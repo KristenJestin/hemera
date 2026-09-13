@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "dev": "bun --hot src/entry/main.ts",
-    "test": "bun test"
+    "dev": "bun --hot src/entry/main.tsx",
+    "test": "bun test tests",
+    "test:system": "bun test system-tests"
   },
   "dependencies": {
     "@gpuix/react": "file:../../vendor/gpuix/0.7.0-hemera.1/gpuix-react-0.7.0-hemera.1.tgz",
@@ -13,5 +14,8 @@
     "@hemera/runtime": "workspace:*",
     "@hemera/ui": "workspace:*",
     "react": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.4"
   }
 }

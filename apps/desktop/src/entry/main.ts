@@ -1,2 +1,0 @@
-/** Desktop entry point. */
-export {}
