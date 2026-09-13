@@ -6,6 +6,7 @@ import { SHOWCASE } from '@hemera/ui/showcase'
 
 import { CHANNEL_OVERRIDE_VARIABLE, resolveChannel } from '@hemera/runtime'
 import { canReach, routeOrDefault, routesOf } from '../src/ui/navigation.ts'
+import { windowTitleOf } from '../src/entry/window-title.ts'
 
 const desktop = resolve(import.meta.dir, '..')
 const componentsRoot = resolve(desktop, '..', '..', 'packages', 'ui', 'src', 'components')
@@ -73,6 +74,18 @@ describe("Développement à côté de l'installation", () => {
   test('a package carries the channel it was assembled with', () => {
     expect(resolveChannel({ packaged: 'prod', env: {}, development: false })).toBe('prod')
     expect(resolveChannel({ packaged: 'dev', env: {}, development: false })).toBe('dev')
+  })
+
+  test('the window names the channel of a development instance, and only that one', () => {
+    expect(windowTitleOf('Hemera', 'dev')).toBe('Hemera (dev)')
+    expect(windowTitleOf('Hemera', 'prod')).toBe('Hemera')
+  })
+
+  test('the start announces the channel and the profile it opened', () => {
+    const entry = readFileSync(join(desktop, 'src', 'entry', 'main.tsx'), 'utf8')
+    expect(entry).toContain('windowTitleOf(')
+    expect(entry).toMatch(/console\.log\(`channel \$\{instance\.channel\}/)
+    expect(entry).toContain('profile ${instance.directory}')
   })
 
   test('the reserved variable overrides the channel, and an unknown value is ignored', () => {
