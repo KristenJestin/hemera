@@ -85,4 +85,17 @@ CREATE TABLE app_preferences (
   value TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+--> statement-breakpoint
+-- Technical output is kept apart from the journal: a long stream is read in blocks in its
+-- own execution context and is never an event of the journal.
+CREATE TABLE activity_output (
+  id TEXT PRIMARY KEY NOT NULL,
+  context_id TEXT NOT NULL,
+  block_index INTEGER NOT NULL,
+  stream TEXT NOT NULL,
+  content TEXT NOT NULL,
+  recorded_at INTEGER NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX activity_output_block ON activity_output (context_id, block_index);
 `

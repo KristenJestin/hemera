@@ -77,3 +77,27 @@ export type {
   PreferenceBounds,
   PreferenceKey,
 } from './storage/preferences.ts'
+export {
+  MAX_OUTPUT_BLOCKS,
+  OutputNotAnEventError,
+  appendOutput,
+  outputExtent,
+  readOutput,
+  refuseOutputAsEvent,
+} from './storage/activity.ts'
+export type {
+  AppendOutput,
+  OutputBlock,
+  OutputExtent,
+  OutputPage,
+  OutputStream,
+} from './storage/activity.ts'
+export {
+  BACKUP_DIRECTORY,
+  DATABASE_FILES,
+  backupNameOf,
+  backupProfile,
+  backupsOf,
+  checkpoint,
+} from './storage/backup.ts'
+export type { BackupOptions, BackupResult } from './storage/backup.ts'
