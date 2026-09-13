@@ -1,0 +1,136 @@
+import { describe, expect, test } from 'bun:test'
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+
+import { validateBranch, validateCommitMessage } from './commit-message.ts'
+
+const repository = resolve(import.meta.dir, '..')
+
+interface CommandResult {
+  code: number
+  output: string
+}
+
+function git(cwd: string, ...args: string[]): CommandResult {
+  const result = Bun.spawnSync(['git', ...args], { cwd, stdout: 'pipe', stderr: 'pipe' })
+  const decoder = new TextDecoder()
+  return {
+    code: result.exitCode,
+    output: `${decoder.decode(result.stdout)}${decoder.decode(result.stderr)}`,
+  }
+}
+
+/** A throwaway repository carrying this repository's hooks and their validators. */
+function repositoryWithHooks(): string {
+  const path = mkdtempSync(join(tmpdir(), 'hemera-flow-'))
+  cpSync(join(repository, '.githooks'), join(path, '.githooks'), { recursive: true })
+  mkdirSync(join(path, 'tools'), { recursive: true })
+  for (const file of ['commit-message.ts', 'branch-guard.ts']) {
+    cpSync(join(repository, 'tools', file), join(path, 'tools', file))
+  }
+  git(path, 'init', '--initial-branch=main')
+  git(path, 'config', 'user.name', 'test')
+  git(path, 'config', 'user.email', 'test@example.invalid')
+  git(path, 'config', 'commit.gpgsign', 'false')
+  git(path, 'add', '-A')
+  git(path, '-c', 'core.hooksPath=', 'commit', '-m', 'chore(repo): seed the throwaway repository')
+  git(path, 'branch', 'dev')
+  git(path, 'config', 'core.hooksPath', '.githooks')
+  return path
+}
+
+function commit(path: string, message: string, file: string): CommandResult {
+  writeFileSync(join(path, file), `${message}\n`)
+  git(path, 'add', file)
+  return git(path, 'commit', '-m', message)
+}
+
+describe('Commit d\'agent sur une branche protégée', () => {
+  test('a commit made directly on dev is refused', () => {
+    const path = repositoryWithHooks()
+    try {
+      git(path, 'checkout', 'dev')
+      const result = commit(path, 'feat(core): add a session entity', 'a.txt')
+      expect(result.code).not.toBe(0)
+      expect(result.output).toContain('"dev" is protected')
+      expect(git(path, 'log', '--oneline', 'dev').output.trim().split('\n')).toHaveLength(1)
+    } finally {
+      rmSync(path, { recursive: true, force: true })
+    }
+  })
+
+  test('a commit made directly on main is refused', () => {
+    const path = repositoryWithHooks()
+    try {
+      const result = commit(path, 'feat(core): add a project entity', 'b.txt')
+      expect(result.code).not.toBe(0)
+      expect(result.output).toContain('"main" is protected')
+    } finally {
+      rmSync(path, { recursive: true, force: true })
+    }
+  })
+
+  test('a conforming commit on a feature branch is accepted', () => {
+    const path = repositoryWithHooks()
+    try {
+      git(path, 'checkout', '-b', 'feature/sessions', 'dev')
+      const result = commit(path, 'feat(core): add a session entity', 'c.txt')
+      expect(result.code).toBe(0)
+      expect(git(path, 'log', '--oneline').output).toContain('add a session entity')
+    } finally {
+      rmSync(path, { recursive: true, force: true })
+    }
+  })
+
+  test('every protected branch is rejected by the guard', () => {
+    expect(validateBranch('main').ok).toBe(false)
+    expect(validateBranch('dev').ok).toBe(false)
+    expect(validateBranch('feature/sessions').ok).toBe(true)
+    expect(validateBranch('hotfix/profile-lock').ok).toBe(true)
+  })
+})
+
+describe('Message hors convention', () => {
+  test('a commit whose message ignores the convention is refused on a feature branch', () => {
+    const path = repositoryWithHooks()
+    try {
+      git(path, 'checkout', '-b', 'feature/sessions', 'dev')
+      const result = commit(path, 'wip', 'd.txt')
+      expect(result.code).not.toBe(0)
+      expect(result.output).toContain('does not match the convention')
+      expect(result.output).toContain('<type>(<scope>): <subject>')
+    } finally {
+      rmSync(path, { recursive: true, force: true })
+    }
+  })
+
+  test.each([
+    ['wip', 'does not match the convention'],
+    ['feat: add a session entity', 'does not match the convention'],
+    ['feature(core): add a session entity', 'unknown type "feature"'],
+    ['feat(core): Add a session entity', 'uppercase subject'],
+    ['feat(core): add a session entity.', 'ends with a period'],
+    [`feat(core): ${'a'.repeat(80)}`, 'characters long'],
+    ['', 'empty commit message'],
+  ])('%p is rejected', (message, reason) => {
+    const result = validateCommitMessage(message)
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain(reason)
+  })
+
+  test.each([
+    'feat(core): add a session entity',
+    'fix(desktop): restore focus after closing the project selector',
+    'test(core): cover rank rebalancing with random insertions',
+    'chore(db): pin the drizzle version',
+    'Merge branch \'feature/sessions\' into dev',
+  ])('%p is accepted', (message) => {
+    expect(validateCommitMessage(message).ok).toBe(true)
+  })
+
+  test('comment lines added by git are ignored', () => {
+    const message = 'feat(core): add a session entity\n\n# Please enter the commit message'
+    expect(validateCommitMessage(message).ok).toBe(true)
+  })
+})
