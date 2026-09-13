@@ -35,7 +35,7 @@ interface InstanceReport {
   owner: number
 }
 
-async function readReport(child: ReturnType<typeof Bun.spawn>): Promise<InstanceReport> {
+async function readReport(child: { stdout: ReadableStream<Uint8Array> }): Promise<InstanceReport> {
   const reader = child.stdout.getReader()
   const decoder = new TextDecoder()
   let buffered = ''
