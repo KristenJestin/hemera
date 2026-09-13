@@ -6,7 +6,7 @@
  * reach it — not a route, not an entry, not a shortcut.
  */
 
-import type { Channel } from '../platform/channel.ts'
+import type { Channel } from '@hemera/runtime'
 
 /** Routes the window can hold. */
 export type Route = 'sessions' | 'showcase'

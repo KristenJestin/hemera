@@ -11,7 +11,7 @@ import { addFonts, render, useWindowSize } from '@gpuix/react'
 import { useEffect, useRef } from 'react'
 
 import { t } from '../i18n/index.ts'
-import { resolveChannel } from '../platform/channel.ts'
+import { resolveChannel } from '@hemera/runtime'
 import {
   embeddedFontsDirectory,
   missingFontDiagnostic,

@@ -5,7 +5,7 @@
  * told apart at a glance.
  */
 
-import type { Channel } from '../platform/channel.ts'
+import type { Channel } from '@hemera/runtime'
 
 export function windowTitleOf(name: string, channel: Channel): string {
   return channel === 'prod' ? name : `${name} (${channel})`

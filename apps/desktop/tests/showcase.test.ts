@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 
 import { SHOWCASE } from '@hemera/ui/showcase'
 
-import { CHANNEL_OVERRIDE_VARIABLE, resolveChannel } from '../src/platform/channel.ts'
+import { CHANNEL_OVERRIDE_VARIABLE, resolveChannel } from '@hemera/runtime'
 import { canReach, routeOrDefault, routesOf } from '../src/ui/navigation.ts'
 
 const desktop = resolve(import.meta.dir, '..')
