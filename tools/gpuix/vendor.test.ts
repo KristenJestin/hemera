@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { VENDOR_VERSION } from './build-native.ts'
+import { FORK_BASE_COMMIT } from './rebuild-fork.ts'
 import { platformNameOf } from './pack-vendor.ts'
 import type { VendorManifest } from './pack-vendor.ts'
 import { resolveFileSpecifier, verifyVendor } from './verify-vendor.ts'
@@ -59,7 +60,7 @@ describe('Installation propre', () => {
   test('the manifest names the fork revision the tarballs were produced from', () => {
     const fork = manifest().fork
     expect(fork.headCommit).toMatch(/^[0-9a-f]{40}$/)
-    expect(fork.baseCommit).toBe('a24b4a42eb516c7b940eb8d34ecebb077df623bd')
+    expect(fork.baseCommit).toBe(FORK_BASE_COMMIT)
     expect(fork.branch).toBe(`hemera/${VENDOR_VERSION}`)
   })
 

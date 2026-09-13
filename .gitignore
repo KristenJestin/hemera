@@ -3,3 +3,4 @@ dist/
 .turbo/
 *.tsbuildinfo
 vendor/gpuix/*/native/
+vendor/gpuix/*/test-support/

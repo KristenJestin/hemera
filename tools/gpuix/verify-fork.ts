@@ -53,6 +53,7 @@ export async function verifyFork(forkPath: string): Promise<VerificationReport> 
   }
   for (const [family, records] of [
     ['gpuix', manifest.patches.gpuix],
+    ['hemera', manifest.patches.hemera ?? []],
     ['zed', manifest.patches.gpui],
   ] as const) {
     for (const record of records) {

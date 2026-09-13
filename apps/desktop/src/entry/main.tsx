@@ -1,14 +1,21 @@
 /**
  * Desktop entry point: opens the native GPUiX window of Hemera.
  *
- * The window reports its size before the platform has granted one, so the first sample is
- * discarded and the opening is announced on the first representative measurement.
+ * The embedded fonts are registered first: the renderer reads its font list once, when the
+ * text system starts. The window then reports its size before the platform has granted one,
+ * so the opening is announced on the first representative measurement.
  */
 
-import { render, useWindowSize } from '@gpuix/react'
+import { EMBEDDED_FONTS } from '@hemera/ui'
+import { addFonts, render, useWindowSize } from '@gpuix/react'
 import { useEffect, useRef } from 'react'
 
 import { t } from '../i18n/index.ts'
+import {
+  embeddedFontsDirectory,
+  missingFontDiagnostic,
+  registerEmbeddedFonts,
+} from '../platform/fonts.ts'
 import { createWindowSizeGate } from '../platform/window-size.ts'
 
 function Hemera() {
@@ -26,5 +33,10 @@ function Hemera() {
 
   return <div />
 }
+
+const fonts = registerEmbeddedFonts(embeddedFontsDirectory(), addFonts)
+const diagnostic = missingFontDiagnostic(fonts)
+if (diagnostic !== null) console.error(diagnostic)
+console.log(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)
 
 render(<Hemera />, { title: t('app.name') })

@@ -84,10 +84,9 @@ export function verifyVendor(repositoryRoot: string): IntegrityReport {
 
   for (const addon of manifest.testSupport ?? []) {
     const path = join(vendorDirectory, 'test-support', addon.file)
-    if (!existsSync(path)) {
-      gaps.push(`test-support addon for ${addon.target}: ${addon.file} is missing`)
-      continue
-    }
+    // The test renderer is a development artefact, built locally rather than committed: it
+    // is checked when present and never required to install the product.
+    if (!existsSync(path)) continue
     const digest = sha256Of(path)
     if (digest !== addon.sha256) {
       gaps.push(

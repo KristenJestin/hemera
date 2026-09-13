@@ -19,14 +19,17 @@ import { join, resolve } from 'node:path'
 /** Upstream repository of the renderer fork. */
 export const FORK_REMOTE = 'https://github.com/remorses/gpuix'
 
-/** Commit the GPUiX queue applies onto. */
-export const FORK_BASE_COMMIT = 'a24b4a42eb516c7b940eb8d34ecebb077df623bd'
+/**
+ * Commit the GPUiX queue applies onto: upstream `main` as pulled on 2026-09-13.
+ *
+ * Design D01 named `a24b4a42`, the commit the queue was first written against. The base was
+ * moved forward to current upstream so the font patch below is written against live code;
+ * the whole queue was replayed onto it, only the submodule pointer conflicting.
+ */
+export const FORK_BASE_COMMIT = '0fac5c941e8431261605eaf0f48d8528322b414d'
 
 /** Upstream repository of the GPUI submodule. */
 export const GPUI_REMOTE = 'https://github.com/remorses/zed.git'
-
-/** Submodule pointer recorded by the fork base, and base of the GPUI queue. */
-export const GPUI_BASE_COMMIT = '8b94defe56992b3ca4ffd4853ace741d8168111a'
 
 /** Branch holding the rebuilt fork. */
 export const FORK_BRANCH = 'hemera/0.7.0-hemera.1'
@@ -64,7 +67,7 @@ export interface ProvenanceManifest {
     headCommit: string
     commits: CommitRecord[]
   }
-  patches: { gpuix: PatchRecord[]; gpui: PatchRecord[] }
+  patches: { gpuix: PatchRecord[]; hemera: PatchRecord[]; gpui: PatchRecord[] }
   licences: { file: string; sha256: string }[]
 }
 
@@ -117,12 +120,26 @@ function patchFilesOf(directory: string): string[] {
 /** Copies the reference queue into the fork so the rebuild no longer reads the spikes. */
 export function importQueue(source: string, forkPath: string): void {
   const destination = join(forkPath, 'patches')
+  // The Hemera queue lives in the fork only; it is never re-imported from a reference.
   for (const family of ['gpuix', 'zed']) {
     const from = join(source, family)
     if (!existsSync(from)) throw new Error(`patch queue ${from} not found`)
     rmSync(join(destination, family), { recursive: true, force: true })
     cpSync(from, join(destination, family), { recursive: true })
   }
+}
+
+/**
+ * A patch that moves the GPUI submodule pointer conflicts whenever the pointer it expects is
+ * not the one the base records. The pointer is restored from the rebuilt submodule at the end
+ * of the rebuild, so taking either side here is safe. Returns false for any other conflict.
+ */
+function resolveSubmodulePointerConflict(repository: string): boolean {
+  const unmerged = run(['git', 'diff', '--name-only', '--diff-filter=U'], repository)
+  const paths = unmerged.stdout.split('\n').filter((path) => path.length > 0)
+  if (paths.length !== 1 || paths[0] !== 'zed') return false
+  if (!run(['git', 'add', 'zed'], repository).ok) return false
+  return run(['git', '-c', 'core.editor=true', 'am', '--continue'], repository).ok
 }
 
 export function applyQueue(
@@ -137,7 +154,7 @@ export function applyQueue(
     const applied = index < appliedCount
     if (applied) {
       const result = run(['git', 'am', '--3way', path], repository)
-      if (!result.ok) {
+      if (!result.ok && !resolveSubmodulePointerConflict(repository)) {
         run(['git', 'am', '--abort'], repository)
         throw new Error(
           `patch ${file} does not apply cleanly onto the identified base: ` +
@@ -169,23 +186,35 @@ interface SubmoduleRebuild {
   records: PatchRecord[]
 }
 
+/** Submodule pointer the fork base records; the GPUI queue applies onto it. */
+export function gpuiBaseCommitOf(forkPath: string): string {
+  const entry = mustRun(['git', 'ls-tree', FORK_BASE_COMMIT, 'zed'], forkPath)
+  const match = /^160000 commit ([0-9a-f]{40})	/.exec(entry)
+  if (match === null) throw new Error(`the fork base records no gpui submodule pointer`)
+  return match[1]!
+}
+
 /** Rebuilds the GPUI submodule in place and returns the commit that was produced. */
-function rebuildSubmodule(forkPath: string, patchDirectory: string): SubmoduleRebuild {
+function rebuildSubmodule(
+  forkPath: string,
+  patchDirectory: string,
+  gpuiBase: string,
+): SubmoduleRebuild {
   const submodule = join(forkPath, 'zed')
   if (!existsSync(join(submodule, '.git'))) {
     mustRun(['git', 'init', '-q', '--initial-branch=gpuix', submodule], forkPath)
     mustRun(['git', 'remote', 'add', 'origin', GPUI_REMOTE], submodule)
   }
-  if (!run(['git', 'cat-file', '-e', `${GPUI_BASE_COMMIT}^{commit}`], submodule).ok) {
-    mustRun(['git', 'fetch', '--depth', '1', '--no-tags', 'origin', GPUI_BASE_COMMIT], submodule)
+  if (!run(['git', 'cat-file', '-e', `${gpuiBase}^{commit}`], submodule).ok) {
+    mustRun(['git', 'fetch', '--depth', '1', '--no-tags', 'origin', gpuiBase], submodule)
   }
-  mustRun(['git', 'checkout', '-q', '-B', 'hemera/gpui', GPUI_BASE_COMMIT], submodule)
+  mustRun(['git', 'checkout', '-q', '-B', 'hemera/gpui', gpuiBase], submodule)
 
   const files = patchFilesOf(patchDirectory)
   const records = applyQueue(submodule, patchDirectory, files, files.length)
   return {
     headCommit: mustRun(['git', 'rev-parse', 'HEAD'], submodule),
-    commits: commitsSince(submodule, GPUI_BASE_COMMIT),
+    commits: commitsSince(submodule, gpuiBase),
     records,
   }
 }
@@ -199,14 +228,29 @@ export async function rebuild(forkPath: string): Promise<ProvenanceManifest> {
   // so the queue is held aside and put back once the patches have been applied.
   const queue = mkdtempSync(join(tmpdir(), 'hemera-queue-'))
   cpSync(join(forkPath, 'patches'), queue, { recursive: true })
+  try {
+    return await rebuildFromQueue(forkPath, queue)
+  } finally {
+    // A failed rebuild must not leave the fork without the queue it was rebuilt from.
+    cpSync(queue, join(forkPath, 'patches'), { recursive: true })
+    rmSync(queue, { recursive: true, force: true })
+  }
+}
+
+async function rebuildFromQueue(forkPath: string, queue: string): Promise<ProvenanceManifest> {
   mustRun(['git', 'checkout', '-q', '-B', FORK_BRANCH, FORK_BASE_COMMIT], forkPath)
 
   const gpuixPatchDirectory = join(queue, 'gpuix')
+  const hemeraPatchDirectory = join(queue, 'hemera')
   const gpuiPatchDirectory = join(queue, 'zed')
   const gpuixFiles = patchFilesOf(gpuixPatchDirectory)
   const gpuixRecords = applyQueue(forkPath, gpuixPatchDirectory, gpuixFiles, APPLIED_GPUIX_PATCHES)
 
-  const gpui = rebuildSubmodule(forkPath, gpuiPatchDirectory)
+  const hemeraFiles = patchFilesOf(hemeraPatchDirectory)
+  const hemeraRecords = applyQueue(forkPath, hemeraPatchDirectory, hemeraFiles, hemeraFiles.length)
+
+  const gpuiBase = gpuiBaseCommitOf(forkPath)
+  const gpui = rebuildSubmodule(forkPath, gpuiPatchDirectory, gpuiBase)
 
   // The queue bumps the submodule pointer to a commit rebuilt elsewhere; restore it to the
   // commit this run actually produced, so the recorded pointer resolves locally.
@@ -226,16 +270,15 @@ export async function rebuild(forkPath: string): Promise<ProvenanceManifest> {
     },
     gpui: {
       remote: GPUI_REMOTE,
-      baseCommit: GPUI_BASE_COMMIT,
+      baseCommit: gpuiBase,
       headCommit: gpui.headCommit,
       commits: gpui.commits,
     },
-    patches: { gpuix: gpuixRecords, gpui: gpui.records },
+    patches: { gpuix: gpuixRecords, hemera: hemeraRecords, gpui: gpui.records },
     licences: LICENCE_FILES.map((file) => ({ file, sha256: sha256Of(join(forkPath, file)) })),
   }
 
   cpSync(queue, join(forkPath, 'patches'), { recursive: true })
-  rmSync(queue, { recursive: true, force: true })
 
   const manifestPath = join(forkPath, 'PROVENANCE.json')
   await Bun.write(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
@@ -267,6 +310,7 @@ if (import.meta.main) {
   const applied = manifest.patches.gpuix.filter((patch) => patch.applied).length
   console.log(
     `patches: ${applied} of ${manifest.patches.gpuix.length} gpuix applied, ` +
+      `${manifest.patches.hemera.length} hemera applied, ` +
       `${manifest.patches.gpui.length} gpui applied`,
   )
 }

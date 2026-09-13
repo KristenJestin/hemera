@@ -2,34 +2,34 @@
   "version": "0.7.0-hemera.1",
   "fork": {
     "remote": "https://github.com/remorses/gpuix",
-    "baseCommit": "a24b4a42eb516c7b940eb8d34ecebb077df623bd",
-    "headCommit": "b07dcad81f3d3c7bb05efec2156c8cf724034118",
+    "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
+    "headCommit": "118b98646613c381e2540f9f9407f61d7f5c4e98",
     "branch": "hemera/0.7.0-hemera.1"
   },
   "packages": [
     {
       "name": "@gpuix/react",
       "file": "gpuix-react-0.7.0-hemera.1.tgz",
-      "sha256": "cd70ceecb215b2b22c8c2b103735f5cc63e71c8352cb819fafef746584c4ea4e",
+      "sha256": "3fcfafea5ae7fe5b4d0ab2ba11352bf6d03110f3e3af762cc8fd92aa1401688c",
       "target": null
     },
     {
       "name": "@gpuix/native",
       "file": "gpuix-native-0.7.0-hemera.1.tgz",
-      "sha256": "1440969aeb07fd8dd6fe2f75b3a7142639fed7cbdac35f728a1fd6a9d27d4924",
+      "sha256": "19ddcd33cba0365556513a20fcdcf089bbafcf44f719192f6d5cafc4b384d135",
       "target": null
     },
     {
       "name": "@gpuix/native-win32-x64-msvc",
       "file": "gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz",
-      "sha256": "5ff17621fe1ccb8cc192638f175e329887cb4ccae0d678a164ff0be5b5272a5d",
+      "sha256": "4404f0c9bae473295eede684dbbf6c9ecb2c6566c55257ddf3f353a8ce346262",
       "target": "x86_64-pc-windows-msvc"
     }
   ],
   "testSupport": [
     {
       "file": "gpuix-native.win32-x64-msvc.node",
-      "sha256": "08fbe8732e82671d713867a39b2d97aefbb697d7c0fad0f5946ee35512e0e68e",
+      "sha256": "670d19708a47d7bd419362aa7e379212ff0940ac737f867248198850f3b27078",
       "target": "x86_64-pc-windows-msvc"
     }
   ]

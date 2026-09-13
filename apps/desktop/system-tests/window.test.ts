@@ -40,6 +40,17 @@ async function openWindowAndReadAnnouncement(timeoutMs: number): Promise<string[
 }
 
 describe('Démarrage applicatif', () => {
+  test('the embedded fonts are registered before the window is created', async () => {
+    const lines = await openWindowAndReadAnnouncement(60_000)
+    const fonts = lines.findIndex((line) => line.startsWith('fonts registered'))
+    const window = lines.indexOf('[gpuix] created native window')
+    expect(fonts).toBeGreaterThanOrEqual(0)
+    expect(window).toBeGreaterThanOrEqual(0)
+    // A font registered after the text system starts is never used by the renderer.
+    expect(fonts).toBeLessThan(window)
+    expect(lines[fonts]).toMatch(/^fonts registered (\d+)\/\1$/)
+  }, 90_000)
+
   test('the desktop entry opens a real native window on this host', async () => {
     const lines = await openWindowAndReadAnnouncement(60_000)
     expect(lines).toContain('[gpuix] created native window')
