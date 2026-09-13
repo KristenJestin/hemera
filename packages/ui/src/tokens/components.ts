@@ -23,6 +23,11 @@ export const icon = {
   size: iconSize,
 } as const
 
+/** Thickness of a separator rule. */
+export const rule = {
+  thickness: 1,
+} as const
+
 /** Session status dot. */
 export const dot = {
   size: 8,

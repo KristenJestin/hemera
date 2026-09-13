@@ -21,6 +21,8 @@ export interface ShowcaseEntry {
 }
 
 import { buttonShowcase } from './button/button.showcase.tsx'
+import { kbdShowcase } from './kbd/kbd.showcase.tsx'
+import { separatorShowcase } from './separator/separator.showcase.tsx'
 
 /** Every demonstration of the catalogue, in catalogue order. */
-export const SHOWCASE: readonly ShowcaseEntry[] = [buttonShowcase]
+export const SHOWCASE: readonly ShowcaseEntry[] = [buttonShowcase, separatorShowcase, kbdShowcase]

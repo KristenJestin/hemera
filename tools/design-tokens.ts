@@ -92,7 +92,10 @@ const SCALES: { name: string; steps: number[]; properties: string[] }[] = [
   },
   {
     name: 'the component and shell tokens',
-    steps: [0, 2, 4, 6, 8, 12, 14, 16, 18, 20, 24, 28, 32, 40, 44, 58, 180, 248, 420, 980, 999],
+    steps: [
+      // 1 is the separator rule thickness.
+      0, 1, 2, 4, 6, 8, 12, 14, 16, 18, 20, 24, 28, 32, 40, 44, 58, 180, 248, 420, 980, 999,
+    ],
     properties: ['width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight'],
   },
 ]
