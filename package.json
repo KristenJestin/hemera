@@ -15,6 +15,7 @@
     "test": "turbo run test //#test:tools",
     "build": "turbo run build",
     "test:tools": "bun test tools",
+    "report": "bun tools/environment-report.ts --window --write",
     "preinstall": "bun tools/gpuix/verify-vendor.ts"
   },
   "devDependencies": {
