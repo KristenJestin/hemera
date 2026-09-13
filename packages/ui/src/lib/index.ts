@@ -1,6 +1,12 @@
 /** Style, interaction, motion and keyboard helpers of the design system. */
 
-export { useFocusReturn, useFocusState, useFocusTraversal, useFocusable } from './interaction.ts'
+export {
+  useFocusReturn,
+  useFocusState,
+  useFocusTraversal,
+  useFocusable,
+  useFocusedElement,
+} from './interaction.ts'
 export type { Focusable, FocusReturn, FocusState, FocusTraversal } from './interaction.ts'
 export {
   ACTIVATION_KEYS,

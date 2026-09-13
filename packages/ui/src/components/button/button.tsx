@@ -132,6 +132,8 @@ export function Button({
       onPress={behaviour.press}
       disabled={behaviour.inert}
       style={mergeStyle(toneStyles(theme)({ tone, size }), square, dimmed, style)}
+      // The label stays the accessible name even when only the icon is painted.
+      aria-label={label}
       {...(testId === undefined ? {} : { testId })}
     >
       <Stack gap="sm" align="center" justify="center">

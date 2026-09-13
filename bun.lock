@@ -54,7 +54,7 @@
   "packages": {
     "@gpuix/native": ["@gpuix/native@./vendor/gpuix/0.7.0-hemera.1/gpuix-native-0.7.0-hemera.1.tgz", { "optionalDependencies": { "@gpuix/native-win32-x64-msvc": "0.7.0-hemera.1" } }, "sha512-tVSEdLaU9Aiw0GJ4dxWJVQMOrVSZegW5UP2cij87sSKedTYQNA1opmuivIP0h3baqceTNAF0/Vt9Znp5z2oE0w=="],
 
-    "@gpuix/native-win32-x64-msvc": ["@gpuix/native-win32-x64-msvc@./vendor/gpuix/0.7.0-hemera.1/gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz", {}, "sha512-uip7EZSTriAfWT+kQAltLSO5NpiPplVD0uAj9YaTpgq0+krLsG6tnaOpgwuPMo4Vwm6AxcfAVz97G0JoBNDsfQ=="],
+    "@gpuix/native-win32-x64-msvc": ["@gpuix/native-win32-x64-msvc@./vendor/gpuix/0.7.0-hemera.1/gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz", {}, "sha512-apkc+ky5OmlUF8X+u819SxtTkoYN6lpw1Le2ErO8gu+3LghzCh8Uoxc/Qb/ww8M3iIUd50CIVWnrNmPIqH7aeA=="],
 
     "@gpuix/react": ["@gpuix/react@../../vendor/gpuix/0.7.0-hemera.1/gpuix-react-0.7.0-hemera.1.tgz", { "dependencies": { "@gpuix/native": "0.7.0-hemera.1", "eventsource-parser": "^4.1.0", "react-reconciler": "^0.31.0", "zod": "^4.4.3" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-SmWjlPlbTEbVHgb/p3zATN4rdndf+Wupp+FmNKSCHv+3X8YMUzXnVuNWtil/CJ6pYEKhykP082d2VBO2b4Fq5A=="],
 

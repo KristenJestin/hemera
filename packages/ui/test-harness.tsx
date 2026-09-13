@@ -60,14 +60,22 @@ export function nodeOf(root: TestRoot, testId: string): TreeNode {
   return found
 }
 
-/** Gives the focus to an element and lets React see it. */
-export function focus(root: TestRoot, testId: string): TreeNode {
+/**
+ * Gives the focus to an element and waits for the design system to observe it.
+ *
+ * The renderer delivers no usable focus event, so the focus state is sampled; a test has to
+ * let one sample land before reading the painted focus ring.
+ */
+export async function focus(root: TestRoot, testId: string): Promise<TreeNode> {
   const target = nodeOf(root, testId)
   root.renderer.focusElement(target.id)
-  root.renderer.dispatchNativeEvents()
+  await new Promise((resolve) => setTimeout(resolve, FOCUS_SAMPLE_WAIT_MS))
   root.renderer.flush()
   return nodeOf(root, testId)
 }
+
+/** Long enough for one focus sample of the design system to land. */
+const FOCUS_SAMPLE_WAIT_MS = 150
 
 /** Every painted text run under `node`, in paint order. */
 export function textsOf(node: TreeNode): string[] {

@@ -22,14 +22,14 @@
     {
       "name": "@gpuix/native-win32-x64-msvc",
       "file": "gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz",
-      "sha256": "4404f0c9bae473295eede684dbbf6c9ecb2c6566c55257ddf3f353a8ce346262",
+      "sha256": "7c7246c2d59f72e35b5a4942ecc752a767c9e4682913315ea45b1cb33e05b678",
       "target": "x86_64-pc-windows-msvc"
     }
   ],
   "testSupport": [
     {
       "file": "gpuix-native.win32-x64-msvc.node",
-      "sha256": "670d19708a47d7bd419362aa7e379212ff0940ac737f867248198850f3b27078",
+      "sha256": "59d0204a0acfd6f6e039daf8fde2ef716eda0a15ee2fee7ecf08b4a84e6007f0",
       "target": "x86_64-pc-windows-msvc"
     }
   ]

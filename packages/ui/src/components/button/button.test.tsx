@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { Button } from './button.tsx'
+import { dark } from '../../theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
 describe('Button — comportement au clavier', () => {
@@ -20,11 +21,14 @@ describe('Button — comportement au clavier', () => {
     }
   })
 
-  test('the button joins the focus traversal and can be focused', () => {
+  test('the focus ring is painted while the button holds the focus', async () => {
     const root = mountedCatalogue(<Button testId="button" label="Create" onPress={() => {}} />)
     try {
-      const button = focus(root, 'button')
-      expect(root.renderer.getFocusedElementId()).toBe(button.id)
+      const resting = nodeOf(root, 'button').style?.borderColor
+      const focused = await focus(root, 'button')
+      expect(root.renderer.getFocusedElementId()).toBe(focused.id)
+      expect(focused.style?.borderColor).not.toBe(resting)
+      expect(focused.style?.borderColor).toBe(dark.colors.primaryRing)
     } finally {
       root.unmount()
     }
