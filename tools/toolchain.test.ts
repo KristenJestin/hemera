@@ -48,7 +48,12 @@ describe('Installation du produit', () => {
     for (const workspace of ['packages/core', 'packages/runtime', 'packages/ui']) {
       const manifest = JSON.parse(readFileSync(join(repository, workspace, 'package.json'), 'utf8'))
       expect(manifest.private).toBe(true)
-      expect(manifest.exports).toEqual({ '.': './src/index.ts' })
+      expect(manifest.exports['.']).toBe('./src/index.ts')
+      // A subpath is a declared export, never a reach into the private src.
+      for (const [subpath, target] of Object.entries(manifest.exports as Record<string, string>)) {
+        expect(subpath.startsWith('.')).toBe(true)
+        expect(target.startsWith('./src/')).toBe(true)
+      }
     }
   })
 

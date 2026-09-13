@@ -15,7 +15,7 @@ export {
   radius,
   space,
 } from './tokens/primitives.ts'
-export { content, control, dot, icon, row, shell } from './tokens/components.ts'
+export { content, control, dot, icon, row, shell, state } from './tokens/components.ts'
 export { COLOR_ROLES } from './tokens/semantic.ts'
 export type { Theme, ThemeColors, ThemeName, ThemeShadows } from './tokens/semantic.ts'
 export { ICONS } from './icons/catalog.ts'

@@ -86,7 +86,11 @@ function sourceFilesOf(directory: string): string[] {
     const path = join(directory, entry)
     if (statSync(path).isDirectory()) {
       found.push(...sourceFilesOf(path))
-    } else if (SOURCE_EXTENSIONS.some((extension) => entry.endsWith(extension))) {
+    } else if (
+      SOURCE_EXTENSIONS.some((extension) => entry.endsWith(extension)) &&
+      // Tests sit beside the component they cover and never ship; they may use the runner.
+      !/.test.tsx?$/.test(entry)
+    ) {
       found.push(path)
     }
   }

@@ -11,6 +11,8 @@
     "tests/**/*.ts",
     "tests/**/*.tsx",
     "system-tests/**/*.ts",
-    "test-setup.ts"
+    "system-tests/**/*.tsx",
+    "test-setup.ts",
+    "test-harness.tsx"
   ]
 }

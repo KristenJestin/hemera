@@ -35,6 +35,11 @@ export const shell = {
   gutter: { size: 6 },
 } as const
 
+/** Painted state of a control the caller disabled. */
+export const state = {
+  disabledOpacity: 0.45,
+} as const
+
 /** Reading width of the content area. */
 export const content = {
   maxWidth: 980,

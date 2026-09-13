@@ -3,11 +3,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./showcase": "./src/components/showcase.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
-    "test:system": "bun test system-tests",
+    "test:system": "bun test system-tests src",
     "test": "bun test tests"
   },
   "dependencies": {
