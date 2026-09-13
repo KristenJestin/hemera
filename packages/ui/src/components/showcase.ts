@@ -10,12 +10,22 @@ import type { ReactNode } from 'react'
 
 import { badgeShowcase } from './badge/badge.showcase.tsx'
 import { buttonShowcase } from './button/button.showcase.tsx'
+import { cardShowcase } from './card/card.showcase.tsx'
+import { composerShowcase } from './composer/composer.showcase.tsx'
+import { dialogPanelShowcase } from './dialog-panel/dialog-panel.showcase.tsx'
+import { emptyStateShowcase } from './empty-state/empty-state.showcase.tsx'
+import { gutterShowcase } from './gutter/gutter.showcase.tsx'
 import { iconButtonShowcase } from './icon-button/icon-button.showcase.tsx'
 import { inputShowcase } from './input/input.showcase.tsx'
 import { kbdShowcase } from './kbd/kbd.showcase.tsx'
+import { listItemShowcase } from './list-item/list-item.showcase.tsx'
+import { navItemShowcase } from './nav-item/nav-item.showcase.tsx'
+import { noticeShowcase } from './notice/notice.showcase.tsx'
 import { selectShowcase } from './select/select.showcase.tsx'
 import { separatorShowcase } from './separator/separator.showcase.tsx'
+import { tabShowcase } from './tab/tab.showcase.tsx'
 import { textareaShowcase } from './textarea/textarea.showcase.tsx'
+import { timelineItemShowcase } from './timeline-item/timeline-item.showcase.tsx'
 
 export interface ShowcaseCase {
   /** What this case demonstrates. */
@@ -34,9 +44,19 @@ export const SHOWCASE: readonly ShowcaseEntry[] = [
   buttonShowcase,
   iconButtonShowcase,
   badgeShowcase,
+  cardShowcase,
+  listItemShowcase,
+  navItemShowcase,
+  tabShowcase,
+  composerShowcase,
+  selectShowcase,
   inputShowcase,
   textareaShowcase,
-  selectShowcase,
   separatorShowcase,
+  gutterShowcase,
+  timelineItemShowcase,
+  emptyStateShowcase,
+  dialogPanelShowcase,
+  noticeShowcase,
   kbdShowcase,
 ]

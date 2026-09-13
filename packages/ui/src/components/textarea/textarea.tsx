@@ -23,6 +23,8 @@ export interface TextareaProps {
   style?: Style
   testId?: string
   'aria-label'?: string
+  /** Reports the painted element, so a surrounding frame can follow its focus. */
+  onInstance?: (instance: PublicInstance | null) => void
 }
 
 export function Textarea({
@@ -36,6 +38,7 @@ export function Textarea({
   style,
   testId,
   'aria-label': ariaLabel,
+  onInstance,
 }: TextareaProps) {
   const theme = useTheme()
   const behaviour = useTextarea({ value, onValueChange, onSubmit, disabled, minRows, maxRows })
@@ -59,7 +62,10 @@ export function Textarea({
 
   return (
     <textarea
-      ref={setInstance}
+      ref={(painted) => {
+        setInstance(painted)
+        onInstance?.(painted)
+      }}
       value={value}
       readOnly={behaviour.inert}
       tabIndex={behaviour.inert ? -1 : 0}
