@@ -180,3 +180,40 @@ describe('Frontières des packages', () => {
     ])
   })
 })
+
+describe('Frontières des packages — sous-chemins déclarés', () => {
+  test('a subpath pattern of the exports is a public surface, not a reach into a src', () => {
+    const root = fixture({
+      'packages/ui/package.json': JSON.stringify({
+        name: '@hemera/ui',
+        exports: { '.': './src/index.ts', './fonts/*': './src/fonts/*' },
+      }),
+      'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
+      'apps/desktop/src/fonts.ts':
+        "import regular from '@hemera/ui/fonts/inter/Inter-Regular.ttf' with { type: 'file' }\n",
+    })
+    try {
+      const rule = PACKAGE_RULES.find((entry) => entry.name === '@hemera/desktop')!
+      expect(analyzePackage(root, rule)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('a path the exports do not declare is still refused', () => {
+    const root = fixture({
+      'packages/ui/package.json': JSON.stringify({
+        name: '@hemera/ui',
+        exports: { '.': './src/index.ts', './fonts/*': './src/fonts/*' },
+      }),
+      'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
+      'apps/desktop/src/reach.ts': "import { dark } from '@hemera/ui/src/theme/dark.ts'\n",
+    })
+    try {
+      const rule = PACKAGE_RULES.find((entry) => entry.name === '@hemera/desktop')!
+      expect(analyzePackage(root, rule)[0]?.problem).toContain('private src')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

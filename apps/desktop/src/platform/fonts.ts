@@ -31,13 +31,23 @@ export function missingFontDiagnostic(registration: FontRegistration): string | 
   return `embedded font files missing for ${families.join(', ')}; starting on the system fallback family — ${details}`
 }
 
-/** Directory the design system keeps its font files in, resolved from its public module. */
+/**
+ * Directory the design system keeps its font files in, resolved from its public module.
+ *
+ * This resolves a module path, so it only answers inside the sources: an assembled package
+ * reads the copies embedded in it instead.
+ */
 export function embeddedFontsDirectory(): string {
   return fileURLToPath(new URL('./fonts/', import.meta.resolve('@hemera/ui')))
 }
 
+/** Where a declared file is, for a run that reads a directory on disk. */
+export function fontsFromDirectory(directory: string): (file: string) => string {
+  return (file) => join(directory, file)
+}
+
 export function registerEmbeddedFonts(
-  fontsDirectory: string,
+  locate: (file: string) => string,
   addFonts: (fonts: Buffer[]) => void,
 ): FontRegistration {
   const registered: EmbeddedFont[] = []
@@ -46,7 +56,7 @@ export function registerEmbeddedFonts(
 
   for (const font of EMBEDDED_FONTS) {
     try {
-      buffers.push(readFileSync(join(fontsDirectory, font.file)))
+      buffers.push(readFileSync(locate(font.file)))
       registered.push(font)
     } catch (error) {
       missing.push({ font, reason: error instanceof Error ? error.message : String(error) })

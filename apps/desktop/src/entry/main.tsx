@@ -12,12 +12,10 @@ import { addFonts, render, useWindowSize } from '@gpuix/react'
 import { useEffect, useRef } from 'react'
 
 import { t } from '../i18n/index.ts'
-import {
-  embeddedFontsDirectory,
-  missingFontDiagnostic,
-  registerEmbeddedFonts,
-} from '../platform/fonts.ts'
+import { missingFontDiagnostic, registerEmbeddedFonts } from '../platform/fonts.ts'
+import { embeddedFontLocator } from '../platform/embedded-fonts.ts'
 import { folderProblem, openInstance } from '../platform/workspace.ts'
+import { packagingOf } from '../platform/packaging.ts'
 import { createWindowSizeGate } from '../platform/window-size.ts'
 import { routeOrDefault } from '../ui/navigation.ts'
 import { SessionsPage } from '../ui/sessions/sessions-page.tsx'
@@ -54,8 +52,7 @@ function Hemera({ route, context }: HemeraProps) {
   )
 }
 
-// A run started from the sources is a development run, whatever a package might say.
-const instance = openInstance({ packaged: 'dev', development: true })
+const instance = openInstance(packagingOf())
 if ('kind' in instance) {
   console.error(`another instance already owns this profile (pid ${instance.owner.pid})`)
   process.exit(1)
@@ -63,7 +60,7 @@ if ('kind' in instance) {
 
 const route = routeOrDefault('sessions', instance.channel)
 
-const fonts = registerEmbeddedFonts(embeddedFontsDirectory(), addFonts)
+const fonts = registerEmbeddedFonts(embeddedFontLocator, addFonts)
 const diagnostic = missingFontDiagnostic(fonts)
 if (diagnostic !== null) console.error(diagnostic)
 console.log(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)

@@ -119,12 +119,14 @@ export function specifiersOf(source: string): string[] {
 const DEEP_HEMERA_IMPORT = /^@hemera\/[a-z-]+\/.+/
 
 /**
- * Subpaths the packages declare in their `exports`.
+ * Whether a specifier is a subpath a package declares in its `exports`.
  *
- * A declared subpath is a public surface, not a reach into a private `src`.
+ * A declared subpath is a public surface, not a reach into a private `src`. A subpath pattern
+ * covers every specifier it matches, exactly as the resolver reads it.
  */
-function declaredSubpaths(repositoryRoot: string): Set<string> {
-  const declared = new Set<string>()
+function declaredSubpaths(repositoryRoot: string): (specifier: string) => boolean {
+  const exact = new Set<string>()
+  const patterns: RegExp[] = []
   for (const rule of PACKAGE_RULES) {
     const manifestPath = resolve(repositoryRoot, rule.directory, 'package.json')
     if (!existsSync(manifestPath)) continue
@@ -133,10 +135,20 @@ function declaredSubpaths(repositoryRoot: string): Set<string> {
     }
     for (const subpath of Object.keys(manifest.exports ?? {})) {
       if (subpath === '.') continue
-      declared.add(`${rule.name}${subpath.slice(1)}`)
+      const declared = `${rule.name}${subpath.slice(1)}`
+      if (declared.includes('*')) {
+        patterns.push(new RegExp(`^${declared.split('*').map(quoted).join('.+')}$`))
+        continue
+      }
+      exact.add(declared)
     }
   }
-  return declared
+  return (specifier) => exact.has(specifier) || patterns.some((pattern) => pattern.test(specifier))
+}
+
+/** A literal part of a subpath pattern, read as itself and not as a pattern. */
+function quoted(part: string): string {
+  return part.replaceAll(/[.*+?^${}()|[\]\\]/g, (match) => `\\${match}`)
 }
 
 export function analyzePackage(repositoryRoot: string, rule: PackageRule): Violation[] {
@@ -158,7 +170,7 @@ export function analyzePackage(repositoryRoot: string, rule: PackageRule): Viola
         }
         continue
       }
-      if (DEEP_HEMERA_IMPORT.test(specifier) && !declared.has(specifier)) {
+      if (DEEP_HEMERA_IMPORT.test(specifier) && !declared(specifier)) {
         violations.push({
           file: reported,
           specifier,

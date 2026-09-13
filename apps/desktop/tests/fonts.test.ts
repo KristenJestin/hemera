@@ -7,6 +7,7 @@ import { EMBEDDED_FONTS, FONT_LICENCES, MONO_FAMILY, SANS_FAMILY } from '@hemera
 
 import {
   embeddedFontsDirectory,
+  fontsFromDirectory,
   missingFontDiagnostic,
   registerEmbeddedFonts,
 } from '../src/platform/fonts.ts'
@@ -32,9 +33,12 @@ describe('Typographie embarquée', () => {
 
   test('every embedded file is handed to the renderer in one call', () => {
     const calls: number[] = []
-    const registration = registerEmbeddedFonts(embeddedFontsDirectory(), (fonts) => {
-      calls.push(fonts.length)
-    })
+    const registration = registerEmbeddedFonts(
+      fontsFromDirectory(embeddedFontsDirectory()),
+      (fonts) => {
+        calls.push(fonts.length)
+      },
+    )
     expect(calls).toEqual([EMBEDDED_FONTS.length])
     expect(registration.registered).toHaveLength(EMBEDDED_FONTS.length)
     expect(registration.missing).toEqual([])
@@ -50,7 +54,7 @@ describe('Police manquante au démarrage', () => {
       rmSync(join(directory, removed.file))
 
       let handed = 0
-      const registration = registerEmbeddedFonts(directory, (fonts) => {
+      const registration = registerEmbeddedFonts(fontsFromDirectory(directory), (fonts) => {
         handed = fonts.length
       })
 
@@ -70,9 +74,12 @@ describe('Police manquante au démarrage', () => {
   })
 
   test('a missing directory reports every family instead of failing', () => {
-    const registration = registerEmbeddedFonts(join(tmpdir(), 'hemera-no-fonts-here'), () => {
-      throw new Error('nothing should be handed to the renderer')
-    })
+    const registration = registerEmbeddedFonts(
+      fontsFromDirectory(join(tmpdir(), 'hemera-no-fonts-here')),
+      () => {
+        throw new Error('nothing should be handed to the renderer')
+      },
+    )
     expect(registration.registered).toEqual([])
     expect(registration.missing).toHaveLength(EMBEDDED_FONTS.length)
 
