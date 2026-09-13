@@ -4,4 +4,8 @@
  */
 export const en = {
   'app.name': 'Hemera',
+  'showcase.title': 'Design system',
+  'showcase.theme': 'Theme',
+  'showcase.theme.light': 'Switch to light',
+  'showcase.theme.dark': 'Switch to dark',
 } as const

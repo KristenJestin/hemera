@@ -4,6 +4,7 @@ import { mergeStyle } from '../../lib/style.ts'
 import type { Style } from '../../lib/style.ts'
 import { Box } from '../../primitives/box.tsx'
 import { Text } from '../../primitives/text.tsx'
+import { badge } from '../../tokens/components.ts'
 import { radius, space } from '../../tokens/primitives.ts'
 import type { Theme, ThemeColors } from '../../tokens/semantic.ts'
 import { useTheme } from '../../theme/provider.tsx'
@@ -34,13 +35,15 @@ function rolesOf(props: BadgeProps): { fill: keyof ThemeColors; text: keyof Them
   return { fill: 'bad', text: 'onPrimary' }
 }
 
-function surfaceOf(theme: Theme, roles: { fill: keyof ThemeColors }): Style {
+function surfaceOf(theme: Theme, roles: { fill: keyof ThemeColors }, count: boolean): Style {
   return {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.colors[roles.fill],
     borderRadius: radius.pill,
+    height: count ? badge.height.count : badge.height.label,
+    minWidth: badge.minWidth,
     paddingLeft: space.sm,
     paddingRight: space.sm,
   }
@@ -54,7 +57,7 @@ export function Badge(props: BadgeProps) {
 
   return (
     <Box
-      style={mergeStyle(surfaceOf(theme, roles), props.style)}
+      style={mergeStyle(surfaceOf(theme, roles, props.kind === 'count'), props.style)}
       {...(props.testId === undefined ? {} : { testId: props.testId })}
     >
       <Text color={roles.text} scale="xs" weight={weight}>

@@ -118,9 +118,31 @@ export function specifiersOf(source: string): string[] {
 /** Matches an import that reaches past a package's public export, such as `@hemera/ui/src/x`. */
 const DEEP_HEMERA_IMPORT = /^@hemera\/[a-z-]+\/.+/
 
+/**
+ * Subpaths the packages declare in their `exports`.
+ *
+ * A declared subpath is a public surface, not a reach into a private `src`.
+ */
+function declaredSubpaths(repositoryRoot: string): Set<string> {
+  const declared = new Set<string>()
+  for (const rule of PACKAGE_RULES) {
+    const manifestPath = resolve(repositoryRoot, rule.directory, 'package.json')
+    if (!existsSync(manifestPath)) continue
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      exports?: Record<string, string>
+    }
+    for (const subpath of Object.keys(manifest.exports ?? {})) {
+      if (subpath === '.') continue
+      declared.add(`${rule.name}${subpath.slice(1)}`)
+    }
+  }
+  return declared
+}
+
 export function analyzePackage(repositoryRoot: string, rule: PackageRule): Violation[] {
   const violations: Violation[] = []
   const packageRoot = resolve(repositoryRoot, rule.directory)
+  const declared = declaredSubpaths(repositoryRoot)
   for (const file of sourceFilesOf(join(packageRoot, 'src'))) {
     const source = readFileSync(file, 'utf8')
     const reported = relative(repositoryRoot, file).replaceAll('\\', '/')
@@ -136,7 +158,7 @@ export function analyzePackage(repositoryRoot: string, rule: PackageRule): Viola
         }
         continue
       }
-      if (DEEP_HEMERA_IMPORT.test(specifier)) {
+      if (DEEP_HEMERA_IMPORT.test(specifier) && !declared.has(specifier)) {
         violations.push({
           file: reported,
           specifier,

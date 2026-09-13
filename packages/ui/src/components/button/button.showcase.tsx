@@ -1,5 +1,4 @@
 import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
 import { Button } from './button.tsx'
 import type { ButtonSize, ButtonTone } from './button.tsx'
 import type { ShowcaseEntry } from '../showcase.ts'
@@ -7,15 +6,10 @@ import type { ShowcaseEntry } from '../showcase.ts'
 const TONES: ButtonTone[] = ['primary', 'secondary', 'ghost', 'danger']
 const SIZES: ButtonSize[] = ['sm', 'md', 'lg']
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ children }: { children: React.ReactNode }) {
   return (
-    <Stack direction="column" gap="xs" align="start">
-      <Text color="dim" scale="xs" weight="semibold">
-        {label}
-      </Text>
-      <Stack gap="md" align="center">
-        {children}
-      </Stack>
+    <Stack gap="md" align="center">
+      {children}
     </Stack>
   )
 }
@@ -26,7 +20,7 @@ export const buttonShowcase: ShowcaseEntry = {
     {
       name: 'tones',
       render: () => (
-        <Row label="tones">
+        <Row>
           {TONES.map((tone) => (
             <Button key={tone} tone={tone} label={tone} onPress={() => {}} />
           ))}
@@ -36,7 +30,7 @@ export const buttonShowcase: ShowcaseEntry = {
     {
       name: 'sizes',
       render: () => (
-        <Row label="sizes">
+        <Row>
           {SIZES.map((size) => (
             <Button key={size} size={size} tone="primary" label={size} onPress={() => {}} />
           ))}
@@ -46,7 +40,7 @@ export const buttonShowcase: ShowcaseEntry = {
     {
       name: 'with an icon',
       render: () => (
-        <Row label="with an icon">
+        <Row>
           {SIZES.map((size) => (
             <Button key={size} size={size} iconName="plus" label="New project" onPress={() => {}} />
           ))}
@@ -56,7 +50,7 @@ export const buttonShowcase: ShowcaseEntry = {
     {
       name: 'icon only',
       render: () => (
-        <Row label="icon only">
+        <Row>
           {SIZES.map((size) => (
             <Button
               key={size}
@@ -73,7 +67,7 @@ export const buttonShowcase: ShowcaseEntry = {
     {
       name: 'loading and disabled',
       render: () => (
-        <Row label="loading and disabled">
+        <Row>
           <Button tone="primary" loading label="Saving" onPress={() => {}} />
           <Button tone="primary" disabled label="Disabled" onPress={() => {}} />
           <Button tone="secondary" disabled label="Disabled" onPress={() => {}} />

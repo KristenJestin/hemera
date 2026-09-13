@@ -28,6 +28,13 @@ export const rule = {
   thickness: 1,
 } as const
 
+/** Count, status and mission markers. */
+export const badge = {
+  /** A count is a tight pill; a label needs room for its text. */
+  height: { count: 16, label: 20 },
+  minWidth: 16,
+} as const
+
 /** Session status dot. */
 export const dot = {
   size: 8,

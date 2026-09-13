@@ -4,3 +4,4 @@ dist/
 *.tsbuildinfo
 vendor/gpuix/*/native/
 vendor/gpuix/*/test-support/
+showcase-*.png

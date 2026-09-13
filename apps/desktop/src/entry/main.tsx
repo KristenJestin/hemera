@@ -11,12 +11,16 @@ import { addFonts, render, useWindowSize } from '@gpuix/react'
 import { useEffect, useRef } from 'react'
 
 import { t } from '../i18n/index.ts'
+import { resolveChannel } from '../platform/channel.ts'
 import {
   embeddedFontsDirectory,
   missingFontDiagnostic,
   registerEmbeddedFonts,
 } from '../platform/fonts.ts'
 import { createWindowSizeGate } from '../platform/window-size.ts'
+import { routeOrDefault } from '../ui/navigation.ts'
+import { ShowcasePage } from '../ui/showcase/showcase-page.tsx'
+import { windowTitleOf } from './window-title.ts'
 
 function Hemera() {
   const size = useWindowSize()
@@ -31,12 +35,18 @@ function Hemera() {
     console.log(`window opened ${measured.width}x${measured.height}`)
   }, [size])
 
-  return <div />
+  // Until the session screens land, the development package opens on the catalogue.
+  return <ShowcasePage />
 }
+
+// A run started from the sources is a development run, whatever a package might say.
+const channel = resolveChannel({ packaged: 'dev', env: process.env, development: true })
+const route = routeOrDefault('showcase', channel)
 
 const fonts = registerEmbeddedFonts(embeddedFontsDirectory(), addFonts)
 const diagnostic = missingFontDiagnostic(fonts)
 if (diagnostic !== null) console.error(diagnostic)
 console.log(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)
+console.log(`channel ${channel}, route ${route}`)
 
-render(<Hemera />, { title: t('app.name') })
+render(<Hemera />, { title: windowTitleOf(t('app.name'), channel) })

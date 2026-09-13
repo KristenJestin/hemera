@@ -1,0 +1,87 @@
+/**
+ * Demonstration page of the design system.
+ *
+ * It renders every component of the catalogue in all its variants and states, and switches
+ * themes in place. It is reachable only from a `dev` package: no route, no navigation entry
+ * and no shortcut exposes it otherwise.
+ */
+
+import {
+  Button,
+  Scroll,
+  Separator,
+  Stack,
+  Text,
+  ThemeProvider,
+  space,
+  useTheme,
+  useThemeControl,
+} from '@hemera/ui'
+import { SHOWCASE } from '@hemera/ui/showcase'
+import type { ThemeName } from '@hemera/ui'
+import { useState } from 'react'
+
+import { t } from '../../i18n/index.ts'
+
+function ThemeSwitch() {
+  const control = useThemeControl()
+  return (
+    <Stack gap="md" align="center">
+      <Text color="muted" scale="sm">
+        {t('showcase.theme')}
+      </Text>
+      <Button
+        label={control.name === 'dark' ? t('showcase.theme.light') : t('showcase.theme.dark')}
+        size="sm"
+        onPress={() => control.setTheme(control.name === 'dark' ? 'light' : 'dark')}
+      />
+    </Stack>
+  )
+}
+
+function Catalogue() {
+  const theme = useTheme()
+  return (
+    <Scroll style={{ backgroundColor: theme.colors.bg, height: '100%' }}>
+      <Stack direction="column" gap="2xl" style={{ padding: space['2xl'] }}>
+        <Stack gap="lg" align="center" justify="between">
+          <Text color="text" scale="display" weight="semibold">
+            {t('showcase.title')}
+          </Text>
+          <ThemeSwitch />
+        </Stack>
+
+        {SHOWCASE.map((entry) => (
+          <Stack key={entry.component} direction="column" gap="lg" align="start">
+            <Text color="text" scale="xl" weight="semibold">
+              {entry.component}
+            </Text>
+            <Separator />
+            {entry.cases.map((demonstration) => (
+              <Stack key={demonstration.name} direction="column" gap="md" align="start">
+                <Text color="dim" scale="xs" weight="semibold">
+                  {demonstration.name}
+                </Text>
+                {demonstration.render()}
+              </Stack>
+            ))}
+          </Stack>
+        ))}
+      </Stack>
+    </Scroll>
+  )
+}
+
+export interface ShowcasePageProps {
+  /** Theme the page starts on; switching it never leaves the page. */
+  initialTheme?: ThemeName
+}
+
+export function ShowcasePage({ initialTheme = 'dark' }: ShowcasePageProps) {
+  const [theme, setTheme] = useState<ThemeName>(initialTheme)
+  return (
+    <ThemeProvider name={theme} onThemeChange={setTheme}>
+      <Catalogue />
+    </ThemeProvider>
+  )
+}
