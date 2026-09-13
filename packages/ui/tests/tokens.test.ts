@@ -3,7 +3,17 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { COLOR_ROLES, dark, fontSize, light, radius, space } from '../src/index.ts'
+import {
+  COLOR_ROLES,
+  control,
+  dark,
+  fontSize,
+  light,
+  radius,
+  row,
+  shell,
+  space,
+} from '../src/index.ts'
 import type { Theme } from '../src/index.ts'
 
 const repository = resolve(import.meta.dir, '..', '..', '..')
@@ -93,5 +103,27 @@ describe('Ombre multi-couche refusée', () => {
         ])
       }
     }
+  })
+})
+
+describe('Densité et échelle', () => {
+  test('the base text size is 14 and the control heights are 28, 32 and 40', () => {
+    expect(fontSize.base).toBe(14)
+    expect(control.height).toEqual({ sm: 28, md: 32, lg: 40 })
+  })
+
+  test('a list row and a navigation entry share the standard control height', () => {
+    expect(row.height).toBe(control.height.md)
+  })
+
+  test('the shell geometry comes from tokens, never from a density', () => {
+    expect(shell.topbar.height).toBe(44)
+    expect(shell.sidebar).toEqual({
+      width: 248,
+      minWidth: 180,
+      maxWidth: 420,
+      collapsedWidth: 58,
+    })
+    expect(shell.gutter.size).toBe(6)
   })
 })

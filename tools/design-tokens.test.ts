@@ -139,3 +139,30 @@ describe('Valeur citée en commentaire', () => {
     expect(withoutComments('/* #ffffff */ const a = 1 // #000000')).not.toContain('#')
   })
 })
+
+describe('Mesure de texte interdite', () => {
+  test('measuring text in JavaScript is refused', () => {
+    const root = scanned(
+      'packages/ui/src/components/card/card.tsx',
+      'const width = context.measureText(label).width\n',
+    )
+    try {
+      const violations = analyzeTokens(root)
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.problem).toContain('exposes no measurement')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('reading the screen density is refused', () => {
+    const root = scanned('apps/desktop/src/ui/page.tsx', 'const scale = devicePixelRatio\n')
+    try {
+      const violations = analyzeTokens(root)
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.problem).toContain('applies the system scale itself')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

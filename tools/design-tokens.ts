@@ -33,6 +33,27 @@ const EXEMPT = 'packages/ui/src/tokens/primitives.ts'
 
 const COLOUR = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\s*\(/g
 
+/**
+ * Screen density read in code, and text measured in JavaScript.
+ *
+ * The renderer honours the system scale factor itself and exposes no text measurement: a
+ * dimension derived from either is wrong by construction.
+ */
+const FORBIDDEN_MEASURES = [
+  {
+    pattern: /\bdevicePixelRatio\b/,
+    problem: 'reads the screen density; the renderer applies the system scale itself',
+  },
+  {
+    pattern: /\bmeasureText\b/,
+    problem: 'measures text in JavaScript; the renderer exposes no measurement',
+  },
+  {
+    pattern: /\bgetBoundingClientRect\b/,
+    problem: 'measures a box in JavaScript; use a layout constraint',
+  },
+]
+
 /** The closed scale each style property draws from, so a report names the right one. */
 const SCALES: { name: string; steps: number[]; properties: string[] }[] = [
   {
@@ -170,6 +191,18 @@ export function analyzeTokens(repositoryRoot: string): TokenViolation[] {
               '(theme.colors.*) instead',
           })
           colour = COLOUR.exec(line)
+        }
+
+        for (const measure of FORBIDDEN_MEASURES) {
+          const found = measure.pattern.exec(line)
+          if (found !== null) {
+            violations.push({
+              file: reported,
+              line: index + 1,
+              value: found[0],
+              problem: measure.problem,
+            })
+          }
         }
 
         DIMENSION.lastIndex = 0
