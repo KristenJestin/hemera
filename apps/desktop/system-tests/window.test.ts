@@ -21,6 +21,9 @@ async function openWindowAndReadAnnouncement(timeoutMs: number): Promise<string[
     const decoder = new TextDecoder()
     let buffered = ''
     while (Date.now() < deadline) {
+      // Reading the next chunk has to wait for the previous one; the chunks are a stream,
+      // not a set of independent promises.
+      // oxlint-disable-next-line no-await-in-loop
       const { value, done } = await reader.read()
       if (done) break
       buffered += decoder.decode(value, { stream: true })
