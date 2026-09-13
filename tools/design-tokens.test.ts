@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { allowedDimensions, analyzeTokens, withoutComments } from './design-tokens.ts'
+import { dark, light } from '../packages/ui/src/index.ts'
 
 const repository = resolve(import.meta.dir, '..')
 
@@ -164,5 +165,83 @@ describe('Mesure de texte interdite', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe('Espacement hors échelle', () => {
+  test('a padding of 5 pixels is refused, naming the value and its neighbours', () => {
+    const root = scanned(
+      'packages/ui/src/components/button/button.tsx',
+      'const surface = { padding: 5 }\n',
+    )
+    try {
+      const violation = analyzeTokens(root)[0]!
+      expect(violation.value).toBe('padding: 5')
+      expect(violation.problem).toContain('the spacing scale')
+      // The neighbouring steps are named, so the value to use is obvious.
+      expect(violation.problem).toContain('4')
+      expect(violation.problem).toContain('6')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Valeur intermédiaire normalisée', () => {
+  test('an intermediate size or radius of the prototype never reaches the code', () => {
+    const root = scanned(
+      'packages/ui/src/components/card/card.tsx',
+      'const surface = { fontSize: 12.5, borderRadius: 9 }\n',
+    )
+    try {
+      const values = analyzeTokens(root).map((violation) => violation.value)
+      expect(values).toContain('fontSize: 12.5')
+      expect(values).toContain('borderRadius: 9')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('no intermediate value of the prototype exists in this monorepo', () => {
+    expect(analyzeTokens(repository)).toEqual([])
+  })
+})
+
+describe('Style visuel dans un écran', () => {
+  test('a screen applying its own background or radius is refused', () => {
+    const root = scanned(
+      'apps/desktop/src/ui/sessions/sessions-page.tsx',
+      "const surface = { backgroundColor: '#18181e', borderRadius: 9 }\n",
+    )
+    try {
+      const found = analyzeTokens(root)
+      expect(found.map((violation) => violation.value)).toContain('#18181e')
+      expect(found.map((violation) => violation.problem).join(' ')).toContain('the radius scale')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Token manquant pour un besoin réel', () => {
+  test('a value no token expresses is added to the scale, never written in the component', () => {
+    // The rule scale is a token because a component needed it; it lives in the token layer.
+    const primitives = readFileSync(
+      join(repository, 'packages', 'ui', 'src', 'tokens', 'primitives.ts'),
+      'utf8',
+    )
+    const components = readFileSync(
+      join(repository, 'packages', 'ui', 'src', 'tokens', 'components.ts'),
+      'utf8',
+    )
+    expect(primitives).toContain('lineHeight')
+    expect(components).toContain('rule')
+    expect(components).toContain('badge')
+
+    // Both themes carry the same roles, so a token added to one is added to the other.
+    expect(Object.keys(dark.colors).toSorted()).toEqual(Object.keys(light.colors).toSorted())
+
+    // And nothing of the monorepo writes a raw value while waiting for a token.
+    expect(analyzeTokens(repository)).toEqual([])
   })
 })

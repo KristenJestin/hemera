@@ -68,3 +68,41 @@ describe('Textarea — comportement au clavier', () => {
     expect(behaviourOf({ value: '', onValueChange: noop, minRows: 8, maxRows: 2 }).maxRows).toBe(8)
   })
 })
+
+describe("Soumission d'un champ multiligne", () => {
+  test('sending goes through the field submission, never through an intercepted Enter', () => {
+    const sent: string[] = []
+    const root = mountedCatalogue(
+      <Textarea
+        testId="field"
+        value="a message"
+        onValueChange={noop}
+        onSubmit={(value) => sent.push(value)}
+        aria-label="Message"
+      />,
+    )
+    try {
+      const field = nodeOf(root, 'field')
+      // The renderer submits by itself once a submission is declared: the application
+      // registers no key listener of its own for Enter.
+      expect(field.type).toBe('textarea')
+      expect(
+        behaviourOf({ value: 'a message', onValueChange: noop, onSubmit: noop }).submitsOnEnter,
+      ).toBe(true)
+
+      // The submission itself carries the content: the send never reads a key event.
+      behaviourOf({
+        value: 'a message',
+        onValueChange: noop,
+        onSubmit: (value) => sent.push(value),
+      }).submit({ value: 'a message' } as never)
+      expect(sent).toEqual(['a message'])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  test('without a declared submission the field keeps Enter for a newline', () => {
+    expect(behaviourOf({ value: '', onValueChange: noop }).submitsOnEnter).toBe(false)
+  })
+})

@@ -81,3 +81,43 @@ describe('DialogPanel — comportement au clavier', () => {
     }
   })
 })
+
+describe("Focus restauré après fermeture d'un overlay", () => {
+  test('closing by Escape brings the focus back to the button that opened it', async () => {
+    const root = mountedCatalogue(<Decision />)
+    try {
+      const trigger = await focus(root, 'trigger')
+      root.renderer.nativeSimulateKeystrokes(trigger.id, 'enter')
+      root.renderer.flush()
+
+      root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'cancel').id, 'escape')
+      root.renderer.flush()
+
+      expect(() => nodeOf(root, 'panel')).toThrow()
+      expect(root.renderer.getFocusedElementId()).toBe(nodeOf(root, 'trigger').id)
+      // The keyboard still drives the window: the trigger answers again.
+      root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'trigger').id, 'enter')
+      root.renderer.flush()
+      expect(() => nodeOf(root, 'panel')).not.toThrow()
+    } finally {
+      root.unmount()
+    }
+  })
+
+  test('closing by the cancel button brings the focus back the same way', async () => {
+    const root = mountedCatalogue(<Decision />)
+    try {
+      const trigger = await focus(root, 'trigger')
+      root.renderer.nativeSimulateKeystrokes(trigger.id, 'enter')
+      root.renderer.flush()
+
+      root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'cancel').id, 'enter')
+      root.renderer.flush()
+
+      expect(() => nodeOf(root, 'panel')).toThrow()
+      expect(root.renderer.getFocusedElementId()).toBe(nodeOf(root, 'trigger').id)
+    } finally {
+      root.unmount()
+    }
+  })
+})

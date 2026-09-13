@@ -288,3 +288,149 @@ describe('Curseur invalide', () => {
     })
   })
 })
+
+describe('Journal append-only', () => {
+  test('a correction adds an event and never rewrites the one before it', () => {
+    withProfile((profile) => {
+      const first = recordChange(profile.database, event({ type: 'project.created' }), () =>
+        project(profile, 'p1'),
+      )
+      const correction = recordChange(
+        profile.database,
+        event({ type: 'project.renamed', payload: { name: 'Hemera' } }),
+        () => {
+          profile.database.run('UPDATE projects SET name = ? WHERE id = ?', ['Hemera', 'p1'])
+        },
+      )
+
+      const events = readJournal(profile.database, {}).events
+      expect(events.map((entry) => entry.type)).toEqual(['project.created', 'project.renamed'])
+      expect(events[0]!.sequence).toBe(first.sequence)
+      expect(events[1]!.sequence).toBe(correction.sequence)
+      expect(correction.sequence).toBeGreaterThan(first.sequence)
+    })
+  })
+
+  test('the journal is never rewritten or emptied by a later change', () => {
+    withProfile((profile) => {
+      recordChange(profile.database, event(), () => project(profile, 'p1'))
+      const before = readJournal(profile.database, {}).events
+
+      recordChange(profile.database, event({ type: 'project.renamed' }), () => {
+        profile.database.run('UPDATE projects SET name = ? WHERE id = ?', ['Nyx', 'p1'])
+      })
+
+      const after = readJournal(profile.database, {}).events
+      expect(after.slice(0, before.length)).toEqual(before)
+      expect(after).toHaveLength(before.length + 1)
+    })
+  })
+})
+
+describe('Auteur humain distingué', () => {
+  test('a change the user made is recorded as human and attributed to no agent', () => {
+    withProfile((profile) => {
+      recordChange(profile.database, event({ source: 'user', author: 'human' }), () =>
+        project(profile, 'p1'),
+      )
+
+      const recorded = readJournal(profile.database, {}).events[0]!
+      expect(recorded.author).toBe('human')
+      expect(recorded.source).toBe('user')
+      expect(recorded.author).not.toBe('agent')
+    })
+  })
+})
+
+describe('Corrélations prévues non alimentées', () => {
+  test('the spec, revision and phase correlations exist empty and are never invented', () => {
+    withProfile((profile) => {
+      recordChange(profile.database, event(), () => project(profile, 'p1'))
+
+      const recorded = readJournal(profile.database, {}).events[0]!
+      expect(recorded.specId).toBeNull()
+      expect(recorded.revisionId).toBeNull()
+      expect(recorded.phaseId).toBeNull()
+
+      // They are columns of the schema, not a promise of a payload.
+      const columns = (
+        profile.database.query('PRAGMA table_info(domain_events)').all() as { name: string }[]
+      ).map((column) => column.name)
+      expect(columns).toContain('spec_id')
+      expect(columns).toContain('revision_id')
+      expect(columns).toContain('phase_id')
+    })
+  })
+})
+
+describe('Redémarrage après enregistrement', () => {
+  test('events and their correlations are found again after a restart', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'hemera-journal-'))
+    try {
+      const first = openProfile({ directory, now: NOW })
+      project(first, 'p1')
+      recordChange(first.database, event({ sessionId: null }), () => {})
+      const before = readJournal(first.database, {}).events
+      first.database.close()
+
+      const second = openProfile({ directory, now: NOW + 1 })
+      try {
+        const after = readJournal(second.database, {}).events
+        expect(after).toEqual(before)
+        expect(after[0]!.projectId).toBe('p1')
+      } finally {
+        second.database.close()
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Continuité après redémarrage', () => {
+  test('a sequence given after a restart is above every one already recorded', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'hemera-journal-'))
+    try {
+      const first = openProfile({ directory, now: NOW })
+      project(first, 'p1')
+      for (const type of ['project.created', 'project.renamed', 'project.configured']) {
+        recordChange(first.database, event({ type }), () => {})
+      }
+      const highest = lastSequence(first.database)
+      first.database.close()
+
+      const second = openProfile({ directory, now: NOW + 1 })
+      try {
+        expect(lastSequence(second.database)).toBe(highest)
+        const later = recordChange(second.database, event({ type: 'project.archived' }), () => {})
+        expect(later.sequence).toBeGreaterThan(highest)
+      } finally {
+        second.database.close()
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Issue inconnue', () => {
+  test('an effect whose outcome was never recorded leaves no outcome behind', () => {
+    withProfile((profile) => {
+      // The intent is durable before the effect is attempted, and the effect itself is
+      // refused inside the transaction, so an unknown outcome can never be written as known.
+      recordChange(profile.database, event({ type: 'effect.intended' }), () => {
+        project(profile, 'p1')
+      })
+      expect(() =>
+        recordChange(profile.database, event({ type: 'effect.intended' }), () => {
+          throw new ExternalEffectInTransactionError()
+        }),
+      ).toThrow(ExternalEffectInTransactionError)
+
+      const types = readJournal(profile.database, {}).events.map((entry) => entry.type)
+      expect(types).toEqual(['effect.intended'])
+      expect(types).not.toContain('effect.succeeded')
+      expect(types).not.toContain('effect.failed')
+    })
+  })
+})

@@ -7,7 +7,7 @@
 
 import { useGpuix } from '@gpuix/react'
 import type { EventPayload, NativeRenderer } from '@gpuix/react'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 export interface FocusState {
   focused: boolean
@@ -123,13 +123,17 @@ export function useFocusReturn(): FocusReturn {
     if (target !== null) renderer?.focusElement?.(target)
   }, [renderer])
 
-  return {
-    capture,
-    restore,
-    get captured() {
-      return captured.current
-    },
-  }
+  // Stable across renders: an overlay captures once, when it opens, not at every paint.
+  return useMemo(
+    () => ({
+      capture,
+      restore,
+      get captured() {
+        return captured.current
+      },
+    }),
+    [capture, restore],
+  )
 }
 
 export interface FocusTraversal {

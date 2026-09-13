@@ -211,7 +211,7 @@ describe('Configuration invalide refusée', () => {
   })
 })
 
-describe('Création dans le Projet actif', () => {
+describe('Création dans un Projet', () => {
   test('a session is created without Spec and without workspace', () => {
     withStore(({ profile, context, documents }) => {
       const { project } = createProject(context, { name: 'Hemera', path: documents })

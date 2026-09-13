@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -157,5 +165,74 @@ describe('Aucune dépendance aux spikes', () => {
     expect(git(forkPath, 'ls-files', 'patches').split('\n').length).toBeGreaterThan(
       APPLIED_GPUIX_PATCHES,
     )
+  })
+})
+
+/** The manifest the vendoring wrote beside the tarballs. */
+function vendorManifest(): {
+  version: string
+  fork: { remote: string; baseCommit: string; headCommit: string; branch: string }
+  packages: { name: string; file: string; sha256: string; target: string | null }[]
+} {
+  const root = resolve(import.meta.dir, '..', '..', 'vendor', 'gpuix')
+  const version = readdirSync(root)[0]!
+  return JSON.parse(readFileSync(join(root, version, 'manifest.json'), 'utf8'))
+}
+
+describe('Historique du renderer', () => {
+  test('the fork keeps its commits and the monorepo consumes an identifiable version', () => {
+    const manifest = vendorManifest()
+
+    // The version and the exact commit it was built from are written down.
+    expect(manifest.version).toMatch(/^\d+\.\d+\.\d+-hemera\.\d+$/)
+    expect(manifest.fork.headCommit).toMatch(/^[0-9a-f]{40}$/)
+    expect(manifest.fork.baseCommit).toMatch(/^[0-9a-f]{40}$/)
+    expect(manifest.fork.remote).toContain('gpuix')
+
+    // Each package is pinned by its own fingerprint.
+    for (const entry of manifest.packages) {
+      expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
+    }
+
+    // The commits live in the fork repository, not in this monorepo.
+    const monorepo = resolve(import.meta.dir, '..', '..')
+    expect(existsSync(join(monorepo, 'crates'))).toBe(false)
+    expect(existsSync(join(monorepo, 'packages', 'gpuix'))).toBe(false)
+    expect(existsSync(forkPath)).toBe(true)
+  })
+
+  test('the manifest names the same version the workspaces install', () => {
+    const manifest = vendorManifest()
+    const desktop = JSON.parse(
+      readFileSync(resolve(import.meta.dir, '..', '..', 'apps', 'desktop', 'package.json'), 'utf8'),
+    ) as { dependencies: Record<string, string> }
+    expect(desktop.dependencies['@gpuix/react']).toContain(manifest.version)
+  })
+})
+
+describe('Prototype présent dans le fork', () => {
+  test('no experimental rendering path of the fork is activated by this delivery', () => {
+    const manifest = vendorManifest()
+
+    // The fork also ships a browser/wasm path and a GPU test renderer; neither is installed
+    // by the application, and neither is presented as a delivered capability.
+    const installed = manifest.packages.map((entry) => entry.name)
+    expect(installed).toContain('@gpuix/react')
+    expect(installed).not.toContain('@gpuix/wasm')
+
+    const application = [
+      resolve(import.meta.dir, '..', '..', 'apps', 'desktop', 'src'),
+      resolve(import.meta.dir, '..', '..', 'packages', 'ui', 'src'),
+    ]
+    for (const root of application) {
+      const found = Bun.spawnSync(
+        ['git', 'grep', '-l', '-e', 'browser.mjs', '-e', '@gpuix/wasm', '--', root],
+        {
+          cwd: resolve(import.meta.dir, '..', '..'),
+          stdout: 'pipe',
+        },
+      )
+      expect(new TextDecoder().decode(found.stdout).trim()).toBe('')
+    }
   })
 })

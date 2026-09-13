@@ -99,3 +99,52 @@ describe('Aucune dépendance aux spikes', () => {
     expect(bytes).not.toContain('gpuix-fork')
   })
 })
+
+describe('Copie embarquée', () => {
+  test('the package embeds no database it could open as the profile', () => {
+    const directory = join(repository, 'dist', packageNameOf('prod', targetOfHost()))
+    const shipped = readdirSync(directory)
+    expect(shipped.some((entry) => entry.endsWith('.db'))).toBe(false)
+    expect(shipped.some((entry) => entry.endsWith('.sqlite'))).toBe(false)
+
+    // The profile is resolved per system, never from the folder the package sits in.
+    const profile = readFileSync(
+      join(repository, 'packages', 'runtime', 'src', 'platform', 'profile.ts'),
+      'utf8',
+    )
+    expect(profile).toContain('LOCALAPPDATA')
+    expect(profile).toContain('XDG_DATA_HOME')
+    expect(profile).not.toContain('execPath')
+    expect(profile).not.toContain('import.meta.dir')
+  })
+})
+
+describe('Mesure de spike présentée comme preuve', () => {
+  test('a report describes the target it was produced on, and no other', () => {
+    const report = readFileSync(
+      join(repository, 'reports', `environment-${targetOfHost()}.md`),
+      'utf8',
+    )
+    expect(report).toContain(targetOfHost())
+    expect(report).toContain('describes this machine only')
+
+    // No measurement of a spike is cited as a verification of this target.
+    expect(report).not.toContain('spike')
+    expect(report).not.toContain('/spikes/')
+  })
+
+  test('nothing of the monorepo reads a spike', () => {
+    const found = Bun.spawnSync(['git', 'grep', '-l', 'spikes/'], {
+      cwd: repository,
+      stdout: 'pipe',
+    })
+    const files = new TextDecoder()
+      .decode(found.stdout)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      // The traceability tooling names the rule; it does not read a spike.
+      .filter((line) => !line.startsWith('tools/'))
+    expect(files).toEqual([])
+  })
+})

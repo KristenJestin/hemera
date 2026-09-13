@@ -63,7 +63,7 @@ function textsOf(node: TreeNode): string[] {
 }
 
 /** Every text painted by the window. */
-function painted(root: TestRoot): string[] {
+function paintedTexts(root: TestRoot): string[] {
   return textsOf(root.renderer.toJSON() as TreeNode)
 }
 
@@ -202,7 +202,7 @@ describe('Aucune Session', () => {
 
         expect(model().sessions).toHaveLength(1)
         expect(model().sessions[0]?.mission).toBe('free')
-        expect(painted(root)).toContain('Untitled session')
+        expect(paintedTexts(root)).toContain('Untitled session')
       } finally {
         root.unmount()
       }
@@ -466,7 +466,7 @@ describe('Aucune suppression proposée', () => {
         model().startSession()
         await settle()
 
-        const labels = painted(root).map((text) => text.toLowerCase())
+        const labels = paintedTexts(root).map((text) => text.toLowerCase())
         for (const forbidden of ['delete', 'remove', 'destroy']) {
           expect(labels.some((label) => label.includes(forbidden))).toBe(false)
         }
@@ -519,7 +519,7 @@ describe("Édition de la configuration depuis l'écran", () => {
 
         expect(model().configuration?.name).toBe('Hemera cockpit')
         expect(model().configuration?.repositories).toEqual(['./sources/api', './sources/front'])
-        expect(painted(root)).toContain('Hemera cockpit')
+        expect(paintedTexts(root)).toContain('Hemera cockpit')
         expect(readdirSync(documents)).toEqual([])
       } finally {
         root.unmount()
@@ -562,13 +562,13 @@ describe('Titre dérivé du premier message dans la sidebar', () => {
         await settle()
         model().startSession()
         await settle()
-        expect(painted(root)).toContain('Untitled session')
+        expect(paintedTexts(root)).toContain('Untitled session')
 
         model().sendMessage('Migrate the profile of the previous version')
         await settle()
         const proposed = model().activeSession?.title ?? ''
         expect(proposed).toContain('Migrate the profile')
-        expect(painted(root)).toContain(proposed)
+        expect(paintedTexts(root)).toContain(proposed)
 
         expect(model().renameSession('Profile migration')).toBe(true)
         await settle()
@@ -576,7 +576,7 @@ describe('Titre dérivé du premier message dans la sidebar', () => {
         await settle()
 
         expect(model().activeSession?.title).toBe('Profile migration')
-        expect(painted(root)).toContain('Profile migration')
+        expect(paintedTexts(root)).toContain('Profile migration')
       } finally {
         root.unmount()
       }
@@ -594,7 +594,7 @@ describe('Panneaux de décision du Projet', () => {
         expect(maybeNodeOf(root, 'new-project-dialog')).not.toBeNull()
         expect(maybeNodeOf(root, 'new-project-name')).not.toBeNull()
         expect(maybeNodeOf(root, 'new-project-path')).not.toBeNull()
-        expect(painted(root)).toContain('Folder of the main workspace')
+        expect(paintedTexts(root)).toContain('Folder of the main workspace')
       } finally {
         root.unmount()
       }
@@ -611,7 +611,7 @@ describe('Panneaux de décision du Projet', () => {
         press(root, 'project-settings')
 
         expect(textsOf(nodeOf(root, 'settings-path'))).toEqual([documents])
-        expect(painted(root)).toContain('Repository locations, one per line')
+        expect(paintedTexts(root)).toContain('Repository locations, one per line')
       } finally {
         root.unmount()
       }
@@ -695,8 +695,109 @@ describe('Suivi du thème système indisponible', () => {
         press(root, 'project-settings')
 
         expect(THEME_OPTIONS.map((option) => option.value)).toEqual(['dark', 'light'])
-        expect(painted(root)).not.toContain('System')
+        expect(paintedTexts(root)).not.toContain('System')
         expect(maybeNodeOf(root, 'settings-theme')).not.toBeNull()
+      } finally {
+        root.unmount()
+      }
+    })
+  })
+})
+
+describe('Onglet de Projet actif', () => {
+  test('selecting another tab changes the active one and the sessions listed', async () => {
+    await withScreen(async ({ context, documents, other }) => {
+      const { root, model, settle } = mount(context)
+      try {
+        model().addProject({ name: 'Hemera', path: documents })
+        await settle()
+        model().startSession()
+        await settle()
+        model().sendMessage('of the first project')
+        await settle()
+        const first = model().activeProjectId ?? ''
+
+        model().addProject({ name: 'Nyx', path: other })
+        await settle()
+        const second = model().activeProjectId ?? ''
+
+        // The active tab is painted apart from the others.
+        const activeTab = nodeOf(root, `project-${second}`)
+        const restingTab = nodeOf(root, `project-${first}`)
+        expect(activeTab.style?.backgroundColor).not.toBe(restingTab.style?.backgroundColor)
+
+        press(root, `project-${first}`)
+
+        expect(model().activeProjectId).toBe(first)
+        expect(nodeOf(root, `project-${first}`).style?.backgroundColor).toBe(
+          activeTab.style?.backgroundColor,
+        )
+        expect(bodiesOf(root)).toContain('of the first project')
+
+        // Exactly one project is active at a time.
+        const active = model().projects.filter((project) => project.id === model().activeProjectId)
+        expect(active).toHaveLength(1)
+      } finally {
+        root.unmount()
+      }
+    })
+  })
+})
+
+describe('Fonctionnalité absente du lot présentée par la maquette', () => {
+  test('the screen shows nothing the lot does not deliver, not even disabled', async () => {
+    await withScreen(async ({ context, documents }) => {
+      const { root, model, settle } = mount(context)
+      try {
+        model().addProject({ name: 'Hemera', path: documents })
+        await settle()
+        model().startSession()
+        await settle()
+
+        // Everything of the mockup that belongs to a later lot: no provider, no model
+        // picker, no mission, no agent, no cost, no search.
+        const painted = paintedTexts(root).map((text) => text.toLowerCase())
+        for (const absent of [
+          'provider',
+          'model',
+          'agent',
+          'mission',
+          'tokens',
+          'cost',
+          'search',
+        ]) {
+          expect(painted.some((text) => text.includes(absent))).toBe(false)
+        }
+      } finally {
+        root.unmount()
+      }
+    })
+  })
+})
+
+describe("Aucune réponse d'agent au lot 1", () => {
+  test('no provider is presented and no agent reply is ever simulated', async () => {
+    await withScreen(async ({ context, documents }) => {
+      const { root, model, settle } = mount(context)
+      try {
+        model().addProject({ name: 'Hemera', path: documents })
+        await settle()
+        model().startSession()
+        await settle()
+        model().sendMessage('is anybody there?')
+        await settle()
+        model().sendMessage('still nobody?')
+        await settle()
+
+        // The thread holds exactly what the user wrote, in order, and nothing else.
+        expect(bodiesOf(root)).toEqual(['is anybody there?', 'still nobody?'])
+        expect(model().messages.every((entry) => entry.author === 'human')).toBe(true)
+
+        // No provider, no generation marker, no waiting state is shown.
+        const painted = paintedTexts(root).map((text) => text.toLowerCase())
+        for (const absent of ['thinking', 'generating', 'typing', 'assistant', 'provider']) {
+          expect(painted.some((text) => text.includes(absent))).toBe(false)
+        }
       } finally {
         root.unmount()
       }

@@ -120,3 +120,45 @@ describe('Deux Sessions retrouvées', () => {
     }
   }, 60_000)
 })
+
+describe('Arrêt non propre', () => {
+  test('a commit that landed before the kill is read back with its journal intact', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'hemera-durability-'))
+    const script = join(directory, 'writer.ts')
+    writeFileSync(script, WRITER)
+
+    const writer = Bun.spawn(['bun', script, directory], { stdout: 'pipe', stderr: 'pipe' })
+    try {
+      const written = await readReport(writer)
+      writer.kill()
+      await writer.exited
+
+      const { lastSequence, readJournal } = await import('../src/index.ts')
+      const reopened = openProfile({ directory, now: Date.now() })
+      try {
+        const page = readJournal(reopened.database, { sessionId: written.sessionId })
+        // Three messages committed, three events, and a sequence that stayed monotonic.
+        expect(page.events.map((event) => event.type)).toEqual([
+          'session.created',
+          'session.entry.recorded',
+          'session.entry.recorded',
+          'session.entry.recorded',
+        ])
+        expect(page.events.map((event) => event.sequence)).toEqual(
+          [...page.events].map((event) => event.sequence).toSorted((a, b) => a - b),
+        )
+        expect(lastSequence(reopened.database)).toBeGreaterThanOrEqual(page.events.at(-1)!.sequence)
+
+        // No half-written entry is presented as an event of the journal.
+        for (const event of page.events) {
+          expect(event.entityId).not.toBe('')
+          expect(event.occurredAt).toBeGreaterThan(0)
+        }
+      } finally {
+        reopened.database.close()
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  }, 60_000)
+})

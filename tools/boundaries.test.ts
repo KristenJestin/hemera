@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { PACKAGE_RULES, analyze, analyzePackage, cyclesOf, specifiersOf } from './boundaries.ts'
+import {
+  PACKAGE_RULES,
+  analyze,
+  analyzePackage,
+  cyclesOf,
+  packageGraph,
+  specifiersOf,
+} from './boundaries.ts'
 
 const repository = resolve(import.meta.dir, '..')
 
@@ -215,5 +222,35 @@ describe('Frontières des packages — sous-chemins déclarés', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe('Cycle de dépendances', () => {
+  test('a module of the design system importing a screen forms a cycle that is reported', () => {
+    const graph = new Map<string, Set<string>>([
+      ['@hemera/ui', new Set(['@hemera/desktop'])],
+      ['@hemera/desktop', new Set(['@hemera/ui'])],
+    ])
+    const cycles = cyclesOf(graph)
+    expect(cycles).not.toEqual([])
+    expect(cycles[0]).toContain('@hemera/ui')
+    expect(cycles[0]).toContain('@hemera/desktop')
+  })
+
+  test('the design system is forbidden from importing a screen in the first place', () => {
+    const root = fixture({
+      'packages/ui/package.json': JSON.stringify({ name: '@hemera/ui' }),
+      'packages/ui/src/shell.tsx': "import { SessionsPage } from '@hemera/desktop'\n",
+    })
+    try {
+      const rule = PACKAGE_RULES.find((entry) => entry.name === '@hemera/ui')!
+      expect(analyzePackage(root, rule)[0]?.problem).toContain('must not import')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the graph of this monorepo is acyclic', () => {
+    expect(cyclesOf(packageGraph(repository))).toEqual([])
   })
 })

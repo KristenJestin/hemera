@@ -12,7 +12,7 @@
     "lint": "oxlint && bun tools/boundaries.ts && bun tools/design-tokens.ts && bun tools/components.ts && bun tools/icons.ts && bun tools/migrations.ts && bun tools/i18n.ts && bun tools/business-suite.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "test": "turbo run test //#test:tools",
+    "test": "turbo run test //#test:tools && bun tools/traceability.ts --write",
     "build": "turbo run build",
     "package": "bun tools/package-desktop.ts",
     "test:tools": "bun test tools",

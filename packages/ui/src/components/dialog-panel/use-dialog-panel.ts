@@ -27,15 +27,17 @@ export interface DialogPanelBehaviour {
 export function useDialogPanel({ open, onClose }: UseDialogPanelOptions): DialogPanelBehaviour {
   const focusReturn = useFocusReturn()
 
+  // Captured when the panel opens, given back when it closes — however it closed, including
+  // through a button of the caller or by the panel leaving the tree altogether.
   useEffect(() => {
-    if (!open) return
+    if (!open) return undefined
     focusReturn.capture()
+    return () => focusReturn.restore()
   }, [open, focusReturn])
 
   const close = useCallback(() => {
-    focusReturn.restore()
     onClose()
-  }, [focusReturn, onClose])
+  }, [onClose])
 
   return {
     open,

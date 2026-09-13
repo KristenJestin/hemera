@@ -107,3 +107,23 @@ describe('Décorations client indisponibles', () => {
     expect(decision.missing).toEqual([])
   })
 })
+
+describe('Décorations client disponibles', () => {
+  test('when the renderer exposes all three, the projects bar becomes the title bar', () => {
+    const decision = decideTitleBar({
+      framelessWindow: true,
+      dragRegion: true,
+      windowButtons: true,
+    })
+    expect(decision.mode).toBe('projects-bar')
+    expect(decision.missing).toEqual([])
+  })
+
+  test('this target exposes them only in part, so the decision stays the native bar', () => {
+    // Observed on Windows with GPUiX 0.7.0-hemera.1; Linux is not measured here.
+    const decision = decideTitleBar(OBSERVED_DECORATIONS)
+    expect(OBSERVED_DECORATIONS.framelessWindow).toBe(true)
+    expect(decision.mode).toBe('native')
+    expect(decision.missing).toEqual(['dragRegion', 'windowButtons'])
+  })
+})

@@ -5,7 +5,18 @@ import type { ErrorInfo, ReactNode } from 'react'
 import { createTestRoot } from '@gpuix/react/testing'
 import type { TestRoot } from '@gpuix/react/testing'
 
-import { Anchored, Pressable, Scroll, Stack, Text, ThemeProvider } from '../src/index.ts'
+import {
+  Anchored,
+  Icon,
+  MONO_FAMILY,
+  Pressable,
+  SANS_FAMILY,
+  Scroll,
+  Stack,
+  Text,
+  ThemeProvider,
+  dark,
+} from '../src/index.ts'
 
 interface TreeNode {
   id: number
@@ -260,6 +271,61 @@ describe("Overlay ancré au-dessus d'une liste", () => {
       const overlay = nodeOf(root, 'overlay')
       expect(overlay.type).toBe('anchored')
       expect(overlay.style?.pointerEvents).toBe('auto')
+    } finally {
+      root.unmount()
+    }
+  })
+})
+
+describe('Texte technique en police monospace', () => {
+  test('an identifier or a path is painted with the family of the package', () => {
+    const root = mounted(
+      <Text testId="path" color="dim" family="mono">
+        C:/Users/kris/AppData/Local/Hemera
+      </Text>,
+    )
+    try {
+      const painted = nodeOf(root, 'path')
+      expect(painted.style?.fontFamily).toBe(MONO_FAMILY)
+      expect(MONO_FAMILY).toBe('JetBrains Mono')
+    } finally {
+      root.unmount()
+    }
+  })
+
+  test('interface text keeps the sans family, and neither is written by hand', () => {
+    const root = mounted(
+      <Text testId="label" color="text">
+        Session
+      </Text>,
+    )
+    try {
+      expect(nodeOf(root, 'label').style?.fontFamily).toBe(SANS_FAMILY)
+    } finally {
+      root.unmount()
+    }
+  })
+})
+
+describe('Icône sans couleur héritée', () => {
+  test('an icon always carries a colour resolved from a role', () => {
+    const root = mounted(<Icon testId="icon" name="folder" />)
+    try {
+      const painted = nodeOf(root, 'icon')
+      expect(painted.type).toBe('svg')
+      expect(painted.style?.color).toBe(dark.colors.text)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  test('the role asked for is the one painted, and never an empty colour', () => {
+    const root = mounted(<Icon testId="icon" name="folder" color="primary" />)
+    try {
+      const painted = nodeOf(root, 'icon')
+      expect(painted.style?.color).toBe(dark.colors.primary)
+      expect(painted.style?.color).not.toBe('')
+      expect(painted.style?.color).toBeDefined()
     } finally {
       root.unmount()
     }
