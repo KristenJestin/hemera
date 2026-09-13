@@ -38,3 +38,21 @@ export {
 } from './storage/migrations/index.ts'
 export type { Migration } from './storage/migrations/index.ts'
 export * as schema from './storage/schema.ts'
+export {
+  DEFAULT_PAGE_SIZE,
+  ExternalEffectInTransactionError,
+  InvalidCursorError,
+  MAX_PAGE_SIZE,
+  lastSequence,
+  readJournal,
+  recordChange,
+} from './storage/journal.ts'
+export type {
+  EventAuthor,
+  EventSource,
+  JournalEvent,
+  JournalPage,
+  JournalQuery,
+  Recorded,
+  RecordedEvent,
+} from './storage/journal.ts'
