@@ -18,6 +18,8 @@ export {
 export { content, control, dot, icon, row, shell } from './tokens/components.ts'
 export { COLOR_ROLES } from './tokens/semantic.ts'
 export type { Theme, ThemeColors, ThemeName, ThemeShadows } from './tokens/semantic.ts'
+export { ICONS } from './icons/catalog.ts'
+export type { IconName } from './icons/catalog.ts'
 export { EMBEDDED_FONTS, FONT_LICENCES, MONO_FAMILY, SANS_FAMILY } from './fonts/index.ts'
 export type { EmbeddedFont } from './fonts/index.ts'
 export { dark } from './theme/dark.ts'
