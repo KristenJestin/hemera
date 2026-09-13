@@ -56,3 +56,24 @@ export type {
   Recorded,
   RecordedEvent,
 } from './storage/journal.ts'
+export {
+  LOCK_FILE,
+  acquireInstanceLock,
+  currentLockOwner,
+  lockPathOf,
+  processExists,
+} from './platform/instance-lock.ts'
+export type { AcquireLockOptions, LockOutcome, LockOwner } from './platform/instance-lock.ts'
+export {
+  DEFAULT_BOUNDS,
+  DEFAULT_PREFERENCES,
+  PREFERENCE_KEYS,
+  loadPreferences,
+  savePreferences,
+} from './storage/preferences.ts'
+export type {
+  DisplayPreferences,
+  LoadedPreferences,
+  PreferenceBounds,
+  PreferenceKey,
+} from './storage/preferences.ts'
