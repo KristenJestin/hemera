@@ -8,8 +8,10 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@gpuix/react": "file:../../vendor/gpuix/0.7.0-hemera.1/gpuix-react-0.7.0-hemera.1.tgz",
     "@hemera/core": "workspace:*",
     "@hemera/runtime": "workspace:*",
-    "@hemera/ui": "workspace:*"
+    "@hemera/ui": "workspace:*",
+    "react": "19.2.4"
   }
 }

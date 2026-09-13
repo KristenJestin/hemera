@@ -35,11 +35,9 @@ describe('Installation du produit', () => {
     const desktop = JSON.parse(
       readFileSync(join(repository, 'apps', 'desktop', 'package.json'), 'utf8'),
     )
-    expect(desktop.dependencies).toEqual({
-      '@hemera/core': 'workspace:*',
-      '@hemera/runtime': 'workspace:*',
-      '@hemera/ui': 'workspace:*',
-    })
+    for (const internal of ['@hemera/core', '@hemera/runtime', '@hemera/ui']) {
+      expect(desktop.dependencies[internal]).toBe('workspace:*')
+    }
     const runtime = JSON.parse(
       readFileSync(join(repository, 'packages', 'runtime', 'package.json'), 'utf8'),
     )

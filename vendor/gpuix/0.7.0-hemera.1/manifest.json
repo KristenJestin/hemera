@@ -1,0 +1,29 @@
+{
+  "version": "0.7.0-hemera.1",
+  "fork": {
+    "remote": "https://github.com/remorses/gpuix",
+    "baseCommit": "a24b4a42eb516c7b940eb8d34ecebb077df623bd",
+    "headCommit": "b07dcad81f3d3c7bb05efec2156c8cf724034118",
+    "branch": "hemera/0.7.0-hemera.1"
+  },
+  "packages": [
+    {
+      "name": "@gpuix/react",
+      "file": "gpuix-react-0.7.0-hemera.1.tgz",
+      "sha256": "cd70ceecb215b2b22c8c2b103735f5cc63e71c8352cb819fafef746584c4ea4e",
+      "target": null
+    },
+    {
+      "name": "@gpuix/native",
+      "file": "gpuix-native-0.7.0-hemera.1.tgz",
+      "sha256": "1440969aeb07fd8dd6fe2f75b3a7142639fed7cbdac35f728a1fd6a9d27d4924",
+      "target": null
+    },
+    {
+      "name": "@gpuix/native-win32-x64-msvc",
+      "file": "gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz",
+      "sha256": "5ff17621fe1ccb8cc192638f175e329887cb4ccae0d678a164ff0be5b5272a5d",
+      "target": "x86_64-pc-windows-msvc"
+    }
+  ]
+}
