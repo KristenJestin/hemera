@@ -25,6 +25,7 @@ import {
   writeConfiguration,
 } from '@hemera/runtime'
 import type { DisplayPreferences, ProjectConfiguration, StoreContext } from '@hemera/runtime'
+import type { ThemeName } from '@hemera/ui'
 import { useCallback, useMemo, useState } from 'react'
 
 export interface SessionsModel {
@@ -50,6 +51,7 @@ export interface SessionsModel {
 
   sidebarWidth: number
   sidebarCollapsed: boolean
+  theme: ThemeName
   /** The refusal the screen has to show, or null when the last action went through. */
   failure: string | null
 
@@ -64,6 +66,7 @@ export interface SessionsModel {
   setArchived: (sessionId: string, archived: boolean) => boolean
   setSidebarWidth: (width: number) => void
   setSidebarCollapsed: (collapsed: boolean) => void
+  setTheme: (theme: ThemeName) => void
 }
 
 export interface UseSessionsOptions {
@@ -148,6 +151,7 @@ export function useSessions({ context, inspectFolder, now }: UseSessionsOptions)
     now: clock,
     sidebarWidth: preferences.sidebarWidth,
     sidebarCollapsed: preferences.sidebarCollapsed,
+    theme: preferences.theme,
     failure,
 
     selectProject: useCallback(
@@ -260,6 +264,15 @@ export function useSessions({ context, inspectFolder, now }: UseSessionsOptions)
     setSidebarCollapsed: useCallback(
       (sidebarCollapsed: boolean) => {
         persist({ ...preferences, sidebarCollapsed })
+      },
+      [persist, preferences],
+    ),
+
+    // The theme applies on the spot; nothing is remounted, so the open session, the unsent
+    // draft and the panel sizes are untouched.
+    setTheme: useCallback(
+      (theme: ThemeName) => {
+        persist({ ...preferences, theme })
       },
       [persist, preferences],
     ),

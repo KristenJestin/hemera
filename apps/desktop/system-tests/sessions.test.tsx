@@ -14,7 +14,7 @@ import { join } from 'node:path'
 
 import { createTestRoot } from '@gpuix/react/testing'
 import type { TestRoot } from '@gpuix/react/testing'
-import { ThemeProvider } from '@hemera/ui'
+import { DEFAULT_THEME, ThemeProvider, light } from '@hemera/ui'
 import { openProfile } from '@hemera/runtime'
 import type { OpenProfile, StoreContext } from '@hemera/runtime'
 
@@ -22,6 +22,7 @@ import { folderProblem } from '../src/platform/workspace.ts'
 import { SessionsPage } from '../src/ui/sessions/sessions-page.tsx'
 import { useSessions } from '../src/ui/sessions/use-sessions.ts'
 import type { SessionsModel } from '../src/ui/sessions/use-sessions.ts'
+import { THEME_OPTIONS } from '../src/ui/sessions/dialogs.tsx'
 
 const NOW = 1_789_000_000_000
 
@@ -80,7 +81,7 @@ function Harness({ context, onModel }: HarnessProps) {
   const model = useSessions({ context, inspectFolder: folderProblem, now: () => NOW })
   onModel(model)
   return (
-    <ThemeProvider name="dark" onThemeChange={() => {}}>
+    <ThemeProvider name={model.theme} onThemeChange={model.setTheme}>
       <SessionsPage model={model} />
     </ThemeProvider>
   )
@@ -611,6 +612,91 @@ describe('Panneaux de décision du Projet', () => {
 
         expect(textsOf(nodeOf(root, 'settings-path'))).toEqual([documents])
         expect(painted(root)).toContain('Repository locations, one per line')
+      } finally {
+        root.unmount()
+      }
+    })
+  })
+})
+
+describe('Bascule de thème à chaud', () => {
+  test('the whole window changes theme without losing the session, the draft or the sizes', async () => {
+    await withScreen(async ({ context, documents }) => {
+      const { root, model, settle } = mount(context)
+      try {
+        model().addProject({ name: 'Hemera', path: documents })
+        await settle()
+        model().startSession()
+        await settle()
+        model().sendMessage('written before the switch')
+        await settle()
+        model().setSidebarWidth(320)
+        await settle()
+
+        const session = model().activeSessionId
+        root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'composer-field').id, 'a b c')
+        root.renderer.flush()
+        const before = nodeOf(root, 'shell').style?.backgroundColor
+
+        model().setTheme('light')
+        await settle()
+
+        expect(model().theme).toBe('light')
+        expect(nodeOf(root, 'shell').style?.backgroundColor).not.toBe(before)
+        expect(nodeOf(root, 'shell').style?.backgroundColor).toBe(light.colors.bg)
+
+        // Nothing was remounted: the session, its thread and the panel width are untouched.
+        expect(model().activeSessionId).toBe(session)
+        expect(bodiesOf(root)).toEqual(['written before the switch'])
+        expect(model().sidebarWidth).toBe(320)
+        expect(maybeNodeOf(root, 'composer-field')).not.toBeNull()
+      } finally {
+        root.unmount()
+      }
+    })
+  })
+})
+
+describe('Thème restauré après redémarrage', () => {
+  test('the theme chosen is the one the next launch opens on', async () => {
+    await withScreen(async ({ context, documents }) => {
+      const first = mount(context)
+      try {
+        first.model().addProject({ name: 'Hemera', path: documents })
+        await first.settle()
+        first.model().setTheme('light')
+        await first.settle()
+        expect(first.model().theme).toBe('light')
+      } finally {
+        first.root.unmount()
+      }
+
+      const second = mount(context)
+      try {
+        expect(second.model().theme).toBe('light')
+        expect(nodeOf(second.root, 'shell').style?.backgroundColor).toBe(light.colors.bg)
+      } finally {
+        second.root.unmount()
+      }
+    })
+  })
+})
+
+describe('Suivi du thème système indisponible', () => {
+  test('no system choice is offered, and the default is the dark theme', async () => {
+    await withScreen(async ({ context, documents }) => {
+      const { root, model, settle } = mount(context)
+      try {
+        expect(model().theme).toBe(DEFAULT_THEME)
+        expect(DEFAULT_THEME).toBe('dark')
+
+        model().addProject({ name: 'Hemera', path: documents })
+        await settle()
+        press(root, 'project-settings')
+
+        expect(THEME_OPTIONS.map((option) => option.value)).toEqual(['dark', 'light'])
+        expect(painted(root)).not.toContain('System')
+        expect(maybeNodeOf(root, 'settings-theme')).not.toBeNull()
       } finally {
         root.unmount()
       }

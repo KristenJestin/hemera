@@ -7,7 +7,7 @@
  * representative measurement.
  */
 
-import { EMBEDDED_FONTS } from '@hemera/ui'
+import { EMBEDDED_FONTS, ThemeProvider } from '@hemera/ui'
 import { addFonts, render, useWindowSize } from '@gpuix/react'
 import { useEffect, useRef } from 'react'
 
@@ -46,7 +46,12 @@ function Hemera({ route, context }: HemeraProps) {
     console.log(`window opened ${measured.width}x${measured.height}`)
   }, [size])
 
-  return route === 'showcase' ? <ShowcasePage /> : <SessionsPage model={model} />
+  if (route === 'showcase') return <ShowcasePage />
+  return (
+    <ThemeProvider name={model.theme} onThemeChange={model.setTheme}>
+      <SessionsPage model={model} />
+    </ThemeProvider>
+  )
 }
 
 // A run started from the sources is a development run, whatever a package might say.

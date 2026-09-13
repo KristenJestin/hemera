@@ -26,7 +26,7 @@ import type { ThemeColors } from '@hemera/ui'
 import { useState } from 'react'
 
 import { t } from '../../i18n/index.ts'
-import { NewProjectDialog, ProjectSettingsDialog, RenameSessionDialog } from './dialogs.tsx'
+import { NewProjectDialog, RenameSessionDialog, SettingsDialog } from './dialogs.tsx'
 import type { SessionsModel } from './use-sessions.ts'
 
 /** Colours projects are marked with in the bar, in order. */
@@ -73,7 +73,7 @@ export function SessionsPage({ model }: SessionsPageProps) {
         <IconButton
           testId="project-settings"
           name="settings"
-          label={t('project.settings')}
+          label={t('settings')}
           size="sm"
           onPress={() => setOverlay('settings')}
         />
@@ -162,9 +162,11 @@ export function SessionsPage({ model }: SessionsPageProps) {
         {overlay === 'new-project' ? (
           <NewProjectDialog onClose={close} onCreate={model.addProject} />
         ) : overlay === 'settings' && model.configuration !== null ? (
-          <ProjectSettingsDialog
+          <SettingsDialog
             configuration={model.configuration}
             path={model.activeProjectPath}
+            theme={model.theme}
+            onThemeChange={model.setTheme}
             onClose={close}
             onSave={model.configureProject}
           />

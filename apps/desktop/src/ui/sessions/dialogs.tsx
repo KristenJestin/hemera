@@ -7,7 +7,8 @@
  * the user typed, and never presents a refused change as saved.
  */
 
-import { Button, DialogPanel, Input, Stack, Text, Textarea, space } from '@hemera/ui'
+import { Button, DialogPanel, Input, Select, Stack, Text, Textarea, space } from '@hemera/ui'
+import type { ThemeName } from '@hemera/ui'
 import type { ProjectConfiguration } from '@hemera/runtime'
 import { useState } from 'react'
 
@@ -90,19 +91,34 @@ export function NewProjectDialog({ onClose, onCreate }: NewProjectDialogProps) {
   )
 }
 
-export interface ProjectSettingsDialogProps {
+/**
+ * Themes the settings offer.
+ *
+ * There is no `system` choice: the renderer exposes no operating-system appearance
+ * preference, and a choice that cannot be honoured is not offered.
+ */
+export const THEME_OPTIONS: readonly { value: ThemeName; label: string }[] = [
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+]
+
+export interface SettingsDialogProps {
   configuration: ProjectConfiguration
   path: string | null
+  theme: ThemeName
+  onThemeChange: (theme: ThemeName) => void
   onClose: () => void
   onSave: (input: { name: string; repositories: string[] }) => boolean
 }
 
-export function ProjectSettingsDialog({
+export function SettingsDialog({
   configuration,
   path,
+  theme,
+  onThemeChange,
   onClose,
   onSave,
-}: ProjectSettingsDialogProps) {
+}: SettingsDialogProps) {
   const [name, setName] = useState(configuration.name)
   const [block, setBlock] = useState(configuration.repositories.join('\n'))
 
@@ -111,7 +127,16 @@ export function ProjectSettingsDialog({
   }
 
   return (
-    <DialogPanel testId="settings-dialog" open onClose={onClose} title={t('project.settings')}>
+    <DialogPanel testId="settings-dialog" open onClose={onClose} title={t('settings')}>
+      <Field label={t('settings.theme')}>
+        <Select
+          testId="settings-theme"
+          value={theme}
+          options={THEME_OPTIONS}
+          onValueChange={onThemeChange}
+          label={t('settings.theme')}
+        />
+      </Field>
       <Field label={t('project.settings.name')}>
         <Input
           testId="settings-name"

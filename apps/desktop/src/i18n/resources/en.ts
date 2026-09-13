@@ -11,6 +11,9 @@ export const en = {
 
   'action.cancel': 'Cancel',
 
+  settings: 'Settings',
+  'settings.theme': 'Appearance',
+
   'shell.sidebar.collapse': 'Collapse the sidebar',
   'shell.sidebar.resize': 'Sidebar width',
 
