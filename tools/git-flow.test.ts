@@ -46,7 +46,7 @@ function commit(path: string, message: string, file: string): CommandResult {
   return git(path, 'commit', '-m', message)
 }
 
-describe('Commit d\'agent sur une branche protégée', () => {
+describe("Commit d'agent sur une branche protégée", () => {
   test('a commit made directly on dev is refused', () => {
     const path = repositoryWithHooks()
     try {
@@ -124,7 +124,7 @@ describe('Message hors convention', () => {
     'fix(desktop): restore focus after closing the project selector',
     'test(core): cover rank rebalancing with random insertions',
     'chore(db): pin the drizzle version',
-    'Merge branch \'feature/sessions\' into dev',
+    "Merge branch 'feature/sessions' into dev",
   ])('%p is accepted', (message) => {
     expect(validateCommitMessage(message).ok).toBe(true)
   })

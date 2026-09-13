@@ -20,7 +20,10 @@ function temporaryDocumentationRoot(): string {
 
 function initRepository(path: string): void {
   mkdirSync(path, { recursive: true })
-  Bun.spawnSync(['git', 'init', '--initial-branch=main', path], { stdout: 'ignore', stderr: 'ignore' })
+  Bun.spawnSync(['git', 'init', '--initial-branch=main', path], {
+    stdout: 'ignore',
+    stderr: 'ignore',
+  })
 }
 
 describe('Initialisation du socle', () => {
@@ -121,7 +124,10 @@ describe('Aucun remote configuré', () => {
       const sources = join(root, 'sources')
       initRepository(join(sources, 'hemera'))
       const report = inspect(sources)
-      expect(report.destinations.map((destination) => destination.name)).toEqual(['hemera', 'gpuix'])
+      expect(report.destinations.map((destination) => destination.name)).toEqual([
+        'hemera',
+        'gpuix',
+      ])
       expect(report.gitRoots).toHaveLength(1)
     } finally {
       rmSync(root, { recursive: true, force: true })

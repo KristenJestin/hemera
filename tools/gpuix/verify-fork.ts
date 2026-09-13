@@ -9,11 +9,7 @@
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import {
-  APPLIED_GPUIX_PATCHES,
-  type ProvenanceManifest,
-  sha256Of,
-} from './rebuild-fork.ts'
+import { APPLIED_GPUIX_PATCHES, type ProvenanceManifest, sha256Of } from './rebuild-fork.ts'
 
 export interface VerificationReport {
   ok: boolean

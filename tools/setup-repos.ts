@@ -117,7 +117,12 @@ export function inspectFork(path: string): DestinationReport {
     return { name, path, state: 'ready', detail: `Git root at ${root}, base commit present` }
   }
   if (!existsSync(path) || isEmptyDirectory(path)) {
-    return { name, path, state: 'pending', detail: `empty destination, ready to clone ${FORK_REMOTE}` }
+    return {
+      name,
+      path,
+      state: 'pending',
+      detail: `empty destination, ready to clone ${FORK_REMOTE}`,
+    }
   }
   return {
     name,
@@ -178,10 +183,7 @@ function applyFork(report: DestinationReport): DestinationReport {
 export function apply(sourcesDir: string): SetupReport {
   assertDocumentationRootIsNotARepository(sourcesDir)
   const before = inspect(sourcesDir)
-  const destinations = [
-    applyMonorepo(before.destinations[0]!),
-    applyFork(before.destinations[1]!),
-  ]
+  const destinations = [applyMonorepo(before.destinations[0]!), applyFork(before.destinations[1]!)]
   const gitRoots = [
     ...new Set(
       destinations

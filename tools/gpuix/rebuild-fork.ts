@@ -111,7 +111,7 @@ export function patchSubject(path: string): string {
 function patchFilesOf(directory: string): string[] {
   return readdirSync(directory)
     .filter((file) => file.endsWith('.patch'))
-    .sort()
+    .toSorted()
 }
 
 /** Copies the reference queue into the fork so the rebuild no longer reads the spikes. */
@@ -150,12 +150,15 @@ export function applyQueue(
   return records
 }
 
+/** Separator emitted by git for the %x1f placeholder. */
+const SEPARATOR = String.fromCharCode(31)
+
 function commitsSince(repository: string, base: string): CommitRecord[] {
-  const format = '--format=%H%x1f%s'
+  const format = `--format=%H%x1f%s`
   const log = mustRun(['git', 'log', '--reverse', format, `${base}..HEAD`], repository)
   if (log.length === 0) return []
   return log.split('\n').map((line) => {
-    const [sha, subject] = line.split('')
+    const [sha, subject] = line.split(SEPARATOR)
     return { sha: sha!, subject: subject! }
   })
 }

@@ -83,7 +83,10 @@ export function validateBranch(branch: string): ValidationResult {
 }
 
 function commitsOf(range: string): { subject: string; body: string }[] {
-  const result = Bun.spawnSync(['git', 'log', '--format=%H', range], { stdout: 'pipe', stderr: 'pipe' })
+  const result = Bun.spawnSync(['git', 'log', '--format=%H', range], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
   if (result.exitCode !== 0) {
     throw new Error(new TextDecoder().decode(result.stderr).trim())
   }

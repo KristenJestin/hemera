@@ -1,0 +1,14 @@
+{
+  "name": "@hemera/desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "dev": "bun --hot src/entry/main.ts"
+  },
+  "dependencies": {
+    "@hemera/core": "workspace:*",
+    "@hemera/runtime": "workspace:*",
+    "@hemera/ui": "workspace:*"
+  }
+}

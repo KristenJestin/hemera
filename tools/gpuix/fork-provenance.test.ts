@@ -102,14 +102,15 @@ describe('Empreinte non conforme', () => {
           fork: { remote: 'x', baseCommit: base, branch: 'b', headCommit: base, commits: [] },
           gpui: { remote: 'x', baseCommit: base, headCommit: base, commits: [] },
           patches: {
-            gpuix: [
-              { file: '0001-x.patch', sha256: 'f'.repeat(64), subject: 'x', applied: true },
-            ],
+            gpuix: [{ file: '0001-x.patch', sha256: 'f'.repeat(64), subject: 'x', applied: true }],
             gpui: [],
           },
           licences: [
             { file: 'LICENSE', sha256: sha256Of(join(path, 'LICENSE')) },
-            { file: 'THIRD_PARTY_NOTICES.md', sha256: sha256Of(join(path, 'THIRD_PARTY_NOTICES.md')) },
+            {
+              file: 'THIRD_PARTY_NOTICES.md',
+              sha256: sha256Of(join(path, 'THIRD_PARTY_NOTICES.md')),
+            },
           ],
         }),
       )
@@ -124,7 +125,7 @@ describe('Empreinte non conforme', () => {
   })
 })
 
-describe('Patch qui ne s\'applique pas', () => {
+describe("Patch qui ne s'applique pas", () => {
   test('a patch that conflicts with the base is reported instead of being forced', () => {
     const repository = repositoryWithOneFile()
     const queue = conflictingPatch(mkdtempSync(join(tmpdir(), 'hemera-queue-')))
