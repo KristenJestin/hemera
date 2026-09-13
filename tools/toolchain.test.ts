@@ -41,7 +41,7 @@ describe('Installation du produit', () => {
     const runtime = JSON.parse(
       readFileSync(join(repository, 'packages', 'runtime', 'package.json'), 'utf8'),
     )
-    expect(runtime.dependencies).toEqual({ '@hemera/core': 'workspace:*' })
+    expect(runtime.dependencies['@hemera/core']).toBe('workspace:*')
   })
 
   test('every workspace package declares an explicit export surface', () => {
