@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { resolve } from 'node:path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+
+import { PROFILE_OVERRIDE_VARIABLE } from '@hemera/runtime'
 
 const desktop = resolve(import.meta.dir, '..')
 
@@ -7,10 +11,15 @@ const desktop = resolve(import.meta.dir, '..')
  * Launches the desktop entry and reads its output until the window announces itself,
  * then stops the process. Needs a graphical session: this is a system test, never part of
  * the business suite.
+ *
+ * The launch is pointed at a temporary profile: a test never migrates, locks or writes the
+ * profile the user works in.
  */
 async function openWindowAndReadAnnouncement(timeoutMs: number): Promise<string[]> {
+  const profile = mkdtempSync(join(tmpdir(), 'hemera-window-'))
   const child = Bun.spawn(['bun', 'src/entry/main.tsx'], {
     cwd: desktop,
+    env: { ...process.env, [PROFILE_OVERRIDE_VARIABLE]: profile },
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -35,6 +44,7 @@ async function openWindowAndReadAnnouncement(timeoutMs: number): Promise<string[
   } finally {
     child.kill()
     await child.exited
+    rmSync(profile, { recursive: true, force: true })
   }
   return lines
 }
