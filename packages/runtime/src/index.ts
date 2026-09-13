@@ -101,3 +101,28 @@ export {
   checkpoint,
 } from './storage/backup.ts'
 export type { BackupOptions, BackupResult } from './storage/backup.ts'
+export {
+  UnknownProjectError,
+  UnknownSessionError,
+  VersionConflictError,
+  createProject,
+  createSession,
+  findProject,
+  findSession,
+  listProjects,
+  listSessions,
+  mainWorkspace,
+  readConfiguration,
+  readMessages,
+  recordMessage,
+  renameSession,
+  setSessionArchived,
+  writeConfiguration,
+} from './storage/workspace-store.ts'
+export type {
+  CreatedProject,
+  Identifiers,
+  ProjectConfiguration,
+  RecordedMessage,
+  StoreContext,
+} from './storage/workspace-store.ts'
