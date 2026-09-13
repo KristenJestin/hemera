@@ -180,6 +180,38 @@ describe('Texte peint par le renderer', () => {
     }
   })
 
+  test('a line height is a length, so wrapped lines never land on each other', () => {
+    const root = mounted(
+      <Text testId="paragraph" color="text">
+        A paragraph long enough to wrap in the panel it is painted in.
+      </Text>,
+    )
+    try {
+      const height = nodeOf(root, 'paragraph').style?.lineHeight
+      expect(typeof height).toBe('number')
+      // A ratio is read as a couple of pixels: the renderer measures a length.
+      expect(height as number).toBeGreaterThan(14)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  test('a truncated run can shrink, which is what paints the ellipsis', () => {
+    const root = mounted(
+      <Text testId="label" color="text" truncate>
+        A session title far too long for the sidebar that lists it
+      </Text>,
+    )
+    try {
+      const style = nodeOf(root, 'label').style
+      expect(style?.whiteSpace).toBe('nowrap')
+      expect(style?.textOverflow).toBe('ellipsis')
+      expect(style?.minWidth).toBe(0)
+    } finally {
+      root.unmount()
+    }
+  })
+
   test('a text run nested in another is refused', () => {
     const message = renderError(
       <Text color="text">

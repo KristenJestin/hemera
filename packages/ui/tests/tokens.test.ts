@@ -8,6 +8,7 @@ import {
   control,
   dark,
   fontSize,
+  lineHeight,
   light,
   radius,
   row,
@@ -125,5 +126,22 @@ describe('Densité et échelle', () => {
       collapsedWidth: 58,
     })
     expect(shell.gutter.size).toBe(6)
+  })
+})
+
+describe('Taille de texte hors échelle', () => {
+  test('every line height is a length in pixels, never a ratio', () => {
+    // A ratio is read by the renderer as a height of a couple of pixels: wrapped lines land
+    // on top of each other and a field paints its text above its own box.
+    for (const [scale, height] of Object.entries(lineHeight)) {
+      const size = fontSize[scale as keyof typeof fontSize]
+      expect(Number.isInteger(height)).toBe(true)
+      expect(height).toBeGreaterThan(size)
+      expect(height).toBeLessThanOrEqual(size * 2)
+    }
+  })
+
+  test('the line height scale covers exactly the text scale', () => {
+    expect(Object.keys(lineHeight)).toEqual(Object.keys(fontSize))
   })
 })

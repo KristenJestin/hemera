@@ -54,7 +54,7 @@ export function Text({
     lineHeight: lineHeight[scale],
     fontWeight: fontWeight[weight],
     fontFamily: fontFamily[family],
-    ...(truncate ? { whiteSpace: 'nowrap', textOverflow: 'ellipsis' } : {}),
+    ...(truncate ? { whiteSpace: 'nowrap', textOverflow: 'ellipsis', minWidth: 0 } : {}),
   }
   return (
     <InsideText.Provider value={true}>

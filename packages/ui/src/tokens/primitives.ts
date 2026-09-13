@@ -132,15 +132,21 @@ export const fontSize = {
   display: 26,
 } as const
 
-/** Line height declared for each step of the text scale. */
+/**
+ * Line box height for each step of the text scale, in pixels.
+ *
+ * The renderer reads a line height as a length, never as a ratio: a ratio is taken as a
+ * height of a couple of pixels, which stacks wrapped lines on top of each other. Each value
+ * here is the intended ratio already resolved against its font size.
+ */
 export const lineHeight = {
-  xs: 1.3,
-  sm: 1.4,
-  md: 1.45,
-  base: 1.5,
-  lg: 1.4,
-  xl: 1.3,
-  display: 1.2,
+  xs: 14,
+  sm: 17,
+  md: 19,
+  base: 21,
+  lg: 22,
+  xl: 26,
+  display: 31,
 } as const
 
 /** Closed font weight scale. */
