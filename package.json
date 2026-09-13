@@ -22,7 +22,7 @@
     "oxfmt": "0.67.0",
     "oxlint": "1.82.0",
     "turbo": "2.10.12",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "overrides": {
     "@gpuix/native": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-0.7.0-hemera.1.tgz",
