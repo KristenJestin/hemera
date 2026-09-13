@@ -6,8 +6,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
-    "test:system": "bun test system-tests"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "test:system": "bun test system-tests",
+    "test": "bun test tests"
   },
   "dependencies": {
     "@gpuix/react": "file:../../vendor/gpuix/0.7.0-hemera.1/gpuix-react-0.7.0-hemera.1.tgz",

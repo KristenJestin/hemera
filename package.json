@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "turbo run dev",
     "typecheck": "turbo run typecheck",
-    "lint": "oxlint",
+    "lint": "oxlint && bun tools/boundaries.ts && bun tools/design-tokens.ts && bun tools/i18n.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "test": "turbo run test //#test:tools",

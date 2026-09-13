@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { analyze, analyzePackage, cyclesOf, specifiersOf } from './boundaries.ts'
+import { PACKAGE_RULES, analyze, analyzePackage, cyclesOf, specifiersOf } from './boundaries.ts'
 
 const repository = resolve(import.meta.dir, '..')
 
@@ -49,6 +49,50 @@ describe('Consommateur indépendant du desktop', () => {
       readFileSync(join(repository, 'packages', 'core', 'tsconfig.test.json'), 'utf8'),
     )
     expect(tests.compilerOptions.types).toEqual(['bun'])
+  })
+})
+
+describe("Import métier interdit dans le package d'interface", () => {
+  test.each([
+    ['@hemera/core', 'an Hemera package'],
+    ['@hemera/runtime', 'an Hemera package'],
+    ['bun:sqlite', 'a Bun built-in module'],
+    ['node:fs', 'a file, process or network API'],
+    ['node:child_process', 'a file, process or network API'],
+    ['drizzle-orm', 'the SQLite storage layer'],
+  ])('%p in the design system is reported with its file and its import', (specifier, reason) => {
+    const root = fixture({
+      'packages/ui/src/components/card/card.tsx': `import x from '${specifier}'\n`,
+    })
+    try {
+      const violations = analyzePackage(root, PACKAGE_RULES[2]!)
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.file).toBe('packages/ui/src/components/card/card.tsx')
+      expect(violations[0]!.specifier).toBe(specifier)
+      expect(violations[0]!.problem).toContain(reason)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the renderer and React stay allowed in the design system', () => {
+    const root = fixture({
+      'packages/ui/src/primitives/box.tsx': [
+        "import { useState } from 'react'",
+        "import type { StyleDesc } from '@gpuix/react'",
+        '',
+      ].join('\n'),
+    })
+    try {
+      expect(analyzePackage(root, PACKAGE_RULES[2]!)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the design system rule is the one declared for @hemera/ui', () => {
+    expect(PACKAGE_RULES[2]!.name).toBe('@hemera/ui')
+    expect(PACKAGE_RULES[2]!.directory).toBe('packages/ui')
   })
 })
 
