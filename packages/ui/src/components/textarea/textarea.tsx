@@ -7,7 +7,7 @@ import { useFocusedElement } from '../../lib/interaction.ts'
 import { focusRing, mergeStyle, withoutUndefined } from '../../lib/style.ts'
 import type { Style } from '../../lib/style.ts'
 import { control, state } from '../../tokens/components.ts'
-import { fontFamily, fontSize, lineHeight, radius } from '../../tokens/primitives.ts'
+import { fontFamily, fontSize, lineHeight, radius, space } from '../../tokens/primitives.ts'
 import { useTheme } from '../../theme/provider.tsx'
 import { useTextarea } from './use-textarea.ts'
 
@@ -57,6 +57,8 @@ export function Textarea({
     lineHeight: lineHeight.base,
     paddingLeft: control.paddingX.md,
     paddingRight: control.paddingX.md,
+    paddingTop: space.md,
+    paddingBottom: space.md,
     ...(behaviour.inert ? { opacity: state.disabledOpacity } : {}),
   }
 

@@ -5,3 +5,4 @@ dist/
 vendor/gpuix/*/native/
 vendor/gpuix/*/test-support/
 showcase-*.png
+shell-*.png

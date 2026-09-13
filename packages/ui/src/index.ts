@@ -24,6 +24,7 @@ export { EMBEDDED_FONTS, FONT_LICENCES, MONO_FAMILY, SANS_FAMILY } from './fonts
 export type { EmbeddedFont } from './fonts/index.ts'
 export * from './components/index.ts'
 export * from './lib/index.ts'
+export * from './shell/index.ts'
 export * from './primitives/index.ts'
 export {
   DEFAULT_THEME,

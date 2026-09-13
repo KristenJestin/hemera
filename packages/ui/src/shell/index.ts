@@ -1,2 +1,6 @@
-/** Window shell. Implemented by task 2.15. */
-export {}
+/** Window shell of the application. */
+
+export { OBSERVED_DECORATIONS, decideTitleBar } from './title-bar.ts'
+export type { ClientDecorations, TitleBarDecision, TitleBarMode } from './title-bar.ts'
+export { SIDEBAR_BOUNDS, WindowShell } from './window-shell.tsx'
+export type { WindowShellProps } from './window-shell.tsx'
