@@ -15,3 +15,26 @@ export {
   resolveProfileLocation,
 } from './platform/profile.ts'
 export type { ProfileLocation, ProfileQuery } from './platform/profile.ts'
+export {
+  BUSY_TIMEOUT_MS,
+  DATABASE_FILE,
+  MigrationChecksumError,
+  MigrationFailedError,
+  SchemaAheadError,
+  migrate,
+  openProfile,
+} from './storage/database.ts'
+export type {
+  AppliedMigration,
+  MigrationReport,
+  OpenProfile,
+  OpenProfileOptions,
+} from './storage/database.ts'
+export {
+  MIGRATIONS,
+  STATEMENT_BREAKPOINT,
+  checksumOf,
+  statementsOf,
+} from './storage/migrations/index.ts'
+export type { Migration } from './storage/migrations/index.ts'
+export * as schema from './storage/schema.ts'
