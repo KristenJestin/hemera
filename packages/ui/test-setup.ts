@@ -1,0 +1,41 @@
+/**
+ * Points the napi loader at the vendored addon that carries the GPUI test renderer, before
+ * any test imports the renderer.
+ *
+ * The shipped build deliberately leaves `gpui/test-support` out (fork patch 0007), so the
+ * component tests cannot use the installed addon. Nothing here changes what is installed:
+ * the loader honours `NAPI_RS_NATIVE_LIBRARY_PATH` and the test addon is only read.
+ */
+
+import { existsSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+
+const repository = resolve(import.meta.dir, '..', '..')
+const version = '0.7.0-hemera.1'
+const vendor = join(repository, 'vendor', 'gpuix', version)
+
+interface Manifest {
+  testSupport: { file: string; target: string }[]
+}
+
+function targetOfThisHost(): string {
+  if (process.platform === 'win32' && process.arch === 'x64') return 'x86_64-pc-windows-msvc'
+  if (process.platform === 'linux' && process.arch === 'x64') return 'x86_64-unknown-linux-gnu'
+  throw new Error(`no test renderer is vendored for ${process.platform}/${process.arch}`)
+}
+
+const manifest = JSON.parse(readFileSync(join(vendor, 'manifest.json'), 'utf8')) as Manifest
+const target = targetOfThisHost()
+const addon = manifest.testSupport.find((entry) => entry.target === target)
+if (addon === undefined) {
+  throw new Error(
+    `no test-support addon vendored for ${target}; ` +
+      'run "bun tools/gpuix/build-native.ts --test-support" then "bun tools/gpuix/pack-vendor.ts"',
+  )
+}
+
+const path = join(vendor, 'test-support', addon.file)
+if (!existsSync(path)) {
+  throw new Error(`the vendored test-support addon is missing at ${path}`)
+}
+process.env.NAPI_RS_NATIVE_LIBRARY_PATH = path

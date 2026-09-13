@@ -141,6 +141,23 @@ describe('Empreinte non conforme', () => {
   })
 })
 
+describe('Test renderer vendu à part', () => {
+  test('a test-support addon is vendored for the host target', () => {
+    const addons = manifest().testSupport
+    expect(addons.length).toBeGreaterThan(0)
+    for (const addon of addons) {
+      expect(addon.file).toContain('.node')
+      expect(addon.sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(existsSync(join(vendorDirectory, 'test-support', addon.file))).toBe(true)
+    }
+  })
+
+  test('the test renderer is never an installed package', () => {
+    const names = manifest().packages.map((entry) => entry.name)
+    expect(names.some((name) => name.includes('test-support'))).toBe(false)
+  })
+})
+
 describe('Paquet incompatible', () => {
   test('each platform package names the target it was built for', () => {
     const platformPackages = manifest().packages.filter((entry) => entry.target !== null)

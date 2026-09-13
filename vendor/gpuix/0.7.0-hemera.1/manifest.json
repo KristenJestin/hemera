@@ -25,5 +25,12 @@
       "sha256": "5ff17621fe1ccb8cc192638f175e329887cb4ccae0d678a164ff0be5b5272a5d",
       "target": "x86_64-pc-windows-msvc"
     }
+  ],
+  "testSupport": [
+    {
+      "file": "gpuix-native.win32-x64-msvc.node",
+      "sha256": "08fbe8732e82671d713867a39b2d97aefbb697d7c0fad0f5946ee35512e0e68e",
+      "target": "x86_64-pc-windows-msvc"
+    }
   ]
 }

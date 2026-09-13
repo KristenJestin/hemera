@@ -37,10 +37,23 @@ export interface PackagedTarball {
   target: string | null
 }
 
+export interface TestSupportAddon {
+  /** Addon file name inside the vendor `test-support/` directory. */
+  file: string
+  sha256: string
+  target: string
+}
+
 export interface VendorManifest {
   version: string
   fork: { remote: string; baseCommit: string; headCommit: string; branch: string }
   packages: PackagedTarball[]
+  /**
+   * Addons carrying the GPUI test renderer. They are never installed: the component test
+   * harness points the napi loader at one of them, so the shipped build keeps the test
+   * support out (fork patch 0007).
+   */
+  testSupport: TestSupportAddon[]
 }
 
 /** Operating system and CPU a napi platform name stands for. */
@@ -92,15 +105,24 @@ function pack(stage: string, destination: string): string {
   return file
 }
 
-/** Default-variant build records staged by `build-native.ts`. */
-export function productBuilds(vendorRoot: string): NativeBuildRecord[] {
+function stagedBuilds(vendorRoot: string, variant: string): NativeBuildRecord[] {
   const nativeRoot = join(vendorRoot, VENDOR_VERSION, 'native')
   if (!existsSync(nativeRoot)) return []
   return readdirSync(nativeRoot)
-    .filter((directory) => directory.endsWith('-default'))
+    .filter((directory) => directory.endsWith(`-${variant}`))
     .map((directory) => join(nativeRoot, directory, 'build.json'))
     .filter((path) => existsSync(path))
     .map((path) => JSON.parse(readFileSync(path, 'utf8')) as NativeBuildRecord)
+}
+
+/** Default-variant build records staged by `build-native.ts`. */
+export function productBuilds(vendorRoot: string): NativeBuildRecord[] {
+  return stagedBuilds(vendorRoot, 'default')
+}
+
+/** Directory holding the addons that carry the GPUI test renderer. */
+export function testSupportDirectory(vendorRoot: string): string {
+  return join(vendorRoot, VENDOR_VERSION, 'test-support')
 }
 
 export function packVendor(forkPath: string, vendorRoot: string): VendorManifest {
@@ -212,6 +234,22 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
     entry.sha256 = sha256Of(join(destination, entry.file))
   }
 
+  const testSupportRoot = testSupportDirectory(vendorRoot)
+  const testSupport: TestSupportAddon[] = []
+  for (const build of stagedBuilds(vendorRoot, 'test-support')) {
+    mkdirSync(testSupportRoot, { recursive: true })
+    const source = join(
+      vendorRoot,
+      VENDOR_VERSION,
+      'native',
+      `${build.target}-test-support`,
+      build.addon.file,
+    )
+    const copy = join(testSupportRoot, build.addon.file)
+    copyFileSync(source, copy)
+    testSupport.push({ file: build.addon.file, sha256: sha256Of(copy), target: build.target })
+  }
+
   const manifest: VendorManifest = {
     version: VENDOR_VERSION,
     fork: {
@@ -221,6 +259,7 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
       branch: provenance.fork.branch,
     },
     packages,
+    testSupport,
   }
   writeJson(join(destination, 'manifest.json'), manifest)
   return manifest

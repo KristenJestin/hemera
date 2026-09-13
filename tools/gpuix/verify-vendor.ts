@@ -82,6 +82,21 @@ export function verifyVendor(repositoryRoot: string): IntegrityReport {
     }
   }
 
+  for (const addon of manifest.testSupport ?? []) {
+    const path = join(vendorDirectory, 'test-support', addon.file)
+    if (!existsSync(path)) {
+      gaps.push(`test-support addon for ${addon.target}: ${addon.file} is missing`)
+      continue
+    }
+    const digest = sha256Of(path)
+    if (digest !== addon.sha256) {
+      gaps.push(
+        `test-support addon ${addon.file} has fingerprint ${digest}, ` +
+          `manifest records ${addon.sha256}`,
+      )
+    }
+  }
+
   for (const declared of declaredPaths(repositoryRoot)) {
     if (!existsSync(declared.path)) {
       gaps.push(`${declared.origin} points at ${declared.path}, which does not exist`)

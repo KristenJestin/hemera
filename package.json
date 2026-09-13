@@ -18,7 +18,7 @@
     "preinstall": "bun tools/gpuix/verify-vendor.ts"
   },
   "devDependencies": {
-    "@types/bun": "1.4.0",
+    "@types/bun": "1.4.2",
     "oxfmt": "0.67.0",
     "oxlint": "1.82.0",
     "turbo": "2.10.12",
@@ -28,5 +28,5 @@
     "@gpuix/native": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-0.7.0-hemera.1.tgz",
     "@gpuix/native-win32-x64-msvc": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz"
   },
-  "packageManager": "bun@1.3.13"
+  "packageManager": "bun@1.4.2"
 }
