@@ -179,8 +179,22 @@ export function renderTable(coverage: Coverage[]): string {
   return lines.join('\n')
 }
 
-export function specsRootOf(repositoryRoot: string): string {
-  return resolve(repositoryRoot, '..', '..', 'openspec', 'changes', CHANGE, 'specs')
+/** Variable naming where the OpenSpec changes are, when they are not beside this repository. */
+export const SPECS_OVERRIDE_VARIABLE = 'HEMERA_SPECS_DIR'
+
+/**
+ * Where the specs of the change are.
+ *
+ * They live in their own repository, cloned beside this one by the bootstrap. A checkout that
+ * puts them elsewhere names the folder instead of moving the repository.
+ */
+export function specsRootOf(
+  repositoryRoot: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const named = env[SPECS_OVERRIDE_VARIABLE]
+  const root = named === undefined || named === '' ? resolve(repositoryRoot, '..', '..') : named
+  return resolve(root, 'openspec', 'changes', CHANGE, 'specs')
 }
 
 if (import.meta.main) {

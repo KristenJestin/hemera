@@ -12,6 +12,7 @@ import {
   missingRequiredSuites,
   renderTable,
   scenariosOf,
+  SPECS_OVERRIDE_VARIABLE,
   specsRootOf,
   suitesOf,
   uncovered,
@@ -104,6 +105,24 @@ describe("Tests d'injection d'échec et de propriétés", () => {
       expect(missingRequiredSuites(root)).toEqual([...REQUIRED_SUITES])
     } finally {
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Specs à côté du dépôt', () => {
+  test('the specs are read beside the repository when nothing names them', () => {
+    expect(specsRootOf(repository, {})).toBe(specs)
+    expect(specsRootOf(repository, { [SPECS_OVERRIDE_VARIABLE]: '' })).toBe(specs)
+  })
+
+  test('a checkout that keeps them elsewhere names the folder instead of moving anything', () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'hemera-specs-'))
+    try {
+      expect(specsRootOf(repository, { [SPECS_OVERRIDE_VARIABLE]: elsewhere })).toBe(
+        join(elsewhere, 'openspec', 'changes', CHANGE, 'specs'),
+      )
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true })
     }
   })
 })
