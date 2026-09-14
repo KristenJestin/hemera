@@ -10,7 +10,7 @@
     {
       "name": "@gpuix/native",
       "file": "gpuix-native-0.7.0-hemera.1.tgz",
-      "sha256": "37dde4bc7cef236fea50b7df4a2fd26031f223a4b8e24338b8c4033ef5f73eed",
+      "sha256": "6d594ea53770039c7638fdee7508f0dc95cd0ce2aa9291a032b30c25a37debe9",
       "target": null,
       "revision": {
         "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
@@ -32,13 +32,18 @@
     {
       "name": "@gpuix/native-win32-x64-msvc",
       "file": "gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz",
-      "sha256": "7c7246c2d59f72e35b5a4942ecc752a767c9e4682913315ea45b1cb33e05b678",
-      "target": "x86_64-pc-windows-msvc"
+      "sha256": "6a18bd788964bd0662c625327bbf3e8d595f1575b9072aa531b54c49042facf0",
+      "target": "x86_64-pc-windows-msvc",
+      "revision": {
+        "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
+        "gpuiBaseCommit": "81c99f816b4a5f69d3c014774068034c24d1d7af",
+        "queue": "3684805b9b7a4d98829410f319eb490c6cdffae2b3d058f08037638d255c8a64"
+      }
     },
     {
       "name": "@gpuix/react",
       "file": "gpuix-react-0.7.0-hemera.1.tgz",
-      "sha256": "3fc49c3036ee5b3595c5f459f527fdf1609d80acc05fcebad1fcf4da90207815",
+      "sha256": "4a3f945ddce37c55f9f36f6416c00ccaceff0f50a3c2baed1ac81b1d95df703f",
       "target": null,
       "revision": {
         "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
@@ -50,7 +55,7 @@
   "testSupport": [
     {
       "file": "gpuix-native.win32-x64-msvc.node",
-      "sha256": "59d0204a0acfd6f6e039daf8fde2ef716eda0a15ee2fee7ecf08b4a84e6007f0",
+      "sha256": "049a96ae79c073b6bd9fb957318cdffb78f4535e820e0291dc731acca55f859f",
       "target": "x86_64-pc-windows-msvc"
     },
     {

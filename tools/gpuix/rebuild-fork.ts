@@ -135,21 +135,19 @@ function mustRun(command: string[], cwd: string, env?: Record<string, string>): 
   return result.stdout
 }
 
-export function sha256Of(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex')
-}
-
 /**
- * Fingerprint of a text file, as the lines it declares rather than as the checkout wrote them.
+ * Fingerprint of a file of the fork: patch, licence, notice.
  *
- * A clone made with the Windows default writes CRLF, so hashing the bytes of the working tree
- * records a property of the machine and not of the revision: the same licence, reconstructed on
- * two hosts, would answer with two fingerprints.
+ * These are text, and a checkout writes them with the line endings of its own system: the same
+ * patch hashes differently on Windows and on Linux. A provenance record has to identify the
+ * content, not the convention of the machine that read it, or two reconstructions of one
+ * revision never agree. Carriage returns are therefore dropped before hashing.
+ *
+ * Binary artefacts are fingerprinted where they are produced, on their bytes, and never here.
  */
-function textSha256Of(path: string): string {
-  return createHash('sha256')
-    .update(readFileSync(path, 'utf8').replaceAll('\r\n', '\n'))
-    .digest('hex')
+export function sha256Of(path: string): string {
+  const bytes = readFileSync(path)
+  return createHash('sha256').update(bytes.toString('utf8').replaceAll('\r\n', '\n')).digest('hex')
 }
 
 /** Subject line of a mail-formatted patch, without its bracketed patch-number prefix. */
@@ -394,7 +392,7 @@ async function rebuildFromQueue(forkPath: string, queue: string): Promise<Proven
       commits: gpui.commits,
     },
     patches: { gpuix: gpuixRecords, hemera: hemeraRecords, gpui: gpui.records },
-    licences: LICENCE_FILES.map((file) => ({ file, sha256: textSha256Of(join(forkPath, file)) })),
+    licences: LICENCE_FILES.map((file) => ({ file, sha256: sha256Of(join(forkPath, file)) })),
   }
 
   cpSync(queue, join(forkPath, 'patches'), { recursive: true })
