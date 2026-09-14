@@ -373,3 +373,75 @@ describe('Cible packée ailleurs conservée', () => {
     }
   })
 })
+
+describe("Cible d'avant l'enregistrement conservée", () => {
+  test('an entry packed before the revision existed survives a run that repacks another', () => {
+    const root = multiTargetFixture({ windows: A, linux: A })
+    const directory = join(root, 'vendor', 'gpuix', VENDOR_VERSION)
+    try {
+      // The vendor as it was committed: tarballs, no revision recorded for any of them.
+      const previous = JSON.parse(
+        readFileSync(join(directory, 'manifest.json'), 'utf8'),
+      ) as VendorManifest
+      writeFileSync(
+        join(directory, 'manifest.json'),
+        JSON.stringify(
+          {
+            ...previous,
+            packages: previous.packages.map(({ revision: _dropped, ...entry }) => entry),
+          },
+          null,
+          2,
+        ),
+      )
+
+      // Linux is repacked here; Windows was packed on the machine that builds it, before the
+      // record existed. Dropping it would uninstall a target nobody can rebuild from here.
+      const kept = carriedOver(directory, [
+        {
+          name: '@gpuix/native-linux-x64-gnu',
+          file: 'gpuix-native-linux-x64-gnu-rebuilt.tgz',
+          sha256: 'x',
+          target: 'x86_64-unknown-linux-gnu',
+          revision: B,
+        },
+      ])
+
+      expect(kept.map((entry) => entry.name)).toEqual(['@gpuix/native-win32-x64-msvc'])
+      expect(kept[0]?.revision).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the vendor that keeps it installs, and says what it cannot answer', () => {
+    const root = multiTargetFixture({ windows: A, linux: A })
+    const directory = join(root, 'vendor', 'gpuix', VENDOR_VERSION)
+    try {
+      const previous = JSON.parse(
+        readFileSync(join(directory, 'manifest.json'), 'utf8'),
+      ) as VendorManifest
+      writeFileSync(
+        join(directory, 'manifest.json'),
+        JSON.stringify(
+          {
+            ...previous,
+            packages: [
+              previous.packages[0]!,
+              (({ revision: _dropped, ...entry }) => entry)(previous.packages[1]!),
+            ],
+          },
+          null,
+          2,
+        ),
+      )
+
+      const report = verifyVendor(root)
+      expect(report.gaps).toEqual([])
+      expect(report.ok).toBe(true)
+      expect(report.notes.join(' ')).toContain('packed before the revision was recorded')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

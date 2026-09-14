@@ -49,10 +49,12 @@ export const SYSTEM_REQUIREMENTS: Record<Target, string[]> = {
   ],
   [TARGETS['linux-x64']]: [
     'Linux x64 with glibc.',
-    'A Wayland compositor, or X11.',
-    'libxkbcommon.',
-    'A Vulkan loader and a driver (Mesa/EGL).',
-    'Neither fontconfig nor freetype is needed: the fonts are embedded in the executable.',
+    'libxkbcommon: the only library the addon names in its ELF dependencies, beside libc,',
+    'libm and libgcc. Observed by reading the addon built on 2026-09-14.',
+    'A Wayland compositor or X11, and a Vulkan loader: opened at run time, so they appear in',
+    'no dependency list and are only missed once the window tries to open.',
+    'Neither fontconfig nor freetype is needed to run: the fonts are embedded in the',
+    'executable, and the crate that reads them links fontconfig only while compiling.',
   ],
 }
 

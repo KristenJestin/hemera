@@ -52,8 +52,13 @@ export interface PackagedTarball {
   sha256: string
   /** Target triple for a platform package, null for a portable one. */
   target: string | null
-  /** What this tarball was built from; a vendor holding two of them is a mixed one. */
-  revision: Revision
+  /**
+   * What this tarball was built from; a vendor holding two of them is a mixed one.
+   *
+   * Absent on a tarball packed before the record existed. Such an entry is carried over as it
+   * is and reported as unanswered: dropping it would uninstall a target nobody rebuilt.
+   */
+  revision?: Revision
 }
 
 export interface TestSupportAddon {
@@ -187,10 +192,7 @@ export function carriedOver(destination: string, packed: PackagedTarball[]): Pac
   const previous = JSON.parse(readFileSync(manifestPath, 'utf8')) as VendorManifest
   const replaced = new Set(packed.map((entry) => entry.name))
   return (previous.packages ?? []).filter(
-    (entry) =>
-      !replaced.has(entry.name) &&
-      entry.revision !== undefined &&
-      existsSync(join(destination, entry.file)),
+    (entry) => !replaced.has(entry.name) && existsSync(join(destination, entry.file)),
   )
 }
 

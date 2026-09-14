@@ -90,7 +90,9 @@ export function verifyVendor(repositoryRoot: string): IntegrityReport {
   // Each target is built where it can be built, so the tarballs are packed by different
   // machines at different times. They are only interchangeable while they come from the same
   // base and the same patch queue; a mix is named here rather than shipped quietly.
-  const revisions = manifest.packages.filter((entry) => entry.revision !== undefined)
+  const revisions = manifest.packages.flatMap((entry) =>
+    entry.revision === undefined ? [] : [{ name: entry.name, revision: entry.revision }],
+  )
   const reference = revisions[0]
   if (reference !== undefined) {
     for (const entry of revisions) {
