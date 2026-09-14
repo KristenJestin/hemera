@@ -3,7 +3,7 @@
   "fork": {
     "remote": "https://github.com/remorses/gpuix",
     "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
-    "headCommit": "70d307820e2f29ace2e5b10c13660baac47853a6",
+    "headCommit": "daac173a528697541276d894731982aaef680364",
     "branch": "hemera/0.7.0-hemera.1"
   },
   "packages": [

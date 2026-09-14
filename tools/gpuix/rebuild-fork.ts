@@ -12,7 +12,16 @@
  */
 
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -77,8 +86,39 @@ interface CommandResult {
   stderr: string
 }
 
-function run(command: string[], cwd: string): CommandResult {
-  const result = Bun.spawnSync(command, { cwd, stdout: 'pipe', stderr: 'pipe' })
+/**
+ * Identity every reconstruction commits under.
+ *
+ * A rebuild is not the work of whoever ran it: it is the base and the queue, applied. Signing
+ * it with the identity of the machine is what made the same tree produce a different commit.
+ */
+export const REBUILD_COMMITTER = { name: 'hemera-rebuild', email: 'rebuild@hemera.invalid' }
+
+/**
+ * Settings that keep a reconstruction dependent on the base and the queue alone.
+ *
+ * `git am` stamps the committer at the moment of the run, so the same tree got a different
+ * commit every time. Only the identity is pinned here: forcing `core.autocrlf=false` as well
+ * makes every file of a clone checked out with the Windows default read as modified, and the
+ * rebuild then refuses to switch branches. Line endings are settled on the queue instead, by
+ * `stageQueue`, which is the only input the conversion can reach.
+ */
+const DETERMINISTIC_CONFIG = [
+  '-c',
+  `user.name=${REBUILD_COMMITTER.name}`,
+  '-c',
+  `user.email=${REBUILD_COMMITTER.email}`,
+]
+
+function run(command: string[], cwd: string, env?: Record<string, string>): CommandResult {
+  const invocation =
+    command[0] === 'git' ? ['git', ...DETERMINISTIC_CONFIG, ...command.slice(1)] : command
+  const result = Bun.spawnSync(invocation, {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
+  })
   const decoder = new TextDecoder()
   return {
     ok: result.exitCode === 0,
@@ -87,8 +127,8 @@ function run(command: string[], cwd: string): CommandResult {
   }
 }
 
-function mustRun(command: string[], cwd: string): string {
-  const result = run(command, cwd)
+function mustRun(command: string[], cwd: string, env?: Record<string, string>): string {
+  const result = run(command, cwd, env)
   if (!result.ok) {
     throw new Error(`${command.join(' ')} failed in ${cwd}: ${result.stderr || result.stdout}`)
   }
@@ -97,6 +137,19 @@ function mustRun(command: string[], cwd: string): string {
 
 export function sha256Of(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+/**
+ * Fingerprint of a text file, as the lines it declares rather than as the checkout wrote them.
+ *
+ * A clone made with the Windows default writes CRLF, so hashing the bytes of the working tree
+ * records a property of the machine and not of the revision: the same licence, reconstructed on
+ * two hosts, would answer with two fingerprints.
+ */
+function textSha256Of(path: string): string {
+  return createHash('sha256')
+    .update(readFileSync(path, 'utf8').replaceAll('\r\n', '\n'))
+    .digest('hex')
 }
 
 /** Subject line of a mail-formatted patch, without its bracketed patch-number prefix. */
@@ -132,14 +185,25 @@ export function importQueue(source: string, forkPath: string): void {
 /**
  * A patch that moves the GPUI submodule pointer conflicts whenever the pointer it expects is
  * not the one the base records. The pointer is restored from the rebuilt submodule at the end
- * of the rebuild, so taking either side here is safe. Returns false for any other conflict.
+ * of the rebuild, so which commit is recorded here does not survive the run.
+ *
+ * It is written straight into the index, at the pointer the fork base carries. Staging the
+ * worktree instead would record whatever the submodule was left at, which is the result of the
+ * previous rebuild: the patch commits then hashed differently on a second run than on a first,
+ * and on a fresh clone the submodule has no commit checked out at all, so staging it fails.
+ * Returns false for any other conflict.
  */
-function resolveSubmodulePointerConflict(repository: string): boolean {
+function resolveSubmodulePointerConflict(repository: string, gpuiBase: string): boolean {
   const unmerged = run(['git', 'diff', '--name-only', '--diff-filter=U'], repository)
   const paths = unmerged.stdout.split('\n').filter((path) => path.length > 0)
   if (paths.length !== 1 || paths[0] !== 'zed') return false
-  if (!run(['git', 'add', 'zed'], repository).ok) return false
-  return run(['git', '-c', 'core.editor=true', 'am', '--continue'], repository).ok
+  if (!run(['git', 'update-index', '--cacheinfo', `160000,${gpuiBase},zed`], repository).ok) {
+    return false
+  }
+  return run(
+    ['git', '-c', 'core.editor=true', 'am', '--committer-date-is-author-date', '--continue'],
+    repository,
+  ).ok
 }
 
 export function applyQueue(
@@ -147,14 +211,18 @@ export function applyQueue(
   patchDirectory: string,
   files: string[],
   appliedCount: number,
+  gpuiBase = '',
 ): PatchRecord[] {
   const records: PatchRecord[] = []
   for (const [index, file] of files.entries()) {
     const path = join(patchDirectory, file)
     const applied = index < appliedCount
     if (applied) {
-      const result = run(['git', 'am', '--3way', path], repository)
-      if (!result.ok && !resolveSubmodulePointerConflict(repository)) {
+      const result = run(
+        ['git', 'am', '--3way', '--committer-date-is-author-date', path],
+        repository,
+      )
+      if (!result.ok && !resolveSubmodulePointerConflict(repository, gpuiBase)) {
         run(['git', 'am', '--abort'], repository)
         throw new Error(
           `patch ${file} does not apply cleanly onto the identified base: ` +
@@ -219,6 +287,42 @@ function rebuildSubmodule(
   }
 }
 
+/**
+ * Date the commits of a reconstruction carry, read from the queue it applied.
+ *
+ * The two commits a rebuild adds of its own have no patch behind them, so `now` would be the
+ * only date available and would differ on every run. The author date of the last applied patch
+ * is a property of the queue, which is what a reconstruction is meant to depend on.
+ */
+function queueDate(repository: string): Record<string, string> {
+  const date = mustRun(['git', 'log', '-1', '--format=%aI'], repository)
+  return { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date }
+}
+
+/**
+ * Copies the patch queue aside, with every patch read as the lines it declares.
+ *
+ * A checkout converts line endings to the habit of the machine, and a clone made with the
+ * Windows default writes the queue itself as CRLF. The patches are the input of the whole
+ * reconstruction, so that conversion would decide what the commits contain and two hosts
+ * applying the same queue would not reach the same tree. They are normalised here, once, where
+ * the queue enters the rebuild.
+ */
+function stageQueue(source: string, destination: string): void {
+  mkdirSync(destination, { recursive: true })
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const from = join(source, entry.name)
+    const to = join(destination, entry.name)
+    if (entry.isDirectory()) {
+      stageQueue(from, to)
+    } else if (entry.name.endsWith('.patch')) {
+      writeFileSync(to, readFileSync(from, 'utf8').replaceAll('\r\n', '\n'))
+    } else {
+      cpSync(from, to)
+    }
+  }
+}
+
 export async function rebuild(forkPath: string): Promise<ProvenanceManifest> {
   if (!run(['git', 'cat-file', '-e', `${FORK_BASE_COMMIT}^{commit}`], forkPath).ok) {
     throw new Error(`${forkPath} does not contain the base commit ${FORK_BASE_COMMIT}`)
@@ -227,7 +331,7 @@ export async function rebuild(forkPath: string): Promise<ProvenanceManifest> {
   // Resetting the branch onto the base drops a queue already tracked by a previous rebuild,
   // so the queue is held aside and put back once the patches have been applied.
   const queue = mkdtempSync(join(tmpdir(), 'hemera-queue-'))
-  cpSync(join(forkPath, 'patches'), queue, { recursive: true })
+  stageQueue(join(forkPath, 'patches'), queue)
   try {
     return await rebuildFromQueue(forkPath, queue)
   } finally {
@@ -243,13 +347,27 @@ async function rebuildFromQueue(forkPath: string, queue: string): Promise<Proven
   const gpuixPatchDirectory = join(queue, 'gpuix')
   const hemeraPatchDirectory = join(queue, 'hemera')
   const gpuiPatchDirectory = join(queue, 'zed')
+  // Read before the queue runs: a patch that moves the submodule pointer conflicts, and the
+  // pointer of the base is what settles it without reading the state the last run left.
+  const gpuiBase = gpuiBaseCommitOf(forkPath)
   const gpuixFiles = patchFilesOf(gpuixPatchDirectory)
-  const gpuixRecords = applyQueue(forkPath, gpuixPatchDirectory, gpuixFiles, APPLIED_GPUIX_PATCHES)
+  const gpuixRecords = applyQueue(
+    forkPath,
+    gpuixPatchDirectory,
+    gpuixFiles,
+    APPLIED_GPUIX_PATCHES,
+    gpuiBase,
+  )
 
   const hemeraFiles = patchFilesOf(hemeraPatchDirectory)
-  const hemeraRecords = applyQueue(forkPath, hemeraPatchDirectory, hemeraFiles, hemeraFiles.length)
+  const hemeraRecords = applyQueue(
+    forkPath,
+    hemeraPatchDirectory,
+    hemeraFiles,
+    hemeraFiles.length,
+    gpuiBase,
+  )
 
-  const gpuiBase = gpuiBaseCommitOf(forkPath)
   const gpui = rebuildSubmodule(forkPath, gpuiPatchDirectory, gpuiBase)
 
   // The queue bumps the submodule pointer to a commit rebuilt elsewhere; restore it to the
@@ -258,6 +376,7 @@ async function rebuildFromQueue(forkPath: string, queue: string): Promise<Proven
   mustRun(
     ['git', 'commit', '-q', '-m', 'build(gpuix): restore the rebuilt gpui submodule pointer'],
     forkPath,
+    queueDate(forkPath),
   )
 
   const manifest: ProvenanceManifest = {
@@ -275,7 +394,7 @@ async function rebuildFromQueue(forkPath: string, queue: string): Promise<Proven
       commits: gpui.commits,
     },
     patches: { gpuix: gpuixRecords, hemera: hemeraRecords, gpui: gpui.records },
-    licences: LICENCE_FILES.map((file) => ({ file, sha256: sha256Of(join(forkPath, file)) })),
+    licences: LICENCE_FILES.map((file) => ({ file, sha256: textSha256Of(join(forkPath, file)) })),
   }
 
   cpSync(queue, join(forkPath, 'patches'), { recursive: true })
@@ -286,6 +405,7 @@ async function rebuildFromQueue(forkPath: string, queue: string): Promise<Proven
   mustRun(
     ['git', 'commit', '-q', '-m', 'docs(gpuix): record the provenance of the rebuilt fork'],
     forkPath,
+    queueDate(forkPath),
   )
   return manifest
 }
