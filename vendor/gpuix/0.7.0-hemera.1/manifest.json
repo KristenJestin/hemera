@@ -47,5 +47,16 @@
       }
     }
   ],
-  "testSupport": []
+  "testSupport": [
+    {
+      "file": "gpuix-native.win32-x64-msvc.node",
+      "sha256": "59d0204a0acfd6f6e039daf8fde2ef716eda0a15ee2fee7ecf08b4a84e6007f0",
+      "target": "x86_64-pc-windows-msvc"
+    },
+    {
+      "file": "gpuix-native.linux-x64-gnu.node",
+      "sha256": "ec5ffd5e9ffad0969906e34996ba0d0157068658e82972039efe300ecdac3c47",
+      "target": "x86_64-unknown-linux-gnu"
+    }
+  ]
 }

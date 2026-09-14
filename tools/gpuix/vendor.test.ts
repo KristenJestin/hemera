@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { absent, testSupportBuilt } from './available.ts'
+import { targetOfHost } from '../environment-report.ts'
 import { VENDOR_VERSION } from './build-native.ts'
 import { FORK_BASE_COMMIT } from './rebuild-fork.ts'
 import {
@@ -166,8 +167,13 @@ describe('Test renderer vendu à part', () => {
     for (const addon of addons) {
       expect(addon.file).toContain('.node')
       expect(addon.sha256).toMatch(/^[0-9a-f]{64}$/)
-      expect(existsSync(join(vendorDirectory, 'test-support', addon.file))).toBe(true)
     }
+    // Only the addon of this host is on disk. The others were built by the machine of their
+    // target and are never committed, so the record is kept without the file beside it, and
+    // the file is checked where it is — the same rule the installation check applies.
+    const own = addons.find((addon) => addon.target === targetOfHost())
+    expect(own).toBeDefined()
+    expect(existsSync(join(vendorDirectory, 'test-support', own!.file))).toBe(true)
   })
 
   test('the test renderer is never an installed package', () => {

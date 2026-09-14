@@ -356,6 +356,7 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
   }
 
   const kept = carriedOver(destination, packages)
+  const keptTestSupport = carriedOverTestSupport(destination, testSupport)
   const manifest: VendorManifest = {
     version: VENDOR_VERSION,
     fork: {
@@ -365,7 +366,9 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
       branch: provenance.fork.branch,
     },
     packages: [...packages, ...kept].toSorted((left, right) => left.name.localeCompare(right.name)),
-    testSupport,
+    testSupport: [...testSupport, ...keptTestSupport].toSorted((left, right) =>
+      left.target.localeCompare(right.target),
+    ),
   }
   writeJson(join(destination, 'manifest.json'), manifest)
   return manifest
