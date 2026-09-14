@@ -29,6 +29,7 @@
   },
   "overrides": {
     "@gpuix/native": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-0.7.0-hemera.1.tgz",
+    "@gpuix/native-linux-x64-gnu": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-linux-x64-gnu-0.7.0-hemera.1.tgz",
     "@gpuix/native-win32-x64-msvc": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz"
   },
   "packageManager": "bun@1.4.2"

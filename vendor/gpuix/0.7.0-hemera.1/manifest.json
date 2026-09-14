@@ -3,34 +3,49 @@
   "fork": {
     "remote": "https://github.com/remorses/gpuix",
     "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
-    "headCommit": "118b98646613c381e2540f9f9407f61d7f5c4e98",
+    "headCommit": "42f6a2110d8cfa5dcf15e9c2f42305cbcc358f96",
     "branch": "hemera/0.7.0-hemera.1"
   },
   "packages": [
     {
-      "name": "@gpuix/react",
-      "file": "gpuix-react-0.7.0-hemera.1.tgz",
-      "sha256": "3fcfafea5ae7fe5b4d0ab2ba11352bf6d03110f3e3af762cc8fd92aa1401688c",
-      "target": null
-    },
-    {
       "name": "@gpuix/native",
       "file": "gpuix-native-0.7.0-hemera.1.tgz",
-      "sha256": "19ddcd33cba0365556513a20fcdcf089bbafcf44f719192f6d5cafc4b384d135",
-      "target": null
+      "sha256": "d3a0d0d203dc943b501e9664ceb92602e3b41110584ea87e3f56d0164d15396c",
+      "target": null,
+      "revision": {
+        "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
+        "gpuiBaseCommit": "81c99f816b4a5f69d3c014774068034c24d1d7af",
+        "queue": "e33e05dcd0ba5e47cf014181a5f4f10cda2c29617a4d7251e567aaefc4137462"
+      }
+    },
+    {
+      "name": "@gpuix/native-linux-x64-gnu",
+      "file": "gpuix-native-linux-x64-gnu-0.7.0-hemera.1.tgz",
+      "sha256": "be1ee04390c0370adee74d6ce872390f31882d1b5905aa61a93bede3beac0140",
+      "target": "x86_64-unknown-linux-gnu",
+      "revision": {
+        "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
+        "gpuiBaseCommit": "81c99f816b4a5f69d3c014774068034c24d1d7af",
+        "queue": "e33e05dcd0ba5e47cf014181a5f4f10cda2c29617a4d7251e567aaefc4137462"
+      }
     },
     {
       "name": "@gpuix/native-win32-x64-msvc",
       "file": "gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz",
       "sha256": "7c7246c2d59f72e35b5a4942ecc752a767c9e4682913315ea45b1cb33e05b678",
       "target": "x86_64-pc-windows-msvc"
+    },
+    {
+      "name": "@gpuix/react",
+      "file": "gpuix-react-0.7.0-hemera.1.tgz",
+      "sha256": "3318f0a9a8e2d824f55da9e311fc68dc8926adbe08397b7a40fd5dea165759f3",
+      "target": null,
+      "revision": {
+        "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
+        "gpuiBaseCommit": "81c99f816b4a5f69d3c014774068034c24d1d7af",
+        "queue": "e33e05dcd0ba5e47cf014181a5f4f10cda2c29617a4d7251e567aaefc4137462"
+      }
     }
   ],
-  "testSupport": [
-    {
-      "file": "gpuix-native.win32-x64-msvc.node",
-      "sha256": "59d0204a0acfd6f6e039daf8fde2ef716eda0a15ee2fee7ecf08b4a84e6007f0",
-      "target": "x86_64-pc-windows-msvc"
-    }
-  ]
+  "testSupport": []
 }
