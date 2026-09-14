@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 import { useState } from 'react'
 
 import { DialogPanel } from './dialog-panel.tsx'
@@ -26,7 +28,7 @@ function Decision() {
   )
 }
 
-describe('DialogPanel — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('DialogPanel — comportement au clavier', () => {
   test('a closed panel paints nothing', () => {
     const root = mountedCatalogue(<Decision />)
     try {
@@ -82,7 +84,7 @@ describe('DialogPanel — comportement au clavier', () => {
   })
 })
 
-describe("Focus restauré après fermeture d'un overlay", () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)("Focus restauré après fermeture d'un overlay", () => {
   test('closing by Escape brings the focus back to the button that opened it', async () => {
     const root = mountedCatalogue(<Decision />)
     try {

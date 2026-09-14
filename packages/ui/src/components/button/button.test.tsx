@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Button } from './button.tsx'
 import { dark } from '../../theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
-describe('Button — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Button — comportement au clavier', () => {
   test('Enter and Space each activate the button once', () => {
     let pressed = 0
     const root = mountedCatalogue(

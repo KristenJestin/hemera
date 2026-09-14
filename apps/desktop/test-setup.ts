@@ -55,3 +55,36 @@ if (addon === undefined) {
     )
   }
 }
+
+/**
+ * Whether the vendored test renderer of this host actually paints.
+ *
+ * The addon compiles for every target, but upstream only reads a rendered image back on macOS
+ * and Windows: a Linux build carries a `TestGpuixRenderer` whose constructor refuses. The
+ * capability is read from the addon itself rather than guessed from the platform, so a target
+ * that gains it upstream needs no change here.
+ *
+ * Suites that paint are skipped where it is absent instead of failing. A run that fails the
+ * same way dozens of times for a capability nobody has is a run that gets ignored, and a real
+ * regression hides in it.
+ */
+function testRendererPaints(): boolean {
+  if (process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined) return false
+  try {
+    const native = require(process.env.NAPI_RS_NATIVE_LIBRARY_PATH) as {
+      hasTestGpuixRenderer: () => boolean
+    }
+    return native.hasTestGpuixRenderer()
+  } catch {
+    return false
+  }
+}
+
+export const TEST_RENDERER_PAINTS = testRendererPaints()
+
+if (!TEST_RENDERER_PAINTS && needed) {
+  console.error(
+    'the GPU test renderer does not exist on this target: upstream does not read the rendered ' +
+      'image back outside macOS and Windows, so the suites that paint are skipped here',
+  )
+}

@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Separator } from './separator.tsx'
 import { dark } from '../../theme/dark.ts'
 import { mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
-describe('Separator — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Separator — comportement au clavier', () => {
   test('a separator carries no action and stays out of the focus traversal', () => {
     const root = mountedCatalogue(<Separator testId="rule" />)
     try {

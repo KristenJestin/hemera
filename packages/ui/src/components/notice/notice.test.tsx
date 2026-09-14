@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Notice } from './notice.tsx'
 import { useNotice } from './use-notice.ts'
 import { dark } from '../../theme/dark.ts'
 import { mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
-describe('Notice — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Notice — comportement au clavier', () => {
   test('a notice carries no action and stays out of the focus traversal', () => {
     const root = mountedCatalogue(<Notice testId="notice" tone="info" message="Saved" />)
     try {

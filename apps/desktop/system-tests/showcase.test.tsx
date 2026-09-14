@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
+
 import { createTestRoot } from '@gpuix/react/testing'
 import { dark, light } from '@hemera/ui'
 
@@ -29,7 +31,7 @@ function textsOf(node: TreeNode): string[] {
   return texts
 }
 
-describe('Comparaison des deux thèmes', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Comparaison des deux thèmes', () => {
   test('the page renders every component of the catalogue', () => {
     const root = createTestRoot({ width: 1280, height: 900 })
     try {

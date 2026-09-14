@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { NavItem } from './nav-item.tsx'
 import { Badge } from '../badge/badge.tsx'
 import { dark } from '../../theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
-describe('NavItem — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('NavItem — comportement au clavier', () => {
   test('Enter and Space select the entry once', () => {
     let selected = 0
     const root = mountedCatalogue(

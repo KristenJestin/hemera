@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Input } from './input.tsx'
 import { useInput, valueOf } from './use-input.ts'
 import type { InputBehaviour, UseInputOptions } from './use-input.ts'
@@ -20,7 +22,7 @@ function Probe({
   return null
 }
 
-describe('Input — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Input — comportement au clavier', () => {
   test('the field takes the focus and paints the ring', async () => {
     const root = mountedCatalogue(
       <Input testId="field" value="" onValueChange={noop} aria-label="Project name" />,

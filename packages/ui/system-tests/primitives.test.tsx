@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+
+import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 
@@ -94,7 +96,7 @@ function nodeOf(root: TestRoot, testId: string): TreeNode {
   return found
 }
 
-describe('Activation au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Activation au clavier', () => {
   test('enter and space each trigger the action exactly once', () => {
     let pressed = 0
     const root = mounted(
@@ -116,7 +118,7 @@ describe('Activation au clavier', () => {
   })
 })
 
-describe('État désactivé figé', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('État désactivé figé', () => {
   test('a disabled pressable leaves the tab order and ignores activation', () => {
     let pressed = 0
     const root = mounted(
@@ -174,7 +176,7 @@ describe('État désactivé figé', () => {
   })
 })
 
-describe('Texte peint par le renderer', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Texte peint par le renderer', () => {
   test('a text run carries the colour of its role', () => {
     const root = mounted(
       <Text testId="label" color="muted">
@@ -234,7 +236,7 @@ describe('Texte peint par le renderer', () => {
   })
 })
 
-describe('Un seul niveau de défilement par panneau', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Un seul niveau de défilement par panneau', () => {
   test('a panel declares one scroll level', () => {
     const root = mounted(
       <Scroll testId="panel">
@@ -260,7 +262,7 @@ describe('Un seul niveau de défilement par panneau', () => {
   })
 })
 
-describe("Overlay ancré au-dessus d'une liste", () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)("Overlay ancré au-dessus d'une liste", () => {
   test('an anchored overlay is deferred and takes its own pointer events', () => {
     const root = mounted(
       <Anchored testId="overlay">
@@ -277,7 +279,7 @@ describe("Overlay ancré au-dessus d'une liste", () => {
   })
 })
 
-describe('Texte technique en police monospace', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Texte technique en police monospace', () => {
   test('an identifier or a path is painted with the family of the package', () => {
     const root = mounted(
       <Text testId="path" color="dim" family="mono">
@@ -307,7 +309,7 @@ describe('Texte technique en police monospace', () => {
   })
 })
 
-describe('Icône sans couleur héritée', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Icône sans couleur héritée', () => {
   test('an icon always carries a colour resolved from a role', () => {
     const root = mounted(<Icon testId="icon" name="folder" />)
     try {

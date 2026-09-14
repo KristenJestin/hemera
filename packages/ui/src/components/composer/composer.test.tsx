@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Composer } from './composer.tsx'
 import { useComposer } from './use-composer.ts'
 import type { ComposerBehaviour, UseComposerOptions } from './use-composer.ts'
@@ -21,7 +23,7 @@ function behaviourOf(options: UseComposerOptions): ComposerBehaviour {
   return captured
 }
 
-describe('Composer — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Composer — comportement au clavier', () => {
   test('the frame lights up when its own field holds the focus', async () => {
     const root = mountedCatalogue(
       <Composer

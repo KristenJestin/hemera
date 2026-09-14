@@ -7,6 +7,8 @@
  */
 
 import { describe, expect, test } from 'bun:test'
+
+import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -92,7 +94,7 @@ function cleanUp(seed: { directory: string; documents: string; profile: OpenProf
 /** What this run could drive, and what it could not. */
 const observations: string[] = []
 
-describe('Parcours natif au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Parcours natif au clavier', () => {
   test('the window is driven from the keyboard alone, control after control', () => {
     const seed = seeded()
     const { context } = seed
@@ -127,7 +129,7 @@ describe('Parcours natif au clavier', () => {
   }, 60_000)
 })
 
-describe('Parcours natif à la molette', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Parcours natif à la molette', () => {
   test('the thread scrolls under the wheel, one scroll level for the panel', () => {
     const seed = seeded()
     const { context } = seed

@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Card } from './card.tsx'
 import { Text } from '../../primitives/text.tsx'
 import { dark } from '../../theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
-describe('Card — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Card — comportement au clavier', () => {
   test('a card without an action carries nothing focusable', () => {
     const root = mountedCatalogue(
       <Card testId="card" title="Sessions">

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+
+import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -67,7 +69,7 @@ function paintedWidths(family: string): { embedded: number; fallback: number } {
   }
 }
 
-describe('Polices embarquées rendues', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Polices embarquées rendues', () => {
   test.each([SANS_FAMILY, MONO_FAMILY])(
     '%s is painted from the embedded file, not from a system fallback',
     (family) => {

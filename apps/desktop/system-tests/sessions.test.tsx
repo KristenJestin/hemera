@@ -8,6 +8,8 @@
  */
 
 import { describe, expect, test } from 'bun:test'
+
+import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -152,7 +154,7 @@ async function withScreen(body: (fixture: Fixture) => Promise<void>): Promise<vo
   }
 }
 
-describe('Dossier inaccessible', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Dossier inaccessible', () => {
   test('a folder that cannot be read is refused by name, and no project is created', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -171,7 +173,7 @@ describe('Dossier inaccessible', () => {
   })
 })
 
-describe('Aucune Session', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Aucune Session', () => {
   test('a project without a session says so and offers to create one, with no fake entry', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -210,7 +212,7 @@ describe('Aucune Session', () => {
   })
 })
 
-describe('Travaux parallèles depuis la sidebar', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Travaux parallèles depuis la sidebar', () => {
   test('two sessions stay reachable from the sidebar with their own threads', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -248,7 +250,7 @@ describe('Travaux parallèles depuis la sidebar', () => {
   })
 })
 
-describe('Brouillon non envoyé', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Brouillon non envoyé', () => {
   test('text left in the composer is no message of the thread', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -270,7 +272,7 @@ describe('Brouillon non envoyé', () => {
   })
 })
 
-describe('Bascule entre deux Projets', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Bascule entre deux Projets', () => {
   test('switching projects shows their own sessions and keeps both', async () => {
     await withScreen(async ({ context, documents, other }) => {
       const { root, model, settle } = mount(context)
@@ -310,7 +312,7 @@ describe('Bascule entre deux Projets', () => {
   })
 })
 
-describe('Projet actif restauré', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Projet actif restauré', () => {
   test('the project active at closing time is the one selected at the next launch', async () => {
     await withScreen(async ({ context, documents, other }) => {
       const first = mount(context)
@@ -340,7 +342,7 @@ describe('Projet actif restauré', () => {
   })
 })
 
-describe('Projet actif devenu indisponible', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Projet actif devenu indisponible', () => {
   test('an unreachable folder is reported and its data is kept', async () => {
     await withScreen(async ({ context, documents, other }) => {
       const { root, model, settle } = mount(context)
@@ -379,7 +381,7 @@ describe('Projet actif devenu indisponible', () => {
   })
 })
 
-describe('Session sélectionnée conservée', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Session sélectionnée conservée', () => {
   test('after a restart the sidebar lists the sessions and the one consulted reopens', async () => {
     await withScreen(async ({ context, documents }) => {
       const first = mount(context)
@@ -416,7 +418,7 @@ describe('Session sélectionnée conservée', () => {
   })
 })
 
-describe("Session archivée depuis l'écran", () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)("Session archivée depuis l'écran", () => {
   test('archiving hides the session from the current list and restoring brings it back', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -456,7 +458,7 @@ describe("Session archivée depuis l'écran", () => {
   })
 })
 
-describe('Aucune suppression proposée', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Aucune suppression proposée', () => {
   test('the screen offers archiving and nothing that deletes', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -479,7 +481,7 @@ describe('Aucune suppression proposée', () => {
   })
 })
 
-describe('Aucun provider disponible', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Aucun provider disponible', () => {
   test('the thread works with no provider configured and answers nothing by itself', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -501,7 +503,7 @@ describe('Aucun provider disponible', () => {
   })
 })
 
-describe("Édition de la configuration depuis l'écran", () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)("Édition de la configuration depuis l'écran", () => {
   test('an edited configuration is stored and shown, and the folder stays untouched', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -528,7 +530,7 @@ describe("Édition de la configuration depuis l'écran", () => {
   })
 })
 
-describe("Configuration invalide refusée dans l'écran", () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)("Configuration invalide refusée dans l'écran", () => {
   test('a refused configuration names the cause and keeps the previous one intact', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -553,7 +555,7 @@ describe("Configuration invalide refusée dans l'écran", () => {
   })
 })
 
-describe('Titre dérivé du premier message dans la sidebar', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Titre dérivé du premier message dans la sidebar', () => {
   test('the first message names the session, and a renamed one keeps its title', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -584,7 +586,7 @@ describe('Titre dérivé du premier message dans la sidebar', () => {
   })
 })
 
-describe('Panneaux de décision du Projet', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Panneaux de décision du Projet', () => {
   test('the new-project panel asks for a name and a folder that must already exist', async () => {
     await withScreen(async ({ context }) => {
       const { root } = mount(context)
@@ -619,7 +621,7 @@ describe('Panneaux de décision du Projet', () => {
   })
 })
 
-describe('Bascule de thème à chaud', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Bascule de thème à chaud', () => {
   test('the whole window changes theme without losing the session, the draft or the sizes', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -657,7 +659,7 @@ describe('Bascule de thème à chaud', () => {
   })
 })
 
-describe('Thème restauré après redémarrage', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Thème restauré après redémarrage', () => {
   test('the theme chosen is the one the next launch opens on', async () => {
     await withScreen(async ({ context, documents }) => {
       const first = mount(context)
@@ -682,7 +684,7 @@ describe('Thème restauré après redémarrage', () => {
   })
 })
 
-describe('Suivi du thème système indisponible', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Suivi du thème système indisponible', () => {
   test('no system choice is offered, and the default is the dark theme', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)
@@ -704,7 +706,7 @@ describe('Suivi du thème système indisponible', () => {
   })
 })
 
-describe('Onglet de Projet actif', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Onglet de Projet actif', () => {
   test('selecting another tab changes the active one and the sessions listed', async () => {
     await withScreen(async ({ context, documents, other }) => {
       const { root, model, settle } = mount(context)
@@ -744,38 +746,41 @@ describe('Onglet de Projet actif', () => {
   })
 })
 
-describe('Fonctionnalité absente du lot présentée par la maquette', () => {
-  test('the screen shows nothing the lot does not deliver, not even disabled', async () => {
-    await withScreen(async ({ context, documents }) => {
-      const { root, model, settle } = mount(context)
-      try {
-        model().addProject({ name: 'Hemera', path: documents })
-        await settle()
-        model().startSession()
-        await settle()
+describe.skipIf(!TEST_RENDERER_PAINTS)(
+  'Fonctionnalité absente du lot présentée par la maquette',
+  () => {
+    test('the screen shows nothing the lot does not deliver, not even disabled', async () => {
+      await withScreen(async ({ context, documents }) => {
+        const { root, model, settle } = mount(context)
+        try {
+          model().addProject({ name: 'Hemera', path: documents })
+          await settle()
+          model().startSession()
+          await settle()
 
-        // Everything of the mockup that belongs to a later lot: no provider, no model
-        // picker, no mission, no agent, no cost, no search.
-        const painted = paintedTexts(root).map((text) => text.toLowerCase())
-        for (const absent of [
-          'provider',
-          'model',
-          'agent',
-          'mission',
-          'tokens',
-          'cost',
-          'search',
-        ]) {
-          expect(painted.some((text) => text.includes(absent))).toBe(false)
+          // Everything of the mockup that belongs to a later lot: no provider, no model
+          // picker, no mission, no agent, no cost, no search.
+          const painted = paintedTexts(root).map((text) => text.toLowerCase())
+          for (const absent of [
+            'provider',
+            'model',
+            'agent',
+            'mission',
+            'tokens',
+            'cost',
+            'search',
+          ]) {
+            expect(painted.some((text) => text.includes(absent))).toBe(false)
+          }
+        } finally {
+          root.unmount()
         }
-      } finally {
-        root.unmount()
-      }
+      })
     })
-  })
-})
+  },
+)
 
-describe("Aucune réponse d'agent au lot 1", () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)("Aucune réponse d'agent au lot 1", () => {
   test('no provider is presented and no agent reply is ever simulated', async () => {
     await withScreen(async ({ context, documents }) => {
       const { root, model, settle } = mount(context)

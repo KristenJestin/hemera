@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 import type { EventPayload } from '@gpuix/react'
 
 import { Gutter } from './gutter.tsx'
@@ -26,7 +28,7 @@ function key(name: string): EventPayload {
   return { key: name } as EventPayload
 }
 
-describe('Gutter — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Gutter — comportement au clavier', () => {
   test('the arrow keys move the size by one step', () => {
     const sizes: number[] = []
     const behaviour = behaviourOf({

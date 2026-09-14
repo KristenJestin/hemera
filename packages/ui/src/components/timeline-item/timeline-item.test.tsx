@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { TimelineItem } from './timeline-item.tsx'
 import { useTimelineItem } from './use-timeline-item.ts'
 import { mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
 const AT = new Date(2026, 8, 13, 14, 5)
 
-describe('TimelineItem — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('TimelineItem — comportement au clavier', () => {
   test('a journal entry carries no action and stays out of the focus traversal', () => {
     const root = mountedCatalogue(
       <TimelineItem testId="entry" message="Project created" at={AT} now={AT} />,

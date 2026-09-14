@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Kbd } from './kbd.tsx'
 import { useKbd } from './use-kbd.ts'
 import { mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
-describe('Kbd — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Kbd — comportement au clavier', () => {
   test('a hint carries no action and stays out of the focus traversal', () => {
     const root = mountedCatalogue(<Kbd testId="hint" combination="enter" />)
     try {

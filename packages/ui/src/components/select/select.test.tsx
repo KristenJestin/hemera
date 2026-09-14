@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Select } from './select.tsx'
 import { dark } from '../../theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
@@ -9,7 +11,7 @@ const OPTIONS = [
   { value: 'dark', label: 'Dark' },
 ] as const
 
-describe('Select — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Select — comportement au clavier', () => {
   test('Enter opens the menu and the options are painted', () => {
     const root = mountedCatalogue(
       <Select

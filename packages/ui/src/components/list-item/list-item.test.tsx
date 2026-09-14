@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { ListItem } from './list-item.tsx'
 import { dark } from '../../theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
-describe('ListItem — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('ListItem — comportement au clavier', () => {
   test('Enter and Space select the row once', () => {
     let selected = 0
     const root = mountedCatalogue(

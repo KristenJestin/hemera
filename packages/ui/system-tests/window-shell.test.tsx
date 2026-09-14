@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+
+import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
 import { useState } from 'react'
 
 import { SIDEBAR_BOUNDS, WindowShell } from '../src/shell/window-shell.tsx'
@@ -29,7 +31,7 @@ function Shell({ width = shell.sidebar.width }: { width?: number }) {
   )
 }
 
-describe('Coquille de fenêtre', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Coquille de fenêtre', () => {
   test('the projects bar, the sidebar, the gutter and the content are painted', () => {
     const root = mountedCatalogue(<Shell />)
     try {
@@ -54,7 +56,7 @@ describe('Coquille de fenêtre', () => {
   })
 })
 
-describe('Sidebar repliée et largeur persistée', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Sidebar repliée et largeur persistée', () => {
   test('collapsing narrows the sidebar and removes its gutter', () => {
     const root = mountedCatalogue(<Shell />)
     try {
@@ -68,7 +70,7 @@ describe('Sidebar repliée et largeur persistée', () => {
   })
 })
 
-describe('Largeur hors bornes', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Largeur hors bornes', () => {
   test('a stored width outside the bounds falls back to the default without failing', () => {
     for (const stored of [10, 9000, Number.NaN]) {
       const root = mountedCatalogue(<Shell width={stored} />)
@@ -90,7 +92,7 @@ describe('Largeur hors bornes', () => {
   })
 })
 
-describe('Décorations client indisponibles', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Décorations client indisponibles', () => {
   test('the fallback applies and names the capabilities the renderer lacks', () => {
     const decision = decideTitleBar(OBSERVED_DECORATIONS)
     expect(decision.mode).toBe('native')
@@ -108,7 +110,7 @@ describe('Décorations client indisponibles', () => {
   })
 })
 
-describe('Décorations client disponibles', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Décorations client disponibles', () => {
   test('when the renderer exposes all three, the projects bar becomes the title bar', () => {
     const decision = decideTitleBar({
       framelessWindow: true,

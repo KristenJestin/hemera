@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Textarea } from './textarea.tsx'
 import { DEFAULT_MAX_ROWS, DEFAULT_MIN_ROWS, useTextarea } from './use-textarea.ts'
 import type { TextareaBehaviour, UseTextareaOptions } from './use-textarea.ts'
@@ -21,7 +23,7 @@ function behaviourOf(options: UseTextareaOptions): TextareaBehaviour {
   return captured
 }
 
-describe('Textarea — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Textarea — comportement au clavier', () => {
   test('the field takes the focus and paints the ring', async () => {
     const root = mountedCatalogue(
       <Textarea testId="composer" value="" onValueChange={noop} aria-label="Message" />,
@@ -69,7 +71,7 @@ describe('Textarea — comportement au clavier', () => {
   })
 })
 
-describe("Soumission d'un champ multiligne", () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)("Soumission d'un champ multiligne", () => {
   test('sending goes through the field submission, never through an intercepted Enter', () => {
     const sent: string[] = []
     const root = mountedCatalogue(

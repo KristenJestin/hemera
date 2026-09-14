@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
+import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
+
 import { Badge } from './badge.tsx'
 import { DEFAULT_COUNT_CAP, useBadge } from './use-badge.ts'
 import { dark } from '../../theme/dark.ts'
 import { mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
-describe('Badge — comportement au clavier', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Badge — comportement au clavier', () => {
   test('a badge carries no action and stays out of the focus traversal', () => {
     const root = mountedCatalogue(<Badge testId="count" kind="count" count={3} />)
     try {
