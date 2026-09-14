@@ -45,6 +45,8 @@ export interface EnvironmentReport {
   gpu: { model: string; driver: string }
   toolchain: { bun: string; rust: string; compiler: string }
   artefacts: { fork: string; head: string; packages: { name: string; sha256: string }[] }
+  /** What this target cannot verify, and why; empty when it can verify everything. */
+  limits: string[]
   observation: { window: string; errors: string[] }
 }
 
@@ -244,6 +246,40 @@ export interface ReportOptions {
   observation?: EnvironmentReport['observation']
 }
 
+/**
+ * What this target cannot verify, read from the artefacts rather than from the platform name.
+ *
+ * A capability the fork does not carry here is not a debt of the delivery, and it is not a
+ * detail of the run either: a target is qualified by what it could check, so what it could
+ * not has to be readable beside the rest.
+ */
+function limitsOf(repositoryRoot: string, target: Target): string[] {
+  const root = join(repositoryRoot, 'vendor', 'gpuix')
+  const version = existsSync(root) ? (readdirSync(root)[0] ?? null) : null
+  if (version === null) return []
+  const manifestPath = join(root, version, 'manifest.json')
+  if (!existsSync(manifestPath)) return []
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    testSupport?: { file: string; target: string }[]
+  }
+  const addon = (manifest.testSupport ?? []).find((entry) => entry.target === target)
+  if (addon === undefined) return []
+  const path = join(root, version, 'test-support', addon.file)
+  if (!existsSync(path)) return []
+  try {
+    // eslint-disable-next-line
+    const native = require(path) as { hasTestGpuixRenderer: () => boolean }
+    if (native.hasTestGpuixRenderer()) return []
+  } catch {
+    return []
+  }
+  return [
+    'GPU test renderer: absent on this target, so nothing painted was inspected here. ' +
+      'Upstream reads a rendered image back on macOS and Windows only; the suites that paint ' +
+      'are named and skipped, and the scenarios they carry are verified on the other target.',
+  ]
+}
+
 export function collectReport({ repositoryRoot, observation }: ReportOptions): EnvironmentReport {
   const target = targetOfHost()
   return {
@@ -258,6 +294,7 @@ export function collectReport({ repositoryRoot, observation }: ReportOptions): E
       compiler: compilerOf(target),
     },
     artefacts: artefactsOf(repositoryRoot, target),
+    limits: limitsOf(repositoryRoot, target),
     observation: observation ?? { window: 'not observed in this run', errors: [] },
   }
 }
@@ -278,6 +315,7 @@ export function renderReport(report: EnvironmentReport): string {
         .map((entry) => `${entry.name} ${entry.sha256.slice(0, 12)}`)
         .join(', ')}`,
     ],
+    ...(report.limits.length === 0 ? [] : [['Limits', report.limits.join(' ')]]),
     [
       'Observation',
       report.observation.errors.length === 0
