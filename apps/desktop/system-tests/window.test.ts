@@ -65,6 +65,16 @@ describe('Démarrage applicatif', () => {
     const lines = await openWindowAndReadAnnouncement(60_000)
     expect(lines).toContain('[gpuix] created native window')
 
+    // What makes it a real window is the backend that opened it. The headless client answers
+    // the size gate with the nominal size it was asked for, and the React package logs the
+    // creation of the renderer whichever client it built, so this test passed on a machine
+    // with no graphical session at all until the backend was announced.
+    const backend = lines
+      .find((line) => line.startsWith('window backend '))
+      ?.slice('window backend '.length)
+    expect(backend).toBeDefined()
+    expect(backend).not.toBe('Headless')
+
     const announcement = lines.find((line) => line.startsWith('window opened'))
     expect(announcement).toBeDefined()
     const [width, height] = announcement!

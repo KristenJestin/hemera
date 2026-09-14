@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import {
+  HEADLESS_BACKEND,
   TARGETS,
   UNKNOWN,
   collectReport,
@@ -84,23 +85,29 @@ describe('Une seule cible vérifiée', () => {
         expect(document).not.toContain(foreign)
       }
 
-      // Whoever wrote it: a window claimed is a window measured. The other two forms are the
-      // honest ones - no window, or a run that did not look. Demanding an opening here would
-      // fail a build machine with no display, which is a machine the lot expects to exist.
+      // Whoever wrote it: a window claimed is a window measured, on a backend that was named.
+      // The other forms are the honest ones - ran headless, nothing announced, or a run that
+      // did not look. Demanding an opening here would fail a build machine with no display,
+      // which is a machine the lot expects to exist.
       const observation = /\| Observation \| (.+?) \|/.exec(document)?.[1] ?? ''
       // Only the first of these is a window. The headless client of GPUI hands the
-      // application the nominal size of a window it never created, so dimensions alone prove
-      // nothing; what proves something is the renderer announcing the window it made.
-      expect(observation).toMatch(
-        new RegExp(
-          [
-            String.raw`^native window created, window opened \d+x\d+`,
-            String.raw`^window opened \d+x\d+, but the renderer announced no native window`,
-            String.raw`^no window announced itself`,
-            String.raw`^not observed in this run`,
-          ].join('|'),
-        ),
-      )
+      // application the nominal size of a window it never created, and the React package logs
+      // the creation of the renderer either way, so neither a size nor that log proves an
+      // opening; the backend the renderer named is what does, and `Headless` is not one.
+      const forms = [
+        String.raw`^native window created on (?!${HEADLESS_BACKEND}\b)\S+, window opened \d+x\d+$`,
+        String.raw`^ran headless, no window was opened \(window opened \d+x\d+\)$`,
+        String.raw`^no window announced itself`,
+        String.raw`^not observed in this run$`,
+        String.raw`^window opened \d+x\d+, from a run that named no backend$`,
+      ]
+      // A report written before the backend was recorded names no backend. Only the machine
+      // it describes can produce it again, so it is read as it stands rather than called
+      // wrong; this machine has no such excuse and is held to the current form.
+      if (target !== targetOfHost()) {
+        forms.push(String.raw`^native window created, window opened \d+x\d+$`)
+      }
+      expect(observation).toMatch(new RegExp(forms.join('|')))
     }
   })
 })

@@ -8,7 +8,7 @@
  */
 
 import { EMBEDDED_FONTS, ThemeProvider } from '@hemera/ui'
-import { addFonts, render, useWindowSize } from '@gpuix/react'
+import { addFonts, render, useWindowSize, windowBackend } from '@gpuix/react'
 import { useEffect, useRef } from 'react'
 
 import { t } from '../i18n/index.ts'
@@ -41,6 +41,10 @@ function Hemera({ route, context }: HemeraProps) {
     const measured = gate.current.accept(size)
     if (measured === null) return
     announced.current = true
+    // The backend is announced beside the size, on its own line: the headless client answers
+    // with the nominal size it was asked for, so the measurement alone does not say a window
+    // was opened, and only the name of the backend that opened it does.
+    console.log(`window backend ${windowBackend()}`)
     console.log(`window opened ${measured.width}x${measured.height}`)
   }, [size])
 

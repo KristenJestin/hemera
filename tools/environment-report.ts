@@ -26,6 +26,9 @@ import { join, resolve } from 'node:path'
 /** Value used when a field cannot be read; never replaced by a plausible one. */
 export const UNKNOWN = 'unknown'
 
+/** Backend GPUI reports when it opened no window at all. */
+export const HEADLESS_BACKEND = 'Headless'
+
 /** Targets the lot compiles for. */
 export const TARGETS = {
   'win32-x64': 'x86_64-pc-windows-msvc',
@@ -215,20 +218,22 @@ export async function observeWindow(
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
 
-  // Two different statements, and only one of them is proof. The size the application reports
-  // comes from its own gate, and the headless client of GPUI hands it the nominal size of a
-  // window it never created: dimensions alone say nothing. What says something is the renderer
-  // announcing the native window it made.
+  // Only the backend is proof. The size comes from the application's own gate, and the
+  // headless client of GPUI answers it with the nominal size of a window it never created;
+  // `[gpuix] created native window` is printed by the React package as soon as `init()`
+  // returns, whichever client it was. Both are reported identically by a run that opened
+  // nothing, so the observation rests on the backend the renderer named instead.
   const measured = lines.find((line) => line.startsWith('window opened'))
-  const created = lines.includes('[gpuix] created native window')
-  if (created && measured !== undefined) {
-    return { window: `native window created, ${measured}`, errors }
+  const backend = lines
+    .find((line) => line.startsWith('window backend '))
+    ?.slice('window backend '.length)
+  if (backend !== undefined && measured !== undefined) {
+    return backend === HEADLESS_BACKEND
+      ? { window: `ran headless, no window was opened (${measured})`, errors }
+      : { window: `native window created on ${backend}, ${measured}`, errors }
   }
   if (measured !== undefined) {
-    return {
-      window: `${measured}, but the renderer announced no native window: it ran headless`,
-      errors,
-    }
+    return { window: `${measured}, from a run that named no backend`, errors }
   }
   return { window: 'no window announced itself', errors }
 }
