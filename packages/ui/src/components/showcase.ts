@@ -12,7 +12,7 @@ import { badgeShowcase } from './badge/badge.showcase.tsx'
 import { buttonShowcase } from './button/button.showcase.tsx'
 import { cardShowcase } from './card/card.showcase.tsx'
 import { composerShowcase } from './composer/composer.showcase.tsx'
-import { dialogPanelShowcase } from './dialog-panel/dialog-panel.showcase.tsx'
+import { modalShowcase } from './modal/modal.showcase.tsx'
 import { emptyStateShowcase } from './empty-state/empty-state.showcase.tsx'
 import { gutterShowcase } from './gutter/gutter.showcase.tsx'
 import { iconButtonShowcase } from './icon-button/icon-button.showcase.tsx'
@@ -56,7 +56,7 @@ export const SHOWCASE: readonly ShowcaseEntry[] = [
   gutterShowcase,
   timelineItemShowcase,
   emptyStateShowcase,
-  dialogPanelShowcase,
+  modalShowcase,
   noticeShowcase,
   kbdShowcase,
 ]

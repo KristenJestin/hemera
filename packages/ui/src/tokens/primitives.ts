@@ -85,7 +85,7 @@ export const palette = {
   cyan50: '#ecfeff',
   cyan400Alpha10: 'rgba(34,211,238,0.10)',
 
-  scrim: 'rgba(10,10,14,0.45)',
+  scrim: 'rgba(10,10,14,0.66)',
   pressLight: 'rgba(16,16,24,0.06)',
   pressDark: 'rgba(255,255,255,0.06)',
 

@@ -1,9 +1,9 @@
 /**
  * Motion the renderer can actually paint.
  *
- * Only opacity, corner radius and the painted transforms (`scale`, `x`, `y`) animate freely.
- * A dimension or an offset animates only outside the flow or inside a fixed box, and there is
- * no spring, no colour animation and no exit animation.
+ * Only opacity and corner radius animate freely. A dimension or an offset animates only
+ * outside the flow or inside a fixed box, and there is no spring, no colour animation, no
+ * transform and no exit animation: an element stops painting the frame it is removed.
  */
 
 import { duration } from '../tokens/primitives.ts'
@@ -11,7 +11,7 @@ import { duration } from '../tokens/primitives.ts'
 export type MotionSpeed = keyof typeof duration
 
 /** Properties the renderer animates wherever the element sits. */
-export const FREE_TARGETS = ['opacity', 'borderRadius', 'scale', 'x', 'y'] as const
+export const FREE_TARGETS = ['opacity', 'borderRadius'] as const
 
 /** Properties the renderer animates only out of the flow or in a fixed box. */
 export const CONSTRAINED_TARGETS = ['width', 'height', 'top', 'right', 'bottom', 'left'] as const

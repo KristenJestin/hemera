@@ -613,7 +613,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Panneaux de décision du Projet', () => 
         press(root, 'project-settings')
 
         expect(textsOf(nodeOf(root, 'settings-path'))).toEqual([documents])
-        expect(paintedTexts(root)).toContain('Repository locations, one per line')
+        expect(paintedTexts(root)).toContain('Repository locations')
       } finally {
         root.unmount()
       }

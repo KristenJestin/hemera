@@ -4,7 +4,7 @@ import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
 import { useState } from 'react'
 
 import { SIDEBAR_BOUNDS, WindowShell } from '../src/shell/window-shell.tsx'
-import { OBSERVED_DECORATIONS, decideTitleBar } from '../src/shell/title-bar.ts'
+import { decideTitleBar, decorationsOf } from '../src/shell/title-bar.ts'
 import { Tab } from '../src/components/tab/tab.tsx'
 import { NavItem } from '../src/components/nav-item/nav-item.tsx'
 import { Text } from '../src/primitives/text.tsx'
@@ -93,39 +93,54 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Largeur hors bornes', () => {
 })
 
 describe.skipIf(!TEST_RENDERER_PAINTS)('Décorations client indisponibles', () => {
-  test('the fallback applies and names the capabilities the renderer lacks', () => {
-    const decision = decideTitleBar(OBSERVED_DECORATIONS)
+  test('a renderer exposing none of it falls back and names what is missing', () => {
+    const decision = decideTitleBar(decorationsOf({}, true))
     expect(decision.mode).toBe('native')
     expect(decision.missing).toEqual(['dragRegion', 'windowButtons'])
   })
 
-  test('the projects bar becomes the title bar once every capability is exposed', () => {
-    const decision = decideTitleBar({
-      framelessWindow: true,
-      dragRegion: true,
-      windowButtons: true,
-    })
-    expect(decision.mode).toBe('projects-bar')
-    expect(decision.missing).toEqual([])
+  test('a window that cannot be frameless falls back even with the commands', () => {
+    const decision = decideTitleBar(
+      decorationsOf(
+        {
+          startWindowMove: () => {},
+          minimizeWindow: () => {},
+          zoomWindow: () => {},
+          closeWindow: () => {},
+        },
+        false,
+      ),
+    )
+    expect(decision.mode).toBe('native')
+    expect(decision.missing).toEqual(['framelessWindow'])
   })
 })
 
 describe.skipIf(!TEST_RENDERER_PAINTS)('Décorations client disponibles', () => {
-  test('when the renderer exposes all three, the projects bar becomes the title bar', () => {
-    const decision = decideTitleBar({
-      framelessWindow: true,
-      dragRegion: true,
-      windowButtons: true,
-    })
-    expect(decision.mode).toBe('projects-bar')
-    expect(decision.missing).toEqual([])
+  test('the renderer installed here exposes the three of them', () => {
+    // Read from the addon itself: the fork carries the commands, and a checkout that does
+    // not would be told apart here instead of painting a window nobody can move or close.
+    const renderer = require('@gpuix/native') as { GpuixRenderer: { prototype: object } }
+    const commands = renderer.GpuixRenderer.prototype as Record<string, unknown>
+    expect(typeof commands['startWindowMove']).toBe('function')
+    expect(typeof commands['minimizeWindow']).toBe('function')
+    expect(typeof commands['zoomWindow']).toBe('function')
+    expect(typeof commands['closeWindow']).toBe('function')
   })
 
-  test('this target exposes them only in part, so the decision stays the native bar', () => {
-    // Observed on Windows with GPUiX 0.7.0-hemera.1; Linux is not measured here.
-    const decision = decideTitleBar(OBSERVED_DECORATIONS)
-    expect(OBSERVED_DECORATIONS.framelessWindow).toBe(true)
-    expect(decision.mode).toBe('native')
-    expect(decision.missing).toEqual(['dragRegion', 'windowButtons'])
+  test('the projects bar becomes the title bar once every capability is exposed', () => {
+    const decision = decideTitleBar(
+      decorationsOf(
+        {
+          startWindowMove: () => {},
+          minimizeWindow: () => {},
+          zoomWindow: () => {},
+          closeWindow: () => {},
+        },
+        true,
+      ),
+    )
+    expect(decision.mode).toBe('projects-bar')
+    expect(decision.missing).toEqual([])
   })
 })

@@ -43,8 +43,17 @@ export const dot = {
 /** Window shell geometry. */
 export const shell = {
   topbar: { height: 44 },
-  sidebar: { width: 248, minWidth: 180, maxWidth: 420, collapsedWidth: 58 },
-  gutter: { size: 6 },
+  // Collapsed, the sidebar is gone rather than narrow: its rows have no icon-only form.
+  sidebar: { width: 248, minWidth: 180, maxWidth: 420, collapsedWidth: 0 },
+  /** `size` is what the pointer grabs, `rule` what is painted. */
+  gutter: { size: 6, rule: 1 },
+} as const
+
+/** A decision panel laid over the window. */
+export const dialog = {
+  width: 520,
+  /** How far the panel rises as it appears, in pixels. */
+  entryOffset: space.md,
 } as const
 
 /** Painted state of a control the caller disabled. */

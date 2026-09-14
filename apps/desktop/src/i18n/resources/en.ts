@@ -12,7 +12,13 @@ export const en = {
   'action.cancel': 'Cancel',
 
   settings: 'Settings',
+  'settings.application': 'Application',
+  'settings.project': 'Project',
   'settings.theme': 'Appearance',
+
+  'window.minimize': 'Minimise the window',
+  'window.maximize': 'Maximise the window',
+  'window.close': 'Close the window',
 
   'shell.sidebar.collapse': 'Collapse the sidebar',
   'shell.sidebar.resize': 'Sidebar width',
@@ -25,7 +31,9 @@ export const en = {
   'project.new.confirm': 'Create the project',
   'project.settings': 'Project configuration',
   'project.settings.name': 'Project name',
-  'project.settings.repositories': 'Repository locations, one per line',
+  'project.settings.repositories': 'Repository locations',
+  'project.settings.repositories.add': 'Add a repository',
+  'project.settings.repositories.remove': 'Remove this repository',
   'project.settings.repositories.placeholder': './sources/api',
   'project.settings.repositories.hint':
     'Relative to the workspace root. Leave empty to use the root itself.',

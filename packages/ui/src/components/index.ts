@@ -45,13 +45,10 @@ export { Composer } from './composer/composer.tsx'
 export type { ComposerProps } from './composer/composer.tsx'
 export { useComposer } from './composer/use-composer.ts'
 export type { ComposerBehaviour, UseComposerOptions } from './composer/use-composer.ts'
-export { DialogPanel } from './dialog-panel/dialog-panel.tsx'
-export type { DialogPanelProps } from './dialog-panel/dialog-panel.tsx'
-export { useDialogPanel } from './dialog-panel/use-dialog-panel.ts'
-export type {
-  DialogPanelBehaviour,
-  UseDialogPanelOptions,
-} from './dialog-panel/use-dialog-panel.ts'
+export { Modal } from './modal/modal.tsx'
+export type { ModalProps } from './modal/modal.tsx'
+export { useModal } from './modal/use-modal.ts'
+export type { ModalBehaviour, UseModalOptions } from './modal/use-modal.ts'
 export { EmptyState } from './empty-state/empty-state.tsx'
 export type { EmptyStateProps } from './empty-state/empty-state.tsx'
 export { useEmptyState } from './empty-state/use-empty-state.ts'

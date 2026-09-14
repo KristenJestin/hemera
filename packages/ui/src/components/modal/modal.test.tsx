@@ -3,33 +3,37 @@ import { describe, expect, test } from 'bun:test'
 import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 import { useState } from 'react'
 
-import { DialogPanel } from './dialog-panel.tsx'
+import { Modal } from './modal.tsx'
 import { Button } from '../button/button.tsx'
 import { Text } from '../../primitives/text.tsx'
 import { Stack } from '../../primitives/stack.tsx'
 import { focus, mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
-/** A trigger and the panel it opens, which is how a decision is actually taken. */
-function Decision() {
+/** A trigger, the decision it opens, and content that must stay painted behind it. */
+function Decision({ dismissOnScrim = true }: { dismissOnScrim?: boolean }) {
   const [open, setOpen] = useState(false)
   return (
     <Stack direction="column" gap="md" align="start">
       <Button testId="trigger" label="Archive" onPress={() => setOpen(true)} />
-      <DialogPanel
+      <Text testId="behind" color="muted">
+        The thread stays where it was.
+      </Text>
+      <Modal
         testId="panel"
         open={open}
         onClose={() => setOpen(false)}
         title="Archive this session?"
+        dismissOnScrim={dismissOnScrim}
         actions={<Button testId="cancel" label="Cancel" onPress={() => setOpen(false)} />}
       >
         <Text color="muted">It stays readable among the archived ones.</Text>
-      </DialogPanel>
+      </Modal>
     </Stack>
   )
 }
 
-describe.skipIf(!TEST_RENDERER_PAINTS)('DialogPanel — comportement au clavier', () => {
-  test('a closed panel paints nothing', () => {
+describe.skipIf(!TEST_RENDERER_PAINTS)('Modal — comportement au clavier', () => {
+  test('a closed decision paints nothing', () => {
     const root = mountedCatalogue(<Decision />)
     try {
       expect(() => nodeOf(root, 'panel')).toThrow()
@@ -38,7 +42,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('DialogPanel — comportement au clavier'
     }
   })
 
-  test('the panel opens from its trigger and carries its own buttons', () => {
+  test('the decision opens from its trigger and carries its own buttons', () => {
     const root = mountedCatalogue(<Decision />)
     try {
       root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'trigger').id, 'enter')
@@ -53,7 +57,34 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('DialogPanel — comportement au clavier'
     }
   })
 
-  test('Escape closes the panel and gives the focus back to the trigger', async () => {
+  test('what sits behind keeps painting instead of being replaced', () => {
+    const root = mountedCatalogue(<Decision />)
+    try {
+      root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'trigger').id, 'enter')
+      root.renderer.flush()
+      // The defect this replaces: the panel took the content's place, so the composer and
+      // everything else under it stopped existing while a decision was open.
+      expect(() => nodeOf(root, 'behind')).not.toThrow()
+      expect(() => nodeOf(root, 'trigger')).not.toThrow()
+    } finally {
+      root.unmount()
+    }
+  })
+
+  test('the panel sits behind a scrim rather than alone in the flow', () => {
+    const root = mountedCatalogue(<Decision />)
+    try {
+      root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'trigger').id, 'enter')
+      root.renderer.flush()
+      // The scrim is what hides the window and swallows the clicks that reach it; the shell
+      // is what stretches it over the whole window.
+      expect(() => nodeOf(root, 'panel-scrim')).not.toThrow()
+    } finally {
+      root.unmount()
+    }
+  })
+
+  test('Escape closes the decision and gives the focus back to the trigger', async () => {
     const root = mountedCatalogue(<Decision />)
     try {
       const trigger = await focus(root, 'trigger')

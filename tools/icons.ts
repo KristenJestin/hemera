@@ -33,11 +33,15 @@ export const CATALOGUE = [
   'info',
   'loader-circle',
   'message-square',
+  'minus',
   'panel-left',
+  'panel-left-open',
   'pencil',
   'plus',
   'search',
   'settings',
+  'square',
+  'trash-2',
   'triangle-alert',
   'x',
 ] as const
@@ -46,7 +50,9 @@ export const CATALOGUE = [
 const SCANNED = ['apps/desktop/src', 'packages/ui/src']
 
 export function camelCaseOf(name: string): string {
-  return name.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
+  // Lucide numbers some of its icons (`trash-2`), and a digit is no more a separator than a
+  // letter is: dropping the dash without raising anything gives a valid identifier.
+  return name.replace(/-([a-z0-9])/g, (_, character: string) => character.toUpperCase())
 }
 
 /**

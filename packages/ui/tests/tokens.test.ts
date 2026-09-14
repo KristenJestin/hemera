@@ -118,9 +118,9 @@ describe('Densité et échelle', () => {
       width: 248,
       minWidth: 180,
       maxWidth: 420,
-      collapsedWidth: 58,
+      collapsedWidth: 0,
     })
-    expect(shell.gutter.size).toBe(6)
+    expect(shell.gutter).toEqual({ size: 6, rule: 1 })
   })
 })
 

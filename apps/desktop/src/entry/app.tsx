@@ -12,7 +12,7 @@
  */
 
 import { EMBEDDED_FONTS, ThemeProvider } from '@hemera/ui'
-import { addFonts, render, useWindowSize, windowBackend } from '@gpuix/react'
+import { addFonts, render, useGpuix, useWindowSize, windowBackend } from '@gpuix/react'
 import { useEffect, useRef } from 'react'
 
 import { t } from '../i18n/index.ts'
@@ -34,8 +34,18 @@ interface HemeraProps {
   context: StoreContext
 }
 
+/**
+ * The window is opened without its native frame, so the projects bar is the title bar.
+ *
+ * The decision is not taken here: the shell reads what the renderer actually exposes and
+ * falls back to the system bar when anything is missing, so a renderer without the window
+ * commands never leaves a window that cannot be moved or closed.
+ */
+const FRAMELESS_WINDOW = true
+
 function Hemera({ route, context }: HemeraProps) {
   const size = useWindowSize()
+  const { renderer } = useGpuix()
   const gate = useRef(createWindowSizeGate())
   const announced = useRef(false)
   const model = useSessions({ context, inspectFolder: folderProblem, now: Date.now })
@@ -55,7 +65,11 @@ function Hemera({ route, context }: HemeraProps) {
   if (route === 'showcase') return <ShowcasePage />
   return (
     <ThemeProvider name={model.theme} onThemeChange={model.setTheme}>
-      <SessionsPage model={model} />
+      <SessionsPage
+        model={model}
+        framelessWindow={FRAMELESS_WINDOW}
+        {...(renderer === null ? {} : { windowCommands: renderer })}
+      />
     </ThemeProvider>
   )
 }
@@ -76,4 +90,5 @@ console.log(`channel ${instance.channel}, route ${route}, profile ${instance.dir
 
 render(<Hemera route={route} context={instance.context} />, {
   title: windowTitleOf(t('app.name'), instance.channel),
+  titlebarTransparent: FRAMELESS_WINDOW,
 })

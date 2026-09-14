@@ -22,7 +22,7 @@ import {
   WindowShell,
   space,
 } from '@hemera/ui'
-import type { ThemeColors } from '@hemera/ui'
+import type { ThemeColors, WindowCommands } from '@hemera/ui'
 import { useState } from 'react'
 
 import { t } from '../../i18n/index.ts'
@@ -32,14 +32,17 @@ import type { SessionsModel } from './use-sessions.ts'
 /** Colours projects are marked with in the bar, in order. */
 const PROJECT_COLORS: (keyof ThemeColors)[] = ['primary', 'ok', 'info', 'warn', 'missionDefine']
 
-/** Surfaces that take the main panel while they are open; there is no real modal here. */
+/** Decisions laid over the window; only one is open at a time. */
 type Overlay = 'none' | 'new-project' | 'settings' | 'rename'
 
 export interface SessionsPageProps {
   model: SessionsModel
+  /** The renderer's window commands, when the window was opened without its native frame. */
+  windowCommands?: WindowCommands
+  framelessWindow?: boolean
 }
 
-export function SessionsPage({ model }: SessionsPageProps) {
+export function SessionsPage({ model, windowCommands, framelessWindow }: SessionsPageProps) {
   const [draft, setDraft] = useState('')
   const [overlay, setOverlay] = useState<Overlay>('none')
 
@@ -135,6 +138,28 @@ export function SessionsPage({ model }: SessionsPageProps) {
     </Stack>
   )
 
+  // A decision is laid over the window by the shell. Rendered in the content it would take
+  // its place: the thread and its composer would stop existing while the panel is open.
+  const decision =
+    overlay === 'new-project' ? (
+      <NewProjectDialog onClose={close} onCreate={model.addProject} />
+    ) : overlay === 'settings' && model.configuration !== null ? (
+      <SettingsDialog
+        configuration={model.configuration}
+        path={model.activeProjectPath}
+        theme={model.theme}
+        onThemeChange={model.setTheme}
+        onClose={close}
+        onSave={model.configureProject}
+      />
+    ) : overlay === 'rename' && model.activeSession !== null ? (
+      <RenameSessionDialog
+        title={model.activeSession.title}
+        onClose={close}
+        onRename={model.renameSession}
+      />
+    ) : null
+
   return (
     <WindowShell
       testId="shell"
@@ -146,6 +171,14 @@ export function SessionsPage({ model }: SessionsPageProps) {
       onSidebarCollapsedChange={model.setSidebarCollapsed}
       projects={projects}
       sidebar={sidebar}
+      windowLabels={{
+        minimize: t('window.minimize'),
+        maximize: t('window.maximize'),
+        close: t('window.close'),
+      }}
+      {...(windowCommands === undefined ? {} : { windowCommands })}
+      {...(framelessWindow === undefined ? {} : { framelessWindow })}
+      {...(decision === null ? {} : { overlay: decision })}
     >
       <Stack
         direction="column"
@@ -159,24 +192,7 @@ export function SessionsPage({ model }: SessionsPageProps) {
           <Notice testId="failure" tone="error" message={model.failure} />
         )}
 
-        {overlay === 'new-project' ? (
-          <NewProjectDialog onClose={close} onCreate={model.addProject} />
-        ) : overlay === 'settings' && model.configuration !== null ? (
-          <SettingsDialog
-            configuration={model.configuration}
-            path={model.activeProjectPath}
-            theme={model.theme}
-            onThemeChange={model.setTheme}
-            onClose={close}
-            onSave={model.configureProject}
-          />
-        ) : overlay === 'rename' && model.activeSession !== null ? (
-          <RenameSessionDialog
-            title={model.activeSession.title}
-            onClose={close}
-            onRename={model.renameSession}
-          />
-        ) : model.activeProjectId === null ? (
+        {model.activeProjectId === null ? (
           <EmptyState
             testId="no-project"
             iconName="folder"

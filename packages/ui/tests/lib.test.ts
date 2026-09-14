@@ -118,8 +118,8 @@ describe('Traversée manuelle du clavier', () => {
 })
 
 describe('Animation interdite sur un élément dans le flux', () => {
-  test('opacity, radius and painted transforms animate anywhere', () => {
-    for (const target of ['opacity', 'borderRadius', 'scale', 'x', 'y'] as const) {
+  test('opacity and radius animate anywhere', () => {
+    for (const target of ['opacity', 'borderRadius'] as const) {
       expect(canAnimate(target, { outOfFlow: false })).toBe(true)
     }
   })

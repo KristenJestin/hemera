@@ -14,6 +14,9 @@ export interface BoxProps {
   children?: ReactNode
   testId?: string
   onClick?: (event: EventPayload) => void
+  onMouseDown?: (event: EventPayload) => void
+  onMouseUp?: (event: EventPayload) => void
+  onMouseMove?: (event: EventPayload) => void
   onMouseEnter?: (event: EventPayload) => void
   onMouseLeave?: (event: EventPayload) => void
 }

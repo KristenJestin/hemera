@@ -38,7 +38,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Comparaison des deux thèmes', () => {
       root.render(<ShowcasePage />)
       root.renderer.flush()
       const painted = textsOf(root.renderer.toJSON() as TreeNode)
-      for (const component of ['Button', 'Badge', 'Card', 'Composer', 'DialogPanel', 'Notice']) {
+      for (const component of ['Button', 'Badge', 'Card', 'Composer', 'Modal', 'Notice']) {
         expect(painted).toContain(component)
       }
     } finally {
