@@ -1,6 +1,6 @@
 # Traceability — lot-1-demarrage
 
-128 of 154 scenarios are covered by a test named after them.
+152 of 154 scenarios are covered by a test named after them.
 2 wait on a machine or an act that does not exist here, and say which.
 
 ## domain-journal
@@ -31,7 +31,7 @@
 |---|---|
 | Projet de conception | `packages/runtime/tests/workspace-store.test.ts` |
 | Chemin unique du Projet | `packages/runtime/tests/project-configuration.test.ts` |
-| Dossier inaccessible | _deferred — undefined_ |
+| Dossier inaccessible | `apps/desktop/system-tests/sessions.test.tsx` |
 | Sources ajoutées plus tard | `packages/runtime/tests/project-configuration.test.ts` |
 | Aucune initialisation imposée | `packages/runtime/tests/project-configuration.test.ts` |
 | Édition de la configuration | `packages/runtime/tests/project-configuration.test.ts` |
@@ -40,24 +40,24 @@
 | Deux emplacements déclarés | `packages/runtime/tests/project-configuration.test.ts` |
 | Aucun dépôt déclaré | `packages/runtime/tests/workspace-store.test.ts` |
 | Chemin sortant de la racine | `packages/runtime/tests/workspace-store.test.ts` |
-| Bascule entre deux Projets | _deferred — undefined_ |
-| Projet actif restauré | _deferred — undefined_ |
-| Projet actif devenu indisponible | _deferred — undefined_ |
+| Bascule entre deux Projets | `apps/desktop/system-tests/sessions.test.tsx` |
+| Projet actif restauré | `apps/desktop/system-tests/sessions.test.tsx` |
+| Projet actif devenu indisponible | `apps/desktop/system-tests/sessions.test.tsx` |
 
 ## sessions
 
 | Scenario | Test |
 |---|---|
 | Travaux parallèles | `packages/runtime/tests/session-thread.test.ts` |
-| Session sélectionnée conservée | _deferred — undefined_ |
-| Aucune Session | _deferred — undefined_ |
+| Session sélectionnée conservée | `apps/desktop/system-tests/sessions.test.tsx` |
+| Aucune Session | `apps/desktop/system-tests/sessions.test.tsx` |
 | Création dans un Projet | `packages/runtime/tests/workspace-store.test.ts` |
 | Aucune Spec créée implicitement | `packages/runtime/tests/session-thread.test.ts` |
 | Aucun Projet actif | `packages/runtime/tests/session-thread.test.ts` |
 | Message enregistré | `packages/runtime/tests/session-thread.test.ts` |
 | Ordre des messages | `packages/runtime/tests/workspace-store.test.ts` |
 | Échec d'enregistrement | `packages/runtime/tests/session-thread.test.ts` |
-| Brouillon non envoyé | _deferred — undefined_ |
+| Brouillon non envoyé | `apps/desktop/system-tests/sessions.test.tsx` |
 | Deux Sessions retrouvées | `packages/runtime/system-tests/durability.test.ts` |
 | Arrêt brutal | `packages/runtime/system-tests/durability.test.ts` |
 | Titre dérivé du premier message | `packages/runtime/tests/workspace-store.test.ts` |
@@ -65,8 +65,8 @@
 | Session sans message | `packages/runtime/tests/session-thread.test.ts` |
 | Session archivée puis restaurée | `packages/runtime/tests/workspace-store.test.ts` |
 | Archivage durable | `packages/runtime/tests/session-thread.test.ts` |
-| Aucune suppression proposée | _deferred — undefined_ |
-| Aucun provider disponible | _deferred — undefined_ |
+| Aucune suppression proposée | `apps/desktop/system-tests/sessions.test.tsx` |
+| Aucun provider disponible | `apps/desktop/system-tests/sessions.test.tsx` |
 | Contenu conservé indépendamment | `packages/runtime/tests/session-thread.test.ts` |
 
 ## design-system
@@ -80,44 +80,44 @@
 | Dimension hors échelle détectée | `tools/design-tokens.test.ts` |
 | Clé sémantique manquante dans un thème | `packages/ui/tests/tokens.test.ts` |
 | Token manquant pour un besoin réel | `tools/design-tokens.test.ts` |
-| Bascule de thème à chaud | _deferred — undefined_ |
-| Thème restauré après redémarrage | _deferred — undefined_ |
-| Suivi du thème système indisponible | _deferred — undefined_ |
+| Bascule de thème à chaud | `apps/desktop/system-tests/sessions.test.tsx` |
+| Thème restauré après redémarrage | `apps/desktop/system-tests/sessions.test.tsx` |
+| Suivi du thème système indisponible | `apps/desktop/system-tests/sessions.test.tsx` |
 | Préférence de thème absente ou invalide | `packages/ui/tests/lib.test.ts` |
 | Police manquante au démarrage | `apps/desktop/tests/fonts.test.ts` |
 | Taille de texte hors échelle | `packages/ui/tests/tokens.test.ts` |
-| Texte technique en police monospace | _deferred — undefined_ |
+| Texte technique en police monospace | `packages/ui/system-tests/primitives.test.tsx` |
 | Animation interdite sur un élément dans le flux | `packages/ui/tests/lib.test.ts` |
 | Ombre multi-couche refusée | `packages/ui/tests/tokens.test.ts` |
 | Espacement hors échelle | `tools/design-tokens.test.ts` |
 | Icône absente du catalogue | `packages/ui/tests/icons.test.ts` |
 | Emoji utilisé comme icône | `tools/icons.test.ts` |
-| Icône sans couleur héritée | _deferred — undefined_ |
+| Icône sans couleur héritée | `packages/ui/system-tests/primitives.test.tsx` |
 | Composant local dupliquant le catalogue | `tools/components.test.ts` |
-| État désactivé figé | `packages/ui/tests/lib.test.ts` |
+| État désactivé figé | `packages/ui/system-tests/primitives.test.tsx`, `packages/ui/tests/lib.test.ts` |
 | Variante manquante | `packages/ui/tests/primitives.test.ts` |
 | Composant non contrôlé | `tools/components.test.ts` |
 | Dossier de composant incomplet | `tools/components.test.ts` |
 | Style écrit dans le hook | `tools/components.test.ts` |
 | Composant sans démonstration | `apps/desktop/system-tests/showcase-registry.test.ts`, `tools/components.test.ts` |
 | Démonstration inaccessible en production | `apps/desktop/tests/showcase.test.ts` |
-| Comparaison des deux thèmes | _deferred — undefined_ |
-| Focus restauré après fermeture d'un overlay | _deferred — undefined_ |
+| Comparaison des deux thèmes | `apps/desktop/system-tests/showcase.test.tsx` |
+| Focus restauré après fermeture d'un overlay | `packages/ui/src/components/dialog-panel/dialog-panel.test.tsx` |
 | Traversée manuelle du clavier | `packages/ui/tests/lib.test.ts` |
-| Activation au clavier | `packages/ui/tests/lib.test.ts` |
-| Soumission d'un champ multiligne | _deferred — undefined_ |
-| Sidebar repliée et largeur persistée | _deferred — undefined_ |
-| Largeur hors bornes | _deferred — undefined_ |
-| Onglet de Projet actif | _deferred — undefined_ |
+| Activation au clavier | `packages/ui/system-tests/primitives.test.tsx`, `packages/ui/tests/lib.test.ts` |
+| Soumission d'un champ multiligne | `packages/ui/src/components/textarea/textarea.test.tsx` |
+| Sidebar repliée et largeur persistée | `packages/ui/system-tests/window-shell.test.tsx` — _deferred — the GPU test renderer does not exist on this target: upstream reads a rendered image back on macOS and Windows only, so the suite is named here and runs there_ |
+| Largeur hors bornes | `packages/ui/system-tests/window-shell.test.tsx` — _deferred — the GPU test renderer does not exist on this target: upstream reads a rendered image back on macOS and Windows only, so the suite is named here and runs there_ |
+| Onglet de Projet actif | `apps/desktop/system-tests/sessions.test.tsx` |
 | Première mesure de fenêtre ignorée | `apps/desktop/tests/window-size.test.ts` |
-| Décorations client disponibles | _deferred — undefined_ |
-| Décorations client indisponibles | _deferred — undefined_ |
+| Décorations client disponibles | `packages/ui/system-tests/window-shell.test.tsx` — _deferred — the GPU test renderer does not exist on this target: upstream reads a rendered image back on macOS and Windows only, so the suite is named here and runs there_ |
+| Décorations client indisponibles | `packages/ui/system-tests/window-shell.test.tsx` — _deferred — the GPU test renderer does not exist on this target: upstream reads a rendered image back on macOS and Windows only, so the suite is named here and runs there_ |
 | Vérification par cible | `tools/environment-report.test.ts` |
 | Écran à haute densité | _deferred — human acceptance with a real mouse, recorded in the matrix of D12b_ |
 | Mesure de texte interdite | `tools/design-tokens.test.ts` |
 | Balisage recopié depuis le prototype | `tools/components.test.ts` |
 | Valeur intermédiaire normalisée | `tools/design-tokens.test.ts` |
-| Fonctionnalité absente du lot présentée par la maquette | _deferred — undefined_ |
+| Fonctionnalité absente du lot présentée par la maquette | `apps/desktop/system-tests/sessions.test.tsx` |
 | Style visuel dans un écran | `tools/design-tokens.test.ts` |
 | Composant intégré sans test clavier | `tools/components.test.ts` |
 | Périmètre livré | `tools/components.test.ts` |
@@ -150,7 +150,7 @@
 | Dépendance système manquante | `tools/package-desktop.test.ts` |
 | Vérification du socle sans fenêtre | `tools/business-suite.test.ts` |
 | Démarrage applicatif | `apps/desktop/system-tests/window.test.ts`, `tools/gpuix/native-build.test.ts` |
-| Aucune réponse d'agent au lot 1 | _deferred — undefined_ |
+| Aucune réponse d'agent au lot 1 | `apps/desktop/system-tests/sessions.test.tsx` |
 | Premier lancement sur chaque système | `packages/runtime/tests/profile.test.ts` |
 | Nettoyage d'un Workspace produit | `packages/runtime/system-tests/profile-independence.test.ts` |
 | Profil de test | `packages/runtime/tests/profile.test.ts` |
