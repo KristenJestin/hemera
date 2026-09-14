@@ -1,11 +1,35 @@
-import { describe, expect, test } from 'bun:test'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { TARGETS, targetOfHost } from './environment-report.ts'
-import { SYSTEM_REQUIREMENTS, executableNameOf, packageNameOf } from './package-desktop.ts'
+import {
+  SYSTEM_REQUIREMENTS,
+  assemblePackage,
+  executableNameOf,
+  packageNameOf,
+} from './package-desktop.ts'
 
 const repository = resolve(import.meta.dir, '..')
+
+/**
+ * A package assembled by this run, in a directory of its own.
+ *
+ * The suite assembles what it checks rather than reading what a previous run left in `dist`:
+ * a fresh checkout has no `dist`, and a stale one would be checked instead of the sources.
+ */
+let assembled: string
+let output: string
+
+beforeAll(async () => {
+  output = mkdtempSync(join(tmpdir(), 'hemera-package-'))
+  assembled = (await assemblePackage(repository, 'prod', output)).directory
+}, 300_000)
+
+afterAll(() => {
+  rmSync(output, { recursive: true, force: true })
+})
 
 /** Every source file of the application, at any depth. */
 function sourcesUnder(folder: string): string[] {
@@ -25,7 +49,7 @@ describe('Installation dans un dossier choisi', () => {
   })
 
   test('the package assembled on this machine is the one of its target', () => {
-    const directory = join(repository, 'dist', packageNameOf('prod', targetOfHost()))
+    const directory = assembled
     expect(existsSync(directory)).toBe(true)
 
     const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')) as {
@@ -51,10 +75,7 @@ describe('Dépendance système manquante', () => {
     // Windows prerequisites are an open point of the lot, written as such.
     expect(SYSTEM_REQUIREMENTS[TARGETS['win32-x64']].join(' ')).toContain('open point')
 
-    const document = readFileSync(
-      join(repository, 'dist', packageNameOf('prod', targetOfHost()), 'SYSTEM-REQUIREMENTS.md'),
-      'utf8',
-    )
+    const document = readFileSync(join(assembled, 'SYSTEM-REQUIREMENTS.md'), 'utf8')
     for (const line of SYSTEM_REQUIREMENTS[targetOfHost()]) {
       expect(document).toContain(line)
     }
@@ -63,10 +84,7 @@ describe('Dépendance système manquante', () => {
 
 describe('Aucune mise à jour implicite', () => {
   test('the package says an update is a replacement, and promises no updater', () => {
-    const document = readFileSync(
-      join(repository, 'dist', packageNameOf('prod', targetOfHost()), 'SYSTEM-REQUIREMENTS.md'),
-      'utf8',
-    )
+    const document = readFileSync(join(assembled, 'SYSTEM-REQUIREMENTS.md'), 'utf8')
     expect(document).toContain('Replace the whole package folder')
     expect(document).toContain('no auto-updater')
     expect(document).toContain('downloads nothing and installs')
@@ -88,12 +106,7 @@ describe('Aucune mise à jour implicite', () => {
 
 describe('Aucune dépendance aux spikes', () => {
   test('the assembled executable carries no path of a spike', () => {
-    const executable = join(
-      repository,
-      'dist',
-      packageNameOf('prod', targetOfHost()),
-      executableNameOf(targetOfHost()),
-    )
+    const executable = join(assembled, executableNameOf(targetOfHost()))
     const bytes = readFileSync(executable).toString('latin1')
     expect(bytes).not.toContain('spikes')
     expect(bytes).not.toContain('gpuix-fork')
@@ -102,7 +115,7 @@ describe('Aucune dépendance aux spikes', () => {
 
 describe('Copie embarquée', () => {
   test('the package embeds no database it could open as the profile', () => {
-    const directory = join(repository, 'dist', packageNameOf('prod', targetOfHost()))
+    const directory = assembled
     const shipped = readdirSync(directory)
     expect(shipped.some((entry) => entry.endsWith('.db'))).toBe(false)
     expect(shipped.some((entry) => entry.endsWith('.sqlite'))).toBe(false)

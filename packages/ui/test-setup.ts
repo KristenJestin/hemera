@@ -5,6 +5,10 @@
  * The shipped build deliberately leaves `gpui/test-support` out (fork patch 0007), so the
  * component tests cannot use the installed addon. Nothing here changes what is installed:
  * the loader honours `NAPI_RS_NATIVE_LIBRARY_PATH` and the test addon is only read.
+ *
+ * The addon is a build artefact, absent from a fresh checkout. Only the suites that paint
+ * need it, so a run that names none of their folders goes on without it rather than stopping
+ * the business suite on a machine that has never compiled the renderer.
  */
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -26,16 +30,28 @@ function targetOfThisHost(): string {
 
 const manifest = JSON.parse(readFileSync(join(vendor, 'manifest.json'), 'utf8')) as Manifest
 const target = targetOfThisHost()
+
+/** Folders whose suites paint on the GPU test renderer. */
+const PAINTING = ['system-tests', 'src']
+
+const needed = Bun.argv.some((argument) => PAINTING.some((folder) => argument.includes(folder)))
+
 const addon = manifest.testSupport.find((entry) => entry.target === target)
 if (addon === undefined) {
-  throw new Error(
-    `no test-support addon vendored for ${target}; ` +
-      'run "bun tools/gpuix/build-native.ts --test-support" then "bun tools/gpuix/pack-vendor.ts"',
-  )
+  if (needed) {
+    throw new Error(
+      `no test-support addon vendored for ${target}; ` +
+        'run "bun tools/gpuix/build-native.ts --test-support" then "bun tools/gpuix/pack-vendor.ts"',
+    )
+  }
+} else {
+  const path = join(vendor, 'test-support', addon.file)
+  if (existsSync(path)) {
+    process.env.NAPI_RS_NATIVE_LIBRARY_PATH = path
+  } else if (needed) {
+    throw new Error(
+      `the vendored test-support addon is missing at ${path}; ` +
+        'run "bun tools/gpuix/build-native.ts --test-support" then "bun tools/gpuix/pack-vendor.ts"',
+    )
+  }
 }
-
-const path = join(vendor, 'test-support', addon.file)
-if (!existsSync(path)) {
-  throw new Error(`the vendored test-support addon is missing at ${path}`)
-}
-process.env.NAPI_RS_NATIVE_LIBRARY_PATH = path
