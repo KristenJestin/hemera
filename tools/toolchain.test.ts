@@ -61,6 +61,9 @@ describe('Installation du produit', () => {
     const root = JSON.parse(readFileSync(join(repository, 'package.json'), 'utf8'))
     expect(root.packageManager).toMatch(/^bun@\d+\.\d+\.\d+$/)
     for (const [name, range] of Object.entries(root.devDependencies as Record<string, string>)) {
+      // A path dependency has no version to pin: the renderer fork is the checkout beside
+      // this repository, and what identifies it is the commit that checkout is on.
+      if (range.startsWith('file:')) continue
       expect(`${name}@${range}`).toMatch(/@\d+\.\d+\.\d+$/)
     }
   })

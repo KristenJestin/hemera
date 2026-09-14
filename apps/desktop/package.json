@@ -9,7 +9,7 @@
     "test:system": "bun test ./system-tests"
   },
   "dependencies": {
-    "@gpuix/react": "file:../../vendor/gpuix/0.7.0-hemera.1/gpuix-react-0.7.0-hemera.1.tgz",
+    "@gpuix/react": "file:../../../gpuix/packages/react",
     "@hemera/core": "workspace:*",
     "@hemera/runtime": "workspace:*",
     "@hemera/ui": "workspace:*",

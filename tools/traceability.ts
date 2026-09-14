@@ -142,7 +142,7 @@ export function uncovered(coverage: Coverage[]): Coverage[] {
  */
 export const REQUIRED_SUITES = [
   'Échec de migration',
-  'Empreinte non conforme',
+  'Addon absent de la machine',
   'Échec de persistance',
   'Arrêt brutal',
   'Rang rééquilibrable',

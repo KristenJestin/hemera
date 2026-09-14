@@ -15,16 +15,16 @@
 | Lint et format en vérification | `tools/toolchain.test.ts` |
 | Installation du produit | `tools/toolchain.test.ts` |
 | Commandes de développement communes | `tools/turbo-graph.test.ts` |
-| Historique du renderer | `tools/gpuix/fork-provenance.test.ts` |
+| Historique du renderer | `tools/gpuix/fork.test.ts` |
 | Tâche à effets sans cache | `tools/turbo-graph.test.ts` |
 | Consommateur indépendant du desktop | `tools/boundaries.test.ts` |
 | Frontières des packages | `tools/boundaries.test.ts` |
 | Vérification après modification partagée | `tools/turbo-graph.test.ts` |
 | Squelettes non demandés | `tools/turbo-graph.test.ts` |
-| Installation propre | `tools/gpuix/fork-provenance.test.ts`, `tools/gpuix/vendor.test.ts` |
-| Empreinte non conforme | `tools/gpuix/fork-provenance.test.ts`, `tools/gpuix/vendor.test.ts` |
-| Patch qui ne s'applique pas | `tools/gpuix/fork-provenance.test.ts` |
-| Paquet incompatible | `tools/gpuix/native-build.test.ts`, `tools/gpuix/vendor.test.ts` |
+| Installation propre | `tools/gpuix/fork.test.ts` |
+| Addon absent de la machine | `tools/gpuix/fork.test.ts` |
+| Suivi de l'amont | `tools/gpuix/fork.test.ts` |
+| Paquet incompatible | `tools/gpuix/native-build.test.ts` |
 | Premier lot sur les deux systèmes | _deferred — no Linux machine is available here; to be run on the Linux target_ |
 | Une seule cible vérifiée | `tools/environment-report.test.ts` |
 | Dépendance système manquante | `apps/desktop/tests/native-dependencies.test.ts`, `tools/package-desktop.test.ts` |
@@ -58,8 +58,8 @@
 | Préférence absente ou invalide | `packages/runtime/tests/preferences.test.ts` |
 | Première mesure de fenêtre ignorée | `apps/desktop/tests/window-size.test.ts` |
 | Emplacement des préférences | `packages/runtime/tests/preferences.test.ts` |
-| Prototype présent dans le fork | `tools/gpuix/fork-provenance.test.ts` |
-| Aucune dépendance aux spikes | `tools/gpuix/fork-provenance.test.ts`, `tools/gpuix/vendor.test.ts`, `tools/package-desktop.test.ts` |
+| Prototype présent dans le fork | `tools/gpuix/fork.test.ts` |
+| Aucune dépendance aux spikes | `tools/package-desktop.test.ts` |
 | Mesure de spike présentée comme preuve | `tools/package-desktop.test.ts` |
 
 ## design-system
@@ -95,7 +95,7 @@
 | Composant sans démonstration | `apps/desktop/system-tests/showcase-registry.test.ts`, `tools/components.test.ts` |
 | Démonstration inaccessible en production | `apps/desktop/tests/showcase.test.ts` |
 | Comparaison des deux thèmes | `apps/desktop/system-tests/showcase.test.tsx` |
-| Focus restauré après fermeture d'un overlay | `packages/ui/src/components/dialog-panel/dialog-panel.test.tsx` |
+| Focus restauré après fermeture d'un overlay | `packages/ui/src/components/modal/modal.test.tsx` |
 | Traversée manuelle du clavier | `packages/ui/tests/lib.test.ts` |
 | Activation au clavier | `packages/ui/system-tests/primitives.test.tsx`, `packages/ui/tests/lib.test.ts` |
 | Soumission d'un champ multiligne | `packages/ui/src/components/textarea/textarea.test.tsx` |

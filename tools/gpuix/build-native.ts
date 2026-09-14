@@ -1,29 +1,28 @@
 #!/usr/bin/env bun
 /**
- * Builds the GPUiX native addon for the host target from the rebuilt fork, checks that
- * generating the bindings did not truncate the product-facing type surface, loads the addon
- * on the host, and records the toolchain and system that produced it.
+ * Builds the GPUiX native addon for the host target, from the fork checked out beside this
+ * repository, checks that generating the bindings did not truncate the product-facing type
+ * surface, loads the addon on the host, and reports the toolchain that produced it.
  *
- *   bun tools/gpuix/build-native.ts                 release build, default features
+ *   bun tools/gpuix/build-native.ts                 release build, what ships
  *   bun tools/gpuix/build-native.ts --test-support  build carrying the GPUI test renderer
+ *
+ * The addon stays where it was built: the product depends on the fork by path, so there is
+ * nothing to copy anywhere and no artefact to keep in step with a manifest.
  */
 
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { platform, release, version } from 'node:os'
 import { join, resolve } from 'node:path'
 
-/** Version the fork packages are consumed under (design D01). */
-export const VENDOR_VERSION = '0.7.0-hemera.1'
-
 /** Build variants of the addon. */
-export type Variant = 'default' | 'test-support'
+export type Variant = 'release' | 'test-support'
 
 /** Names the product itself calls; losing one of them is a truncated generation. */
 const PRODUCT_SURFACE = 'GpuixRenderer'
 
 export interface NativeBuildRecord {
-  version: string
   target: string
   variant: Variant
   addon: { file: string; sha256: string; bytes: number }
@@ -35,7 +34,6 @@ export interface NativeBuildRecord {
     toolchain: { rustc: string; cargo: string; bun: string; napi: string }
   }
 }
-
 interface CommandResult {
   ok: boolean
   stdout: string
@@ -103,16 +101,18 @@ function addonFileOf(nativePackage: string): string {
   return found
 }
 
-export function buildNative(
-  forkPath: string,
-  vendorRoot: string,
-  variant: Variant,
-): NativeBuildRecord {
+/**
+ * Builds the addon in place and reports what came out of it.
+ *
+ * `build:release` leaves `gpui/test-support` out — upstream turns it on by default, and a
+ * `gpui` built with it draws two to three frames per input event instead of one.
+ */
+export function buildNative(forkPath: string, variant: Variant): NativeBuildRecord {
   const nativePackage = join(forkPath, 'packages', 'native')
   const tracked = run(['git', 'show', 'HEAD:packages/native/index.d.ts'], forkPath)
   if (!tracked.ok) throw new Error('the fork does not track packages/native/index.d.ts')
 
-  const script = variant === 'test-support' ? 'build:test-support' : 'build'
+  const script = variant === 'test-support' ? 'build' : 'build:release'
   const build = run(['bun', 'run', script], nativePackage)
   if (!build.ok) {
     throw new Error(`the ${variant} native build failed: ${build.stderr || build.stdout}`)
@@ -141,23 +141,13 @@ export function buildNative(
     nativePackage,
   )
 
-  const destination = join(vendorRoot, VENDOR_VERSION, 'native', `${target}-${variant}`)
-  mkdirSync(destination, { recursive: true })
-  for (const file of [addon, 'index.js', 'index.d.ts']) {
-    copyFileSync(join(nativePackage, file), join(destination, file))
-  }
-  // Each variant regenerates the bindings in place; the fork keeps its tracked ones, and the
-  // bindings that match this build stay next to the addon that was staged.
-  run(['git', 'checkout', '--', 'packages/native/index.js', 'packages/native/index.d.ts'], forkPath)
-
   return {
-    version: VENDOR_VERSION,
     target,
     variant,
     addon: {
       file: addon,
-      sha256: sha256Of(join(destination, addon)),
-      bytes: statSync(join(destination, addon)).size,
+      sha256: sha256Of(join(nativePackage, addon)),
+      bytes: statSync(join(nativePackage, addon)).size,
     },
     truncatedNames: truncated,
     load: {
@@ -180,19 +170,8 @@ export function buildNative(
 if (import.meta.main) {
   const repository = resolve(import.meta.dir, '..', '..')
   const forkPath = resolve(repository, '..', 'gpuix')
-  const variant: Variant = process.argv.includes('--test-support') ? 'test-support' : 'default'
-  const record = buildNative(forkPath, join(repository, 'vendor', 'gpuix'), variant)
-
-  const recordPath = join(
-    repository,
-    'vendor',
-    'gpuix',
-    VENDOR_VERSION,
-    'native',
-    `${record.target}-${record.variant}`,
-    'build.json',
-  )
-  await Bun.write(recordPath, `${JSON.stringify(record, null, 2)}\n`)
+  const variant: Variant = process.argv.includes('--test-support') ? 'test-support' : 'release'
+  const record = buildNative(forkPath, variant)
 
   console.log(`${record.variant} addon for ${record.target}: ${record.addon.file}`)
   console.log(`  sha256 ${record.addon.sha256}`)
@@ -200,5 +179,5 @@ if (import.meta.main) {
   if (record.truncatedNames.length > 0) {
     console.log(`  names absent from this variant: ${record.truncatedNames.length}`)
   }
-  if (!existsSync(recordPath)) process.exit(1)
+  if (!record.load.ok) process.exit(1)
 }

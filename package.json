@@ -16,10 +16,10 @@
     "build": "turbo run build",
     "package": "bun tools/package-desktop.ts",
     "test:tools": "bun test tools",
-    "report": "bun tools/environment-report.ts --window --write",
-    "preinstall": "bun tools/gpuix/verify-vendor.ts"
+    "report": "bun tools/environment-report.ts --window --write"
   },
   "devDependencies": {
+    "@gpuix/native": "file:../gpuix/packages/native",
     "@types/bun": "1.4.2",
     "lucide-static": "1.45.0",
     "oxfmt": "0.67.0",
@@ -28,9 +28,7 @@
     "typescript": "7.0.2"
   },
   "overrides": {
-    "@gpuix/native": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-0.7.0-hemera.1.tgz",
-    "@gpuix/native-linux-x64-gnu": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-linux-x64-gnu-0.7.0-hemera.1.tgz",
-    "@gpuix/native-win32-x64-msvc": "file:./vendor/gpuix/0.7.0-hemera.1/gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz"
+    "@gpuix/native": "file:../gpuix/packages/native"
   },
   "packageManager": "bun@1.4.2"
 }

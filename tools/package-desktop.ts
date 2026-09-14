@@ -14,7 +14,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { TARGETS, targetOfHost } from './environment-report.ts'
@@ -91,19 +91,15 @@ function sha256Of(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
-interface VendorManifest {
-  version: string
-  fork: { headCommit: string }
-}
-
+/** The renderer this package embeds: the branch of the fork beside it, and its commit. */
 function forkOf(repositoryRoot: string): { version: string; head: string } {
-  const root = join(repositoryRoot, 'vendor', 'gpuix')
-  const version = existsSync(root) ? (readdirSync(root)[0] ?? null) : null
-  if (version === null) return { version: 'unknown', head: 'unknown' }
-  const manifest = JSON.parse(
-    readFileSync(join(root, version, 'manifest.json'), 'utf8'),
-  ) as VendorManifest
-  return { version: manifest.version, head: manifest.fork.headCommit }
+  const forkPath = resolve(repositoryRoot, '..', 'gpuix')
+  if (!existsSync(join(forkPath, '.git'))) return { version: 'unknown', head: 'unknown' }
+  const read = (args: string[]): string => {
+    const run = Bun.spawnSync(['git', '-C', forkPath, ...args], { stdout: 'pipe', stderr: 'pipe' })
+    return run.exitCode === 0 ? new TextDecoder().decode(run.stdout).trim() : 'unknown'
+  }
+  return { version: read(['rev-parse', '--abbrev-ref', 'HEAD']), head: read(['rev-parse', 'HEAD']) }
 }
 
 export interface AssembledPackage {

@@ -1,7 +1,7 @@
 /**
  * What of the renderer is present on this machine.
  *
- * The fork checkout and the compiled addons are build inputs, not sources: a machine that has
+ * The fork checkout and the compiled addon are build inputs, not sources: a machine that has
  * only cloned the monorepo has neither. The checks that read them run where they exist and say
  * so where they do not, rather than failing a checkout for something it was never given.
  */
@@ -11,34 +11,41 @@ import { join, resolve } from 'node:path'
 
 const repository = resolve(import.meta.dir, '..', '..')
 
-/** The renderer fork, cloned beside the monorepo by `bootstrap -WithFork`. */
+/** The renderer fork, cloned beside the monorepo by the bootstrap. */
 export const FORK_PATH = resolve(repository, '..', 'gpuix')
 
-function vendoredVersion(): string | null {
-  const root = join(repository, 'vendor', 'gpuix')
-  return existsSync(root) ? (readdirSync(root)[0] ?? null) : null
-}
+/** Where the addon is built, and where the product reads it from. */
+export const NATIVE_PACKAGE = join(FORK_PATH, 'packages', 'native')
 
-function builtInto(folder: string): boolean {
-  const version = vendoredVersion()
-  if (version === null) return false
-  const directory = join(repository, 'vendor', 'gpuix', version, folder)
-  return existsSync(directory) && readdirSync(directory).length > 0
-}
-
-/** Whether the fork is checked out, with its history and its patch queue. */
+/** Whether the fork is checked out. */
 export function forkCheckedOut(): boolean {
   return existsSync(join(FORK_PATH, '.git'))
 }
 
-/** Whether the native addon was compiled on this machine. */
-export function nativeBuilt(): boolean {
-  return builtInto('native')
+/** Compiled addons of the fork, by file name. */
+export function builtAddons(): string[] {
+  if (!existsSync(NATIVE_PACKAGE)) return []
+  return readdirSync(NATIVE_PACKAGE).filter((entry) => entry.endsWith('.node'))
 }
 
-/** Whether the addon carrying the GPU test renderer was compiled on this machine. */
+/** Whether the native addon was compiled on this machine. */
+export function nativeBuilt(): boolean {
+  return builtAddons().length > 0
+}
+
+/**
+ * Whether the addon installed here carries the GPU test renderer.
+ *
+ * Read from the addon rather than from a file name: the same file is the release build or
+ * the test-support one depending on which script last produced it.
+ */
 export function testSupportBuilt(): boolean {
-  return builtInto('test-support')
+  try {
+    const native = require('@gpuix/native') as { hasTestGpuixRenderer: () => boolean }
+    return native.hasTestGpuixRenderer()
+  } catch {
+    return false
+  }
 }
 
 /** Says once what is missing, so a skipped check is never a silent one. */

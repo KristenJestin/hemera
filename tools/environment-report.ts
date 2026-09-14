@@ -20,6 +20,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { arch, platform, release, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -148,28 +149,30 @@ function compilerOf(target: Target): string {
   return version === UNKNOWN ? UNKNOWN : `MSVC ${version} (${edition})`
 }
 
-interface VendorManifest {
-  version: string
-  fork: { headCommit: string }
-  packages: { name: string; sha256: string; target: string | null }[]
-}
+/**
+ * The renderer this target was built against: the fork commit, and the addon actually
+ * loaded, fingerprinted where it sits.
+ *
+ * The addon is not copied anywhere, so what is reported is the file the product imports —
+ * not a record of a build that may since have been redone.
+ */
+function artefactsOf(repositoryRoot: string): EnvironmentReport['artefacts'] {
+  const forkPath = resolve(repositoryRoot, '..', 'gpuix')
+  const head = readCommand(['git', '-C', forkPath, 'rev-parse', 'HEAD'])
+  const branch = readCommand(['git', '-C', forkPath, 'rev-parse', '--abbrev-ref', 'HEAD'])
+  const nativePackage = join(forkPath, 'packages', 'native')
+  if (!existsSync(nativePackage)) return { fork: UNKNOWN, head: UNKNOWN, packages: [] }
 
-function artefactsOf(repositoryRoot: string, target: Target): EnvironmentReport['artefacts'] {
-  const root = join(repositoryRoot, 'vendor', 'gpuix')
-  const version = existsSync(root) ? (readdirSync(root)[0] ?? null) : null
-  const manifestPath = version === null ? null : join(root, version, 'manifest.json')
-  if (manifestPath === null || !existsSync(manifestPath)) {
-    return { fork: UNKNOWN, head: UNKNOWN, packages: [] }
-  }
-
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as VendorManifest
+  const addons = readdirSync(nativePackage).filter((entry) => entry.endsWith('.node'))
   return {
-    fork: manifest.version,
-    head: manifest.fork.headCommit,
-    // Only the packages of this target: a report never names an artefact it cannot load.
-    packages: manifest.packages
-      .filter((entry) => entry.target === null || entry.target === target)
-      .map((entry) => ({ name: entry.name, sha256: entry.sha256 })),
+    fork: branch,
+    head,
+    packages: addons.map((file) => ({
+      name: file,
+      sha256: createHash('sha256')
+        .update(readFileSync(join(nativePackage, file)))
+        .digest('hex'),
+    })),
   }
 }
 
@@ -253,22 +256,10 @@ export interface ReportOptions {
  * detail of the run either: a target is qualified by what it could check, so what it could
  * not has to be readable beside the rest.
  */
-function limitsOf(repositoryRoot: string, target: Target): string[] {
-  const root = join(repositoryRoot, 'vendor', 'gpuix')
-  const version = existsSync(root) ? (readdirSync(root)[0] ?? null) : null
-  if (version === null) return []
-  const manifestPath = join(root, version, 'manifest.json')
-  if (!existsSync(manifestPath)) return []
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
-    testSupport?: { file: string; target: string }[]
-  }
-  const addon = (manifest.testSupport ?? []).find((entry) => entry.target === target)
-  if (addon === undefined) return []
-  const path = join(root, version, 'test-support', addon.file)
-  if (!existsSync(path)) return []
+function limitsOf(): string[] {
   try {
     // eslint-disable-next-line
-    const native = require(path) as { hasTestGpuixRenderer: () => boolean }
+    const native = require('@gpuix/native') as { hasTestGpuixRenderer: () => boolean }
     if (native.hasTestGpuixRenderer()) return []
   } catch {
     return []
@@ -293,8 +284,8 @@ export function collectReport({ repositoryRoot, observation }: ReportOptions): E
       rust: readCommand(['rustc', '--version']),
       compiler: compilerOf(target),
     },
-    artefacts: artefactsOf(repositoryRoot, target),
-    limits: limitsOf(repositoryRoot, target),
+    artefacts: artefactsOf(repositoryRoot),
+    limits: limitsOf(),
     observation: observation ?? { window: 'not observed in this run', errors: [] },
   }
 }
