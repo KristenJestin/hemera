@@ -3,7 +3,9 @@ import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { EMBEDDED_FONTS, FONT_LICENCES, MONO_FAMILY, SANS_FAMILY } from '@hemera/ui'
+// The declaration of the fonts, not the barrel: the barrel re-exports the components, which
+// load the renderer and its native addon on a machine that may have none.
+import { EMBEDDED_FONTS, FONT_LICENCES, MONO_FAMILY, SANS_FAMILY } from '@hemera/ui/fonts/index.ts'
 
 import {
   embeddedFontsDirectory,

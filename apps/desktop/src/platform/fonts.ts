@@ -6,8 +6,8 @@
  * the application starts on the system fallback family instead of failing silently.
  */
 
-import { EMBEDDED_FONTS } from '@hemera/ui'
-import type { EmbeddedFont } from '@hemera/ui'
+import { EMBEDDED_FONTS } from '@hemera/ui/fonts/index.ts'
+import type { EmbeddedFont } from '@hemera/ui/fonts/index.ts'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'

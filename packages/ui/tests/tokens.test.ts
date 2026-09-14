@@ -3,19 +3,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import {
-  COLOR_ROLES,
-  control,
-  dark,
-  fontSize,
-  lineHeight,
-  light,
-  radius,
-  row,
-  shell,
-  space,
-} from '../src/index.ts'
-import type { Theme } from '../src/index.ts'
+// The leaf modules, not the barrel: the barrel re-exports the components, which load the
+// renderer and its native addon on a machine that may have none.
+import { control, row, shell } from '../src/tokens/components.ts'
+import { fontSize, lineHeight, radius, space } from '../src/tokens/primitives.ts'
+import { COLOR_ROLES } from '../src/tokens/semantic.ts'
+import type { Theme } from '../src/tokens/semantic.ts'
+import { dark } from '../src/theme/dark.ts'
+import { light } from '../src/theme/light.ts'
 
 const repository = resolve(import.meta.dir, '..', '..', '..')
 const ui = resolve(import.meta.dir, '..')

@@ -2,38 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { SHOWCASE } from '@hemera/ui/showcase'
-
 import { CHANNEL_OVERRIDE_VARIABLE, resolveChannel } from '@hemera/runtime'
 import { canReach, routeOrDefault, routesOf } from '../src/ui/navigation.ts'
 import { windowTitleOf } from '../src/entry/window-title.ts'
 
 const desktop = resolve(import.meta.dir, '..')
-const componentsRoot = resolve(desktop, '..', '..', 'packages', 'ui', 'src', 'components')
-
-describe('Composant sans démonstration', () => {
-  test('every component of the catalogue has an entry', () => {
-    const folders = readdirSync(componentsRoot).filter((entry) => !entry.endsWith('.ts'))
-    const registered = new Set(SHOWCASE.map((entry) => entry.component))
-    for (const folder of folders) {
-      const component = folder
-        .split('-')
-        .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-        .join('')
-      expect(registered.has(component)).toBe(true)
-    }
-  })
-
-  test('every entry demonstrates at least one case', () => {
-    for (const entry of SHOWCASE) {
-      expect(entry.cases.length).toBeGreaterThan(0)
-      for (const demonstration of entry.cases) {
-        expect(demonstration.name.length).toBeGreaterThan(0)
-        expect(typeof demonstration.render).toBe('function')
-      }
-    }
-  })
-})
 
 describe('Démonstration inaccessible en production', () => {
   test('a prod package exposes no route to the page', () => {

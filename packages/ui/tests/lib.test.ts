@@ -1,23 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 import type { EventPayload } from '@gpuix/react'
 
+// The leaf modules, not the barrel: the barrel re-exports the components, which load the
+// renderer and its native addon on a machine that may have none.
 import {
-  DEFAULT_THEME,
-  canAnimate,
   conflictingShortcuts,
-  dark,
-  focusRing,
-  freezeStyle,
   isActivationKey,
   isDismissKey,
-  light,
-  mergeStyle,
-  themeOf,
-  transition,
   traversalIntentOf,
-  variants,
-} from '../src/index.ts'
-import { withoutUndefined } from '../src/lib/style.ts'
+} from '../src/lib/keyboard.ts'
+import { canAnimate, transition } from '../src/lib/motion.ts'
+import { focusRing, freezeStyle, mergeStyle, variants, withoutUndefined } from '../src/lib/style.ts'
+import { dark } from '../src/theme/dark.ts'
+import { light } from '../src/theme/light.ts'
+import { DEFAULT_THEME, themeOf } from '../src/theme/provider.tsx'
 
 function keyEvent(key: string, modifiers?: { shift?: boolean }): EventPayload {
   return { key, modifiers } as EventPayload

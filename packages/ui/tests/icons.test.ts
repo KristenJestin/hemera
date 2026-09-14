@@ -3,8 +3,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { ICONS, iconSize } from '../src/index.ts'
-import type { IconName } from '../src/index.ts'
+// The leaf modules, not the barrel: the barrel re-exports the components, which load the
+// renderer and its native addon on a machine that may have none.
+import { ICONS } from '../src/icons/catalog.ts'
+import type { IconName } from '../src/icons/catalog.ts'
+import { iconSize } from '../src/tokens/primitives.ts'
 
 const repository = resolve(import.meta.dir, '..', '..', '..')
 const catalogue = join(repository, 'packages', 'ui', 'src', 'icons', 'catalog.ts')
