@@ -56,7 +56,12 @@ describe('Vérification par cible', () => {
 describe('Une seule cible vérifiée', () => {
   test('the report of this machine exists and names only what was observed here', () => {
     const path = reportPathOf(repository, targetOfHost())
-    expect(existsSync(path)).toBe(true)
+    // A target carries its own report or it is not verified. The absence says what produces
+    // it, because the first run on a new target lands here with nothing to read.
+    const found = existsSync(path)
+      ? path
+      : `no report for ${targetOfHost()}; run "bun run report" on this target to produce it`
+    expect(found).toBe(path)
 
     const document = readFileSync(path, 'utf8')
     expect(document).toContain(`# Environment report — ${targetOfHost()}`)
