@@ -11,10 +11,21 @@ import {
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
+import { absent, forkCheckedOut } from './available.ts'
 import { APPLIED_GPUIX_PATCHES, applyQueue, sha256Of } from './rebuild-fork.ts'
 import { recordedSubmodulePointer, verifyFork } from './verify-fork.ts'
 
 const forkPath = resolve(import.meta.dir, '..', '..', '..', 'gpuix')
+
+/**
+ * A check that reads the fork checkout itself.
+ *
+ * The fork is a build input, not a source of this repository: a machine that only cloned the
+ * monorepo has no checkout to read, and is told so rather than failed.
+ */
+const hasFork = forkCheckedOut()
+if (!hasFork) absent('the renderer fork', 'bootstrap -WithFork')
+const withFork = test.skipIf(!hasFork)
 
 function git(cwd: string, ...args: string[]): string {
   const result = Bun.spawnSync(['git', ...args], { cwd, stdout: 'pipe', stderr: 'pipe' })
@@ -61,13 +72,13 @@ function conflictingPatch(directory: string): string {
 }
 
 describe('Installation propre', () => {
-  test('the rebuilt fork matches its provenance manifest', async () => {
+  withFork('the rebuilt fork matches its provenance manifest', async () => {
     const report = await verifyFork(forkPath)
     expect(report.problems).toEqual([])
     expect(report.ok).toBe(true)
   })
 
-  test('exactly the socle subset of the gpuix queue is applied', async () => {
+  withFork('exactly the socle subset of the gpuix queue is applied', async () => {
     const manifest = await Bun.file(join(forkPath, 'PROVENANCE.json')).json()
     const applied = manifest.patches.gpuix.filter((patch: { applied: boolean }) => patch.applied)
     expect(applied).toHaveLength(APPLIED_GPUIX_PATCHES)
@@ -75,16 +86,19 @@ describe('Installation propre', () => {
     expect(manifest.patches.gpui.every((patch: { applied: boolean }) => patch.applied)).toBe(true)
   })
 
-  test('licence files of the rebuilt revision are recorded with their fingerprint', async () => {
-    const manifest = await Bun.file(join(forkPath, 'PROVENANCE.json')).json()
-    expect(manifest.licences.map((licence: { file: string }) => licence.file)).toEqual([
-      'LICENSE',
-      'THIRD_PARTY_NOTICES.md',
-    ])
-    for (const licence of manifest.licences) {
-      expect(sha256Of(join(forkPath, licence.file))).toBe(licence.sha256)
-    }
-  })
+  withFork(
+    'licence files of the rebuilt revision are recorded with their fingerprint',
+    async () => {
+      const manifest = await Bun.file(join(forkPath, 'PROVENANCE.json')).json()
+      expect(manifest.licences.map((licence: { file: string }) => licence.file)).toEqual([
+        'LICENSE',
+        'THIRD_PARTY_NOTICES.md',
+      ])
+      for (const licence of manifest.licences) {
+        expect(sha256Of(join(forkPath, licence.file))).toBe(licence.sha256)
+      }
+    },
+  )
 })
 
 describe('Empreinte non conforme', () => {
@@ -152,14 +166,14 @@ describe("Patch qui ne s'applique pas", () => {
 })
 
 describe('Aucune dépendance aux spikes', () => {
-  test('the gpui submodule pointer resolves in the rebuilt fork', () => {
+  withFork('the gpui submodule pointer resolves in the rebuilt fork', () => {
     const pointer = recordedSubmodulePointer(forkPath)
     expect(pointer).not.toBeNull()
     expect(existsSync(join(forkPath, 'zed', '.git'))).toBe(true)
     expect(git(join(forkPath, 'zed'), 'rev-parse', 'HEAD')).toBe(pointer!)
   })
 
-  test('the rebuilt fork carries its own patch queue', () => {
+  withFork('the rebuilt fork carries its own patch queue', () => {
     expect(existsSync(join(forkPath, 'patches', 'gpuix'))).toBe(true)
     expect(existsSync(join(forkPath, 'patches', 'zed'))).toBe(true)
     expect(git(forkPath, 'ls-files', 'patches').split('\n').length).toBeGreaterThan(
@@ -180,7 +194,7 @@ function vendorManifest(): {
 }
 
 describe('Historique du renderer', () => {
-  test('the fork keeps its commits and the monorepo consumes an identifiable version', () => {
+  withFork('the fork keeps its commits and the monorepo consumes an identifiable version', () => {
     const manifest = vendorManifest()
 
     // The version and the exact commit it was built from are written down.

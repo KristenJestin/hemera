@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
+import { absent, nativeBuilt } from './available.ts'
 import { VENDOR_VERSION, declaredNames, truncatedNames } from './build-native.ts'
 import type { NativeBuildRecord } from './build-native.ts'
 
@@ -16,8 +17,12 @@ function recordsBuiltHere(): NativeBuildRecord[] {
     .map((path) => JSON.parse(readFileSync(path, 'utf8')) as NativeBuildRecord)
 }
 
+/** The addon is compiled here or it is not: a checkout carries the packed one, not the build. */
+const hasNative = nativeBuilt()
+if (!hasNative) absent('the compiled native addon', 'bun tools/gpuix/build-native.ts')
+
 describe('Démarrage applicatif', () => {
-  test('a native addon was produced and loaded for this host', () => {
+  test.skipIf(!hasNative)('a native addon was produced and loaded for this host', () => {
     const records = recordsBuiltHere()
     expect(records.length).toBeGreaterThan(0)
     const host = process.platform === 'win32' ? 'x86_64-pc-windows-msvc' : process.platform

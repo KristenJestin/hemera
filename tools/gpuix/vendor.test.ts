@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
+import { absent, testSupportBuilt } from './available.ts'
 import { VENDOR_VERSION } from './build-native.ts'
 import { FORK_BASE_COMMIT } from './rebuild-fork.ts'
 import { platformNameOf } from './pack-vendor.ts'
@@ -142,8 +143,14 @@ describe('Empreinte non conforme', () => {
   })
 })
 
+/** The test renderer is a build artefact too, and gitignored for the same reason. */
+const hasTestSupport = testSupportBuilt()
+if (!hasTestSupport) {
+  absent('the test-support addon', 'bun tools/gpuix/build-native.ts --test-support')
+}
+
 describe('Test renderer vendu à part', () => {
-  test('a test-support addon is vendored for the host target', () => {
+  test.skipIf(!hasTestSupport)('a test-support addon is vendored for the host target', () => {
     const addons = manifest().testSupport
     expect(addons.length).toBeGreaterThan(0)
     for (const addon of addons) {
