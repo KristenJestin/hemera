@@ -134,3 +134,28 @@ describe('Message hors convention', () => {
     expect(validateCommitMessage(message).ok).toBe(true)
   })
 })
+
+describe('Crochet ignoré faute de droit', () => {
+  test('both hooks are recorded as executable, or Git skips them without a word', () => {
+    // Git for Windows runs a hook whatever its mode; every other system skips one that is
+    // not executable, and skips it silently — the protection would simply not exist there.
+    const recorded = new TextDecoder().decode(
+      Bun.spawnSync(['git', 'ls-files', '-s', '.githooks'], {
+        cwd: repository,
+        stdout: 'pipe',
+      }).stdout,
+    )
+
+    const modes = recorded
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => ({ mode: line.slice(0, 6), file: line.split('\t')[1] }))
+
+    expect(modes.length).toBeGreaterThanOrEqual(2)
+    for (const entry of modes) {
+      expect(entry.mode).toBe('100755')
+    }
+    expect(modes.map((entry) => entry.file)).toContain('.githooks/pre-commit')
+    expect(modes.map((entry) => entry.file)).toContain('.githooks/commit-msg')
+  })
+})
