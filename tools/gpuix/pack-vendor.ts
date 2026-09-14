@@ -386,8 +386,9 @@ if (import.meta.main) {
       `  ${entry.name}${entry.target === null ? '' : ` (${entry.target})`}: ${entry.file}`,
     )
   }
-  // The lockfile pins the tarball by its path, and the install cache keys on that path: a
-  // freshly packed archive at the same path is served from the cache as the old one.
-  console.log('\nthe lockfile still points at the archives installed before this run:')
-  console.log('  rm bun.lock && bun install')
+  // The lockfile pins the tarball by its path, and so does the tree already extracted under
+  // node_modules: a freshly packed archive written at the same path is served as the old one.
+  // Dropping the lockfile alone leaves that tree in place, and the install reports no change.
+  console.log('\nthe archives installed before this run are still in place:')
+  console.log('  rm -rf node_modules bun.lock && bun install')
 }

@@ -91,9 +91,11 @@ bun run package                 # portable package of this target
 Root `test` never runs migrations on a real user profile; tests use a temporary profile.
 Never run a real LLM provider from a test.
 
-After re-vendoring the fork (`tools/gpuix/pack-vendor.ts`), run `rm bun.lock && bun install`:
-the lockfile pins each archive by its path and the install cache keys on that path, so a new
-archive written at the same path is served as the old one.
+After re-vendoring the fork (`tools/gpuix/pack-vendor.ts`), run
+`rm -rf node_modules bun.lock && bun install`: the lockfile pins each archive by its path, and
+so does the tree already extracted under `node_modules`, so a new archive written at the same
+path is served as the old one. Dropping the lockfile alone leaves that tree in place and the
+install reports no change, which silently keeps testing the previous addon.
 
 ## Git rules (non-negotiable)
 
