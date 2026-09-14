@@ -147,7 +147,7 @@
 | Paquet incompatible | `tools/gpuix/native-build.test.ts`, `tools/gpuix/vendor.test.ts` |
 | Premier lot sur les deux systèmes | _deferred — no Linux machine is available here; to be run on the Linux target_ |
 | Une seule cible vérifiée | `tools/environment-report.test.ts` |
-| Dépendance système manquante | `tools/package-desktop.test.ts` |
+| Dépendance système manquante | `apps/desktop/tests/native-dependencies.test.ts`, `tools/package-desktop.test.ts` |
 | Vérification du socle sans fenêtre | `tools/business-suite.test.ts` |
 | Démarrage applicatif | `apps/desktop/system-tests/window.test.ts`, `tools/gpuix/native-build.test.ts` |
 | Aucune réponse d'agent au lot 1 | `apps/desktop/system-tests/sessions.test.tsx` |

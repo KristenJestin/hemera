@@ -55,10 +55,16 @@ describe("Développement à côté de l'installation", () => {
   })
 
   test('the start announces the channel and the profile it opened', () => {
+    // `main.tsx` stays the entry everyone launches; the application it loads is `app.tsx`,
+    // so that a load failing for want of a system library is caught before any of this runs.
+    const application = readFileSync(join(desktop, 'src', 'entry', 'app.tsx'), 'utf8')
+    expect(application).toContain('windowTitleOf(')
+    expect(application).toMatch(/console\.log\(`channel \$\{instance\.channel\}/)
+    expect(application).toContain('profile ${instance.directory}')
+
     const entry = readFileSync(join(desktop, 'src', 'entry', 'main.tsx'), 'utf8')
-    expect(entry).toContain('windowTitleOf(')
-    expect(entry).toMatch(/console\.log\(`channel \$\{instance\.channel\}/)
-    expect(entry).toContain('profile ${instance.directory}')
+    expect(entry).toContain("import('./app.tsx')")
+    expect(entry).toContain('missingLibraryDiagnostic')
   })
 
   test('the reserved variable overrides the channel, and an unknown value is ignored', () => {
