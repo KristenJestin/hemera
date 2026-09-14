@@ -84,10 +84,16 @@ bun run lint                    # oxlint
 bun run fmt                     # oxfmt (fmt:check in CI)
 bun run test                    # business tests without GPU + traceability table
 bun run build                   # native builds, no cache
+bun run report                  # environment report of this target (D02)
+bun run package                 # portable package of this target
 ```
 
 Root `test` never runs migrations on a real user profile; tests use a temporary profile.
 Never run a real LLM provider from a test.
+
+After re-vendoring the fork (`tools/gpuix/pack-vendor.ts`), run `rm bun.lock && bun install`:
+the lockfile pins each archive by its path and the install cache keys on that path, so a new
+archive written at the same path is served as the old one.
 
 ## Git rules (non-negotiable)
 
