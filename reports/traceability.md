@@ -106,12 +106,12 @@
 | Traversée manuelle du clavier | `packages/ui/tests/lib.test.ts` |
 | Activation au clavier | `packages/ui/system-tests/primitives.test.tsx`, `packages/ui/tests/lib.test.ts` |
 | Soumission d'un champ multiligne | `packages/ui/src/components/textarea/textarea.test.tsx` |
-| Sidebar repliée et largeur persistée | `packages/ui/system-tests/window-shell.test.tsx` — _deferred — the GPU test renderer does not exist on this target: upstream reads a rendered image back on macOS and Windows only, so the suite is named here and runs there_ |
-| Largeur hors bornes | `packages/ui/system-tests/window-shell.test.tsx` — _deferred — the GPU test renderer does not exist on this target: upstream reads a rendered image back on macOS and Windows only, so the suite is named here and runs there_ |
+| Sidebar repliée et largeur persistée | `packages/ui/system-tests/window-shell.test.tsx` |
+| Largeur hors bornes | `packages/ui/system-tests/window-shell.test.tsx` |
 | Onglet de Projet actif | `apps/desktop/system-tests/sessions.test.tsx` |
 | Première mesure de fenêtre ignorée | `apps/desktop/tests/window-size.test.ts` |
-| Décorations client disponibles | `packages/ui/system-tests/window-shell.test.tsx` — _deferred — the GPU test renderer does not exist on this target: upstream reads a rendered image back on macOS and Windows only, so the suite is named here and runs there_ |
-| Décorations client indisponibles | `packages/ui/system-tests/window-shell.test.tsx` — _deferred — the GPU test renderer does not exist on this target: upstream reads a rendered image back on macOS and Windows only, so the suite is named here and runs there_ |
+| Décorations client disponibles | `packages/ui/system-tests/window-shell.test.tsx` |
+| Décorations client indisponibles | `packages/ui/system-tests/window-shell.test.tsx` |
 | Vérification par cible | `tools/environment-report.test.ts` |
 | Écran à haute densité | _deferred — human acceptance with a real mouse, recorded in the matrix of D12b_ |
 | Mesure de texte interdite | `tools/design-tokens.test.ts` |

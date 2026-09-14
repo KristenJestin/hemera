@@ -21,9 +21,6 @@ export const DEFERRAL_REASONS = {
   linux: 'no Linux machine is available here; to be run on the Linux target',
   human: 'human acceptance with a real mouse, recorded in the matrix of D12b',
   tooling: 'covered by the repository tooling check rather than by a test suite',
-  renderer:
-    'the GPU test renderer does not exist on this target: upstream reads a rendered image ' +
-    'back on macOS and Windows only, so the suite is named here and runs there',
 } as const
 
 export type DeferralReason = keyof typeof DEFERRAL_REASONS
@@ -37,17 +34,6 @@ export type DeferralReason = keyof typeof DEFERRAL_REASONS
 export const DEFERRED: Record<string, DeferralReason> = {
   'Premier lot sur les deux systèmes': 'linux',
   'Écran à haute densité': 'human',
-  // Painted on the GPU test renderer, which upstream does not provide outside macOS and
-  // Windows. The suite exists and is named after the scenario; it is skipped where the
-  // capability is absent, so the scenario is carried by the target that has it.
-  'Polices embarquées rendues': 'renderer',
-  'Coquille de fenêtre': 'renderer',
-  'Sidebar repliée et largeur persistée': 'renderer',
-  'Largeur hors bornes': 'renderer',
-  'Décorations client disponibles': 'renderer',
-  'Décorations client indisponibles': 'renderer',
-  'Parcours natif au clavier': 'renderer',
-  'Parcours natif à la molette': 'renderer',
 }
 
 export interface Scenario {
@@ -93,7 +79,7 @@ export function scenariosOf(specsRoot: string): Scenario[] {
  * modifier decides where it runs, not what it covers. Reading only bare `describe(` would
  * report a scenario as untested the moment its suite is gated on a capability.
  */
-const SUITE_NAME = /describe(?:\.\w+\([^)]*\))?\(\s*(['"`])(.+?)\1/g
+const SUITE_NAME = /describe(?:\.\w+(?:\([^)]*\))?)*\s*\(\s*(['"`])(.+?)\1/g
 
 /** Suites declared by the test files, by suite name. */
 export function suitesOf(repositoryRoot: string): Map<string, string[]> {
@@ -191,13 +177,10 @@ export function renderTable(coverage: Coverage[]): string {
   for (const [capability, entries] of byCapability) {
     lines.push(`## ${capability}`, '', '| Scenario | Test |', '|---|---|')
     for (const entry of entries) {
-      // A scenario can have its suite and still not run here. Showing only the file would
-      // read as verified on this machine, and showing only the note would lose the suite.
-      const files = entry.tests.map((file) => `\`${file}\``).join(', ')
-      const note =
-        entry.deferral === null ? null : `_deferred — ${DEFERRAL_REASONS[entry.deferral]}_`
       const where =
-        entry.tests.length > 0 ? (note === null ? files : `${files} — ${note}`) : (note ?? '')
+        entry.tests.length > 0
+          ? entry.tests.map((file) => `\`${file}\``).join(', ')
+          : `_deferred — ${DEFERRAL_REASONS[entry.deferral!]}_`
       lines.push(`| ${entry.scenario.name} | ${where} |`)
     }
     lines.push('')

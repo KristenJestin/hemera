@@ -89,6 +89,34 @@ describe('Table de traçabilité', () => {
   })
 })
 
+describe('Suite conditionnée à une capacité', () => {
+  test('a suite is found by its name whether or not it carries a modifier', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hemera-traceability-'))
+    mkdirSync(join(root, 'tools'), { recursive: true })
+    // The modifier decides where a suite runs, never what it covers. A pattern that reads
+    // `describe(` alone drops every suite the moment one is gated on a capability, and the
+    // table then reports covered scenarios as untested without anything failing.
+    writeFileSync(
+      join(root, 'tools', 'covered.test.ts'),
+      [
+        "describe('Suite nue', () => {})",
+        "describe.skipIf(!PAINTS)('Suite conditionnée', () => {})",
+        "describe.skip('Suite désactivée', () => {})",
+        "describe.each([1, 2])('Suite répétée', () => {})",
+        '',
+      ].join('\n'),
+    )
+    try {
+      const suites = suitesOf(root)
+      for (const name of ['Suite nue', 'Suite conditionnée', 'Suite désactivée', 'Suite répétée']) {
+        expect(suites.has(name)).toBe(true)
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("Tests d'injection d'échec et de propriétés", () => {
   test('the suites the lot requires by name all exist and are named as required', () => {
     expect(missingRequiredSuites(repository)).toEqual([])
