@@ -3,7 +3,7 @@
   "fork": {
     "remote": "https://github.com/remorses/gpuix",
     "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
-    "headCommit": "42f6a2110d8cfa5dcf15e9c2f42305cbcc358f96",
+    "headCommit": "4ef369215707d0fcdb3fb4127fc3194ec78022c1",
     "branch": "hemera/0.7.0-hemera.1"
   },
   "packages": [
@@ -15,18 +15,18 @@
       "revision": {
         "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
         "gpuiBaseCommit": "81c99f816b4a5f69d3c014774068034c24d1d7af",
-        "queue": "e33e05dcd0ba5e47cf014181a5f4f10cda2c29617a4d7251e567aaefc4137462"
+        "queue": "0c21a03d555ae1b7a5c3165747edf7f90fcf507ca44eaf4f519377c219142b22"
       }
     },
     {
       "name": "@gpuix/native-linux-x64-gnu",
       "file": "gpuix-native-linux-x64-gnu-0.7.0-hemera.1.tgz",
-      "sha256": "be1ee04390c0370adee74d6ce872390f31882d1b5905aa61a93bede3beac0140",
+      "sha256": "992a4bb3cf6ac579655e05f52bea2971ed74a01fead420bf222108a04bb1e044",
       "target": "x86_64-unknown-linux-gnu",
       "revision": {
         "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
         "gpuiBaseCommit": "81c99f816b4a5f69d3c014774068034c24d1d7af",
-        "queue": "e33e05dcd0ba5e47cf014181a5f4f10cda2c29617a4d7251e567aaefc4137462"
+        "queue": "0c21a03d555ae1b7a5c3165747edf7f90fcf507ca44eaf4f519377c219142b22"
       }
     },
     {
@@ -43,15 +43,9 @@
       "revision": {
         "baseCommit": "0fac5c941e8431261605eaf0f48d8528322b414d",
         "gpuiBaseCommit": "81c99f816b4a5f69d3c014774068034c24d1d7af",
-        "queue": "e33e05dcd0ba5e47cf014181a5f4f10cda2c29617a4d7251e567aaefc4137462"
+        "queue": "0c21a03d555ae1b7a5c3165747edf7f90fcf507ca44eaf4f519377c219142b22"
       }
     }
   ],
-  "testSupport": [
-    {
-      "file": "gpuix-native.win32-x64-msvc.node",
-      "sha256": "59d0204a0acfd6f6e039daf8fde2ef716eda0a15ee2fee7ecf08b4a84e6007f0",
-      "target": "x86_64-pc-windows-msvc"
-    }
-  ]
+  "testSupport": []
 }

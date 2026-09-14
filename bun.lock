@@ -117,7 +117,7 @@
 
     "@gpuix/native": ["@gpuix/native@./vendor/gpuix/0.7.0-hemera.1/gpuix-native-0.7.0-hemera.1.tgz", { "optionalDependencies": { "@gpuix/native-linux-x64-gnu": "0.7.0-hemera.1", "@gpuix/native-win32-x64-msvc": "0.7.0-hemera.1" } }, "sha512-cs8MMRB1l6rAAT4rY6pZpOXlujBl1Qe4VesoTP54E2pxB1iQrD4Ix0e82p8FT4obkxwimwXrVNP6cRQ3lkZpHg=="],
 
-    "@gpuix/native-linux-x64-gnu": ["@gpuix/native-linux-x64-gnu@./vendor/gpuix/0.7.0-hemera.1/gpuix-native-linux-x64-gnu-0.7.0-hemera.1.tgz", {}, "sha512-esDVeNpXiWXxYSLX+xUV6JLfmdF4vPloYrYk3QIxlFHVnwYcqptbkSuBgYYbyAwNJk/PRI7nPAknqkkdADZjxA=="],
+    "@gpuix/native-linux-x64-gnu": ["@gpuix/native-linux-x64-gnu@./vendor/gpuix/0.7.0-hemera.1/gpuix-native-linux-x64-gnu-0.7.0-hemera.1.tgz", {}, "sha512-PAiZ7ur/PebMFP0zslDSmOSfDE2OLBfDOg3/HV/UMysd1Qq81DM1VK0uzHurZcrRFOcUrtuZytKmeJk6agpWWA=="],
 
     "@gpuix/native-win32-x64-msvc": ["@gpuix/native-win32-x64-msvc@./vendor/gpuix/0.7.0-hemera.1/gpuix-native-win32-x64-msvc-0.7.0-hemera.1.tgz", {}, "sha512-apkc+ky5OmlUF8X+u819SxtTkoYN6lpw1Le2ErO8gu+3LghzCh8Uoxc/Qb/ww8M3iIUd50CIVWnrNmPIqH7aeA=="],
 

@@ -94,17 +94,17 @@
 | Emoji utilisé comme icône | `tools/icons.test.ts` |
 | Icône sans couleur héritée | `packages/ui/system-tests/primitives.test.tsx` |
 | Composant local dupliquant le catalogue | `tools/components.test.ts` |
-| État désactivé figé | `packages/ui/tests/lib.test.ts`, `packages/ui/system-tests/primitives.test.tsx` |
+| État désactivé figé | `packages/ui/system-tests/primitives.test.tsx`, `packages/ui/tests/lib.test.ts` |
 | Variante manquante | `packages/ui/tests/primitives.test.ts` |
 | Composant non contrôlé | `tools/components.test.ts` |
 | Dossier de composant incomplet | `tools/components.test.ts` |
 | Style écrit dans le hook | `tools/components.test.ts` |
-| Composant sans démonstration | `tools/components.test.ts`, `apps/desktop/system-tests/showcase-registry.test.ts` |
+| Composant sans démonstration | `apps/desktop/system-tests/showcase-registry.test.ts`, `tools/components.test.ts` |
 | Démonstration inaccessible en production | `apps/desktop/tests/showcase.test.ts` |
 | Comparaison des deux thèmes | `apps/desktop/system-tests/showcase.test.tsx` |
 | Focus restauré après fermeture d'un overlay | `packages/ui/src/components/dialog-panel/dialog-panel.test.tsx` |
 | Traversée manuelle du clavier | `packages/ui/tests/lib.test.ts` |
-| Activation au clavier | `packages/ui/tests/lib.test.ts`, `packages/ui/system-tests/primitives.test.tsx` |
+| Activation au clavier | `packages/ui/system-tests/primitives.test.tsx`, `packages/ui/tests/lib.test.ts` |
 | Soumission d'un champ multiligne | `packages/ui/src/components/textarea/textarea.test.tsx` |
 | Sidebar repliée et largeur persistée | `packages/ui/system-tests/window-shell.test.tsx` |
 | Largeur hors bornes | `packages/ui/system-tests/window-shell.test.tsx` |
@@ -141,15 +141,15 @@
 | Frontières des packages | `tools/boundaries.test.ts` |
 | Vérification après modification partagée | `tools/turbo-graph.test.ts` |
 | Squelettes non demandés | `tools/turbo-graph.test.ts` |
-| Installation propre | `tools/gpuix/vendor.test.ts`, `tools/gpuix/fork-provenance.test.ts` |
-| Empreinte non conforme | `tools/gpuix/vendor.test.ts`, `tools/gpuix/fork-provenance.test.ts` |
+| Installation propre | `tools/gpuix/fork-provenance.test.ts`, `tools/gpuix/vendor.test.ts` |
+| Empreinte non conforme | `tools/gpuix/fork-provenance.test.ts`, `tools/gpuix/vendor.test.ts` |
 | Patch qui ne s'applique pas | `tools/gpuix/fork-provenance.test.ts` |
 | Paquet incompatible | `tools/gpuix/native-build.test.ts`, `tools/gpuix/vendor.test.ts` |
 | Premier lot sur les deux systèmes | _deferred — no Linux machine is available here; to be run on the Linux target_ |
 | Une seule cible vérifiée | `tools/environment-report.test.ts` |
 | Dépendance système manquante | `tools/package-desktop.test.ts` |
 | Vérification du socle sans fenêtre | `tools/business-suite.test.ts` |
-| Démarrage applicatif | `tools/gpuix/native-build.test.ts`, `apps/desktop/system-tests/window.test.ts` |
+| Démarrage applicatif | `apps/desktop/system-tests/window.test.ts`, `tools/gpuix/native-build.test.ts` |
 | Aucune réponse d'agent au lot 1 | `apps/desktop/system-tests/sessions.test.tsx` |
 | Premier lancement sur chaque système | `packages/runtime/tests/profile.test.ts` |
 | Nettoyage d'un Workspace produit | `packages/runtime/system-tests/profile-independence.test.ts` |
@@ -171,13 +171,13 @@
 | Installation dans un dossier choisi | `tools/package-desktop.test.ts` |
 | Remplacement du paquet | `apps/desktop/system-tests/package.test.ts` |
 | Aucune mise à jour implicite | `tools/package-desktop.test.ts` |
-| Textes de l'interface | `tools/i18n.test.ts`, `apps/desktop/tests/i18n.test.ts` |
-| Clé de traduction manquante | `tools/i18n.test.ts`, `apps/desktop/tests/i18n.test.ts` |
+| Textes de l'interface | `apps/desktop/tests/i18n.test.ts`, `tools/i18n.test.ts` |
+| Clé de traduction manquante | `apps/desktop/tests/i18n.test.ts`, `tools/i18n.test.ts` |
 | Aucune promesse multilingue | `apps/desktop/tests/i18n.test.ts` |
 | Réouverture après redémarrage | `packages/runtime/tests/preferences.test.ts` |
 | Préférence absente ou invalide | `packages/runtime/tests/preferences.test.ts` |
 | Première mesure de fenêtre ignorée | `apps/desktop/tests/window-size.test.ts` |
 | Emplacement des préférences | `packages/runtime/tests/preferences.test.ts` |
 | Prototype présent dans le fork | `tools/gpuix/fork-provenance.test.ts` |
-| Aucune dépendance aux spikes | `tools/gpuix/vendor.test.ts`, `tools/gpuix/fork-provenance.test.ts`, `tools/package-desktop.test.ts` |
+| Aucune dépendance aux spikes | `tools/gpuix/fork-provenance.test.ts`, `tools/gpuix/vendor.test.ts`, `tools/package-desktop.test.ts` |
 | Mesure de spike présentée comme preuve | `tools/package-desktop.test.ts` |
