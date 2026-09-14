@@ -69,15 +69,17 @@ describe('Installation dans un dossier choisi', () => {
 
 describe('Dépendance système manquante', () => {
   test('each target ships the list of what it needs, and names what is not known', () => {
-    expect(SYSTEM_REQUIREMENTS[TARGETS['linux-x64']].join(' ')).toContain('libxkbcommon')
-    expect(SYSTEM_REQUIREMENTS[TARGETS['linux-x64']].join(' ')).toContain('Vulkan')
+    expect(SYSTEM_REQUIREMENTS[TARGETS['linux-x64']].flat().join(' ')).toContain('libxkbcommon')
+    expect(SYSTEM_REQUIREMENTS[TARGETS['linux-x64']].flat().join(' ')).toContain('Vulkan')
 
     // Windows prerequisites are an open point of the lot, written as such.
-    expect(SYSTEM_REQUIREMENTS[TARGETS['win32-x64']].join(' ')).toContain('open point')
+    expect(SYSTEM_REQUIREMENTS[TARGETS['win32-x64']].flat().join(' ')).toContain('open point')
 
+    // A requirement wrapped over several source lines is one bullet of the document, so it is
+    // looked for as it reads there and not line by line.
     const document = readFileSync(join(assembled, 'SYSTEM-REQUIREMENTS.md'), 'utf8')
-    for (const line of SYSTEM_REQUIREMENTS[targetOfHost()]) {
-      expect(document).toContain(line)
+    for (const requirement of SYSTEM_REQUIREMENTS[targetOfHost()]) {
+      expect(document).toContain(`- ${requirement.join(' ')}`)
     }
   })
 })

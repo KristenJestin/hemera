@@ -40,21 +40,31 @@ export function packageNameOf(channel: string, target: Target): string {
  * Windows has no documented prerequisite to this day; that is an open point of the lot and is
  * written as such rather than filled in with a guess.
  */
-export const SYSTEM_REQUIREMENTS: Record<Target, string[]> = {
+export const SYSTEM_REQUIREMENTS: Record<Target, string[][]> = {
   [TARGETS['win32-x64']]: [
-    'Windows 10 or 11, x64.',
-    'A GPU and driver supporting DirectX 12.',
-    'No further prerequisite is documented to this day: this is an open point of the lot,',
-    'to be established by running the package on a machine that never built it.',
+    ['Windows 10 or 11, x64.'],
+    ['A GPU and driver supporting DirectX 12.'],
+    [
+      'No further prerequisite is documented to this day: this is an open point of the lot,',
+      'to be established by running the package on a machine that never built it.',
+    ],
   ],
   [TARGETS['linux-x64']]: [
-    'Linux x64 with glibc.',
-    'libxkbcommon: the only library the addon names in its ELF dependencies, beside libc,',
-    'libm and libgcc. Observed by reading the addon built on 2026-09-14.',
-    'A Wayland compositor or X11, and a Vulkan loader: opened at run time, so they appear in',
-    'no dependency list and are only missed once the window tries to open.',
-    'Neither fontconfig nor freetype is needed to run: the fonts are embedded in the',
-    'executable, and the crate that reads them links fontconfig only while compiling.',
+    ['Linux x64 with glibc.'],
+    [
+      'libxkbcommon, libxkbcommon-x11 and libxcb: the libraries the addon names in its ELF',
+      'dependencies, beside libc, libm and libgcc. The last two arrived with the X11 client',
+      'of the renderer; without them the addon no longer loads at all, on a Wayland session',
+      'too. Observed by reading the addon built on 2026-09-14.',
+    ],
+    [
+      'A Wayland compositor or X11, and a Vulkan loader: opened at run time, so they appear',
+      'in no dependency list and are only missed once the window tries to open.',
+    ],
+    [
+      'Neither fontconfig nor freetype is needed to run: the fonts are embedded in the',
+      'executable, and the crate that reads them links fontconfig only while compiling.',
+    ],
   ],
 }
 
@@ -64,7 +74,9 @@ function requirementsDocument(target: Target, channel: string): string {
     '',
     `Channel of this package: \`${channel}\`.`,
     '',
-    ...SYSTEM_REQUIREMENTS[target].map((line) => `- ${line}`),
+    // Each requirement is written as the lines its source is wrapped over, and reads as one
+    // bullet: a wrap in the code is not a second prerequisite.
+    ...SYSTEM_REQUIREMENTS[target].map((lines) => `- ${lines.join(' ')}`),
     '',
     '## Updating',
     '',
