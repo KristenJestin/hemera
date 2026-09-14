@@ -196,6 +196,24 @@ export function carriedOver(destination: string, packed: PackagedTarball[]): Pac
   )
 }
 
+/**
+ * Test renderer addons a previous run recorded for targets this one did not build.
+ *
+ * Unlike the tarballs, these addons are never committed: each machine builds its own. The
+ * record of what another machine produced is therefore kept without asking for the file,
+ * exactly as the verification reads it — checked where it is, never required.
+ */
+export function carriedOverTestSupport(
+  destination: string,
+  packed: TestSupportAddon[],
+): TestSupportAddon[] {
+  const manifestPath = join(destination, 'manifest.json')
+  if (!existsSync(manifestPath)) return []
+  const previous = JSON.parse(readFileSync(manifestPath, 'utf8')) as VendorManifest
+  const replaced = new Set(packed.map((addon) => addon.target))
+  return (previous.testSupport ?? []).filter((addon) => !replaced.has(addon.target))
+}
+
 /** Directory holding the addons that carry the GPUI test renderer. */
 export function testSupportDirectory(vendorRoot: string): string {
   return join(vendorRoot, VENDOR_VERSION, 'test-support')

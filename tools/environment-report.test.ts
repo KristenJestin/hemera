@@ -65,10 +65,41 @@ describe('Une seule cible vérifiée', () => {
 
     const document = readFileSync(path, 'utf8')
     expect(document).toContain(`# Environment report — ${targetOfHost()}`)
-    expect(document).toContain('window opened')
 
-    // No report of a target this machine is not.
-    const other = Object.values(TARGETS).find((target) => target !== targetOfHost())
-    expect(existsSync(reportPathOf(repository, other!))).toBe(false)
+    // The observation is what this machine saw: a window with the size it was given, or the
+    // named reason there was none. Demanding a window here would fail a build machine that
+    // has no display, and would say nothing about the case that matters — a claim of an
+    // opening with no measurement behind it.
+    const observation = /\| Observation \| (.+?) \|/.exec(document)?.[1] ?? ''
+    expect(observation).toMatch(
+      /^window opened \d+x\d+|^no window announced itself|^not observed in this run/,
+    )
+  })
+
+  test('each report names its own target, and never another', () => {
+    // A target is qualified by its own report, produced on it. Carrying a result from one
+    // target to another is the mistake the whole rule exists to prevent — not the mere
+    // presence, beside it, of the report another machine wrote for itself.
+    const written = Object.values(TARGETS).filter((target) =>
+      existsSync(reportPathOf(repository, target)),
+    )
+    expect(written).toContain(targetOfHost())
+
+    for (const target of written) {
+      const document = readFileSync(reportPathOf(repository, target), 'utf8')
+      expect(document).toContain(`# Environment report — ${target}`)
+      expect(document).toContain('describes this machine only')
+      for (const foreign of Object.values(TARGETS).filter((name) => name !== target)) {
+        expect(document).not.toContain(foreign)
+      }
+
+      // Whoever wrote it: a window claimed is a window measured. The other two forms are the
+      // honest ones - no window, or a run that did not look. Demanding an opening here would
+      // fail a build machine with no display, which is a machine the lot expects to exist.
+      const observation = /\| Observation \| (.+?) \|/.exec(document)?.[1] ?? ''
+      expect(observation).toMatch(
+        /^window opened \d+x\d+|^no window announced itself|^not observed in this run/,
+      )
+    }
   })
 })

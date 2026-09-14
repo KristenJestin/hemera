@@ -7,7 +7,13 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { absent, testSupportBuilt } from './available.ts'
 import { VENDOR_VERSION } from './build-native.ts'
 import { FORK_BASE_COMMIT } from './rebuild-fork.ts'
-import { carriedOver, platformNameOf, revisionOf, sameRevision } from './pack-vendor.ts'
+import {
+  carriedOver,
+  carriedOverTestSupport,
+  platformNameOf,
+  revisionOf,
+  sameRevision,
+} from './pack-vendor.ts'
 import type { Revision, VendorManifest } from './pack-vendor.ts'
 import { resolveFileSpecifier, verifyVendor } from './verify-vendor.ts'
 
@@ -440,6 +446,79 @@ describe("Cible d'avant l'enregistrement conservée", () => {
       expect(report.gaps).toEqual([])
       expect(report.ok).toBe(true)
       expect(report.notes.join(' ')).toContain('packed before the revision was recorded')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Test renderer des autres cibles conservé', () => {
+  test('a run keeps what another machine recorded, without asking for its addon', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hemera-vendor-support-'))
+    const directory = join(root, 'vendor', 'gpuix', VENDOR_VERSION)
+    mkdirSync(directory, { recursive: true })
+    try {
+      writeFileSync(
+        join(directory, 'manifest.json'),
+        JSON.stringify({
+          version: VENDOR_VERSION,
+          fork: { remote: 'r', baseCommit: 'b', headCommit: 'h', branch: 'x' },
+          packages: [],
+          testSupport: [
+            {
+              file: 'gpuix-native.win32-x64-msvc.node',
+              sha256: 'a'.repeat(64),
+              target: 'x86_64-pc-windows-msvc',
+            },
+          ],
+        }),
+      )
+
+      // This run built the Linux renderer. The Windows addon is not on this disk and never
+      // will be: it is gitignored, built where Windows is. Its record still has to survive.
+      const kept = carriedOverTestSupport(directory, [
+        {
+          file: 'gpuix-native.linux-x64-gnu.node',
+          sha256: 'b'.repeat(64),
+          target: 'x86_64-unknown-linux-gnu',
+        },
+      ])
+      expect(kept.map((addon) => addon.target)).toEqual(['x86_64-pc-windows-msvc'])
+      expect(existsSync(join(directory, kept[0]!.file))).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('a target this run rebuilt replaces its own record', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hemera-vendor-support-'))
+    const directory = join(root, 'vendor', 'gpuix', VENDOR_VERSION)
+    mkdirSync(directory, { recursive: true })
+    try {
+      writeFileSync(
+        join(directory, 'manifest.json'),
+        JSON.stringify({
+          version: VENDOR_VERSION,
+          fork: { remote: 'r', baseCommit: 'b', headCommit: 'h', branch: 'x' },
+          packages: [],
+          testSupport: [
+            {
+              file: 'gpuix-native.linux-x64-gnu.node',
+              sha256: 'old',
+              target: 'x86_64-unknown-linux-gnu',
+            },
+          ],
+        }),
+      )
+      expect(
+        carriedOverTestSupport(directory, [
+          {
+            file: 'gpuix-native.linux-x64-gnu.node',
+            sha256: 'new',
+            target: 'x86_64-unknown-linux-gnu',
+          },
+        ]),
+      ).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
