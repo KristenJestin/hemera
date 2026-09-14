@@ -126,3 +126,34 @@ describe('Specs à côté du dépôt', () => {
     }
   })
 })
+
+describe('Table stable entre deux exécutions', () => {
+  test('a scenario covered twice lists its files in a fixed order', () => {
+    const { specs: specsRoot, root } = fixture(['Deux fois couvert'], [])
+    try {
+      // Two files cover it; on disk they are found in whatever order the walk returns.
+      mkdirSync(join(root, 'packages', 'core', 'tests'), { recursive: true })
+      writeFileSync(
+        join(root, 'tools', 'zebra.test.ts'),
+        "describe('Deux fois couvert', () => {})\n",
+      )
+      writeFileSync(
+        join(root, 'packages', 'core', 'tests', 'alpha.test.ts'),
+        "describe('Deux fois couvert', () => {})\n",
+      )
+      writeFileSync(
+        join(root, 'packages', 'core', 'package.json'),
+        JSON.stringify({ name: '@hemera/core', scripts: { test: 'bun test ./tests' } }),
+      )
+
+      const covered = coverageOf(root, specsRoot)[0]!
+      expect(covered.tests).toEqual([...covered.tests].toSorted())
+      expect(covered.tests).toHaveLength(2)
+      expect(renderTable(coverageOf(root, specsRoot))).toBe(
+        renderTable(coverageOf(root, specsRoot)),
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

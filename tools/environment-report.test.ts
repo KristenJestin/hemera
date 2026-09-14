@@ -65,15 +65,6 @@ describe('Une seule cible vérifiée', () => {
 
     const document = readFileSync(path, 'utf8')
     expect(document).toContain(`# Environment report — ${targetOfHost()}`)
-
-    // The observation is what this machine saw: a window with the size it was given, or the
-    // named reason there was none. Demanding a window here would fail a build machine that
-    // has no display, and would say nothing about the case that matters — a claim of an
-    // opening with no measurement behind it.
-    const observation = /\| Observation \| (.+?) \|/.exec(document)?.[1] ?? ''
-    expect(observation).toMatch(
-      /^window opened \d+x\d+|^no window announced itself|^not observed in this run/,
-    )
   })
 
   test('each report names its own target, and never another', () => {
@@ -97,8 +88,18 @@ describe('Une seule cible vérifiée', () => {
       // honest ones - no window, or a run that did not look. Demanding an opening here would
       // fail a build machine with no display, which is a machine the lot expects to exist.
       const observation = /\| Observation \| (.+?) \|/.exec(document)?.[1] ?? ''
+      // Only the first of these is a window. The headless client of GPUI hands the
+      // application the nominal size of a window it never created, so dimensions alone prove
+      // nothing; what proves something is the renderer announcing the window it made.
       expect(observation).toMatch(
-        /^window opened \d+x\d+|^no window announced itself|^not observed in this run/,
+        new RegExp(
+          [
+            String.raw`^native window created, window opened \d+x\d+`,
+            String.raw`^window opened \d+x\d+, but the renderer announced no native window`,
+            String.raw`^no window announced itself`,
+            String.raw`^not observed in this run`,
+          ].join('|'),
+        ),
       )
     }
   })

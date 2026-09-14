@@ -114,7 +114,10 @@ export function coverageOf(repositoryRoot: string, specsRoot: string): Coverage[
     })
     .map((scenario) => ({
       scenario,
-      tests: suites.get(scenario.name) ?? [],
+      // Sorted: the files are collected by walking directories, whose order is the file
+      // system's. A table that reorders itself between two runs is a diff on both machines
+      // for a change nobody made.
+      tests: (suites.get(scenario.name) ?? []).toSorted(),
       deferral: DEFERRED[scenario.name] ?? null,
     }))
 }

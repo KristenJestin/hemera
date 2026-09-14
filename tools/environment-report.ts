@@ -210,12 +210,27 @@ export async function observeWindow(
     rmSync(profile, { recursive: true, force: true })
   }
 
-  const opened = lines.find((line) => line.startsWith('window opened'))
   const errors = (await new Response(child.stderr).text())
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-  return { window: opened ?? 'no window announced itself', errors }
+
+  // Two different statements, and only one of them is proof. The size the application reports
+  // comes from its own gate, and the headless client of GPUI hands it the nominal size of a
+  // window it never created: dimensions alone say nothing. What says something is the renderer
+  // announcing the native window it made.
+  const measured = lines.find((line) => line.startsWith('window opened'))
+  const created = lines.includes('[gpuix] created native window')
+  if (created && measured !== undefined) {
+    return { window: `native window created, ${measured}`, errors }
+  }
+  if (measured !== undefined) {
+    return {
+      window: `${measured}, but the renderer announced no native window: it ran headless`,
+      errors,
+    }
+  }
+  return { window: 'no window announced itself', errors }
 }
 
 export interface ReportOptions {
