@@ -12,11 +12,15 @@ import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { VENDOR_VERSION } from './build-native.ts'
+import { sameRevision } from './pack-vendor.ts'
 import type { VendorManifest } from './pack-vendor.ts'
 
 export interface IntegrityReport {
   ok: boolean
+  /** What refuses the install. */
   gaps: string[]
+  /** What the vendor cannot answer, without being wrong about it. */
+  notes: string[]
 }
 
 function sha256Of(path: string): string {
@@ -52,10 +56,11 @@ function declaredPaths(repositoryRoot: string): { origin: string; path: string }
 
 export function verifyVendor(repositoryRoot: string): IntegrityReport {
   const gaps: string[] = []
+  const notes: string[] = []
   const vendorDirectory = join(repositoryRoot, 'vendor', 'gpuix', VENDOR_VERSION)
   const manifestPath = join(vendorDirectory, 'manifest.json')
   if (!existsSync(manifestPath)) {
-    return { ok: false, gaps: [`no vendor manifest at ${manifestPath}`] }
+    return { ok: false, gaps: [`no vendor manifest at ${manifestPath}`], notes }
   }
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as VendorManifest
 
@@ -78,6 +83,32 @@ export function verifyVendor(repositoryRoot: string): IntegrityReport {
     if (digest !== entry.sha256) {
       gaps.push(
         `${entry.name}: ${entry.file} has fingerprint ${digest}, manifest records ${entry.sha256}`,
+      )
+    }
+  }
+
+  // Each target is built where it can be built, so the tarballs are packed by different
+  // machines at different times. They are only interchangeable while they come from the same
+  // base and the same patch queue; a mix is named here rather than shipped quietly.
+  const revisions = manifest.packages.filter((entry) => entry.revision !== undefined)
+  const reference = revisions[0]
+  if (reference !== undefined) {
+    for (const entry of revisions) {
+      if (sameRevision(entry.revision, reference.revision)) continue
+      gaps.push(
+        `${entry.name}: built from queue ${entry.revision.queue.slice(0, 12)} ` +
+          `while ${reference.name} comes from ${reference.revision.queue.slice(0, 12)}; ` +
+          'rebuild the targets that lag behind before shipping them together',
+      )
+    }
+  }
+  for (const entry of manifest.packages) {
+    // A tarball packed before the record existed is not wrong, it is unanswered: it says
+    // nothing about what it was built from, so nothing can be compared to it either.
+    if (entry.revision === undefined) {
+      notes.push(
+        `${entry.name}: packed before the revision was recorded, so it cannot be compared; ` +
+          'repack it on the machine that builds its target',
       )
     }
   }
@@ -109,12 +140,13 @@ export function verifyVendor(repositoryRoot: string): IntegrityReport {
     }
   }
 
-  return { ok: gaps.length === 0, gaps }
+  return { ok: gaps.length === 0, gaps, notes }
 }
 
 if (import.meta.main) {
   const repositoryRoot = resolve(import.meta.dir, '..', '..')
   const report = verifyVendor(repositoryRoot)
+  for (const note of report.notes) console.error(`vendor: ${note}`)
   for (const gap of report.gaps) console.error(`vendor integrity: ${gap}`)
   if (!report.ok) {
     console.error('refusing to install the fork dependency until these gaps are resolved')

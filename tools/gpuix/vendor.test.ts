@@ -7,8 +7,8 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { absent, testSupportBuilt } from './available.ts'
 import { VENDOR_VERSION } from './build-native.ts'
 import { FORK_BASE_COMMIT } from './rebuild-fork.ts'
-import { platformNameOf } from './pack-vendor.ts'
-import type { VendorManifest } from './pack-vendor.ts'
+import { carriedOver, platformNameOf, revisionOf, sameRevision } from './pack-vendor.ts'
+import type { Revision, VendorManifest } from './pack-vendor.ts'
 import { resolveFileSpecifier, verifyVendor } from './verify-vendor.ts'
 
 const repository = resolve(import.meta.dir, '..', '..')
@@ -66,7 +66,9 @@ describe('Installation propre', () => {
   })
 
   test('every tarball matches the fingerprint the manifest records', () => {
-    expect(verifyVendor(repository)).toEqual({ ok: true, gaps: [] })
+    const report = verifyVendor(repository)
+    expect(report.gaps).toEqual([])
+    expect(report.ok).toBe(true)
   })
 
   test('the desktop dependency and the root overrides resolve to the vendored tarballs', () => {
@@ -116,7 +118,9 @@ describe('Empreinte non conforme', () => {
   test('a matching tarball passes the gate', () => {
     const { root } = vendorFixture('the expected bytes')
     try {
-      expect(verifyVendor(root)).toEqual({ ok: true, gaps: [] })
+      const report = verifyVendor(root)
+      expect(report.gaps).toEqual([])
+      expect(report.ok).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -196,5 +200,176 @@ describe('Aucune dépendance aux spikes', () => {
     expect(declarations).not.toContain('spikes')
     expect(declarations).not.toContain('sources/gpuix')
     expect(declarations).not.toContain('../gpuix/packages')
+  })
+})
+
+/** A vendor holding two platform tarballs, each with the revision it was built from. */
+function multiTargetFixture(revisions: { windows: Revision; linux: Revision }): string {
+  const root = mkdtempSync(join(tmpdir(), 'hemera-vendor-mixed-'))
+  const directory = join(root, 'vendor', 'gpuix', VENDOR_VERSION)
+  mkdirSync(directory, { recursive: true })
+  mkdirSync(join(root, 'apps', 'desktop'), { recursive: true })
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture' }))
+  writeFileSync(join(root, 'apps', 'desktop', 'package.json'), JSON.stringify({}))
+
+  const packages = (
+    [
+      ['@gpuix/native-win32-x64-msvc', 'x86_64-pc-windows-msvc', revisions.windows],
+      ['@gpuix/native-linux-x64-gnu', 'x86_64-unknown-linux-gnu', revisions.linux],
+    ] as const
+  ).map(([name, target, revision]) => {
+    const file = `${name.replace('@gpuix/', 'gpuix-')}-${VENDOR_VERSION}.tgz`
+    writeFileSync(join(directory, file), name)
+    return {
+      name,
+      file,
+      sha256: createHash('sha256').update(name).digest('hex'),
+      target,
+      revision,
+    }
+  })
+
+  writeFileSync(
+    join(directory, 'manifest.json'),
+    JSON.stringify(
+      {
+        version: VENDOR_VERSION,
+        fork: { remote: 'r', baseCommit: 'b', headCommit: 'h', branch: 'x' },
+        packages,
+        testSupport: [],
+      },
+      null,
+      2,
+    ),
+  )
+  return root
+}
+
+const A: Revision = { baseCommit: 'base', gpuiBaseCommit: 'gpui', queue: 'a'.repeat(64) }
+const B: Revision = { baseCommit: 'base', gpuiBaseCommit: 'gpui', queue: 'b'.repeat(64) }
+
+describe('Révision comparable entre machines', () => {
+  test('the same applied queue gives the same revision, whatever the commit it produced', () => {
+    const queue = {
+      gpuix: [{ file: '0001.patch', sha256: 'aa', applied: true }],
+      hemera: [{ file: '0001.patch', sha256: 'bb', applied: true }],
+      gpui: [{ file: '0001.patch', sha256: 'cc', applied: true }],
+    }
+    const windows = revisionOf({
+      fork: { remote: 'r', baseCommit: 'base', headCommit: 'commit-on-windows', branch: 'x' },
+      gpui: { baseCommit: 'gpui' },
+      patches: queue,
+    })
+    const linux = revisionOf({
+      fork: { remote: 'r', baseCommit: 'base', headCommit: 'commit-on-linux', branch: 'x' },
+      gpui: { baseCommit: 'gpui' },
+      patches: queue,
+    })
+
+    // The commits differ by construction; the revision does not.
+    expect(windows).toEqual(linux)
+    expect(sameRevision(windows, linux)).toBe(true)
+  })
+
+  test('a patch added to the queue changes the revision', () => {
+    const before = revisionOf({
+      fork: { remote: 'r', baseCommit: 'base', headCommit: 'h', branch: 'x' },
+      gpui: { baseCommit: 'gpui' },
+      patches: { hemera: [{ file: '0001.patch', sha256: 'bb', applied: true }] },
+    })
+    const after = revisionOf({
+      fork: { remote: 'r', baseCommit: 'base', headCommit: 'h', branch: 'x' },
+      gpui: { baseCommit: 'gpui' },
+      patches: {
+        hemera: [
+          { file: '0001.patch', sha256: 'bb', applied: true },
+          { file: '0002.patch', sha256: 'dd', applied: true },
+        ],
+      },
+    })
+    expect(sameRevision(before, after)).toBe(false)
+  })
+
+  test('a patch of the queue that is not applied does not count', () => {
+    const applied = revisionOf({
+      fork: { remote: 'r', baseCommit: 'base', headCommit: 'h', branch: 'x' },
+      gpui: { baseCommit: 'gpui' },
+      patches: { gpuix: [{ file: '0001.patch', sha256: 'aa', applied: true }] },
+    })
+    const withReference = revisionOf({
+      fork: { remote: 'r', baseCommit: 'base', headCommit: 'h', branch: 'x' },
+      gpui: { baseCommit: 'gpui' },
+      patches: {
+        gpuix: [
+          { file: '0001.patch', sha256: 'aa', applied: true },
+          { file: '0026.patch', sha256: 'zz', applied: false },
+        ],
+      },
+    })
+    expect(sameRevision(applied, withReference)).toBe(true)
+  })
+})
+
+describe('Vendor mixte entre deux cibles', () => {
+  test('two targets from the same queue install together', () => {
+    const root = multiTargetFixture({ windows: A, linux: A })
+    try {
+      expect(verifyVendor(root).gaps).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('two targets from different queues are refused, naming both', () => {
+    const root = multiTargetFixture({ windows: A, linux: B })
+    try {
+      const report = verifyVendor(root)
+      expect(report.ok).toBe(false)
+      expect(report.gaps.join(' ')).toContain('@gpuix/native-linux-x64-gnu')
+      expect(report.gaps.join(' ')).toContain('rebuild the targets that lag behind')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('a tarball packed before the record is a note, not a refusal', () => {
+    const report = verifyVendor(repository)
+    expect(report.ok).toBe(true)
+  })
+})
+
+describe('Cible packée ailleurs conservée', () => {
+  test('a run keeps the entries whose tarball is still there', () => {
+    const root = multiTargetFixture({ windows: A, linux: A })
+    const directory = join(root, 'vendor', 'gpuix', VENDOR_VERSION)
+    try {
+      // This run repacks Linux only; Windows was packed on the machine that can build it.
+      const packed = [
+        {
+          name: '@gpuix/native-linux-x64-gnu',
+          file: 'gpuix-native-linux-x64-gnu-rebuilt.tgz',
+          sha256: 'x',
+          target: 'x86_64-unknown-linux-gnu',
+          revision: B,
+        },
+      ]
+      const kept = carriedOver(directory, packed)
+      expect(kept.map((entry) => entry.name)).toEqual(['@gpuix/native-win32-x64-msvc'])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('an entry whose tarball disappeared is not carried over', () => {
+    const root = multiTargetFixture({ windows: A, linux: A })
+    const directory = join(root, 'vendor', 'gpuix', VENDOR_VERSION)
+    try {
+      rmSync(join(directory, `gpuix-native-win32-x64-msvc-${VENDOR_VERSION}.tgz`))
+      expect(carriedOver(directory, []).map((entry) => entry.name)).toEqual([
+        '@gpuix/native-linux-x64-gnu',
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

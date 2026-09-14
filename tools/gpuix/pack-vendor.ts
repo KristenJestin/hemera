@@ -27,6 +27,23 @@ import { basename, join, resolve, sep } from 'node:path'
 import { VENDOR_VERSION } from './build-native.ts'
 import type { NativeBuildRecord } from './build-native.ts'
 
+/**
+ * The revision a tarball was built from, in a form two machines can compare.
+ *
+ * The fork is reconstructed on each machine, and `git am` stamps a committer date, so the
+ * same tree gets a different commit on every checkout. A commit therefore identifies a run,
+ * never a revision. What identifies a revision is the base it applies onto and the queue of
+ * patches applied to it, both of which are recorded by fingerprint.
+ */
+export interface Revision {
+  /** Commit of the upstream renderer the queue applies onto. */
+  baseCommit: string
+  /** Commit of the GPUI base the submodule queue applies onto. */
+  gpuiBaseCommit: string
+  /** Digest of the applied patch queue; the same patches give the same digest. */
+  queue: string
+}
+
 export interface PackagedTarball {
   /** Package name as installed. */
   name: string
@@ -35,6 +52,8 @@ export interface PackagedTarball {
   sha256: string
   /** Target triple for a platform package, null for a portable one. */
   target: string | null
+  /** What this tarball was built from; a vendor holding two of them is a mixed one. */
+  revision: Revision
 }
 
 export interface TestSupportAddon {
@@ -46,6 +65,12 @@ export interface TestSupportAddon {
 
 export interface VendorManifest {
   version: string
+  /**
+   * The fork the most recent run packed from.
+   *
+   * `headCommit` identifies that run, not the revision: a reconstruction of the same tree on
+   * another machine gives another commit. Compare `packages[].revision` instead.
+   */
   fork: { remote: string; baseCommit: string; headCommit: string; branch: string }
   packages: PackagedTarball[]
   /**
@@ -120,15 +145,65 @@ export function productBuilds(vendorRoot: string): NativeBuildRecord[] {
   return stagedBuilds(vendorRoot, 'default')
 }
 
+interface Provenance {
+  fork: { remote: string; baseCommit: string; headCommit: string; branch: string }
+  gpui: { baseCommit: string }
+  patches: Record<string, { file: string; sha256: string; applied: boolean }[]>
+}
+
+/** The revision a reconstruction produced, as two machines can compare it. */
+export function revisionOf(provenance: Provenance): Revision {
+  const applied = Object.entries(provenance.patches)
+    .toSorted(([left], [right]) => left.localeCompare(right))
+    .flatMap(([queue, patches]) =>
+      patches.filter((patch) => patch.applied).map((patch) => `${queue}:${patch.sha256}`),
+    )
+  return {
+    baseCommit: provenance.fork.baseCommit,
+    gpuiBaseCommit: provenance.gpui.baseCommit,
+    queue: createHash('sha256').update(applied.join('\n')).digest('hex'),
+  }
+}
+
+/** Whether two tarballs were built from the same base and the same queue. */
+export function sameRevision(left: Revision, right: Revision): boolean {
+  return (
+    left.baseCommit === right.baseCommit &&
+    left.gpuiBaseCommit === right.gpuiBaseCommit &&
+    left.queue === right.queue
+  )
+}
+
+/**
+ * Entries of a previous run this one must not drop.
+ *
+ * Each target is built on the machine that can build it, and the staging directory is not
+ * versioned: a run only ever sees its own. What the vendor already carries is therefore read
+ * from the manifest beside the tarballs, and kept whenever its tarball is still there.
+ */
+export function carriedOver(destination: string, packed: PackagedTarball[]): PackagedTarball[] {
+  const manifestPath = join(destination, 'manifest.json')
+  if (!existsSync(manifestPath)) return []
+  const previous = JSON.parse(readFileSync(manifestPath, 'utf8')) as VendorManifest
+  const replaced = new Set(packed.map((entry) => entry.name))
+  return (previous.packages ?? []).filter(
+    (entry) =>
+      !replaced.has(entry.name) &&
+      entry.revision !== undefined &&
+      existsSync(join(destination, entry.file)),
+  )
+}
+
 /** Directory holding the addons that carry the GPUI test renderer. */
 export function testSupportDirectory(vendorRoot: string): string {
   return join(vendorRoot, VENDOR_VERSION, 'test-support')
 }
 
 export function packVendor(forkPath: string, vendorRoot: string): VendorManifest {
-  const provenance = JSON.parse(readFileSync(join(forkPath, 'PROVENANCE.json'), 'utf8')) as {
-    fork: { remote: string; baseCommit: string; headCommit: string; branch: string }
-  }
+  const provenance = JSON.parse(
+    readFileSync(join(forkPath, 'PROVENANCE.json'), 'utf8'),
+  ) as Provenance
+  const revision = revisionOf(provenance)
   const builds = productBuilds(vendorRoot)
   if (builds.length === 0) {
     throw new Error('no native build staged; run tools/gpuix/build-native.ts first')
@@ -159,6 +234,7 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
       file: pack(reactStage, destination),
       sha256: '',
       target: null,
+      revision,
     })
 
     // One loader for every target; its bindings come from the build that was staged.
@@ -185,8 +261,15 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
     loaderManifest.version = VENDOR_VERSION
     delete loaderManifest.scripts
     delete loaderManifest.devDependencies
+    // Dropping a target another machine packed would uninstall it on the next install.
+    const platforms = new Set(
+      builds.map((build) => `@gpuix/native-${platformNameOf(build.addon.file)}`),
+    )
+    for (const entry of carriedOver(destination, [])) {
+      if (entry.target !== null) platforms.add(entry.name)
+    }
     loaderManifest.optionalDependencies = Object.fromEntries(
-      builds.map((build) => [`@gpuix/native-${platformNameOf(build.addon.file)}`, VENDOR_VERSION]),
+      [...platforms].toSorted().map((name) => [name, VENDOR_VERSION]),
     )
     writeJson(join(loaderStage, 'package.json'), loaderManifest)
     packages.push({
@@ -194,6 +277,7 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
       file: pack(loaderStage, destination),
       sha256: '',
       target: null,
+      revision,
     })
 
     for (const build of builds) {
@@ -224,6 +308,7 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
         file: pack(stage, destination),
         sha256: '',
         target: build.target,
+        revision,
       })
     }
   } finally {
@@ -250,6 +335,7 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
     testSupport.push({ file: build.addon.file, sha256: sha256Of(copy), target: build.target })
   }
 
+  const kept = carriedOver(destination, packages)
   const manifest: VendorManifest = {
     version: VENDOR_VERSION,
     fork: {
@@ -258,7 +344,7 @@ export function packVendor(forkPath: string, vendorRoot: string): VendorManifest
       headCommit: provenance.fork.headCommit,
       branch: provenance.fork.branch,
     },
-    packages,
+    packages: [...packages, ...kept].toSorted((left, right) => left.name.localeCompare(right.name)),
     testSupport,
   }
   writeJson(join(destination, 'manifest.json'), manifest)
