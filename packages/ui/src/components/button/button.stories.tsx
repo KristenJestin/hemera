@@ -101,6 +101,12 @@ export const States: Story = {
     expect(disabled).toBeDisabled()
     disabled.focus()
     expect(document.activeElement).not.toBe(disabled)
+
+    // A hand where something can be pressed, and never where it refuses to be. Tailwind 4
+    // dropped the pointer cursor from its reset, so the theme has to put it back.
+    expect(getComputedStyle(canvas.getByRole('button', { name: /idle/i })).cursor).toBe('pointer')
+    expect(getComputedStyle(disabled).cursor).toBe('not-allowed')
+    expect(getComputedStyle(working).cursor).toBe('not-allowed')
   },
 }
 

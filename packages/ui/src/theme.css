@@ -346,6 +346,21 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /* Tailwind 4 dropped the pointer cursor from buttons in its reset, on the grounds that the
+     browser's own default is an arrow. What a user has learned from every other application is
+     that a hand means "this does something", so it goes back — everywhere something is pressed,
+     and nowhere something refuses to be. */
+  button:not(:disabled, [aria-disabled='true']),
+  [role='button']:not([aria-disabled='true']),
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
   ::selection {
     background-color: var(--color-primary-muted);
   }
