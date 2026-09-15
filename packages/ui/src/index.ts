@@ -13,4 +13,5 @@ export {
   type IconButtonProps,
 } from './components/button/button.tsx'
 export { Badge, type BadgeProps } from './components/badge/badge.tsx'
+export { Input, Textarea, type InputProps, type TextareaProps } from './components/field/field.tsx'
 export { Loading, type LoadingProps } from './components/loading/loading.tsx'

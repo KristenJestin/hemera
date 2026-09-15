@@ -32,7 +32,9 @@
   --card: #ffffff;
   --card-foreground: #111118;
   --muted: #f6f6f8;
-  --muted-foreground: #6b6b7b;
+  /* The prototype's dim grey lands at 4.47:1 on the light background, half a point short of
+     what small text needs; a shade down clears it everywhere the role is used. */
+  --muted-foreground: #63636f;
   --accent: #e9e9ee;
   --accent-foreground: #111118;
 
