@@ -154,6 +154,11 @@ function sourceFilesOf(directory: string): string[] {
     const path = join(directory, entry)
     if (statSync(path).isDirectory()) {
       found.push(...sourceFilesOf(path))
+    } else if (entry.endsWith('.test.ts') || entry.endsWith('.test.tsx')) {
+      // A test builds a situation — a panel shorter than its content, a box of a size the
+      // scale has no reason to carry. What it paints is never shipped, and forcing it onto
+      // the scale would only make the situation less legible.
+      continue
     } else if (entry.endsWith('.ts') || entry.endsWith('.tsx')) {
       found.push(path)
     }
