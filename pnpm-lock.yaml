@@ -190,6 +190,9 @@ importers:
       '@hemera/ipc':
         specifier: workspace:*
         version: link:../../packages/ipc
+      '@hemera/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       motion:
         specifier: 13.3.0
         version: 13.3.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

@@ -164,6 +164,36 @@ describe('Frontière du design system', () => {
   })
 })
 
+describe('Import direct refusé', () => {
+  test('the catalogue alone may import the icon package', () => {
+    const inside = 'packages/ui/src/icons.ts'
+    const outside = 'packages/ui/src/components/button/button.tsx'
+    const source = "import { IconCheck } from '@tabler/icons-react'\n"
+    const root = fixture({ [inside]: source, [outside]: source })
+    try {
+      const violations = analyzePackage(root, ruleFor('@hemera/ui'))
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.file).toBe(outside)
+      expect(violations[0]!.problem).toContain(inside)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the application never imports the icon package, catalogue or not', () => {
+    const path = 'apps/desktop/src/renderer/application.tsx'
+    const root = fixture({ [path]: "import { IconCheck } from '@tabler/icons-react'\n" })
+    try {
+      const violations = analyzePackage(root, ruleFor('@hemera/desktop'))
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.file).toBe(path)
+      expect(violations[0]!.problem).toContain('packages/ui/src/icons.ts')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('Frontières des packages', () => {
   test('a cycle between packages is detected', () => {
     const graph = new Map([

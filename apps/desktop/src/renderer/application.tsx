@@ -8,8 +8,8 @@ import { MotionConfig, motion } from 'motion/react'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { MotionMeasure } from '@hemera/ipc'
+import { spring } from '@hemera/ui/motion'
 
-import { calmSpring } from './motion.ts'
 import { usePixelRatio } from './use-pixel-ratio.ts'
 import { measureFrames } from './witness.ts'
 
@@ -50,7 +50,7 @@ export function Application() {
           className="witness"
           initial={false}
           animate={{ opacity: shown ? 1 : 0.15, y: shown ? 0 : 24 }}
-          transition={calmSpring}
+          transition={spring}
         >
           <p>This panel slides and fades, and nothing else.</p>
         </motion.section>
