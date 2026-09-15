@@ -7,14 +7,15 @@
  *   bun tools/gpuix/build-native.ts                 release build, what ships
  *   bun tools/gpuix/build-native.ts --test-support  build carrying the GPUI test renderer
  *
- * The addon stays where it was built: the product depends on the fork by path, so there is
- * nothing to copy anywhere and no artefact to keep in step with a manifest.
+ * The addon stays where it was built. What is refreshed is the copy that `bun install` put
+ * under `node_modules`: a path dependency is copied there, not linked, so without that step
+ * every check keeps loading the binary of the last install.
  */
 
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { platform, release, version } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 /** Build variants of the addon. */
 export type Variant = 'release' | 'test-support'
@@ -102,6 +103,41 @@ function addonFileOf(nativePackage: string): string {
 }
 
 /**
+ * Copies a freshly built addon into the installed package.
+ *
+ * `bun install` copies a `file:` dependency rather than linking it, so the tree under
+ * `node_modules` holds the addon as it was at install time. Rebuilding the fork leaves that
+ * copy untouched, and every check keeps running against the previous binary — silently, since
+ * it loads perfectly well.
+ *
+ * Returns the paths it refreshed, or an empty list when the package is not installed.
+ */
+export function refreshInstalledAddon(nativePackage: string): string[] {
+  let installed: string
+  try {
+    installed = dirname(require.resolve('@gpuix/native'))
+  } catch {
+    return []
+  }
+  if (resolve(installed) === resolve(nativePackage)) return []
+
+  const refreshed: string[] = []
+  const files = [
+    ...readdirSync(nativePackage).filter((entry) => entry.endsWith('.node')),
+    'index.js',
+    'index.d.ts',
+  ]
+  for (const file of files) {
+    const source = join(nativePackage, file)
+    if (!existsSync(source)) continue
+    const destination = join(installed, file)
+    copyFileSync(source, destination)
+    refreshed.push(destination)
+  }
+  return refreshed
+}
+
+/**
  * Builds the addon in place and reports what came out of it.
  *
  * `build:release` leaves `gpui/test-support` out — upstream turns it on by default, and a
@@ -140,6 +176,9 @@ export function buildNative(forkPath: string, variant: Variant): NativeBuildReco
     ['bun', '-e', 'console.log(Object.keys(require("./index.js")).toSorted().join(","))'],
     nativePackage,
   )
+
+  // The checks import the installed package, not this folder.
+  refreshInstalledAddon(nativePackage)
 
   return {
     target,

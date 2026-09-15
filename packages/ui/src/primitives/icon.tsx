@@ -23,11 +23,26 @@ export interface IconProps {
   color?: keyof ThemeColors
   /** Clockwise rotation in degrees, painted by the sprite transform. */
   rotate?: number
+  /**
+   * Turns on its own, one revolution a second.
+   *
+   * The renderer repeats it, so a spinner costs no render of ours per frame. A turning icon
+   * is decoration: it carries no event and reports no bounds.
+   */
+  spin?: boolean
   style?: Style
   testId?: string
 }
 
-export function Icon({ name, size = 'sm', color = 'text', rotate, style, testId }: IconProps) {
+export function Icon({
+  name,
+  size = 'sm',
+  color = 'text',
+  rotate,
+  spin,
+  style,
+  testId,
+}: IconProps) {
   const theme = useTheme()
   const painted: Style = {
     width: iconSize[size],
@@ -40,6 +55,7 @@ export function Icon({ name, size = 'sm', color = 'text', rotate, style, testId 
       {...withoutUndefined({
         source: ICONS[name],
         rotate,
+        spin,
         style: mergeStyle(painted, style),
         testId,
       })}

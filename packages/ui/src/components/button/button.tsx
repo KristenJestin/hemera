@@ -138,7 +138,8 @@ export function Button({
     >
       <Stack gap="sm" align="center" justify="center">
         {shown === undefined ? null : (
-          <Icon name={shown} size={ICON_SIZE[size]} color={contentColorOf(tone)} />
+          // A loader that does not turn says nothing: it reads as an icon someone chose.
+          <Icon name={shown} size={ICON_SIZE[size]} color={contentColorOf(tone)} spin={loading} />
         )}
         {iconOnly ? null : (
           <Text color={contentColorOf(tone)} scale={LABEL_SCALE[size]} weight="medium">
