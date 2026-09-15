@@ -13,6 +13,22 @@ import { defineConfig } from 'vitest/config'
  */
 export default defineConfig({
   plugins: [storybookTest({ configDir: join(import.meta.dirname, '.storybook') })],
+  // Declared rather than discovered: a dependency the optimizer meets for the first time
+  // mid-run makes it reload the page under the tests, and a run that reloads is a run that
+  // fails for no reason anyone can act on.
+  optimizeDeps: {
+    include: [
+      '@base-ui/react/button',
+      '@base-ui/react/dialog',
+      '@base-ui/react/field',
+      '@base-ui/react/menu',
+      '@base-ui/react/select',
+      '@tabler/icons-react',
+      'class-variance-authority',
+      'cn',
+      'motion/react',
+    ],
+  },
   test: {
     name: 'ui',
     root: import.meta.dirname,
