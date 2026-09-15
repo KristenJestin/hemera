@@ -5,7 +5,14 @@ import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { IconAlertTriangle, IconCheck } from '../../icons.ts'
-import { useTransition } from '../../motion.ts'
+import {
+  HOVERED,
+  MARK_TRAVEL,
+  PRESSED,
+  PRESSED_COMPACT,
+  press,
+  useTransition,
+} from '../../motion.ts'
 import { Loading } from '../loading/loading.tsx'
 
 /**
@@ -16,12 +23,14 @@ import { Loading } from '../loading/loading.tsx'
  * appearance is a prop and never a class the caller writes. motion animates, through Base UI's
  * `render` prop, which merges the ref, the class and the handlers into the element it is given.
  *
- * The press is `whileTap`, on the one spring of the application. A button that is working says
- * so where its label was, and keeps its focus while it does: `focusableWhenDisabled` is what
- * stops the keyboard from falling back to the top of the page under the user's hands.
+ * Everything it does answers the hand, so everything it does is on the `press` preset: the
+ * hover, the press, the width following what the button now says, and going quiet when it is
+ * disabled. A button that is working says so where its label was and keeps its focus while it
+ * does — `focusableWhenDisabled` is what stops the keyboard from falling back to the top of
+ * the page under the user's hands.
  */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 rounded-md border font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 data-disabled:opacity-50',
+  'inline-flex items-center justify-center gap-1.5 overflow-hidden rounded-md border font-medium whitespace-nowrap outline-none focus-ring',
   {
     variants: {
       variant: {
@@ -53,6 +62,8 @@ export interface ButtonProps
     Omit<BaseButton.Props, 'render' | 'className' | 'style' | 'children'>,
     VariantProps<typeof buttonVariants> {
   state?: ButtonState | undefined
+  /** How deep the press goes. Square controls set it themselves; nobody else needs to. */
+  pressScale?: number | undefined
   children?: ReactNode
   /** Where the button sits; never how it looks. */
   className?: string | undefined
@@ -63,21 +74,33 @@ export function Button({
   size,
   state = 'idle',
   disabled = false,
+  pressScale = PRESSED,
   children,
   className,
   ...rest
 }: ButtonProps) {
-  const transition = useTransition()
+  const transition = useTransition(press)
   const working = state === 'loading'
   return (
     <BaseButton
       {...rest}
       className={cn(buttonVariants({ variant, size }), className)}
       disabled={disabled || working}
-      // A button that is working is not a button that has gone away: keep it reachable, so the
-      // keyboard stays where the user left it and the label change is announced in place.
       focusableWhenDisabled={working}
-      render={<motion.button whileTap={{ scale: 0.97 }} transition={transition} />}
+      render={
+        <motion.button
+          // The width and the press are on the same element: `layout` and `whileTap` both project
+          // a transform onto whatever carries them, and nesting one inside the other leaves the
+          // inner one spending the press correcting for the outer one.
+          layout
+          whileHover={{ scale: HOVERED }}
+          whileTap={{ scale: pressScale }}
+          // Going quiet is a change like any other: it fades rather than switching off, which
+          // is why the opacity lives here and not in a class the browser applies at once.
+          animate={{ opacity: disabled || working ? 0.5 : 1 }}
+          transition={transition}
+        />
+      }
     >
       <Content state={state}>{children}</Content>
     </BaseButton>
@@ -97,6 +120,7 @@ export function IconButton({ variant, size = 'md', icon, className, ...rest }: I
       {...rest}
       variant={variant}
       size={size}
+      pressScale={PRESSED_COMPACT}
       className={cn(ICON_ONLY[size ?? 'md'], className)}
     >
       {icon}
@@ -105,26 +129,42 @@ export function IconButton({ variant, size = 'md', icon, className, ...rest }: I
 }
 
 /**
- * What the button shows right now. One child at a time, so the button is as wide as what it
- * says; the swap is an opacity and a scale, which is what a compositor animates on its own.
+ * What the button shows right now.
+ *
+ * The mark of the state arrives from under the edge rather than fading in place, so the swap
+ * reads as one thing replacing another; `popLayout` takes the leaving one out of the flow so
+ * the label closes the gap instead of waiting for it. The width itself is animated by the
+ * button, one element up: a width is a layout change, and a layout change belongs on the
+ * element that is already being transformed, not on a child of it.
  */
 function Content({ state, children }: { state: ButtonState; children: ReactNode }) {
-  const transition = useTransition()
+  const transition = useTransition(press)
+  const mark = MARKS[state]
   return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.span
-        key={state}
-        className="inline-flex items-center gap-1.5"
-        initial={{ opacity: 0, scale: 0.85 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.85 }}
-        transition={transition}
-      >
-        {state === 'loading' && <Loading size="sm" label="Working" />}
-        {state === 'success' && <IconCheck size="sm" />}
-        {state === 'error' && <IconAlertTriangle size="sm" />}
-        {children}
-      </motion.span>
-    </AnimatePresence>
+    <>
+      <AnimatePresence mode="popLayout" initial={false}>
+        {mark !== null && (
+          <motion.span
+            key={state}
+            className="inline-flex"
+            initial={{ opacity: 0, y: MARK_TRAVEL, scale: 0.7 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -MARK_TRAVEL, scale: 0.7 }}
+            transition={transition}
+          >
+            {mark}
+          </motion.span>
+        )}
+      </AnimatePresence>
+      {children}
+    </>
   )
+}
+
+/** What each state puts in front of the label; idle puts nothing, and takes no room. */
+const MARKS: Record<ButtonState, ReactNode> = {
+  idle: null,
+  loading: <Loading size="sm" label="Working" />,
+  success: <IconCheck size="sm" />,
+  error: <IconAlertTriangle size="sm" />,
 }
