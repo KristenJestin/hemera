@@ -1,0 +1,218 @@
+/*
+ * The theme of Hemera: the one place a colour, a size, a radius, a shadow or a duration is
+ * written down (design D1-01). Tailwind reads it, the renderer loads it, and the main process
+ * parses `--background` out of it to paint the window frame.
+ *
+ * Two layers, and the order matters. The first declares the roles as plain custom properties,
+ * once per theme, so that swapping a class on `<html>` swaps every value at once. The second
+ * hands those roles to Tailwind with `@theme inline`, which keeps the `var()` in the generated
+ * utility instead of freezing the value it had at build time — without `inline` the dark theme
+ * would compile away.
+ *
+ * The names come from coss ui; the values come from the validated prototype
+ * (`spikes/proto-motion/src/styles.css`, itself extracted from the HTML prototype). None of
+ * Tailwind's own palette survives: `--color-*: initial` clears it, so a class like `bg-red-500`
+ * cannot be generated and the lint has something real to refuse.
+ */
+
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/fira-code';
+
+/* The dark theme is a class on `<html>`, not a media query: the page follows the system by
+   putting the class there, and the user can take it off without the system changing. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- Roles, light ---- */
+:root {
+  color-scheme: light;
+
+  --background: #ededf0;
+  --foreground: #111118;
+  --card: #ffffff;
+  --card-foreground: #111118;
+  --muted: #f6f6f8;
+  --muted-foreground: #6b6b7b;
+  --accent: #e9e9ee;
+  --accent-foreground: #111118;
+
+  --primary: #d946ef;
+  --primary-foreground: #ffffff;
+  --primary-strong: #c026d3;
+  --primary-muted: #fdf4ff;
+  --primary-muted-foreground: #a21caf;
+
+  --success: #16a34a;
+  --success-muted: #ecfdf3;
+  --warning: #d97706;
+  --warning-muted: #fffbeb;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --destructive-muted: #fef2f2;
+  --info: #2563eb;
+  --info-muted: #eff6ff;
+
+  --mission-define: #7c3aed;
+  --mission-define-muted: #f3efff;
+  --mission-build: #0891b2;
+  --mission-build-muted: #ecfeff;
+  --mission-free: #6b6b7b;
+  --mission-free-muted: #f1f1f4;
+
+  --border: #e2e2e8;
+  --input: #d3d3db;
+  --ring: rgba(217, 70, 239, 0.25);
+  --overlay: rgba(16, 16, 24, 0.2);
+
+  --shadow: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.04);
+  --shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12);
+}
+
+/* ---- Roles, dark ---- */
+.dark {
+  color-scheme: dark;
+
+  --background: #040406;
+  --foreground: #ececf1;
+  --card: #18181e;
+  --card-foreground: #ececf1;
+  --muted: #0e0e12;
+  --muted-foreground: #9a9aab;
+  --accent: #121217;
+  --accent-foreground: #ececf1;
+
+  --primary: #e879f9;
+  /* The dark primary is a light fuchsia; what reads on it is the page's own dark, not white. */
+  --primary-foreground: #040406;
+  --primary-strong: #d946ef;
+  --primary-muted: rgba(232, 121, 249, 0.1);
+  --primary-muted-foreground: #f0abfc;
+
+  --success: #4ade80;
+  --success-muted: rgba(74, 222, 128, 0.1);
+  --warning: #fbbf24;
+  --warning-muted: rgba(251, 191, 36, 0.1);
+  --destructive: #f87171;
+  --destructive-foreground: #040406;
+  --destructive-muted: rgba(248, 113, 113, 0.1);
+  --info: #60a5fa;
+  --info-muted: rgba(96, 165, 250, 0.1);
+
+  --mission-define: #a78bfa;
+  --mission-define-muted: rgba(167, 139, 250, 0.12);
+  --mission-build: #22d3ee;
+  --mission-build-muted: rgba(34, 211, 238, 0.1);
+  --mission-free: #9a9aab;
+  --mission-free-muted: rgba(154, 154, 171, 0.12);
+
+  --border: #27272f;
+  --input: #363640;
+  --ring: rgba(232, 121, 249, 0.3);
+  --overlay: rgba(0, 0, 0, 0.5);
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-raised: 0 14px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- The Tailwind theme reads the roles, never the raw values ---- */
+@theme inline {
+  --color-*: initial;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-muted: var(--primary-muted);
+  --color-primary-muted-foreground: var(--primary-muted-foreground);
+
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-muted: var(--destructive-muted);
+  --color-info: var(--info);
+  --color-info-muted: var(--info-muted);
+
+  --color-mission-define: var(--mission-define);
+  --color-mission-define-muted: var(--mission-define-muted);
+  --color-mission-build: var(--mission-build);
+  --color-mission-build-muted: var(--mission-build-muted);
+  --color-mission-free: var(--mission-free);
+  --color-mission-free-muted: var(--mission-free-muted);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-raised);
+}
+
+/* ---- The scales, the same under both themes ---- */
+@theme {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'Fira Code Variable', ui-monospace, monospace;
+
+  --text-xs: 0.6875rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.125rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.375rem;
+  --text-2xl--line-height: 2rem;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Named steps of the spacing scale, so an icon is sized by the scale and not by a number:
+     `size-icon-md` is a spacing utility like any other, and the scale lint can close the list. */
+  --spacing-icon-sm: 0.875rem;
+  --spacing-icon-md: 1rem;
+  --spacing-icon-lg: 1.25rem;
+
+  /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
+     gives the spring, for the transitions Base UI drives through data attributes. */
+  --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
+  --duration-fast: 160ms;
+  --duration-base: 260ms;
+  --duration-slow: 400ms;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: var(--color-primary-muted);
+  }
+}
