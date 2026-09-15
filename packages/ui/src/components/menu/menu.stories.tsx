@@ -70,7 +70,12 @@ export const States: Story = {
       'aria-disabled',
       'true',
     )
+    // Closed before the story ends, and waited for: the accessibility pass runs on whatever is
+    // on the page when the play is over, and a popup on its way out is not what it judges.
     await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
   },
 }
 

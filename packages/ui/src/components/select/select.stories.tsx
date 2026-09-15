@@ -93,7 +93,13 @@ export const States: Story = {
     )
     expect(popup.width).toBeGreaterThanOrEqual(control.width)
 
+    // Closed before the story ends, and waited for: the accessibility pass runs on whatever is
+    // on the page when the play is over, and a popup still on its way out has Base UI's focus
+    // guards in it, which read as an error nobody can act on.
     await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('listbox')).toBeNull()
+    })
   },
 }
 

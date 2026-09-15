@@ -76,7 +76,11 @@ export const States: Story = {
     const tip = await waitFor(() => within(document.body).getByRole('tooltip'))
     // The keystroke is drawn as keys, the way the menus draw theirs.
     expect(within(tip).getByText('Ctrl')).toBeInTheDocument()
+    // Gone before the story ends: the accessibility pass judges what is on the page then.
     await userEvent.unhover(trigger)
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('tooltip')).toBeNull()
+    })
   },
 }
 

@@ -300,6 +300,9 @@ export const ManyProjects: Story = {
     const panel = await waitFor(() => within(document.body).getByRole('dialog'))
     expect(within(panel).getByRole('button', { name: /Project number 12/ })).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
   },
 }
 
