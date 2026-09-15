@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconPlus, IconSettings, IconTrash } from '../../icons.ts'
 import { Menu } from './menu.tsx'
@@ -8,24 +8,40 @@ const meta = {
   title: 'Components/Menu',
   component: Menu,
   args: { label: 'Session', groups: [] },
+  argTypes: {
+    label: { control: 'text' },
+    disabled: { control: 'boolean' },
+    groups: { table: { disable: true } },
+    className: { table: { disable: true } },
+  },
 } satisfies Meta<typeof Menu>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-const GROUPS = [
-  [
-    { label: 'New session', icon: <IconPlus size="sm" />, shortcut: 'Ctrl N' },
-    { label: 'Settings', icon: <IconSettings size="sm" />, shortcut: 'Ctrl ,' },
-  ],
-  [{ label: 'Delete', icon: <IconTrash size="sm" />, disabled: true }],
-]
+/** Each command reports itself in the Actions panel when it is chosen. */
+function commands(onSelect: () => void) {
+  return [
+    [
+      { label: 'New session', icon: <IconPlus size="sm" />, shortcut: 'Ctrl N', onSelect },
+      { label: 'Settings', icon: <IconSettings size="sm" />, shortcut: 'Ctrl ,', onSelect },
+    ],
+    [{ label: 'Delete', icon: <IconTrash size="sm" />, disabled: true, onSelect }],
+  ]
+}
+
+export const Playground: Story = {
+  args: { groups: commands(fn()) },
+}
 
 export const Variants: Story = {
-  render: () => (
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  render: (args) => (
     <div className="flex items-start gap-4">
-      <Menu label="Session" groups={GROUPS} />
-      <Menu label="Locked" groups={GROUPS} disabled />
+      <Menu {...args} label="Session" groups={commands(fn())} />
+      <Menu {...args} label="Locked" groups={commands(fn())} disabled />
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -36,7 +52,10 @@ export const Variants: Story = {
 }
 
 export const States: Story = {
-  render: () => <Menu label="Session" groups={GROUPS} />,
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  args: { groups: commands(fn()) },
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: 'Session' }))
     const menu = await waitFor(() => within(document.body).getByRole('menu'))
@@ -54,20 +73,12 @@ export const States: Story = {
 }
 
 export const Keyboard: Story = {
-  render: () => {
-    const chosen: string[] = []
-    return (
-      <Menu
-        label="Session"
-        groups={[
-          [
-            { label: 'New session', shortcut: 'Ctrl N', onSelect: () => chosen.push('new') },
-            { label: 'Settings', shortcut: 'Ctrl ,' },
-          ],
-          [{ label: 'Delete', disabled: true }],
-        ]}
-      />
-    )
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  render: function Keyboard(args) {
+    const chosen = fn()
+    return <Menu {...args} groups={commands(chosen)} />
   },
   play: async ({ canvasElement }) => {
     const trigger = within(canvasElement).getByRole('button', { name: 'Session' })
@@ -90,14 +101,4 @@ export const Keyboard: Story = {
     })
     expect(document.activeElement).toBe(trigger)
   },
-}
-
-export const Light: Story = {
-  args: { label: 'Session', groups: GROUPS },
-  globals: { theme: 'light' },
-}
-
-export const Dark: Story = {
-  args: { label: 'Session', groups: GROUPS },
-  globals: { theme: 'dark' },
 }

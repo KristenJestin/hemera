@@ -96,6 +96,7 @@ export default defineConfig({
         },
       },
       './packages/ui/vitest.config.ts',
+      './packages/ui/vitest.dark.config.ts',
     ],
   },
 })

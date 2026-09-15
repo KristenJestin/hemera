@@ -150,7 +150,7 @@ describe('Frontière du design system', () => {
       'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
       'apps/desktop/src/renderer/main.tsx': [
         "import { Button } from '@hemera/ui'",
-        "import { spring } from '@hemera/ui/motion'",
+        "import { arrival } from '@hemera/ui/motion'",
         "import '@hemera/ui/theme.css'",
         '',
       ].join('\n'),

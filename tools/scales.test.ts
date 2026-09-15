@@ -12,7 +12,7 @@ const scales = scalesOf(
 describe('Valeur hors échelle refusée', () => {
   test('the scales are the ones the theme declares', () => {
     expect(scales.radius).toEqual(['sm', 'md', 'lg', 'xl', 'none', 'full'])
-    expect(scales.duration).toEqual(['fast', 'base', 'slow', 'wave'])
+    expect(scales.duration).toEqual(['fast', 'base', 'slow', 'turn'])
     expect(scales.spacing).toContain('icon-md')
   })
 

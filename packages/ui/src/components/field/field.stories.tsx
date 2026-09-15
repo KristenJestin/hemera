@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconSearch } from '../../icons.ts'
 import { Input, Textarea } from './field.tsx'
@@ -7,18 +7,49 @@ import { Input, Textarea } from './field.tsx'
 const meta = {
   title: 'Components/Field',
   component: Input,
-  args: { label: 'Name' },
+  args: { label: 'Name', placeholder: 'Hemera', onValueChange: fn() },
+  argTypes: {
+    label: { control: 'text' },
+    description: { control: 'text' },
+    error: { control: 'text' },
+    placeholder: { control: 'text' },
+    disabled: { control: 'boolean' },
+    icon: { table: { disable: true } },
+    className: { table: { disable: true } },
+  },
 } satisfies Meta<typeof Input>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
+/**
+ * Type in it and the Actions panel shows each value as the field reports it. Put something in
+ * `error` and watch the control turn invalid and point at the message.
+ */
+export const Playground: Story = {
+  decorators: [
+    (Story) => (
+      <div className="w-full max-w-xs">
+        <Story />
+      </div>
+    ),
+  ],
+}
+
 export const Variants: Story = {
-  render: () => (
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  render: (args) => (
     <div className="flex w-full max-w-xs flex-col gap-4">
-      <Input label="Name" placeholder="Hemera" />
-      <Input label="Search" icon={<IconSearch size="sm" />} placeholder="Find a session" />
-      <Textarea label="Notes" placeholder="What happened" />
+      <Input {...args} label="Name" />
+      <Input
+        {...args}
+        label="Search"
+        icon={<IconSearch size="sm" />}
+        placeholder="Find a session"
+      />
+      <Textarea {...args} label="Notes" placeholder="What happened" />
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -31,12 +62,25 @@ export const Variants: Story = {
 }
 
 export const States: Story = {
-  render: () => (
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  render: (args) => (
     <div className="flex w-full max-w-xs flex-col gap-4">
-      <Input label="Project" description="The folder Hemera works in" placeholder="~/work" />
-      <Input label="Branch" error="A branch name has no spaces" defaultValue="my branch" />
-      <Input label="Locked" disabled defaultValue="Cannot be changed" />
-      <Textarea label="Summary" error="Say something" />
+      <Input
+        {...args}
+        label="Project"
+        description="The folder Hemera works in"
+        placeholder="~/work"
+      />
+      <Input
+        {...args}
+        label="Branch"
+        error="A branch name has no spaces"
+        defaultValue="my branch"
+      />
+      <Input {...args} label="Locked" disabled defaultValue="Cannot be changed" />
+      <Textarea {...args} label="Summary" error="Say something" placeholder="" />
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -53,21 +97,34 @@ export const States: Story = {
 }
 
 export const Keyboard: Story = {
-  render: () => (
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  render: (args) => (
     <div className="flex w-full max-w-xs flex-col gap-4">
-      <Input label="First" />
-      <Textarea label="Second" />
+      <Input {...args} label="First" placeholder="" />
+      <Textarea {...args} label="Second" placeholder="" />
     </div>
   ),
-  play: async ({ canvasElement }) => {
+  play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement)
     const first = canvas.getByLabelText('First')
     const second = canvas.getByLabelText('Second')
 
     await userEvent.tab()
     expect(document.activeElement).toBe(first)
+
+    // The ring is visible, and it is visible on the box around the control: an input renders
+    // no pseudo-element of its own, so a ring drawn on it would never appear at all.
+    const ring = first.parentElement!
+    await waitFor(() => {
+      expect(getComputedStyle(ring, '::after').opacity).toBe('1')
+    })
+    expect(getComputedStyle(ring, '::after').boxShadow).not.toBe('none')
+
     await userEvent.type(first, 'hemera')
     expect(first).toHaveValue('hemera')
+    expect(args.onValueChange).toHaveBeenCalledWith('hemera')
 
     await userEvent.tab()
     expect(document.activeElement).toBe(second)
@@ -77,14 +134,4 @@ export const Keyboard: Story = {
     await userEvent.type(second, 'one{Enter}two{Enter}three{Enter}four{Enter}five')
     expect(second.getBoundingClientRect().height).toBeGreaterThan(before)
   },
-}
-
-export const Light: Story = {
-  args: { label: 'Name', placeholder: 'Hemera' },
-  globals: { theme: 'light' },
-}
-
-export const Dark: Story = {
-  args: { label: 'Name', placeholder: 'Hemera' },
-  globals: { theme: 'dark' },
 }

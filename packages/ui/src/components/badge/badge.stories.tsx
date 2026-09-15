@@ -4,17 +4,6 @@ import { expect, within } from 'storybook/test'
 import { IconCheck } from '../../icons.ts'
 import { Badge } from './badge.tsx'
 
-const meta = {
-  title: 'Components/Badge',
-  component: Badge,
-  // A badge with nothing in it is not a badge; the stories that render their own tree
-  // replace this, and the ones that do not have something to say.
-  args: { children: 'Badge' },
-} satisfies Meta<typeof Badge>
-
-export default meta
-type Story = StoryObj<typeof meta>
-
 const TONES = [
   'neutral',
   'primary',
@@ -27,11 +16,34 @@ const TONES = [
   'free',
 ] as const
 
+const meta = {
+  title: 'Components/Badge',
+  component: Badge,
+  args: { children: 'Ready' },
+  argTypes: {
+    tone: { control: 'inline-radio', options: TONES },
+    children: { control: 'text', name: 'label' },
+    icon: { table: { disable: true } },
+    className: { table: { disable: true } },
+  },
+} satisfies Meta<typeof Badge>
+
+export default meta
+type Story = StoryObj<typeof meta>
+
+/** Every tone on a control, with and without its icon. */
+export const Playground: Story = {
+  args: { tone: 'define' },
+}
+
 export const Variants: Story = {
-  render: () => (
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  render: (args) => (
     <div className="flex flex-wrap items-center gap-2">
       {TONES.map((tone) => (
-        <Badge key={tone} tone={tone}>
+        <Badge {...args} key={tone} tone={tone}>
           {tone}
         </Badge>
       ))}
@@ -49,12 +61,17 @@ export const Variants: Story = {
 }
 
 export const States: Story = {
-  render: () => (
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  render: (args) => (
     <div className="flex flex-wrap items-center gap-2">
-      <Badge tone="success" icon={<IconCheck size="sm" />}>
+      <Badge {...args} tone="success" icon={<IconCheck size="sm" />}>
         Passed
       </Badge>
-      <Badge tone="neutral">Plain</Badge>
+      <Badge {...args} tone="neutral">
+        Plain
+      </Badge>
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -64,14 +81,4 @@ export const States: Story = {
     expect(getComputedStyle(icon).width).toBe('14px')
     expect(getComputedStyle(icon).color).toBe(getComputedStyle(withIcon).color)
   },
-}
-
-export const Light: Story = {
-  args: { tone: 'define', children: 'Define' },
-  globals: { theme: 'light' },
-}
-
-export const Dark: Story = {
-  args: { tone: 'define', children: 'Define' },
-  globals: { theme: 'dark' },
 }

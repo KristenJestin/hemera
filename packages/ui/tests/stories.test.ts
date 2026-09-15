@@ -36,8 +36,15 @@ const CATALOGUE: Catalogued[] = [
   { name: 'Loading', folder: 'loading', keyboard: false },
 ]
 
-/** A story per variant, per state, and one in each theme; a keyboard story where there is one. */
-const ALWAYS = ['Variants', 'States', 'Light', 'Dark']
+/**
+ * What every component shows: a playground where every prop is a control, its variants side by
+ * side, and its states side by side. A keyboard story comes on top where there is a keyboard.
+ *
+ * No story per theme: the toolbar swaps the theme on any story at any moment, so a story that
+ * pinned one would only be saying something false about the component. The themes are covered
+ * where it counts instead — the whole catalogue is run once per theme.
+ */
+const ALWAYS = ['Playground', 'Variants', 'States']
 
 function storiesOf(folder: string): string[] {
   const source = readFileSync(
@@ -48,18 +55,25 @@ function storiesOf(folder: string): string[] {
 }
 
 const barrel = readFileSync(join(designSystem, 'index.ts'), 'utf8')
+const preview = readFileSync(join(designSystem, '..', '.storybook', 'preview.tsx'), 'utf8')
+const runner = ['vitest.config.ts', 'vitest.dark.config.ts'].map((file) =>
+  readFileSync(join(designSystem, '..', file), 'utf8'),
+)
 
 describe('Stories complètes', () => {
-  test.each(CATALOGUE)('$name has its variant, state and theme stories', ({ name, folder }) => {
-    const stories = storiesOf(folder)
-    for (const required of ALWAYS) {
-      expect(stories, `${name} has no ${required} story`).toContain(required)
-    }
-  })
+  test.each(CATALOGUE)(
+    '$name has its playground, variant and state stories',
+    ({ name, folder }) => {
+      const stories = storiesOf(folder)
+      for (const required of ALWAYS) {
+        expect(stories, `${name} has no ${required} story`).toContain(required)
+      }
+    },
+  )
 
   test('a component whose story is taken away is named', () => {
-    const stories = storiesOf('badge').filter((story) => story !== 'Dark')
-    expect(ALWAYS.filter((required) => !stories.includes(required))).toEqual(['Dark'])
+    const stories = storiesOf('badge').filter((story) => story !== 'States')
+    expect(ALWAYS.filter((required) => !stories.includes(required))).toEqual(['States'])
   })
 })
 
@@ -88,5 +102,32 @@ describe('Neuf composants accessibles écrits maison', () => {
     expect(exportedComponents(barrel).toSorted()).toEqual(
       [...CATALOGUE.map((entry) => entry.name), ...parts].toSorted(),
     )
+  })
+})
+
+describe('Stories dans les deux thèmes', () => {
+  test('the theme is a toolbar global, so any story can be seen in either', () => {
+    expect(preview).toContain('globalTypes')
+    expect(preview).toContain('theme')
+    for (const value of ['light', 'dark']) {
+      expect(preview, `the toolbar offers no ${value} theme`).toContain(`value: '${value}'`)
+    }
+  })
+
+  test('the runner plays the whole catalogue once per theme', () => {
+    const asked = runner.map((config) => /catalogue\('(\w+)'\)/.exec(config)![1])
+    expect(asked).toEqual(['light', 'dark'])
+  })
+
+  test('no story pins a theme of its own', () => {
+    const pinning = CATALOGUE.map((entry) => entry.folder)
+      .filter((folder, index, folders) => folders.indexOf(folder) === index)
+      .filter((folder) =>
+        readFileSync(
+          join(designSystem, 'components', folder, `${folder}.stories.tsx`),
+          'utf8',
+        ).includes('globals:'),
+      )
+    expect(pinning).toEqual([])
   })
 })
