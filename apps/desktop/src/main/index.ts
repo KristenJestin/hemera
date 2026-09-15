@@ -7,32 +7,16 @@
  * top-level `await app.whenReady()` waits for an event its own waiting prevents.
  */
 
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { BrowserWindow, app } from 'electron/main'
+import { app } from 'electron/main'
 
-import { rendererSource } from './renderer-source.ts'
+import { openWindow } from './window.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
 
-async function openWindow(): Promise<void> {
-  const window = new BrowserWindow({
-    webPreferences: {
-      preload: join(main, '..', 'preload', 'index.cjs'),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  })
-
-  const source = rendererSource()
-  await (source.kind === 'server'
-    ? window.loadURL(source.location)
-    : window.loadFile(source.location))
-}
-
-void app.whenReady().then(openWindow)
+void app.whenReady().then(() => openWindow(main))
 
 app.on('window-all-closed', () => {
   app.quit()
