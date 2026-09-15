@@ -59,3 +59,46 @@ describe('Le thème est la seule source visuelle', () => {
     expect(theme).toContain('--color-*: initial')
   })
 })
+
+describe('Densité relevée', () => {
+  test('the base text is sixteen pixels, and every step of the scale follows it', () => {
+    expect(theme).toContain('--text-base: 1rem;')
+    expect(theme).toContain('--text-sm: 0.875rem;')
+    expect(theme).toContain('--text-lg: 1.125rem;')
+    // The page itself is read at the base size, which is what "the density" means.
+    expect(theme).toContain('font-size: var(--text-base);')
+  })
+
+  test('a control is thirty-two, thirty-six or forty-four pixels tall', () => {
+    for (const [step, size] of [
+      ['sm', '2rem'],
+      ['md', '2.25rem'],
+      ['lg', '2.75rem'],
+    ]) {
+      expect(theme).toContain(`--spacing-control-${step}: ${size};`)
+    }
+  })
+
+  test('a component asks for a named step and never for a number', () => {
+    const button = readFileSync(
+      join(import.meta.dirname, '..', 'src', 'components', 'button', 'button.tsx'),
+      'utf8',
+    )
+    for (const step of ['h-control-sm', 'h-control-md', 'h-control-lg']) {
+      expect(button, `the button does not ask for ${step}`).toContain(step)
+    }
+    // A height written as a step of Tailwind's own multiplication is a height that stops
+    // following the theme the day the density changes again.
+    expect(button).not.toMatch(/\bh-\d/)
+  })
+
+  test('the shell is drawn at the theme size, with nothing of the scale written in it', () => {
+    const shell = ['shell.tsx', 'chrome-bar.tsx', 'sidebar.tsx', 'gutter.tsx'].map((file) =>
+      readFileSync(join(import.meta.dirname, '..', 'src', 'shell', file), 'utf8'),
+    )
+    for (const source of shell) {
+      expect(source).not.toMatch(/\bh-\d/)
+      expect(source).not.toMatch(/\btext-\[/)
+    }
+  })
+})
