@@ -9,9 +9,10 @@
   "scripts": {
     "dev": "node dev.ts",
     "build": "node build.ts",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && tsc -p tsconfig.test.json"
   },
   "dependencies": {
+    "@hemera/ipc": "workspace:*",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

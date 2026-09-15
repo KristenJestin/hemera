@@ -32,6 +32,7 @@ export default defineConfig({
   },
   test: {
     include: [
+      'apps/*/tests/**/*.test.ts',
       'packages/*/tests/**/*.test.ts',
       'tools/boundaries.test.ts',
       'tools/git-flow.test.ts',

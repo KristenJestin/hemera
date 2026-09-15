@@ -12,11 +12,15 @@ import { fileURLToPath } from 'node:url'
 
 import { app } from 'electron/main'
 
+import { registerChannels } from './channels.ts'
 import { openWindow } from './window.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
 
-void app.whenReady().then(() => openWindow(main))
+void app.whenReady().then(async () => {
+  const window = await openWindow(main)
+  registerChannels(window)
+})
 
 app.on('window-all-closed', () => {
   app.quit()
