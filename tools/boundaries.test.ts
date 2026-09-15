@@ -113,6 +113,87 @@ describe('Importation interdite', () => {
   })
 })
 
+describe('Frontière du design system', () => {
+  test.each([
+    ['@hemera/core', 'must not depend on'],
+    ['@hemera/ipc', 'must not depend on'],
+    ['@hemera/desktop', 'must not depend on'],
+    ['electron', 'Electron'],
+  ])(
+    'a component reaching for %s is reported with its file and its import',
+    (specifier, reason) => {
+      const path = 'packages/ui/src/components/button/button.tsx'
+      const root = fixture({ [path]: `import { thing } from '${specifier}'\n` })
+      try {
+        const violations = analyzePackage(root, ruleFor('@hemera/ui'))
+        expect(violations).toHaveLength(1)
+        expect(violations[0]!.file).toBe(path)
+        expect(violations[0]!.specifier).toBe(specifier)
+        expect(violations[0]!.problem).toContain(reason)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  test('the application may import the design system through its declared subpaths', () => {
+    const root = fixture({
+      'packages/ui/package.json': JSON.stringify({
+        name: '@hemera/ui',
+        exports: {
+          '.': './src/index.ts',
+          './theme.css': './src/theme.css',
+          './motion': './src/motion.ts',
+          './window': './src/window.ts',
+        },
+      }),
+      'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
+      'apps/desktop/src/renderer/main.tsx': [
+        "import { Button } from '@hemera/ui'",
+        "import { arrival } from '@hemera/ui/motion'",
+        "import '@hemera/ui/theme.css'",
+        '',
+      ].join('\n'),
+      'apps/desktop/src/main/window.ts': "import { windowColors } from '@hemera/ui/window'\n",
+    })
+    try {
+      expect(analyzePackage(root, ruleFor('@hemera/desktop'))).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Import direct refusé', () => {
+  test('the catalogue alone may import the icon package', () => {
+    const inside = 'packages/ui/src/icons.ts'
+    const outside = 'packages/ui/src/components/button/button.tsx'
+    const source = "import { IconCheck } from '@tabler/icons-react'\n"
+    const root = fixture({ [inside]: source, [outside]: source })
+    try {
+      const violations = analyzePackage(root, ruleFor('@hemera/ui'))
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.file).toBe(outside)
+      expect(violations[0]!.problem).toContain(inside)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the application never imports the icon package, catalogue or not', () => {
+    const path = 'apps/desktop/src/renderer/application.tsx'
+    const root = fixture({ [path]: "import { IconCheck } from '@tabler/icons-react'\n" })
+    try {
+      const violations = analyzePackage(root, ruleFor('@hemera/desktop'))
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.file).toBe(path)
+      expect(violations[0]!.problem).toContain('packages/ui/src/icons.ts')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('Frontières des packages', () => {
   test('a cycle between packages is detected', () => {
     const graph = new Map([

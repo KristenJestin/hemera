@@ -22,6 +22,10 @@ export const ALLOWED_PROPERTIES = [
   'clipPath',
   'clip-path',
   'transform',
+  // `translate` beside the shorthand: Tailwind 4 writes its transform utilities as the
+  // individual properties, and a compositor carries those exactly as it carries `transform`.
+  // `scale` and `rotate` are already below, where motion's own names are.
+  'translate',
   'x',
   'y',
   'z',
@@ -48,9 +52,64 @@ export const ALLOWED_PROPERTIES = [
 /** Props of a motion component that carry the properties it animates. */
 const ANIMATED_PROPS = ['initial', 'animate', 'exit', 'whileHover', 'whileTap', 'whileFocus']
 
+/** The one file allowed to write spring numbers: the preset every animation reads (D1-04). */
+export const MOTION_PRESET = 'packages/ui/src/motion.ts'
+
+/** The one file allowed to write durations in CSS: the theme they are a scale of (D1-01). */
+export const MOTION_THEME = 'packages/ui/src/theme.css'
+
+/** What a spring is made of. Written twice, a personality is no longer one. */
+const SPRING_PARAMETER = /\b(stiffness|damping|mass|bounce|restDelta|restSpeed)\s*:\s*[-\d.]/g
+
+/** Timings a component asks motion for in numbers instead of reading them off the scale. */
+const LITERAL_TIMING = /\b(duration|delay|repeatDelay|staggerChildren|delayChildren)\s*:\s*[-\d.]/g
+
+/** A time written in a stylesheet, which the theme's duration tokens exist to replace. */
+const CSS_TIME = /(?<![\w-])\d+(?:\.\d+)?m?s(?![\w-])/g
+
 export interface Refusal {
   file: string
   property: string
+  problem: string
+}
+
+/**
+ * Motion values a file of the design system writes itself instead of reading them from the
+ * preset and the theme. The preset and the theme are where those numbers live; anywhere else
+ * they are a second personality that nobody decided on.
+ */
+export function hardcodedOf(file: string, source: string): Refusal[] {
+  const refusals: Refusal[] = []
+  const inDesignSystem = file.startsWith('packages/ui/')
+
+  if (file !== MOTION_PRESET) {
+    for (const pattern of [SPRING_PARAMETER, LITERAL_TIMING]) {
+      pattern.lastIndex = 0
+      let found = pattern.exec(source)
+      while (found !== null) {
+        refusals.push({
+          file,
+          property: found[1]!,
+          problem: `is a motion value written here instead of read from ${MOTION_PRESET}`,
+        })
+        found = pattern.exec(source)
+      }
+    }
+  }
+
+  if (inDesignSystem && file !== MOTION_THEME && file.endsWith('.css')) {
+    CSS_TIME.lastIndex = 0
+    let time = CSS_TIME.exec(source)
+    while (time !== null) {
+      refusals.push({
+        file,
+        property: time[0],
+        problem: `is a duration written here instead of read from ${MOTION_THEME}`,
+      })
+      time = CSS_TIME.exec(source)
+    }
+  }
+  return refusals
 }
 
 function filesUnder(directory: string, keep: (path: string) => boolean): string[] {
@@ -95,7 +154,10 @@ export function animatedStyleOf(source: string): string[] {
   while (transition !== null) {
     for (const part of transition[1]!.split(',')) {
       const name = part.trim().split(/\s+/)[0]
-      if (name !== undefined && name !== '' && name !== 'all') properties.push(name)
+      // `none` animates nothing: it is how a transition is switched off under reduced motion.
+      if (name !== undefined && name !== '' && name !== 'all' && name !== 'none') {
+        properties.push(name)
+      }
       if (name === 'all') properties.push('all')
     }
     transition = TRANSITION_PROPERTY.exec(source)
@@ -115,11 +177,58 @@ export function animatedStyleOf(source: string): string[] {
   return properties
 }
 
+/** An opening tag of a motion element, with everything written between its brackets. */
+const MOTION_ELEMENT = /<motion\.\w+\b([\s\S]*?)\/?>/g
+
+/** Props that set a motion element in motion; `initial` alone only places it. */
+const MOVING_PROPS = ['animate', 'exit', 'whileHover', 'whileTap', 'whileFocus', 'layout']
+
+/**
+ * Motion elements that move without a transition read from `useTransition`.
+ *
+ * The hook is what answers the reduced-motion preference for the design system; an element
+ * that animates on motion's default spring has both a second personality and no answer.
+ */
+export function unansweredOf(file: string, source: string): Refusal[] {
+  const refusals: Refusal[] = []
+  MOTION_ELEMENT.lastIndex = 0
+  let element = MOTION_ELEMENT.exec(source)
+  while (element !== null) {
+    const props = element[1]!
+    const moving = MOVING_PROPS.filter((prop) => new RegExp(`\\b${prop}(=|\\s|$)`).test(props))
+    if (moving.length > 0 && !/\btransition=\{/.test(props)) {
+      refusals.push({
+        file,
+        property: moving[0]!,
+        problem: 'moves a motion element without a `transition` read from useTransition',
+      })
+    }
+    element = MOTION_ELEMENT.exec(source)
+  }
+  if (refusals.length > 0 && !/\buseTransition\(/.test(source)) {
+    refusals.push({
+      file,
+      property: 'useTransition',
+      problem: 'animates without ever calling useTransition, which answers reduced motion',
+    })
+  }
+  return refusals
+}
+
 export function refusalsOf(file: string, source: string): Refusal[] {
   const animated = file.endsWith('.css') ? animatedStyleOf(source) : animatedPropertiesOf(source)
-  return animated
-    .filter((property) => !ALLOWED_PROPERTIES.some((allowed) => allowed === property))
-    .map((property) => ({ file, property }))
+  return [
+    ...(file.endsWith('.css') ? [] : unansweredOf(file, source)),
+    ...animated
+      .filter((property) => !ALLOWED_PROPERTIES.some((allowed) => allowed === property))
+      .map((property) => ({
+        file,
+        property,
+        problem:
+          'is not a property a compositor animates; only transform, opacity, filter and clip-path are',
+      })),
+    ...hardcodedOf(file, source),
+  ]
 }
 
 export function analyze(rendererRoot: string, repositoryRoot: string): Refusal[] {
@@ -130,16 +239,17 @@ export function analyze(rendererRoot: string, repositoryRoot: string): Refusal[]
 
 if (import.meta.main) {
   const repository = resolve(import.meta.dirname, '..')
-  const refusals = analyze(join(repository, 'apps', 'desktop', 'src', 'renderer'), repository)
+  const refusals = [
+    join(repository, 'apps', 'desktop', 'src', 'renderer'),
+    join(repository, 'packages', 'ui', 'src'),
+  ].flatMap((root) => analyze(root, repository))
   for (const refusal of refusals) {
-    console.error(
-      `${refusal.file}: "${refusal.property}" is not a property a compositor animates; only transform, opacity, filter and clip-path are`,
-    )
+    console.error(`${refusal.file}: "${refusal.property}" ${refusal.problem}`)
   }
   console.log(
     refusals.length === 0
-      ? 'the renderer animates composited properties only'
-      : `${refusals.length} animation(s) of a layout or colour property`,
+      ? 'the renderer and the design system animate composited properties only, off the one preset'
+      : `${refusals.length} animation(s) of a layout or colour property, or motion value written twice`,
   )
   if (refusals.length > 0) process.exit(1)
 }

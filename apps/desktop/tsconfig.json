@@ -3,5 +3,14 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["src/main/**/*.ts", "src/preload/**/*.ts", "bundles.ts", "build.ts", "dev.ts"]
+  "include": [
+    // The design system says what a stylesheet imported for its text is; the main process
+    // and the renderer both read one, and an ambient declaration only counts where it is seen.
+    "../../packages/ui/src/styles.d.ts",
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "bundles.ts",
+    "build.ts",
+    "dev.ts"
+  ]
 }

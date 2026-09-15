@@ -15,7 +15,16 @@ export interface PackageRule {
   /** Path of the package relative to the repository root. */
   directory: string
   /** Bare specifiers this package must never import, with the reason to report. */
-  forbidden: { pattern: RegExp; reason: string }[]
+  forbidden: {
+    pattern: RegExp
+    reason: string
+    /**
+     * The one file allowed to import it anyway, as a path from the repository root. A
+     * catalogue is exactly that: a single door a dependency comes through, so that the rest
+     * of the tree imports the catalogue instead of the dependency.
+     */
+    exceptIn?: string
+  }[]
 }
 
 const NO_PLATFORM = [
@@ -33,6 +42,16 @@ const NO_PLATFORM = [
 const NO_ELECTRON = [{ pattern: /^electron(\/|$)/, reason: 'Electron' }]
 
 const NO_RENDERER = [{ pattern: /^react(-dom)?(\/|$)/, reason: 'the React renderer' }]
+
+/** Tabler is reached through the catalogue that re-exports it, sized and stroked (D1-05). */
+const ICON_CATALOGUE = 'packages/ui/src/icons.ts'
+const NO_RAW_ICONS = [
+  {
+    pattern: /^@tabler\/icons-react(\/|$)/,
+    reason: `the icon package directly instead of the catalogue in ${ICON_CATALOGUE}`,
+    exceptIn: ICON_CATALOGUE,
+  },
+]
 
 export const PACKAGE_RULES: PackageRule[] = [
   {
@@ -64,9 +83,25 @@ export const PACKAGE_RULES: PackageRule[] = [
     ],
   },
   {
+    // The design system is a leaf too, and a stricter one: it is React and nothing of Hemera.
+    // A component that reached for a domain type or for Electron would stop being renderable
+    // on its own, which is exactly what Storybook exists to keep it able to do.
+    name: '@hemera/ui',
+    directory: 'packages/ui',
+    forbidden: [
+      ...NO_PLATFORM,
+      ...NO_ELECTRON,
+      ...NO_RAW_ICONS,
+      {
+        pattern: /^@hemera\/(core|ipc|desktop)(\/|$)/,
+        reason: 'a package the design system must not depend on',
+      },
+    ],
+  },
+  {
     name: '@hemera/desktop',
     directory: 'apps/desktop',
-    forbidden: [],
+    forbidden: [...NO_RAW_ICONS],
   },
 ]
 
@@ -179,7 +214,9 @@ export function analyzePackage(repositoryRoot: string, rule: PackageRule): Viola
         })
         continue
       }
-      const forbidden = rule.forbidden.find((entry) => entry.pattern.test(specifier))
+      const forbidden = rule.forbidden.find(
+        (entry) => entry.pattern.test(specifier) && entry.exceptIn !== reported,
+      )
       if (forbidden !== undefined) {
         violations.push({
           file: reported,

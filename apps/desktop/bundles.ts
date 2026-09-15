@@ -9,6 +9,7 @@
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import type { InlineConfig } from 'vite-plus'
 
@@ -61,8 +62,8 @@ export const rendererBundle: InlineConfig = {
   base: './',
   // `@vitejs/plugin-react` is typed against the `vite` package. Vite+ ships that same Vite
   // under its own name, so the plugin runs as it always did and only the nominal type differs.
-  // SAFETY: same Vite, two package names; the plugin's nominal type is the only difference.
-  plugins: [react()] as NonNullable<InlineConfig['plugins']>,
+  // SAFETY: same Vite, two package names; the plugins' nominal type is the only difference.
+  plugins: [react(), tailwindcss()] as NonNullable<InlineConfig['plugins']>,
   build: {
     outDir: resolve(OUTPUT, 'renderer'),
     emptyOutDir: true,

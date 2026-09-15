@@ -1,0 +1,46 @@
+{
+  "name": "@hemera/ui",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#*": "./src/*"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./theme.css": "./src/theme.css",
+    "./motion": "./src/motion.ts",
+    "./icons": "./src/icons.ts",
+    "./window": "./src/window.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "storybook": "storybook dev -p 6006 --no-open"
+  },
+  "dependencies": {
+    "@base-ui/react": "1.8.0",
+    "@fontsource-variable/fira-code": "5.3.0",
+    "@fontsource-variable/inter": "5.3.0",
+    "@tabler/icons-react": "3.46.0",
+    "class-variance-authority": "0.7.1",
+    "cn": "0.3.0",
+    "motion": "13.3.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss": "4.3.3"
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "10.6.0",
+    "@storybook/addon-mcp": "10.6.0",
+    "@storybook/addon-vitest": "10.6.0",
+    "@storybook/react-vite": "10.6.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitest/browser": "4.1.11",
+    "@vitest/browser-playwright": "4.1.11",
+    "playwright": "1.63.0",
+    "storybook": "10.6.0",
+    "vite-plus": "0.3.2",
+    "vitest": "4.1.11"
+  }
+}
