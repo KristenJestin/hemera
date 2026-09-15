@@ -1,32 +1,33 @@
 import { cn } from 'cn'
 
 /**
- * The loading indicator: a five by five grid of dots that lights up in rings from its middle
- * outwards (design D1-04b).
+ * The loading indicator: three dots going round (design D1-04b).
  *
- * It is opacity and nothing else, so the compositor carries it alone, and it is `currentColor`,
- * so it takes the colour of whatever it sits in — a button, a line of text, a panel. Under
- * reduced motion the grid is drawn at its resting opacity and stays there: `motion-safe`
- * leaves the animation out of the stylesheet entirely rather than playing it faster.
+ * One element turns and the dots ride it, so the whole thing is a single rotation the
+ * compositor carries on its own — no dot animates anything of its own, and there is no
+ * keyframe per dot to keep in step. It is drawn in `currentColor`, so it takes the colour of
+ * whatever it sits in: a button, a line of text, a panel.
+ *
+ * Under reduced motion `motion-safe` leaves the rotation out of the stylesheet entirely rather
+ * than playing it slower, and the three dots stay where they are.
  */
-
-/** How far each of the twenty-five cells is from the middle, which is the ring it lights in. */
-const RINGS = Array.from(
-  { length: 25 },
-  (_, cell) => Math.abs(Math.floor(cell / 5) - 2) + Math.abs((cell % 5) - 2),
-)
-
-/** One class per ring, written out: a class name built at run time is one Tailwind never sees. */
-const RING_DELAY = ['wave-ring-0', 'wave-ring-1', 'wave-ring-2', 'wave-ring-3', 'wave-ring-4']
-
 const SIZE = {
   sm: 'size-icon-sm',
   md: 'size-icon-md',
   lg: 'size-icon-lg',
 } as const
 
+const DOT = {
+  sm: 'size-1',
+  md: 'size-1',
+  lg: 'size-1.5',
+} as const
+
+/** One class per dot, written out: a class name built at run time is one Tailwind never sees. */
+const ORBIT = ['orbit-0', 'orbit-1', 'orbit-2']
+
 export interface LoadingProps {
-  /** One step of the icon scale, so the grid sits where an icon would. */
+  /** One step of the icon scale, so the indicator sits where an icon would. */
   size?: keyof typeof SIZE
   /** What a screen reader says while this is on screen. */
   label?: string
@@ -36,20 +37,12 @@ export interface LoadingProps {
 
 export function Loading({ size = 'md', label = 'Loading', className }: LoadingProps) {
   return (
-    <span
-      role="status"
-      aria-label={label}
-      className={cn('grid grid-cols-5 grid-rows-5', SIZE[size], className)}
-    >
-      {RINGS.map((ring, cell) => (
-        <span
-          key={cell}
-          className={cn(
-            'size-full scale-50 rounded-full bg-current opacity-20 motion-safe:animate-wave',
-            RING_DELAY[ring],
-          )}
-        />
-      ))}
+    <span role="status" aria-label={label} className={cn('relative', SIZE[size], className)}>
+      <span className="absolute inset-0 flex items-center justify-center motion-safe:animate-turn">
+        {ORBIT.map((orbit) => (
+          <span key={orbit} className={cn('absolute rounded-full bg-current', DOT[size], orbit)} />
+        ))}
+      </span>
     </span>
   )
 }

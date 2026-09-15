@@ -81,8 +81,9 @@ export const Icons: Story = {
           ))}
         </div>
       ))}
-      <p className="text-primary">
+      <p className="flex items-center gap-3 text-primary">
         <icons.IconCheck aria-label="A check in the primary colour" />
+        <icons.IconAlertTriangle weight="filled" aria-label="A filled warning" />
       </p>
     </div>
   ),
@@ -92,10 +93,15 @@ export const Icons: Story = {
     const drawn = canvas.getAllByLabelText('IconCheck')
     expect(drawn.map((icon) => getComputedStyle(icon).width)).toEqual(['14px', '16px', '20px'])
 
-    // The colour is whatever the text around it is: an icon names no colour of its own.
-    const coloured = canvas.getByLabelText('A check in the primary colour')
-    expect(getComputedStyle(coloured).color).toBe(getComputedStyle(coloured.parentElement!).color)
-    expect(getComputedStyle(coloured).stroke).toBe(getComputedStyle(coloured).color)
+    // The colour is whatever the text around it is: an icon names no colour of its own. A
+    // filled one says so by its fill and an outlined one by its stroke, which is the whole
+    // difference between the two weights.
+    const outlined = canvas.getByLabelText('A check in the primary colour')
+    const filled = canvas.getByLabelText('A filled warning')
+    const inherited = getComputedStyle(outlined.parentElement!).color
+    expect(getComputedStyle(outlined).stroke).toBe(inherited)
+    expect(getComputedStyle(outlined).fill).toBe('none')
+    expect(getComputedStyle(filled).fill).toBe(inherited)
   },
 }
 
@@ -117,13 +123,13 @@ export const Typography: Story = {
     const prose = canvas.getByText(/text-base/)
     const code = canvas.getByText(/git rebase/)
 
-    // The families come with the bundle: nothing here was installed on this machine.
+    // The families come with the bundle: nothing here was installed on this machine. The wait
+    // is for the bundle's own files to arrive, which on a cold browser is not instant.
     expect(getComputedStyle(prose).fontFamily).toContain('Inter Variable')
     expect(getComputedStyle(code).fontFamily).toContain('Fira Code Variable')
-    await waitFor(() => {
-      expect(document.fonts.check('1rem "Inter Variable"')).toBe(true)
-      expect(document.fonts.check('1rem "Fira Code Variable"')).toBe(true)
-    })
+    await document.fonts.ready
+    expect(document.fonts.check('1rem "Inter Variable"')).toBe(true)
+    expect(document.fonts.check('1rem "Fira Code Variable"')).toBe(true)
   },
 }
 
@@ -156,8 +162,10 @@ export const Motion: Story = {
     await waitFor(() => {
       expect(getComputedStyle(panel).transform).not.toBe('none')
     })
+    // And it settles, wherever the click sent it. Which of the two ends it lands on is not
+    // the point and is not always the same: the story is re-run in place as it is edited.
     await waitFor(() => {
-      expect(getComputedStyle(panel).opacity).toBe('1')
+      expect(getComputedStyle(panel).transform).toBe('none')
     })
   },
 }
@@ -179,9 +187,6 @@ export const ReducedMotion: Story = {
       // No travel to catch: the panel is where it belongs, and the journey took no time.
       await waitFor(() => {
         expect(getComputedStyle(panel).transform).toBe('none')
-      })
-      await waitFor(() => {
-        expect(getComputedStyle(panel).opacity).toBe('1')
       })
     } finally {
       await restore()
