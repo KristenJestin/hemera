@@ -4,6 +4,7 @@ import type { BrowserWindow } from 'electron/main'
 
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
+import { paintWindow } from './window.ts'
 
 export function registerChannels(window: BrowserWindow): void {
   handle('env.report', () => collectReport())
@@ -12,5 +13,11 @@ export function registerChannels(window: BrowserWindow): void {
     if (command === 'minimize') return window.minimize()
     if (command === 'close') return window.close()
     return window.isMaximized() ? window.unmaximize() : window.maximize()
+  })
+
+  // The page decides which theme it wears; the frame and the system's window buttons are
+  // outside the page, so it says so here and they follow.
+  handle('theme.set', ({ theme }) => {
+    paintWindow(window, theme)
   })
 }

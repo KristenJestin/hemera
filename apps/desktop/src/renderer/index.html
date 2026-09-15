@@ -4,7 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hemera</title>
-    <link rel="stylesheet" href="./application.css" />
+    <script>
+      // Before anything is drawn: the page wears what the system asks for, so a cold start
+      // never shows a pale page inside a dark frame. The store takes over once React is up.
+      if (matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

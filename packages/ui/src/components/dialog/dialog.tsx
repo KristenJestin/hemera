@@ -13,7 +13,7 @@ import { Button, IconButton } from '../button/button.tsx'
  * outside both close it, because a dialog that can only be dismissed one way is a trap.
  */
 const BACKDROP =
-  'fixed inset-0 bg-overlay transition-opacity duration-fast ease-calm data-starting-style:opacity-0 data-ending-style:opacity-0'
+  'fixed inset-0 bg-overlay backdrop-motion data-starting-style:opacity-0 data-ending-style:opacity-0'
 
 const POPUP =
   'fixed inset-0 m-auto flex h-fit w-full max-w-md flex-col gap-4 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-lg outline-none popup-motion data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0'

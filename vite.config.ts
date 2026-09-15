@@ -38,8 +38,7 @@ export default defineConfig({
       'shadcn/no-arbitrary-values': 'error',
       'shadcn/no-inline-styles': 'error',
       'shadcn/require-static-classes': 'error',
-      // Off until Tailwind and the theme exist (lot 1): every class of lot 0 is plain CSS.
-      'shadcn/no-unknown-classes': 'off',
+      'shadcn/no-unknown-classes': 'error',
       'shadcn/no-restyle': ['error', { allow: ['layout'] }],
       'anti-slop/no-chained-type-assertions': 'error',
       'anti-slop/no-conditional-empty-object-spread': 'error',

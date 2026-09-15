@@ -47,8 +47,8 @@ function compile(call: string) {
 }
 
 describe('Appel typé nominal', () => {
-  test('the two channels of the lot are the ones declared', () => {
-    const names: ChannelName[] = ['env.report', 'window.command']
+  test('the channels of the application are the ones declared', () => {
+    const names: ChannelName[] = ['env.report', 'theme.set', 'window.command']
     expect(Object.keys(CHANNELS).toSorted()).toEqual(names.toSorted())
   })
 

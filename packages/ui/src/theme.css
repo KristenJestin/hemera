@@ -19,6 +19,12 @@
 @import '@fontsource-variable/inter';
 @import '@fontsource-variable/fira-code';
 
+/* The classes of the design system live beside this file, not in whatever loads it: an
+   application's own build looks under its own root and would never find them, so a component
+   would arrive stripped of every class it was written with. */
+@source './components';
+@source './icons.ts';
+
 /* The dark theme is a class on `<html>`, not a media query: the page follows the system by
    putting the class there, and the user can take it off without the system changing. */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -259,6 +265,14 @@
 
 @utility no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* What a backdrop does, which is appear and go away. Named here for the same reason as the
+   popup's own motion: the list of properties is a decision, not something a caller retypes. */
+@utility backdrop-motion {
+  transition-property: opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
 }
 
 /* The two properties a popup enters and leaves on, named once so that no component writes the
