@@ -1,10 +1,7 @@
 import { defineConfig } from 'vite-plus'
 
-/**
- * The parked GPUiX era and the generated reports are not part of the workspace: they are kept
- * for the lots that will mine them, never linted, formatted, type checked or tested.
- */
-const OUTSIDE_THE_WORKSPACE = ['legacy/**', 'reports/**', 'dist/**']
+/** Generated output is not part of the workspace: never linted, formatted, type checked or tested. */
+const OUTSIDE_THE_WORKSPACE = ['reports/**', 'dist/**']
 
 export default defineConfig({
   lint: {

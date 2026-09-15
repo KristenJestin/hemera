@@ -7,7 +7,7 @@
  * does not exist.
  *
  *   node tools/traceability.ts            check, and report what is missing
- *   node tools/traceability.ts --write    write reports/traceability.md
+ *   node tools/traceability.ts --write    write the table beside the lot, in the documentation folder
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
@@ -20,8 +20,8 @@ export const CHANGE = 'lot-0-socle'
 export const DEFERRAL_REASONS = {
   linux: 'no Linux machine is available here; to be run on the Linux target',
   human: 'a system setting or a real mouse, recorded in the walkthrough of the target',
-  capture: 'observed by capturing what the screen showed, recorded under reports/',
-  package: 'observed on a package run outside the sources, recorded under reports/',
+  capture: 'observed by capturing what the screen showed, recorded in the reports of the lot',
+  package: 'observed on a package run outside the sources, recorded in the reports of the lot',
 } as const
 
 export type DeferralReason = keyof typeof DEFERRAL_REASONS
@@ -193,16 +193,21 @@ export const SPECS_OVERRIDE_VARIABLE = 'HEMERA_SPECS_DIR'
 /**
  * Where the specs of the change are.
  *
- * They live in their own repository, cloned beside this one by the bootstrap. A checkout that
- * puts them elsewhere names the folder instead of moving the repository.
+ * They live in the documentation folder this repository is cloned into (`source/` under it).
+ * A checkout that puts them elsewhere names the folder instead of moving the repository.
  */
 export function specsRootOf(
   repositoryRoot: string,
   env: Record<string, string | undefined> = process.env,
 ): string {
   const named = env[SPECS_OVERRIDE_VARIABLE]
-  const root = named === undefined || named === '' ? resolve(repositoryRoot, '..', '..') : named
+  const root = named === undefined || named === '' ? resolve(repositoryRoot, '..') : named
   return resolve(root, 'openspec', 'changes', CHANGE, 'specs')
+}
+
+/** Where the table is filed: with the other reports of the lot, beside its specs. */
+export function tablePathOf(specsRoot: string): string {
+  return resolve(specsRoot, '..', 'reports', 'traceability.md')
 }
 
 if (import.meta.main) {
@@ -218,7 +223,7 @@ if (import.meta.main) {
   const required = missingRequiredSuites(repositoryRoot)
 
   if (process.argv.includes('--write')) {
-    const path = join(repositoryRoot, 'reports', 'traceability.md')
+    const path = tablePathOf(specsRoot)
     mkdirSync(join(path, '..'), { recursive: true })
     writeFileSync(path, renderTable(coverage))
     console.log(`written ${path}`)

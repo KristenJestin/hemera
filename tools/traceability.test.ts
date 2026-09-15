@@ -15,6 +15,7 @@ import {
   SPECS_OVERRIDE_VARIABLE,
   specsRootOf,
   suitesOf,
+  tablePathOf,
   uncovered,
 } from './traceability.ts'
 
@@ -77,7 +78,7 @@ describe('Table de traçabilité', () => {
   })
 
   test('the written table is the one this repository stands behind', () => {
-    const path = join(repository, 'reports', 'traceability.md')
+    const path = tablePathOf(specs)
     expect(existsSync(path)).toBe(true)
 
     const written = readFileSync(path, 'utf8')

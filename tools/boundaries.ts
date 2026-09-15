@@ -34,14 +34,6 @@ const NO_ELECTRON = [{ pattern: /^electron(\/|$)/, reason: 'Electron' }]
 
 const NO_RENDERER = [{ pattern: /^react(-dom)?(\/|$)/, reason: 'the React renderer' }]
 
-/**
- * The GPUiX era is parked, not deleted: its packages still carry the tokens and the storage
- * lots 1 and 3 will mine. Nothing in the workspace may import them in the meantime.
- */
-const NO_LEGACY = [
-  { pattern: /^@hemera\/(ui|runtime)(\/|$)/, reason: 'a package parked under legacy/' },
-]
-
 export const PACKAGE_RULES: PackageRule[] = [
   {
     name: '@hemera/core',
@@ -50,7 +42,6 @@ export const PACKAGE_RULES: PackageRule[] = [
       ...NO_PLATFORM,
       ...NO_ELECTRON,
       ...NO_RENDERER,
-      ...NO_LEGACY,
       {
         pattern: /^@hemera\/(ipc|desktop)(\/|$)/,
         reason: 'a package core must not depend on',
@@ -66,7 +57,6 @@ export const PACKAGE_RULES: PackageRule[] = [
       ...NO_PLATFORM,
       ...NO_ELECTRON,
       ...NO_RENDERER,
-      ...NO_LEGACY,
       {
         pattern: /^@hemera\/(core|desktop)(\/|$)/,
         reason: 'a package the channel declaration must not depend on',
@@ -76,7 +66,7 @@ export const PACKAGE_RULES: PackageRule[] = [
   {
     name: '@hemera/desktop',
     directory: 'apps/desktop',
-    forbidden: [...NO_LEGACY],
+    forbidden: [],
   },
 ]
 
@@ -163,7 +153,6 @@ function quoted(part: string): string {
 export function analyzePackage(repositoryRoot: string, rule: PackageRule): Violation[] {
   const violations: Violation[] = []
   const packageRoot = resolve(repositoryRoot, rule.directory)
-  const legacyRoot = resolve(repositoryRoot, 'legacy')
   const declared = declaredSubpaths(repositoryRoot)
   for (const file of sourceFilesOf(join(packageRoot, 'src'))) {
     const source = readFileSync(file, 'utf8')
@@ -171,16 +160,6 @@ export function analyzePackage(repositoryRoot: string, rule: PackageRule): Viola
     for (const specifier of specifiersOf(source)) {
       if (specifier.startsWith('.')) {
         const target = resolve(dirname(file), specifier)
-        // Named before the generic escape: a climb into the parked tree is not a package
-        // that moved, it is code the workspace agreed to stop consuming.
-        if (!relative(legacyRoot, target).startsWith('..')) {
-          violations.push({
-            file: reported,
-            specifier,
-            problem: 'imports the legacy tree parked out of the workspace',
-          })
-          continue
-        }
         if (relative(packageRoot, target).startsWith('..')) {
           violations.push({
             file: reported,

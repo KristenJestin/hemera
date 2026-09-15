@@ -12,8 +12,8 @@ directories:
   output: ../../dist/package
   buildResources: build
 
-# Only what was built and the manifest that names its entry point. The sources, the parked
-# legacy tree and every development dependency stay out by not being named.
+# Only what was built and the manifest that names its entry point. The sources and every
+# development dependency stay out by not being named.
 files:
   - dist/**
   - package.json

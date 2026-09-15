@@ -29,7 +29,7 @@ describe('Locales réduites', () => {
 })
 
 describe('Paquet sans les sources', () => {
-  test.each(['legacy/packages/ui/dist/tokens.js', 'spikes/proto-motion/index.html'])(
+  test.each(['spikes/proto-motion/index.html', 'packages/core/src/index.ts'])(
     '%p in a package is reported as belonging to the sources',
     (entry) => {
       expect(refusedEntries([entry])).toHaveLength(1)

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
@@ -110,55 +110,6 @@ describe('Importation interdite', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
-  })
-})
-
-describe('Code hérité isolé', () => {
-  test('a relative climb into the parked tree is reported', () => {
-    const root = fixture({
-      'apps/desktop/src/renderer/tokens.ts':
-        "import { dark } from '../../../../legacy/packages/ui/src/theme/dark.ts'\n",
-    })
-    try {
-      const violations = analyzePackage(root, ruleFor('@hemera/desktop'))
-      expect(violations).toHaveLength(1)
-      expect(violations[0]!.file).toBe('apps/desktop/src/renderer/tokens.ts')
-      expect(violations[0]!.problem).toContain('legacy tree parked out of the workspace')
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test.each(['@hemera/ui', '@hemera/runtime'])(
-    'importing %p by name is reported as a package parked under legacy/',
-    (specifier) => {
-      const root = fixture({
-        'apps/desktop/src/renderer/app.tsx': `import x from '${specifier}'\n`,
-      })
-      try {
-        const violations = analyzePackage(root, ruleFor('@hemera/desktop'))
-        expect(violations).toHaveLength(1)
-        expect(violations[0]!.specifier).toBe(specifier)
-        expect(violations[0]!.problem).toContain('parked under legacy/')
-      } finally {
-        rmSync(root, { recursive: true, force: true })
-      }
-    },
-  )
-
-  test('the workspace does not reach the parked tree', () => {
-    const workspace = readFileSync(join(repository, 'pnpm-workspace.yaml'), 'utf8')
-    expect(workspace).toContain('apps/*')
-    expect(workspace).toContain('packages/*')
-    expect(workspace).not.toContain('legacy')
-  })
-
-  test('nothing lints, formats or tests the parked tree', () => {
-    const config = readFileSync(join(repository, 'vite.config.ts'), 'utf8')
-    expect(config).toContain("'legacy/**'")
-    // The test glob names the workspace folders; a pattern starting at the root would walk
-    // into legacy/ the moment a parked package held a file named like a test.
-    expect(config).toContain("'packages/*/tests/**/*.test.ts'")
   })
 })
 

@@ -14,7 +14,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 /** Folders whose content has no business inside a package. */
-export const REFUSED_IN_PACKAGE = ['legacy', 'spikes', 'src', 'node_modules'] as const
+export const REFUSED_IN_PACKAGE = ['spikes', 'src', 'node_modules'] as const
 
 export interface PackageProblem {
   entry: string
