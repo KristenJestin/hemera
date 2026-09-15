@@ -200,18 +200,21 @@
   --font-sans: 'Inter Variable', system-ui, sans-serif;
   --font-mono: 'Fira Code Variable', ui-monospace, monospace;
 
-  --text-xs: 0.6875rem;
+  /* One notch up from what lot 1 shipped: the base is the browser's own sixteen pixels, and
+     every other step follows it (design D2-07). Lot 1 read fourteen off the prototype, which
+     is a size a web page picks for dense data and not one a window is read at all day. */
+  --text-xs: 0.75rem;
   --text-xs--line-height: 1rem;
-  --text-sm: 0.8125rem;
+  --text-sm: 0.875rem;
   --text-sm--line-height: 1.25rem;
-  --text-base: 0.875rem;
-  --text-base--line-height: 1.375rem;
-  --text-lg: 1rem;
-  --text-lg--line-height: 1.5rem;
-  --text-xl: 1.125rem;
-  --text-xl--line-height: 1.75rem;
-  --text-2xl: 1.375rem;
-  --text-2xl--line-height: 2rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 2rem;
+  --text-2xl: 1.625rem;
+  --text-2xl--line-height: 2.25rem;
 
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
@@ -227,6 +230,23 @@
   --spacing-icon-sm: 0.875rem;
   --spacing-icon-md: 1rem;
   --spacing-icon-lg: 1.25rem;
+
+  /* How tall a control is drawn, one step per size of the components (design D2-07). A named
+     step and not a number: `h-control-md` is a class the scale check knows the whole list of,
+     and a change of density is these three lines rather than a search through the catalogue. */
+  --spacing-control-sm: 2rem;
+  --spacing-control-md: 2.25rem;
+  --spacing-control-lg: 2.75rem;
+
+  /* How wide the sidebar may be, what it opens at, and what it folds down to (design D2-03).
+     The bounds belong to the theme because they are sizes; which one is in force belongs to
+     the shell, which hands the current one back as `--sidebar-current-width`. */
+  --spacing-sidebar: 16rem;
+  --spacing-sidebar-min: 12.5rem;
+  --spacing-sidebar-max: 25rem;
+  --spacing-sidebar-rail: 4.25rem;
+  /* How narrow the separator has to be dragged before the sidebar folds instead of shrinking. */
+  --spacing-sidebar-collapse: 7.5rem;
 
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
@@ -348,8 +368,8 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    line-height: var(--text-sm--line-height);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
     -webkit-font-smoothing: antialiased;
   }
 

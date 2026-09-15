@@ -115,7 +115,7 @@ export function Input({
           defaultValue={defaultValue}
           value={value}
           onValueChange={(next) => onValueChange?.(next)}
-          className={cn(CONTROL, 'h-8 px-2 text-sm', icon !== undefined && 'pl-6')}
+          className={cn(CONTROL, 'h-control-md px-2 text-sm', icon !== undefined && 'pl-6')}
         />
       </div>
     </FieldShell>

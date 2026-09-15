@@ -42,9 +42,9 @@ const buttonVariants = cva(
           'border-destructive bg-destructive text-destructive-foreground hover:brightness-95',
       },
       size: {
-        sm: 'h-6 px-2 text-xs',
-        md: 'h-8 px-3 text-sm',
-        lg: 'h-10 px-4 text-base',
+        sm: 'h-control-sm px-2 text-xs',
+        md: 'h-control-md px-3 text-sm',
+        lg: 'h-control-lg px-4 text-base',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },
@@ -52,7 +52,11 @@ const buttonVariants = cva(
 )
 
 /** A square of the same height, for a button that is an icon and nothing else. */
-const ICON_ONLY = { sm: 'size-6 p-0', md: 'size-8 p-0', lg: 'size-10 p-0' } as const
+const ICON_ONLY = {
+  sm: 'size-control-sm p-0',
+  md: 'size-control-md p-0',
+  lg: 'size-control-lg p-0',
+} as const
 
 /** What the button is doing, which is what it shows instead of its label. */
 export type ButtonState = 'idle' | 'loading' | 'success' | 'error'
