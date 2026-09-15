@@ -103,7 +103,7 @@ export function Sidebar({
       <Folding collapsed={collapsed} label="Command">
         <Button variant="secondary" className={ENTRY} aria-label="Command" onClick={onOpenCommand}>
           <span className="flex shrink-0">
-            <IconCommand size="lg" />
+            <IconCommand size="md" />
           </span>
           <Label collapsed={collapsed} transition={labels}>
             Command
@@ -133,7 +133,7 @@ export function Sidebar({
             key={session.id}
             id={session.id}
             label={session.title}
-            icon={<IconMessages size="lg" />}
+            icon={<IconMessages size="md" />}
             active={session.id === activeEntryId}
             collapsed={collapsed}
             transition={transition}
@@ -144,7 +144,7 @@ export function Sidebar({
         <Entry
           id={JOURNAL_ENTRY}
           label="Journal"
-          icon={<IconTimelineEvent size="lg" />}
+          icon={<IconTimelineEvent size="md" />}
           active={activeEntryId === JOURNAL_ENTRY}
           collapsed={collapsed}
           transition={transition}
@@ -154,7 +154,7 @@ export function Sidebar({
         <Entry
           id={PROJECT_SETTINGS_ENTRY}
           label="Project settings"
-          icon={<IconSettings size="lg" />}
+          icon={<IconSettings size="md" />}
           active={activeEntryId === PROJECT_SETTINGS_ENTRY}
           collapsed={collapsed}
           transition={transition}
@@ -166,14 +166,14 @@ export function Sidebar({
       <div className="mt-auto flex flex-col gap-1">
         <Action
           label={theme === 'dark' ? 'Use the light theme' : 'Use the dark theme'}
-          icon={theme === 'dark' ? <IconSun size="lg" /> : <IconMoon size="lg" />}
+          icon={theme === 'dark' ? <IconSun size="md" /> : <IconMoon size="md" />}
           collapsed={collapsed}
           labels={labels}
           onSelect={onToggleTheme}
         />
         <Action
           label="Settings"
-          icon={<IconSettings size="lg" />}
+          icon={<IconSettings size="md" />}
           collapsed={collapsed}
           labels={labels}
           onSelect={onOpenSettings}

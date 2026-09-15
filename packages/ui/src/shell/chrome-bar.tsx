@@ -105,7 +105,7 @@ export function ChromeBar({
           <Tooltip label={fold} keys={collapseShortcut} side="bottom">
             <IconButton
               variant="ghost"
-              icon={<IconLayoutSidebar size="lg" />}
+              icon={<IconLayoutSidebar size="md" />}
               aria-label={fold}
               aria-expanded={!collapsed}
               onClick={onToggleCollapsed}
@@ -141,7 +141,7 @@ export function ChromeBar({
           <Tooltip label="Add a Project" side="bottom">
             <IconButton
               variant="ghost"
-              icon={<IconPlus size="lg" />}
+              icon={<IconPlus size="md" />}
               aria-label="Add a Project"
               onClick={onAddProject}
             />
@@ -154,7 +154,7 @@ export function ChromeBar({
             trigger={
               <IconButton
                 variant="ghost"
-                icon={<IconBell size="lg" />}
+                icon={<IconBell size="md" />}
                 aria-label="Notifications"
               />
             }

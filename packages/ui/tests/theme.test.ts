@@ -61,11 +61,12 @@ describe('Le thème est la seule source visuelle', () => {
 })
 
 describe('Densité relevée', () => {
-  test('the base text is sixteen pixels, and every step of the scale follows it', () => {
-    expect(theme).toContain('--text-base: 1rem;')
-    expect(theme).toContain('--text-sm: 0.875rem;')
-    expect(theme).toContain('--text-lg: 1.125rem;')
-    // The page itself is read at the base size, which is what "the density" means.
+  test('the base is fourteen, and ordinary text is the base', () => {
+    expect(theme).toContain('--text-base: 0.875rem;')
+    expect(theme).toContain('--text-sm: 0.8125rem;')
+    expect(theme).toContain('--text-lg: 1rem;')
+    // What the density is really about: the page is read at the base size, and not a notch
+    // under it. Lot 1 had the same fourteen and read its body at thirteen.
     expect(theme).toContain('font-size: var(--text-base);')
   })
 

@@ -16,7 +16,7 @@ export function HemeraMark(): ReactNode {
       viewBox="0 0 20 20"
       fill="none"
       aria-hidden="true"
-      className="size-icon-lg shrink-0 text-primary"
+      className="size-icon-md shrink-0 text-primary"
     >
       <circle cx="10" cy="8" r="4.5" fill="currentColor" />
       <path
