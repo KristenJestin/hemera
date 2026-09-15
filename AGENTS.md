@@ -196,11 +196,14 @@ Until then nothing in this repository opens one.
   closed set: `press` for what answers the hand (hover, press, a width following it — stiff and
   light), `arrival` for what puts itself in place (panels, popups — the prototype's "Calme"
   spring, `stiffness 170, damping 26`, no overshoot), `instant` for a system asking for less
-  movement. Components read `useTransition(preset)`, never a preset directly: it is what
-  answers the reduced-motion preference, because motion's own `reducedMotion` drops a transform
-  animation instead of finishing it and leaves a panel where it started — hence
-  `MotionConfig reducedMotion="never"` around the tree. No component writes its own spring
-  numbers or durations; a lint check refuses them outside that one file.
+  movement. Components read `useTransition(preset)`, never a preset directly: it answers the
+  reduced-motion preference with the end state for every property, where motion's own
+  `reducedMotion` would keep animating opacity. The tree runs under
+  `MotionConfig reducedMotion="user"` all the same, as the net under any element that forgets
+  the hook — and the lint refuses a `motion.*` element that animates without a `transition`
+  from it. CSS transitions of the design system stop under `prefers-reduced-motion: reduce`.
+  No component writes its own spring numbers or durations; a lint check refuses them outside
+  that one file.
   **Only `transform`, `opacity`, `filter` and `clip-path` are animated.** A lint check refuses
   an animation that targets a layout property or a colour.
 - Every visual value comes from the design system's CSS tokens. **No hex colors, no px sizes,

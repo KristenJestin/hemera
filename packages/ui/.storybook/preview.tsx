@@ -21,12 +21,12 @@ const withTheme: Decorator = (Story, context) => {
 }
 
 /**
- * The design system answers the reduced-motion preference itself, in `src/motion.ts`: motion's
- * own handling drops a transform animation instead of finishing it, which leaves a panel that
- * should have arrived sitting where it started. `never` tells motion to keep out of it.
+ * The design system answers the reduced-motion preference itself, in `src/motion.ts`, with the
+ * end state for every property. `user` keeps motion's own answer underneath as a net: a motion
+ * element that forgets the hook still stops moving when the system asks.
  */
 const withMotion: Decorator = (Story) => (
-  <MotionConfig reducedMotion="never">
+  <MotionConfig reducedMotion="user">
     <Story />
   </MotionConfig>
 )

@@ -9,6 +9,7 @@ import {
   animatedStyleOf,
   hardcodedOf,
   refusalsOf,
+  unansweredOf,
 } from './motion-properties.ts'
 
 const repository = resolve(import.meta.dirname, '..')
@@ -129,4 +130,34 @@ describe('Propriétés autorisées seules dans le design system', () => {
       expect(refusals[0]!.file).toBe(file)
     },
   )
+})
+
+describe('Réponse au mouvement réduit', () => {
+  test('a stylesheet that switches its transition off animates nothing', () => {
+    expect(animatedStyleOf('a { transition-property: none; }')).toEqual([])
+  })
+
+  test('a motion element that moves on a transition from the hook passes', () => {
+    const source = [
+      'const transition = useTransition(press)',
+      '<motion.button whileTap={{ scale: 0.93 }} transition={transition} />',
+    ].join('\n')
+    expect(unansweredOf('packages/ui/src/components/button/button.tsx', source)).toEqual([])
+  })
+
+  test('a motion element that moves without a transition is refused, naming the prop', () => {
+    const source = '<motion.div animate={{ opacity: 1, y: 0 }} />'
+    const refusals = unansweredOf('apps/desktop/src/renderer/panel.tsx', source)
+    expect(refusals.map((refusal) => refusal.property)).toEqual(['animate', 'useTransition'])
+    expect(refusals[0]!.problem).toContain('useTransition')
+  })
+
+  test('a motion element that is only placed does not have to answer', () => {
+    expect(unansweredOf('panel.tsx', '<motion.div initial={false} />')).toEqual([])
+  })
+
+  test('the renderer and the design system of this lot answer reduced motion everywhere', () => {
+    expect(analyze(renderer, repository)).toEqual([])
+    expect(analyze(designSystem, repository)).toEqual([])
+  })
 })

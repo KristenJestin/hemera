@@ -2,9 +2,9 @@
  * Says what the system prefers, for the length of one story.
  *
  * The preference is a media query, and a media query is answered by the browser: a story
- * cannot decide it from the inside, and `MotionConfig` cannot stand in for it — motion's own
- * reduced-motion handling drops transform animations rather than finishing them, which leaves
- * a panel that should have arrived sitting where it started.
+ * cannot decide it from the inside, and a `MotionConfig` only reaches what motion animates.
+ * The stylesheet answers the same query on its own (`motion-safe`, the popup utilities), so
+ * the one way to test both at once is to ask the browser to say what the system prefers.
  *
  * Answers `null` where nobody is driving the browser, which is the catalogue opened by hand:
  * the reader sees what their own system asked for, and the story says so.

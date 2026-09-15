@@ -154,7 +154,10 @@ export function animatedStyleOf(source: string): string[] {
   while (transition !== null) {
     for (const part of transition[1]!.split(',')) {
       const name = part.trim().split(/\s+/)[0]
-      if (name !== undefined && name !== '' && name !== 'all') properties.push(name)
+      // `none` animates nothing: it is how a transition is switched off under reduced motion.
+      if (name !== undefined && name !== '' && name !== 'all' && name !== 'none') {
+        properties.push(name)
+      }
       if (name === 'all') properties.push('all')
     }
     transition = TRANSITION_PROPERTY.exec(source)
@@ -174,9 +177,48 @@ export function animatedStyleOf(source: string): string[] {
   return properties
 }
 
+/** An opening tag of a motion element, with everything written between its brackets. */
+const MOTION_ELEMENT = /<motion\.\w+\b([\s\S]*?)\/?>/g
+
+/** Props that set a motion element in motion; `initial` alone only places it. */
+const MOVING_PROPS = ['animate', 'exit', 'whileHover', 'whileTap', 'whileFocus', 'layout']
+
+/**
+ * Motion elements that move without a transition read from `useTransition`.
+ *
+ * The hook is what answers the reduced-motion preference for the design system; an element
+ * that animates on motion's default spring has both a second personality and no answer.
+ */
+export function unansweredOf(file: string, source: string): Refusal[] {
+  const refusals: Refusal[] = []
+  MOTION_ELEMENT.lastIndex = 0
+  let element = MOTION_ELEMENT.exec(source)
+  while (element !== null) {
+    const props = element[1]!
+    const moving = MOVING_PROPS.filter((prop) => new RegExp(`\\b${prop}(=|\\s|$)`).test(props))
+    if (moving.length > 0 && !/\btransition=\{/.test(props)) {
+      refusals.push({
+        file,
+        property: moving[0]!,
+        problem: 'moves a motion element without a `transition` read from useTransition',
+      })
+    }
+    element = MOTION_ELEMENT.exec(source)
+  }
+  if (refusals.length > 0 && !/\buseTransition\(/.test(source)) {
+    refusals.push({
+      file,
+      property: 'useTransition',
+      problem: 'animates without ever calling useTransition, which answers reduced motion',
+    })
+  }
+  return refusals
+}
+
 export function refusalsOf(file: string, source: string): Refusal[] {
   const animated = file.endsWith('.css') ? animatedStyleOf(source) : animatedPropertiesOf(source)
   return [
+    ...(file.endsWith('.css') ? [] : unansweredOf(file, source)),
     ...animated
       .filter((property) => !ALLOWED_PROPERTIES.some((allowed) => allowed === property))
       .map((property) => ({

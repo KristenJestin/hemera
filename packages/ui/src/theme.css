@@ -301,6 +301,9 @@
   transition-property: opacity, backdrop-filter;
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
 }
 
 /* The two properties a popup enters and leaves on, named once so that no component writes the
@@ -320,6 +323,10 @@
   transition-property: opacity, translate, scale;
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
+  /* A system asking for less movement gets the popup where it ends, and nothing on the way. */
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
 }
 
 /* Where a dot sits on the ring it orbits: a third of a turn apart, pushed out from the middle.

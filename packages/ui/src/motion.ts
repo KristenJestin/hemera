@@ -49,9 +49,11 @@ export const easing: Easing = [0.25, 0.8, 0.25, 1]
 /**
  * The transition to animate with, which is the preset asked for unless less movement was.
  *
- * motion's own `reducedMotion` leaves a transform where it was rather than putting it where it
- * belongs, so a panel that should have arrived stays offset for good. What reduced motion has
- * to mean is the end state without the journey, so the journey is given no time instead.
+ * motion's own `reducedMotion` jumps a transform to its target and keeps animating opacity and
+ * colour. What reduced motion has to mean here is the end state without the journey, for every
+ * property at once, so the journey is given no time instead. The tree still runs under
+ * `MotionConfig reducedMotion="user"`: it is the net under any motion element that forgets
+ * this hook, and the lint refuses one that does.
  *
  * Both ways of asking are honoured: the system preference, and the `MotionConfig` a story or a
  * screen sets around the component.

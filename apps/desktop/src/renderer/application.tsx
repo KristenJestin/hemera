@@ -40,8 +40,9 @@ export function Application() {
   }, [play])
 
   return (
-    // The design system answers the reduced-motion preference itself, in its own preset.
-    <MotionConfig reducedMotion="never">
+    // The design system answers the reduced-motion preference in its own preset; `user` keeps
+    // motion's own answer underneath, for any element that would forget the hook.
+    <MotionConfig reducedMotion="user">
       <header className="title-bar flex items-center gap-4 px-4">
         <span className="font-medium">Hemera</span>
         <span className="text-muted-foreground">— drag this strip to move the window</span>
