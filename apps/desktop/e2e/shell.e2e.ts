@@ -128,7 +128,12 @@ describe('Repli mesuré', () => {
 
     expect(measure.frames).toBeGreaterThan(0)
     expect(measure.refreshRate).toBeGreaterThanOrEqual(30)
-    expect(measure.longestFrame).toBeLessThanOrEqual((2 * 1000) / measure.refreshRate)
+    // Both sides at the resolution the measure reports in. At 165 Hz two periods are 12.195 ms
+    // and the measure is filed to the hundredth: a longest frame of 12.2 ms is one frame that
+    // lasted two periods, not one that exceeded them, and a frame that truly ran long — three
+    // periods is 18.3 ms — is still refused.
+    const twoPeriods = Math.round(((2 * 1000) / measure.refreshRate) * 100) / 100
+    expect(measure.longestFrame).toBeLessThanOrEqual(twoPeriods)
 
     await unfold()
   })

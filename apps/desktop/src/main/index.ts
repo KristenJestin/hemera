@@ -15,7 +15,7 @@ import { app } from 'electron/main'
 
 import { registerChannels } from './channels.ts'
 import { collectReport } from './environment.ts'
-import { openWindow } from './window.ts'
+import { createWindow, loadWindow } from './window.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
 
@@ -23,8 +23,11 @@ const main = dirname(fileURLToPath(import.meta.url))
 const REPORT_FLAG = '--report'
 
 void app.whenReady().then(async () => {
-  const window = await openWindow(main)
+  // Wired before the page loads: the first thing it does is say which theme it wants, and a
+  // channel with nobody on it would answer that with an error in the application's own console.
+  const window = createWindow(main)
   registerChannels(window)
+  await loadWindow(window)
 
   if (process.argv.includes(REPORT_FLAG)) {
     // The transition is played and counted in the page, because that is where frames are
