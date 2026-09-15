@@ -154,3 +154,35 @@ describe.skipIf(!TEST_RENDERER_PAINTS)("Focus restauré après fermeture d'un ov
     }
   })
 })
+
+describe.skipIf(!TEST_RENDERER_PAINTS)('Décision fermée par le voile', () => {
+  test('a click on the scrim closes, a click inside the panel does not', async () => {
+    const root = mountedCatalogue(<Decision />)
+    try {
+      root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'trigger').id, 'enter')
+      root.renderer.flush()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      root.renderer.flush()
+
+      const panel = root.renderer.getElementBounds(nodeOf(root, 'panel').id)
+      expect(panel).not.toBeNull()
+      if (panel === null) return
+
+      // Inside the panel: the decision is being taken, not dismissed.
+      root.renderer.nativeSimulateClick(panel.x + panel.width / 2, panel.y + panel.height / 2)
+      root.renderer.flush()
+      expect(() => nodeOf(root, 'panel')).not.toThrow()
+
+      // Outside it, on the scrim: the panel sits inside a padding, so its own corner is the
+      // window as far as the user is concerned.
+      const scrim = root.renderer.getElementBounds(nodeOf(root, 'panel-scrim').id)
+      expect(scrim).not.toBeNull()
+      if (scrim === null) return
+      root.renderer.nativeSimulateClick(scrim.x + 4, scrim.y + 4)
+      root.renderer.flush()
+      expect(() => nodeOf(root, 'panel')).toThrow()
+    } finally {
+      root.unmount()
+    }
+  })
+})

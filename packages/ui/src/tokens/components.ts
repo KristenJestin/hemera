@@ -62,6 +62,8 @@ export const dialog = {
   width: 520,
   /** How far the panel rises as it appears, in pixels. */
   entryOffset: space.md,
+  /** How long the panel waits for the window to dim, in seconds. */
+  entryDelay: 0.05,
 } as const
 
 /** Painted state of a control the caller disabled. */

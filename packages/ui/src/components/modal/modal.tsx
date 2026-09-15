@@ -72,24 +72,46 @@ export function Modal({
 
   return (
     <Box
-      {...(testId === undefined ? {} : { testId: `${testId}-scrim` })}
-      onClick={behaviour.onScrimPress}
-      style={{
-        display: 'flex',
-        width: '100%',
-        height: '100%',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: space['2xl'],
-        backgroundColor: theme.colors.scrim,
-      }}
+      style={{ display: 'flex', position: 'relative', width: '100%', height: '100%' }}
+      {...(testId === undefined ? {} : { testId: `${testId}-overlay` })}
     >
-      <div onKeyDown={(event: EventPayload) => behaviour.onKeyDown(event)}>
+      {/* The scrim is its own layer so it can fade on its own: an opacity applies to an
+          element and everything inside it, and the panel does not rise at the same pace. */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={transition('fast')}
+        onClick={behaviour.onScrimPress}
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          opacity: 0,
+          backgroundColor: theme.colors.scrim,
+        }}
+        {...(testId === undefined ? {} : { testId: `${testId}-scrim` })}
+      />
+      <div
+        onKeyDown={(event: EventPayload) => behaviour.onKeyDown(event)}
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100%',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: space['2xl'],
+          // The centring layer must not take the clicks meant for the scrim behind it.
+          pointerEvents: 'none',
+        }}
+      >
         <motion.div
           initial={{ opacity: 0, top: dialog.entryOffset }}
           animate={{ opacity: 1, top: 0 }}
-          transition={transition('base')}
-          style={mergeStyle(panel, style)}
+          // Behind the scrim by a frame or two: the window dims, then the decision arrives.
+          transition={{ ...transition('base'), delay: dialog.entryDelay }}
+          style={mergeStyle(panel, { pointerEvents: 'auto' }, style)}
           {...(testId === undefined ? {} : { testId })}
         >
           <Box style={{ display: 'flex', padding: space.xl }}>
