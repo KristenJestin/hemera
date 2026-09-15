@@ -42,6 +42,7 @@ describe("Cœur importé hors d'Electron", () => {
   test('the production configuration of the core declares no ambient platform type', () => {
     // The tests read the file system through the tooling, so their configuration names the
     // Node types; what ships is compiled without them and would not survive a `process`.
+    // SAFETY: the core's own tsconfig, read for the two fields the test asserts on.
     const production = JSON.parse(
       readFileSync(resolve(import.meta.dirname, '..', 'tsconfig.json'), 'utf8'),
     ) as { compilerOptions: { types: string[] }; include: string[] }

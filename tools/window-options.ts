@@ -98,7 +98,7 @@ export function refusalsOf(file: string, source: string): Refusal[] {
   }
 
   for (const key of webPreferenceKeys(source)) {
-    if (!(ALLOWED_WEB_PREFERENCES as readonly string[]).includes(key)) {
+    if (!ALLOWED_WEB_PREFERENCES.some((allowed) => allowed === key)) {
       at(
         key,
         `is not one of the webPreferences D0-05 allows (${ALLOWED_WEB_PREFERENCES.join(', ')})`,

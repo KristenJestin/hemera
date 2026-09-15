@@ -41,6 +41,7 @@ describe('Échelle fractionnaire par écran', () => {
       return
     }
 
+    // SAFETY: guarded just above, `scales` has at least two entries.
     const [one, other] = scales as [number, number]
     const onOne = await ratioOnDisplay(displays.find((d) => d.scaleFactor === one)!.id)
     const onOther = await ratioOnDisplay(displays.find((d) => d.scaleFactor === other)!.id)

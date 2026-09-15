@@ -14,6 +14,8 @@ const bridge: Bridge = {
     channel: K,
     argument: ChannelArguments<K>,
   ): Promise<ChannelResponse<K>> =>
+    // SAFETY: the main process answers this channel with the handler `handle<K>()` registered,
+    // whose return type is `ChannelResponse<K>`; the wire carries the value, not the type.
     (await ipcRenderer.invoke(channel, argument)) as ChannelResponse<K>,
 }
 

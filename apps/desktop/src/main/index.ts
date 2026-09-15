@@ -36,6 +36,8 @@ void app.whenReady().then(async () => {
     // of the transition is measured on a window that has already painted.
     const play = 'window.hemeraWitness.play()'
     await window.webContents.executeJavaScript(play)
+    // SAFETY: `play` is the renderer's `window.hemeraWitness.play`, declared in `bridge.d.ts`
+    // to resolve a `MotionMeasure`; `executeJavaScript` returns it untyped.
     const motion = (await window.webContents.executeJavaScript(play)) as MotionMeasure
     // Read after the page has painted: what the GPU decided is only true once it drew.
     process.stdout.write(JSON.stringify({ ...(await collectReport()), motion }))

@@ -57,7 +57,7 @@ export function validateCommitMessage(message: string): ValidationResult {
   }
   const type = match[1]!
   const subject = match[3]!
-  if (!(COMMIT_TYPES as readonly string[]).includes(type)) {
+  if (!COMMIT_TYPES.some((known) => known === type)) {
     return { ok: false, error: `"${header}" uses the unknown type "${type}"; ${EXPECTED}` }
   }
   if (header.length > MAX_SUBJECT_LENGTH) {
@@ -76,7 +76,7 @@ export function validateCommitMessage(message: string): ValidationResult {
 }
 
 export function validateBranch(branch: string): ValidationResult {
-  if ((PROTECTED_BRANCHES as readonly string[]).includes(branch)) {
+  if (PROTECTED_BRANCHES.some((protectedBranch) => protectedBranch === branch)) {
     return {
       ok: false,
       error: `"${branch}" is protected; create a feature/<topic> branch from dev before committing`,

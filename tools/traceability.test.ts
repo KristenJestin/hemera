@@ -23,7 +23,7 @@ const repository = resolve(import.meta.dirname, '..')
 const specs = specsRootOf(repository)
 
 /** A change holding one capability with the scenarios given, and one test file. */
-function fixture(scenarios: string[], suites: string[]): { specs: string; root: string } {
+function fixture(scenarios: string[], suites: string[]) {
   const root = mkdtempSync(join(tmpdir(), 'hemera-traceability-'))
   const capability = join(root, 'specs', 'sessions')
   mkdirSync(capability, { recursive: true })
@@ -45,7 +45,7 @@ describe('Table de traçabilité', () => {
     expect(coverage.length).toBeGreaterThan(20)
     expect(uncovered(coverage)).toEqual([])
 
-    for (const reason of Object.values(DEFERRED)) {
+    for (const reason of DEFERRED.values()) {
       expect(Object.keys(DEFERRAL_REASONS)).toContain(reason)
     }
   })

@@ -32,13 +32,13 @@ export type DeferralReason = keyof typeof DEFERRAL_REASONS
  * Nothing lands here to make the verification pass: a scenario is deferred only when the
  * machine or the act it needs does not exist here.
  */
-export const DEFERRED: Record<string, DeferralReason> = {
-  'Ouverture sous Linux en Wayland natif': 'linux',
-  'Sandbox conservée sous Ubuntu 24.04': 'linux',
-  'Mouvement réduit respecté': 'human',
-  'Aucun flash blanc': 'capture',
-  'Lancement depuis un dossier avec espaces': 'package',
-}
+export const DEFERRED = new Map<string, DeferralReason>([
+  ['Ouverture sous Linux en Wayland natif', 'linux'],
+  ['Sandbox conservée sous Ubuntu 24.04', 'linux'],
+  ['Mouvement réduit respecté', 'human'],
+  ['Aucun flash blanc', 'capture'],
+  ['Lancement depuis un dossier avec espaces', 'package'],
+])
 
 export interface Scenario {
   name: string
@@ -131,7 +131,7 @@ export function coverageOf(repositoryRoot: string, specsRoot: string): Coverage[
       // system's. A table that reorders itself between two runs is a diff on both machines
       // for a change nobody made.
       tests: (suites.get(scenario.name) ?? []).toSorted(),
-      deferral: DEFERRED[scenario.name] ?? null,
+      deferral: DEFERRED.get(scenario.name) ?? null,
     }))
 }
 

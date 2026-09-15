@@ -23,6 +23,7 @@ export function handle<K extends ChannelName>(
     console.error(reason)
   },
 ): void {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- what Electron hands over is unparsed by definition; `decide` parses it
   ipcMain.handle(channel, async (event: IpcMainInvokeEvent, argument: unknown) => {
     const frame = event.senderFrame
     const decision = decide(

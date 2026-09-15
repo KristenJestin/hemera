@@ -61,6 +61,7 @@ export const rendererBundle: InlineConfig = {
   base: './',
   // `@vitejs/plugin-react` is typed against the `vite` package. Vite+ ships that same Vite
   // under its own name, so the plugin runs as it always did and only the nominal type differs.
+  // SAFETY: same Vite, two package names; the plugin's nominal type is the only difference.
   plugins: [react()] as NonNullable<InlineConfig['plugins']>,
   build: {
     outDir: resolve(OUTPUT, 'renderer'),

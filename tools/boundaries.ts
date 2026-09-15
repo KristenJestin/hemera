@@ -129,6 +129,8 @@ function declaredSubpaths(repositoryRoot: string): (specifier: string) => boolea
   for (const rule of PACKAGE_RULES) {
     const manifestPath = resolve(repositoryRoot, rule.directory, 'package.json')
     if (!existsSync(manifestPath)) continue
+    // SAFETY: the manifest of one of this repository's own packages, whose `exports` map
+    // subpaths to files; it is read for its keys only.
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
       exports?: Record<string, string>
     }

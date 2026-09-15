@@ -13,7 +13,7 @@ const ipc = resolve(import.meta.dirname, '..')
  * The compiler is the thing under test, so it is run rather than imitated: a call written in
  * a file, `tsc` over that file, and whatever it reports.
  */
-function compile(call: string): { ok: boolean; output: string } {
+function compile(call: string) {
   const probe = join(ipc, 'tests', '.probe')
   mkdirSync(probe, { recursive: true })
   writeFileSync(

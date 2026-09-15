@@ -102,7 +102,8 @@ if (import.meta.main) {
   // The binary belongs to the application, not to the root: it is asked of the package that
   // installed it, so there is one pinned Electron in the repository and not two.
   const fromApplication = createRequire(join(application, 'package.json'))
-  const binary = fromApplication('electron') as string
+  // Outside Electron the module is the path of the binary; its typing is written for the inside.
+  const binary: string = fromApplication('electron')
 
   const report = readReportFrom(application, binary)
   console.log(renderReport(report))

@@ -7,10 +7,10 @@
  */
 
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import electron from 'electron'
 import { build, createServer } from 'vite-plus'
 
 import { RENDERER_URL_VARIABLE } from './src/main/renderer-source.ts'
@@ -26,8 +26,9 @@ await server.listen()
 const address = server.resolvedUrls?.local[0]
 if (address === undefined) throw new Error('the renderer development server has no address')
 
-// Outside Electron, the module is the path of the binary this package installed.
-const binary = electron as unknown as string
+// Outside Electron, the module is the path of the binary this package installed: a string,
+// which the package's own typing (written for the inside) does not say.
+const binary: string = createRequire(import.meta.url)('electron')
 
 // A terminal opened inside an Electron based editor exports ELECTRON_RUN_AS_NODE, and the
 // binary then starts as a plain Node process: no window, and no `electron` module to import.

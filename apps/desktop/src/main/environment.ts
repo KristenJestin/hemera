@@ -17,10 +17,10 @@ import { app, screen } from 'electron/main'
 export const UNKNOWN = 'unknown'
 
 /** What a report produced on one target never claims about the others. */
-export const OTHER_TARGETS: Record<string, string[]> = {
-  windows: ['linux/wayland: not verified by this report'],
-  linux: ['windows: not verified by this report'],
-}
+export const OTHER_TARGETS = new Map<string, string[]>([
+  ['windows', ['linux/wayland: not verified by this report']],
+  ['linux', ['windows: not verified by this report']],
+])
 
 function distributionOf(): string | null {
   if (process.platform !== 'linux') return null
@@ -59,6 +59,8 @@ async function graphicsOf(environment = process.env): Promise<Graphics> {
   // Asked for before the feature status is read, and awaited: until the GPU process has
   // answered, Electron reports every feature as software and the report would name a
   // degradation that is only the question arriving too early.
+  // SAFETY: Electron types `getGPUInfo` as `unknown`; the `complete` form is documented to
+  // carry `gpuDevice[]` with `active` and `deviceString`, and every field is read optionally.
   const info = (await app.getGPUInfo('complete')) as {
     gpuDevice?: { active?: boolean; deviceString?: string }[]
   }
@@ -70,7 +72,7 @@ async function graphicsOf(environment = process.env): Promise<Graphics> {
       ? (environment.XDG_CURRENT_DESKTOP ?? environment.DESKTOP_SESSION ?? UNKNOWN)
       : null,
     gpuBackend: commandLine === null ? null : gpuBackendOf(commandLine),
-    features: app.getGPUFeatureStatus() as unknown as Record<string, string>,
+    features: Object.fromEntries(Object.entries(app.getGPUFeatureStatus())),
   }
 }
 
@@ -108,7 +110,7 @@ export async function collectReport(): Promise<EnvironmentReport> {
       node: process.versions.node,
     },
     motion: null,
-    notVerified: OTHER_TARGETS[target] ?? [],
+    notVerified: OTHER_TARGETS.get(target) ?? [],
     producedAt: new Date().toISOString(),
   }
 }

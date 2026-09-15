@@ -118,7 +118,7 @@ export function animatedStyleOf(source: string): string[] {
 export function refusalsOf(file: string, source: string): Refusal[] {
   const animated = file.endsWith('.css') ? animatedStyleOf(source) : animatedPropertiesOf(source)
   return animated
-    .filter((property) => !(ALLOWED_PROPERTIES as readonly string[]).includes(property))
+    .filter((property) => !ALLOWED_PROPERTIES.some((allowed) => allowed === property))
     .map((property) => ({ file, property }))
 }
 

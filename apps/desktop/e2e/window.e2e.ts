@@ -9,23 +9,15 @@ import { browser, expect } from '@wdio/globals'
 
 describe('Renderer sans Node', () => {
   it('has no require, no Node process and no Electron module in the page', async () => {
-    const reached = await browser.execute(() => ({
-      require: typeof (globalThis as { require?: unknown }).require,
-      process: typeof (globalThis as { process?: unknown }).process,
-      electron: typeof (globalThis as { electron?: unknown }).electron,
-      module: typeof (globalThis as { module?: unknown }).module,
-    }))
-    expect(reached.require).toBe('undefined')
-    expect(reached.process).toBe('undefined')
-    expect(reached.electron).toBe('undefined')
-    expect(reached.module).toBe('undefined')
+    const reached = await browser.execute(() =>
+      ['require', 'process', 'electron', 'module'].filter((name) => name in globalThis),
+    )
+    expect(reached).toEqual([])
   })
 
   it('reaches the main process only through the bridge the preload exposes', async () => {
-    const bridge = await browser.execute(
-      () => typeof (window as unknown as { hemera?: { invoke?: unknown } }).hemera?.invoke,
-    )
-    expect(bridge).toBe('function')
+    const bridge = await browser.execute(() => window.hemera.invoke instanceof Function)
+    expect(bridge).toBe(true)
   })
 
   it('runs isolated and sandboxed, which is what the page is unable to do', async () => {
@@ -33,15 +25,11 @@ describe('Renderer sans Node', () => {
     // isolation is checked by what it costs: a page that reaches none of these is a page
     // whose preload ran in another world and whose renderer has no Node behind it.
     const reached = await browser.execute(() => ({
-      ipcRenderer: typeof (globalThis as { ipcRenderer?: unknown }).ipcRenderer,
-      dirname: typeof (globalThis as Record<string, unknown>)['__dirname'],
-      buffer: typeof (globalThis as { Buffer?: unknown }).Buffer,
+      leaked: ['ipcRenderer', '__dirname', 'Buffer'].filter((name) => name in globalThis),
       // The preload puts one object on the page; a leaked preload scope would put its own.
       bridgeKeys: Object.keys(window.hemera),
     }))
-    expect(reached.ipcRenderer).toBe('undefined')
-    expect(reached.dirname).toBe('undefined')
-    expect(reached.buffer).toBe('undefined')
+    expect(reached.leaked).toEqual([])
     expect(reached.bridgeKeys).toEqual(['invoke'])
   })
 })
@@ -60,6 +48,7 @@ describe('Message non conforme', () => {
   it('refuses a message the channel does not declare, naming the channel and the field', async () => {
     const refusal = await browser.execute(async () => {
       try {
+        // SAFETY: the point of the test is a message the channel does not declare.
         await window.hemera.invoke('window.command', { command: 'explode' } as never)
         return 'accepted'
       } catch (error) {

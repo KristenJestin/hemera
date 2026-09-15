@@ -7,6 +7,7 @@ const repository = resolve(import.meta.dirname, '..')
 
 describe('Vérification unique', () => {
   test('one command chains the four verifications and stops at the first failure', () => {
+    // SAFETY: this repository's own root manifest, read for the script it declares.
     const manifest = JSON.parse(readFileSync(join(repository, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>
     }

@@ -40,6 +40,7 @@ export function isOwnFrame(emitter: Emitter | null, origin: string): boolean {
 export function decide<K extends ChannelName>(
   channel: K,
   emitter: Emitter | null,
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the I/O boundary itself: the one place a message is still unparsed
   argument: unknown,
   origin: string,
 ): Decision<K> {
@@ -60,5 +61,7 @@ export function decide<K extends ChannelName>(
       reason: `${channel}: refused a message whose ${field} does not match the channel (${issue?.message ?? 'no detail'})`,
     }
   }
+  // SAFETY: `read.data` is the output of `CHANNELS[channel].arguments`, the schema that
+  // defines `ChannelArguments<K>`; TypeScript cannot carry the key through the lookup.
   return { accepted: true, argument: read.data as ChannelArguments<K> }
 }
