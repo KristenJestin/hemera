@@ -21,11 +21,12 @@ const withTheme: Decorator = (Story, context) => {
 }
 
 /**
- * Reduced motion is a story parameter and not a global: what has to be verified is one story
- * reaching its final state without a transition, beside the same story that animates.
+ * The design system answers the reduced-motion preference itself, in `src/motion.ts`: motion's
+ * own handling drops a transform animation instead of finishing it, which leaves a panel that
+ * should have arrived sitting where it started. `never` tells motion to keep out of it.
  */
-const withMotion: Decorator = (Story, context) => (
-  <MotionConfig reducedMotion={context.parameters.reducedMotion === true ? 'always' : 'user'}>
+const withMotion: Decorator = (Story) => (
+  <MotionConfig reducedMotion="never">
     <Story />
   </MotionConfig>
 )

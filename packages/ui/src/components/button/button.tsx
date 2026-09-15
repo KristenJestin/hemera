@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { IconAlertTriangle, IconCheck } from '../../icons.ts'
-import { spring } from '../../motion.ts'
+import { useTransition } from '../../motion.ts'
 import { Loading } from '../loading/loading.tsx'
 
 /**
@@ -67,6 +67,7 @@ export function Button({
   className,
   ...rest
 }: ButtonProps) {
+  const transition = useTransition()
   const working = state === 'loading'
   return (
     <BaseButton
@@ -76,7 +77,7 @@ export function Button({
       // A button that is working is not a button that has gone away: keep it reachable, so the
       // keyboard stays where the user left it and the label change is announced in place.
       focusableWhenDisabled={working}
-      render={<motion.button whileTap={{ scale: 0.97 }} transition={spring} />}
+      render={<motion.button whileTap={{ scale: 0.97 }} transition={transition} />}
     >
       <Content state={state}>{children}</Content>
     </BaseButton>
@@ -108,6 +109,7 @@ export function IconButton({ variant, size = 'md', icon, className, ...rest }: I
  * says; the swap is an opacity and a scale, which is what a compositor animates on its own.
  */
 function Content({ state, children }: { state: ButtonState; children: ReactNode }) {
+  const transition = useTransition()
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.span
@@ -116,7 +118,7 @@ function Content({ state, children }: { state: ButtonState; children: ReactNode 
         initial={{ opacity: 0, scale: 0.85 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.85 }}
-        transition={spring}
+        transition={transition}
       >
         {state === 'loading' && <Loading size="sm" label="Working" />}
         {state === 'success' && <IconCheck size="sm" />}

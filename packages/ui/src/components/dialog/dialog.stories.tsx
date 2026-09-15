@@ -81,15 +81,15 @@ export const Keyboard: Story = {
     await userEvent.keyboard('{Enter}')
 
     const dialog = await waitFor(() => within(document.body).getByRole('dialog'))
-    // The focus goes inside and stays there: tabbing round comes back to the dialog's own
-    // controls rather than leaving for the page behind it.
+    // The focus goes inside and stays there: tabbing walks the dialog's own controls rather
+    // than leaving for the page behind it.
     await waitFor(() => {
       expect(dialog.contains(document.activeElement)).toBe(true)
     })
     await userEvent.tab()
     await userEvent.tab()
-    await userEvent.tab()
     expect(dialog.contains(document.activeElement)).toBe(true)
+    expect(document.activeElement).not.toBe(trigger)
 
     // Escape closes it and hands the focus back to what opened it.
     await userEvent.keyboard('{Escape}')

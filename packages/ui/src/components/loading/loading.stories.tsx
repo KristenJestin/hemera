@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, waitFor, within } from 'storybook/test'
 
+import { emulateReducedMotion } from '../../../.storybook/reduced-motion.ts'
 import { Loading } from './loading.tsx'
 
 const meta = {
@@ -72,10 +73,9 @@ export const Dark: Story = {
  */
 export const ReducedMotion: Story = {
   args: { label: 'Loading' },
-  parameters: { reducedMotion: true },
   play: async ({ canvasElement }) => {
-    const emulate = await reducedMotion('reduce')
-    if (emulate === null) return
+    const restore = await emulateReducedMotion()
+    if (restore === null) return
     try {
       const dot = within(canvasElement).getByRole('status').children[0]!
       await waitFor(() => {
@@ -83,25 +83,7 @@ export const ReducedMotion: Story = {
       })
       expect(getComputedStyle(dot).opacity).toBe('0.2')
     } finally {
-      await emulate('no-preference')
+      await restore()
     }
   },
-}
-
-/**
- * Tells the browser what the system prefers, and hands back the way to say it again. Answers
- * `null` where nobody is driving the browser, which is the catalogue opened by hand: only a
- * test runner holds the session a media query can be emulated through.
- */
-async function reducedMotion(value: string): Promise<((value: string) => Promise<void>) | null> {
-  const runner = await import('vitest/browser').catch(() => null)
-  if (runner === null) return null
-  const session = runner.cdp()
-  const set = async (preference: string): Promise<void> => {
-    await session.send('Emulation.setEmulatedMedia', {
-      features: [{ name: 'prefers-reduced-motion', value: preference }],
-    })
-  }
-  await set(value)
-  return set
 }
