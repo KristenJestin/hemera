@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -84,4 +84,61 @@ describe('Démarrage applicatif', () => {
     expect(width).toBeGreaterThan(0)
     expect(height).toBeGreaterThan(0)
   }, 90_000)
+})
+
+describe('Deuxième lancement', () => {
+  test('a second start says who holds the profile, and says it where it is read', async () => {
+    const profile = mkdtempSync(join(tmpdir(), 'hemera-second-'))
+    const environment = { ...process.env, [PROFILE_OVERRIDE_VARIABLE]: profile }
+    const holder = Bun.spawn(['bun', 'src/entry/main.tsx'], {
+      cwd: desktop,
+      env: environment,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    try {
+      // The lock is taken at the start, but the window is what proves the first one is up.
+      const reader = holder.stdout.getReader()
+      const decoder = new TextDecoder()
+      let seen = ''
+      const deadline = Date.now() + 60_000
+      while (Date.now() < deadline && !seen.includes('window opened')) {
+        // oxlint-disable-next-line no-await-in-loop
+        const { value, done } = await reader.read()
+        if (done) break
+        seen += decoder.decode(value, { stream: true })
+      }
+      expect(seen).toContain('window opened')
+
+      const second = Bun.spawn(['bun', 'src/entry/main.tsx'], {
+        cwd: desktop,
+        env: environment,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      // A refusal is a warning, so it leaves by the error stream, as a warning does.
+      const [out, err] = await Promise.all([
+        new Response(second.stdout).text(),
+        new Response(second.stderr).text(),
+      ])
+      const refusal = out + err
+      const code = await second.exited
+
+      // Refused, and saying so: a start that stops without a word reads as a start that did
+      // nothing at all, which is what a task runner shows of it.
+      expect(code).toBe(1)
+      expect(refusal).toContain('another instance already owns this profile')
+      expect(refusal).toContain('close that window')
+
+      // And written where it can be read back, console or not.
+      const logs = readdirSync(join(profile, 'Hemera-dev', 'logs'))
+      expect(logs.length).toBeGreaterThan(0)
+      const written = readFileSync(join(profile, 'Hemera-dev', 'logs', logs[0]!), 'utf8')
+      expect(written).toContain('another instance already owns this profile')
+    } finally {
+      holder.kill()
+      await holder.exited
+      rmSync(profile, { recursive: true, force: true })
+    }
+  }, 120_000)
 })

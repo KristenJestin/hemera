@@ -41,7 +41,7 @@
 | Développement à côté de l'installation | `apps/desktop/tests/showcase.test.ts` |
 | Paquet dev distribué | `packages/runtime/tests/profile.test.ts` |
 | Surcharge de canal hors test | `packages/runtime/tests/profile.test.ts` |
-| Deuxième lancement | `packages/runtime/tests/instance-lock.test.ts` |
+| Deuxième lancement | `apps/desktop/system-tests/window.test.ts`, `packages/runtime/tests/instance-lock.test.ts` |
 | Verrou résiduel après arrêt brutal | `packages/runtime/tests/instance-lock.test.ts` |
 | Profils distincts | `packages/runtime/tests/instance-lock.test.ts` |
 | Lancement hors checkout | `apps/desktop/system-tests/package.test.ts` |

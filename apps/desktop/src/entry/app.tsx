@@ -18,7 +18,8 @@ import { useEffect, useRef, useState } from 'react'
 import * as m from '#paraglide/messages.js'
 import { missingFontDiagnostic, registerEmbeddedFonts } from '#platform/fonts.ts'
 import { embeddedFontLocator } from '#platform/embedded-fonts.ts'
-import { folderProblem, openInstance } from '#platform/workspace.ts'
+import { folderProblem, openInstance, profileDirectoryOf } from '#platform/workspace.ts'
+import type { InstanceProfile } from '#platform/workspace.ts'
 import { packagingOf } from '#platform/packaging.ts'
 import { createWindowSizeGate } from '#platform/window-size.ts'
 import { canReach, routeFromArguments } from '#ui/navigation.ts'
@@ -80,25 +81,35 @@ function Hemera({ route, channel, context }: HemeraProps) {
   )
 }
 
+// Every diagnostic of the start goes to the profile as well as to the console: a package
+// started from a desktop icon has no console, so what is only printed is lost. The log is
+// opened before the lock is taken, because a refused start is exactly one of them.
+const log = openDiagnosticLog(profileDirectoryOf(packagingOf()))
+
 const instance = openInstance(packagingOf())
 if ('kind' in instance) {
-  console.error(`another instance already owns this profile (pid ${instance.owner.pid})`)
-  process.exit(1)
+  // Not an error of ours: a second window was asked for and the first one holds the profile.
+  // It goes to the standard output, where a task runner relays it, and to the log.
+  log.warn(
+    `another instance already owns this profile (pid ${instance.owner.pid}); ` +
+      'close that window, or wait for it to release the profile',
+  )
+  process.exitCode = 1
+} else {
+  start(instance)
 }
 
-const route = routeFromArguments(Bun.argv, instance.channel)
+function start(opened: InstanceProfile): void {
+  const route = routeFromArguments(Bun.argv, opened.channel)
 
-// Every diagnostic of the start goes to the profile as well as to the console: a package
-// started from a desktop icon has no console, so what is only printed is lost.
-const log = openDiagnosticLog({ directory: instance.directory })
+  const fonts = registerEmbeddedFonts(embeddedFontLocator, addFonts)
+  const diagnostic = missingFontDiagnostic(fonts)
+  if (diagnostic !== null) log.error(diagnostic)
+  log.info(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)
+  log.info(`channel ${opened.channel}, route ${route}, profile ${opened.directory}`)
 
-const fonts = registerEmbeddedFonts(embeddedFontLocator, addFonts)
-const diagnostic = missingFontDiagnostic(fonts)
-if (diagnostic !== null) log.error(diagnostic)
-log.info(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)
-log.info(`channel ${instance.channel}, route ${route}, profile ${instance.directory}`)
-
-render(<Hemera route={route} channel={instance.channel} context={instance.context} />, {
-  title: windowTitleOf(m.app_name(), instance.channel),
-  titlebarTransparent: FRAMELESS_WINDOW,
-})
+  render(<Hemera route={route} channel={opened.channel} context={opened.context} />, {
+    title: windowTitleOf(m.app_name(), opened.channel),
+    titlebarTransparent: FRAMELESS_WINDOW,
+  })
+}
