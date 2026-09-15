@@ -105,7 +105,9 @@ describe('Densité relevée', () => {
       readFileSync(join(import.meta.dirname, '..', 'src', 'shell', file), 'utf8'),
     )
     for (const source of shell) {
-      expect(source).not.toMatch(/\bh-\d/)
+      // A control's height is the size it was asked for, never a class the shell writes; the
+      // steps of the spacing scale stay the shell's to use for everything else.
+      expect(source).not.toMatch(/h-control-/)
       expect(source).not.toMatch(/\btext-\[/)
     }
   })

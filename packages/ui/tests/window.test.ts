@@ -35,6 +35,6 @@ describe('Fenêtre peinte avec la couleur du thème', () => {
   })
 
   test('the overlay is as tall as the theme says', () => {
-    expect(heightIn(theme)).toBe(40)
+    expect(heightIn(theme)).toBe(48)
   })
 })

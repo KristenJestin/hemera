@@ -38,7 +38,13 @@ import { JOURNAL_ENTRY, PROJECT_SETTINGS_ENTRY, SIDEBAR_RAIL, type ShellSession 
 const PANEL =
   'relative flex shrink-0 flex-col gap-1 overflow-hidden border-r border-border bg-card p-2'
 
-const ENTRY = 'w-full justify-start gap-2'
+/**
+ * Every entry is padded so that the middle of its icon lands on the middle of the rail: the
+ * sidebar's own padding, plus this one, plus half an icon, is half of `--spacing-sidebar-rail`.
+ * That is what makes folding move the panel and not the icons inside it — and it is why the
+ * border goes: a ghost button draws a transparent one, and one pixel is one pixel.
+ */
+const ENTRY = 'w-full justify-start gap-3 border-0 px-4'
 
 const MARK = 'absolute inset-0 rounded-md bg-accent'
 
@@ -97,7 +103,7 @@ export function Sidebar({
       <Folding collapsed={collapsed} label="Command">
         <Button variant="secondary" className={ENTRY} aria-label="Command" onClick={onOpenCommand}>
           <span className="flex shrink-0">
-            <IconCommand size="sm" />
+            <IconCommand size="lg" />
           </span>
           <Label collapsed={collapsed} transition={labels}>
             Command
@@ -127,7 +133,7 @@ export function Sidebar({
             key={session.id}
             id={session.id}
             label={session.title}
-            icon={<IconMessages size="sm" />}
+            icon={<IconMessages size="lg" />}
             active={session.id === activeEntryId}
             collapsed={collapsed}
             transition={transition}
@@ -138,7 +144,7 @@ export function Sidebar({
         <Entry
           id={JOURNAL_ENTRY}
           label="Journal"
-          icon={<IconTimelineEvent size="sm" />}
+          icon={<IconTimelineEvent size="lg" />}
           active={activeEntryId === JOURNAL_ENTRY}
           collapsed={collapsed}
           transition={transition}
@@ -148,7 +154,7 @@ export function Sidebar({
         <Entry
           id={PROJECT_SETTINGS_ENTRY}
           label="Project settings"
-          icon={<IconSettings size="sm" />}
+          icon={<IconSettings size="lg" />}
           active={activeEntryId === PROJECT_SETTINGS_ENTRY}
           collapsed={collapsed}
           transition={transition}
@@ -160,14 +166,14 @@ export function Sidebar({
       <div className="mt-auto flex flex-col gap-1">
         <Action
           label={theme === 'dark' ? 'Use the light theme' : 'Use the dark theme'}
-          icon={theme === 'dark' ? <IconSun size="sm" /> : <IconMoon size="sm" />}
+          icon={theme === 'dark' ? <IconSun size="lg" /> : <IconMoon size="lg" />}
           collapsed={collapsed}
           labels={labels}
           onSelect={onToggleTheme}
         />
         <Action
           label="Settings"
-          icon={<IconSettings size="sm" />}
+          icon={<IconSettings size="lg" />}
           collapsed={collapsed}
           labels={labels}
           onSelect={onOpenSettings}

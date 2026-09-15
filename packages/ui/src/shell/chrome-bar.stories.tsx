@@ -23,7 +23,6 @@ const meta = {
     onToggleCollapsed: fn(),
     collapseShortcut: 'Ctrl+B',
     notifications: <p className="text-muted-foreground">Notifications: lot 4.</p>,
-    onOpenSettings: fn(),
   },
   argTypes: {
     projects: { table: { disable: true } },

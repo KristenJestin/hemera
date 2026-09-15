@@ -45,7 +45,7 @@ describe('Boutons de fenêtre hors de la barre', () => {
     const laid = await browser.execute(() => {
       const bar = document.querySelector('header')!
       const segments = [...bar.children].map((node) => node.getBoundingClientRect().right)
-      const tabs = bar.querySelector('header > div:nth-child(2) > div')!
+      const tabs = bar.querySelector('nav[aria-label="Projects"]')!
       return {
         bar: bar.getBoundingClientRect().right,
         window: window.innerWidth,

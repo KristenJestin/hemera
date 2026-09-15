@@ -225,8 +225,9 @@
   /* Named steps of the spacing scale, so an icon is sized by the scale and not by a number:
      `size-icon-md` is a spacing utility like any other, and the scale lint can close the list. */
   /* The strip the system draws its window buttons in. The main process asks the platform for
-     it in pixels; the page reads back what the platform actually gave, and falls back here. */
-  --spacing-title-bar: 2.5rem;
+     it in pixels; the page reads back what the platform actually gave, and falls back here.
+     Tall enough for a control of the `md` size with room around it, which is what it holds. */
+  --spacing-title-bar: 3rem;
 
   --spacing-icon-sm: 0.875rem;
   --spacing-icon-md: 1rem;

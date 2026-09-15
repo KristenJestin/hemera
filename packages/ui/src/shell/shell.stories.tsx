@@ -166,6 +166,15 @@ export const FoldsToARailAndBack: Story = {
     const canvas = within(canvasElement)
     const sidebar = canvas.getByRole('complementary')
 
+    // Where the middle of an icon sits before the fold. Folding moves the panel, never what is
+    // drawn in it: the icons of the rail are the icons of the sidebar, in the same place.
+    const middleOfJournal = (): number => {
+      const box = canvas.getByRole('button', { name: 'Journal' }).querySelector('svg')!
+      const { left, width } = box.getBoundingClientRect()
+      return Math.round(left + width / 2)
+    }
+    const before = middleOfJournal()
+
     await userEvent.click(canvas.getByRole('button', { name: 'Collapse the sidebar' }))
     await waitFor(
       () => {
@@ -173,6 +182,10 @@ export const FoldsToARailAndBack: Story = {
       },
       { timeout: 3000 },
     )
+
+    // Dead centre of the rail, and exactly where it already was.
+    expect(middleOfJournal()).toBe(before)
+    expect(middleOfJournal()).toBe(Math.round(SIDEBAR_RAIL / 2))
 
     // Folded, every icon still says what it is — to a screen reader by name, and to everyone
     // else in a tooltip beside the rail.
@@ -190,6 +203,16 @@ export const FoldsToARailAndBack: Story = {
       },
       { timeout: 3000 },
     )
+  },
+}
+
+/** The add button adds a Project, and does not ask a second time in a panel of its own. */
+export const AddsAProject: Story = {
+  play: async ({ canvasElement }) => {
+    const add = within(canvasElement).getByRole('button', { name: 'Add a Project' })
+    await userEvent.click(add)
+    // Nothing opens: the press is the whole of it.
+    expect(within(document.body).queryByRole('dialog')).toBeNull()
   },
 }
 
@@ -287,22 +310,14 @@ export const ManyProjects: Story = {
   args: { projects: MANY },
   play: async ({ canvasElement }) => {
     const bar = canvasElement.querySelector('header')!
-    const strip = canvasElement.querySelectorAll('header > div')[1]!
+    const strip = canvasElement.querySelector('nav[aria-label="Projects"]')!
 
     // Nothing of ours is laid outside the strip the platform left us, however many tabs there
-    // are: what does not fit scrolls, and the whole list is in the panel the add button opens.
+    // are: the strip ends inside the bar, and what does not fit scrolls out of sight in it.
     expect(strip.getBoundingClientRect().right).toBeLessThanOrEqual(
       bar.getBoundingClientRect().right + 1,
     )
-    await userEvent.click(
-      within(canvasElement).getByRole('button', { name: 'Projects and adding one' }),
-    )
-    const panel = await waitFor(() => within(document.body).getByRole('dialog'))
-    expect(within(panel).getByRole('button', { name: /Project number 12/ })).toBeInTheDocument()
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => {
-      expect(within(document.body).queryByRole('dialog')).toBeNull()
-    })
+    expect(strip.scrollWidth).toBeGreaterThan(strip.clientWidth)
   },
 }
 

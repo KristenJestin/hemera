@@ -27,10 +27,14 @@ import { Sidebar } from './sidebar.tsx'
  * is the content area and nothing above it can ever be pushed out of view.
  *
  * One number crosses the whole layout: how wide the sidebar is right now. The sidebar animates
- * it and says so on every frame; the shell writes it down as `--sidebar-current-width`, and the
- * chrome bar's first column is that variable. Writing a property on an element is not how this
- * repository styles anything — but this is the one value that changes sixty times a second, and
- * a class cannot carry it. One value, one writer, and two columns that cannot come apart.
+ * it and says so on every frame; the shell writes it down as `--sidebar-current-width` on the
+ * chrome bar, whose first column is that variable. Writing a property on an element is not how
+ * this repository styles anything — but this is the one value that changes sixty times a second,
+ * and a class cannot carry it. One value, one writer, and two columns that cannot come apart.
+ *
+ * It is written on the bar and not here, and the difference is measurable: a custom property
+ * written on an ancestor makes the browser recompute the style of everything beneath it, and
+ * beneath the shell is the entire window. On the bar, the fold stops dropping frames.
  */
 export interface ShellProps {
   projects: ShellProject[]
@@ -84,12 +88,13 @@ export function Shell({
   children,
 }: ShellProps): ReactNode {
   const root = useRef<HTMLDivElement>(null)
+  const bar = useRef<HTMLElement>(null)
   const overlay = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
   const checked = checkedWidth(width)
 
   const poseWidth = useCallback((current: number) => {
-    root.current?.style.setProperty('--sidebar-current-width', `${current}px`)
+    bar.current?.style.setProperty('--sidebar-current-width', `${current}px`)
   }, [])
 
   // The first frame has no animation to report a width, so the shell writes the resting one —
@@ -110,6 +115,7 @@ export function Shell({
       <OverlayContainerProvider value={overlay}>
         <div ref={root} className="shell-root bg-background text-foreground">
           <ChromeBar
+            ref={bar}
             projects={projects}
             activeProjectId={activeProjectId}
             onSelectProject={onSelectProject}
@@ -118,7 +124,6 @@ export function Shell({
             onToggleCollapsed={() => onCollapsedChange(!collapsed)}
             collapseShortcut={collapseShortcut}
             notifications={notifications}
-            onOpenSettings={onOpenSettings}
           />
           <div className="shell-body">
             <Sidebar

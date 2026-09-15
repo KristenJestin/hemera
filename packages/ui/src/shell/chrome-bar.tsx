@@ -1,13 +1,14 @@
 import { cn } from 'cn'
 import { LayoutGroup, motion } from 'motion/react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 
-import { IconBell, IconLayoutSidebar, IconPlus, IconSettings } from '../icons.ts'
-import { arrival, useTransition } from '../motion.ts'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Popover } from '../components/popover/popover.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
+import { IconBell, IconLayoutSidebar, IconPlus } from '../icons.ts'
+import { arrival, useTransition } from '../motion.ts'
+import { HemeraMark } from './mark.tsx'
 import type { ProjectTone, ShellProject } from './model.ts'
 
 /**
@@ -20,10 +21,11 @@ import type { ProjectTone, ShellProject } from './model.ts'
  * bar is a title bar everywhere the eye sees nothing to press.
  *
  * Two segments in one grid. The first column is the sidebar's current width, written by the
- * shell as the sidebar folds, so the left segment and the sidebar are the same width at every
- * frame and the Projects always start at the sidebar's right edge. The left segment carries the
- * name of the application and the button that folds the sidebar — above the sidebar rather than
- * inside it, so it does not move when the panel it commands does.
+ * shell as the sidebar folds, and it carries the name of the application and nothing else: the
+ * mark stays exactly where it is at either width — dead centre of the rail once folded — and
+ * the word beside it leaves with the labels of the sidebar. Everything that is pressed lives in
+ * the second segment, the button that folds the sidebar first, then a rule, then the Projects,
+ * so that the first column can be as narrow as a rail without dragging a control into it.
  *
  * The mark of the active Project is one element that slides between the tabs on `arrival`,
  * which is the movement the prototype earned. It lives inside the scrolling strip with the
@@ -31,13 +33,16 @@ import type { ProjectTone, ShellProject } from './model.ts'
  */
 const BAR = 'title-bar chrome-columns items-center border-b border-border bg-background'
 
-const BRAND = 'flex min-w-0 items-center gap-2 overflow-hidden pr-1 pl-3'
+const BRAND = 'flex min-w-0 items-center gap-2 overflow-hidden pr-2 pl-6'
 
 const STRIP = 'no-drag-children scroll-quiet flex min-w-0 flex-1 items-center gap-1 overflow-x-auto'
 
-const TAB = 'relative shrink-0 gap-1.5'
+const TAB = 'relative shrink-0 gap-2'
 
-const MARK = 'absolute inset-0 rounded-md bg-accent'
+/** The slab that slides from tab to tab: a raised pill, which is what makes it visible at all. */
+const MARK = 'absolute inset-0 rounded-md bg-card shadow-sm'
+
+const RULE = 'mx-1 h-6 shrink-0 self-center border-l border-border'
 
 /** The dot a Project is told apart by: a tone of the theme, and never a colour written here. */
 const TONE: Record<ProjectTone, string> = {
@@ -59,7 +64,15 @@ export interface ChromeBarProps {
   collapseShortcut: string
   /** What the bell opens onto; the lot that owns notifications fills it. */
   notifications: ReactNode
-  onOpenSettings: () => void
+  /**
+   * Where the shell writes the sidebar's current width, sixty times a second.
+   *
+   * On the bar itself and not on the shell: a custom property written on an ancestor makes the
+   * browser recompute the style of everything under it, and everything under the shell is the
+   * sidebar, the separator and the whole content area. Written here it reaches the one grid
+   * that reads it, and the fold stops dropping frames.
+   */
+  ref?: RefObject<HTMLElement | null> | undefined
 }
 
 export function ChromeBar({
@@ -71,37 +84,42 @@ export function ChromeBar({
   onToggleCollapsed,
   collapseShortcut,
   notifications,
-  onOpenSettings,
+  ref,
 }: ChromeBarProps): ReactNode {
   const transition = useTransition(arrival)
   const fold = collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'
 
   return (
-    <header className={BAR}>
+    <header ref={ref} className={BAR}>
       <div className={BRAND}>
-        <span className="truncate font-medium">Hemera</span>
-        <span className="no-drag-children ml-auto flex">
+        <HemeraMark />
+        {/* Taken out rather than faded: the column is only as wide as the rail once folded, and
+            a word left in it at nought opacity is a word still half on screen — text the eye
+            cannot read and the accessibility pass is right to refuse. The mark is what stays,
+            and it has not moved. */}
+        {!collapsed && <span className="truncate font-medium">Hemera</span>}
+      </div>
+
+      <div className="flex min-w-0 items-center gap-1 pr-2">
+        <span className="no-drag-children flex shrink-0 items-center">
           <Tooltip label={fold} keys={collapseShortcut} side="bottom">
             <IconButton
               variant="ghost"
-              size="sm"
-              icon={<IconLayoutSidebar size="sm" />}
+              icon={<IconLayoutSidebar size="lg" />}
               aria-label={fold}
               aria-expanded={!collapsed}
               onClick={onToggleCollapsed}
             />
           </Tooltip>
         </span>
-      </div>
+        <span aria-hidden="true" className={RULE} />
 
-      <div className="flex min-w-0 items-center gap-1 pr-2">
-        <div className={STRIP}>
+        <nav aria-label="Projects" className={STRIP}>
           <LayoutGroup id="projects">
             {projects.map((project) => (
               <Button
                 key={project.id}
                 variant="ghost"
-                size="sm"
                 className={TAB}
                 aria-current={project.id === activeProjectId ? 'page' : undefined}
                 onClick={() => onSelectProject(project.id)}
@@ -109,9 +127,7 @@ export function ChromeBar({
                 {project.id === activeProjectId && (
                   <motion.span layoutId="active-project" className={MARK} transition={transition} />
                 )}
-                <span
-                  className={cn('relative size-1.5 shrink-0 rounded-full', TONE[project.tone])}
-                />
+                <span className={cn('relative size-2 shrink-0 rounded-full', TONE[project.tone])} />
                 <span className="relative">{project.name}</span>
                 {project.pending > 0 && (
                   <Badge tone="neutral" className="relative">
@@ -121,40 +137,16 @@ export function ChromeBar({
               </Button>
             ))}
           </LayoutGroup>
-          {/* Whatever the strip is too narrow to show is still one press away: the same list
-              lives in the panel the add button opens, which is also where a new one is made. */}
-          <Popover
-            title="Projects"
-            side="bottom"
-            align="start"
-            trigger={
-              <IconButton
-                variant="ghost"
-                size="sm"
-                icon={<IconPlus size="sm" />}
-                aria-label="Projects and adding one"
-              />
-            }
-          >
-            <div className="flex flex-col gap-1">
-              {projects.map((project) => (
-                <Button
-                  key={project.id}
-                  variant="ghost"
-                  className="justify-start gap-2"
-                  onClick={() => onSelectProject(project.id)}
-                >
-                  <span className={cn('size-1.5 shrink-0 rounded-full', TONE[project.tone])} />
-                  {project.name}
-                </Button>
-              ))}
-              <Button variant="secondary" className="justify-start gap-2" onClick={onAddProject}>
-                <IconPlus size="sm" />
-                Add a Project
-              </Button>
-            </div>
-          </Popover>
-        </div>
+          {/* One press, one Project. It sits after the last tab, where the next one will be. */}
+          <Tooltip label="Add a Project" side="bottom">
+            <IconButton
+              variant="ghost"
+              icon={<IconPlus size="lg" />}
+              aria-label="Add a Project"
+              onClick={onAddProject}
+            />
+          </Tooltip>
+        </nav>
 
         <div className="no-drag-children flex shrink-0 items-center gap-1">
           <Popover
@@ -162,23 +154,13 @@ export function ChromeBar({
             trigger={
               <IconButton
                 variant="ghost"
-                size="sm"
-                icon={<IconBell size="sm" />}
+                icon={<IconBell size="lg" />}
                 aria-label="Notifications"
               />
             }
           >
             {notifications}
           </Popover>
-          <Tooltip label="Settings" side="bottom">
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={<IconSettings size="sm" />}
-              aria-label="Settings"
-              onClick={onOpenSettings}
-            />
-          </Tooltip>
         </div>
       </div>
     </header>

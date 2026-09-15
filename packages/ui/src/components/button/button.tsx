@@ -42,9 +42,9 @@ const buttonVariants = cva(
           'border-destructive bg-destructive text-destructive-foreground hover:brightness-95',
       },
       size: {
-        sm: 'h-control-sm px-2 text-xs',
-        md: 'h-control-md px-3 text-sm',
-        lg: 'h-control-lg px-4 text-base',
+        sm: 'h-control-sm px-2 text-sm',
+        md: 'h-control-md px-3 text-base',
+        lg: 'h-control-lg px-4 text-lg',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },
