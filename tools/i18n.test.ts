@@ -3,8 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { analyzeI18n } from './i18n.ts'
-import { en } from '../apps/desktop/src/i18n/resources/en.ts'
+import { analyzeI18n, catalogueOf, staleMessages } from './i18n.ts'
 
 const repository = resolve(import.meta.dir, '..')
 
@@ -20,7 +19,7 @@ function desktopFixture(files: Record<string, string>): string {
 
 describe("Textes de l'interface", () => {
   test('the desktop application holds no hard-coded visible text', () => {
-    expect(analyzeI18n(repository, new Set(Object.keys(en)))).toEqual([])
+    expect(analyzeI18n(repository, catalogueOf(repository))).toEqual([])
   })
 
   test('literal JSX text is reported with its file and line', () => {
@@ -30,7 +29,7 @@ describe("Textes de l'interface", () => {
       ),
     })
     try {
-      const violations = analyzeI18n(root, new Set(['app.name']))
+      const violations = analyzeI18n(root, new Set(['app_name']))
       expect(violations).toHaveLength(1)
       expect(violations[0]!.file).toBe('apps/desktop/src/ui/page.tsx')
       expect(violations[0]!.line).toBe(2)
@@ -45,7 +44,7 @@ describe("Textes de l'interface", () => {
       'ui/field.tsx': '<Input placeholder="Message Hemera" />\n',
     })
     try {
-      const violations = analyzeI18n(root, new Set(['app.name']))
+      const violations = analyzeI18n(root, new Set(['app_name']))
       expect(violations).toHaveLength(1)
       expect(violations[0]!.problem).toContain('Message Hemera')
     } finally {
@@ -56,7 +55,7 @@ describe("Textes de l'interface", () => {
   test('punctuation and separators are not mistaken for a label', () => {
     const root = desktopFixture({ 'ui/sep.tsx': '<Text>{value}</Text>\n<Text> · </Text>\n' })
     try {
-      expect(analyzeI18n(root, new Set(['app.name']))).toEqual([])
+      expect(analyzeI18n(root, new Set(['app_name']))).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -64,23 +63,29 @@ describe("Textes de l'interface", () => {
 })
 
 describe('Clé de traduction manquante', () => {
-  test('a key absent from the locale is reported where it is requested', () => {
-    const root = desktopFixture({ 'ui/page.tsx': "<Text>{t('project.create')}</Text>\n" })
+  test('a message absent from the catalogue is reported where it is called', () => {
+    const root = desktopFixture({ 'ui/page.tsx': '<Text>{m.project_create()}</Text>\n' })
     try {
-      const violations = analyzeI18n(root, new Set(['app.name']))
+      const violations = analyzeI18n(root, new Set(['app_name']))
       expect(violations).toHaveLength(1)
-      expect(violations[0]!.problem).toContain('"project.create" is missing')
+      expect(violations[0]!.problem).toContain('"project_create" is missing')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('a key present in the locale passes', () => {
-    const root = desktopFixture({ 'ui/page.tsx': "<Text>{t('app.name')}</Text>\n" })
+  test('a message the catalogue declares passes', () => {
+    const root = desktopFixture({ 'ui/page.tsx': '<Text>{m.app_name()}</Text>\n' })
     try {
-      expect(analyzeI18n(root, new Set(['app.name']))).toEqual([])
+      expect(analyzeI18n(root, new Set(['app_name']))).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  test('the compiled messages are the ones the catalogue declares', () => {
+    // They are committed, so nothing regenerates them on a checkout: a catalogue edited
+    // without recompiling would leave the application calling a message that is gone.
+    expect(staleMessages(repository)).toEqual([])
   })
 })

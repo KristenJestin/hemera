@@ -2,6 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["bun"],
+    // The Paraglide messages are generated as JavaScript carrying JSDoc types.
+    "allowJs": true,
     "jsx": "react-jsx",
     "jsxImportSource": "@gpuix/react"
   },

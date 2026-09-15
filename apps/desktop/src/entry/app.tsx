@@ -15,7 +15,7 @@ import { EMBEDDED_FONTS, ThemeProvider } from '@hemera/ui'
 import { addFonts, render, useGpuix, useWindowSize, windowBackend } from '@gpuix/react'
 import { useEffect, useRef, useState } from 'react'
 
-import { t } from '#i18n/index.ts'
+import * as m from '#paraglide/messages.js'
 import { missingFontDiagnostic, registerEmbeddedFonts } from '#platform/fonts.ts'
 import { embeddedFontLocator } from '#platform/embedded-fonts.ts'
 import { folderProblem, openInstance } from '#platform/workspace.ts'
@@ -99,6 +99,6 @@ log.info(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)
 log.info(`channel ${instance.channel}, route ${route}, profile ${instance.directory}`)
 
 render(<Hemera route={route} channel={instance.channel} context={instance.context} />, {
-  title: windowTitleOf(t('app.name'), instance.channel),
+  title: windowTitleOf(m.app_name(), instance.channel),
   titlebarTransparent: FRAMELESS_WINDOW,
 })

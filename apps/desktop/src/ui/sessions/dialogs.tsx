@@ -12,7 +12,7 @@ import type { ThemeName } from '@hemera/ui'
 import type { ProjectConfiguration } from '@hemera/runtime'
 import { useState } from 'react'
 
-import { t } from '#i18n/index.ts'
+import * as m from '#paraglide/messages.js'
 
 /** Keeps the locations that name something, an empty list meaning the workspace root. */
 export function locationsOf(lines: string[]): string[] {
@@ -54,41 +54,41 @@ export function NewProjectDialog({ onClose, onCreate }: NewProjectDialogProps) {
       testId="new-project-dialog"
       open
       onClose={onClose}
-      title={t('project.new')}
+      title={m.project_new()}
       actions={
         <>
           <Button
             testId="new-project-cancel"
-            label={t('action.cancel')}
+            label={m.action_cancel()}
             tone="ghost"
             onPress={onClose}
           />
           <Button
             testId="new-project-confirm"
-            label={t('project.new.confirm')}
+            label={m.project_new_confirm()}
             tone="primary"
             onPress={create}
           />
         </>
       }
     >
-      <Field label={t('project.new.name')}>
+      <Field label={m.project_new_name()}>
         <Input
           testId="new-project-name"
           value={name}
           onValueChange={setName}
-          placeholder={t('project.new.name.placeholder')}
-          aria-label={t('project.new.name')}
+          placeholder={m.project_new_name_placeholder()}
+          aria-label={m.project_new_name()}
         />
       </Field>
-      <Field label={t('project.new.path')}>
+      <Field label={m.project_new_path()}>
         <Input
           testId="new-project-path"
           value={path}
           onValueChange={setPath}
           onSubmit={create}
-          placeholder={t('project.new.path.placeholder')}
-          aria-label={t('project.new.path')}
+          placeholder={m.project_new_path_placeholder()}
+          aria-label={m.project_new_path()}
         />
       </Field>
     </Modal>
@@ -131,14 +131,14 @@ function RepositoryList({ locations, onChange }: RepositoryListProps) {
             testId={`settings-repository-${index}`}
             value={location}
             onValueChange={(value) => replace(index, value)}
-            placeholder={t('project.settings.repositories.placeholder')}
-            aria-label={t('project.settings.repositories')}
+            placeholder={m.project_settings_repositories_placeholder()}
+            aria-label={m.project_settings_repositories()}
             style={{ flexGrow: 1 }}
           />
           <IconButton
             testId={`settings-repository-remove-${index}`}
             name="trash-2"
-            label={t('project.settings.repositories.remove')}
+            label={m.project_settings_repositories_remove()}
             size="sm"
             onPress={() => onChange(locations.filter((_, at) => at !== index))}
           />
@@ -147,7 +147,7 @@ function RepositoryList({ locations, onChange }: RepositoryListProps) {
       <Stack>
         <Button
           testId="settings-repository-add"
-          label={t('project.settings.repositories.add')}
+          label={m.project_settings_repositories_add()}
           tone="ghost"
           size="sm"
           iconName="plus"
@@ -187,18 +187,18 @@ export function SettingsDialog({
       testId="settings-dialog"
       open
       onClose={onClose}
-      title={t('settings')}
+      title={m.settings()}
       actions={
         <>
           <Button
             testId="settings-cancel"
-            label={t('action.cancel')}
+            label={m.action_cancel()}
             tone="ghost"
             onPress={onClose}
           />
           <Button
             testId="settings-save"
-            label={t('project.settings.save')}
+            label={m.project_settings_save()}
             tone="primary"
             onPress={save}
           />
@@ -208,16 +208,16 @@ export function SettingsDialog({
       {/* The appearance belongs to the application, not to a project: it is shown apart so
           that saving the project never reads as saving the theme. */}
       <Text color="dim" scale="sm" weight="semibold">
-        {t('settings.application')}
+        {m.settings_application()}
       </Text>
       <Stack direction="column" style={{ paddingTop: space.md }}>
-        <Field label={t('settings.theme')}>
+        <Field label={m.settings_theme()}>
           <Select
             testId="settings-theme"
             value={theme}
             options={THEME_OPTIONS}
             onValueChange={onThemeChange}
-            label={t('settings.theme')}
+            label={m.settings_theme()}
           />
         </Field>
       </Stack>
@@ -226,25 +226,25 @@ export function SettingsDialog({
 
       <Stack direction="column" style={{ paddingTop: space.lg }}>
         <Text color="dim" scale="sm" weight="semibold" style={{ paddingBottom: space.md }}>
-          {t('settings.project')}
+          {m.settings_project()}
         </Text>
-        <Field label={t('project.settings.name')}>
+        <Field label={m.project_settings_name()}>
           <Input
             testId="settings-name"
             value={name}
             onValueChange={setName}
-            aria-label={t('project.settings.name')}
+            aria-label={m.project_settings_name()}
           />
         </Field>
-        <Field label={t('project.folder')}>
+        <Field label={m.project_folder()}>
           <Text color="dim" scale="sm" family="mono" testId="settings-path">
             {path ?? ''}
           </Text>
         </Field>
-        <Field label={t('project.settings.repositories')}>
+        <Field label={m.project_settings_repositories()}>
           <RepositoryList locations={locations} onChange={setLocations} />
           <Text color="dim" scale="sm">
-            {t('project.settings.repositories.hint')}
+            {m.project_settings_repositories_hint()}
           </Text>
         </Field>
       </Stack>
@@ -270,31 +270,26 @@ export function RenameSessionDialog({ title, onClose, onRename }: RenameSessionD
       testId="rename-dialog"
       open
       onClose={onClose}
-      title={t('session.rename.title')}
+      title={m.session_rename_title()}
       actions={
         <>
-          <Button
-            testId="rename-cancel"
-            label={t('action.cancel')}
-            tone="ghost"
-            onPress={onClose}
-          />
+          <Button testId="rename-cancel" label={m.action_cancel()} tone="ghost" onPress={onClose} />
           <Button
             testId="rename-confirm"
-            label={t('session.rename.confirm')}
+            label={m.session_rename_confirm()}
             tone="primary"
             onPress={rename}
           />
         </>
       }
     >
-      <Field label={t('session.rename.field')}>
+      <Field label={m.session_rename_field()}>
         <Input
           testId="rename-title"
           value={next}
           onValueChange={setNext}
           onSubmit={rename}
-          aria-label={t('session.rename.field')}
+          aria-label={m.session_rename_field()}
         />
       </Field>
     </Modal>

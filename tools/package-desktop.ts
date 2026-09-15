@@ -120,6 +120,19 @@ export async function assemblePackage(
   rmSync(directory, { recursive: true, force: true })
   mkdirSync(directory, { recursive: true })
 
+  // The messages are compiled, not committed, and the bundler reads them as sources: a
+  // package assembled without this step embeds whatever the last compilation left behind.
+  const messages = Bun.spawnSync(['bun', 'run', 'i18n:compile'], {
+    cwd: join(repositoryRoot, 'apps', 'desktop'),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  if (messages.exitCode !== 0) {
+    throw new Error(
+      `the messages could not be compiled: ${new TextDecoder().decode(messages.stderr)}`,
+    )
+  }
+
   const executable = join(directory, executableNameOf(target))
   const build = Bun.spawnSync(
     [

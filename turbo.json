@@ -12,6 +12,20 @@
       "inputs": ["src/**", "tools/**", "tests/**"],
       "outputs": []
     },
+    "@hemera/desktop#i18n:compile": {
+      "inputs": ["messages/**", "project.inlang/**"],
+      "outputs": ["src/paraglide/**"]
+    },
+    "@hemera/desktop#typecheck": {
+      "dependsOn": ["^typecheck", "@hemera/desktop#i18n:compile"],
+      "inputs": ["src/**", "messages/**", "tsconfig.json", "../../tsconfig.base.json"],
+      "outputs": []
+    },
+    "@hemera/desktop#test": {
+      "dependsOn": ["^typecheck", "@hemera/desktop#i18n:compile"],
+      "inputs": ["src/**", "messages/**", "tests/**"],
+      "outputs": []
+    },
     "test:system": {
       "cache": false
     },

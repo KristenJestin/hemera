@@ -21,17 +21,17 @@ import { SHOWCASE } from '@hemera/ui/showcase'
 import type { ThemeName } from '@hemera/ui'
 import { useState } from 'react'
 
-import { t } from '#i18n/index.ts'
+import * as m from '#paraglide/messages.js'
 
 function ThemeSwitch() {
   const control = useThemeControl()
   return (
     <Stack gap="md" align="center">
       <Text color="muted" scale="sm">
-        {t('showcase.theme')}
+        {m.showcase_theme()}
       </Text>
       <Button
-        label={control.name === 'dark' ? t('showcase.theme.light') : t('showcase.theme.dark')}
+        label={control.name === 'dark' ? m.showcase_theme_light() : m.showcase_theme_dark()}
         size="sm"
         onPress={() => control.setTheme(control.name === 'dark' ? 'light' : 'dark')}
       />
@@ -46,14 +46,14 @@ function Catalogue({ onClose }: { onClose?: (() => void) | undefined }) {
       <Stack direction="column" gap="2xl" style={{ padding: space['2xl'] }}>
         <Stack gap="lg" align="center" justify="between">
           <Text color="text" scale="display" weight="semibold">
-            {t('showcase.title')}
+            {m.showcase_title()}
           </Text>
           <Stack gap="md" align="center">
             <ThemeSwitch />
             {onClose === undefined ? null : (
               <Button
                 testId="showcase-close"
-                label={t('showcase.close')}
+                label={m.showcase_close()}
                 size="sm"
                 iconName="chevron-left"
                 onPress={onClose}

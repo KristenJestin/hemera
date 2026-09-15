@@ -25,7 +25,7 @@ import {
 import type { ThemeColors, WindowCommands } from '@hemera/ui'
 import { useState } from 'react'
 
-import { t } from '#i18n/index.ts'
+import * as m from '#paraglide/messages.js'
 import { NewProjectDialog, RenameSessionDialog, SettingsDialog } from './dialogs.tsx'
 import type { SessionsModel } from './use-sessions.ts'
 
@@ -75,7 +75,7 @@ export function SessionsPage({
       <IconButton
         testId="new-project"
         name="plus"
-        label={t('project.new')}
+        label={m.project_new()}
         size="sm"
         onPress={() => setOverlay('new-project')}
       />
@@ -83,7 +83,7 @@ export function SessionsPage({
         <IconButton
           testId="project-settings"
           name="settings"
-          label={t('settings')}
+          label={m.settings()}
           size="sm"
           onPress={() => setOverlay('settings')}
         />
@@ -92,7 +92,7 @@ export function SessionsPage({
         <IconButton
           testId="open-showcase"
           name="search"
-          label={t('showcase.open')}
+          label={m.showcase_open()}
           size="sm"
           onPress={onOpenShowcase}
         />
@@ -105,7 +105,7 @@ export function SessionsPage({
       {model.showingArchived || model.archivedCount > 0 ? (
         <Button
           testId="toggle-archived"
-          label={model.showingArchived ? t('session.archived.hide') : t('session.archived.show')}
+          label={model.showingArchived ? m.session_archived_hide() : m.session_archived_show()}
           tone="ghost"
           size="sm"
           iconName={model.showingArchived ? 'message-square' : 'archive'}
@@ -117,15 +117,15 @@ export function SessionsPage({
         <EmptyState
           testId="no-session"
           iconName="inbox"
-          title={model.showingArchived ? t('session.none.archived.title') : t('session.none.title')}
+          title={model.showingArchived ? m.session_none_archived_title() : m.session_none_title()}
           description={
             model.showingArchived
-              ? t('session.none.archived.description')
-              : t('session.none.description')
+              ? m.session_none_archived_description()
+              : m.session_none_description()
           }
           {...(model.showingArchived || model.activeProjectId === null
             ? {}
-            : { actionLabel: t('session.new'), onAction: model.startSession })}
+            : { actionLabel: m.session_new(), onAction: model.startSession })}
         />
       ) : (
         <>
@@ -142,7 +142,7 @@ export function SessionsPage({
           {model.showingArchived ? null : (
             <Button
               testId="new-session"
-              label={t('session.new')}
+              label={m.session_new()}
               tone="secondary"
               size="sm"
               iconName="plus"
@@ -179,8 +179,8 @@ export function SessionsPage({
   return (
     <WindowShell
       testId="shell"
-      collapseLabel={t('shell.sidebar.collapse')}
-      resizeLabel={t('shell.sidebar.resize')}
+      collapseLabel={m.shell_sidebar_collapse()}
+      resizeLabel={m.shell_sidebar_resize()}
       sidebarWidth={model.sidebarWidth}
       onSidebarWidthChange={model.setSidebarWidth}
       sidebarCollapsed={model.sidebarCollapsed}
@@ -188,9 +188,9 @@ export function SessionsPage({
       projects={projects}
       sidebar={sidebar}
       windowLabels={{
-        minimize: t('window.minimize'),
-        maximize: t('window.maximize'),
-        close: t('window.close'),
+        minimize: m.window_minimize(),
+        maximize: m.window_maximize(),
+        close: m.window_close(),
       }}
       {...(windowCommands === undefined ? {} : { windowCommands })}
       {...(framelessWindow === undefined ? {} : { framelessWindow })}
@@ -202,7 +202,7 @@ export function SessionsPage({
         style={{ padding: space['2xl'], flexGrow: 1, minHeight: 0 }}
       >
         {model.unavailableFolder === null ? null : (
-          <Notice testId="folder-unavailable" tone="warn" message={t('project.unavailable')} />
+          <Notice testId="folder-unavailable" tone="warn" message={m.project_unavailable()} />
         )}
         {model.failure === null ? null : (
           <Notice testId="failure" tone="error" message={model.failure} />
@@ -212,17 +212,17 @@ export function SessionsPage({
           <EmptyState
             testId="no-project"
             iconName="folder"
-            title={t('project.none.title')}
-            description={t('project.none.description')}
-            actionLabel={t('project.new')}
+            title={m.project_none_title()}
+            description={m.project_none_description()}
+            actionLabel={m.project_new()}
             onAction={() => setOverlay('new-project')}
           />
         ) : model.activeSession === null ? (
           <EmptyState
             testId="no-thread"
             iconName="message-square"
-            title={t('session.open.none.title')}
-            description={t('session.open.none.description')}
+            title={m.session_open_none_title()}
+            description={m.session_open_none_description()}
           />
         ) : (
           <Thread
@@ -262,14 +262,14 @@ function Thread({ model, draft, onDraftChange, onSend, onRename }: ThreadProps) 
           <IconButton
             testId="rename-session"
             name="pencil"
-            label={t('session.rename')}
+            label={m.session_rename()}
             size="sm"
             onPress={onRename}
           />
           <IconButton
             testId="archive-session"
             name={archived ? 'archive-restore' : 'archive'}
-            label={archived ? t('session.restore') : t('session.archive')}
+            label={archived ? m.session_restore() : m.session_archive()}
             size="sm"
             onPress={() => model.setArchived(session.id, !archived)}
           />
@@ -297,12 +297,12 @@ function Thread({ model, draft, onDraftChange, onSend, onRename }: ThreadProps) 
         onDraftChange={onDraftChange}
         onSend={onSend}
         disabled={archived}
-        placeholder={t('session.composer.placeholder')}
-        aria-label={t('session.composer.label')}
+        placeholder={m.session_composer_placeholder()}
+        aria-label={m.session_composer_label()}
         footer={
           <Button
             testId="send"
-            label={t('session.send')}
+            label={m.session_send()}
             tone="primary"
             size="sm"
             disabled={archived || draft.trim().length === 0}
