@@ -28,6 +28,19 @@ export function systemTheme(): Theme {
   return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
 }
 
+/**
+ * The windows whose page has already said what it wears. The page is the authority: it follows
+ * the system itself while nobody has chosen otherwise, and says so again on every change, so a
+ * frame that went on following the system would undo a theme picked against it.
+ */
+const answered = new WeakSet<BrowserWindow>()
+
+/** What the page says it wears, which is what the frame wears from then on. */
+export function wearTheme(window: BrowserWindow, theme: Theme): void {
+  answered.add(window)
+  paintWindow(window, theme)
+}
+
 /** Paints the frame and the system's window buttons in a theme's own colours. */
 export function paintWindow(window: BrowserWindow, theme: Theme): void {
   const colors = windowColors(theme)
@@ -62,10 +75,11 @@ export async function openWindow(main: string): Promise<BrowserWindow> {
     },
   })
 
-  // The system can change its mind while the application is running, and the page follows it
-  // through its own media query; the frame has nobody to tell it but this.
+  // The system can change its mind before the page is up to say anything, and until it does
+  // the frame has nobody to tell it but this. Once the page has spoken it is what the frame
+  // follows: it answers the system itself, and it can be wearing a theme against it.
   nativeTheme.on('updated', () => {
-    if (!window.isDestroyed()) paintWindow(window, systemTheme())
+    if (!answered.has(window) && !window.isDestroyed()) paintWindow(window, systemTheme())
   })
 
   const source = rendererSource()

@@ -62,7 +62,9 @@ export function Menu({ label, groups, disabled, className }: MenuProps) {
         <BaseMenu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4}>
           <BaseMenu.Popup className={POPUP}>
             {groups.map((group, index) => (
-              <BaseMenu.Group key={group[0]?.label ?? index}>
+              // A group is a position in the list, and two of them can open on the same
+              // command: its place is the only thing that tells it from the next one.
+              <BaseMenu.Group key={index}>
                 {index > 0 && <BaseMenu.Separator className="my-1 border-t border-border" />}
                 {group.map((item) => (
                   <BaseMenu.Item

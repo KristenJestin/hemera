@@ -55,13 +55,14 @@ export const easing: Easing = [0.25, 0.8, 0.25, 1]
  * `MotionConfig reducedMotion="user"`: it is the net under any motion element that forgets
  * this hook, and the lint refuses one that does.
  *
- * Both ways of asking are honoured: the system preference, and the `MotionConfig` a story or a
- * screen sets around the component.
+ * Both ways of asking are honoured: the system preference, and a `MotionConfig` that says
+ * `always`. `never` is not one of them, because `never` is also motion's own default: a
+ * component rendered outside any `MotionConfig` reads it, and reading it as "this tree opted
+ * out" is how the one guard the design system has ends up switched off by nobody.
  */
 export function useTransition(preset: Transition = arrival): Transition {
   const { reducedMotion } = useContext(MotionConfigContext)
   const system = useReducedMotion()
   if (reducedMotion === 'always') return instant
-  if (reducedMotion === 'never') return preset
   return system === true ? instant : preset
 }

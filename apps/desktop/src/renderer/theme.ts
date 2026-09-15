@@ -27,6 +27,11 @@ export function themePreference(): ThemePreference {
   return preference
 }
 
+/** Says once, at start-up, what the page is wearing, so the frame starts out wearing it too. */
+export function syncTheme(): void {
+  wear(currentTheme())
+}
+
 export function setThemePreference(next: ThemePreference): void {
   preference = next
   wear(currentTheme())
