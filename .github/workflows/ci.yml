@@ -37,7 +37,7 @@ jobs:
       # the documents above it.
       - uses: actions/checkout@v4
         with:
-          path: sources/hemera
+          path: source
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.DOCS_REPOSITORY }}
@@ -48,7 +48,7 @@ jobs:
         with:
           node-version: 24.21.0
       - name: Enable the pinned package manager
-        working-directory: sources/hemera
+        working-directory: source
         run: corepack enable
 
       # Since Electron 42 the binary is downloaded on the first run of its `bin` script and
@@ -60,23 +60,23 @@ jobs:
           path: |
             ~/.cache/electron
             ~/AppData/Local/electron/Cache
-          key: electron-${{ runner.os }}-${{ hashFiles('sources/hemera/pnpm-lock.yaml') }}
+          key: electron-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
 
-      - working-directory: sources/hemera
+      - working-directory: source
         run: pnpm install --frozen-lockfile
       - name: Fetch the Electron binary
-        working-directory: sources/hemera/apps/desktop
+        working-directory: source/apps/desktop
         run: pnpm exec install-electron
 
-      - working-directory: sources/hemera
+      - working-directory: source
         run: pnpm typecheck
-      - working-directory: sources/hemera
+      - working-directory: source
         run: pnpm lint
-      - working-directory: sources/hemera
+      - working-directory: source
         run: pnpm fmt:check
       # The suites that need a window are not run here: a runner has no display server and no
       # GPU, and what this lot proves about a window is proved on a real target.
-      - working-directory: sources/hemera
+      - working-directory: source
         env:
           HEMERA_SPECS_DIR: ${{ github.workspace }}/docs-root
         run: pnpm test

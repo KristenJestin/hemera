@@ -7,7 +7,7 @@ Hemera (code name of Nyx v3) is a desktop cockpit for ACP agents: Electron 44 wi
 Chromium, Node in the main process, React served by Vite in the renderer, SQLite through
 `node:sqlite` + Drizzle in a named `utilityProcess`. GPUiX and Bun were abandoned on
 15 September 2026. This repository is the product monorepo. Product rules, OpenSpec changes
-and spike reports live in the parent documentation folder (`../../docs`, `../../openspec`),
+and spike reports live in the parent documentation folder (`../docs`, `../openspec`),
 which is the registered OpenSpec store `hemera-docs`; `openspec/config.yaml` here only
 declares `store: hemera-docs`, so every `openspec` command run from this repository reads and
 writes the changes there (never create `openspec/specs` or `openspec/changes` here). On a new
