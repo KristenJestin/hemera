@@ -1,0 +1,3 @@
+# OpenSpec pointer: planning lives in the hemera-docs store (the parent documentation repo).
+# Register it once per machine: openspec store register <path-to-hemera-docs> --id hemera-docs --yes
+store: hemera-docs
