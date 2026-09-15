@@ -5,11 +5,6 @@ on:
   push:
     branches: [main, dev]
 
-# The specs live in their own repository, which is private: the traceability table is built
-# against them where they are, never against a copy taken at some point.
-env:
-  DOCS_REPOSITORY: hemera-app/hemera-docs
-
 jobs:
   commit-messages:
     runs-on: ubuntu-latest
@@ -33,16 +28,9 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      # The two repositories are laid out the way a machine lays them out: the product, and
-      # the documents above it.
       - uses: actions/checkout@v4
         with:
           path: source
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ env.DOCS_REPOSITORY }}
-          token: ${{ secrets.DOCS_TOKEN }}
-          path: docs-root
 
       - uses: actions/setup-node@v4
         with:
@@ -77,6 +65,4 @@ jobs:
       # The suites that need a window are not run here: a runner has no display server and no
       # GPU, and what this lot proves about a window is proved on a real target.
       - working-directory: source
-        env:
-          HEMERA_SPECS_DIR: ${{ github.workspace }}/docs-root
         run: pnpm test

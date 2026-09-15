@@ -8,7 +8,7 @@
  * a report is an observation, never a plausible reconstruction.
  *
  *   node tools/environment-report.ts            print the report of this machine
- *   node tools/environment-report.ts --write    also file it with the reports of the lot, in the documentation folder
+ *   node tools/environment-report.ts --write    also file it under reports/<target>/
  */
 
 import { spawnSync } from 'node:child_process'
@@ -16,7 +16,6 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { arch } from 'node:os'
 import { join, resolve } from 'node:path'
-import { specsRootOf } from './traceability.ts'
 
 import { environmentReportSchema, type EnvironmentReport } from '@hemera/ipc'
 
@@ -109,7 +108,7 @@ if (import.meta.main) {
   console.log(renderReport(report))
 
   if (process.argv.includes('--write')) {
-    const path = reportPath(join(specsRootOf(repository), '..', 'reports'), report, new Date())
+    const path = reportPath(join(repository, 'reports'), report, new Date())
     mkdirSync(join(path, '..'), { recursive: true })
     writeFileSync(`${path}.json`, `${JSON.stringify(report, null, 2)}\n`)
     writeFileSync(`${path}.md`, renderReport(report))

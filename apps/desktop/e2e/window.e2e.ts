@@ -1,8 +1,7 @@
 /**
  * What the lot claims about the window, asked of a running application.
  *
- * Each suite is named after the scenario of `specs/desktop-foundation/spec.md` it covers, so
- * the traceability table finds it by that name and by nothing else.
+ * Each suite is named after the scenario of `specs/desktop-foundation/spec.md` it covers.
  */
 
 import { browser, expect } from '@wdio/globals'

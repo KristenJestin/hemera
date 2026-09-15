@@ -4,7 +4,7 @@
  * Some of these only apply to some machines: a fractional scale needs two displays scaled
  * differently, and a named degradation needs a driver that refuses acceleration. Those suites
  * skip where they do not apply rather than asserting something the machine cannot answer —
- * they keep their name, so the traceability table still finds the scenario they cover.
+ * they keep their name, which is the scenario they cover.
  */
 
 import { browser, expect } from '@wdio/globals'
