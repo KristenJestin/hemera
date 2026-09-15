@@ -94,11 +94,13 @@ pnpm dev                         # the desktop application, main + preload + ren
 pnpm typecheck                   # tsc per package, through Vite+ task running
 pnpm lint                        # oxlint + the package boundaries
 pnpm fmt                         # oxfmt (fmt:check in CI)
-pnpm test                        # vitest
+pnpm test                        # vitest + the traceability table of the lot
 pnpm build                       # the three bundles of the application
 pnpm report                      # environment report of this target (D0-07)
 pnpm package                     # portable package of this target
 pnpm check                       # typecheck, lint, fmt:check and test, in that order
+
+pnpm --filter @hemera/desktop e2e  # the built application, driven by @wdio/electron-service
 ```
 
 Configuration lives in one place: `vite.config.ts` at the root holds the `lint`, `fmt` and
