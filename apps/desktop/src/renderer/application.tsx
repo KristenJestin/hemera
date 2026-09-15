@@ -1,85 +1,136 @@
 /**
- * The window of lot 0, wearing the design system of lot 1 (design D1-08).
+ * The window of lot 2: the shell, composed with fixtures (design D2-01).
  *
- * It is still not an interface: a drag strip beside the system's window buttons, a witness text
- * whose sharpness at a fractional scale is what lot 0 verifies, and one transition to measure.
- * What changed is that nothing here names a colour or a size any more, and the two controls it
- * has are components of the catalogue. The interface itself belongs to lot 2.
+ * There is still no data behind any of it. The Projects, the Sessions and every empty state
+ * come from `fixtures.ts`, the four things the shell remembers live in a store in memory, and
+ * the keyboard comes from the one table in `shortcuts.ts`. What lot 3 and lot 4 replace is
+ * those three files; the shell itself never learns where any of it came from.
+ *
+ * The witness transition of lot 0 is still here, and it is now the one the lot measures: the
+ * fold of the sidebar, which is the only dimension of the layout this application animates and
+ * the one the frame counter has to keep honest (design D2-09).
  */
 
-import { motion } from 'motion/react'
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
 import type { MotionMeasure } from '@hemera/ipc'
-import { Badge, Button, IconButton } from '@hemera/ui'
-import { IconMoon, IconPlayerPlay, IconSun } from '@hemera/ui/icons'
-import { useTransition } from '@hemera/ui/motion'
+import { Dialog, JOURNAL_ENTRY, PROJECT_SETTINGS_ENTRY, Shell } from '@hemera/ui'
 
+import { EMPTY, PROJECT_FIXTURES, sessionsOf } from './fixtures.ts'
+import {
+  selectEntry,
+  selectProject,
+  selectProjectByRank,
+  setCollapsed,
+  setWidth,
+  shellState,
+  subscribeToShell,
+  toggleCollapsed,
+} from './shell-store.ts'
+import { type ShortcutAction, keysOf, useShellShortcuts } from './shortcuts.ts'
 import { currentTheme, setThemePreference, subscribeToTheme } from './theme.ts'
-import { usePixelRatio } from './use-pixel-ratio.ts'
 import { measureFrames } from './witness.ts'
 
-export function Application() {
-  const ratio = usePixelRatio()
-  const theme = useSyncExternalStore(subscribeToTheme, currentTheme, () => 'light' as const)
-  const transition = useTransition()
-  const [shown, setShown] = useState(false)
-  const [measure, setMeasure] = useState<MotionMeasure | null>(null)
+/** The panel a keystroke opens on an empty room, named after the lot that furnishes it. */
+type Placeholder = 'command' | 'settings' | null
 
-  const play = useCallback(async (): Promise<MotionMeasure> => {
-    setShown((previous) => !previous)
-    const measured = await measureFrames()
-    setMeasure(measured)
-    return measured
+export function Application() {
+  const shell = useSyncExternalStore(subscribeToShell, shellState, shellState)
+  const theme = useSyncExternalStore(subscribeToTheme, currentTheme, () => 'light' as const)
+  const [placeholder, setPlaceholder] = useState<Placeholder>(null)
+
+  const run = useCallback((action: ShortcutAction) => {
+    if (action.kind === 'sidebar') {
+      toggleCollapsed()
+      return
+    }
+    if (action.kind === 'command') {
+      setPlaceholder('command')
+      return
+    }
+    if (action.kind === 'settings') {
+      setPlaceholder('settings')
+      return
+    }
+    selectProjectByRank(action.rank)
   }, [])
 
-  // The same act the button performs, offered to whatever drives the window from outside:
-  // the report run and the end-to-end suite trigger the transition exactly as a hand does.
+  useShellShortcuts(run)
+
+  /**
+   * The same act the button performs, offered to whatever drives the window from outside: the
+   * report run and the end-to-end suite fold the sidebar exactly as a hand does, and count.
+   *
+   * The counter is started a frame before the fold on purpose. Counted from the same tick as
+   * the act, the first frame of *any* animation — a transform exactly as much as a width —
+   * lands on two periods of a 165 Hz display, because that frame carries React's commit and
+   * the round trip that asked for it. What the lot has to keep honest is the fold, so the
+   * fold is what the window counts.
+   */
+  const play = useCallback(async (): Promise<MotionMeasure> => {
+    const counted = measureFrames()
+    await new Promise(requestAnimationFrame)
+    toggleCollapsed()
+    return await counted
+  }, [])
+
   useEffect(() => {
     window.hemeraWitness = { play }
   }, [play])
 
+  const sessions = sessionsOf(shell.activeProjectId)
+  const session = sessions.find((one) => one.id === shell.activeEntryId)
+
   return (
-    // `MotionConfig` is around this component and not inside it (`main.tsx`): a hook reads the
-    // context it is rendered under, never the one the same component renders.
-    <>
-      <header className="title-bar flex items-center gap-4 px-4">
-        <span className="font-medium">Hemera</span>
-        <span className="text-muted-foreground">— drag this strip to move the window</span>
-      </header>
-      <main className="flex flex-col items-start gap-4 p-6 pt-16">
-        <h1 className="text-2xl font-medium">Witness text</h1>
-        <p>
-          Read this line at 100% and at 150%, and compare the edges of the glyphs. Page pixel ratio:{' '}
-          <output className="font-mono">{ratio}</output>.
+    <Shell
+      projects={PROJECT_FIXTURES}
+      activeProjectId={shell.activeProjectId}
+      onSelectProject={selectProject}
+      onAddProject={() => setPlaceholder('command')}
+      notifications={<p className="text-muted-foreground">{EMPTY.notifications}</p>}
+      onOpenSettings={() => setPlaceholder('settings')}
+      sessions={sessions}
+      activeEntryId={shell.activeEntryId}
+      onSelectEntry={selectEntry}
+      onOpenCommand={() => setPlaceholder('command')}
+      commandShortcut={keysOf('command')}
+      collapseShortcut={keysOf('sidebar')}
+      theme={theme}
+      onToggleTheme={() => setThemePreference(theme === 'dark' ? 'light' : 'dark')}
+      collapsed={shell.collapsed}
+      onCollapsedChange={setCollapsed}
+      width={shell.width}
+      onWidthChange={setWidth}
+    >
+      <section className="flex flex-col gap-2 p-6">
+        <h1 className="text-2xl font-medium">{session?.title ?? headingOf(shell.activeEntryId)}</h1>
+        <p className="text-muted-foreground">
+          {emptyOf(shell.activeEntryId, session !== undefined)}
         </p>
-        <div className="no-drag flex items-center gap-2">
-          <Button variant="primary" onClick={() => void play()}>
-            <IconPlayerPlay size="sm" />
-            Play the witness transition
-          </Button>
-          <IconButton
-            variant="ghost"
-            icon={theme === 'dark' ? <IconSun /> : <IconMoon />}
-            aria-label={theme === 'dark' ? 'Use the light theme' : 'Use the dark theme'}
-            onClick={() => setThemePreference(theme === 'dark' ? 'light' : 'dark')}
-          />
-        </div>
-        <motion.section
-          className="w-full rounded-lg border border-border bg-card p-4 will-change-transform"
-          initial={false}
-          animate={{ opacity: shown ? 1 : 0.15, y: shown ? 0 : 24 }}
-          transition={transition}
-        >
-          <p>This panel slides and fades, and nothing else.</p>
-        </motion.section>
-        {measure !== null && (
-          <Badge tone="info">
-            {measure.frames} frames at {measure.refreshRate} Hz, longest frame{' '}
-            {measure.longestFrame} ms
-          </Badge>
-        )}
-      </main>
-    </>
+      </section>
+      <Dialog
+        title={placeholder === 'settings' ? 'Settings' : 'Command'}
+        description={placeholder === 'settings' ? EMPTY.settings : EMPTY.command}
+        open={placeholder !== null}
+        onOpenChange={(open) => {
+          if (!open) setPlaceholder(null)
+        }}
+      />
+    </Shell>
   )
+}
+
+/** What the content area is titled when the entry is one of the places rather than a Session. */
+function headingOf(entryId: string): string {
+  if (entryId === JOURNAL_ENTRY) return 'Journal'
+  if (entryId === PROJECT_SETTINGS_ENTRY) return 'Project settings'
+  return 'Home'
+}
+
+/** What it says underneath, which always names the lot that will fill it. */
+function emptyOf(entryId: string, isSession: boolean): string {
+  if (isSession) return EMPTY.sessions
+  if (entryId === JOURNAL_ENTRY) return EMPTY.journal
+  if (entryId === PROJECT_SETTINGS_ENTRY) return EMPTY.projectSettings
+  return EMPTY.home
 }
