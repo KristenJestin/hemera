@@ -35,6 +35,7 @@ export default defineConfig({
       'packages/*/tests/**/*.test.ts',
       'tools/boundaries.test.ts',
       'tools/git-flow.test.ts',
+      'tools/verification.test.ts',
     ],
   },
 })

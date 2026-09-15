@@ -3,11 +3,13 @@
 Instructions for any coding agent working in this repository. `CLAUDE.md` is a symbolic link
 to this file: there is one contract, not two that drift apart.
 
-Hemera (code name of Nyx v3) is a native desktop cockpit for ACP agents: one Bun process,
-React on GPUiX (no DOM, no Chromium), SQLite via `bun:sqlite` + Drizzle. This repository is
-the product monorepo. Product rules, OpenSpec changes and spike reports live in the parent
-documentation folder (`../../docs`, `../../openspec`); read the current lot's `proposal.md`,
-`specs/`, `design.md` and `tasks.md` before touching code.
+Hemera (code name of Nyx v3) is a desktop cockpit for ACP agents: Electron 44 with its
+Chromium, Node in the main process, React served by Vite in the renderer, SQLite through
+`node:sqlite` + Drizzle in a named `utilityProcess`. GPUiX and Bun were abandoned on
+15 September 2026. This repository is the product monorepo. Product rules, OpenSpec changes
+and spike reports live in the parent documentation folder (`../../docs`, `../../openspec`);
+read the current lot's `proposal.md`, `specs/`, `design.md` and `tasks.md` before touching
+code.
 
 Behavioral guidelines below are adapted from the Karpathy-style CLAUDE.md. They bias toward
 caution over speed; for trivial tasks, use judgment.
@@ -55,57 +57,52 @@ caution over speed; for trivial tasks, use judgment.
 ## Repository layout
 
 ```
-apps/desktop      @hemera/desktop  GPUiX/React app: pages, routing, i18n resources, platform
-                                   glue, entry. Composes @hemera/ui; defines no styles.
-packages/ui       @hemera/ui       design system: tokens (primitive → semantic → component),
-                                   light/dark themes, fonts, lucide icons, primitives and
-                                   components (headless hook + styled component), showcase.
-                                   No business logic, no import of core/runtime.
-packages/core     @hemera/core     pure TypeScript: domain, use cases, ports. No Bun, no
-                                   GPUiX/React, no SQLite, no fs/process APIs.
-packages/runtime  @hemera/runtime  Bun implementations of core ports: storage (Drizzle,
-                                   bun:sqlite, static migrations), platform (profile path,
-                                   instance lock, diagnostics log), later agents/commands/
-                                   terminal/integrations.
+apps/desktop      @hemera/desktop  Electron application: main process (ESM), preload
+                                   (CommonJS, sandboxed), renderer (React 19 served by Vite).
+packages/core     @hemera/core     pure TypeScript: domain, use cases, ports. No Electron,
+                                   no React, no SQLite, no fs/process APIs.
+packages/ipc      @hemera/ipc      the shared channel declaration: one name per channel, its
+                                   Zod argument schema and its response type. Names and
+                                   schemas only, no implementation and no Electron.
+legacy/           —                the parked GPUiX era: the former apps/desktop,
+                                   packages/ui, packages/runtime and the tools that were not
+                                   ported. Read-only, outside the workspace, never imported.
+                                   Lots 1 and 3 will mine it, then it goes.
+tools/            —                boundaries, commit-message, git-flow, traceability,
+                                   environment-report, package-desktop. TypeScript run by
+                                   Node, tested by Vitest.
 ```
 
-The renderer is **not** vendored here: `../gpuix` is the fork, cloned beside this repository,
-and the packages are consumed from that checkout by path. Build its addon before the suites
-that paint can run.
+Dependency direction is `desktop → core` and `desktop → ipc`. `core` imports nothing of
+Hemera, `ipc` imports nothing of Hemera: both are leaves the application composes. Import
+other packages only through their `exports`; never reach into another package's `src`. Nothing
+in the workspace imports `legacy/`. `node tools/boundaries.ts` enforces all of it and runs
+inside `pnpm lint`.
 
-Dependency direction is `desktop → runtime → core` and `desktop → ui`. `core` never imports
-`runtime`, `runtime` never imports `desktop`, `ui` imports nothing from Hemera. Import other
-packages only through their `exports`; never reach into another package's `src`. Boundary
-tests enforce this.
-
-Inside a package, a module that climbs out of its folder is imported through the subpath
-`#`: `#tokens/primitives.ts`, not `../../tokens/primitives.ts`. A sibling stays relative.
-`bun tools/subpath-imports.ts` reports and rewrites.
-
-"Workspace" means two things: a Bun workspace (a package here) and a product Workspace
+"Workspace" means two things: a pnpm workspace (a package here) and a product Workspace
 (a user's working environment). Don't confuse them in code or comments.
 
 ## Commands
 
 ```
-bun install --frozen-lockfile   # once, at the root; no per-package lockfiles
-bun run dev                     # desktop in dev channel (separate profile from prod)
-bun run typecheck               # turbo, follows package dependencies
-bun run lint                    # oxlint
-bun run fmt                     # oxfmt (fmt:check in CI)
-bun run test                    # business tests without GPU + traceability table
-bun run build                   # native builds, no cache
-bun run report                  # environment report of this target (D02)
-bun run package                 # portable package of this target
+pnpm install --frozen-lockfile   # once, at the root; no per-package lockfiles
+pnpm dev                         # the desktop application, main + preload + renderer
+pnpm typecheck                   # tsc per package, through Vite+ task running
+pnpm lint                        # oxlint + the package boundaries
+pnpm fmt                         # oxfmt (fmt:check in CI)
+pnpm test                        # vitest
+pnpm build                       # the three bundles of the application
+pnpm report                      # environment report of this target (D0-07)
+pnpm package                     # portable package of this target
+pnpm check                       # typecheck, lint, fmt:check and test, in that order
 ```
+
+Configuration lives in one place: `vite.config.ts` at the root holds the `lint`, `fmt` and
+`test` blocks. `legacy/` is excluded there and absent from `pnpm-workspace.yaml`, so nothing
+compiles, lints, formats or tests it.
 
 Root `test` never runs migrations on a real user profile; tests use a temporary profile.
 Never run a real LLM provider from a test.
-
-The renderer addon is built in the fork, and the build decides what it carries:
-`bun run build` in `../gpuix/packages/native` includes the GPU test renderer (what the suites
-that paint need), `bun run build:release` leaves it out (what ships). `bun tools/gpuix/
-build-native.ts [--test-support]` does it from here and reports what came out.
 
 ## Git rules (non-negotiable)
 
@@ -130,12 +127,37 @@ BREAKING CHANGE: <description — only if schema or internal API changes>
 ```
 
 - `type`: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`, `ci`, `perf`.
-- `scope`: `core`, `runtime`, `desktop`, `gpuix`, `db`, or a domain name (`sessions`,
-  `projects`, `journal`).
+- `scope`: `core`, `ipc`, `desktop`, `repo`, `db`, or a domain name (`sessions`, `projects`,
+  `journal`).
 - `subject`: imperative, lowercase, no trailing period, ≤ 72 chars, in English.
-- Examples: `feat(runtime): add instance lock with stale-owner recovery`,
+- Examples: `feat(ipc): declare the environment report channel`,
   `fix(desktop): restore focus after closing the project selector`,
   `test(core): cover rank rebalancing with random insertions`.
+
+## The window and the process model
+
+- **Main process**: ESM, minimal. It creates the window, registers the IPC channels and
+  produces the environment report. Everything that must precede `ready` is awaited at the top
+  level of the entry point: an ESM module loads asynchronously and a dynamic `import()`
+  arrives too late. Nothing blocking, no heavy `require` at module level.
+- **Preload**: CommonJS — a sandboxed preload does not support ESM. A few dozen lines that
+  expose a narrow API through `contextBridge`, never raw `ipcRenderer`.
+- **Renderer**: React 19 served by Vite, sandboxed and isolated, no access to Node. The
+  `clipboard` module is gone from the renderer since Electron 44: `navigator.clipboard` only.
+- The window is frameless with Window Controls Overlay, shown immediately on the application
+  background colour, with `windowStatePersistence`. The renderer reads `env(titlebar-area-*)`
+  and marks its drag zone; the controls stay `no-drag`.
+- **Refused, and checked by a test**: any `webPreferences` option outside
+  `sandbox`, `contextIsolation`, `nodeIntegration: false`, `backgroundThrottling`,
+  `spellcheck` and `preload` — in particular `additionalArguments`, `enableBlinkFeatures`,
+  `disableBlinkFeatures`, `experimentalFeatures`, `offscreen` and any non-default partition,
+  each of which loses the warmed-up renderer. No `commandLine.appendSwitch`, no ozone flag,
+  no `--no-sandbox`, `--single-process`, `--in-process-gpu` or `--disable-gpu`.
+- Wayland has no `win.setPosition()` and no `screen.getCursorScreenPoint()` by design of the
+  protocol. They are not used.
+
+Every version is pinned exactly: Electron, pnpm, Vite+, and whatever a lot adds. Nothing is
+downloaded or installed while the application runs.
 
 ## Data and migrations
 
@@ -148,38 +170,28 @@ BREAKING CHANGE: <description — only if schema or internal API changes>
   Git, shell or network call inside a transaction.
 - Queries go through Drizzle, built from `storage/schema.ts`. Raw SQL is for what a schema
   cannot express: pragmas, the migration statements, the backup checkpoint.
-- Close a profile connection with `database.close(true)`. Drizzle keeps a prepared statement
-  alive per query, and a plain `close()` leaves the file locked.
 - A start diagnostic goes through `openDiagnosticLog`, never to the console alone: a package
   started from a desktop icon has no console to print to.
 
-## UI rules (design system)
+The database arrives in lot 3, in a named `utilityProcess` created after `app.whenReady()`.
+Until then nothing in this repository opens one.
 
-- Every visual value comes from `@hemera/ui` tokens. **No hex colors, no px sizes, no inline
-  styles in pages or components outside the token files.** A lint check fails the build.
-- Reuse the catalogue (Button, Badge, Card, NavItem, Tab, Composer, Select, Modal…).
-  Never write a local one-off component that duplicates a catalogue component. If a variant
-  is missing, add it to the catalogue with its showcase and test.
-- A new component = folder `packages/ui/src/components/<name>/` with `<name>.tsx`,
-  `use-<name>.ts`, `<name>.test.tsx`, `<name>.showcase.tsx`. Not mergeable without the four.
-- Both themes (light and dark) must render correctly; the showcase page shows both.
-- The HTML prototype in `docs/prototypes/` is a **token reference only**. Never copy its
-  markup, classes or inline styles. Copying it is a rejected change.
+## UI rules
+
+- Motion is the application's signature: `motion` with the "Calme" personality, soft springs
+  (`stiffness 170, damping 26`), no bounce, under `MotionConfig reducedMotion="user"`.
+  **Only `transform`, `opacity`, `filter` and `clip-path` are animated.** A lint check refuses
+  an animation that targets a layout property or a colour.
+- Every visual value comes from the design system's CSS tokens. **No hex colors, no px sizes,
+  no inline styles outside the token files.**
+- The HTML prototype in `docs/prototypes/` and `spikes/proto-motion/` are **token and motion
+  references only**. Never copy their markup, classes or inline styles. Copying them is a
+  rejected change.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
-- A decision is laid over the window through the shell's `overlay`, never rendered inside the
-  content: an absolute box is positioned against its own parent, so a panel rendered in the
-  content takes the content's place.
 
-## Renderer gotchas (GPUiX, no DOM)
-
-No `className`/CSS, no HTML `<button>`, no `role`/`aria-*`, no `zIndex`, one scroll level per
-panel, `Tab` not handled (manual focus traversal), focus must be restored explicitly after
-closing an overlay, `Enter` in inputs is eaten by the native editor (use submit), fonts must
-be registered before the text system starts. Animation covers opacity and corner radius
-anywhere, dimensions and offsets only out of the flow; there is no exit animation. All
-user-visible strings go through i18n resources (English only for now).
+The design system itself — tokens, Base UI, Tailwind 4, Storybook, the component catalogue —
+is lot 1. Lot 0 ships an empty window and one witness panel.
 
 ## When done
 
-Run `bun run typecheck && bun run lint && bun run fmt:check && bun run test` and report the
-real output. If something fails, say so; don't claim green.
+Run `pnpm check` and report the real output. If something fails, say so; don't claim green.
