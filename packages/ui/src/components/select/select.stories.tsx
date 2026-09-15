@@ -113,6 +113,11 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(within(document.body).getByRole('listbox')).toBeInTheDocument()
     })
+    // The list is open before it is walkable: Base UI puts the highlight on the chosen item
+    // once the popup has settled, and a key pressed before then lands on nothing.
+    await waitFor(() => {
+      expect(document.querySelector('[role="option"][data-highlighted]')).not.toBeNull()
+    })
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await waitFor(() => {
       expect(args.onValueChange).toHaveBeenCalledWith('sonnet')
