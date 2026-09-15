@@ -119,51 +119,55 @@ export function Sidebar({
         </Button>
       </Folding>
 
-      <LayoutGroup id="sidebar">
-        <motion.p
-          className={GROUP}
-          initial={false}
-          animate={{ opacity: collapsed ? 0 : 1 }}
-          transition={labels}
-        >
-          Sessions
-        </motion.p>
-        {sessions.map((session) => (
+      {/* The places scroll and the two ends do not: a window short enough to cut the list off
+          used to cut it off for good, with the theme and the settings pushed out of reach. */}
+      <div className="scroll-quiet flex min-h-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto">
+        <LayoutGroup id="sidebar">
+          <motion.p
+            className={GROUP}
+            initial={false}
+            animate={{ opacity: collapsed ? 0 : 1 }}
+            transition={labels}
+          >
+            Sessions
+          </motion.p>
+          {sessions.map((session) => (
+            <Entry
+              key={session.id}
+              id={session.id}
+              label={session.title}
+              icon={<IconMessages size="md" />}
+              active={session.id === activeEntryId}
+              collapsed={collapsed}
+              transition={transition}
+              labels={labels}
+              onSelect={onSelectEntry}
+            />
+          ))}
           <Entry
-            key={session.id}
-            id={session.id}
-            label={session.title}
-            icon={<IconMessages size="md" />}
-            active={session.id === activeEntryId}
+            id={JOURNAL_ENTRY}
+            label="Journal"
+            icon={<IconTimelineEvent size="md" />}
+            active={activeEntryId === JOURNAL_ENTRY}
             collapsed={collapsed}
             transition={transition}
             labels={labels}
             onSelect={onSelectEntry}
           />
-        ))}
-        <Entry
-          id={JOURNAL_ENTRY}
-          label="Journal"
-          icon={<IconTimelineEvent size="md" />}
-          active={activeEntryId === JOURNAL_ENTRY}
-          collapsed={collapsed}
-          transition={transition}
-          labels={labels}
-          onSelect={onSelectEntry}
-        />
-        <Entry
-          id={PROJECT_SETTINGS_ENTRY}
-          label="Project settings"
-          icon={<IconSettings size="md" />}
-          active={activeEntryId === PROJECT_SETTINGS_ENTRY}
-          collapsed={collapsed}
-          transition={transition}
-          labels={labels}
-          onSelect={onSelectEntry}
-        />
-      </LayoutGroup>
+          <Entry
+            id={PROJECT_SETTINGS_ENTRY}
+            label="Project settings"
+            icon={<IconSettings size="md" />}
+            active={activeEntryId === PROJECT_SETTINGS_ENTRY}
+            collapsed={collapsed}
+            transition={transition}
+            labels={labels}
+            onSelect={onSelectEntry}
+          />
+        </LayoutGroup>
+      </div>
 
-      <div className="mt-auto flex flex-col gap-1">
+      <div className="flex shrink-0 flex-col gap-1">
         <Action
           label={theme === 'dark' ? 'Use the light theme' : 'Use the dark theme'}
           icon={theme === 'dark' ? <IconSun size="md" /> : <IconMoon size="md" />}

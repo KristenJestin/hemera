@@ -37,9 +37,15 @@ const BRAND = 'flex min-w-0 items-center gap-2 overflow-hidden pr-2 pl-6'
 
 const STRIP = 'no-drag-children scroll-quiet flex min-w-0 flex-1 items-center gap-1 overflow-x-auto'
 
-const TAB = 'relative shrink-0 gap-2'
+const TAB = 'no-drag relative shrink-0 gap-2 bg-transparent hover:bg-transparent'
 
-/** The slab that slides from tab to tab: a raised pill, which is what makes it visible at all. */
+/**
+ * The slab that slides from tab to tab.
+ *
+ * It is a sibling of the tab and not a child of it: a button hides what overflows it, and a
+ * slab travelling from one tab to the next is nothing but overflow — it was being clipped to
+ * the tab it was arriving at, which is why it looked like it jumped rather than slid.
+ */
 const MARK = 'absolute inset-0 rounded-md bg-card shadow-sm'
 
 const RULE = 'mx-1 h-6 shrink-0 self-center border-l border-border'
@@ -117,24 +123,23 @@ export function ChromeBar({
         <nav aria-label="Projects" className={STRIP}>
           <LayoutGroup id="projects">
             {projects.map((project) => (
-              <Button
-                key={project.id}
-                variant="ghost"
-                className={TAB}
-                aria-current={project.id === activeProjectId ? 'page' : undefined}
-                onClick={() => onSelectProject(project.id)}
-              >
+              // The hover is on the wrapper and not on the tab: on the tab it would paint
+              // over the slab, and the active Project would lose its mark under the pointer.
+              <span key={project.id} className="relative flex shrink-0 rounded-md hover:bg-accent">
                 {project.id === activeProjectId && (
                   <motion.span layoutId="active-project" className={MARK} transition={transition} />
                 )}
-                <span className={cn('relative size-2 shrink-0 rounded-full', TONE[project.tone])} />
-                <span className="relative">{project.name}</span>
-                {project.pending > 0 && (
-                  <Badge tone="neutral" className="relative">
-                    {project.pending}
-                  </Badge>
-                )}
-              </Button>
+                <Button
+                  variant="ghost"
+                  className={TAB}
+                  aria-current={project.id === activeProjectId ? 'page' : undefined}
+                  onClick={() => onSelectProject(project.id)}
+                >
+                  <span className={cn('size-2 shrink-0 rounded-full', TONE[project.tone])} />
+                  {project.name}
+                  {project.pending > 0 && <Badge tone="neutral">{project.pending}</Badge>}
+                </Button>
+              </span>
             ))}
           </LayoutGroup>
           {/* One press, one Project. It sits after the last tab, where the next one will be. */}

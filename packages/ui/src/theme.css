@@ -270,13 +270,20 @@
 }
 
 /* Where the system draws its own window buttons, as the platform tells the page. The whole
-   strip moves the window; anything interactive inside it opts back out. */
+   strip moves the window; anything interactive inside it opts back out.
+
+   The bar runs the full width of the window and keeps its contents off the buttons with
+   padding, rather than by stopping short of them. Stopping short is what it used to do, and it
+   left the background and the rule under the bar ending in mid-air a hand's width before the
+   edge of the window — which is exactly where the eye goes to check that a window is one. */
 @utility title-bar {
   position: fixed;
   top: 0;
-  left: env(titlebar-area-x, 0px);
-  width: env(titlebar-area-width, 100%);
+  left: 0;
+  width: 100%;
   height: env(titlebar-area-height, var(--spacing-title-bar));
+  padding-left: env(titlebar-area-x, 0px);
+  padding-right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%));
   -webkit-app-region: drag;
 }
 

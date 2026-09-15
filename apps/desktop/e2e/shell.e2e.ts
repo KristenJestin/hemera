@@ -44,25 +44,30 @@ describe('Boutons de fenêtre hors de la barre', () => {
   it('lays nothing of its own under the strip the system draws its buttons in', async () => {
     const laid = await browser.execute(() => {
       const bar = document.querySelector('header')!
-      const segments = [...bar.children].map((node) => node.getBoundingClientRect().right)
+      const box = bar.getBoundingClientRect()
+      const padding = Number.parseFloat(getComputedStyle(bar).paddingRight)
       const tabs = bar.querySelector('nav[aria-label="Projects"]')!
       return {
-        bar: bar.getBoundingClientRect().right,
+        bar: box.right,
+        // Where the platform says our side of the strip ends, which is where the buttons begin.
+        usable: box.right - padding,
+        padding,
         window: window.innerWidth,
-        segments,
+        segments: [...bar.children].map((node) => node.getBoundingClientRect().right),
         tabsRight: tabs.getBoundingClientRect().right,
         clips: getComputedStyle(tabs).overflowX,
       }
     })
 
-    // The bar is placed at `env(titlebar-area-*)`, so it stops where the system's own buttons
-    // begin, and it never reaches the right edge of a window that has them.
-    expect(laid.bar).toBeLessThanOrEqual(laid.window)
+    // The bar itself runs the full width of the window — its background and the rule under it
+    // reach the edge — and keeps its contents off the buttons with padding instead.
+    expect(laid.bar).toBeCloseTo(laid.window, 0)
+    expect(laid.padding).toBeGreaterThan(0)
 
-    // Both segments end inside it, and the tabs live in a strip that clips: what does not fit
-    // scrolls out of sight rather than being drawn under a window button.
-    for (const right of laid.segments) expect(right).toBeLessThanOrEqual(laid.bar + 1)
-    expect(laid.tabsRight).toBeLessThanOrEqual(laid.bar + 1)
+    // Both segments end before the buttons, and the tabs live in a strip that clips: what does
+    // not fit scrolls out of sight rather than being drawn under a window button.
+    for (const right of laid.segments) expect(right).toBeLessThanOrEqual(laid.usable + 1)
+    expect(laid.tabsRight).toBeLessThanOrEqual(laid.usable + 1)
     expect(laid.clips).toBe('auto')
   })
 })
