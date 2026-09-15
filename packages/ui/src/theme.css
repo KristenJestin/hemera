@@ -294,9 +294,13 @@
 /* The shell: a chrome bar in the strip the platform gave us, and everything else underneath
    (design D2-01). The body is placed rather than padded, so that the one element allowed to
    scroll is the content area and nothing above it can be pushed out of view. */
+/* The window, and not a share of whatever holds it: a shell asked for a percentage of its
+   parent would be as tall as the element it was dropped into, which in a page that never
+   thought about it is nothing at all. */
 @utility shell-root {
   position: relative;
-  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 /* The body clips, and the root does not: a sidebar that is folding must not make the window
@@ -320,6 +324,16 @@
 
 /* The one level of scrolling of the window (design D2-05). `contain` is what keeps a wheel
    over the content from carrying on into the page once the content has run out. */
+/* A strip that scrolls without saying so. A scrollbar drawn across the title bar is chrome on
+   top of chrome, and what does not fit is one press away in the panel the add button opens. */
+@utility scroll-quiet {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @utility content-area {
   flex: 1;
   min-width: 0;

@@ -33,7 +33,7 @@ const BAR = 'title-bar chrome-columns items-center border-b border-border bg-bac
 
 const BRAND = 'flex min-w-0 items-center gap-2 overflow-hidden pr-1 pl-3'
 
-const STRIP = 'no-drag-children flex min-w-0 flex-1 items-center gap-1 overflow-x-auto'
+const STRIP = 'no-drag-children scroll-quiet flex min-w-0 flex-1 items-center gap-1 overflow-x-auto'
 
 const TAB = 'relative shrink-0 gap-1.5'
 
