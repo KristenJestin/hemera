@@ -117,7 +117,12 @@ export function refusalsOf(file: string, source: string): Refusal[] {
     at('commandLine.appendSwitch', 'adds a Chromium switch; the target decides, not the code')
   }
   for (const flag of REFUSED_SWITCHES) {
-    if (source.includes(flag)) at(flag, 'is a platform flag the application never passes')
+    // Looked for as a string the code hands over, not as text: the environment report reads
+    // the very same flags out of the GPU process command line, and reading is the opposite
+    // of passing.
+    if (new RegExp(`['"\`]${flag}`).test(source)) {
+      at(flag, 'is a platform flag the application never passes')
+    }
   }
   for (const variable of REFUSED_ENVIRONMENT) {
     if (new RegExp(`${variable}\\s*(?::|=|'\\s*\\]\\s*=)`).test(source)) {

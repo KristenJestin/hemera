@@ -23,6 +23,11 @@ describe('Options de plateforme refusées', () => {
     expect(refusalsOf('window.ts', source)).toEqual([])
   })
 
+  test('reading a platform flag out of a command line is not passing it', () => {
+    const source = 'const backend = /--ozone-platform(?:-hint)?=([\\w-]+)/.exec(commandLine)\n'
+    expect(refusalsOf('src/main/environment.ts', source)).toEqual([])
+  })
+
   test.each([
     [
       'an ozone hint',

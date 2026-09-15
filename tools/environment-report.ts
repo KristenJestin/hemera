@@ -1,353 +1,116 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
- * Environment report of the target this machine is, as decided in D02.
+ * Environment report of the target this machine is (design D0-07).
  *
- * A report describes the machine it was produced on and nothing else: a field that cannot be
- * read is reported as unknown rather than guessed, and no result is carried from one target to
- * another. A target is only ever declared verified with its own report beside it.
+ * The report is produced by the application itself, because only a running Electron knows
+ * what its GPU process decided and what each display is scaled at. This tool starts it, reads
+ * what it says, and files it. What it cannot read it leaves as the application reported it:
+ * a report is an observation, never a plausible reconstruction.
  *
- *   bun tools/environment-report.ts            print the report
- *   bun tools/environment-report.ts --write    write reports/environment-<target>.md
- *   bun tools/environment-report.ts --window   also launch the window and observe it
+ *   node tools/environment-report.ts            print the report of this machine
+ *   node tools/environment-report.ts --write    also file it under reports/<target>/
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
-import { createHash } from 'node:crypto'
-import { arch, platform, release, tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { arch } from 'node:os'
 import { join, resolve } from 'node:path'
 
-/** Value used when a field cannot be read; never replaced by a plausible one. */
-export const UNKNOWN = 'unknown'
+import { environmentReportSchema, type EnvironmentReport } from '@hemera/ipc'
 
-/** Backend GPUI reports when it opened no window at all. */
-export const HEADLESS_BACKEND = 'Headless'
-
-/** Targets the lot compiles for. */
-export const TARGETS = {
-  'win32-x64': 'x86_64-pc-windows-msvc',
-  'linux-x64': 'x86_64-unknown-linux-gnu',
-} as const
-
-export type Target = (typeof TARGETS)[keyof typeof TARGETS]
-
-export interface EnvironmentReport {
-  target: Target
-  producedAt: string
-  system: { name: string; version: string }
-  graphics: { session: string; compositor: string }
-  gpu: { model: string; driver: string }
-  toolchain: { bun: string; rust: string; compiler: string }
-  artefacts: { fork: string; head: string; packages: { name: string; sha256: string }[] }
-  /** What this target cannot verify, and why; empty when it can verify everything. */
-  limits: string[]
-  observation: { window: string; errors: string[] }
+/** Where a report is filed: one folder per target, one pair of files per run. */
+export function reportPath(reportsRoot: string, report: EnvironmentReport, date: Date): string {
+  const day = date.toISOString().slice(0, 19).replaceAll(':', '-')
+  return join(reportsRoot, `${report.platform}-${arch()}`, day)
 }
 
-/** The target this machine is, refusing to report about one it is not. */
-export function targetOfHost(hostPlatform: string = platform(), hostArch: string = arch()): Target {
-  const target = TARGETS[`${hostPlatform}-${hostArch}` as keyof typeof TARGETS]
-  if (target === undefined) {
-    throw new Error(`no target of the lot matches ${hostPlatform}/${hostArch}`)
-  }
-  return target
+function line(label: string, value: string): string {
+  return `| ${label} | ${value} |`
 }
 
-/** Runs a command and gives its first line, or `unknown` when it cannot be read. */
-function readCommand(command: string[]): string {
-  try {
-    const run = Bun.spawnSync(command, { stdout: 'pipe', stderr: 'pipe' })
-    if (run.exitCode !== 0) return UNKNOWN
-    const line = new TextDecoder()
-      .decode(run.stdout)
-      .split('\n')
-      .map((candidate) => candidate.trim())
-      .find((candidate) => candidate.length > 0)
-    return line ?? UNKNOWN
-  } catch {
-    return UNKNOWN
-  }
-}
-
-function windowsGpu(): { model: string; driver: string } {
-  const read = (property: string) =>
-    readCommand([
-      'powershell',
-      '-NoProfile',
-      '-Command',
-      `(Get-CimInstance Win32_VideoController | Select-Object -First 1).${property}`,
-    ])
-  return { model: read('Name'), driver: read('DriverVersion') }
-}
-
-function linuxGpu(): { model: string; driver: string } {
-  const renderer = readCommand(['sh', '-c', "glxinfo -B 2>/dev/null | grep -i 'OpenGL renderer'"])
-  const mesa = readCommand(['sh', '-c', "glxinfo -B 2>/dev/null | grep -i 'OpenGL version'"])
-  return { model: renderer, driver: mesa }
-}
-
-function systemOf(target: Target): { name: string; version: string } {
-  if (target === TARGETS['win32-x64']) {
-    return {
-      name: readCommand([
-        'powershell',
-        '-NoProfile',
-        '-Command',
-        '(Get-CimInstance Win32_OperatingSystem).Caption',
-      ]),
-      version: release(),
-    }
-  }
-  const description = readCommand([
-    'sh',
-    '-c',
-    'lsb_release -ds 2>/dev/null || cat /etc/os-release',
-  ])
-  return { name: description, version: release() }
-}
-
-function graphicsOf(target: Target): { session: string; compositor: string } {
-  if (target === TARGETS['win32-x64']) {
-    // Windows composes the desktop itself; there is no session type to choose from.
-    return { session: 'Windows Desktop Window Manager', compositor: 'DWM' }
-  }
-  const session = process.env.XDG_SESSION_TYPE ?? UNKNOWN
-  const compositor =
-    process.env.WAYLAND_DISPLAY !== undefined
-      ? `Wayland (${process.env.WAYLAND_DISPLAY})`
-      : process.env.DISPLAY !== undefined
-        ? `X11 (${process.env.DISPLAY})`
-        : UNKNOWN
-  return { session, compositor }
-}
-
-/** Path the Visual Studio installer records its own inventory at. */
-const VSWHERE = 'C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe'
-
-function compilerOf(target: Target): string {
-  if (target !== TARGETS['win32-x64']) return readCommand(['sh', '-c', 'gcc --version'])
-  // `cl` only exists inside a developer prompt; the installer knows what is installed.
-  const onPath = readCommand(['cmd', '/c', 'cl'])
-  if (onPath !== UNKNOWN) return onPath
-  if (!existsSync(VSWHERE)) return UNKNOWN
-  const version = readCommand([
-    VSWHERE,
-    '-products',
-    '*',
-    '-latest',
-    '-property',
-    'installationVersion',
-  ])
-  const edition = readCommand([VSWHERE, '-products', '*', '-latest', '-property', 'displayName'])
-  return version === UNKNOWN ? UNKNOWN : `MSVC ${version} (${edition})`
-}
-
-/**
- * The renderer this target was built against: the fork commit, and the addon actually
- * loaded, fingerprinted where it sits.
- *
- * The addon is not copied anywhere, so what is reported is the file the product imports —
- * not a record of a build that may since have been redone.
- */
-function artefactsOf(repositoryRoot: string): EnvironmentReport['artefacts'] {
-  const forkPath = resolve(repositoryRoot, '..', 'gpuix')
-  const head = readCommand(['git', '-C', forkPath, 'rev-parse', 'HEAD'])
-  const branch = readCommand(['git', '-C', forkPath, 'rev-parse', '--abbrev-ref', 'HEAD'])
-  const nativePackage = join(forkPath, 'packages', 'native')
-  if (!existsSync(nativePackage)) return { fork: UNKNOWN, head: UNKNOWN, packages: [] }
-
-  const addons = readdirSync(nativePackage).filter((entry) => entry.endsWith('.node'))
-  return {
-    fork: branch,
-    head,
-    packages: addons.map((file) => ({
-      name: file,
-      sha256: createHash('sha256')
-        .update(readFileSync(join(nativePackage, file)))
-        .digest('hex'),
-    })),
-  }
-}
-
-/**
- * Launches the desktop entry on a temporary profile and reports what the window did.
- *
- * Nothing here is inferred: the observation is what the process printed, and a launch that
- * printed nothing is reported as such.
- */
-export async function observeWindow(
-  repositoryRoot: string,
-  timeoutMs = 60_000,
-): Promise<{
-  window: string
-  errors: string[]
-}> {
-  const profile = mkdtempSync(join(tmpdir(), 'hemera-report-'))
-  const child = Bun.spawn(['bun', 'src/entry/main.tsx'], {
-    cwd: join(repositoryRoot, 'apps', 'desktop'),
-    env: { ...process.env, HEMERA_PROFILE_DIR: profile },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  const lines: string[] = []
-  const deadline = Date.now() + timeoutMs
-  try {
-    const reader = child.stdout.getReader()
-    const decoder = new TextDecoder()
-    let buffered = ''
-    while (Date.now() < deadline) {
-      // oxlint-disable-next-line no-await-in-loop
-      const { value, done } = await reader.read()
-      if (done) break
-      buffered += decoder.decode(value, { stream: true })
-      const parts = buffered.split('\n')
-      buffered = parts.pop() ?? ''
-      lines.push(...parts.map((line) => line.trim()).filter((line) => line.length > 0))
-      if (lines.some((line) => line.startsWith('window opened'))) break
-    }
-  } finally {
-    child.kill()
-    await child.exited
-    rmSync(profile, { recursive: true, force: true })
-  }
-
-  const errors = (await new Response(child.stderr).text())
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-
-  // Only the backend is proof. The size comes from the application's own gate, and the
-  // headless client of GPUI answers it with the nominal size of a window it never created;
-  // `[gpuix] created native window` is printed by the React package as soon as `init()`
-  // returns, whichever client it was. Both are reported identically by a run that opened
-  // nothing, so the observation rests on the backend the renderer named instead.
-  const measured = lines.find((line) => line.startsWith('window opened'))
-  const backend = lines
-    .find((line) => line.startsWith('window backend '))
-    ?.slice('window backend '.length)
-  if (backend !== undefined && measured !== undefined) {
-    return backend === HEADLESS_BACKEND
-      ? { window: `ran headless, no window was opened (${measured})`, errors }
-      : { window: `native window created on ${backend}, ${measured}`, errors }
-  }
-  if (measured !== undefined) {
-    return { window: `${measured}, from a run that named no backend`, errors }
-  }
-  return { window: 'no window announced itself', errors }
-}
-
-export interface ReportOptions {
-  repositoryRoot: string
-  /** Observation of the window, when the run is allowed to open one. */
-  observation?: EnvironmentReport['observation']
-}
-
-/**
- * What this target cannot verify, read from the artefacts rather than from the platform name.
- *
- * A capability the fork does not carry here is not a debt of the delivery, and it is not a
- * detail of the run either: a target is qualified by what it could check, so what it could
- * not has to be readable beside the rest.
- */
-function limitsOf(): string[] {
-  try {
-    // eslint-disable-next-line
-    const native = require('@gpuix/native') as { hasTestGpuixRenderer: () => boolean }
-    if (native.hasTestGpuixRenderer()) return []
-  } catch {
-    return []
-  }
-  return [
-    'GPU test renderer: absent on this target, so nothing painted was inspected here. ' +
-      'Upstream reads a rendered image back on macOS and Windows only; the suites that paint ' +
-      'are named and skipped, and the scenarios they carry are verified on the other target.',
-  ]
-}
-
-export function collectReport({ repositoryRoot, observation }: ReportOptions): EnvironmentReport {
-  const target = targetOfHost()
-  return {
-    target,
-    producedAt: new Date().toISOString(),
-    system: systemOf(target),
-    graphics: graphicsOf(target),
-    gpu: target === TARGETS['win32-x64'] ? windowsGpu() : linuxGpu(),
-    toolchain: {
-      bun: readCommand(['bun', '--version']),
-      rust: readCommand(['rustc', '--version']),
-      compiler: compilerOf(target),
-    },
-    artefacts: artefactsOf(repositoryRoot),
-    limits: limitsOf(),
-    observation: observation ?? { window: 'not observed in this run', errors: [] },
-  }
-}
-
-/** The report as the document joined to the result of the lot. */
 export function renderReport(report: EnvironmentReport): string {
-  const rows = [
-    ['System and version', `${report.system.name} — ${report.system.version}`],
-    ['Graphical session', `${report.graphics.session} — ${report.graphics.compositor}`],
-    ['GPU and driver', `${report.gpu.model} — ${report.gpu.driver}`],
-    [
-      'Toolchain',
-      `Bun ${report.toolchain.bun}, ${report.toolchain.rust}, ${report.toolchain.compiler}`,
-    ],
-    [
-      'Artefacts',
-      `fork ${report.artefacts.fork} (${report.artefacts.head}), ${report.artefacts.packages
-        .map((entry) => `${entry.name} ${entry.sha256.slice(0, 12)}`)
-        .join(', ')}`,
-    ],
-    ...(report.limits.length === 0 ? [] : [['Limits', report.limits.join(' ')]]),
-    [
-      'Observation',
-      report.observation.errors.length === 0
-        ? report.observation.window
-        : `${report.observation.window}; errors: ${report.observation.errors.join(' | ')}`,
-    ],
-  ]
-
-  return [
-    `# Environment report — ${report.target}`,
+  const lines = [
+    `# Environment — ${report.platform}`,
     '',
-    `Produced on ${report.producedAt}. This report describes this machine only: nothing here`,
-    'is carried over to another target, and a field that could not be read says so.',
+    `Produced at ${report.producedAt}.`,
     '',
-    '| Field | Value |',
+    '## System',
+    '',
+    '| | |',
     '|---|---|',
-    ...rows.map(([field, value]) => `| ${field} | ${value} |`),
+    line('OS version', report.osVersion),
+    line('Distribution', report.distribution ?? '—'),
+    line('Graphics session', report.graphics.session),
+    line('Compositor', report.graphics.compositor ?? '—'),
+    line('GPU process backend', report.graphics.gpuBackend ?? '—'),
+    line('GPU adapter', report.graphics.device ?? '—'),
+    line('Electron', report.versions.electron),
+    line('Chromium', report.versions.chrome),
+    line('Node', report.versions.node),
     '',
-  ].join('\n')
+    '## Displays',
+    '',
+    '| Id | Size | Scale | Refresh | Primary |',
+    '|---|---|---|---|---|',
+    ...report.displays.map(
+      (display) =>
+        `| ${display.id} | ${display.width}×${display.height} | ${display.scaleFactor} | ${display.refreshRate} Hz | ${display.primary ? 'yes' : 'no'} |`,
+    ),
+    '',
+    '## GPU',
+    '',
+    '| Feature | State |',
+    '|---|---|',
+    ...Object.entries(report.graphics.features).map(([feature, state]) => line(feature, state)),
+    '',
+    '## Motion',
+    '',
+    report.motion === null
+      ? 'The witness transition was not measured during this run.'
+      : `${report.motion.frames} frames at ${report.motion.refreshRate} Hz, longest frame ${report.motion.longestFrame} ms.`,
+    '',
+    '## Not verified by this report',
+    '',
+    ...(report.notVerified.length === 0
+      ? ['Nothing: this report speaks for every target of the lot.']
+      : report.notVerified.map((limit) => `- ${limit}`)),
+    '',
+  ]
+  return lines.join('\n')
 }
 
-export function reportPathOf(repositoryRoot: string, target: Target): string {
-  return join(repositoryRoot, 'reports', `environment-${target}.md`)
+/** Starts the application in reporting mode and reads what it answered. */
+export function readReportFrom(application: string, binary: string): EnvironmentReport {
+  // A terminal opened inside an Electron based editor exports ELECTRON_RUN_AS_NODE, and the
+  // binary would then start as a plain Node process with no window and no GPU to report on.
+  const { ELECTRON_RUN_AS_NODE: _runAsNode, ...environment } = process.env
+  const result = spawnSync(binary, [application, '--report'], {
+    encoding: 'utf8',
+    env: environment,
+  })
+  if (result.status !== 0) {
+    throw new Error(`the application refused to report: ${result.stderr.trim()}`)
+  }
+  return environmentReportSchema.parse(JSON.parse(result.stdout))
 }
 
 if (import.meta.main) {
-  const repositoryRoot = resolve(import.meta.dir, '..')
-  const observation = process.argv.includes('--window')
-    ? await observeWindow(repositoryRoot)
-    : undefined
-  const report = collectReport(
-    observation === undefined ? { repositoryRoot } : { repositoryRoot, observation },
-  )
-  const document = renderReport(report)
+  const repository = resolve(import.meta.dirname, '..')
+  const application = join(repository, 'apps', 'desktop')
+  // The binary belongs to the application, not to the root: it is asked of the package that
+  // installed it, so there is one pinned Electron in the repository and not two.
+  const fromApplication = createRequire(join(application, 'package.json'))
+  const binary = fromApplication('electron') as string
+
+  const report = readReportFrom(application, binary)
+  console.log(renderReport(report))
 
   if (process.argv.includes('--write')) {
-    const path = reportPathOf(repositoryRoot, report.target)
+    const path = reportPath(join(repository, 'reports'), report, new Date())
     mkdirSync(join(path, '..'), { recursive: true })
-    writeFileSync(path, document)
-    console.log(`written ${path}`)
-  } else {
-    console.log(document)
+    writeFileSync(`${path}.json`, `${JSON.stringify(report, null, 2)}\n`)
+    writeFileSync(`${path}.md`, renderReport(report))
+    console.log(`written ${path}.json and ${path}.md`)
   }
 }

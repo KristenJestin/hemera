@@ -26,6 +26,8 @@ export const graphicsSchema = z.object({
   compositor: z.string().nullable(),
   /** The backend the GPU process actually runs on, read from its command line. */
   gpuBackend: z.string().nullable(),
+  /** The adapter the GPU process ended up on, null when it reported none. */
+  device: z.string().nullable(),
   /** `app.getGPUFeatureStatus()`, feature by feature. */
   features: z.record(z.string(), z.string()),
 })

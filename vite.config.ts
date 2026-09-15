@@ -35,6 +35,7 @@ export default defineConfig({
       'apps/*/tests/**/*.test.ts',
       'packages/*/tests/**/*.test.ts',
       'tools/boundaries.test.ts',
+      'tools/environment-report.test.ts',
       'tools/git-flow.test.ts',
       'tools/verification.test.ts',
       'tools/window-options.test.ts',
