@@ -6,10 +6,13 @@
  * taking the clicks meant for the overlay.
  */
 
+import { motion } from '@gpuix/react'
 import type { ReactNode } from 'react'
 
+import { transition } from '#lib/motion.ts'
 import { mergeStyle, withoutUndefined } from '#lib/style.ts'
 import type { Style } from '#lib/style.ts'
+import { overlay } from '#tokens/components.ts'
 import { space } from '#tokens/primitives.ts'
 
 export interface AnchoredProps {
@@ -46,7 +49,16 @@ export function Anchored({
         testId,
       })}
     >
-      {children}
+      {/* Appearing in one frame reads as a glitch. The overlay rises into place; there is no
+          exit animation to match it, because an element stops painting the frame it leaves. */}
+      <motion.div
+        initial={{ opacity: 0, top: overlay.entryOffset }}
+        animate={{ opacity: 1, top: 0 }}
+        transition={transition('fast')}
+        style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}
+      >
+        {children}
+      </motion.div>
     </anchored>
   )
 }

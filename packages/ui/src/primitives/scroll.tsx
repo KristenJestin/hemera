@@ -9,6 +9,7 @@
 import { createContext, useContext } from 'react'
 import type { ReactNode } from 'react'
 
+import { DismissProvider, useDismissChannel } from '#lib/dismiss.ts'
 import { mergeStyle, withoutUndefined } from '#lib/style.ts'
 import type { Style } from '#lib/style.ts'
 
@@ -22,7 +23,9 @@ export interface ScrollProps {
 const InsideScroll = createContext(false)
 
 export function Scroll({ axis = 'vertical', style, children, testId }: ScrollProps) {
-  if (useContext(InsideScroll)) {
+  const nested = useContext(InsideScroll)
+  const dismissal = useDismissChannel()
+  if (nested) {
     throw new Error('Scroll cannot nest: a panel has exactly one scroll level')
   }
   const scrolling: Style =
@@ -32,14 +35,19 @@ export function Scroll({ axis = 'vertical', style, children, testId }: ScrollPro
 
   return (
     <InsideScroll.Provider value={true}>
-      <div
-        {...withoutUndefined({
-          style: mergeStyle({ display: 'flex', flexDirection: 'column' }, scrolling, style),
-          testId,
-        })}
-      >
-        {children}
-      </div>
+      <DismissProvider value={dismissal}>
+        <div
+          // An anchored overlay is placed against a trigger that just moved: it is told, and
+          // closes, rather than staying snapped to an edge of the window.
+          onScroll={dismissal.dismiss}
+          {...withoutUndefined({
+            style: mergeStyle({ display: 'flex', flexDirection: 'column' }, scrolling, style),
+            testId,
+          })}
+        >
+          {children}
+        </div>
+      </DismissProvider>
     </InsideScroll.Provider>
   )
 }

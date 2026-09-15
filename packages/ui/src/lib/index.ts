@@ -19,6 +19,13 @@ export {
   traversalIntentOf,
 } from './keyboard.ts'
 export type { Shortcut, TraversalIntent } from './keyboard.ts'
+export {
+  DismissProvider,
+  useDismissChannel,
+  useDismissOnScroll,
+  useDismissPublisher,
+} from './dismiss.ts'
+export type { DismissChannel } from './dismiss.ts'
 export { CONSTRAINED_TARGETS, FREE_TARGETS, canAnimate, transition } from './motion.ts'
 export type { MotionContext, MotionSpeed, MotionTarget, Transition } from './motion.ts'
 export { focusRing, freezeStyle, mergeStyle, variants } from './style.ts'

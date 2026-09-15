@@ -10,6 +10,8 @@ import { iconSize, space } from './primitives.ts'
 /** Interactive control geometry. */
 export const control = {
   height: { sm: 28, md: 32, lg: 40 },
+  /** How far a pressed control travels, in pixels. */
+  pressTravel: 1,
   paddingX: { sm: space.md, md: space.lg, lg: space.xl },
 } as const
 
@@ -47,6 +49,12 @@ export const shell = {
   sidebar: { width: 248, minWidth: 180, maxWidth: 420, collapsedWidth: 0 },
   /** `size` is what the pointer grabs, `rule` what is painted. */
   gutter: { size: 6, rule: 1 },
+} as const
+
+/** An overlay anchored to its trigger: menu, tooltip. */
+export const overlay = {
+  /** How far it rises as it appears, in pixels. */
+  entryOffset: 4,
 } as const
 
 /** A decision panel laid over the window. */

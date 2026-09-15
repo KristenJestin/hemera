@@ -8,6 +8,7 @@
 import type { EventPayload } from '@gpuix/react'
 import { useCallback, useState } from 'react'
 
+import { useDismissOnScroll } from '#lib/dismiss.ts'
 import { useFocusReturn } from '#lib/interaction.ts'
 import { isDismissKey } from '#lib/keyboard.ts'
 
@@ -48,6 +49,10 @@ export function useSelect<Value extends string>({
     setOpen(false)
     focusReturn.restore()
   }, [focusReturn])
+
+  // The menu is anchored to the pill: once the panel scrolls, the pill has moved and the
+  // renderer snaps the menu to an edge of the window instead of following it.
+  useDismissOnScroll(open, close)
 
   const toggle = useCallback(() => {
     if (disabled) return
