@@ -6,6 +6,10 @@ const OUTSIDE_THE_WORKSPACE = ['reports/**', 'dist/**']
 export default defineConfig({
   lint: {
     plugins: ['typescript', 'oxc', 'import'],
+    // The design-system rules agents are held to: no colour outside the theme, no arbitrary
+    // Tailwind value, no inline style, no class built at run time, no restyling of a
+    // component through className. Tailwind and the theme arrive in lot 1; the rules stand now.
+    jsPlugins: ['@shadcn/lint'],
     categories: {
       correctness: 'error',
       suspicious: 'error',
@@ -16,6 +20,13 @@ export default defineConfig({
       'typescript/no-explicit-any': 'error',
       'typescript/consistent-type-imports': 'error',
       'import/no-cycle': 'error',
+      'shadcn/no-raw-colors': 'error',
+      'shadcn/no-arbitrary-values': 'error',
+      'shadcn/no-inline-styles': 'error',
+      'shadcn/require-static-classes': 'error',
+      // Off until Tailwind and the theme exist (lot 1): every class of lot 0 is plain CSS.
+      'shadcn/no-unknown-classes': 'off',
+      'shadcn/no-restyle': ['error', { allow: ['layout'] }],
     },
     ignorePatterns: OUTSIDE_THE_WORKSPACE,
   },

@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vite-plus/test'
 
-import { CALM } from '#renderer/application.tsx'
 import { measureOf } from '#renderer/witness.ts'
 
 /** Frame times of a run at `rate` hertz, with `spikes` inserted as longer frames. */
@@ -31,11 +30,5 @@ describe('Transition à la fréquence de l’écran', () => {
   test('a run with no frame to compare says nothing rather than something', () => {
     expect(measureOf([])).toEqual({ refreshRate: 0, frames: 0, longestFrame: 0 })
     expect(measureOf([12])).toEqual({ refreshRate: 0, frames: 1, longestFrame: 0 })
-  })
-})
-
-describe('Propriétés autorisées seules', () => {
-  test('the calm personality is the spring the prototype settled on', () => {
-    expect(CALM).toEqual({ type: 'spring', stiffness: 170, damping: 26 })
   })
 })

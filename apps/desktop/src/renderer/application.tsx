@@ -9,14 +9,9 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { MotionMeasure } from '@hemera/ipc'
 
+import { calmSpring } from './motion.ts'
 import { usePixelRatio } from './use-pixel-ratio.ts'
 import { measureFrames } from './witness.ts'
-
-/**
- * The "Calme" personality, as the prototype settled it: a soft spring that arrives without
- * overshooting. Only transform and opacity are animated; nothing here moves a layout box.
- */
-export const CALM = { type: 'spring', stiffness: 170, damping: 26 } as const
 
 export function Application() {
   const ratio = usePixelRatio()
@@ -55,7 +50,7 @@ export function Application() {
           className="witness"
           initial={false}
           animate={{ opacity: shown ? 1 : 0.15, y: shown ? 0 : 24 }}
-          transition={CALM}
+          transition={calmSpring}
         >
           <p>This panel slides and fades, and nothing else.</p>
         </motion.section>
