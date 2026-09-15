@@ -1,10 +1,19 @@
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { analyze, animatedPropertiesOf, animatedStyleOf, refusalsOf } from './motion-properties.ts'
+import {
+  MOTION_PRESET,
+  MOTION_THEME,
+  analyze,
+  animatedPropertiesOf,
+  animatedStyleOf,
+  hardcodedOf,
+  refusalsOf,
+} from './motion-properties.ts'
 
 const repository = resolve(import.meta.dirname, '..')
 const renderer = join(repository, 'apps', 'desktop', 'src', 'renderer')
+const designSystem = join(repository, 'packages', 'ui', 'src')
 
 describe('Propriétés autorisées seules', () => {
   test('the renderer of this lot animates composited properties only', () => {
@@ -57,4 +66,67 @@ describe('Propriétés autorisées seules', () => {
   ])('%s is refused', (_case, source, property) => {
     expect(refusalsOf('panel.css', source).map((refusal) => refusal.property)).toContain(property)
   })
+})
+
+describe('Preset partagé', () => {
+  test('the design system writes its spring numbers in the preset and nowhere else', () => {
+    expect(analyze(designSystem, repository).map((refusal) => refusal.file)).toEqual([])
+  })
+
+  test('the preset is the file the numbers are allowed to be in', () => {
+    const source = "export const spring = { type: 'spring', stiffness: 170, damping: 26 }\n"
+    expect(hardcodedOf(MOTION_PRESET, source)).toEqual([])
+  })
+
+  test.each([
+    ['a spring of its own', 'transition={{ stiffness: 200, damping: 10 }}', 'stiffness'],
+    ['a damping of its own', 'transition={{ type: "spring", damping: 12 }}', 'damping'],
+    ['a duration of its own', 'transition={{ duration: 0.4 }}', 'duration'],
+    ['a delay of its own', 'transition={{ delay: 0.12 }}', 'delay'],
+  ])(
+    'a component that writes %s is refused, naming the file and the value',
+    (_case, source, property) => {
+      const file = 'packages/ui/src/components/button/button.tsx'
+      const refusals = hardcodedOf(file, source)
+      expect(refusals.map((refusal) => refusal.property)).toContain(property)
+      expect(refusals[0]!.file).toBe(file)
+      expect(refusals[0]!.problem).toContain(MOTION_PRESET)
+    },
+  )
+
+  test('a duration written in a stylesheet of the design system is refused', () => {
+    const refusals = hardcodedOf(
+      'packages/ui/src/components/menu/menu.css',
+      '.a { transition: opacity 120ms; }',
+    )
+    expect(refusals.map((refusal) => refusal.property)).toContain('120ms')
+    expect(refusals[0]!.problem).toContain(MOTION_THEME)
+  })
+
+  test('the theme is the file the durations are allowed to be in', () => {
+    expect(hardcodedOf(MOTION_THEME, '@theme { --duration-base: 260ms; }')).toEqual([])
+  })
+})
+
+describe('Propriétés autorisées seules dans le design system', () => {
+  test('the design system of this lot animates composited properties only', () => {
+    expect(analyze(designSystem, repository)).toEqual([])
+  })
+
+  test.each([
+    ['a width', '<motion.div animate={{ width: 320 }} />', 'width'],
+    [
+      'a colour',
+      '<motion.div animate={{ backgroundColor: "var(--primary)" }} />',
+      'backgroundColor',
+    ],
+  ])(
+    '%s asked of motion by a component is refused, naming the component and the property',
+    (_case, source, property) => {
+      const file = 'packages/ui/src/components/badge/badge.tsx'
+      const refusals = refusalsOf(file, source)
+      expect(refusals.map((refusal) => refusal.property)).toContain(property)
+      expect(refusals[0]!.file).toBe(file)
+    },
+  )
 })
