@@ -92,6 +92,14 @@ describe('Densité relevée', () => {
     expect(button).not.toMatch(/\bh-\d/)
   })
 
+  test('the shell takes the window, and not a share of whatever holds it', () => {
+    // A percentage is a share of a parent, and a parent nobody gave a height is nothing at all:
+    // the stories hid this for a whole lot, because their decorator handed the shell a screen.
+    const root = /@utility shell-root \{([\s\S]*?)^\}/m.exec(theme)![1]!
+    expect(root).toContain('100dvh')
+    expect(root).not.toContain('100%')
+  })
+
   test('the shell is drawn at the theme size, with nothing of the scale written in it', () => {
     const shell = ['shell.tsx', 'chrome-bar.tsx', 'sidebar.tsx', 'gutter.tsx'].map((file) =>
       readFileSync(join(import.meta.dirname, '..', 'src', 'shell', file), 'utf8'),
