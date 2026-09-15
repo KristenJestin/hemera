@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "dev": "bun --hot src/entry/main.tsx",
+    "dev": "cd ../.. && bun --hot apps/desktop/src/entry/main.tsx",
     "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide",
     "test": "bun test ./tests",
     "test:system": "bun test ./system-tests"

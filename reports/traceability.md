@@ -14,7 +14,7 @@
 | Message hors convention | `tools/git-flow.test.ts` |
 | Lint et format en vérification | `tools/toolchain.test.ts` |
 | Installation du produit | `tools/toolchain.test.ts` |
-| Commandes de développement communes | `tools/turbo-graph.test.ts` |
+| Commandes de développement communes | `tools/turbo-graph.test.ts`, `tools/turbo-graph.test.ts` |
 | Historique du renderer | `tools/gpuix/fork.test.ts` |
 | Tâche à effets sans cache | `tools/turbo-graph.test.ts` |
 | Consommateur indépendant du desktop | `tools/boundaries.test.ts` |

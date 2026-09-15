@@ -113,6 +113,29 @@ describe('Tâche à effets sans cache', () => {
   })
 })
 
+describe('Commandes de développement communes', () => {
+  test('the environment a start needs reaches the task', () => {
+    // Turbo hands a task a filtered environment. Without these, `bun run dev` cannot place
+    // its profile — `LOCALAPPDATA` is simply absent — and fails on a machine where it is
+    // plainly set, with a message that accuses the machine.
+    const definition = JSON.parse(readFileSync(join(repository, 'turbo.json'), 'utf8')) as {
+      globalPassThroughEnv?: string[]
+    }
+    const passed = new Set(definition.globalPassThroughEnv ?? [])
+    for (const variable of [
+      'LOCALAPPDATA',
+      'XDG_DATA_HOME',
+      'HOME',
+      'DISPLAY',
+      'WAYLAND_DISPLAY',
+      'HEMERA_CHANNEL',
+      'HEMERA_PROFILE_DIR',
+    ]) {
+      expect(passed.has(variable)).toBe(true)
+    }
+  })
+})
+
 describe('Squelettes non demandés', () => {
   test('the monorepo holds no server or mobile application', () => {
     expect(readdirSync(join(repository, 'apps'))).toEqual(['desktop'])

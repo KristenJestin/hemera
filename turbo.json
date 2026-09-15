@@ -1,6 +1,17 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "stream",
+  "globalPassThroughEnv": [
+    "LOCALAPPDATA",
+    "XDG_DATA_HOME",
+    "XDG_SESSION_TYPE",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "HOME",
+    "HEMERA_CHANNEL",
+    "HEMERA_PROFILE_DIR",
+    "HEMERA_SPECS_DIR"
+  ],
   "tasks": {
     "typecheck": {
       "dependsOn": ["^typecheck"],
