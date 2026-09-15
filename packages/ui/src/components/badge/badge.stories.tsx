@@ -7,6 +7,9 @@ import { Badge } from './badge.tsx'
 const meta = {
   title: 'Components/Badge',
   component: Badge,
+  // A badge with nothing in it is not a badge; the stories that render their own tree
+  // replace this, and the ones that do not have something to say.
+  args: { children: 'Badge' },
 } satisfies Meta<typeof Badge>
 
 export default meta
