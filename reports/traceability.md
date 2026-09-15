@@ -96,7 +96,7 @@
 | Dossier de composant incomplet | `tools/components.test.ts` |
 | Style écrit dans le hook | `tools/components.test.ts` |
 | Composant sans démonstration | `apps/desktop/system-tests/showcase-registry.test.ts`, `tools/components.test.ts` |
-| Démonstration inaccessible en production | `apps/desktop/tests/showcase.test.ts` |
+| Démonstration inaccessible en production | `apps/desktop/system-tests/sessions.test.tsx`, `apps/desktop/tests/showcase.test.ts` |
 | Comparaison des deux thèmes | `apps/desktop/system-tests/showcase.test.tsx` |
 | Focus restauré après fermeture d'un overlay | `packages/ui/src/components/modal/modal.test.tsx` |
 | Traversée manuelle du clavier | `packages/ui/tests/lib.test.ts` |

@@ -3,12 +3,12 @@ import { describe, expect, test } from 'bun:test'
 import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
 import { useState } from 'react'
 
-import { SIDEBAR_BOUNDS, WindowShell } from '../src/shell/window-shell.tsx'
-import { decideTitleBar, decorationsOf } from '../src/shell/title-bar.ts'
-import { Tab } from '../src/components/tab/tab.tsx'
-import { NavItem } from '../src/components/nav-item/nav-item.tsx'
-import { Text } from '../src/primitives/text.tsx'
-import { shell } from '../src/tokens/components.ts'
+import { SIDEBAR_BOUNDS, WindowShell } from '#shell/window-shell.tsx'
+import { decideTitleBar, decorationsOf } from '#shell/title-bar.ts'
+import { Tab } from '#components/tab/tab.tsx'
+import { NavItem } from '#components/nav-item/nav-item.tsx'
+import { Text } from '#primitives/text.tsx'
+import { shell } from '#tokens/components.ts'
 import { mountedCatalogue, nodeOf } from '../test-harness.tsx'
 
 function Shell({ width = shell.sidebar.width }: { width?: number }) {

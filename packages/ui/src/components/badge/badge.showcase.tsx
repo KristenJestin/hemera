@@ -1,7 +1,7 @@
-import { Stack } from '../../primitives/stack.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { Badge } from './badge.tsx'
 import type { BadgeMission, BadgeStatus } from './use-badge.ts'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 const STATUSES: BadgeStatus[] = ['ok', 'warn', 'bad', 'info']
 const MISSIONS: BadgeMission[] = ['define', 'build', 'free']

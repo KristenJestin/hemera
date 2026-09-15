@@ -1,7 +1,7 @@
-import { Stack } from '../../primitives/stack.tsx'
-import { Badge } from '../badge/badge.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Badge } from '#components/badge/badge.tsx'
 import { ListItem } from './list-item.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 export const listItemShowcase: ShowcaseEntry = {
   component: 'ListItem',

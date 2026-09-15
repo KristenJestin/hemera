@@ -31,8 +31,8 @@ import {
   renameSession,
   setSessionArchived,
   writeConfiguration,
-} from '../src/index.ts'
-import type { OpenProfile, StoreContext } from '../src/index.ts'
+} from '#index.ts'
+import type { OpenProfile, StoreContext } from '#index.ts'
 
 const NOW = 1_789_000_000_000
 

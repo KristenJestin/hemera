@@ -9,7 +9,7 @@ import {
   lockPathOf,
   openProfile,
   processExists,
-} from '../src/index.ts'
+} from '#index.ts'
 
 const NOW = 1_789_000_000_000
 

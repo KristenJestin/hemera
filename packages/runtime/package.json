@@ -2,6 +2,9 @@
   "name": "@hemera/runtime",
   "private": true,
   "type": "module",
+  "imports": {
+    "#*": "./src/*"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

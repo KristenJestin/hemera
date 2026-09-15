@@ -5,17 +5,17 @@
  * renderer stops painting hover and active without React.
  */
 
-import { Pressable } from '../../primitives/pressable.tsx'
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { Icon } from '../../primitives/icon.tsx'
-import type { IconName } from '../../icons/catalog.ts'
-import { mergeStyle, variants } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import { control, state } from '../../tokens/components.ts'
-import { radius, space } from '../../tokens/primitives.ts'
-import type { Theme, ThemeColors } from '../../tokens/semantic.ts'
-import { useTheme } from '../../theme/provider.tsx'
+import { Pressable } from '#primitives/pressable.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { Icon } from '#primitives/icon.tsx'
+import type { IconName } from '#icons/catalog.ts'
+import { mergeStyle, variants } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { control, state } from '#tokens/components.ts'
+import { radius, space } from '#tokens/primitives.ts'
+import type { Theme, ThemeColors } from '#tokens/semantic.ts'
+import { useTheme } from '#theme/provider.tsx'
 import { useButton } from './use-button.ts'
 
 export type ButtonTone = 'primary' | 'secondary' | 'ghost' | 'danger'

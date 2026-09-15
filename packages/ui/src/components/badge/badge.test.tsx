@@ -4,7 +4,7 @@ import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 
 import { Badge } from './badge.tsx'
 import { DEFAULT_COUNT_CAP, useBadge } from './use-badge.ts'
-import { dark } from '../../theme/dark.ts'
+import { dark } from '#theme/dark.ts'
 import { mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
 describe.skipIf(!TEST_RENDERER_PAINTS)('Badge — comportement au clavier', () => {

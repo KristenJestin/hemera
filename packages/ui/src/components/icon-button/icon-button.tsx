@@ -1,14 +1,14 @@
 /** A square control carrying only an icon. */
 
-import { mergeStyle, variants } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import type { IconName } from '../../icons/catalog.ts'
-import { Icon } from '../../primitives/icon.tsx'
-import { Pressable } from '../../primitives/pressable.tsx'
-import { control, state } from '../../tokens/components.ts'
-import { radius } from '../../tokens/primitives.ts'
-import type { Theme } from '../../tokens/semantic.ts'
-import { useTheme } from '../../theme/provider.tsx'
+import { mergeStyle, variants } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import type { IconName } from '#icons/catalog.ts'
+import { Icon } from '#primitives/icon.tsx'
+import { Pressable } from '#primitives/pressable.tsx'
+import { control, state } from '#tokens/components.ts'
+import { radius } from '#tokens/primitives.ts'
+import type { Theme } from '#tokens/semantic.ts'
+import { useTheme } from '#theme/provider.tsx'
 import { useIconButton } from './use-icon-button.ts'
 
 export type IconButtonTone = 'ghost' | 'secondary'

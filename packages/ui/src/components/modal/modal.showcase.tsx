@@ -1,10 +1,10 @@
 import { useState } from 'react'
 
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { Button } from '../button/button.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { Button } from '#components/button/button.tsx'
 import { Modal } from './modal.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 function Decision() {
   const [open, setOpen] = useState(false)

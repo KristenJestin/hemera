@@ -6,13 +6,13 @@
  * from a role, defaulting to the surrounding text role rather than left unset.
  */
 
-import { mergeStyle, withoutUndefined } from '../lib/style.ts'
-import type { Style } from '../lib/style.ts'
-import { ICONS } from '../icons/catalog.ts'
-import type { IconName } from '../icons/catalog.ts'
-import { iconSize } from '../tokens/primitives.ts'
-import type { ThemeColors } from '../tokens/semantic.ts'
-import { useTheme } from '../theme/provider.tsx'
+import { mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { ICONS } from '#icons/catalog.ts'
+import type { IconName } from '#icons/catalog.ts'
+import { iconSize } from '#tokens/primitives.ts'
+import type { ThemeColors } from '#tokens/semantic.ts'
+import { useTheme } from '#theme/provider.tsx'
 
 export type IconSize = keyof typeof iconSize
 

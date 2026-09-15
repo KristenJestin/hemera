@@ -9,7 +9,7 @@ import {
   profileFolderOf,
   resolveChannel,
   resolveProfileLocation,
-} from '../src/index.ts'
+} from '#index.ts'
 
 const HOME = '/home/kris'
 

@@ -1,6 +1,6 @@
-import { Stack } from '../../primitives/stack.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { Kbd } from './kbd.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 export const kbdShowcase: ShowcaseEntry = {
   component: 'Kbd',

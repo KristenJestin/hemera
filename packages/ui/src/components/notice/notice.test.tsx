@@ -4,7 +4,7 @@ import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 
 import { Notice } from './notice.tsx'
 import { useNotice } from './use-notice.ts'
-import { dark } from '../../theme/dark.ts'
+import { dark } from '#theme/dark.ts'
 import { mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
 describe.skipIf(!TEST_RENDERER_PAINTS)('Notice — comportement au clavier', () => {

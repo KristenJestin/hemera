@@ -1,11 +1,11 @@
 /** A keyboard hint: one key, or a combination written with `+`. */
 
-import { mergeStyle, withoutUndefined } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { radius, space } from '../../tokens/primitives.ts'
-import { useTheme } from '../../theme/provider.tsx'
+import { mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { radius, space } from '#tokens/primitives.ts'
+import { useTheme } from '#theme/provider.tsx'
 import { useKbd } from './use-kbd.ts'
 
 export interface KbdProps {

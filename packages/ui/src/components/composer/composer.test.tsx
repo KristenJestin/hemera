@@ -5,7 +5,7 @@ import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 import { Composer } from './composer.tsx'
 import { useComposer } from './use-composer.ts'
 import type { ComposerBehaviour, UseComposerOptions } from './use-composer.ts'
-import { dark } from '../../theme/dark.ts'
+import { dark } from '#theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
 function noop() {}

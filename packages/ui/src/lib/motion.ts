@@ -6,7 +6,7 @@
  * transform and no exit animation: an element stops painting the frame it is removed.
  */
 
-import { duration } from '../tokens/primitives.ts'
+import { duration } from '#tokens/primitives.ts'
 
 export type MotionSpeed = keyof typeof duration
 

@@ -6,8 +6,8 @@
 import type { EventPayload } from '@gpuix/react'
 import type { ReactNode } from 'react'
 
-import { withoutUndefined } from '../lib/style.ts'
-import type { Style } from '../lib/style.ts'
+import { withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
 
 export interface BoxProps {
   style?: Style

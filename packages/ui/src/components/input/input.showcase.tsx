@@ -1,8 +1,8 @@
 import { useState } from 'react'
 
-import { Stack } from '../../primitives/stack.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { Input } from './input.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 function Fields() {
   const [value, setValue] = useState('')

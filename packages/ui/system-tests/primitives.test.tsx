@@ -18,7 +18,7 @@ import {
   Text,
   ThemeProvider,
   dark,
-} from '../src/index.ts'
+} from '#index.ts'
 
 interface TreeNode {
   id: number

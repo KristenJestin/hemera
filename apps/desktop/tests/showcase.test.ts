@@ -3,8 +3,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { CHANNEL_OVERRIDE_VARIABLE, resolveChannel } from '@hemera/runtime'
-import { canReach, routeOrDefault, routesOf } from '../src/ui/navigation.ts'
-import { windowTitleOf } from '../src/entry/window-title.ts'
+import { canReach, routeFromArguments, routeOrDefault, routesOf } from '#ui/navigation.ts'
+import { windowTitleOf } from '#entry/window-title.ts'
 
 const desktop = resolve(import.meta.dir, '..')
 
@@ -19,6 +19,16 @@ describe('Démonstration inaccessible en production', () => {
     expect(routesOf('dev')).toContain('showcase')
     expect(canReach('showcase', 'dev')).toBe(true)
     expect(routeOrDefault('showcase', 'dev')).toBe('showcase')
+  })
+
+  test('the route asked for on the command line is honoured only where it exists', () => {
+    expect(routeFromArguments(['bun', 'main.tsx', '--route', 'showcase'], 'dev')).toBe('showcase')
+    expect(routeFromArguments(['bun', 'main.tsx', '--route=showcase'], 'dev')).toBe('showcase')
+    // A prod package falls back whatever was typed: the page is not in it to reach.
+    expect(routeFromArguments(['bun', 'main.tsx', '--route=showcase'], 'prod')).toBe('sessions')
+    expect(routeFromArguments(['bun', 'main.tsx'], 'dev')).toBe('sessions')
+    expect(routeFromArguments(['bun', 'main.tsx', '--route'], 'dev')).toBe('sessions')
+    expect(routeFromArguments(['bun', 'main.tsx', '--route=nowhere'], 'dev')).toBe('sessions')
   })
 
   test('no navigation entry or shortcut names the page outside its own folder', () => {

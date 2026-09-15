@@ -8,7 +8,7 @@ import {
   isRank,
   rankBetween,
   ranksFor,
-} from '../src/index.ts'
+} from '#index.ts'
 
 /** A deterministic pseudo-random source, so a failing run is reproducible. */
 function sequence(seed: number): () => number {

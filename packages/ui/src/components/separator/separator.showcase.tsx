@@ -1,8 +1,8 @@
-import { Box } from '../../primitives/box.tsx'
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
+import { Box } from '#primitives/box.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
 import { Separator } from './separator.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 export const separatorShowcase: ShowcaseEntry = {
   component: 'Separator',

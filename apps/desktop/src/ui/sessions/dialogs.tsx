@@ -12,7 +12,7 @@ import type { ThemeName } from '@hemera/ui'
 import type { ProjectConfiguration } from '@hemera/runtime'
 import { useState } from 'react'
 
-import { t } from '../../i18n/index.ts'
+import { t } from '#i18n/index.ts'
 
 /** Keeps the locations that name something, an empty list meaning the workspace root. */
 export function locationsOf(lines: string[]): string[] {

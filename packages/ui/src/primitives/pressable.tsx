@@ -13,11 +13,11 @@ import type { EventPayload, PublicInstance } from '@gpuix/react'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 
-import { useFocusable, useFocusedElement } from '../lib/interaction.ts'
-import { isActivationKey } from '../lib/keyboard.ts'
-import { focusRing, freezeStyle, mergeStyle, withoutUndefined } from '../lib/style.ts'
-import type { Style } from '../lib/style.ts'
-import { useTheme } from '../theme/provider.tsx'
+import { useFocusable, useFocusedElement } from '#lib/interaction.ts'
+import { isActivationKey } from '#lib/keyboard.ts'
+import { focusRing, freezeStyle, mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { useTheme } from '#theme/provider.tsx'
 
 export interface PressableProps {
   onPress: () => void

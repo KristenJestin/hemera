@@ -1,13 +1,13 @@
 /** What a panel shows when it holds nothing yet. */
 
-import { mergeStyle } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import type { IconName } from '../../icons/catalog.ts'
-import { Icon } from '../../primitives/icon.tsx'
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { space } from '../../tokens/primitives.ts'
-import { Button } from '../button/button.tsx'
+import { mergeStyle } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import type { IconName } from '#icons/catalog.ts'
+import { Icon } from '#primitives/icon.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { space } from '#tokens/primitives.ts'
+import { Button } from '#components/button/button.tsx'
 import { useEmptyState } from './use-empty-state.ts'
 
 export interface EmptyStateProps {

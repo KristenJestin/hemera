@@ -5,7 +5,7 @@ import { TEST_RENDERER_PAINTS } from '../test-setup.ts'
 import { createTestRoot } from '@gpuix/react/testing'
 import { dark, light } from '@hemera/ui'
 
-import { ShowcasePage } from '../src/ui/showcase/showcase-page.tsx'
+import { ShowcasePage } from '#ui/showcase/showcase-page.tsx'
 
 interface TreeNode {
   id: number

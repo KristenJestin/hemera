@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { missingKeyMarker, t } from '../src/i18n/index.ts'
+import { missingKeyMarker, t } from '#i18n/index.ts'
 
 const desktop = resolve(import.meta.dir, '..')
 

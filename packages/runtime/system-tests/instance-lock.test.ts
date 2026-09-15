@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { currentLockOwner, lockPathOf } from '../src/index.ts'
+import { currentLockOwner, lockPathOf } from '#index.ts'
 
 const runtime = resolve(import.meta.dir, '..')
 

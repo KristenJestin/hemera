@@ -1,8 +1,8 @@
 import { useState } from 'react'
 
-import { Stack } from '../../primitives/stack.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { Select } from './select.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 const OPTIONS = [
   { value: 'light', label: 'Light' },

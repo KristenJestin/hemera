@@ -25,3 +25,18 @@ export function canReach(route: Route, channel: Channel): boolean {
 export function routeOrDefault(route: Route, channel: Channel): Route {
   return canReach(route, channel) ? route : 'sessions'
 }
+
+/**
+ * The route asked for on the command line, or the default.
+ *
+ * `--route showcase` and `--route=showcase` both read; anything else is the default, and a
+ * package that does not expose the route falls back to it whatever was typed.
+ */
+export function routeFromArguments(argv: readonly string[], channel: Channel): Route {
+  const inline = argv.find((argument) => argument.startsWith('--route='))?.slice('--route='.length)
+  const flag = argv[argv.indexOf('--route') + 1]
+  const asked = inline ?? (argv.includes('--route') ? flag : undefined)
+  return asked === 'showcase' || asked === 'sessions'
+    ? routeOrDefault(asked, channel)
+    : routeOrDefault('sessions', channel)
+}

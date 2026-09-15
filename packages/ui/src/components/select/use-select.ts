@@ -8,8 +8,8 @@
 import type { EventPayload } from '@gpuix/react'
 import { useCallback, useState } from 'react'
 
-import { useFocusReturn } from '../../lib/interaction.ts'
-import { isDismissKey } from '../../lib/keyboard.ts'
+import { useFocusReturn } from '#lib/interaction.ts'
+import { isDismissKey } from '#lib/keyboard.ts'
 
 export interface SelectOption<Value extends string> {
   value: Value

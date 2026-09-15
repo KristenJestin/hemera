@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { listSessions, openProfile, readMessages } from '../src/index.ts'
+import { listSessions, openProfile, readMessages } from '#index.ts'
 
 const runtime = resolve(import.meta.dir, '..')
 const surface = join(runtime, 'src', 'index.ts').replaceAll('\\', '/')
@@ -100,7 +100,7 @@ describe('Deux Sessions retrouvées', () => {
         ids: { next: () => `id-${(count += 1)}` },
         now: Date.now(),
       }
-      const { createSession, recordMessage } = await import('../src/index.ts')
+      const { createSession, recordMessage } = await import('#index.ts')
       const other = createSession(context, written.projectId)
       recordMessage(context, other.id, 'a second thread')
       second.database.close(true)
@@ -133,7 +133,7 @@ describe('Arrêt non propre', () => {
       writer.kill()
       await writer.exited
 
-      const { lastSequence, readJournal } = await import('../src/index.ts')
+      const { lastSequence, readJournal } = await import('#index.ts')
       const reopened = openProfile({ directory, now: Date.now() })
       try {
         const page = readJournal(reopened.database, { sessionId: written.sessionId })

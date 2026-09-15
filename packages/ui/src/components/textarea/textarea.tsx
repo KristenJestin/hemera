@@ -3,12 +3,12 @@
 import { useState } from 'react'
 import type { PublicInstance } from '@gpuix/react'
 
-import { useFocusedElement } from '../../lib/interaction.ts'
-import { focusRing, mergeStyle, withoutUndefined } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import { control, state } from '../../tokens/components.ts'
-import { fontFamily, fontSize, lineHeight, radius, space } from '../../tokens/primitives.ts'
-import { useTheme } from '../../theme/provider.tsx'
+import { useFocusedElement } from '#lib/interaction.ts'
+import { focusRing, mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { control, state } from '#tokens/components.ts'
+import { fontFamily, fontSize, lineHeight, radius, space } from '#tokens/primitives.ts'
+import { useTheme } from '#theme/provider.tsx'
 import { useTextarea } from './use-textarea.ts'
 
 export interface TextareaProps {

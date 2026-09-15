@@ -9,8 +9,8 @@
 import { createContext, useContext } from 'react'
 import type { ReactNode } from 'react'
 
-import { mergeStyle, withoutUndefined } from '../lib/style.ts'
-import type { Style } from '../lib/style.ts'
+import { mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
 
 export interface ScrollProps {
   axis?: 'vertical' | 'horizontal'

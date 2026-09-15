@@ -5,7 +5,7 @@ import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 import { Textarea } from './textarea.tsx'
 import { DEFAULT_MAX_ROWS, DEFAULT_MIN_ROWS, useTextarea } from './use-textarea.ts'
 import type { TextareaBehaviour, UseTextareaOptions } from './use-textarea.ts'
-import { dark } from '../../theme/dark.ts'
+import { dark } from '#theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
 function noop() {}

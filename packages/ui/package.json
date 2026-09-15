@@ -2,6 +2,9 @@
   "name": "@hemera/ui",
   "private": true,
   "type": "module",
+  "imports": {
+    "#*": "./src/*"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./showcase": "./src/components/showcase.ts",

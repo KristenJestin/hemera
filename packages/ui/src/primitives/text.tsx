@@ -7,11 +7,11 @@
 
 import { createContext, useContext } from 'react'
 
-import { mergeStyle, withoutUndefined } from '../lib/style.ts'
-import type { Style } from '../lib/style.ts'
-import { fontFamily, fontSize, fontWeight, lineHeight } from '../tokens/primitives.ts'
-import type { ThemeColors } from '../tokens/semantic.ts'
-import { useTheme } from '../theme/provider.tsx'
+import { mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { fontFamily, fontSize, fontWeight, lineHeight } from '#tokens/primitives.ts'
+import type { ThemeColors } from '#tokens/semantic.ts'
+import { useTheme } from '#theme/provider.tsx'
 
 export type TextScale = keyof typeof fontSize
 export type TextWeight = keyof typeof fontWeight

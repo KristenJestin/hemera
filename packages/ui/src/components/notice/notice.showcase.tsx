@@ -1,7 +1,7 @@
-import { Stack } from '../../primitives/stack.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { Notice } from './notice.tsx'
 import type { NoticeTone } from './use-notice.ts'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 const TONES: NoticeTone[] = ['info', 'warn', 'error', 'success']
 

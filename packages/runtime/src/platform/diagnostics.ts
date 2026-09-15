@@ -33,7 +33,7 @@ export interface DiagnosticLogOptions {
   /** Days of logs kept; older files are removed when the log opens. */
   retentionDays?: number
   /** Where the copy goes; the console by default. */
-  print?: (level: DiagnosticLevel, line: string) => void
+  print?: (level: DiagnosticLevel, message: string) => void
 }
 
 /** Days of history kept: enough to read back a start that failed last week. */
@@ -82,10 +82,11 @@ export function openDiagnosticLog({
   const path = join(folder, logFileNameOf(opened))
 
   const write = (level: DiagnosticLevel, message: string): void => {
-    const line = diagnosticLine(new Date(now()), level, message)
-    print(level, line)
+    // The console gets the message as it was written; the instant and the level are what a
+    // file read a week later needs, and what a terminal reading it live does not.
+    print(level, message)
     try {
-      appendFileSync(path, `${line}\n`, 'utf8')
+      appendFileSync(path, `${diagnosticLine(new Date(now()), level, message)}\n`, 'utf8')
     } catch (failure) {
       // A profile that cannot be written to is a problem of its own, and it is not this
       // line's to report: losing the console copy too would leave nothing at all.

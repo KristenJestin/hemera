@@ -14,9 +14,9 @@
 
 import { openDiagnosticLog } from '@hemera/runtime'
 
-import { missingLibraryDiagnostic } from '../platform/native-dependencies.ts'
-import { packagingOf } from '../platform/packaging.ts'
-import { profileDirectoryOf } from '../platform/workspace.ts'
+import { missingLibraryDiagnostic } from '#platform/native-dependencies.ts'
+import { packagingOf } from '#platform/packaging.ts'
+import { profileDirectoryOf } from '#platform/workspace.ts'
 
 try {
   await import('./app.tsx')

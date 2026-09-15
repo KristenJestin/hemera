@@ -1,6 +1,6 @@
-import { Stack } from '../../primitives/stack.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { Tab } from './tab.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 export const tabShowcase: ShowcaseEntry = {
   component: 'Tab',

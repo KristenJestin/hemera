@@ -5,6 +5,8 @@
 export const en = {
   'app.name': 'Hemera',
   'showcase.title': 'Design system',
+  'showcase.open': 'Design system',
+  'showcase.close': 'Back to the sessions',
   'showcase.theme': 'Theme',
   'showcase.theme.light': 'Switch to light',
   'showcase.theme.dark': 'Switch to dark',

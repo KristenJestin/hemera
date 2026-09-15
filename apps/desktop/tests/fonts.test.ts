@@ -12,7 +12,7 @@ import {
   fontsFromDirectory,
   missingFontDiagnostic,
   registerEmbeddedFonts,
-} from '../src/platform/fonts.ts'
+} from '#platform/fonts.ts'
 
 function fontsCopy(): string {
   const directory = mkdtempSync(join(tmpdir(), 'hemera-fonts-'))

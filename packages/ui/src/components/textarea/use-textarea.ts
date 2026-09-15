@@ -9,7 +9,7 @@
 import type { EventPayload } from '@gpuix/react'
 import { useCallback } from 'react'
 
-import { valueOf } from '../input/use-input.ts'
+import { valueOf } from '#components/input/use-input.ts'
 
 export interface UseTextareaOptions {
   value: string

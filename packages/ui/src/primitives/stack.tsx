@@ -7,9 +7,9 @@
 
 import type { ReactNode } from 'react'
 
-import { mergeStyle, withoutUndefined } from '../lib/style.ts'
-import type { Style } from '../lib/style.ts'
-import { space } from '../tokens/primitives.ts'
+import { mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { space } from '#tokens/primitives.ts'
 
 export type StackGap = keyof typeof space
 

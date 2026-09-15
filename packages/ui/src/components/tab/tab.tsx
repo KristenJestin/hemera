@@ -1,16 +1,16 @@
 /** A project tab: a colour dot, a label and, when there is one, a counter. */
 
-import { mergeStyle } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import { Box } from '../../primitives/box.tsx'
-import { Pressable } from '../../primitives/pressable.tsx'
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { control, dot, state } from '../../tokens/components.ts'
-import { radius } from '../../tokens/primitives.ts'
-import type { ThemeColors } from '../../tokens/semantic.ts'
-import { useTheme } from '../../theme/provider.tsx'
-import { Badge } from '../badge/badge.tsx'
+import { mergeStyle } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { Box } from '#primitives/box.tsx'
+import { Pressable } from '#primitives/pressable.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { control, dot, state } from '#tokens/components.ts'
+import { radius } from '#tokens/primitives.ts'
+import type { ThemeColors } from '#tokens/semantic.ts'
+import { useTheme } from '#theme/provider.tsx'
+import { Badge } from '#components/badge/badge.tsx'
 import { useTab } from './use-tab.ts'
 
 export interface TabProps {

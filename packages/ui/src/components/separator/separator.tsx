@@ -1,10 +1,10 @@
 /** A one pixel rule between two groups. */
 
-import { mergeStyle } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import { Box } from '../../primitives/box.tsx'
-import { rule as ruleToken } from '../../tokens/components.ts'
-import { useTheme } from '../../theme/provider.tsx'
+import { mergeStyle } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { Box } from '#primitives/box.tsx'
+import { rule as ruleToken } from '#tokens/components.ts'
+import { useTheme } from '#theme/provider.tsx'
 import { useSeparator } from './use-separator.ts'
 
 export interface SeparatorProps {

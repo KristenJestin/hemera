@@ -12,8 +12,8 @@ import {
   openProfile,
   readJournal,
   recordChange,
-} from '../src/index.ts'
-import type { JournalEvent, OpenProfile } from '../src/index.ts'
+} from '#index.ts'
+import type { JournalEvent, OpenProfile } from '#index.ts'
 
 const NOW = 1_789_000_000_000
 

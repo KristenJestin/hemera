@@ -8,12 +8,12 @@ import {
   isActivationKey,
   isDismissKey,
   traversalIntentOf,
-} from '../src/lib/keyboard.ts'
-import { canAnimate, transition } from '../src/lib/motion.ts'
-import { focusRing, freezeStyle, mergeStyle, variants, withoutUndefined } from '../src/lib/style.ts'
-import { dark } from '../src/theme/dark.ts'
-import { light } from '../src/theme/light.ts'
-import { DEFAULT_THEME, themeOf } from '../src/theme/provider.tsx'
+} from '#lib/keyboard.ts'
+import { canAnimate, transition } from '#lib/motion.ts'
+import { focusRing, freezeStyle, mergeStyle, variants, withoutUndefined } from '#lib/style.ts'
+import { dark } from '#theme/dark.ts'
+import { light } from '#theme/light.ts'
+import { DEFAULT_THEME, themeOf } from '#theme/provider.tsx'
 
 function keyEvent(key: string, modifiers?: { shift?: boolean }): EventPayload {
   return { key, modifiers } as EventPayload

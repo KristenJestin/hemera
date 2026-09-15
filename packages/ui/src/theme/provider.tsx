@@ -9,7 +9,7 @@
 import { createContext, useContext, useMemo } from 'react'
 import type { ReactNode } from 'react'
 
-import type { Theme, ThemeName } from '../tokens/semantic.ts'
+import type { Theme, ThemeName } from '#tokens/semantic.ts'
 import { dark } from './dark.ts'
 import { light } from './light.ts'
 

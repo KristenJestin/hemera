@@ -4,9 +4,9 @@ import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 import { useState } from 'react'
 
 import { Modal } from './modal.tsx'
-import { Button } from '../button/button.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { Stack } from '../../primitives/stack.tsx'
+import { Button } from '#components/button/button.tsx'
+import { Text } from '#primitives/text.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { focus, mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
 /** A trigger, the decision it opens, and content that must stay painted behind it. */

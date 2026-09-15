@@ -11,11 +11,11 @@
 
 import type { EventPayload } from '@gpuix/react'
 
-import { useFocusable, useFocusedElement } from '../../lib/interaction.ts'
-import { focusRing, mergeStyle, withoutUndefined } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import { shell } from '../../tokens/components.ts'
-import { useTheme } from '../../theme/provider.tsx'
+import { useFocusable, useFocusedElement } from '#lib/interaction.ts'
+import { focusRing, mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { shell } from '#tokens/components.ts'
+import { useTheme } from '#theme/provider.tsx'
 import { useGutter } from './use-gutter.ts'
 import { useState } from 'react'
 import type { PublicInstance } from '@gpuix/react'

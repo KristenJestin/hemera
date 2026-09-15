@@ -21,7 +21,7 @@ import { SHOWCASE } from '@hemera/ui/showcase'
 import type { ThemeName } from '@hemera/ui'
 import { useState } from 'react'
 
-import { t } from '../../i18n/index.ts'
+import { t } from '#i18n/index.ts'
 
 function ThemeSwitch() {
   const control = useThemeControl()
@@ -39,7 +39,7 @@ function ThemeSwitch() {
   )
 }
 
-function Catalogue() {
+function Catalogue({ onClose }: { onClose?: (() => void) | undefined }) {
   const theme = useTheme()
   return (
     <Scroll style={{ backgroundColor: theme.colors.bg, height: '100%' }}>
@@ -48,7 +48,18 @@ function Catalogue() {
           <Text color="text" scale="display" weight="semibold">
             {t('showcase.title')}
           </Text>
-          <ThemeSwitch />
+          <Stack gap="md" align="center">
+            <ThemeSwitch />
+            {onClose === undefined ? null : (
+              <Button
+                testId="showcase-close"
+                label={t('showcase.close')}
+                size="sm"
+                iconName="chevron-left"
+                onPress={onClose}
+              />
+            )}
+          </Stack>
         </Stack>
 
         {SHOWCASE.map((entry) => (
@@ -75,13 +86,15 @@ function Catalogue() {
 export interface ShowcasePageProps {
   /** Theme the page starts on; switching it never leaves the page. */
   initialTheme?: ThemeName
+  /** Back to the sessions. Absent when the page is opened on its own. */
+  onClose?: () => void
 }
 
-export function ShowcasePage({ initialTheme = 'dark' }: ShowcasePageProps) {
+export function ShowcasePage({ initialTheme = 'dark', onClose }: ShowcasePageProps) {
   const [theme, setTheme] = useState<ThemeName>(initialTheme)
   return (
     <ThemeProvider name={theme} onThemeChange={setTheme}>
-      <Catalogue />
+      <Catalogue onClose={onClose} />
     </ThemeProvider>
   )
 }

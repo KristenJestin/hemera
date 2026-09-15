@@ -9,7 +9,7 @@ import {
   expiredLogs,
   logFileNameOf,
   openDiagnosticLog,
-} from '../src/platform/diagnostics.ts'
+} from '#platform/diagnostics.ts'
 
 const AT = new Date('2026-09-15T08:30:00.000Z')
 

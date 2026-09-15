@@ -8,9 +8,9 @@
 
 import type { ReactNode } from 'react'
 
-import { mergeStyle, withoutUndefined } from '../lib/style.ts'
-import type { Style } from '../lib/style.ts'
-import { space } from '../tokens/primitives.ts'
+import { mergeStyle, withoutUndefined } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { space } from '#tokens/primitives.ts'
 
 export interface AnchoredProps {
   side?: 'top' | 'right' | 'bottom' | 'left'

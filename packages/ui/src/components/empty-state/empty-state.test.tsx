@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 
 import { EmptyState } from './empty-state.tsx'
-import { dark } from '../../theme/dark.ts'
+import { dark } from '#theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
 describe.skipIf(!TEST_RENDERER_PAINTS)('EmptyState — comportement au clavier', () => {

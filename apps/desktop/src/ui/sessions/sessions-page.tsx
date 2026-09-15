@@ -25,7 +25,7 @@ import {
 import type { ThemeColors, WindowCommands } from '@hemera/ui'
 import { useState } from 'react'
 
-import { t } from '../../i18n/index.ts'
+import { t } from '#i18n/index.ts'
 import { NewProjectDialog, RenameSessionDialog, SettingsDialog } from './dialogs.tsx'
 import type { SessionsModel } from './use-sessions.ts'
 
@@ -40,9 +40,16 @@ export interface SessionsPageProps {
   /** The renderer's window commands, when the window was opened without its native frame. */
   windowCommands?: WindowCommands
   framelessWindow?: boolean
+  /** Opens the design system demonstration. Absent from a package that does not expose it. */
+  onOpenShowcase?: () => void
 }
 
-export function SessionsPage({ model, windowCommands, framelessWindow }: SessionsPageProps) {
+export function SessionsPage({
+  model,
+  windowCommands,
+  framelessWindow,
+  onOpenShowcase,
+}: SessionsPageProps) {
   const [draft, setDraft] = useState('')
   const [overlay, setOverlay] = useState<Overlay>('none')
 
@@ -79,6 +86,15 @@ export function SessionsPage({ model, windowCommands, framelessWindow }: Session
           label={t('settings')}
           size="sm"
           onPress={() => setOverlay('settings')}
+        />
+      )}
+      {onOpenShowcase === undefined ? null : (
+        <IconButton
+          testId="open-showcase"
+          name="search"
+          label={t('showcase.open')}
+          size="sm"
+          onPress={onOpenShowcase}
         />
       )}
     </>

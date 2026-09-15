@@ -1,16 +1,16 @@
 /** One entry of the journal: a dot, a badge, the text and the moment. */
 
-import { mergeStyle } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import { Box } from '../../primitives/box.tsx'
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { dot } from '../../tokens/components.ts'
-import { radius, space } from '../../tokens/primitives.ts'
-import type { ThemeColors } from '../../tokens/semantic.ts'
-import { useTheme } from '../../theme/provider.tsx'
-import { Badge } from '../badge/badge.tsx'
-import type { BadgeMission } from '../badge/use-badge.ts'
+import { mergeStyle } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { Box } from '#primitives/box.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { dot } from '#tokens/components.ts'
+import { radius, space } from '#tokens/primitives.ts'
+import type { ThemeColors } from '#tokens/semantic.ts'
+import { useTheme } from '#theme/provider.tsx'
+import { Badge } from '#components/badge/badge.tsx'
+import type { BadgeMission } from '#components/badge/use-badge.ts'
 import { useTimelineItem } from './use-timeline-item.ts'
 
 export interface TimelineItemProps {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createWindowSizeGate } from '../src/platform/window-size.ts'
+import { createWindowSizeGate } from '#platform/window-size.ts'
 
 describe('Première mesure de fenêtre ignorée', () => {
   test('a sample without dimensions is refused', () => {

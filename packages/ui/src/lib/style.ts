@@ -7,7 +7,7 @@
 
 import type { StyleDesc } from '@gpuix/react'
 
-import type { Theme } from '../tokens/semantic.ts'
+import type { Theme } from '#tokens/semantic.ts'
 
 export type Style = StyleDesc
 

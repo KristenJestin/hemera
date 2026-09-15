@@ -13,25 +13,26 @@
 
 import { EMBEDDED_FONTS, ThemeProvider } from '@hemera/ui'
 import { addFonts, render, useGpuix, useWindowSize, windowBackend } from '@gpuix/react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import { t } from '../i18n/index.ts'
-import { missingFontDiagnostic, registerEmbeddedFonts } from '../platform/fonts.ts'
-import { embeddedFontLocator } from '../platform/embedded-fonts.ts'
-import { folderProblem, openInstance } from '../platform/workspace.ts'
-import { packagingOf } from '../platform/packaging.ts'
-import { createWindowSizeGate } from '../platform/window-size.ts'
-import { routeOrDefault } from '../ui/navigation.ts'
-import { SessionsPage } from '../ui/sessions/sessions-page.tsx'
-import { useSessions } from '../ui/sessions/use-sessions.ts'
-import { ShowcasePage } from '../ui/showcase/showcase-page.tsx'
-import type { Route } from '../ui/navigation.ts'
+import { t } from '#i18n/index.ts'
+import { missingFontDiagnostic, registerEmbeddedFonts } from '#platform/fonts.ts'
+import { embeddedFontLocator } from '#platform/embedded-fonts.ts'
+import { folderProblem, openInstance } from '#platform/workspace.ts'
+import { packagingOf } from '#platform/packaging.ts'
+import { createWindowSizeGate } from '#platform/window-size.ts'
+import { canReach, routeFromArguments } from '#ui/navigation.ts'
+import { SessionsPage } from '#ui/sessions/sessions-page.tsx'
+import { useSessions } from '#ui/sessions/use-sessions.ts'
+import { ShowcasePage } from '#ui/showcase/showcase-page.tsx'
+import type { Route } from '#ui/navigation.ts'
 import { openDiagnosticLog } from '@hemera/runtime'
-import type { StoreContext } from '@hemera/runtime'
+import type { Channel, StoreContext } from '@hemera/runtime'
 import { windowTitleOf } from './window-title.ts'
 
 interface HemeraProps {
   route: Route
+  channel: Channel
   context: StoreContext
 }
 
@@ -44,9 +45,12 @@ interface HemeraProps {
  */
 const FRAMELESS_WINDOW = true
 
-function Hemera({ route, context }: HemeraProps) {
+function Hemera({ route, channel, context }: HemeraProps) {
   const size = useWindowSize()
   const { renderer } = useGpuix()
+  // The window holds one route at a time, and the demonstration is reachable from the
+  // sessions only where the channel exposes it: a prod package offers no way in at all.
+  const [current, setCurrent] = useState<Route>(route)
   const gate = useRef(createWindowSizeGate())
   const announced = useRef(false)
   const model = useSessions({ context, inspectFolder: folderProblem, now: Date.now })
@@ -63,13 +67,14 @@ function Hemera({ route, context }: HemeraProps) {
     log.info(`window opened ${measured.width}x${measured.height}`)
   }, [size])
 
-  if (route === 'showcase') return <ShowcasePage />
+  if (current === 'showcase') return <ShowcasePage onClose={() => setCurrent('sessions')} />
   return (
     <ThemeProvider name={model.theme} onThemeChange={model.setTheme}>
       <SessionsPage
         model={model}
         framelessWindow={FRAMELESS_WINDOW}
         {...(renderer === null ? {} : { windowCommands: renderer })}
+        {...(canReach('showcase', channel) ? { onOpenShowcase: () => setCurrent('showcase') } : {})}
       />
     </ThemeProvider>
   )
@@ -81,7 +86,7 @@ if ('kind' in instance) {
   process.exit(1)
 }
 
-const route = routeOrDefault('sessions', instance.channel)
+const route = routeFromArguments(Bun.argv, instance.channel)
 
 // Every diagnostic of the start goes to the profile as well as to the console: a package
 // started from a desktop icon has no console, so what is only printed is lost.
@@ -93,7 +98,7 @@ if (diagnostic !== null) log.error(diagnostic)
 log.info(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)
 log.info(`channel ${instance.channel}, route ${route}, profile ${instance.directory}`)
 
-render(<Hemera route={route} context={instance.context} />, {
+render(<Hemera route={route} channel={instance.channel} context={instance.context} />, {
   title: windowTitleOf(t('app.name'), instance.channel),
   titlebarTransparent: FRAMELESS_WINDOW,
 })

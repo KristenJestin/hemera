@@ -3,13 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import {
-  DATABASE_FILE,
-  listProjects,
-  listSessions,
-  openProfile,
-  readMessages,
-} from '../src/index.ts'
+import { DATABASE_FILE, listProjects, listSessions, openProfile, readMessages } from '#index.ts'
 
 const runtime = resolve(import.meta.dir, '..')
 const surface = join(runtime, 'src', 'index.ts').replaceAll('\\', '/')

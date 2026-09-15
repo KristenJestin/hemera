@@ -20,9 +20,9 @@ import { createProject, createSession, openProfile, recordMessage } from '@hemer
 import type { OpenProfile, StoreContext } from '@hemera/runtime'
 
 import { targetOfHost } from '../../../tools/environment-report.ts'
-import { folderProblem } from '../src/platform/workspace.ts'
-import { SessionsPage } from '../src/ui/sessions/sessions-page.tsx'
-import { useSessions } from '../src/ui/sessions/use-sessions.ts'
+import { folderProblem } from '#platform/workspace.ts'
+import { SessionsPage } from '#ui/sessions/sessions-page.tsx'
+import { useSessions } from '#ui/sessions/use-sessions.ts'
 
 const repository = resolve(import.meta.dir, '..', '..', '..')
 

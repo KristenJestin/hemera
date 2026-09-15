@@ -10,8 +10,8 @@
 import type { EventPayload } from '@gpuix/react'
 import { useCallback, useEffect } from 'react'
 
-import { useFocusReturn } from '../../lib/interaction.ts'
-import { isDismissKey } from '../../lib/keyboard.ts'
+import { useFocusReturn } from '#lib/interaction.ts'
+import { isDismissKey } from '#lib/keyboard.ts'
 
 export interface UseModalOptions {
   open: boolean

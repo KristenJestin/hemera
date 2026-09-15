@@ -5,7 +5,7 @@ import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 import { Input } from './input.tsx'
 import { useInput, valueOf } from './use-input.ts'
 import type { InputBehaviour, UseInputOptions } from './use-input.ts'
-import { dark } from '../../theme/dark.ts'
+import { dark } from '#theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
 function noop() {}

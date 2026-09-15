@@ -1,11 +1,11 @@
 import { useState } from 'react'
 
-import { Stack } from '../../primitives/stack.tsx'
-import { shell } from '../../tokens/components.ts'
-import { Button } from '../button/button.tsx'
-import { Select } from '../select/select.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { shell } from '#tokens/components.ts'
+import { Button } from '#components/button/button.tsx'
+import { Select } from '#components/select/select.tsx'
 import { Composer } from './composer.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 const MISSIONS = [{ value: 'free', label: 'Free' }] as const
 

@@ -3,8 +3,8 @@ import { describe, expect, test } from 'bun:test'
 import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 
 import { Card } from './card.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { dark } from '../../theme/dark.ts'
+import { Text } from '#primitives/text.tsx'
+import { dark } from '#theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf, textsOf } from '../../../test-harness.tsx'
 
 describe.skipIf(!TEST_RENDERER_PAINTS)('Card — comportement au clavier', () => {

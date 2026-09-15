@@ -5,12 +5,12 @@ import { join, resolve } from 'node:path'
 
 // The leaf modules, not the barrel: the barrel re-exports the components, which load the
 // renderer and its native addon on a machine that may have none.
-import { control, row, shell } from '../src/tokens/components.ts'
-import { fontSize, lineHeight, radius, space } from '../src/tokens/primitives.ts'
-import { COLOR_ROLES } from '../src/tokens/semantic.ts'
-import type { Theme } from '../src/tokens/semantic.ts'
-import { dark } from '../src/theme/dark.ts'
-import { light } from '../src/theme/light.ts'
+import { control, row, shell } from '#tokens/components.ts'
+import { fontSize, lineHeight, radius, space } from '#tokens/primitives.ts'
+import { COLOR_ROLES } from '#tokens/semantic.ts'
+import type { Theme } from '#tokens/semantic.ts'
+import { dark } from '#theme/dark.ts'
+import { light } from '#theme/light.ts'
 
 const repository = resolve(import.meta.dir, '..', '..', '..')
 const ui = resolve(import.meta.dir, '..')

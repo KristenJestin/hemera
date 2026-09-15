@@ -1,10 +1,10 @@
 import { useState } from 'react'
 
-import { Box } from '../../primitives/box.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { shell } from '../../tokens/components.ts'
+import { Box } from '#primitives/box.tsx'
+import { Text } from '#primitives/text.tsx'
+import { shell } from '#tokens/components.ts'
 import { Gutter } from './gutter.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 function Split() {
   const [size, setSize] = useState<number>(shell.sidebar.width)

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { TEST_RENDERER_PAINTS } from '../../../test-setup.ts'
 
 import { IconButton } from './icon-button.tsx'
-import { dark } from '../../theme/dark.ts'
+import { dark } from '#theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
 describe.skipIf(!TEST_RENDERER_PAINTS)('IconButton — comportement au clavier', () => {

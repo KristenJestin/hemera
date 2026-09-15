@@ -1,7 +1,7 @@
-import { Text } from '../../primitives/text.tsx'
-import { Stack } from '../../primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { Card } from './card.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 export const cardShowcase: ShowcaseEntry = {
   component: 'Card',

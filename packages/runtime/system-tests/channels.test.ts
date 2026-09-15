@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { LOCK_FILE, listProjects, openProfile } from '../src/index.ts'
+import { LOCK_FILE, listProjects, openProfile } from '#index.ts'
 
 const runtime = resolve(import.meta.dir, '..')
 const surface = join(runtime, 'src', 'index.ts').replaceAll('\\', '/')

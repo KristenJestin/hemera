@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { addFonts } from '@gpuix/native'
 import { createTestRoot } from '@gpuix/react/testing'
 
-import { EMBEDDED_FONTS, MONO_FAMILY, SANS_FAMILY } from '../src/index.ts'
+import { EMBEDDED_FONTS, MONO_FAMILY, SANS_FAMILY } from '#index.ts'
 
 const fontsDirectory = resolve(import.meta.dir, '..', 'src', 'fonts')
 

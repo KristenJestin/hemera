@@ -1,7 +1,7 @@
 /** The complete light theme. Values extracted from the prototype (design.md, D12a). */
 
-import { lightShadow, palette } from '../tokens/primitives.ts'
-import type { Theme } from '../tokens/semantic.ts'
+import { lightShadow, palette } from '#tokens/primitives.ts'
+import type { Theme } from '#tokens/semantic.ts'
 
 export const light: Theme = {
   name: 'light',

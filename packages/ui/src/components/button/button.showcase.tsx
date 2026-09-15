@@ -1,7 +1,7 @@
-import { Stack } from '../../primitives/stack.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { Button } from './button.tsx'
 import type { ButtonSize, ButtonTone } from './button.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 const TONES: ButtonTone[] = ['primary', 'secondary', 'ghost', 'danger']
 const SIZES: ButtonSize[] = ['sm', 'md', 'lg']

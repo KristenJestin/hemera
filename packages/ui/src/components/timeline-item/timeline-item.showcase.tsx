@@ -1,7 +1,7 @@
-import { Stack } from '../../primitives/stack.tsx'
-import { shell } from '../../tokens/components.ts'
+import { Stack } from '#primitives/stack.tsx'
+import { shell } from '#tokens/components.ts'
 import { TimelineItem } from './timeline-item.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 const AT = new Date(2026, 8, 13, 14, 5)
 

@@ -1,13 +1,13 @@
 /** A selectable row of a list. */
 
-import { mergeStyle } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import { Pressable } from '../../primitives/pressable.tsx'
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { row, state } from '../../tokens/components.ts'
-import { radius, space } from '../../tokens/primitives.ts'
-import { useTheme } from '../../theme/provider.tsx'
+import { mergeStyle } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import { Pressable } from '#primitives/pressable.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { row, state } from '#tokens/components.ts'
+import { radius, space } from '#tokens/primitives.ts'
+import { useTheme } from '#theme/provider.tsx'
 import { useListItem } from './use-list-item.ts'
 
 export interface ListItemProps {

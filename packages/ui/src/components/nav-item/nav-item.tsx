@@ -1,15 +1,15 @@
 /** A navigation entry of the sidebar: an icon, a label and, when there is one, a badge. */
 
-import { mergeStyle } from '../../lib/style.ts'
-import type { Style } from '../../lib/style.ts'
-import type { IconName } from '../../icons/catalog.ts'
-import { Icon } from '../../primitives/icon.tsx'
-import { Pressable } from '../../primitives/pressable.tsx'
-import { Stack } from '../../primitives/stack.tsx'
-import { Text } from '../../primitives/text.tsx'
-import { row, state } from '../../tokens/components.ts'
-import { radius, space } from '../../tokens/primitives.ts'
-import { useTheme } from '../../theme/provider.tsx'
+import { mergeStyle } from '#lib/style.ts'
+import type { Style } from '#lib/style.ts'
+import type { IconName } from '#icons/catalog.ts'
+import { Icon } from '#primitives/icon.tsx'
+import { Pressable } from '#primitives/pressable.tsx'
+import { Stack } from '#primitives/stack.tsx'
+import { Text } from '#primitives/text.tsx'
+import { row, state } from '#tokens/components.ts'
+import { radius, space } from '#tokens/primitives.ts'
+import { useTheme } from '#theme/provider.tsx'
 import { useNavItem } from './use-nav-item.ts'
 
 export interface NavItemProps {

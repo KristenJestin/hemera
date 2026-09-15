@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { missingLibraryDiagnostic } from '../src/platform/native-dependencies.ts'
+import { missingLibraryDiagnostic } from '#platform/native-dependencies.ts'
 
 /** The sentence the napi loader answers with, whatever the reason the addon did not load. */
 const NAPI_MESSAGE =

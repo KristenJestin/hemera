@@ -20,11 +20,11 @@ import { DEFAULT_THEME, ThemeProvider, light } from '@hemera/ui'
 import { openProfile } from '@hemera/runtime'
 import type { OpenProfile, StoreContext } from '@hemera/runtime'
 
-import { folderProblem } from '../src/platform/workspace.ts'
-import { SessionsPage } from '../src/ui/sessions/sessions-page.tsx'
-import { useSessions } from '../src/ui/sessions/use-sessions.ts'
-import type { SessionsModel } from '../src/ui/sessions/use-sessions.ts'
-import { THEME_OPTIONS } from '../src/ui/sessions/dialogs.tsx'
+import { folderProblem } from '#platform/workspace.ts'
+import { SessionsPage } from '#ui/sessions/sessions-page.tsx'
+import { useSessions } from '#ui/sessions/use-sessions.ts'
+import type { SessionsModel } from '#ui/sessions/use-sessions.ts'
+import { THEME_OPTIONS } from '#ui/sessions/dialogs.tsx'
 
 const NOW = 1_789_000_000_000
 
@@ -803,6 +803,22 @@ describe.skipIf(!TEST_RENDERER_PAINTS)("Aucune réponse d'agent au lot 1", () =>
         for (const absent of ['thinking', 'generating', 'typing', 'assistant', 'provider']) {
           expect(painted.some((text) => text.includes(absent))).toBe(false)
         }
+      } finally {
+        root.unmount()
+      }
+    })
+  })
+})
+
+describe.skipIf(!TEST_RENDERER_PAINTS)('Démonstration inaccessible en production', () => {
+  test('the screen offers no way into the demonstration unless it is given one', async () => {
+    await withScreen(async ({ context }) => {
+      // The screen is mounted the way a prod package mounts it: without the action, because
+      // the channel of that package exposes no route to the page at all.
+      const { root, settle } = mount(context)
+      try {
+        await settle()
+        expect(maybeNodeOf(root, 'open-showcase')).toBeNull()
       } finally {
         root.unmount()
       }

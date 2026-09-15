@@ -6,7 +6,7 @@ import type { EventPayload } from '@gpuix/react'
 import { Gutter } from './gutter.tsx'
 import { DEFAULT_GUTTER_STEP, sizeWithinBounds, useGutter } from './use-gutter.ts'
 import type { GutterBehaviour, UseGutterOptions } from './use-gutter.ts'
-import { dark } from '../../theme/dark.ts'
+import { dark } from '#theme/dark.ts'
 import { focus, mountedCatalogue, nodeOf } from '../../../test-harness.tsx'
 
 const BOUNDS = { min: 180, max: 420, defaultSize: 248 }

@@ -1,6 +1,6 @@
-import { Stack } from '../../primitives/stack.tsx'
+import { Stack } from '#primitives/stack.tsx'
 import { IconButton } from './icon-button.tsx'
-import type { ShowcaseEntry } from '../showcase.ts'
+import type { ShowcaseEntry } from '#components/showcase.ts'
 
 export const iconButtonShowcase: ShowcaseEntry = {
   component: 'IconButton',

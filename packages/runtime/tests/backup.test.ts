@@ -13,8 +13,8 @@ import {
   backupProfile,
   backupsOf,
   openProfile,
-} from '../src/index.ts'
-import type { Migration } from '../src/index.ts'
+} from '#index.ts'
+import type { Migration } from '#index.ts'
 
 const NOW = 1_789_000_000_000
 
