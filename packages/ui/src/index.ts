@@ -14,6 +14,7 @@ export {
 } from './components/button/button.tsx'
 export { Badge, type BadgeProps } from './components/badge/badge.tsx'
 export { Input, Textarea, type InputProps, type TextareaProps } from './components/field/field.tsx'
+export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
 export {
   Select,
   type SelectGroup,

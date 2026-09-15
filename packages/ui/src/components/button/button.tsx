@@ -52,10 +52,10 @@ export interface ButtonProps
   extends
     Omit<BaseButton.Props, 'render' | 'className' | 'style' | 'children'>,
     VariantProps<typeof buttonVariants> {
-  state?: ButtonState
+  state?: ButtonState | undefined
   children?: ReactNode
   /** Where the button sits; never how it looks. */
-  className?: string
+  className?: string | undefined
 }
 
 export function Button({
