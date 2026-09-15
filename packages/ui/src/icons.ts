@@ -24,6 +24,7 @@ import {
   IconCheckFilled as TablerCheckFilled,
   IconChevronDown as TablerChevronDown,
   IconChevronDownFilled as TablerChevronDownFilled,
+  IconChevronUp as TablerChevronUp,
   IconCommand as TablerCommand,
   IconLayoutSidebar as TablerLayoutSidebar,
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
@@ -113,6 +114,9 @@ export const IconChevronDown = catalogued(
   TablerChevronDown,
   'IconChevronDown',
 )
+/* Tabler draws a solid chevron pointing down and none pointing up; the outline stands for
+   both weights, which is what a chevron is anyway. */
+export const IconChevronUp = catalogued(TablerChevronUp, TablerChevronUp, 'IconChevronUp')
 /* Tabler draws no solid command key: the outline stands for both weights, which is what a
    key cap looks like anyway. */
 export const IconCommand = catalogued(TablerCommand, TablerCommand, 'IconCommand')
