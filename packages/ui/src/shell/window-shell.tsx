@@ -15,6 +15,7 @@ import { motion } from '@gpuix/react'
 import type { EventPayload } from '@gpuix/react'
 
 import { transition } from '#lib/motion.ts'
+import { usePresence } from '#lib/presence.ts'
 import { mergeStyle } from '#lib/style.ts'
 import type { Style } from '#lib/style.ts'
 import { Box } from '#primitives/box.tsx'
@@ -97,6 +98,8 @@ export function WindowShell({
   // not a delta to accumulate. The shell listens rather than the gutter: once the pointer
   // leaves the six pixels of the gutter, only an ancestor still sees it move.
   const [dragging, setDragging] = useState(false)
+  // The rows leave before the panel has finished closing, and arrive after it has opened.
+  const sidebarContent = usePresence({ open: !sidebarCollapsed })
   const width = sidebarCollapsed
     ? shell.sidebar.collapsedWidth
     : sizeWithinBounds(sidebarWidth, SIDEBAR_BOUNDS)
@@ -196,15 +199,26 @@ export function WindowShell({
         <motion.div
           animate={{ width }}
           // A drag would otherwise chase the pointer one transition behind it.
-          transition={dragging ? { duration: 0 } : transition('base')}
+          transition={dragging ? { duration: 0 } : transition('base', 'move')}
           style={{ display: 'flex', flexDirection: 'column', width, overflow: 'hidden' }}
           {...(testId === undefined ? {} : { testId: `${testId}-sidebar` })}
         >
-          {/* Collapsed, the sidebar paints nothing: its rows have no icon-only form, and
-              squeezed into a rail they read one letter per line. */}
-          {sidebarCollapsed ? null : (
-            <Scroll style={{ flexGrow: 1, padding: space.md }}>{sidebar}</Scroll>
-          )}
+          {/* The rows fade before the panel finishes closing, and are painted again once it
+              has opened: text caught mid-travel in a shrinking box reads as a glitch, and
+              collapsed there is nothing to show — the rows have no icon-only form. */}
+          {sidebarContent.present ? (
+            <motion.div
+              animate={{ opacity: sidebarContent.stage === 'leaving' ? 0 : 1 }}
+              transition={transition(
+                'fast',
+                sidebarContent.stage === 'leaving' ? 'exit' : 'enter',
+                sidebarContent.stage === 'leaving' ? 0 : shell.sidebar.contentDelay,
+              )}
+              style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 }}
+            >
+              <Scroll style={{ flexGrow: 1, padding: space.md }}>{sidebar}</Scroll>
+            </motion.div>
+          ) : null}
         </motion.div>
 
         {sidebarCollapsed ? null : (

@@ -6,8 +6,8 @@
  * the renderer positions an absolute box against its own parent, so a panel rendered inside
  * the content would only ever cover the content, and would push the rest of it aside.
  *
- * The entry is animated; there is no exit animation, because the renderer has none — an
- * element stops painting the frame it is removed.
+ * It arrives and it leaves. The renderer paints nothing on removal, so the panel outlives
+ * its own closing by the length of its exit — see `usePresence`.
  */
 
 import type { ReactNode } from 'react'
@@ -15,6 +15,7 @@ import { motion } from '@gpuix/react'
 import type { EventPayload } from '@gpuix/react'
 
 import { transition } from '#lib/motion.ts'
+import { usePresence } from '#lib/presence.ts'
 import { mergeStyle } from '#lib/style.ts'
 import type { Style } from '#lib/style.ts'
 import { Box } from '#primitives/box.tsx'
@@ -55,7 +56,10 @@ export function Modal({
     onClose,
     ...(dismissOnScrim === undefined ? {} : { dismissOnScrim }),
   })
-  if (!behaviour.open) return null
+  // Painted while it leaves, so the exit has somewhere to play.
+  const presence = usePresence({ open: behaviour.open })
+  if (!presence.present) return null
+  const leaving = presence.stage === 'leaving'
 
   const panel: Style = {
     display: 'flex',
@@ -79,8 +83,8 @@ export function Modal({
           element and everything inside it, and the panel does not rise at the same pace. */}
       <motion.div
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={transition('fast')}
+        animate={{ opacity: leaving ? 0 : 1 }}
+        transition={transition('fast', leaving ? 'exit' : 'enter')}
         onClick={behaviour.onScrimPress}
         style={{
           position: 'absolute',
@@ -108,9 +112,15 @@ export function Modal({
       >
         <motion.div
           initial={{ opacity: 0, top: dialog.entryOffset }}
-          animate={{ opacity: 1, top: 0 }}
-          // Behind the scrim by a frame or two: the window dims, then the decision arrives.
-          transition={{ ...transition('base'), delay: dialog.entryDelay }}
+          // It rises into place and settles; on the way out it drops back and goes, faster
+          // than it came, because a decision taken should not be waited on.
+          animate={leaving ? { opacity: 0, top: dialog.exitOffset } : { opacity: 1, top: 0 }}
+          transition={
+            leaving
+              ? transition('fast', 'exit')
+              : // Behind the scrim by a frame or two: the window dims, then the panel arrives.
+                transition('base', 'settle', dialog.entryDelay)
+          }
           style={mergeStyle(panel, { pointerEvents: 'auto' }, style)}
           {...(testId === undefined ? {} : { testId })}
         >

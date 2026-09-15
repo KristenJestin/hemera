@@ -165,6 +165,8 @@ export const fontFamily = {
 
 /** Closed motion duration scale, in seconds. */
 export const duration = {
+  /** A state change the eye should not have to follow: a press going down. */
+  instant: 0.06,
   fast: 0.12,
   base: 0.18,
   slow: 0.28,

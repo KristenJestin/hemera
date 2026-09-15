@@ -13,6 +13,12 @@ const OPTIONS = [
   { value: 'dark', label: 'Dark' },
 ] as const
 
+/** The menu is painted while it leaves, so a test that reads it back has to wait. */
+async function afterExit(root: ReturnType<typeof mountedCatalogue>): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 220))
+  root.renderer.flush()
+}
+
 describe.skipIf(!TEST_RENDERER_PAINTS)('Select — comportement au clavier', () => {
   test('Enter opens the menu and the options are painted', () => {
     const root = mountedCatalogue(
@@ -34,7 +40,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Select — comportement au clavier', () 
     }
   })
 
-  test('choosing an option reports it and closes the menu', () => {
+  test('choosing an option reports it and closes the menu', async () => {
     let chosen = ''
     const root = mountedCatalogue(
       <Select
@@ -51,6 +57,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Select — comportement au clavier', () 
       root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'theme-option-light').id, 'enter')
       root.renderer.flush()
       expect(chosen).toBe('light')
+      await afterExit(root)
       expect(() => nodeOf(root, 'theme-menu')).toThrow()
     } finally {
       root.unmount()
@@ -75,6 +82,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Select — comportement au clavier', () 
 
       root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'theme-option-light').id, 'escape')
       root.renderer.flush()
+      await afterExit(root)
       expect(() => nodeOf(root, 'theme-menu')).toThrow()
       // The window stays answerable to the keyboard because the focus came back.
       expect(root.renderer.getFocusedElementId()).toBe(nodeOf(root, 'theme').id)
@@ -150,6 +158,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Menu ancré pendant un défilement', () 
       // the menu's, not the panel's.
       root.renderer.nativeSimulateScrollWheel(300, 100, 0, -200)
       root.renderer.flush()
+      await afterExit(root)
       expect(() => nodeOf(root, 'theme-menu')).toThrow()
     } finally {
       root.unmount()

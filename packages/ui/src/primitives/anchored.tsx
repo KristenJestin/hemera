@@ -23,6 +23,8 @@ export interface AnchoredProps {
   style?: Style
   children?: ReactNode
   testId?: string
+  /** Playing its exit: painted, on its way out. */
+  leaving?: boolean
 }
 
 export function Anchored({
@@ -32,6 +34,7 @@ export function Anchored({
   style,
   children,
   testId,
+  leaving = false,
 }: AnchoredProps) {
   return (
     <anchored
@@ -53,8 +56,8 @@ export function Anchored({
           exit animation to match it, because an element stops painting the frame it leaves. */}
       <motion.div
         initial={{ opacity: 0, top: overlay.entryOffset }}
-        animate={{ opacity: 1, top: 0 }}
-        transition={transition('fast')}
+        animate={leaving ? { opacity: 0, top: overlay.entryOffset } : { opacity: 1, top: 0 }}
+        transition={transition('fast', leaving ? 'exit' : 'enter')}
         style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}
       >
         {children}

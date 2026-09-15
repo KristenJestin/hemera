@@ -32,6 +32,15 @@ function Decision({ dismissOnScrim = true }: { dismissOnScrim?: boolean }) {
   )
 }
 
+/** The panel is painted while it leaves, so a test that reads it back has to wait. */
+async function afterExit(root: ReturnType<typeof mountedCatalogue>): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, EXIT_WAIT_MS))
+  root.renderer.flush()
+}
+
+/** Longer than the exit itself, short enough that a suite is not slowed by it. */
+const EXIT_WAIT_MS = 220
+
 describe.skipIf(!TEST_RENDERER_PAINTS)('Modal — comportement au clavier', () => {
   test('a closed decision paints nothing', () => {
     const root = mountedCatalogue(<Decision />)
@@ -94,6 +103,9 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Modal — comportement au clavier', () =
 
       root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'cancel').id, 'escape')
       root.renderer.flush()
+      // Still painted, on its way out.
+      expect(() => nodeOf(root, 'panel')).not.toThrow()
+      await afterExit(root)
       expect(() => nodeOf(root, 'panel')).toThrow()
       // The window keeps answering the keyboard because the focus came back.
       expect(root.renderer.getFocusedElementId()).toBe(nodeOf(root, 'trigger').id)
@@ -125,6 +137,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)("Focus restauré après fermeture d'un ov
 
       root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'cancel').id, 'escape')
       root.renderer.flush()
+      await afterExit(root)
 
       expect(() => nodeOf(root, 'panel')).toThrow()
       expect(root.renderer.getFocusedElementId()).toBe(nodeOf(root, 'trigger').id)
@@ -146,6 +159,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)("Focus restauré après fermeture d'un ov
 
       root.renderer.nativeSimulateKeystrokes(nodeOf(root, 'cancel').id, 'enter')
       root.renderer.flush()
+      await afterExit(root)
 
       expect(() => nodeOf(root, 'panel')).toThrow()
       expect(root.renderer.getFocusedElementId()).toBe(nodeOf(root, 'trigger').id)
@@ -180,6 +194,7 @@ describe.skipIf(!TEST_RENDERER_PAINTS)('Décision fermée par le voile', () => {
       if (scrim === null) return
       root.renderer.nativeSimulateClick(scrim.x + 4, scrim.y + 4)
       root.renderer.flush()
+      await afterExit(root)
       expect(() => nodeOf(root, 'panel')).toThrow()
     } finally {
       root.unmount()

@@ -46,7 +46,14 @@ export const dot = {
 export const shell = {
   topbar: { height: 44 },
   // Collapsed, the sidebar is gone rather than narrow: its rows have no icon-only form.
-  sidebar: { width: 248, minWidth: 180, maxWidth: 420, collapsedWidth: 0 },
+  sidebar: {
+    width: 248,
+    minWidth: 180,
+    maxWidth: 420,
+    collapsedWidth: 0,
+    /** How long the rows wait for the panel to open, in seconds. */
+    contentDelay: 0.08,
+  },
   /** `size` is what the pointer grabs, `rule` what is painted. */
   gutter: { size: 6, rule: 1 },
 } as const
@@ -64,6 +71,8 @@ export const dialog = {
   entryOffset: space.md,
   /** How long the panel waits for the window to dim, in seconds. */
   entryDelay: 0.05,
+  /** How far it drops back as it leaves, in pixels. */
+  exitOffset: space.xs,
 } as const
 
 /** Painted state of a control the caller disabled. */

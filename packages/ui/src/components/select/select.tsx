@@ -2,6 +2,7 @@
 
 import type { EventPayload } from '@gpuix/react'
 
+import { usePresence } from '#lib/presence.ts'
 import { mergeStyle, variants } from '#lib/style.ts'
 import type { Style } from '#lib/style.ts'
 import { Anchored } from '#primitives/anchored.tsx'
@@ -75,6 +76,8 @@ export function Select<Value extends string>({
 }: SelectProps<Value>) {
   const theme = useTheme()
   const behaviour = useSelect({ value, options, onValueChange, disabled })
+  // The menu is painted while it leaves, so closing it is not a disappearance.
+  const menuPresence = usePresence({ open: behaviour.open })
   const dimmed = behaviour.inert
     ? { opacity: state.disabledOpacity, cursor: 'not-allowed' as const }
     : {}
@@ -105,10 +108,11 @@ export function Select<Value extends string>({
         </Stack>
       </Pressable>
 
-      {behaviour.open ? (
+      {menuPresence.present ? (
         <Anchored
           side="bottom"
           align="start"
+          leaving={menuPresence.stage === 'leaving'}
           style={menu}
           {...(testId === undefined ? {} : { testId: `${testId}-menu` })}
         >

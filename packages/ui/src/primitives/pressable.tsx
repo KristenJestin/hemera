@@ -72,10 +72,11 @@ export function Pressable({
     position: 'relative',
     ...(hoverColor === undefined ? {} : { hover: hoverRest }),
     // A press that only tints the surface reads as the button going translucent. A pixel of
-    // travel reads as a button being pushed, which is what happened. It is not animated: a
-    // motion element carries no `tabIndex`, and a pixel over a tenth of a second reads as
-    // nothing at all next to the press itself.
-    top: pressed && !disabled ? control.pressTravel : 0,
+    // travel reads as a button being pushed, which is what happened.
+    //
+    // The surface itself cannot animate it — a motion element carries no `tabIndex` — so the
+    // travel is on the content, which is what the eye follows anyway. Down is immediate,
+    // coming back settles: released, a control should feel like it answered.
   }
 
   return (
@@ -104,7 +105,9 @@ export function Pressable({
       {hoverColor === undefined || disabled ? null : (
         <motion.div
           animate={{ opacity: hovered ? 1 : 0 }}
-          transition={transition('fast')}
+          // Lighting up on approach is quicker than going out on leaving: a pointer crossing
+          // a row should not leave a trail of half-lit surfaces behind it.
+          transition={transition(hovered ? 'fast' : 'base', hovered ? 'enter' : 'exit')}
           style={{
             position: 'absolute',
             top: 0,
@@ -120,7 +123,20 @@ export function Pressable({
           }}
         />
       )}
-      {children}
+      <motion.div
+        animate={{ top: pressed && !disabled ? control.pressTravel : 0 }}
+        transition={pressed ? transition('instant', 'exit') : transition('fast', 'settle')}
+        style={{
+          display: 'flex',
+          position: 'relative',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '100%',
+          height: '100%',
+        }}
+      >
+        {children}
+      </motion.div>
     </div>
   )
 }

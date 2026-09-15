@@ -119,6 +119,7 @@ describe('Densité et échelle', () => {
       minWidth: 180,
       maxWidth: 420,
       collapsedWidth: 0,
+      contentDelay: 0.08,
     })
     expect(shell.gutter).toEqual({ size: 6, rule: 1 })
   })

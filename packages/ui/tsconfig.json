@@ -5,6 +5,6 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@gpuix/react"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/globals.d.ts"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
