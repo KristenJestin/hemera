@@ -12,6 +12,7 @@
     "build": "vp run --filter !hemera build",
     "package": "node tools/package-desktop.ts",
     "report": "node tools/environment-report.ts --write",
+    "storybook": "pnpm --filter @hemera/ui storybook",
     "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test"
   },
   "devDependencies": {

@@ -194,6 +194,27 @@
   --duration-fast: 160ms;
   --duration-base: 260ms;
   --duration-slow: 400ms;
+
+  /* The pulse of the loading grid. One cycle, and a ring of the grid lights up per step, so
+     the whole grid takes a cycle plus four steps to travel from the centre to the corners. */
+  --duration-wave: 1200ms;
+  --animate-wave: wave var(--duration-wave) var(--ease-calm) infinite;
+
+  @keyframes wave {
+    0%,
+    70%,
+    100% {
+      opacity: 0.2;
+    }
+    35% {
+      opacity: 1;
+    }
+  }
+}
+
+/* How far into the wave a dot is, which is how far it is from the middle of the grid. */
+@utility wave-ring-* {
+  animation-delay: calc(--value(integer) * var(--duration-fast));
 }
 
 @layer base {
