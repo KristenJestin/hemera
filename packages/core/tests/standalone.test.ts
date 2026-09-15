@@ -1,5 +1,5 @@
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -7,8 +7,8 @@ import { FIRST_RANK, projectName, rankBetween } from '#index.ts'
 
 import { PACKAGE_RULES, analyzePackage } from '../../../tools/boundaries.ts'
 
-const repository = resolve(import.meta.dirname, '..', '..', '..')
-const require = createRequire(import.meta.url)
+const core = resolve(import.meta.dirname, '..')
+const repository = resolve(core, '..', '..')
 
 describe("Cœur importé hors d'Electron", () => {
   test('the public surface answers in a plain Node process', () => {
@@ -19,9 +19,18 @@ describe("Cœur importé hors d'Electron", () => {
   test.each(['electron', 'better-sqlite3', 'drizzle-orm'])(
     '%p does not resolve from the core package',
     (module) => {
-      // The core is installed without them, so a file that reached for one would fail at
-      // import time here rather than at the first start on a user's machine.
-      expect(() => require.resolve(module)).toThrow()
+      // Asked of a plain Node process rather than of the test runner: a bundler resolves
+      // modules its own way, and what matters is what the core is installed beside. NODE_PATH
+      // goes with it — the package manager points it at its own store while it runs a script,
+      // and a machine starting the application has no such thing.
+      const { NODE_PATH: _store, ...environment } = process.env
+      const result = spawnSync(process.execPath, ['-e', `require.resolve('${module}')`], {
+        cwd: core,
+        encoding: 'utf8',
+        env: environment,
+      })
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain(`Cannot find module '${module}'`)
     },
   )
 

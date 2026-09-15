@@ -1,0 +1,25 @@
+{
+  "name": "@hemera/desktop",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/index.js",
+  "imports": {
+    "#*": "./src/*"
+  },
+  "scripts": {
+    "dev": "node dev.ts",
+    "build": "node build.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.3.0",
+    "vite-plus": "0.3.2"
+  }
+}
