@@ -320,6 +320,11 @@
   display: flex;
   min-height: 0;
   overflow: hidden;
+  /* The rule under the chrome bar is drawn here and not on the bar. The system paints its
+     window buttons over the page, and a line the bar draws inside that strip is a line that
+     stops a hand's width before the edge of the window. Drawn on the body it starts just
+     below the strip, and runs the whole width. */
+  border-top: 1px solid var(--color-border);
 }
 
 /* The chrome bar's two segments. The first column is the sidebar's current width, which the

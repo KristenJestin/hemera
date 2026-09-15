@@ -44,11 +44,12 @@ const PANEL =
  * That is what makes folding move the panel and not the icons inside it — and it is why the
  * border goes: a ghost button draws a transparent one, and one pixel is one pixel.
  */
-const ENTRY = 'w-full justify-start gap-3 border-0 px-4'
+const ENTRY = 'w-full shrink-0 justify-start gap-3 border-0 px-4'
 
 const MARK = 'absolute inset-0 rounded-md bg-accent'
 
-const GROUP = 'px-3 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase'
+const GROUP =
+  'shrink-0 px-3 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase'
 
 export interface SidebarProps {
   collapsed: boolean

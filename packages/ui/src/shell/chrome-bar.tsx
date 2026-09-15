@@ -31,13 +31,24 @@ import type { ProjectTone, ShellProject } from './model.ts'
  * which is the movement the prototype earned. It lives inside the scrolling strip with the
  * tabs, never outside it, or it would be left behind by its own tab.
  */
-const BAR = 'title-bar chrome-columns items-center border-b border-border bg-background'
+const BAR = 'title-bar chrome-columns items-center bg-background'
 
 const BRAND = 'flex min-w-0 items-center gap-2 overflow-hidden pr-2 pl-6'
 
 const STRIP = 'no-drag-children scroll-quiet flex min-w-0 flex-1 items-center gap-1 overflow-x-auto'
 
+/**
+ * A tab says what it is by how present it is, not by a second background.
+ *
+ * A hover that fills the tab looks exactly like the slab that marks the active one, and two
+ * things that look the same are one thing the eye cannot read. The inactive tabs are dimmed
+ * instead and come up to full on hover; the slab is the only fill in the strip.
+ */
 const TAB = 'no-drag relative shrink-0 gap-2 bg-transparent hover:bg-transparent'
+
+const TAB_ACTIVE = 'text-foreground'
+
+const TAB_QUIET = 'text-muted-foreground hover:text-foreground'
 
 /**
  * The slab that slides from tab to tab.
@@ -123,15 +134,13 @@ export function ChromeBar({
         <nav aria-label="Projects" className={STRIP}>
           <LayoutGroup id="projects">
             {projects.map((project) => (
-              // The hover is on the wrapper and not on the tab: on the tab it would paint
-              // over the slab, and the active Project would lose its mark under the pointer.
-              <span key={project.id} className="relative flex shrink-0 rounded-md hover:bg-accent">
+              <span key={project.id} className="relative flex shrink-0">
                 {project.id === activeProjectId && (
                   <motion.span layoutId="active-project" className={MARK} transition={transition} />
                 )}
                 <Button
                   variant="ghost"
-                  className={TAB}
+                  className={cn(TAB, project.id === activeProjectId ? TAB_ACTIVE : TAB_QUIET)}
                   aria-current={project.id === activeProjectId ? 'page' : undefined}
                   onClick={() => onSelectProject(project.id)}
                 >
