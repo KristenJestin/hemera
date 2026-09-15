@@ -11,7 +11,7 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { MotionMeasure } from '@hemera/ipc'
-import { app } from 'electron/main'
+import { Menu, app } from 'electron/main'
 
 import { registerChannels } from './channels.ts'
 import { collectReport } from './environment.ts'
@@ -21,6 +21,16 @@ const main = dirname(fileURLToPath(import.meta.url))
 
 /** Asked for by `pnpm report`: start as usual, say what this machine is, and leave. */
 const REPORT_FLAG = '--report'
+
+/**
+ * No menu at all, which also takes its keystrokes with it.
+ *
+ * Electron gives a window a default menu, and the default menu owns Ctrl+W — so a frameless
+ * application with no menu bar anywhere on screen still closes itself on a keystroke nobody
+ * chose, from a menu nobody can see. The shortcuts of the application are declared in the
+ * renderer, in one table, and that is the whole list.
+ */
+Menu.setApplicationMenu(null)
 
 void app.whenReady().then(async () => {
   // Wired before the page loads: the first thing it does is say which theme it wants, and a
