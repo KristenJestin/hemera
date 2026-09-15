@@ -65,6 +65,7 @@ export default defineConfig({
       'tools/git-flow.test.ts',
       'tools/motion-properties.test.ts',
       'tools/package-desktop.test.ts',
+      'tools/scales.test.ts',
       'tools/verification.test.ts',
       'tools/window-options.test.ts',
     ],
