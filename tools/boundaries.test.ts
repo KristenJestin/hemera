@@ -1,10 +1,11 @@
-import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { describe, expect, test } from 'vite-plus/test'
 
 import {
   PACKAGE_RULES,
+  type PackageRule,
   analyze,
   analyzePackage,
   cyclesOf,
@@ -12,7 +13,13 @@ import {
   specifiersOf,
 } from './boundaries.ts'
 
-const repository = resolve(import.meta.dir, '..')
+const repository = resolve(import.meta.dirname, '..')
+
+function ruleFor(name: string): PackageRule {
+  const rule = PACKAGE_RULES.find((entry) => entry.name === name)
+  if (rule === undefined) throw new Error(`no boundary rule declares ${name}`)
+  return rule
+}
 
 function fixture(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'hemera-boundaries-'))
@@ -24,233 +31,179 @@ function fixture(files: Record<string, string>): string {
   return root
 }
 
-describe('Consommateur indépendant du desktop', () => {
-  test('bundling the public core API pulls in no renderer, storage or platform module', async () => {
-    const build = await Bun.build({
-      entrypoints: [join(repository, 'packages', 'core', 'src', 'index.ts')],
-      target: 'bun',
-    })
-    expect(build.success).toBe(true)
-    const bundled = await Promise.all(build.outputs.map((output) => output.text()))
-    const code = bundled.join('\n')
-    for (const forbidden of [
-      'bun:sqlite',
-      'node:fs',
-      'node:child_process',
-      'drizzle-orm',
-      '@gpuix/',
-      'react-reconciler',
-    ]) {
-      expect(code).not.toContain(forbidden)
-    }
-  })
-
-  test('the production configuration of core declares no ambient Bun types', () => {
-    const production = JSON.parse(
-      readFileSync(join(repository, 'packages', 'core', 'tsconfig.json'), 'utf8'),
-    )
-    expect(production.compilerOptions.types).toEqual([])
-    expect(production.include).toEqual(['src/**/*.ts'])
-
-    const tests = JSON.parse(
-      readFileSync(join(repository, 'packages', 'core', 'tsconfig.test.json'), 'utf8'),
-    )
-    expect(tests.compilerOptions.types).toEqual(['bun'])
-  })
-})
-
-describe("Import métier interdit dans le package d'interface", () => {
+describe('Importation interdite', () => {
   test.each([
-    ['@hemera/core', 'an Hemera package'],
-    ['@hemera/runtime', 'an Hemera package'],
-    ['bun:sqlite', 'a Bun built-in module'],
-    ['node:fs', 'a file, process or network API'],
-    ['node:child_process', 'a file, process or network API'],
-    ['drizzle-orm', 'the SQLite storage layer'],
-  ])('%p in the design system is reported with its file and its import', (specifier, reason) => {
-    const root = fixture({
-      'packages/ui/src/components/card/card.tsx': `import x from '${specifier}'\n`,
-    })
+    [
+      'core reaching for Electron',
+      '@hemera/core',
+      'packages/core/src/domain/window.ts',
+      "import { app } from 'electron'\n",
+      'Electron',
+    ],
+    [
+      'core reaching for a Node platform module',
+      '@hemera/core',
+      'packages/core/src/domain/profile.ts',
+      "import { readFileSync } from 'node:fs'\n",
+      'a file, process or network API',
+    ],
+    [
+      'the channel declaration reaching for the application',
+      '@hemera/ipc',
+      'packages/ipc/src/channels.ts',
+      "import { main } from '@hemera/desktop'\n",
+      'must not depend on',
+    ],
+    [
+      'the application reaching past a public entry point',
+      '@hemera/desktop',
+      'apps/desktop/src/main/window.ts',
+      "import { envReport } from '@hemera/ipc/src/channels.ts'\n",
+      'private src',
+    ],
+  ])('%s is reported with its file and its import', (_case, name, path, source, reason) => {
+    const root = fixture({ [path]: source })
     try {
-      const violations = analyzePackage(root, PACKAGE_RULES[2]!)
+      const violations = analyzePackage(root, ruleFor(name))
       expect(violations).toHaveLength(1)
-      expect(violations[0]!.file).toBe('packages/ui/src/components/card/card.tsx')
-      expect(violations[0]!.specifier).toBe(specifier)
+      expect(violations[0]!.file).toBe(path)
+      expect(violations[0]!.specifier).toBe(/'([^']+)'/.exec(source)![1])
       expect(violations[0]!.problem).toContain(reason)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('the renderer and React stay allowed in the design system', () => {
+  test('the tree of this monorepo respects its declared boundaries', () => {
+    expect(analyze(repository)).toEqual([])
+  })
+
+  test('the application may import the core and the channel declaration', () => {
     const root = fixture({
-      'packages/ui/src/primitives/box.tsx': [
-        "import { useState } from 'react'",
-        "import type { StyleDesc } from '@gpuix/react'",
+      'packages/core/package.json': JSON.stringify({ name: '@hemera/core' }),
+      'packages/ipc/package.json': JSON.stringify({ name: '@hemera/ipc' }),
+      'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
+      'apps/desktop/src/main/index.ts': [
+        "import { projectName } from '@hemera/core'",
+        "import { CHANNELS } from '@hemera/ipc'",
         '',
       ].join('\n'),
     })
     try {
-      expect(analyzePackage(root, PACKAGE_RULES[2]!)).toEqual([])
+      expect(analyzePackage(root, ruleFor('@hemera/desktop'))).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('the design system rule is the one declared for @hemera/ui', () => {
-    expect(PACKAGE_RULES[2]!.name).toBe('@hemera/ui')
-    expect(PACKAGE_RULES[2]!.directory).toBe('packages/ui')
+  test('a declared subpath is a public surface, not a reach into a src', () => {
+    const root = fixture({
+      'packages/ipc/package.json': JSON.stringify({
+        name: '@hemera/ipc',
+        exports: { '.': './src/index.ts', './schemas/*': './src/schemas/*' },
+      }),
+      'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
+      'apps/desktop/src/main/report.ts': "import { report } from '@hemera/ipc/schemas/env.ts'\n",
+    })
+    try {
+      expect(analyzePackage(root, ruleFor('@hemera/desktop'))).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Code hérité isolé', () => {
+  test('a relative climb into the parked tree is reported', () => {
+    const root = fixture({
+      'apps/desktop/src/renderer/tokens.ts':
+        "import { dark } from '../../../../legacy/packages/ui/src/theme/dark.ts'\n",
+    })
+    try {
+      const violations = analyzePackage(root, ruleFor('@hemera/desktop'))
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.file).toBe('apps/desktop/src/renderer/tokens.ts')
+      expect(violations[0]!.problem).toContain('legacy tree parked out of the workspace')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test.each(['@hemera/ui', '@hemera/runtime'])(
+    'importing %p by name is reported as a package parked under legacy/',
+    (specifier) => {
+      const root = fixture({
+        'apps/desktop/src/renderer/app.tsx': `import x from '${specifier}'\n`,
+      })
+      try {
+        const violations = analyzePackage(root, ruleFor('@hemera/desktop'))
+        expect(violations).toHaveLength(1)
+        expect(violations[0]!.specifier).toBe(specifier)
+        expect(violations[0]!.problem).toContain('parked under legacy/')
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  test('the workspace does not reach the parked tree', () => {
+    const workspace = readFileSync(join(repository, 'pnpm-workspace.yaml'), 'utf8')
+    expect(workspace).toContain('apps/*')
+    expect(workspace).toContain('packages/*')
+    expect(workspace).not.toContain('legacy')
+  })
+
+  test('nothing lints, formats or tests the parked tree', () => {
+    const config = readFileSync(join(repository, 'vite.config.ts'), 'utf8')
+    expect(config).toContain("'legacy/**'")
+    // The test glob names the workspace folders; a pattern starting at the root would walk
+    // into legacy/ the moment a parked package held a file named like a test.
+    expect(config).toContain("'packages/*/tests/**/*.test.ts'")
   })
 })
 
 describe('Frontières des packages', () => {
-  test('the monorepo respects its declared boundaries', () => {
-    expect(analyze(repository)).toEqual([])
-  })
-
-  test('a platform import in core is reported with its reason', () => {
-    const root = fixture({
-      'packages/core/src/index.ts': "import { Database } from 'bun:sqlite'\nexport { Database }\n",
-    })
-    try {
-      const violations = analyzePackage(root, {
-        name: '@hemera/core',
-        directory: 'packages/core',
-        forbidden: [{ pattern: /^bun:/, reason: 'a Bun built-in module' }],
-      })
-      expect(violations).toHaveLength(1)
-      expect(violations[0]!.specifier).toBe('bun:sqlite')
-      expect(violations[0]!.problem).toContain('a Bun built-in module')
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('an import reaching into another package private src is reported', () => {
-    const root = fixture({
-      'apps/desktop/src/page.ts': "import { Button } from '@hemera/ui/src/components/button'\n",
-    })
-    try {
-      const violations = analyzePackage(root, {
-        name: '@hemera/desktop',
-        directory: 'apps/desktop',
-        forbidden: [],
-      })
-      expect(violations).toHaveLength(1)
-      expect(violations[0]!.problem).toContain('private src')
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('a relative path escaping the package is reported', () => {
-    const root = fixture({
-      'packages/runtime/src/storage.ts': "import { x } from '../../core/src/domain'\n",
-    })
-    try {
-      const violations = analyzePackage(root, {
-        name: '@hemera/runtime',
-        directory: 'packages/runtime',
-        forbidden: [],
-      })
-      expect(violations).toHaveLength(1)
-      expect(violations[0]!.problem).toContain('reaches outside @hemera/runtime')
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
   test('a cycle between packages is detected', () => {
     const graph = new Map([
-      ['@hemera/core', new Set(['@hemera/runtime'])],
-      ['@hemera/runtime', new Set(['@hemera/core'])],
-      ['@hemera/ui', new Set<string>()],
+      ['@hemera/core', new Set(['@hemera/ipc'])],
+      ['@hemera/ipc', new Set(['@hemera/core'])],
+      ['@hemera/desktop', new Set<string>()],
     ])
     const cycles = cyclesOf(graph)
     expect(cycles).toHaveLength(1)
     expect(cycles[0]).toContain('@hemera/core')
-    expect(cycles[0]).toContain('@hemera/runtime')
+    expect(cycles[0]).toContain('@hemera/ipc')
+  })
+
+  test('the graph of this monorepo is acyclic', () => {
+    expect(cyclesOf(packageGraph(repository))).toEqual([])
+  })
+
+  test('a relative path escaping the package is reported', () => {
+    const root = fixture({
+      'packages/ipc/src/channels.ts': "import { x } from '../../core/src/domain'\n",
+    })
+    try {
+      const violations = analyzePackage(root, ruleFor('@hemera/ipc'))
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.problem).toContain('reaches outside @hemera/ipc')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test('static, bare and dynamic specifiers are all collected', () => {
     const source = [
       "import { a } from './a.ts'",
-      "import 'bun:sqlite'",
+      "import 'electron'",
       "export { b } from '@hemera/core'",
       "const c = await import('node:fs')",
     ].join('\n')
     expect(specifiersOf(source).toSorted()).toEqual([
       './a.ts',
       '@hemera/core',
-      'bun:sqlite',
+      'electron',
       'node:fs',
     ])
-  })
-})
-
-describe('Frontières des packages — sous-chemins déclarés', () => {
-  test('a subpath pattern of the exports is a public surface, not a reach into a src', () => {
-    const root = fixture({
-      'packages/ui/package.json': JSON.stringify({
-        name: '@hemera/ui',
-        exports: { '.': './src/index.ts', './fonts/*': './src/fonts/*' },
-      }),
-      'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
-      'apps/desktop/src/fonts.ts':
-        "import regular from '@hemera/ui/fonts/inter/Inter-Regular.ttf' with { type: 'file' }\n",
-    })
-    try {
-      const rule = PACKAGE_RULES.find((entry) => entry.name === '@hemera/desktop')!
-      expect(analyzePackage(root, rule)).toEqual([])
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('a path the exports do not declare is still refused', () => {
-    const root = fixture({
-      'packages/ui/package.json': JSON.stringify({
-        name: '@hemera/ui',
-        exports: { '.': './src/index.ts', './fonts/*': './src/fonts/*' },
-      }),
-      'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
-      'apps/desktop/src/reach.ts': "import { dark } from '@hemera/ui/src/theme/dark.ts'\n",
-    })
-    try {
-      const rule = PACKAGE_RULES.find((entry) => entry.name === '@hemera/desktop')!
-      expect(analyzePackage(root, rule)[0]?.problem).toContain('private src')
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-})
-
-describe('Cycle de dépendances', () => {
-  test('a module of the design system importing a screen forms a cycle that is reported', () => {
-    const graph = new Map<string, Set<string>>([
-      ['@hemera/ui', new Set(['@hemera/desktop'])],
-      ['@hemera/desktop', new Set(['@hemera/ui'])],
-    ])
-    const cycles = cyclesOf(graph)
-    expect(cycles).not.toEqual([])
-    expect(cycles[0]).toContain('@hemera/ui')
-    expect(cycles[0]).toContain('@hemera/desktop')
-  })
-
-  test('the design system is forbidden from importing a screen in the first place', () => {
-    const root = fixture({
-      'packages/ui/package.json': JSON.stringify({ name: '@hemera/ui' }),
-      'packages/ui/src/shell.tsx': "import { SessionsPage } from '@hemera/desktop'\n",
-    })
-    try {
-      const rule = PACKAGE_RULES.find((entry) => entry.name === '@hemera/ui')!
-      expect(analyzePackage(root, rule)[0]?.problem).toContain('must not import')
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('the graph of this monorepo is acyclic', () => {
-    expect(cyclesOf(packageGraph(repository))).toEqual([])
   })
 })

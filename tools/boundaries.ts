@@ -1,9 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
- * Checks the dependency boundaries of the monorepo (design D03): who may import what,
+ * Checks the dependency boundaries of the monorepo (design D0-02): who may import what,
  * that no import reaches into another package's private `src`, and that no cycle exists.
  *
- *   bun tools/boundaries.ts
+ *   node tools/boundaries.ts
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -30,9 +30,16 @@ const NO_PLATFORM = [
   },
 ]
 
-const NO_RENDERER = [
-  { pattern: /^react(-dom|-reconciler)?(\/|$)/, reason: 'the React renderer' },
-  { pattern: /^@gpuix\//, reason: 'the GPUiX renderer' },
+const NO_ELECTRON = [{ pattern: /^electron(\/|$)/, reason: 'Electron' }]
+
+const NO_RENDERER = [{ pattern: /^react(-dom)?(\/|$)/, reason: 'the React renderer' }]
+
+/**
+ * The GPUiX era is parked, not deleted: its packages still carry the tokens and the storage
+ * lots 1 and 3 will mine. Nothing in the workspace may import them in the meantime.
+ */
+const NO_LEGACY = [
+  { pattern: /^@hemera\/(ui|runtime)(\/|$)/, reason: 'a package parked under legacy/' },
 ]
 
 export const PACKAGE_RULES: PackageRule[] = [
@@ -41,33 +48,35 @@ export const PACKAGE_RULES: PackageRule[] = [
     directory: 'packages/core',
     forbidden: [
       ...NO_PLATFORM,
+      ...NO_ELECTRON,
       ...NO_RENDERER,
+      ...NO_LEGACY,
       {
-        pattern: /^@hemera\/(runtime|ui|desktop)(\/|$)/,
+        pattern: /^@hemera\/(ipc|desktop)(\/|$)/,
         reason: 'a package core must not depend on',
       },
     ],
   },
   {
-    name: '@hemera/runtime',
-    directory: 'packages/runtime',
-    forbidden: [
-      ...NO_RENDERER,
-      { pattern: /^@hemera\/(ui|desktop)(\/|$)/, reason: 'a package runtime must not depend on' },
-    ],
-  },
-  {
-    name: '@hemera/ui',
-    directory: 'packages/ui',
+    // The channel declaration is read by the main process and by the renderer alike: it
+    // carries names and schemas, never an implementation, so it imports neither side.
+    name: '@hemera/ipc',
+    directory: 'packages/ipc',
     forbidden: [
       ...NO_PLATFORM,
-      { pattern: /^@hemera\//, reason: 'an Hemera package the design system must stay free of' },
+      ...NO_ELECTRON,
+      ...NO_RENDERER,
+      ...NO_LEGACY,
+      {
+        pattern: /^@hemera\/(core|desktop)(\/|$)/,
+        reason: 'a package the channel declaration must not depend on',
+      },
     ],
   },
   {
     name: '@hemera/desktop',
     directory: 'apps/desktop',
-    forbidden: [],
+    forbidden: [...NO_LEGACY],
   },
 ]
 
@@ -154,6 +163,7 @@ function quoted(part: string): string {
 export function analyzePackage(repositoryRoot: string, rule: PackageRule): Violation[] {
   const violations: Violation[] = []
   const packageRoot = resolve(repositoryRoot, rule.directory)
+  const legacyRoot = resolve(repositoryRoot, 'legacy')
   const declared = declaredSubpaths(repositoryRoot)
   for (const file of sourceFilesOf(join(packageRoot, 'src'))) {
     const source = readFileSync(file, 'utf8')
@@ -161,6 +171,16 @@ export function analyzePackage(repositoryRoot: string, rule: PackageRule): Viola
     for (const specifier of specifiersOf(source)) {
       if (specifier.startsWith('.')) {
         const target = resolve(dirname(file), specifier)
+        // Named before the generic escape: a climb into the parked tree is not a package
+        // that moved, it is code the workspace agreed to stop consuming.
+        if (!relative(legacyRoot, target).startsWith('..')) {
+          violations.push({
+            file: reported,
+            specifier,
+            problem: 'imports the legacy tree parked out of the workspace',
+          })
+          continue
+        }
         if (relative(packageRoot, target).startsWith('..')) {
           violations.push({
             file: reported,
@@ -243,7 +263,7 @@ export function analyze(repositoryRoot: string): Violation[] {
 }
 
 if (import.meta.main) {
-  const repositoryRoot = resolve(import.meta.dir, '..')
+  const repositoryRoot = resolve(import.meta.dirname, '..')
   const violations = analyze(repositoryRoot)
   for (const violation of violations) {
     console.error(`${violation.file}: "${violation.specifier}" ${violation.problem}`)
