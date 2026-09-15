@@ -24,6 +24,7 @@
    would arrive stripped of every class it was written with. */
 @source './components';
 @source './icons.ts';
+@source './shell';
 
 /* The dark theme is a class on `<html>`, not a media query: the page follows the system by
    putting the class there, and the user can take it off without the system changing. */
@@ -280,6 +281,50 @@
 
 @utility no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* Everything a hand can press inside the chrome bar opts out of moving the window; the gaps
+   between them do not, which is what makes a bar of controls a title bar (design D2-02). */
+@utility no-drag-children {
+  & > * {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/* The shell: a chrome bar in the strip the platform gave us, and everything else underneath
+   (design D2-01). The body is placed rather than padded, so that the one element allowed to
+   scroll is the content area and nothing above it can be pushed out of view. */
+@utility shell-root {
+  position: relative;
+  height: 100%;
+}
+
+/* The body clips, and the root does not: a sidebar that is folding must not make the window
+   scrollable, and a popup rendered in the overlay root must not be cut off by either. */
+@utility shell-body {
+  position: absolute;
+  inset: 0;
+  top: env(titlebar-area-height, var(--spacing-title-bar));
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The chrome bar's two segments. The first column is the sidebar's current width, which the
+   shell writes as the sidebar folds: one animated value, two columns that cannot come apart
+   (design D2-02). The fallback is what the bar is drawn at before the shell has said. */
+@utility chrome-columns {
+  display: grid;
+  grid-template-columns: var(--sidebar-current-width, var(--spacing-sidebar)) 1fr;
+}
+
+/* The one level of scrolling of the window (design D2-05). `contain` is what keeps a wheel
+   over the content from carrying on into the page once the content has run out. */
+@utility content-area {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* What a backdrop does, which is appear and go away. Named here for the same reason as the
