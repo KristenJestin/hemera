@@ -31,6 +31,6 @@ export default defineConfig({
     ignorePatterns: [...OUTSIDE_THE_WORKSPACE, '**/*.md'],
   },
   test: {
-    include: ['packages/*/tests/**/*.test.ts'],
+    include: ['packages/*/tests/**/*.test.ts', 'tools/git-flow.test.ts'],
   },
 })

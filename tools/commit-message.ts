@@ -1,10 +1,13 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
- * Angular commit convention of the product repository (see CLAUDE.md).
+ * Angular commit convention of the product repository (see AGENTS.md).
  *
- *   bun tools/commit-message.ts <file>    validate the message held by <file>
- *   bun tools/commit-message.ts --range <base>..<head>   validate a range of commits
+ *   node tools/commit-message.ts <file>    validate the message held by <file>
+ *   node tools/commit-message.ts --range <base>..<head>   validate a range of commits
  */
+
+import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 
 /** Commit types allowed by the convention. */
 export const COMMIT_TYPES = [
@@ -83,21 +86,17 @@ export function validateBranch(branch: string): ValidationResult {
 }
 
 function commitsOf(range: string): { subject: string; body: string }[] {
-  const result = Bun.spawnSync(['git', 'log', '--format=%H', range], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  if (result.exitCode !== 0) {
-    throw new Error(new TextDecoder().decode(result.stderr).trim())
+  const result = spawnSync('git', ['log', '--format=%H', range], { encoding: 'utf8' })
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim())
   }
-  return new TextDecoder()
-    .decode(result.stdout)
+  return result.stdout
     .trim()
     .split('\n')
     .filter((hash) => hash.length > 0)
     .map((hash) => {
-      const message = Bun.spawnSync(['git', 'log', '-1', '--format=%B', hash], { stdout: 'pipe' })
-      return { subject: hash, body: new TextDecoder().decode(message.stdout) }
+      const message = spawnSync('git', ['log', '-1', '--format=%B', hash], { encoding: 'utf8' })
+      return { subject: hash, body: message.stdout }
     })
 }
 
@@ -122,10 +121,10 @@ if (import.meta.main) {
 
   const file = process.argv[2]
   if (file === undefined) {
-    console.error('usage: bun tools/commit-message.ts <file> | --range <base>..<head>')
+    console.error('usage: node tools/commit-message.ts <file> | --range <base>..<head>')
     process.exit(2)
   }
-  const result = validateCommitMessage(await Bun.file(file).text())
+  const result = validateCommitMessage(readFileSync(file, 'utf8'))
   if (!result.ok) {
     console.error(`commit rejected: ${result.error}`)
     process.exit(1)

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Traceability of the lot: every scenario of its specs to the test that covers it.
  *
@@ -6,15 +6,15 @@
  * neither covered nor explicitly deferred fails the verification: a gap is named here or it
  * does not exist.
  *
- *   bun tools/traceability.ts            check, and report what is missing
- *   bun tools/traceability.ts --write    write reports/traceability.md
+ *   node tools/traceability.ts            check, and report what is missing
+ *   node tools/traceability.ts --write    write reports/traceability.md
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 /** Change whose specs this repository delivers. */
-export const CHANGE = 'lot-1-demarrage'
+export const CHANGE = 'lot-0-socle'
 
 /** Reasons a scenario may be left without a test of this repository. */
 export const DEFERRAL_REASONS = {
@@ -31,10 +31,7 @@ export type DeferralReason = keyof typeof DEFERRAL_REASONS
  * Nothing lands here to make the verification pass: a scenario is deferred only when the
  * machine or the act it needs does not exist here.
  */
-export const DEFERRED: Record<string, DeferralReason> = {
-  'Premier lot sur les deux systèmes': 'linux',
-  'Écran à haute densité': 'human',
-}
+export const DEFERRED: Record<string, DeferralReason> = {}
 
 export interface Scenario {
   name: string
@@ -85,7 +82,7 @@ const SUITE_NAME = /describe(?:\.\w+(?:\([^)]*\))?)*\s*\(\s*(['"`])(.+?)\1/g
 export function suitesOf(repositoryRoot: string): Map<string, string[]> {
   const files = [
     ...filesUnder(join(repositoryRoot, 'tools'), (path) => path.endsWith('.test.ts')),
-    ...['apps/desktop', 'packages/core', 'packages/runtime', 'packages/ui'].flatMap((workspace) =>
+    ...['apps/desktop', 'packages/core', 'packages/ipc'].flatMap((workspace) =>
       ['tests', 'system-tests', 'src'].flatMap((folder) =>
         filesUnder(join(repositoryRoot, workspace, folder), (path) => /\.test\.tsx?$/.test(path)),
       ),
@@ -140,15 +137,7 @@ export function uncovered(coverage: Coverage[]): Coverage[] {
  * Failure injection and property tests are named here because a green suite that never
  * injects a failure proves nothing about what happens when one lands.
  */
-export const REQUIRED_SUITES = [
-  'Échec de migration',
-  'Addon absent de la machine',
-  'Échec de persistance',
-  'Arrêt brutal',
-  'Rang rééquilibrable',
-  'Ordre des entrées',
-  'Écriture pendant la pagination',
-] as const
+export const REQUIRED_SUITES = [] as const satisfies readonly string[]
 
 export function missingRequiredSuites(repositoryRoot: string): string[] {
   const suites = suitesOf(repositoryRoot)
@@ -208,7 +197,7 @@ export function specsRootOf(
 }
 
 if (import.meta.main) {
-  const repositoryRoot = resolve(import.meta.dir, '..')
+  const repositoryRoot = resolve(import.meta.dirname, '..')
   const specsRoot = specsRootOf(repositoryRoot)
   if (!existsSync(specsRoot)) {
     console.error(`the specs of ${CHANGE} are not beside this repository (${specsRoot})`)

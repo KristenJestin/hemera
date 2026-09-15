@@ -1,11 +1,12 @@
-import { describe, expect, test } from 'bun:test'
+import { spawnSync } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { describe, expect, test } from 'vite-plus/test'
 
 import { validateBranch, validateCommitMessage } from './commit-message.ts'
 
-const repository = resolve(import.meta.dir, '..')
+const repository = resolve(import.meta.dirname, '..')
 
 interface CommandResult {
   code: number
@@ -13,12 +14,8 @@ interface CommandResult {
 }
 
 function git(cwd: string, ...args: string[]): CommandResult {
-  const result = Bun.spawnSync(['git', ...args], { cwd, stdout: 'pipe', stderr: 'pipe' })
-  const decoder = new TextDecoder()
-  return {
-    code: result.exitCode,
-    output: `${decoder.decode(result.stdout)}${decoder.decode(result.stderr)}`,
-  }
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  return { code: result.status ?? 1, output: `${result.stdout}${result.stderr}` }
 }
 
 /** A throwaway repository carrying this repository's hooks and their validators. */
@@ -26,6 +23,9 @@ function repositoryWithHooks(): string {
   const path = mkdtempSync(join(tmpdir(), 'hemera-flow-'))
   cpSync(join(repository, '.githooks'), join(path, '.githooks'), { recursive: true })
   mkdirSync(join(path, 'tools'), { recursive: true })
+  // The validators are modules: without a manifest saying so, Node has to guess the goal of
+  // a file it strips the types from, and the hook fails for a reason that is not the commit.
+  writeFileSync(join(path, 'package.json'), `${JSON.stringify({ type: 'module' })}\n`)
   for (const file of ['commit-message.ts', 'branch-guard.ts']) {
     cpSync(join(repository, 'tools', file), join(path, 'tools', file))
   }
@@ -139,12 +139,10 @@ describe('Crochet ignoré faute de droit', () => {
   test('both hooks are recorded as executable, or Git skips them without a word', () => {
     // Git for Windows runs a hook whatever its mode; every other system skips one that is
     // not executable, and skips it silently — the protection would simply not exist there.
-    const recorded = new TextDecoder().decode(
-      Bun.spawnSync(['git', 'ls-files', '-s', '.githooks'], {
-        cwd: repository,
-        stdout: 'pipe',
-      }).stdout,
-    )
+    const recorded = spawnSync('git', ['ls-files', '-s', '.githooks'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).stdout
 
     const modes = recorded
       .split('\n')

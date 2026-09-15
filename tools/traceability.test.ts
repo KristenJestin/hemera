@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vite-plus/test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -18,7 +18,7 @@ import {
   uncovered,
 } from './traceability.ts'
 
-const repository = resolve(import.meta.dir, '..')
+const repository = resolve(import.meta.dirname, '..')
 const specs = specsRootOf(repository)
 
 /** A change holding one capability with the scenarios given, and one test file. */
@@ -171,7 +171,7 @@ describe('Table stable entre deux exécutions', () => {
       )
       writeFileSync(
         join(root, 'packages', 'core', 'package.json'),
-        JSON.stringify({ name: '@hemera/core', scripts: { test: 'bun test ./tests' } }),
+        JSON.stringify({ name: '@hemera/core', scripts: { typecheck: 'tsc -p tsconfig.json' } }),
       )
 
       const covered = coverageOf(root, specsRoot)[0]!
