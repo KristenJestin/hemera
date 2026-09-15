@@ -390,7 +390,14 @@ export function readMessages(database: Database, sessionId: string): SessionEntr
     .where(eq(sessionEntries.sessionId, sessionId))
     .orderBy(asc(sessionEntries.rank))
     .all()
-    .map((row) => ({ ...row, author: row.author as 'human' }))
+    .map((row) => ({
+      id: row.id,
+      sessionId: row.sessionId,
+      author: row.author as 'human',
+      body: row.body,
+      rank: row.rank,
+      createdAt: row.createdAt,
+    }))
 }
 
 /** Renames a session; the choice is never taken back by a proposal. */
