@@ -192,10 +192,15 @@ Until then nothing in this repository opens one.
 
 ## UI rules
 
-- Motion is the application's signature: one preset, `spring` from `@hemera/ui/motion` — a soft
-  spring that arrives without overshooting (`stiffness 170, damping 26`), the "Calme" verdict
-  of the prototype — under `MotionConfig reducedMotion="user"`. No component writes its own
-  spring numbers or durations; a lint check refuses them outside `packages/ui/src/motion.ts`.
+- Motion is the application's signature, and it lives in `packages/ui/src/motion.ts` as a short,
+  closed set: `press` for what answers the hand (hover, press, a width following it — stiff and
+  light), `arrival` for what puts itself in place (panels, popups — the prototype's "Calme"
+  spring, `stiffness 170, damping 26`, no overshoot), `instant` for a system asking for less
+  movement. Components read `useTransition(preset)`, never a preset directly: it is what
+  answers the reduced-motion preference, because motion's own `reducedMotion` drops a transform
+  animation instead of finishing it and leaves a panel where it started — hence
+  `MotionConfig reducedMotion="never"` around the tree. No component writes its own spring
+  numbers or durations; a lint check refuses them outside that one file.
   **Only `transform`, `opacity`, `filter` and `clip-path` are animated.** A lint check refuses
   an animation that targets a layout property or a colour.
 - Every visual value comes from the design system's CSS tokens. **No hex colors, no px sizes,
