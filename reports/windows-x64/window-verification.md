@@ -44,3 +44,25 @@ window handle exists.
 
 No white frame at any point. The window's own first image is the application's background
 colour; before that, nothing of the window is painted at all.
+
+## Mouvement réduit respecté
+
+Verified by hand on this machine on 2026-09-15, with the Windows animation preference turned
+off in Settings › Accessibility › Visual effects. The renderer reads nothing but the
+`prefers-reduced-motion` media feature Chromium maps that setting onto, through
+`MotionConfig reducedMotion="user"`.
+
+Linux is not verified by this entry: the same act has to be done on Arch/Hyprland and on
+Ubuntu 24.04 — task 4.2 of `lot-0-linux`.
+
+## Recette humaine à la vraie souris
+
+Performed by the user on this machine on 2026-09-15, on the packaged application extracted to
+a folder with spaces outside the sources: window dragged between two displays, minimised,
+maximised, restored and closed by the system's own buttons, witness transition triggered, and
+the report read. No deviation reported.
+
+This is the act the synthetic clicks of the sections above cannot stand in for: they are real
+clicks from the application's point of view, but they are not a hand.
+
+Linux is not verified by this entry — task 6.2 of `lot-0-linux`.
