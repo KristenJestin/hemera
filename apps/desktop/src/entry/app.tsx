@@ -26,6 +26,7 @@ import { SessionsPage } from '../ui/sessions/sessions-page.tsx'
 import { useSessions } from '../ui/sessions/use-sessions.ts'
 import { ShowcasePage } from '../ui/showcase/showcase-page.tsx'
 import type { Route } from '../ui/navigation.ts'
+import { openDiagnosticLog } from '@hemera/runtime'
 import type { StoreContext } from '@hemera/runtime'
 import { windowTitleOf } from './window-title.ts'
 
@@ -58,8 +59,8 @@ function Hemera({ route, context }: HemeraProps) {
     // The backend is announced beside the size, on its own line: the headless client answers
     // with the nominal size it was asked for, so the measurement alone does not say a window
     // was opened, and only the name of the backend that opened it does.
-    console.log(`window backend ${windowBackend()}`)
-    console.log(`window opened ${measured.width}x${measured.height}`)
+    log.info(`window backend ${windowBackend()}`)
+    log.info(`window opened ${measured.width}x${measured.height}`)
   }, [size])
 
   if (route === 'showcase') return <ShowcasePage />
@@ -82,11 +83,15 @@ if ('kind' in instance) {
 
 const route = routeOrDefault('sessions', instance.channel)
 
+// Every diagnostic of the start goes to the profile as well as to the console: a package
+// started from a desktop icon has no console, so what is only printed is lost.
+const log = openDiagnosticLog({ directory: instance.directory })
+
 const fonts = registerEmbeddedFonts(embeddedFontLocator, addFonts)
 const diagnostic = missingFontDiagnostic(fonts)
-if (diagnostic !== null) console.error(diagnostic)
-console.log(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)
-console.log(`channel ${instance.channel}, route ${route}, profile ${instance.directory}`)
+if (diagnostic !== null) log.error(diagnostic)
+log.info(`fonts registered ${fonts.registered.length}/${EMBEDDED_FONTS.length}`)
+log.info(`channel ${instance.channel}, route ${route}, profile ${instance.directory}`)
 
 render(<Hemera route={route} context={instance.context} />, {
   title: windowTitleOf(t('app.name'), instance.channel),

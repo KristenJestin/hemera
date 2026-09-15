@@ -1,6 +1,6 @@
 # Traceability — lot-1-demarrage
 
-152 of 154 scenarios are covered by a test named after them.
+155 of 157 scenarios are covered by a test named after them.
 2 wait on a machine or an act that does not exist here, and say which.
 
 ## application-foundation
@@ -28,6 +28,9 @@
 | Premier lot sur les deux systèmes | _deferred — no Linux machine is available here; to be run on the Linux target_ |
 | Une seule cible vérifiée | `tools/environment-report.test.ts` |
 | Dépendance système manquante | `apps/desktop/tests/native-dependencies.test.ts`, `tools/package-desktop.test.ts` |
+| Diagnostic sans console | `packages/runtime/tests/diagnostics.test.ts` |
+| Journal borné dans le temps | `packages/runtime/tests/diagnostics.test.ts` |
+| Journal non inscriptible | `packages/runtime/tests/diagnostics.test.ts` |
 | Vérification du socle sans fenêtre | `tools/business-suite.test.ts` |
 | Démarrage applicatif | `apps/desktop/system-tests/window.test.ts`, `tools/gpuix/native-build.test.ts` |
 | Aucune réponse d'agent au lot 1 | `apps/desktop/system-tests/sessions.test.tsx` |

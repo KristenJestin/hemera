@@ -82,9 +82,17 @@ export interface OpenInstanceOptions {
  * A second instance never opens the database in write: the caller reads the outcome of the
  * lock and brings the running window forward instead.
  */
-export function openInstance(options: OpenInstanceOptions = {}): InstanceProfile | LockOutcome {
+/**
+ * Where this run's profile is, without opening anything.
+ *
+ * A start that fails before the database is opened still has somewhere to write why: the
+ * location is a function of the channel and the system, not of a profile being readable.
+ */
+export function profileDirectoryOf(options: OpenInstanceOptions = {}): {
+  channel: Channel
+  directory: string
+} {
   const env = options.env ?? process.env
-  const now = options.now ?? Date.now()
   const channel = resolveChannel({
     packaged: options.packaged ?? 'dev',
     env,
@@ -96,6 +104,12 @@ export function openInstance(options: OpenInstanceOptions = {}): InstanceProfile
     channel,
     home: homedir(),
   })
+  return { channel, directory }
+}
+
+export function openInstance(options: OpenInstanceOptions = {}): InstanceProfile | LockOutcome {
+  const now = options.now ?? Date.now()
+  const { channel, directory } = profileDirectoryOf(options)
 
   const lock = acquireInstanceLock({
     directory,

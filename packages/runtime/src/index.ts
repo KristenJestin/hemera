@@ -16,6 +16,19 @@ export {
 } from './platform/profile.ts'
 export type { ProfileLocation, ProfileQuery } from './platform/profile.ts'
 export {
+  DEFAULT_RETENTION_DAYS,
+  diagnosticLine,
+  expiredLogs,
+  logExists,
+  logFileNameOf,
+  openDiagnosticLog,
+} from './platform/diagnostics.ts'
+export type {
+  DiagnosticLevel,
+  DiagnosticLog,
+  DiagnosticLogOptions,
+} from './platform/diagnostics.ts'
+export {
   BUSY_TIMEOUT_MS,
   DATABASE_FILE,
   MigrationChecksumError,
