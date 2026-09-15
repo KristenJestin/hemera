@@ -1,0 +1,28 @@
+packages:
+  - apps/*
+  - packages/*
+
+# A dependency only runs an install script if it is allowed here. esbuild links the binary the
+# end-to-end runner transpiles with; the three refused ones download a browser driver or build
+# a Squirrel installer, and this repository drives Electron and ships a zip, an AppImage and a deb.
+allowBuilds:
+  edgedriver: false
+  electron-winstaller: false
+  esbuild: true
+  geckodriver: false
+
+minimumReleaseAgeExclude:
+  - '@voidzero-dev/vite-plus-core@0.3.2'
+  - '@voidzero-dev/vite-plus-darwin-arm64@0.3.2'
+  - '@voidzero-dev/vite-plus-darwin-x64@0.3.2'
+  - '@voidzero-dev/vite-plus-linux-arm64-gnu@0.3.2'
+  - '@voidzero-dev/vite-plus-linux-arm64-musl@0.3.2'
+  - '@voidzero-dev/vite-plus-linux-x64-gnu@0.3.2'
+  - '@voidzero-dev/vite-plus-linux-x64-musl@0.3.2'
+  - '@voidzero-dev/vite-plus-win32-arm64-msvc@0.3.2'
+  - '@voidzero-dev/vite-plus-win32-x64-msvc@0.3.2'
+  - vite-plus@0.3.2
+  - framer-motion@13.3.0
+  - motion-dom@13.3.0
+  - motion-utils@13.3.0
+  - motion@13.3.0

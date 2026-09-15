@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+jobs:
+  commit-messages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Check the Angular commit convention
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          head="${{ github.event.pull_request.head.sha || github.sha }}"
+          node tools/commit-message.ts --range "$base..$head"
+
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        working-directory: source
+        run: corepack enable
+
+      # Since Electron 42 the binary is downloaded on the first run of its `bin` script and
+      # no longer by a postinstall hook. It is cached and fetched explicitly, so no job ever
+      # pulls a hundred megabytes twice and no run downloads it behind a test.
+      - name: Cache the Electron binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
+
+      - working-directory: source
+        run: pnpm install --frozen-lockfile
+      - name: Fetch the Electron binary
+        working-directory: source/apps/desktop
+        run: pnpm exec install-electron
+
+      - working-directory: source
+        run: pnpm typecheck
+      - working-directory: source
+        run: pnpm lint
+      - working-directory: source
+        run: pnpm fmt:check
+      # The suites that need a window are not run here: a runner has no display server and no
+      # GPU, and what this lot proves about a window is proved on a real target.
+      - working-directory: source
+        run: pnpm test
