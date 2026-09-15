@@ -62,7 +62,21 @@ jobs:
         run: pnpm lint
       - working-directory: source
         run: pnpm fmt:check
+      # The stories run as tests in a headless Chromium that Playwright downloads on demand; it
+      # is cached like the Electron binary so no run fetches a browser twice.
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
+      - name: Fetch the Playwright browser
+        working-directory: source/packages/ui
+        run: pnpm exec playwright install chromium ${{ runner.os == 'Linux' && '--with-deps' || '' }}
+
       # The suites that need a window are not run here: a runner has no display server and no
-      # GPU, and what this lot proves about a window is proved on a real target.
+      # GPU, and what this lot proves about a window is proved on a real target. The stories
+      # run headless, which is a page and not a window.
       - working-directory: source
         run: pnpm test

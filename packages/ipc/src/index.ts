@@ -1,6 +1,6 @@
 /** Public surface of the channel declaration shared by the main process and the renderer. */
 
-export { CHANNELS, windowCommandSchema } from './channels.ts'
+export { CHANNELS, themeSchema, windowCommandSchema } from './channels.ts'
 export type {
   Bridge,
   ChannelArguments,

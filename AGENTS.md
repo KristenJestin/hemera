@@ -64,14 +64,18 @@ packages/core     @hemera/core     pure TypeScript: domain, use cases, ports. No
 packages/ipc      @hemera/ipc      the shared channel declaration: one name per channel, its
                                    Zod argument schema and its response type. Names and
                                    schemas only, no implementation and no Electron.
+packages/ui       @hemera/ui       the design system: the CSS theme, the motion preset, the
+                                   icon catalogue and the components. React, Tailwind 4, Base
+                                   UI and motion; nothing of Hemera, nothing of Electron.
 tools/            —                boundaries, commit-message, git-flow, environment-report,
                                    package-desktop, window-options, motion-properties.
                                    TypeScript run by Node, tested by Vitest.
 ```
 
-Dependency direction is `desktop → core` and `desktop → ipc`. `core` imports nothing of
-Hemera, `ipc` imports nothing of Hemera: both are leaves the application composes. Import
-other packages only through their `exports`; never reach into another package's `src`.
+Dependency direction is `desktop → core`, `desktop → ipc` and `desktop → ui`. `core`, `ipc`
+and `ui` import nothing of Hemera: they are the leaves the application composes. Tabler comes
+through `packages/ui/src/icons.ts` and nowhere else. Import other packages only through their
+`exports`; never reach into another package's `src`.
 `node tools/boundaries.ts` enforces all of it and runs inside `pnpm lint`.
 
 "Workspace" means two things: a pnpm workspace (a package here) and a product Workspace
@@ -188,8 +192,18 @@ Until then nothing in this repository opens one.
 
 ## UI rules
 
-- Motion is the application's signature: `motion` with the "Calme" personality, soft springs
-  (`stiffness 170, damping 26`), no bounce, under `MotionConfig reducedMotion="user"`.
+- Motion is the application's signature, and it lives in `packages/ui/src/motion.ts` as a short,
+  closed set: `press` for what answers the hand (hover, press, a width following it — stiff and
+  light), `arrival` for what puts itself in place (panels, popups — the prototype's "Calme"
+  spring, `stiffness 170, damping 26`, no overshoot), `instant` for a system asking for less
+  movement. Components read `useTransition(preset)`, never a preset directly: it answers the
+  reduced-motion preference with the end state for every property, where motion's own
+  `reducedMotion` would keep animating opacity. The tree runs under
+  `MotionConfig reducedMotion="user"` all the same, as the net under any element that forgets
+  the hook — and the lint refuses a `motion.*` element that animates without a `transition`
+  from it. CSS transitions of the design system stop under `prefers-reduced-motion: reduce`.
+  No component writes its own spring numbers or durations; a lint check refuses them outside
+  that one file.
   **Only `transform`, `opacity`, `filter` and `clip-path` are animated.** A lint check refuses
   an animation that targets a layout property or a colour.
 - Every visual value comes from the design system's CSS tokens. **No hex colors, no px sizes,

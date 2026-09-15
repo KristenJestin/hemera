@@ -72,14 +72,18 @@ describe("Ouverture sous Windows à l'échelle 150 %", () => {
     })
     expect(window.count).toBe(1)
     expect(window.visible).toBe(true)
-    // The colour the frame is painted with before anything is drawn in it.
-    expect(window.backgroundColor?.toLowerCase()).toBe('#12141a')
+    // The colour the frame is painted with before anything is drawn in it, which is the very
+    // token the page is painted with: one theme, read by both sides of the application.
+    const background = await browser.execute(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),
+    )
+    expect(window.backgroundColor?.toLowerCase()).toBe(background.toLowerCase())
   })
 
   it('marks a drag region the page does not lose to its controls', async () => {
     const regions = await browser.execute(() => {
-      const strip = document.querySelector('.title-bar')
-      const control = document.querySelector('.title-bar ~ .page button')
+      const strip = document.querySelector('header')
+      const control = document.querySelector('main button')
       return {
         strip: strip === null ? null : getComputedStyle(strip).getPropertyValue('app-region'),
         control: control === null ? null : getComputedStyle(control).getPropertyValue('app-region'),

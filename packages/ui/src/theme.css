@@ -1,0 +1,374 @@
+/*
+ * The theme of Hemera: the one place a colour, a size, a radius, a shadow or a duration is
+ * written down (design D1-01). Tailwind reads it, the renderer loads it, and the main process
+ * parses `--background` out of it to paint the window frame.
+ *
+ * Two layers, and the order matters. The first declares the roles as plain custom properties,
+ * once per theme, so that swapping a class on `<html>` swaps every value at once. The second
+ * hands those roles to Tailwind with `@theme inline`, which keeps the `var()` in the generated
+ * utility instead of freezing the value it had at build time — without `inline` the dark theme
+ * would compile away.
+ *
+ * The names come from coss ui; the values come from the validated prototype
+ * (`spikes/proto-motion/src/styles.css`, itself extracted from the HTML prototype). None of
+ * Tailwind's own palette survives: `--color-*: initial` clears it, so a class like `bg-red-500`
+ * cannot be generated and the lint has something real to refuse.
+ */
+
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/fira-code';
+
+/* The classes of the design system live beside this file, not in whatever loads it: an
+   application's own build looks under its own root and would never find them, so a component
+   would arrive stripped of every class it was written with. */
+@source './components';
+@source './icons.ts';
+
+/* The dark theme is a class on `<html>`, not a media query: the page follows the system by
+   putting the class there, and the user can take it off without the system changing. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- Roles, light ---- */
+:root {
+  color-scheme: light;
+
+  --background: #ededf0;
+  --foreground: #111118;
+  --card: #ffffff;
+  --card-foreground: #111118;
+  --muted: #f6f6f8;
+  /* The prototype's dim grey lands at 4.47:1 on the light background, half a point short of
+     what small text needs; a shade down clears it everywhere the role is used. */
+  --muted-foreground: #63636f;
+  --accent: #e9e9ee;
+  --accent-foreground: #111118;
+
+  /* The prototype's accent fuchsia is #d946ef, but white on it is 3.45:1 and the catalogue's
+     own accessibility check refuses that. The solid fills take the prototype's next shade
+     down, which reads at 4.7:1; the ring keeps the lighter one. */
+  --primary: #c026d3;
+  --primary-foreground: #ffffff;
+  --primary-strong: #a21caf;
+  --primary-muted: #fdf4ff;
+  --primary-muted-foreground: #a21caf;
+
+  --success: #16a34a;
+  --success-muted: #ecfdf3;
+  --success-muted-foreground: #15803d;
+  --warning: #d97706;
+  --warning-muted: #fffbeb;
+  --warning-muted-foreground: #b45309;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --destructive-muted: #fef2f2;
+  --destructive-muted-foreground: #b91c1c;
+  --info: #2563eb;
+  --info-muted: #eff6ff;
+  --info-muted-foreground: #1d4ed8;
+
+  --mission-define: #7c3aed;
+  --mission-define-muted: #f3efff;
+  --mission-define-muted-foreground: #6d28d9;
+  --mission-build: #0891b2;
+  --mission-build-muted: #ecfeff;
+  --mission-build-muted-foreground: #0e7490;
+  --mission-free: #6b6b7b;
+  --mission-free-muted: #f1f1f4;
+  --mission-free-muted-foreground: #4b4b57;
+
+  --border: #e2e2e8;
+  --input: #d3d3db;
+  --ring: rgba(217, 70, 239, 0.25);
+  --overlay: rgba(16, 16, 24, 0.2);
+
+  --shadow: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.04);
+  --shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12);
+}
+
+/* ---- Roles, dark ---- */
+.dark {
+  color-scheme: dark;
+
+  --background: #040406;
+  --foreground: #ececf1;
+  --card: #18181e;
+  --card-foreground: #ececf1;
+  --muted: #0e0e12;
+  --muted-foreground: #9a9aab;
+  --accent: #121217;
+  --accent-foreground: #ececf1;
+
+  --primary: #e879f9;
+  /* The dark primary is a light fuchsia; what reads on it is the page's own dark, not white. */
+  --primary-foreground: #040406;
+  --primary-strong: #d946ef;
+  --primary-muted: rgba(232, 121, 249, 0.1);
+  --primary-muted-foreground: #f0abfc;
+
+  --success: #4ade80;
+  --success-muted: rgba(74, 222, 128, 0.1);
+  --success-muted-foreground: #4ade80;
+  --warning: #fbbf24;
+  --warning-muted: rgba(251, 191, 36, 0.1);
+  --warning-muted-foreground: #fbbf24;
+  --destructive: #f87171;
+  --destructive-foreground: #040406;
+  --destructive-muted: rgba(248, 113, 113, 0.1);
+  --destructive-muted-foreground: #f87171;
+  --info: #60a5fa;
+  --info-muted: rgba(96, 165, 250, 0.1);
+  --info-muted-foreground: #60a5fa;
+
+  --mission-define: #a78bfa;
+  --mission-define-muted: rgba(167, 139, 250, 0.12);
+  --mission-define-muted-foreground: #a78bfa;
+  --mission-build: #22d3ee;
+  --mission-build-muted: rgba(34, 211, 238, 0.1);
+  --mission-build-muted-foreground: #22d3ee;
+  --mission-free: #9a9aab;
+  --mission-free-muted: rgba(154, 154, 171, 0.12);
+  --mission-free-muted-foreground: #9a9aab;
+
+  --border: #27272f;
+  --input: #363640;
+  --ring: rgba(232, 121, 249, 0.3);
+  --overlay: rgba(0, 0, 0, 0.5);
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-raised: 0 14px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- The Tailwind theme reads the roles, never the raw values ---- */
+@theme inline {
+  --color-*: initial;
+
+  /* The two colours that are not values: what is behind, and whatever the text already is. */
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-muted: var(--primary-muted);
+  --color-primary-muted-foreground: var(--primary-muted-foreground);
+
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-success-muted-foreground: var(--success-muted-foreground);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-warning-muted-foreground: var(--warning-muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-muted: var(--destructive-muted);
+  --color-destructive-muted-foreground: var(--destructive-muted-foreground);
+  --color-info: var(--info);
+  --color-info-muted: var(--info-muted);
+  --color-info-muted-foreground: var(--info-muted-foreground);
+
+  --color-mission-define: var(--mission-define);
+  --color-mission-define-muted: var(--mission-define-muted);
+  --color-mission-define-muted-foreground: var(--mission-define-muted-foreground);
+  --color-mission-build: var(--mission-build);
+  --color-mission-build-muted: var(--mission-build-muted);
+  --color-mission-build-muted-foreground: var(--mission-build-muted-foreground);
+  --color-mission-free: var(--mission-free);
+  --color-mission-free-muted: var(--mission-free-muted);
+  --color-mission-free-muted-foreground: var(--mission-free-muted-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+
+  --shadow-sm: var(--shadow);
+  --shadow-lg: var(--shadow-raised);
+}
+
+/* ---- The scales, the same under both themes ---- */
+@theme {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'Fira Code Variable', ui-monospace, monospace;
+
+  --text-xs: 0.6875rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.125rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.375rem;
+  --text-2xl--line-height: 2rem;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Named steps of the spacing scale, so an icon is sized by the scale and not by a number:
+     `size-icon-md` is a spacing utility like any other, and the scale lint can close the list. */
+  /* The strip the system draws its window buttons in. The main process asks the platform for
+     it in pixels; the page reads back what the platform actually gave, and falls back here. */
+  --spacing-title-bar: 2.5rem;
+
+  --spacing-icon-sm: 0.875rem;
+  --spacing-icon-md: 1rem;
+  --spacing-icon-lg: 1.25rem;
+
+  /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
+     gives the spring, for the transitions Base UI drives through data attributes. */
+  --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
+  --duration-fast: 160ms;
+  --duration-base: 260ms;
+  --duration-slow: 400ms;
+
+  /* One turn of the loading indicator. Linear on purpose: a spin that eases is a spin that
+     looks like it keeps stopping. */
+  --duration-turn: 1200ms;
+  --animate-turn: turn var(--duration-turn) linear infinite;
+
+  @keyframes turn {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+/* Where the system draws its own window buttons, as the platform tells the page. The whole
+   strip moves the window; anything interactive inside it opts back out. */
+@utility title-bar {
+  position: fixed;
+  top: 0;
+  left: env(titlebar-area-x, 0px);
+  width: env(titlebar-area-width, 100%);
+  height: env(titlebar-area-height, var(--spacing-title-bar));
+  -webkit-app-region: drag;
+}
+
+@utility no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* What a backdrop does, which is appear and go away. Named here for the same reason as the
+   popup's own motion: the list of properties is a decision, not something a caller retypes. */
+/* A focus ring that arrives instead of snapping on.
+   The ring itself is a shadow, and a shadow is not something a compositor can animate — so
+   nothing about the shadow changes. It is drawn once on a layer of its own, kept invisible and
+   a little too large, and what moves is that layer's opacity and scale. It is drawn inside the
+   control rather than around it, because a control that hides its overflow would clip a ring
+   sitting outside it. */
+@utility focus-ring {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 2px var(--color-ring);
+    opacity: 0;
+    scale: 1.06;
+    pointer-events: none;
+    transition-property: opacity, scale;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-calm);
+  }
+
+  &:focus-visible::after,
+  /* A control that cannot carry the ring itself wears it through the box around it: an input
+     and a textarea are replaced elements, and a replaced element renders no pseudo-element at
+     all — the ring would simply never be drawn. */
+  &:has(:focus-visible)::after {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@utility backdrop-motion {
+  transition-property: opacity, backdrop-filter;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* The two properties a popup enters and leaves on, named once so that no component writes the
+   list itself and nothing else can slip into it.
+   A popup carries its resting `translate` and `scale` as classes of their own, and not only
+   under the starting and ending variants. Without them the variant rule is the only thing
+   declaring the property at all, and a popup whose transition never ran — Base UI opens
+   instantly when nothing pointed at it — keeps the value it was supposed to leave.
+
+   A popup comes down from its trigger and folds back up into it rather than growing out of a
+   corner: a scale from an origin reads as a direction nobody asked for, and the direction a
+   list opens in is the first thing the eye uses to find where it came from. */
+@utility popup-motion {
+  /* `translate` and `scale` and not `transform`: Tailwind 4 writes its transform utilities as
+     the individual properties, and a transition naming `transform` never sees them — the popup
+     lands at its end position in one frame and then animates nothing. */
+  transition-property: opacity, translate, scale;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  /* A system asking for less movement gets the popup where it ends, and nothing on the way. */
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* Where a dot sits on the ring it orbits: a third of a turn apart, pushed out from the middle.
+   The push is a share of the dot's own size, which is the only length a percentage can mean
+   here — at one and a tenth of it the three dots land just inside the edge of the box at
+   every step of the scale. The transform is fixed; only the ring they sit on ever turns. */
+@utility orbit-* {
+  transform: rotate(calc(--value(integer) * 120deg)) translateY(-110%);
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Tailwind 4 dropped the pointer cursor from buttons in its reset, on the grounds that the
+     browser's own default is an arrow. What a user has learned from every other application is
+     that a hand means "this does something", so it goes back — everywhere something is pressed,
+     and nowhere something refuses to be. */
+  button:not(:disabled, [aria-disabled='true']),
+  [role='button']:not([aria-disabled='true']),
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background-color: var(--color-primary-muted);
+  }
+}

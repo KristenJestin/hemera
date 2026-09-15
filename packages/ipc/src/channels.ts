@@ -16,6 +16,11 @@ export const windowCommandSchema = z.object({
   command: z.enum(['minimize', 'maximize', 'close']),
 })
 
+/** Which theme the page is wearing, so the frame and its buttons wear the same one. */
+export const themeSchema = z.object({
+  theme: z.enum(['light', 'dark']),
+})
+
 const nothingSchema = z.object({})
 
 /**
@@ -31,6 +36,10 @@ export const CHANNELS = {
   },
   'window.command': {
     arguments: windowCommandSchema,
+    response: z.void(),
+  },
+  'theme.set': {
+    arguments: themeSchema,
     response: z.void(),
   },
 } as const
