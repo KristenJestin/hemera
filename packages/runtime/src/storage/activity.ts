@@ -11,6 +11,10 @@
  */
 
 import type { Database } from 'bun:sqlite'
+import { and, asc, count, eq, gte, max, sql } from 'drizzle-orm'
+
+import { orm } from './orm.ts'
+import { activityOutput } from './schema.ts'
 
 /** Which stream a block came from. */
 export type OutputStream = 'stdout' | 'stderr'
@@ -43,40 +47,33 @@ export class OutputNotAnEventError extends Error {
 /** Appends one block of output and returns the block it became. */
 export function appendOutput(database: Database, block: AppendOutput): OutputBlock {
   const next = nextBlockIndex(database, block.contextId)
-  database.run(
-    `INSERT INTO activity_output (id, context_id, block_index, stream, content, recorded_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      `${block.contextId}:${next}`,
-      block.contextId,
-      next,
-      block.stream,
-      block.content,
-      block.recordedAt,
-    ],
-  )
+  orm(database)
+    .insert(activityOutput)
+    .values({
+      id: `${block.contextId}:${next}`,
+      contextId: block.contextId,
+      blockIndex: next,
+      stream: block.stream,
+      content: block.content,
+      recordedAt: block.recordedAt,
+    })
+    .run()
   return { ...block, blockIndex: next }
 }
 
 function nextBlockIndex(database: Database, contextId: string): number {
-  const row = database
-    .query('SELECT MAX(block_index) AS last FROM activity_output WHERE context_id = ?')
-    .get(contextId) as { last: number | null }
-  return (row.last ?? -1) + 1
+  const row = orm(database)
+    .select({ last: max(activityOutput.blockIndex) })
+    .from(activityOutput)
+    .where(eq(activityOutput.contextId, contextId))
+    .get()
+  return (row?.last ?? -1) + 1
 }
 
 export interface OutputPage {
   blocks: OutputBlock[]
   /** Index to read from next, or null when the end was reached. */
   nextBlockIndex: number | null
-}
-
-interface OutputRow {
-  context_id: string
-  block_index: number
-  stream: string
-  content: string
-  recorded_at: number
 }
 
 /** Reads one bounded run of blocks of an execution context. */
@@ -87,20 +84,20 @@ export function readOutput(
   limit = MAX_OUTPUT_BLOCKS,
 ): OutputPage {
   const size = Math.min(Math.max(limit, 1), MAX_OUTPUT_BLOCKS)
-  const rows = database
-    .query(
-      `SELECT * FROM activity_output
-       WHERE context_id = ? AND block_index >= ?
-       ORDER BY block_index LIMIT ?`,
-    )
-    .all(contextId, from, size + 1) as OutputRow[]
+  const rows = orm(database)
+    .select()
+    .from(activityOutput)
+    .where(and(eq(activityOutput.contextId, contextId), gte(activityOutput.blockIndex, from)))
+    .orderBy(asc(activityOutput.blockIndex))
+    .limit(size + 1)
+    .all()
 
   const blocks = rows.slice(0, size).map((row) => ({
-    contextId: row.context_id,
-    blockIndex: row.block_index,
+    contextId: row.contextId,
+    blockIndex: row.blockIndex,
     stream: row.stream as OutputStream,
     content: row.content,
-    recordedAt: row.recorded_at,
+    recordedAt: row.recordedAt,
   }))
   const next =
     rows.length > size && blocks.length > 0 ? blocks[blocks.length - 1]!.blockIndex + 1 : null
@@ -116,13 +113,17 @@ export interface OutputExtent {
 
 /** What is really persisted for an execution context. */
 export function outputExtent(database: Database, contextId: string): OutputExtent {
-  const row = database
-    .query(
-      `SELECT COUNT(*) AS blocks, COALESCE(SUM(LENGTH(content)), 0) AS characters
-       FROM activity_output WHERE context_id = ?`,
-    )
-    .get(contextId) as { blocks: number; characters: number }
-  return { recordedBlocks: row.blocks, recordedCharacters: row.characters }
+  const row = orm(database)
+    .select({
+      blocks: count(),
+      // The length of what is stored, not of what was handed over: a block the store
+      // refused would otherwise be counted as recorded.
+      characters: sql<number>`coalesce(sum(length(${activityOutput.content})), 0)`,
+    })
+    .from(activityOutput)
+    .where(eq(activityOutput.contextId, contextId))
+    .get()
+  return { recordedBlocks: row?.blocks ?? 0, recordedCharacters: row?.characters ?? 0 }
 }
 
 /** Whether a journal event type names technical output, which it never may. */

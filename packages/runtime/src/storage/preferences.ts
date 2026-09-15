@@ -10,6 +10,10 @@
  */
 
 import type { Database } from 'bun:sqlite'
+import { eq } from 'drizzle-orm'
+
+import { orm } from './orm.ts'
+import { appPreferences } from './schema.ts'
 
 /** Keys the profile stores, one per preference. */
 export const PREFERENCE_KEYS = {
@@ -46,19 +50,22 @@ export const DEFAULT_BOUNDS: PreferenceBounds = {
 }
 
 function readRaw(database: Database): Map<string, string> {
-  const rows = database.query('SELECT key, value FROM app_preferences').all() as {
-    key: string
-    value: string
-  }[]
+  const rows = orm(database)
+    .select({ key: appPreferences.key, value: appPreferences.value })
+    .from(appPreferences)
+    .all()
   return new Map(rows.map((row) => [row.key, row.value]))
 }
 
 function writeRaw(database: Database, key: string, value: string, now: number): void {
-  database.run(
-    `INSERT INTO app_preferences (key, value, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    [key, value, now],
-  )
+  orm(database)
+    .insert(appPreferences)
+    .values({ key, value, updatedAt: now })
+    .onConflictDoUpdate({
+      target: appPreferences.key,
+      set: { value, updatedAt: now },
+    })
+    .run()
 }
 
 function themeOrDefault(stored: string | undefined): DisplayPreferences['theme'] {
@@ -119,7 +126,10 @@ export function savePreferences(
     writeRaw(database, PREFERENCE_KEYS.sidebarWidth, String(preferences.sidebarWidth), now)
     writeRaw(database, PREFERENCE_KEYS.sidebarCollapsed, String(preferences.sidebarCollapsed), now)
     if (preferences.activeProject === null) {
-      database.run('DELETE FROM app_preferences WHERE key = ?', [PREFERENCE_KEYS.activeProject])
+      orm(database)
+        .delete(appPreferences)
+        .where(eq(appPreferences.key, PREFERENCE_KEYS.activeProject))
+        .run()
     } else {
       writeRaw(database, PREFERENCE_KEYS.activeProject, preferences.activeProject, now)
     }

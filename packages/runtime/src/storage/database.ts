@@ -10,7 +10,11 @@ import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { asc } from 'drizzle-orm'
+
 import { MIGRATIONS, checksumOf, statementsOf } from './migrations/index.ts'
+import { orm } from './orm.ts'
+import { schemaMigrations } from './schema.ts'
 import type { Migration } from './migrations/index.ts'
 
 /** File the profile keeps its database in. */
@@ -63,20 +67,19 @@ function readApplied(database: Database): AppliedMigration[] {
       applied_at INTEGER NOT NULL
     )`,
   )
-  return database
-    .query('SELECT name, checksum, applied_at AS appliedAt FROM schema_migrations ORDER BY name')
-    .all() as AppliedMigration[]
+  return orm(database).select().from(schemaMigrations).orderBy(asc(schemaMigrations.name)).all()
 }
 
 /** Applies one migration and its tracking row in a single transaction. */
 function applyMigration(database: Database, migration: Migration, now: number): void {
   const apply = database.transaction(() => {
+    // The migration itself is the one thing that stays raw SQL: it is what creates the
+    // schema the queries are built from, so it cannot be expressed through it.
     for (const statement of statementsOf(migration)) database.run(statement)
-    database.run('INSERT INTO schema_migrations (name, checksum, applied_at) VALUES (?, ?, ?)', [
-      migration.name,
-      checksumOf(migration),
-      now,
-    ])
+    orm(database)
+      .insert(schemaMigrations)
+      .values({ name: migration.name, checksum: checksumOf(migration), appliedAt: now })
+      .run()
   })
   try {
     apply()
@@ -134,6 +137,13 @@ export interface OpenProfileOptions {
 }
 
 export interface OpenProfile {
+  /**
+   * Connection of the profile. Close it with `close(true)`.
+   *
+   * Drizzle prepares a statement per query and keeps it alive, and a plain `close()` leaves
+   * the file locked as long as one of them is: on Windows the profile folder cannot even be
+   * removed afterwards. `close(true)` finalises them.
+   */
   database: Database
   path: string
   migrations: MigrationReport
@@ -153,7 +163,7 @@ export function openProfile({ directory, now, migrations }: OpenProfileOptions):
     return { database, path, migrations: migrate(database, now, migrations) }
   } catch (cause) {
     // A failed migration leaves no writable connection behind.
-    database.close()
+    database.close(true)
     throw cause
   }
 }

@@ -44,7 +44,7 @@ export function checkpoint(path: string): void {
   try {
     database.run('PRAGMA wal_checkpoint(TRUNCATE)')
   } finally {
-    database.close()
+    database.close(true)
   }
 }
 

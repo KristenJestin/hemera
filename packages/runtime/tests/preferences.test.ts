@@ -21,7 +21,7 @@ function withProfile(body: (profile: OpenProfile, directory: string) => void): v
   try {
     body(profile, directory)
   } finally {
-    profile.database.close()
+    profile.database.close(true)
     rmSync(directory, { recursive: true, force: true })
   }
 }
@@ -39,7 +39,7 @@ describe('Réouverture après redémarrage', () => {
     try {
       const first = openProfile({ directory, now: NOW })
       savePreferences(first.database, CHOSEN, NOW)
-      first.database.close()
+      first.database.close(true)
 
       const second = openProfile({ directory, now: NOW + 1 })
       try {
@@ -47,7 +47,7 @@ describe('Réouverture après redémarrage', () => {
         expect(loaded.preferences).toEqual(CHOSEN)
         expect(loaded.repaired).toEqual([])
       } finally {
-        second.database.close()
+        second.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })

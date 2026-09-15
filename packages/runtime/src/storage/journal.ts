@@ -9,6 +9,10 @@
  */
 
 import type { Database } from 'bun:sqlite'
+import { and, asc, eq, gt, max } from 'drizzle-orm'
+
+import { orm } from './orm.ts'
+import { domainEvents } from './schema.ts'
 
 /** Who caused a change. Lot 1 only ever records the user. */
 export type EventSource = 'user'
@@ -72,30 +76,30 @@ export function recordChange<Result>(
   event: JournalEvent,
   mutate: () => Result,
 ): Recorded<Result> {
+  const db = orm(database)
   const write = database.transaction(() => {
     const result = mutate()
     if (result instanceof Promise) throw new ExternalEffectInTransactionError()
 
-    database.run(
-      `INSERT INTO domain_events
-        (type, entity, entity_id, source, author, occurred_at, project_id, session_id, payload)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        event.type,
-        event.entity,
-        event.entityId,
-        event.source,
-        event.author,
-        event.occurredAt,
-        event.projectId ?? null,
-        event.sessionId ?? null,
-        event.payload === undefined ? null : JSON.stringify(event.payload),
-      ],
-    )
-    const sequence = (
-      database.query('SELECT last_insert_rowid() AS sequence').get() as { sequence: number }
-    ).sequence
-    return { result, sequence }
+    const [written] = db
+      .insert(domainEvents)
+      .values({
+        type: event.type,
+        entity: event.entity,
+        entityId: event.entityId,
+        source: event.source,
+        author: event.author,
+        occurredAt: event.occurredAt,
+        projectId: event.projectId ?? null,
+        sessionId: event.sessionId ?? null,
+        payload: event.payload === undefined ? null : JSON.stringify(event.payload),
+      })
+      // The sequence is what orders the journal, so it is read back from the row that was
+      // written rather than from the connection's last rowid.
+      .returning({ sequence: domainEvents.sequence })
+      .all()
+    if (written === undefined) throw new Error('the journal event was not written')
+    return { result, sequence: written.sequence }
   })
   return write()
 }
@@ -122,36 +126,22 @@ export const MAX_PAGE_SIZE = 200
 /** Page size used when none is asked. */
 export const DEFAULT_PAGE_SIZE = 50
 
-interface EventRow {
-  sequence: number
-  type: string
-  entity: string
-  entity_id: string
-  source: string
-  author: string
-  occurred_at: number
-  project_id: string | null
-  session_id: string | null
-  spec_id: string | null
-  revision_id: string | null
-  phase_id: string | null
-  payload: string | null
-}
+type EventRow = typeof domainEvents.$inferSelect
 
 function toEvent(row: EventRow): RecordedEvent {
   return {
     sequence: row.sequence,
     type: row.type,
     entity: row.entity,
-    entityId: row.entity_id,
+    entityId: row.entityId,
     source: row.source as EventSource,
     author: row.author as EventAuthor,
-    occurredAt: row.occurred_at,
-    projectId: row.project_id,
-    sessionId: row.session_id,
-    specId: row.spec_id,
-    revisionId: row.revision_id,
-    phaseId: row.phase_id,
+    occurredAt: row.occurredAt,
+    projectId: row.projectId,
+    sessionId: row.sessionId,
+    specId: row.specId,
+    revisionId: row.revisionId,
+    phaseId: row.phaseId,
     payload: row.payload === null ? undefined : JSON.parse(row.payload),
   }
 }
@@ -169,27 +159,20 @@ export function readJournal(database: Database, query: JournalQuery = {}): Journ
   }
 
   const limit = Math.min(Math.max(query.limit ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE)
-  const conditions: string[] = []
-  const parameters: (string | number)[] = []
+  const conditions = [
+    query.projectId == null ? undefined : eq(domainEvents.projectId, query.projectId),
+    query.sessionId == null ? undefined : eq(domainEvents.sessionId, query.sessionId),
+    cursor === null ? undefined : gt(domainEvents.sequence, cursor),
+  ].filter((condition) => condition !== undefined)
 
-  if (query.projectId != null) {
-    conditions.push('project_id = ?')
-    parameters.push(query.projectId)
-  }
-  if (query.sessionId != null) {
-    conditions.push('session_id = ?')
-    parameters.push(query.sessionId)
-  }
-  if (cursor !== null) {
-    conditions.push('sequence > ?')
-    parameters.push(cursor)
-  }
-
-  const where = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`
   // One row past the page tells whether another page follows, without counting the whole table.
-  const rows = database
-    .query(`SELECT * FROM domain_events ${where} ORDER BY sequence LIMIT ?`)
-    .all(...parameters, limit + 1) as EventRow[]
+  const rows = orm(database)
+    .select()
+    .from(domainEvents)
+    .where(conditions.length === 0 ? undefined : and(...conditions))
+    .orderBy(asc(domainEvents.sequence))
+    .limit(limit + 1)
+    .all()
 
   const events = rows.slice(0, limit).map(toEvent)
   const nextCursor =
@@ -199,8 +182,9 @@ export function readJournal(database: Database, query: JournalQuery = {}): Journ
 
 /** The highest sequence written so far, or 0 when the journal is empty. */
 export function lastSequence(database: Database): number {
-  const row = database.query('SELECT MAX(sequence) AS sequence FROM domain_events').get() as {
-    sequence: number | null
-  }
-  return row.sequence ?? 0
+  const row = orm(database)
+    .select({ sequence: max(domainEvents.sequence) })
+    .from(domainEvents)
+    .get()
+  return row?.sequence ?? 0
 }

@@ -23,7 +23,7 @@ function withProfile(body: (profile: OpenProfile) => void): void {
   try {
     body(profile)
   } finally {
-    profile.database.close()
+    profile.database.close(true)
     rmSync(directory, { recursive: true, force: true })
   }
 }

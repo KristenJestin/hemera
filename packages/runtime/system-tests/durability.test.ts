@@ -73,7 +73,7 @@ describe('Arrêt brutal', () => {
           readMessages(reopened.database, written.sessionId).map((entry) => entry.body),
         ).toEqual(['one', 'two', 'three'])
       } finally {
-        reopened.database.close()
+        reopened.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -103,7 +103,7 @@ describe('Deux Sessions retrouvées', () => {
       const { createSession, recordMessage } = await import('../src/index.ts')
       const other = createSession(context, written.projectId)
       recordMessage(context, other.id, 'a second thread')
-      second.database.close()
+      second.database.close(true)
 
       const third = openProfile({ directory, now: Date.now() })
       try {
@@ -113,7 +113,7 @@ describe('Deux Sessions retrouvées', () => {
           'a second thread',
         ])
       } finally {
-        third.database.close()
+        third.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -155,7 +155,7 @@ describe('Arrêt non propre', () => {
           expect(event.occurredAt).toBeGreaterThan(0)
         }
       } finally {
-        reopened.database.close()
+        reopened.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })

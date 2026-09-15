@@ -38,7 +38,7 @@ function profileOfPreviousVersion(directory: string): void {
     'INSERT INTO sessions (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
     ['s1', 'p1', 'A session', NOW, NOW],
   )
-  profile.database.close()
+  profile.database.close(true)
 }
 
 describe('Mise à jour du paquet sur un profil existant', () => {
@@ -56,7 +56,7 @@ describe('Mise à jour du paquet sur un profil existant', () => {
         expect(copied.query('SELECT COUNT(*) AS n FROM projects').get()).toEqual({ n: 1 })
         expect(copied.query('SELECT COUNT(*) AS n FROM sessions').get()).toEqual({ n: 1 })
       } finally {
-        copied.close()
+        copied.close(true)
       }
     })
   })
@@ -72,7 +72,7 @@ describe('Mise à jour du paquet sur un profil existant', () => {
         expect(migrated.database.query('SELECT id FROM projects').all()).toEqual([{ id: 'p1' }])
         expect(migrated.database.query('SELECT id FROM sessions').all()).toEqual([{ id: 's1' }])
       } finally {
-        migrated.database.close()
+        migrated.database.close(true)
       }
     })
   })
@@ -122,7 +122,7 @@ describe("Échec pendant la migration d'un profil existant", () => {
       try {
         expect(reopened.database.query('SELECT id FROM projects').all()).toEqual([{ id: 'p1' }])
       } finally {
-        reopened.database.close()
+        reopened.database.close(true)
       }
       expect(existsSync(join(backup.directory, DATABASE_FILE))).toBe(true)
       expect(backupsOf(directory)).toHaveLength(1)
@@ -158,7 +158,7 @@ describe('Test de migration depuis la version précédente', () => {
         }[]
         expect(applied.map((row) => row.name)).toEqual(['0001-lot-1'])
       } finally {
-        fixture.close()
+        fixture.close(true)
       }
     })
   })

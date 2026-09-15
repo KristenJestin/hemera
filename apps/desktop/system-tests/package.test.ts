@@ -124,7 +124,7 @@ describe('Remplacement du paquet', () => {
       const { project } = createProject(context, { name: 'Hemera', path: installed.directory })
       const session = createSession(context, project.id)
       recordMessage(context, session.id, 'written before the package was replaced')
-      opened.database.close()
+      opened.database.close(true)
 
       // The package is replaced by a freshly assembled one, as an update is done.
       const replacement = await assemblePackage(repository, 'prod')
@@ -147,7 +147,7 @@ describe('Remplacement du paquet', () => {
           'written before the package was replaced',
         ])
       } finally {
-        reopened.database.close()
+        reopened.database.close(true)
       }
     } finally {
       rmSync(join(installed.directory, '..'), { recursive: true, force: true })

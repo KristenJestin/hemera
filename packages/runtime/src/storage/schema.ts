@@ -129,6 +129,25 @@ export const domainEvents = sqliteTable(
   ],
 )
 
+/**
+ * Technical output of an execution context, kept out of the journal.
+ *
+ * Appended and read in blocks, so consulting an execution never loads it whole.
+ */
+export const activityOutput = sqliteTable(
+  'activity_output',
+  {
+    id: text('id').primaryKey(),
+    contextId: text('context_id').notNull(),
+    blockIndex: integer('block_index').notNull(),
+    /** `stdout` or `stderr`. */
+    stream: text('stream').notNull(),
+    content: text('content').notNull(),
+    recordedAt: integer('recorded_at').notNull(),
+  },
+  (table) => [uniqueIndex('activity_output_block').on(table.contextId, table.blockIndex)],
+)
+
 /** Display preferences of the profile, including the theme and the panel sizes. */
 export const appPreferences = sqliteTable('app_preferences', {
   key: text('key').primaryKey(),

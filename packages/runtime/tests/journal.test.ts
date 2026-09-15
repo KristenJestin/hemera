@@ -23,7 +23,7 @@ function withProfile(body: (profile: OpenProfile, directory: string) => void): v
   try {
     body(profile, directory)
   } finally {
-    profile.database.close()
+    profile.database.close(true)
     rmSync(directory, { recursive: true, force: true })
   }
 }
@@ -146,7 +146,7 @@ describe('Ordre total des événements', () => {
       const first = openProfile({ directory, now: NOW })
       project(first, 'p1')
       const before = recordChange(first.database, event(), () => {}).sequence
-      first.database.close()
+      first.database.close(true)
 
       const second = openProfile({ directory, now: NOW + 1 })
       try {
@@ -158,7 +158,7 @@ describe('Ordre total des événements', () => {
         expect(after).toBeGreaterThan(before)
         expect(lastSequence(second.database)).toBe(after)
       } finally {
-        second.database.close()
+        second.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -371,7 +371,7 @@ describe('Redémarrage après enregistrement', () => {
       project(first, 'p1')
       recordChange(first.database, event({ sessionId: null }), () => {})
       const before = readJournal(first.database, {}).events
-      first.database.close()
+      first.database.close(true)
 
       const second = openProfile({ directory, now: NOW + 1 })
       try {
@@ -379,7 +379,7 @@ describe('Redémarrage après enregistrement', () => {
         expect(after).toEqual(before)
         expect(after[0]!.projectId).toBe('p1')
       } finally {
-        second.database.close()
+        second.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -397,7 +397,7 @@ describe('Continuité après redémarrage', () => {
         recordChange(first.database, event({ type }), () => {})
       }
       const highest = lastSequence(first.database)
-      first.database.close()
+      first.database.close(true)
 
       const second = openProfile({ directory, now: NOW + 1 })
       try {
@@ -405,7 +405,7 @@ describe('Continuité après redémarrage', () => {
         const later = recordChange(second.database, event({ type: 'project.archived' }), () => {})
         expect(later.sequence).toBeGreaterThan(highest)
       } finally {
-        second.database.close()
+        second.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })

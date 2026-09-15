@@ -116,7 +116,7 @@ describe('Deux canaux en parallèle', () => {
       try {
         expect(listProjects(profile.database).map((project) => project.name)).toEqual([channel!])
       } finally {
-        profile.database.close()
+        profile.database.close(true)
       }
     }
 

@@ -147,7 +147,7 @@ async function withScreen(body: (fixture: Fixture) => Promise<void>): Promise<vo
       other,
     })
   } finally {
-    profile.database.close()
+    profile.database.close(true)
     rmSync(directory, { recursive: true, force: true })
     rmSync(documents, { recursive: true, force: true })
     rmSync(other, { recursive: true, force: true })

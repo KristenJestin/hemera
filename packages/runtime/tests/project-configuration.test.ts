@@ -48,7 +48,7 @@ function withStore(body: (fixture: Fixture) => void): void {
       documents,
     })
   } finally {
-    profile.database.close()
+    profile.database.close(true)
     rmSync(directory, { recursive: true, force: true })
     rmSync(documents, { recursive: true, force: true })
   }
@@ -131,7 +131,7 @@ describe('Édition de la configuration', () => {
         name: 'Hemera cockpit',
         repositories: ['./sources/api', './sources/front'],
       })
-      first.database.close()
+      first.database.close(true)
 
       const second = openProfile({ directory, now: NOW + 1 })
       try {
@@ -139,7 +139,7 @@ describe('Édition de la configuration', () => {
         expect(configuration.name).toBe('Hemera cockpit')
         expect(configuration.repositories).toEqual(['./sources/api', './sources/front'])
       } finally {
-        second.database.close()
+        second.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })

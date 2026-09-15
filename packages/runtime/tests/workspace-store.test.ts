@@ -65,7 +65,7 @@ function withStore(body: (fixture: Fixture) => void): void {
       documents,
     })
   } finally {
-    profile.database.close()
+    profile.database.close(true)
     rmSync(directory, { recursive: true, force: true })
     rmSync(documents, { recursive: true, force: true })
   }

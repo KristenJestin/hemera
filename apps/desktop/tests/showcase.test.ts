@@ -59,7 +59,8 @@ describe("Développement à côté de l'installation", () => {
     // so that a load failing for want of a system library is caught before any of this runs.
     const application = readFileSync(join(desktop, 'src', 'entry', 'app.tsx'), 'utf8')
     expect(application).toContain('windowTitleOf(')
-    expect(application).toMatch(/console\.log\(`channel \$\{instance\.channel\}/)
+    // Through the log rather than the console: a package started from an icon has neither.
+    expect(application).toMatch(/log\.info\(`channel \$\{instance\.channel\}/)
     expect(application).toContain('profile ${instance.directory}')
 
     const entry = readFileSync(join(desktop, 'src', 'entry', 'main.tsx'), 'utf8')

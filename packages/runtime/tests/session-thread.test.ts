@@ -46,7 +46,7 @@ function withStore(body: (fixture: Fixture) => void): void {
       documents,
     })
   } finally {
-    profile.database.close()
+    profile.database.close(true)
     rmSync(directory, { recursive: true, force: true })
     rmSync(documents, { recursive: true, force: true })
   }
@@ -195,7 +195,7 @@ describe('Archivage durable', () => {
       recordMessage(context, session.id, 'one')
       recordMessage(context, session.id, 'two')
       setSessionArchived(context, session.id, true)
-      first.database.close()
+      first.database.close(true)
 
       const second = openProfile({ directory, now: NOW + 1 })
       try {
@@ -208,7 +208,7 @@ describe('Archivage durable', () => {
           'two',
         ])
       } finally {
-        second.database.close()
+        second.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -227,7 +227,7 @@ describe('Contenu conservé indépendamment', () => {
       const { project } = createProject(context, { name: 'Hemera', path: documents })
       const session = createSession(context, project.id)
       recordMessage(context, session.id, 'kept by Hemera alone')
-      first.database.close()
+      first.database.close(true)
 
       // The folder of the user disappears: the thread belongs to the profile, not to it.
       rmSync(documents, { recursive: true, force: true })
@@ -239,7 +239,7 @@ describe('Contenu conservé indépendamment', () => {
         ])
         expect(listSessions(second.database, project.id)).toHaveLength(1)
       } finally {
-        second.database.close()
+        second.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })

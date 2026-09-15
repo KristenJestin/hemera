@@ -61,7 +61,7 @@ describe('Ouverture de la base du profil', () => {
         expect(profile.path).toBe(join(directory, DATABASE_FILE))
         for (const table of TABLES) expect(tablesOf(profile.database)).toContain(table)
       } finally {
-        profile.database.close()
+        profile.database.close(true)
       }
     })
   })
@@ -78,7 +78,7 @@ describe('Ouverture de la base du profil', () => {
           timeout: BUSY_TIMEOUT_MS,
         })
       } finally {
-        profile.database.close()
+        profile.database.close(true)
       }
     })
   })
@@ -94,21 +94,21 @@ describe('Ouverture de la base du profil', () => {
           ),
         ).toThrow(/FOREIGN KEY/i)
       } finally {
-        profile.database.close()
+        profile.database.close(true)
       }
     })
   })
 
   test('the database reopens after a restart with its tables and its pragmas', () => {
     withProfile((directory) => {
-      openProfile({ directory, now: NOW }).database.close()
+      openProfile({ directory, now: NOW }).database.close(true)
       const reopened = openProfile({ directory, now: NOW + 1 })
       try {
         expect(reopened.migrations.applied).toEqual([])
         expect(reopened.migrations.alreadyApplied).toEqual(['0001-lot-1'])
         expect(tablesOf(reopened.database)).toContain('sessions')
       } finally {
-        reopened.database.close()
+        reopened.database.close(true)
       }
     })
   })
@@ -119,13 +119,13 @@ describe('Migration déjà appliquée', () => {
     withProfile((directory) => {
       const first = openProfile({ directory, now: NOW })
       expect(first.migrations.applied).toEqual(['0001-lot-1'])
-      first.database.close()
+      first.database.close(true)
 
       const second = openProfile({ directory, now: NOW + 1 })
       try {
         expect(second.migrations.applied).toEqual([])
       } finally {
-        second.database.close()
+        second.database.close(true)
       }
     })
   })
@@ -137,7 +137,7 @@ describe('Migration déjà appliquée', () => {
         const tampered: Migration[] = [{ name: '0001-lot-1', sql: 'SELECT 1;' }]
         expect(() => migrate(profile.database, NOW, tampered)).toThrow(MigrationChecksumError)
       } finally {
-        profile.database.close()
+        profile.database.close(true)
       }
     })
   })
@@ -175,7 +175,7 @@ describe('Échec de migration', () => {
           n: 0,
         })
       } finally {
-        inspected.close()
+        inspected.close(true)
       }
     })
   })
@@ -197,7 +197,7 @@ describe('Ancien paquet sur profil récent', () => {
         ...MIGRATIONS,
         { name: '0002-later-lot', sql: 'CREATE TABLE later (id TEXT PRIMARY KEY NOT NULL);' },
       ]
-      openProfile({ directory, now: NOW, migrations: ahead }).database.close()
+      openProfile({ directory, now: NOW, migrations: ahead }).database.close(true)
 
       expect(() => openProfile({ directory, now: NOW + 1 })).toThrow(SchemaAheadError)
       expect(() => openProfile({ directory, now: NOW + 1 })).toThrow(/0002-later-lot/)

@@ -43,7 +43,7 @@ describe('Deuxième lancement', () => {
       expect(existsSync(lockPathOf(directory))).toBe(true)
 
       const profile = openProfile({ directory, now: NOW })
-      profile.database.close()
+      profile.database.close(true)
     })
   })
 

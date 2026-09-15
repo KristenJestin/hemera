@@ -30,7 +30,7 @@ const context = {
 const { project } = createProject(context, { name: 'Hemera', path: workspace })
 const session = createSession(context, project.id)
 recordMessage(context, session.id, 'written while the workspace still existed')
-profile.database.close()
+profile.database.close(true)
 
 console.log(JSON.stringify({ projectId: project.id, sessionId: session.id }))
 `
@@ -71,7 +71,7 @@ describe("Nettoyage d'un Workspace produit", () => {
           readMessages(reopened.database, written.sessionId).map((entry) => entry.body),
         ).toEqual(['written while the workspace still existed'])
       } finally {
-        reopened.database.close()
+        reopened.database.close(true)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })

@@ -86,7 +86,7 @@ function seeded(): {
 
 /** Closes the profile and removes the folders the walkthrough used. */
 function cleanUp(seed: { directory: string; documents: string; profile: OpenProfile }): void {
-  seed.profile.database.close()
+  seed.profile.database.close(true)
   rmSync(seed.directory, { recursive: true, force: true })
   rmSync(seed.documents, { recursive: true, force: true })
 }
