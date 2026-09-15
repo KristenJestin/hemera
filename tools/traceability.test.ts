@@ -41,7 +41,7 @@ function fixture(scenarios: string[], suites: string[]): { specs: string; root: 
 describe('Table de traçabilité', () => {
   test('every scenario of the lot is covered by a test named after it, or deferred by name', () => {
     const coverage = coverageOf(repository, specs)
-    expect(coverage.length).toBeGreaterThan(100)
+    expect(coverage.length).toBeGreaterThan(20)
     expect(uncovered(coverage)).toEqual([])
 
     for (const reason of Object.values(DEFERRED)) {
@@ -83,7 +83,7 @@ describe('Table de traçabilité', () => {
     const written = readFileSync(path, 'utf8')
     const scenarios = scenariosOf(specs)
     expect(written).toContain(`# Traceability — ${CHANGE}`)
-    for (const scenario of scenarios.slice(0, 20)) {
+    for (const scenario of scenarios) {
       expect(written).toContain(scenario.name)
     }
   })

@@ -91,7 +91,7 @@ describe("Commit d'agent sur une branche protégée", () => {
   })
 })
 
-describe('Message hors convention', () => {
+describe('Commit hors convention', () => {
   test('a commit whose message ignores the convention is refused on a feature branch', () => {
     const path = repositoryWithHooks()
     try {

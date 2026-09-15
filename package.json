@@ -8,7 +8,7 @@
     "lint": "vp lint && node tools/boundaries.ts && node tools/window-options.ts && node tools/motion-properties.ts",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
-    "test": "vp test",
+    "test": "vp test && node tools/traceability.ts --write",
     "build": "vp run --filter !hemera build",
     "package": "node tools/package-desktop.ts",
     "report": "node tools/environment-report.ts --write",

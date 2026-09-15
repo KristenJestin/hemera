@@ -1,0 +1,47 @@
+ "spec" Reporter:
+------------------------------------------------------------------
+Running: chrome (v152.0.7977.78) on windows
+Session ID: a740d52edf4443d13b7b34ddf6f4c138
+
+» e2e\target.e2e.ts
+Échelle fractionnaire par écran
+   ? reports the pixel ratio of the display the window is on
+   - reports the pixel ratio of the display the window is on
+
+Compositing matériel constaté
+   ✓ reports hardware compositing and GPU rasterisation, or skips where there is none
+
+Dégradation nommée
+   ? names the degraded feature and starts anyway, with no sandbox flag added
+   - names the degraded feature and starts anyway, with no sandbox flag added
+
+1 passing (10s)
+2 skipped
+------------------------------------------------------------------
+Running: chrome (v152.0.7977.78) on windows
+Session ID: f723dac3ea8f05f4a58ae906f1502892
+
+» e2e\window.e2e.ts
+Renderer sans Node
+   ✓ has no require, no Node process and no Electron module in the page
+   ✓ reaches the main process only through the bridge the preload exposes
+   ✓ runs isolated and sandboxed, which is what the page is unable to do
+
+Appel typé nominal
+   ✓ answers the environment report on the declared channel
+
+Message non conforme
+   ✓ refuses a message the channel does not declare, naming the channel and the field
+
+Ouverture sous Windows à l'échelle 150 %
+   ✓ opens one frameless window with the system controls left to the platform
+   ✓ marks a drag region the page does not lose to its controls
+
+Transition à la fréquence de l'écran
+   ✓ plays the witness transition without a frame above two display periods
+
+8 passing (14s)
+
+
+Spec Files:	 2 passed, 2 total (100% completed) in 00:00:29  
+

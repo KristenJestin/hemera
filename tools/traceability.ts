@@ -19,8 +19,9 @@ export const CHANGE = 'lot-0-socle'
 /** Reasons a scenario may be left without a test of this repository. */
 export const DEFERRAL_REASONS = {
   linux: 'no Linux machine is available here; to be run on the Linux target',
-  human: 'human acceptance with a real mouse, recorded in the matrix of D12b',
-  tooling: 'covered by the repository tooling check rather than by a test suite',
+  human: 'a system setting or a real mouse, recorded in the walkthrough of the target',
+  capture: 'observed by capturing what the screen showed, recorded under reports/',
+  package: 'observed on a package run outside the sources, recorded under reports/',
 } as const
 
 export type DeferralReason = keyof typeof DEFERRAL_REASONS
@@ -31,7 +32,13 @@ export type DeferralReason = keyof typeof DEFERRAL_REASONS
  * Nothing lands here to make the verification pass: a scenario is deferred only when the
  * machine or the act it needs does not exist here.
  */
-export const DEFERRED: Record<string, DeferralReason> = {}
+export const DEFERRED: Record<string, DeferralReason> = {
+  'Ouverture sous Linux en Wayland natif': 'linux',
+  'Sandbox conservée sous Ubuntu 24.04': 'linux',
+  'Mouvement réduit respecté': 'human',
+  'Aucun flash blanc': 'capture',
+  'Lancement depuis un dossier avec espaces': 'package',
+}
 
 export interface Scenario {
   name: string
@@ -83,8 +90,10 @@ export function suitesOf(repositoryRoot: string): Map<string, string[]> {
   const files = [
     ...filesUnder(join(repositoryRoot, 'tools'), (path) => path.endsWith('.test.ts')),
     ...['apps/desktop', 'packages/core', 'packages/ipc'].flatMap((workspace) =>
-      ['tests', 'system-tests', 'src'].flatMap((folder) =>
-        filesUnder(join(repositoryRoot, workspace, folder), (path) => /\.test\.tsx?$/.test(path)),
+      ['tests', 'e2e', 'src'].flatMap((folder) =>
+        filesUnder(join(repositoryRoot, workspace, folder), (path) =>
+          /\.(test|e2e)\.tsx?$/.test(path),
+        ),
       ),
     ),
   ]
