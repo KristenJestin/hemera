@@ -72,6 +72,8 @@ const preview = readFileSync(join(designSystem, '..', '.storybook', 'preview.tsx
 const runner = ['vitest.config.ts', 'vitest.dark.config.ts'].map((file) =>
   readFileSync(join(designSystem, '..', file), 'utf8'),
 )
+const shared = readFileSync(join(designSystem, '..', 'vitest.shared.ts'), 'utf8')
+const manager = readFileSync(join(designSystem, '..', '.storybook', 'manager.ts'), 'utf8')
 
 describe('Stories complètes', () => {
   test.each(CATALOGUE)(
@@ -140,9 +142,27 @@ describe('Stories dans les deux thèmes', () => {
   test('the theme is a toolbar global, so any story can be seen in either', () => {
     expect(preview).toContain('globalTypes')
     expect(preview).toContain('theme')
-    for (const value of ['light', 'dark']) {
+    for (const value of ['light', 'dark', 'both']) {
       expect(preview, `the toolbar offers no ${value} theme`).toContain(`value: '${value}'`)
     }
+  })
+
+  test('both is for the eye: it wears the class on a wrapper, not on the document', () => {
+    expect(preview).toContain("chosen !== 'both'")
+    expect(preview).toContain('className="dark')
+  })
+
+  test('the chrome of Storybook follows the same global the story does', () => {
+    expect(manager).toContain('GLOBALS_UPDATED')
+    expect(manager).toContain('setOptions')
+    expect(manager).toContain('themes.dark')
+  })
+
+  test('each run is named after the theme it played, so a contrast failure names it', () => {
+    // The two projects are the whole matrix: a violation that only exists on black is reported
+    // under `storybook-dark`, which is what tells the reader which theme to go and look at.
+    expect(shared).toContain('storybook-${theme}')
+    expect(shared).toContain("theme: 'light' | 'dark'")
   })
 
   test('the runner plays the whole catalogue once per theme', () => {

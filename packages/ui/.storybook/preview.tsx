@@ -11,13 +11,27 @@ import '../src/theme.css'
  * The theme is a class on the document, the same way the application wears it, so a story sees
  * exactly what the window sees. It is a global rather than a story argument: the toolbar swaps
  * it live, and a story that belongs to one theme pins it for itself.
+ *
+ * A third value shows both at once, and it is for the eye only: the second copy wears `.dark`
+ * on a wrapper rather than on the document, which is enough for what is drawn inside the story
+ * and not enough for a portal, a scrollbar or a native control — all of which read the theme
+ * off the document. The tests never see it: each run pins one theme on the document itself.
  */
 const withTheme: Decorator = (Story, context) => {
-  const dark = context.globals.theme === 'dark'
+  const chosen = context.globals.theme
+  const dark = chosen === 'dark'
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
   }, [dark])
-  return <Story />
+  if (chosen !== 'both') return <Story />
+  return (
+    <div className="flex flex-col gap-6">
+      <Story />
+      <div className="dark bg-background p-4 text-foreground">
+        <Story />
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -42,6 +56,7 @@ const preview: Preview = {
         items: [
           { value: 'light', title: 'Light' },
           { value: 'dark', title: 'Dark' },
+          { value: 'both', title: 'Both' },
         ],
       },
     },
