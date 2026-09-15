@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { MotionMeasure } from '@hemera/ipc'
 
+import { usePixelRatio } from './use-pixel-ratio.ts'
 import { measureFrames } from './witness.ts'
 
 /**
@@ -18,6 +19,7 @@ import { measureFrames } from './witness.ts'
 export const CALM = { type: 'spring', stiffness: 170, damping: 26 } as const
 
 export function Application() {
+  const ratio = usePixelRatio()
   const [shown, setShown] = useState(false)
   const [measure, setMeasure] = useState<MotionMeasure | null>(null)
 
@@ -44,7 +46,7 @@ export function Application() {
         <h1>Witness text</h1>
         <p>
           Read this line at 100% and at 150%, and compare the edges of the glyphs. Page pixel ratio:{' '}
-          {window.devicePixelRatio}.
+          <output className="ratio">{ratio}</output>.
         </p>
         <button className="no-drag" type="button" onClick={() => void play()}>
           Play the witness transition
