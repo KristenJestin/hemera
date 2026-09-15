@@ -36,9 +36,12 @@
   --accent: #e9e9ee;
   --accent-foreground: #111118;
 
-  --primary: #d946ef;
+  /* The prototype's accent fuchsia is #d946ef, but white on it is 3.45:1 and the catalogue's
+     own accessibility check refuses that. The solid fills take the prototype's next shade
+     down, which reads at 4.7:1; the ring keeps the lighter one. */
+  --primary: #c026d3;
   --primary-foreground: #ffffff;
-  --primary-strong: #c026d3;
+  --primary-strong: #a21caf;
   --primary-muted: #fdf4ff;
   --primary-muted-foreground: #a21caf;
 
@@ -117,6 +120,10 @@
 /* ---- The Tailwind theme reads the roles, never the raw values ---- */
 @theme inline {
   --color-*: initial;
+
+  /* The two colours that are not values: what is behind, and whatever the text already is. */
+  --color-transparent: transparent;
+  --color-current: currentColor;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);

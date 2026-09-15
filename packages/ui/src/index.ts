@@ -5,4 +5,11 @@
  * through their own subpaths, because the bundler and the main process need them alone.
  */
 
+export {
+  Button,
+  IconButton,
+  type ButtonProps,
+  type ButtonState,
+  type IconButtonProps,
+} from './components/button/button.tsx'
 export { Loading, type LoadingProps } from './components/loading/loading.tsx'
