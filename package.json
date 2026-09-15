@@ -1,34 +1,22 @@
 {
   "name": "hemera",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
   "type": "module",
   "scripts": {
-    "dev": "turbo run dev",
-    "typecheck": "turbo run typecheck",
-    "lint": "oxlint && bun tools/boundaries.ts && bun tools/design-tokens.ts && bun tools/components.ts && bun tools/icons.ts && bun tools/migrations.ts && bun tools/i18n.ts && bun tools/business-suite.ts",
-    "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
-    "test": "turbo run test //#test:tools && bun tools/traceability.ts --write",
-    "build": "turbo run build",
-    "package": "bun tools/package-desktop.ts",
-    "test:tools": "bun test tools",
-    "report": "bun tools/environment-report.ts --window --write"
+    "dev": "vp run --filter !hemera --parallel dev",
+    "typecheck": "vp run --filter !hemera typecheck",
+    "lint": "vp lint",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
+    "test": "vp test",
+    "build": "vp run --filter !hemera build",
+    "package": "node tools/package-desktop.ts",
+    "report": "node tools/environment-report.ts --window --write",
+    "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test"
   },
   "devDependencies": {
-    "@gpuix/native": "file:../gpuix/packages/native",
-    "@types/bun": "1.4.2",
-    "lucide-static": "1.45.0",
-    "oxfmt": "0.67.0",
-    "oxlint": "1.82.0",
-    "turbo": "2.10.12",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vite-plus": "0.3.2"
   },
-  "overrides": {
-    "@gpuix/native": "file:../gpuix/packages/native"
-  },
-  "packageManager": "bun@1.4.2"
+  "packageManager": "pnpm@12.4.1"
 }

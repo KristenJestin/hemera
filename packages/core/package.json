@@ -9,7 +9,6 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
-    "test": "bun test ./tests"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json"
   }
 }
