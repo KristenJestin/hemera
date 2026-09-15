@@ -113,6 +113,57 @@ describe('Importation interdite', () => {
   })
 })
 
+describe('Frontière du design system', () => {
+  test.each([
+    ['@hemera/core', 'must not depend on'],
+    ['@hemera/ipc', 'must not depend on'],
+    ['@hemera/desktop', 'must not depend on'],
+    ['electron', 'Electron'],
+  ])(
+    'a component reaching for %s is reported with its file and its import',
+    (specifier, reason) => {
+      const path = 'packages/ui/src/components/button/button.tsx'
+      const root = fixture({ [path]: `import { thing } from '${specifier}'\n` })
+      try {
+        const violations = analyzePackage(root, ruleFor('@hemera/ui'))
+        expect(violations).toHaveLength(1)
+        expect(violations[0]!.file).toBe(path)
+        expect(violations[0]!.specifier).toBe(specifier)
+        expect(violations[0]!.problem).toContain(reason)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  test('the application may import the design system through its declared subpaths', () => {
+    const root = fixture({
+      'packages/ui/package.json': JSON.stringify({
+        name: '@hemera/ui',
+        exports: {
+          '.': './src/index.ts',
+          './theme.css': './src/theme.css',
+          './motion': './src/motion.ts',
+          './window': './src/window.ts',
+        },
+      }),
+      'apps/desktop/package.json': JSON.stringify({ name: '@hemera/desktop' }),
+      'apps/desktop/src/renderer/main.tsx': [
+        "import { Button } from '@hemera/ui'",
+        "import { spring } from '@hemera/ui/motion'",
+        "import '@hemera/ui/theme.css'",
+        '',
+      ].join('\n'),
+      'apps/desktop/src/main/window.ts': "import { windowColors } from '@hemera/ui/window'\n",
+    })
+    try {
+      expect(analyzePackage(root, ruleFor('@hemera/desktop'))).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('Frontières des packages', () => {
   test('a cycle between packages is detected', () => {
     const graph = new Map([

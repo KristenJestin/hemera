@@ -64,6 +64,21 @@ export const PACKAGE_RULES: PackageRule[] = [
     ],
   },
   {
+    // The design system is a leaf too, and a stricter one: it is React and nothing of Hemera.
+    // A component that reached for a domain type or for Electron would stop being renderable
+    // on its own, which is exactly what Storybook exists to keep it able to do.
+    name: '@hemera/ui',
+    directory: 'packages/ui',
+    forbidden: [
+      ...NO_PLATFORM,
+      ...NO_ELECTRON,
+      {
+        pattern: /^@hemera\/(core|ipc|desktop)(\/|$)/,
+        reason: 'a package the design system must not depend on',
+      },
+    ],
+  },
+  {
     name: '@hemera/desktop',
     directory: 'apps/desktop',
     forbidden: [],
