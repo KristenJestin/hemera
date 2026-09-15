@@ -55,9 +55,13 @@
     "chrome": "152.0.7977.78",
     "node": "24.20.0"
   },
-  "motion": null,
+  "motion": {
+    "refreshRate": 164,
+    "frames": 331,
+    "longestFrame": 6.3
+  },
   "notVerified": [
     "linux/wayland: not verified by this report"
   ],
-  "producedAt": "2026-09-15T11:01:05.651Z"
+  "producedAt": "2026-09-15T11:03:02.846Z"
 }

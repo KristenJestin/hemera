@@ -12,3 +12,7 @@ minimumReleaseAgeExclude:
   - '@voidzero-dev/vite-plus-win32-arm64-msvc@0.3.2'
   - '@voidzero-dev/vite-plus-win32-x64-msvc@0.3.2'
   - vite-plus@0.3.2
+  - framer-motion@13.3.0
+  - motion-dom@13.3.0
+  - motion-utils@13.3.0
+  - motion@13.3.0

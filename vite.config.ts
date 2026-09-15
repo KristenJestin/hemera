@@ -37,6 +37,7 @@ export default defineConfig({
       'tools/boundaries.test.ts',
       'tools/environment-report.test.ts',
       'tools/git-flow.test.ts',
+      'tools/motion-properties.test.ts',
       'tools/verification.test.ts',
       'tools/window-options.test.ts',
     ],

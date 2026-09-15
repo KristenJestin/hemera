@@ -10,6 +10,7 @@
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import type { MotionMeasure } from '@hemera/ipc'
 import { app } from 'electron/main'
 
 import { registerChannels } from './channels.ts'
@@ -26,8 +27,18 @@ void app.whenReady().then(async () => {
   registerChannels(window)
 
   if (process.argv.includes(REPORT_FLAG)) {
-    // Written after the page has painted: what the GPU decided is only true once it drew.
-    process.stdout.write(JSON.stringify(await collectReport()))
+    // The transition is played and counted in the page, because that is where frames are
+    // rendered; the main process only asks for it and files what came back.
+    //
+    // It is played twice and the second one is filed. The first transition after a cold start
+    // carries the page's first paint with it — a frame of about 110 ms on this machine — and
+    // that frame says what starting costs, not what the transition costs. What the lot asks
+    // of the transition is measured on a window that has already painted.
+    const play = 'window.hemeraWitness.play()'
+    await window.webContents.executeJavaScript(play)
+    const motion = (await window.webContents.executeJavaScript(play)) as MotionMeasure
+    // Read after the page has painted: what the GPU decided is only true once it drew.
+    process.stdout.write(JSON.stringify({ ...(await collectReport()), motion }))
     app.quit()
   }
 })

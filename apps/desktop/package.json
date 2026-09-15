@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@hemera/ipc": "workspace:*",
+    "motion": "13.3.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
