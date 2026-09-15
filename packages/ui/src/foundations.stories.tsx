@@ -5,6 +5,7 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { emulateReducedMotion } from '../.storybook/reduced-motion.ts'
 import { Button } from './components/button/button.tsx'
+import * as icons from './icons.ts'
 import { useTransition } from './motion.ts'
 
 /**
@@ -65,6 +66,37 @@ export const Colours: Story = {
       </div>
     </div>
   ),
+}
+
+/** Every icon of the catalogue is a component; the sizes are the type's own. */
+const CATALOGUE = Object.entries(icons).filter(([name]) => name.startsWith('Icon'))
+
+export const Icons: Story = {
+  render: () => (
+    <div className="flex flex-col gap-4">
+      {(['sm', 'md', 'lg'] as const).map((size) => (
+        <div key={size} className="flex flex-wrap items-center gap-3 text-muted-foreground">
+          {CATALOGUE.map(([name, Icon]) => (
+            <Icon key={name} size={size} aria-label={name} />
+          ))}
+        </div>
+      ))}
+      <p className="text-primary">
+        <icons.IconCheck aria-label="A check in the primary colour" />
+      </p>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // A size is a step of the icon scale, never a number the caller passed in.
+    const drawn = canvas.getAllByLabelText('IconCheck')
+    expect(drawn.map((icon) => getComputedStyle(icon).width)).toEqual(['14px', '16px', '20px'])
+
+    // The colour is whatever the text around it is: an icon names no colour of its own.
+    const coloured = canvas.getByLabelText('A check in the primary colour')
+    expect(getComputedStyle(coloured).color).toBe(getComputedStyle(coloured.parentElement!).color)
+    expect(getComputedStyle(coloured).stroke).toBe(getComputedStyle(coloured).color)
+  },
 }
 
 const SIZES = ['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl']
