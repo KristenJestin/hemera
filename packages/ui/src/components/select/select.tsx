@@ -14,10 +14,11 @@ import { IconCheck, IconChevronDown } from '../../icons.ts'
  *
  * The popup animates in CSS through Base UI's `data-starting-style`, not through motion: the
  * element enters and leaves with the popup itself, and a spring driven from React would have
- * to be told when the popup is gone. Opacity and transform only, on the theme's own curve.
+ * to be told when the popup is gone. It comes down from the trigger and folds back up into it,
+ * so the direction says where it came from. Opacity and transform only, on the theme's curve.
  */
 const POPUP =
-  'max-h-64 overflow-auto rounded-lg border border-border bg-card p-1 text-sm text-card-foreground shadow-lg outline-none popup-motion data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0'
+  'max-h-64 min-w-(--anchor-width) overflow-auto rounded-lg border border-border bg-card p-1 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
 
 const ITEM =
   'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none data-highlighted:bg-accent data-disabled:opacity-50'
@@ -25,6 +26,8 @@ const ITEM =
 export interface SelectItem<Value extends string> {
   value: Value
   label: string
+  /** One icon of the catalogue, before the label and in the list's own colour. */
+  icon?: ReactNode
   disabled?: boolean | undefined
 }
 
@@ -73,7 +76,7 @@ export function Select<Value extends string>({
       <BaseSelect.Trigger
         aria-label={label}
         className={cn(
-          'flex h-8 items-center justify-between gap-2 rounded-md border border-input bg-card px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring data-disabled:opacity-50',
+          'flex h-8 items-center justify-between gap-2 rounded-md border border-input bg-card px-2 text-sm text-foreground outline-none focus-ring data-disabled:opacity-50',
           className,
         )}
       >
@@ -83,7 +86,15 @@ export function Select<Value extends string>({
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
-        <BaseSelect.Positioner sideOffset={4}>
+        <BaseSelect.Positioner
+          // Base UI would otherwise lay the chosen item over the trigger, the way a native
+          // macOS menu does — the list covers the control it belongs to and the eye loses
+          // where it came from. It opens below, like every other popup here.
+          alignItemWithTrigger={false}
+          side="bottom"
+          align="start"
+          sideOffset={4}
+        >
           <BaseSelect.Popup className={POPUP}>
             {groups.map((group, index) => (
               <Section key={group.label === '' ? index : group.label} group={group} />
@@ -104,10 +115,16 @@ function Section<Value extends string>({ group }: { group: SelectGroup<Value> })
       disabled={item.disabled === true}
       className={ITEM}
     >
-      <BaseSelect.ItemIndicator className="flex text-primary">
-        <IconCheck size="sm" />
-      </BaseSelect.ItemIndicator>
+      {item.icon}
       <BaseSelect.ItemText>{item.label}</BaseSelect.ItemText>
+      {/* The mark sits after the label, where the eye ends up rather than where it starts:
+          a list is read down its left edge, and a column of empty space before every word
+          pushes the words away from it for the sake of one item. */}
+      <span className="ml-auto flex w-icon-sm justify-center text-primary">
+        <BaseSelect.ItemIndicator>
+          <IconCheck size="sm" />
+        </BaseSelect.ItemIndicator>
+      </span>
     </BaseSelect.Item>
   ))
 

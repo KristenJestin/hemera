@@ -235,19 +235,14 @@
   --duration-base: 260ms;
   --duration-slow: 400ms;
 
-  /* The pulse of the loading grid. One cycle, and a ring of the grid lights up per step, so
-     the whole grid takes a cycle plus four steps to travel from the centre to the corners. */
-  --duration-wave: 1200ms;
-  --animate-wave: wave var(--duration-wave) var(--ease-calm) infinite;
+  /* One turn of the loading indicator. Linear on purpose: a spin that eases is a spin that
+     looks like it keeps stopping. */
+  --duration-turn: 1200ms;
+  --animate-turn: turn var(--duration-turn) linear infinite;
 
-  @keyframes wave {
-    0%,
-    70%,
-    100% {
-      opacity: 0.2;
-    }
-    35% {
-      opacity: 1;
+  @keyframes turn {
+    to {
+      transform: rotate(360deg);
     }
   }
 }
@@ -269,24 +264,70 @@
 
 /* What a backdrop does, which is appear and go away. Named here for the same reason as the
    popup's own motion: the list of properties is a decision, not something a caller retypes. */
+/* A focus ring that arrives instead of snapping on.
+   The ring itself is a shadow, and a shadow is not something a compositor can animate — so
+   nothing about the shadow changes. It is drawn once on a layer of its own, kept invisible and
+   a little too large, and what moves is that layer's opacity and scale. It is drawn inside the
+   control rather than around it, because a control that hides its overflow would clip a ring
+   sitting outside it. */
+@utility focus-ring {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 2px var(--color-ring);
+    opacity: 0;
+    scale: 1.06;
+    pointer-events: none;
+    transition-property: opacity, scale;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-calm);
+  }
+
+  &:focus-visible::after,
+  /* A control that cannot carry the ring itself wears it through the box around it: an input
+     and a textarea are replaced elements, and a replaced element renders no pseudo-element at
+     all — the ring would simply never be drawn. */
+  &:has(:focus-visible)::after {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
 @utility backdrop-motion {
-  transition-property: opacity;
-  transition-duration: var(--duration-fast);
+  transition-property: opacity, backdrop-filter;
+  transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
 }
 
 /* The two properties a popup enters and leaves on, named once so that no component writes the
-   list itself and nothing else can slip into it. Base UI hands over the origin to grow from. */
+   list itself and nothing else can slip into it.
+   A popup carries its resting `translate` and `scale` as classes of their own, and not only
+   under the starting and ending variants. Without them the variant rule is the only thing
+   declaring the property at all, and a popup whose transition never ran — Base UI opens
+   instantly when nothing pointed at it — keeps the value it was supposed to leave.
+
+   A popup comes down from its trigger and folds back up into it rather than growing out of a
+   corner: a scale from an origin reads as a direction nobody asked for, and the direction a
+   list opens in is the first thing the eye uses to find where it came from. */
 @utility popup-motion {
-  transform-origin: var(--transform-origin);
-  transition-property: opacity, transform;
-  transition-duration: var(--duration-fast);
+  /* `translate` and `scale` and not `transform`: Tailwind 4 writes its transform utilities as
+     the individual properties, and a transition naming `transform` never sees them — the popup
+     lands at its end position in one frame and then animates nothing. */
+  transition-property: opacity, translate, scale;
+  transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
 }
 
-/* How far into the wave a dot is, which is how far it is from the middle of the grid. */
-@utility wave-ring-* {
-  animation-delay: calc(--value(integer) * var(--duration-fast));
+/* Where a dot sits on the ring it orbits: a third of a turn apart, pushed out from the middle.
+   The push is a share of the dot's own size, which is the only length a percentage can mean
+   here — at one and a tenth of it the three dots land just inside the edge of the box at
+   every step of the scale. The transform is fixed; only the ring they sit on ever turns. */
+@utility orbit-* {
+  transform: rotate(calc(--value(integer) * 120deg)) translateY(-110%);
 }
 
 @layer base {

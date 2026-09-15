@@ -1,5 +1,5 @@
 import { Menu as BaseMenu } from '@base-ui/react/menu'
-import type { ReactNode } from 'react'
+import { type ReactNode, useRef } from 'react'
 
 import { Button } from '../button/button.tsx'
 
@@ -10,11 +10,18 @@ import { Button } from '../button/button.tsx'
  * groups of items and the lines fall where they belong. That leaves every entry in the list an
  * actual command, which is what the keyboard walks through.
  *
+ * It opens downwards from its trigger and folds back up into it. A menu that grows out of a
+ * corner makes the eye hunt for where it came from; one that comes down has already said.
+ *
+ * The popup hangs off a wrapper around the trigger and not off the trigger itself. A pressed
+ * button is a scaled button, its box shrinks with it, and a popup anchored to that box chases
+ * the press from under the pointer. The wrapper never moves, so neither does the menu.
+ *
  * Base UI returns the focus to the trigger when the menu closes, which is the part a menu is
  * usually missing: leave it out and the keyboard lands back at the top of the page.
  */
 const POPUP =
-  'min-w-48 rounded-lg border border-border bg-card p-1 text-sm text-card-foreground shadow-lg outline-none popup-motion data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0'
+  'min-w-48 rounded-lg border border-border bg-card p-1 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
 
 const ITEM =
   'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none data-highlighted:bg-accent data-disabled:opacity-50'
@@ -40,16 +47,19 @@ export interface MenuProps {
 }
 
 export function Menu({ label, groups, disabled, className }: MenuProps) {
+  const anchor = useRef<HTMLSpanElement>(null)
   return (
     <BaseMenu.Root>
-      <BaseMenu.Trigger
-        disabled={disabled === true}
-        render={<Button variant="secondary" className={className} />}
-      >
-        {label}
-      </BaseMenu.Trigger>
+      <span ref={anchor} className="inline-flex">
+        <BaseMenu.Trigger
+          disabled={disabled === true}
+          render={<Button variant="secondary" className={className} />}
+        >
+          {label}
+        </BaseMenu.Trigger>
+      </span>
       <BaseMenu.Portal>
-        <BaseMenu.Positioner sideOffset={4} align="start">
+        <BaseMenu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4}>
           <BaseMenu.Popup className={POPUP}>
             {groups.map((group, index) => (
               <BaseMenu.Group key={group[0]?.label ?? index}>

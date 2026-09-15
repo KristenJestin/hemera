@@ -22,6 +22,10 @@ export const ALLOWED_PROPERTIES = [
   'clipPath',
   'clip-path',
   'transform',
+  // `translate` beside the shorthand: Tailwind 4 writes its transform utilities as the
+  // individual properties, and a compositor carries those exactly as it carries `transform`.
+  // `scale` and `rotate` are already below, where motion's own names are.
+  'translate',
   'x',
   'y',
   'z',
