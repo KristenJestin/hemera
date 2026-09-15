@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node", "@wdio/globals/types", "@wdio/electron-service", "@wdio/mocha-framework"]
+  },
+  "include": ["e2e/**/*.ts", "wdio.conf.ts", "src/renderer/bridge.d.ts"]
+}

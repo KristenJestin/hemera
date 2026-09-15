@@ -1,0 +1,54 @@
+# Packaging of the application (design D0-08).
+#
+# One portable package per target: an archive on Windows, an AppImage and a deb on Linux.
+# Nothing here signs, notarises, publishes or updates — that is lot 8. Nothing downloads at
+# start either: what the package needs, the package carries.
+
+appId: dev.hemera.app
+productName: Hemera
+copyright: Hemera
+
+directories:
+  output: ../../dist/package
+  buildResources: build
+
+# Only what was built and the manifest that names its entry point. The sources and every
+# development dependency stay out by not being named.
+files:
+  - dist/**
+  - package.json
+
+# The 55 locales Chromium ships weigh 47 MB unpacked and the application speaks one language.
+# The folder is emptied through this option and never by hand: an empty locales folder is a
+# crash at start, not a smaller package.
+electronLanguages:
+  - en-US
+
+compression: normal
+
+# What the runtime is allowed to be talked into. `RunAsNode` and the inspect arguments turn a
+# packaged application into a Node interpreter for whoever sets an environment variable.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  enableCookieEncryption: true
+
+win:
+  # An archive, not an installer: the package is extracted wherever the user wants and started
+  # from there, which is what the lot verifies.
+  target:
+    - zip
+
+linux:
+  category: Development
+  target:
+    - AppImage
+    - deb
+
+deb:
+  # Ubuntu 24.04 restricts user namespaces, which is what the Chromium sandbox is built on.
+  # The profile ships with the package so the sandbox stays on without a single flag.
+  appArmorProfile: build/hemera.apparmor

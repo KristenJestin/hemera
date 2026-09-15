@@ -1,0 +1,26 @@
+{
+  "name": "hemera",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp run --filter !hemera --parallel dev",
+    "typecheck": "vp run --filter !hemera typecheck",
+    "lint": "vp lint && node tools/boundaries.ts && node tools/window-options.ts && node tools/motion-properties.ts",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
+    "test": "vp test",
+    "build": "vp run --filter !hemera build",
+    "package": "node tools/package-desktop.ts",
+    "report": "node tools/environment-report.ts --write",
+    "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test"
+  },
+  "devDependencies": {
+    "@hemera/ipc": "workspace:*",
+    "@oxlint/plugins": "1.82.0",
+    "@shadcn/lint": "^0.1.0",
+    "@types/node": "24.13.4",
+    "typescript": "7.0.2",
+    "vite-plus": "0.3.2"
+  },
+  "packageManager": "pnpm@12.4.1"
+}
