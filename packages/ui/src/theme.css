@@ -47,20 +47,27 @@
 
   --success: #16a34a;
   --success-muted: #ecfdf3;
+  --success-muted-foreground: #15803d;
   --warning: #d97706;
   --warning-muted: #fffbeb;
+  --warning-muted-foreground: #b45309;
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
   --destructive-muted: #fef2f2;
+  --destructive-muted-foreground: #b91c1c;
   --info: #2563eb;
   --info-muted: #eff6ff;
+  --info-muted-foreground: #1d4ed8;
 
   --mission-define: #7c3aed;
   --mission-define-muted: #f3efff;
+  --mission-define-muted-foreground: #6d28d9;
   --mission-build: #0891b2;
   --mission-build-muted: #ecfeff;
+  --mission-build-muted-foreground: #0e7490;
   --mission-free: #6b6b7b;
   --mission-free-muted: #f1f1f4;
+  --mission-free-muted-foreground: #4b4b57;
 
   --border: #e2e2e8;
   --input: #d3d3db;
@@ -93,20 +100,27 @@
 
   --success: #4ade80;
   --success-muted: rgba(74, 222, 128, 0.1);
+  --success-muted-foreground: #4ade80;
   --warning: #fbbf24;
   --warning-muted: rgba(251, 191, 36, 0.1);
+  --warning-muted-foreground: #fbbf24;
   --destructive: #f87171;
   --destructive-foreground: #040406;
   --destructive-muted: rgba(248, 113, 113, 0.1);
+  --destructive-muted-foreground: #f87171;
   --info: #60a5fa;
   --info-muted: rgba(96, 165, 250, 0.1);
+  --info-muted-foreground: #60a5fa;
 
   --mission-define: #a78bfa;
   --mission-define-muted: rgba(167, 139, 250, 0.12);
+  --mission-define-muted-foreground: #a78bfa;
   --mission-build: #22d3ee;
   --mission-build-muted: rgba(34, 211, 238, 0.1);
+  --mission-build-muted-foreground: #22d3ee;
   --mission-free: #9a9aab;
   --mission-free-muted: rgba(154, 154, 171, 0.12);
+  --mission-free-muted-foreground: #9a9aab;
 
   --border: #27272f;
   --input: #363640;
@@ -142,20 +156,27 @@
 
   --color-success: var(--success);
   --color-success-muted: var(--success-muted);
+  --color-success-muted-foreground: var(--success-muted-foreground);
   --color-warning: var(--warning);
   --color-warning-muted: var(--warning-muted);
+  --color-warning-muted-foreground: var(--warning-muted-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-muted: var(--destructive-muted);
+  --color-destructive-muted-foreground: var(--destructive-muted-foreground);
   --color-info: var(--info);
   --color-info-muted: var(--info-muted);
+  --color-info-muted-foreground: var(--info-muted-foreground);
 
   --color-mission-define: var(--mission-define);
   --color-mission-define-muted: var(--mission-define-muted);
+  --color-mission-define-muted-foreground: var(--mission-define-muted-foreground);
   --color-mission-build: var(--mission-build);
   --color-mission-build-muted: var(--mission-build-muted);
+  --color-mission-build-muted-foreground: var(--mission-build-muted-foreground);
   --color-mission-free: var(--mission-free);
   --color-mission-free-muted: var(--mission-free-muted);
+  --color-mission-free-muted-foreground: var(--mission-free-muted-foreground);
 
   --color-border: var(--border);
   --color-input: var(--input);

@@ -12,4 +12,5 @@ export {
   type ButtonState,
   type IconButtonProps,
 } from './components/button/button.tsx'
+export { Badge, type BadgeProps } from './components/badge/badge.tsx'
 export { Loading, type LoadingProps } from './components/loading/loading.tsx'
