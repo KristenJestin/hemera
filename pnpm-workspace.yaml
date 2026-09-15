@@ -1,6 +1,8 @@
 packages:
   - apps/*
   - packages/*
+allowBuilds:
+  electron-winstaller: set this to true or false
 minimumReleaseAgeExclude:
   - '@voidzero-dev/vite-plus-core@0.3.2'
   - '@voidzero-dev/vite-plus-darwin-arm64@0.3.2'

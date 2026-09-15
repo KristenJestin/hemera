@@ -1,6 +1,8 @@
 {
   "name": "@hemera/desktop",
+  "version": "0.0.0",
   "private": true,
+  "description": "Desktop cockpit for ACP agents",
   "type": "module",
   "main": "dist/main/index.js",
   "imports": {
@@ -22,6 +24,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "electron": "44.3.0",
+    "electron-builder": "26.15.3",
     "vite-plus": "0.3.2"
   }
 }

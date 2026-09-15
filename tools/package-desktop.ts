@@ -1,183 +1,102 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
- * Assembles the portable desktop package of the target this machine is.
+ * Portable package of the target this machine is (design D0-08).
  *
- * The executable carries the Bun runtime, the sources of the internal packages, the
- * statically imported migrations, the fonts and the native addon of its target. It starts
- * outside the sources, from a folder whose path has spaces, with no `node_modules` of the
- * monorepo beside it and with nothing of a spike in it.
+ * The three bundles are built, electron-builder assembles them, and what came out is read
+ * back: what a package carries is checked on the package, not on the configuration that was
+ * supposed to produce it. Nothing here signs, publishes or updates.
  *
- * An update is a replacement of the package: there is no auto-updater in this delivery.
- *
- *   bun tools/package-desktop.ts              assemble the dev package
- *   bun tools/package-desktop.ts --prod       assemble the prod package
+ *   node tools/package-desktop.ts
  */
 
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 
-import { TARGETS, targetOfHost } from './environment-report.ts'
-import type { Target } from './environment-report.ts'
+/** Folders whose content has no business inside a package. */
+export const REFUSED_IN_PACKAGE = ['legacy', 'spikes', 'src', 'node_modules'] as const
 
-/** Name the executable carries in the package. */
-export function executableNameOf(target: Target): string {
-  return target === TARGETS['win32-x64'] ? 'hemera.exe' : 'hemera'
+export interface PackageProblem {
+  entry: string
+  problem: string
 }
 
-/** Bun target the assembler compiles for. */
-function bunTargetOf(target: Target): string {
-  return target === TARGETS['win32-x64'] ? 'bun-windows-x64' : 'bun-linux-x64'
-}
-
-export function packageNameOf(channel: string, target: Target): string {
-  return `hemera-${channel}-${target}`
-}
-
-/**
- * System prerequisites of a package, per target.
- *
- * Windows has no documented prerequisite to this day; that is an open point of the lot and is
- * written as such rather than filled in with a guess.
- */
-export const SYSTEM_REQUIREMENTS: Record<Target, string[][]> = {
-  [TARGETS['win32-x64']]: [
-    ['Windows 10 or 11, x64.'],
-    ['A GPU and driver supporting DirectX 12.'],
-    [
-      'No further prerequisite is documented to this day: this is an open point of the lot,',
-      'to be established by running the package on a machine that never built it.',
-    ],
-  ],
-  [TARGETS['linux-x64']]: [
-    ['Linux x64 with glibc.'],
-    [
-      'libxkbcommon, libxkbcommon-x11 and libxcb: the libraries the addon names in its ELF',
-      'dependencies, beside libc, libm and libgcc. The last two arrived with the X11 client',
-      'of the renderer; without them the addon no longer loads at all, on a Wayland session',
-      'too. Observed by reading the addon built on 2026-09-14.',
-    ],
-    [
-      'A Wayland compositor or X11, and a Vulkan loader: opened at run time, so they appear',
-      'in no dependency list and are only missed once the window tries to open.',
-    ],
-    [
-      'Neither fontconfig nor freetype is needed to run: the fonts are embedded in the',
-      'executable, and the crate that reads them links fontconfig only while compiling.',
-    ],
-  ],
-}
-
-function requirementsDocument(target: Target, channel: string): string {
-  return [
-    `# System prerequisites — ${target}`,
-    '',
-    `Channel of this package: \`${channel}\`.`,
-    '',
-    // Each requirement is written as the lines its source is wrapped over, and reads as one
-    // bullet: a wrap in the code is not a second prerequisite.
-    ...SYSTEM_REQUIREMENTS[target].map((lines) => `- ${lines.join(' ')}`),
-    '',
-    '## Updating',
-    '',
-    'Replace the whole package folder with the new one. Hemera downloads nothing and installs',
-    'nothing on its own at start-up, and there is no auto-updater in this delivery. The profile',
-    'lives outside the package, so a replacement finds the same projects and sessions again.',
-    '',
-  ].join('\n')
-}
-
-function sha256Of(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex')
-}
-
-/** The renderer this package embeds: the branch of the fork beside it, and its commit. */
-function forkOf(repositoryRoot: string): { version: string; head: string } {
-  const forkPath = resolve(repositoryRoot, '..', 'gpuix')
-  if (!existsSync(join(forkPath, '.git'))) return { version: 'unknown', head: 'unknown' }
-  const read = (args: string[]): string => {
-    const run = Bun.spawnSync(['git', '-C', forkPath, ...args], { stdout: 'pipe', stderr: 'pipe' })
-    return run.exitCode === 0 ? new TextDecoder().decode(run.stdout).trim() : 'unknown'
+function entriesUnder(root: string, from: string = root): string[] {
+  const found: string[] = []
+  for (const entry of readdirSync(root)) {
+    const path = join(root, entry)
+    found.push(relative(from, path).replaceAll('\\', '/'))
+    if (statSync(path).isDirectory()) found.push(...entriesUnder(path, from))
   }
-  return { version: read(['rev-parse', '--abbrev-ref', 'HEAD']), head: read(['rev-parse', 'HEAD']) }
+  return found
 }
 
-export interface AssembledPackage {
-  directory: string
-  executable: string
-  channel: string
-  target: Target
-  sha256: string
-}
-
-export async function assemblePackage(
-  repositoryRoot: string,
-  channel: 'prod' | 'dev',
-  outputRoot = join(repositoryRoot, 'dist'),
-): Promise<AssembledPackage> {
-  const target = targetOfHost()
-  const directory = join(outputRoot, packageNameOf(channel, target))
-  rmSync(directory, { recursive: true, force: true })
-  mkdirSync(directory, { recursive: true })
-
-  // The messages are compiled, not committed, and the bundler reads them as sources: a
-  // package assembled without this step embeds whatever the last compilation left behind.
-  const messages = Bun.spawnSync(['bun', 'run', 'i18n:compile'], {
-    cwd: join(repositoryRoot, 'apps', 'desktop'),
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  if (messages.exitCode !== 0) {
-    throw new Error(
-      `the messages could not be compiled: ${new TextDecoder().decode(messages.stderr)}`,
+/** What a packaged tree carries that it should not. */
+export function refusedEntries(entries: string[]): PackageProblem[] {
+  return entries
+    .filter((entry) =>
+      REFUSED_IN_PACKAGE.some((refused) => entry === refused || entry.split('/').includes(refused)),
     )
+    .map((entry) => ({ entry, problem: 'belongs to the sources, not to a package' }))
+}
+
+/**
+ * Whether the locales the package carries are the one language it speaks.
+ *
+ * The folder is checked for being reduced and for existing: Electron refuses to start on an
+ * empty one, so emptying it by hand trades 47 MB for a package that does not run.
+ */
+export function localesProblems(locales: string[]): PackageProblem[] {
+  const packs = locales.filter((entry) => entry.endsWith('.pak'))
+  if (packs.length === 0) {
+    return [{ entry: 'locales', problem: 'is empty, and Electron will not start on that' }]
   }
-
-  const executable = join(directory, executableNameOf(target))
-  const build = Bun.spawnSync(
-    [
-      'bun',
-      'build',
-      '--compile',
-      `--target=${bunTargetOf(target)}`,
-      // The channel becomes a literal of the bundle: a package cannot be told it is another.
-      '--define',
-      `HEMERA_PACKAGED_CHANNEL="${channel}"`,
-      join(repositoryRoot, 'apps', 'desktop', 'src', 'entry', 'main.tsx'),
-      '--outfile',
-      executable,
-    ],
-    { cwd: repositoryRoot, stdout: 'pipe', stderr: 'pipe' },
-  )
-  if (build.exitCode !== 0) {
-    throw new Error(`the assembly failed: ${new TextDecoder().decode(build.stderr)}`)
+  if (packs.length > 1) {
+    return packs
+      .filter((pack) => !pack.startsWith('en-US'))
+      .map((pack) => ({ entry: pack, problem: 'is a locale the application does not speak' }))
   }
+  return []
+}
 
-  const fork = forkOf(repositoryRoot)
-  writeFileSync(join(directory, 'SYSTEM-REQUIREMENTS.md'), requirementsDocument(target, channel))
-  writeFileSync(
-    join(directory, 'manifest.json'),
-    `${JSON.stringify(
-      {
-        channel,
-        target,
-        executable: executableNameOf(target),
-        sha256: sha256Of(executable),
-        fork,
-        assembledAt: new Date().toISOString(),
-      },
-      null,
-      2,
-    )}\n`,
-  )
+export function inspectPackage(unpacked: string): PackageProblem[] {
+  const entries = entriesUnder(unpacked)
+  const locales = join(unpacked, 'locales')
+  return [
+    ...refusedEntries(entries),
+    ...localesProblems(existsSync(locales) ? readdirSync(locales) : []),
+  ]
+}
 
-  return { directory, executable, channel, target, sha256: sha256Of(executable) }
+/** The folder electron-builder leaves the unpacked application in, per target. */
+export function unpackedFolderOf(platform: string = process.platform): string {
+  if (platform === 'win32') return 'win-unpacked'
+  if (platform === 'linux') return 'linux-unpacked'
+  return `${platform}-unpacked`
+}
+
+function run(command: string, cwd: string): void {
+  const { ELECTRON_RUN_AS_NODE: _runAsNode, ...environment } = process.env
+  const result = spawnSync(command, { cwd, stdio: 'inherit', shell: true, env: environment })
+  if (result.status !== 0) throw new Error(`\`${command}\` failed with ${String(result.status)}`)
 }
 
 if (import.meta.main) {
-  const repositoryRoot = resolve(import.meta.dir, '..')
-  const channel = process.argv.includes('--prod') ? 'prod' : 'dev'
-  const assembled = await assemblePackage(repositoryRoot, channel)
-  console.log(`assembled ${assembled.directory}`)
-  console.log(`${assembled.executable} ${assembled.sha256}`)
+  const repository = resolve(import.meta.dirname, '..')
+  const application = join(repository, 'apps', 'desktop')
+
+  run('node build.ts', application)
+  run('pnpm exec electron-builder --config electron-builder.yml', application)
+
+  const unpacked = join(repository, 'dist', 'package', unpackedFolderOf())
+  const problems = inspectPackage(unpacked)
+  for (const problem of problems) {
+    console.error(`${problem.entry}: ${problem.problem}`)
+  }
+  console.log(
+    problems.length === 0
+      ? `the package under ${unpacked} carries what it should and nothing else`
+      : `${problems.length} problem(s) in the package`,
+  )
+  if (problems.length > 0) process.exit(1)
 }
