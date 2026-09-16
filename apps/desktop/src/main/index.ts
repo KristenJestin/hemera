@@ -43,11 +43,13 @@ void app.whenReady().then(async () => {
     // The transition is played and counted in the page, because that is where frames are
     // rendered; the main process only asks for it and files what came back.
     //
-    // It is played twice and the second one is filed. The first transition after a cold start
-    // carries the page's first paint with it — a frame of about 110 ms on this machine — and
-    // that frame says what starting costs, not what the transition costs. What the lot asks
-    // of the transition is measured on a window that has already painted.
+    // It is played three times and the last one is filed. The first folds after a cold start
+    // carry the page's first paints and the compositor layer the panel is given — eighteen
+    // milliseconds on this machine, three periods of a 165 Hz display — and those frames say
+    // what starting costs, not what the fold costs. What the lot asks of the fold is measured
+    // on a window that has already drawn it.
     const play = 'window.hemeraWitness.play()'
+    await window.webContents.executeJavaScript(play)
     await window.webContents.executeJavaScript(play)
     // SAFETY: `play` is the renderer's `window.hemeraWitness.play`, declared in `bridge.d.ts`
     // to resolve a `MotionMeasure`; `executeJavaScript` returns it untyped.
