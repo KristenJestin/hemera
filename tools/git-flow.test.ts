@@ -125,8 +125,16 @@ describe('Commit hors convention', () => {
     'test(core): cover rank rebalancing with random insertions',
     'chore(db): pin the drizzle version',
     "Merge branch 'feature/sessions' into dev",
+    // Seventy-one characters as written, and the number GitHub appends on a squash after.
+    'fix(tools): build the beta package on linux, give the type check time (#7)',
   ])('%p is accepted', (message) => {
     expect(validateCommitMessage(message).ok).toBe(true)
+  })
+
+  test('the number a squash merge appends is not counted against the author', () => {
+    const long = `feat(core): ${'a'.repeat(80)} (#12)`
+    expect(validateCommitMessage(long).ok).toBe(false)
+    expect(validateCommitMessage(`feat(core): ${'a'.repeat(60)} (#12)`).ok).toBe(true)
   })
 
   test('comment lines added by git are ignored', () => {
