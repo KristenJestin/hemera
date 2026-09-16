@@ -4,7 +4,7 @@ import type { BrowserWindow } from 'electron/main'
 
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
-import { wearTheme } from './window.ts'
+import { wearPreference } from './window.ts'
 
 export function registerChannels(window: BrowserWindow): void {
   handle('env.report', () => collectReport())
@@ -15,9 +15,9 @@ export function registerChannels(window: BrowserWindow): void {
     return window.isMaximized() ? window.unmaximize() : window.maximize()
   })
 
-  // The page decides which theme it wears; the frame and the system's window buttons are
-  // outside the page, so it says so here and they follow.
-  handle('theme.set', ({ theme }) => {
-    wearTheme(window, theme)
+  // The page asks; the platform decides, and everything follows from what it answers — the
+  // frame, the system's window buttons, and `prefers-color-scheme` inside the page itself.
+  handle('theme.set', ({ preference }) => {
+    wearPreference(window, preference)
   })
 }

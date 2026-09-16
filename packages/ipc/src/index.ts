@@ -7,6 +7,7 @@ export type {
   ChannelName,
   ChannelResponse,
   Channels,
+  ThemePreference,
 } from './channels.ts'
 export {
   displaySchema,

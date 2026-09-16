@@ -1,8 +1,13 @@
 /**
- * What the catalogue claims about itself: nine components, each with the stories the lot says
- * every component has. A component whose stories are missing is a component nobody validated.
+ * What the catalogue claims about itself: twelve components, each with the stories the lot says
+ * every component has, and the six pieces of the shell beside them. A component whose stories
+ * are missing is a component nobody validated.
  *
- * Each suite is named after the scenario of `specs/design-system/spec.md` it covers.
+ * Nine of the twelve are lot 1's; Tooltip, Popover and Tabs arrive with the shell of lot 2,
+ * which is why the inventory counts to twelve now (`openspec/changes/lot-2-coquille`).
+ *
+ * Each suite is named after the scenario of `specs/design-system/spec.md` or of
+ * `specs/window-shell/spec.md` it covers.
  */
 
 import { readFileSync } from 'node:fs'
@@ -23,7 +28,7 @@ interface Catalogued {
   keyboard: boolean
 }
 
-/** The nine, and no tenth: the lot delivers exactly this list. */
+/** The twelve, and no thirteenth: the two lots deliver exactly this list. */
 const CATALOGUE: Catalogued[] = [
   { name: 'Button', folder: 'button', keyboard: true },
   { name: 'IconButton', folder: 'button', keyboard: true },
@@ -34,7 +39,13 @@ const CATALOGUE: Catalogued[] = [
   { name: 'Menu', folder: 'menu', keyboard: true },
   { name: 'Dialog', folder: 'dialog', keyboard: true },
   { name: 'Loading', folder: 'loading', keyboard: false },
+  { name: 'Tooltip', folder: 'tooltip', keyboard: true },
+  { name: 'Popover', folder: 'popover', keyboard: true },
+  { name: 'Tabs', folder: 'tabs', keyboard: true },
 ]
+
+/** The pieces of the shell, which are components with a story each and no catalogue entry. */
+const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter']
 
 /**
  * What every component shows: a playground where every prop is a control, its variants side by
@@ -46,12 +57,14 @@ const CATALOGUE: Catalogued[] = [
  */
 const ALWAYS = ['Playground', 'Variants', 'States']
 
-function storiesOf(folder: string): string[] {
-  const source = readFileSync(
-    join(designSystem, 'components', folder, `${folder}.stories.tsx`),
-    'utf8',
+function storiesIn(path: string): string[] {
+  return [...readFileSync(path, 'utf8').matchAll(/^export const (\w+): Story\b/gm)].map(
+    (match) => match[1]!,
   )
-  return [...source.matchAll(/^export const (\w+): Story\b/gm)].map((match) => match[1]!)
+}
+
+function storiesOf(folder: string): string[] {
+  return storiesIn(join(designSystem, 'components', folder, `${folder}.stories.tsx`))
 }
 
 const barrel = readFileSync(join(designSystem, 'index.ts'), 'utf8')
@@ -59,6 +72,8 @@ const preview = readFileSync(join(designSystem, '..', '.storybook', 'preview.tsx
 const runner = ['vitest.config.ts', 'vitest.dark.config.ts'].map((file) =>
   readFileSync(join(designSystem, '..', file), 'utf8'),
 )
+const shared = readFileSync(join(designSystem, '..', 'vitest.shared.ts'), 'utf8')
+const manager = readFileSync(join(designSystem, '..', '.storybook', 'manager.ts'), 'utf8')
 
 describe('Stories complètes', () => {
   test.each(CATALOGUE)(
@@ -94,14 +109,32 @@ function exportedComponents(source: string): string[] {
     .filter((name) => name !== '' && !name.startsWith('type '))
 }
 
-describe('Neuf composants accessibles écrits maison', () => {
-  test('the design system hands out exactly the nine, and nothing beside them', () => {
-    // `DialogClose` is not a tenth component: it is the dialog's own way of saying that a
-    // button of the caller's closes it, and it has no appearance of its own.
-    const parts = ['DialogClose']
+describe('Douze composants accessibles écrits maison', () => {
+  test('the design system hands out exactly the twelve, and the shell beside them', () => {
+    // Neither `DialogClose` nor `Kbd` is a thirteenth component: the first is the dialog's own
+    // way of saying that a button of the caller's closes it, and the second is a keystroke
+    // drawn as keys, which every one of the twelve that shows one borrows.
+    const parts = ['DialogClose', 'Kbd', 'TooltipProvider']
+    const shell = ['Shell', 'ContentArea', 'OverlayRoot', 'ChromeBar', 'Sidebar', 'Gutter']
+    // The bounds and the named entries of the sidebar are values of the theme, not components:
+    // the application needs them to hand the shell a width and to say which place it is on.
+    const values = [
+      'JOURNAL_ENTRY',
+      'PROJECT_SETTINGS_ENTRY',
+      'SIDEBAR_DEFAULT',
+      'SIDEBAR_MAX',
+      'SIDEBAR_MIN',
+      'SIDEBAR_RAIL',
+    ]
     expect(exportedComponents(barrel).toSorted()).toEqual(
-      [...CATALOGUE.map((entry) => entry.name), ...parts].toSorted(),
+      [...CATALOGUE.map((entry) => entry.name), ...parts, ...shell, ...values].toSorted(),
     )
+  })
+})
+
+describe('Coquille montrée en Storybook', () => {
+  test.each(SHELL)('%s has a story of its own', (piece) => {
+    expect(storiesIn(join(designSystem, 'shell', `${piece}.stories.tsx`))).toContain('Playground')
   })
 })
 
@@ -109,9 +142,27 @@ describe('Stories dans les deux thèmes', () => {
   test('the theme is a toolbar global, so any story can be seen in either', () => {
     expect(preview).toContain('globalTypes')
     expect(preview).toContain('theme')
-    for (const value of ['light', 'dark']) {
+    for (const value of ['light', 'dark', 'both']) {
       expect(preview, `the toolbar offers no ${value} theme`).toContain(`value: '${value}'`)
     }
+  })
+
+  test('both is for the eye: it wears the class on a wrapper, not on the document', () => {
+    expect(preview).toContain("chosen !== 'both'")
+    expect(preview).toContain('className="dark')
+  })
+
+  test('the chrome of Storybook follows the same global the story does', () => {
+    expect(manager).toContain('GLOBALS_UPDATED')
+    expect(manager).toContain('setOptions')
+    expect(manager).toContain('themes.dark')
+  })
+
+  test('each run is named after the theme it played, so a contrast failure names it', () => {
+    // The two projects are the whole matrix: a violation that only exists on black is reported
+    // under `storybook-dark`, which is what tells the reader which theme to go and look at.
+    expect(shared).toContain('storybook-${theme}')
+    expect(shared).toContain("theme: 'light' | 'dark'")
   })
 
   test('the runner plays the whole catalogue once per theme', () => {

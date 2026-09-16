@@ -2,6 +2,7 @@ import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import type { ReactNode } from 'react'
 
 import { IconX } from '../../icons.ts'
+import { useOverlayContainer } from '../../overlay.ts'
 import { Button, IconButton } from '../button/button.tsx'
 
 /**
@@ -29,8 +30,8 @@ export interface DialogProps {
   children?: ReactNode
   /** The buttons at the bottom; the dialog draws the row, the caller decides the buttons. */
   actions?: ReactNode
-  /** What opens it. */
-  trigger: string
+  /** What opens it, when a button is what opens it: a dialog a keystroke opens has none. */
+  trigger?: string | undefined
   open?: boolean | undefined
   onOpenChange?: ((open: boolean) => void) | undefined
   /** Where the trigger sits; never how it looks. */
@@ -47,12 +48,15 @@ export function Dialog({
   onOpenChange,
   className,
 }: DialogProps) {
+  const container = useOverlayContainer()
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange?.(next)}>
-      <BaseDialog.Trigger render={<Button variant="secondary" className={className} />}>
-        {trigger}
-      </BaseDialog.Trigger>
-      <BaseDialog.Portal>
+      {trigger !== undefined && (
+        <BaseDialog.Trigger render={<Button variant="secondary" className={className} />}>
+          {trigger}
+        </BaseDialog.Trigger>
+      )}
+      <BaseDialog.Portal container={container}>
         <BaseDialog.Backdrop className={BACKDROP} />
         <BaseDialog.Popup className={POPUP}>
           <div className="flex items-start gap-2">

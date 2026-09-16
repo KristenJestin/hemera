@@ -12,7 +12,8 @@ import { useContext } from 'react'
  * a finger it takes so long to settle that a three per cent press is not visible at all. What
  * answers the hand has to be stiff and light, and what arrives on its own has to be soft.
  *
- * A third preset needs an interaction neither of these serves. The set is meant to stay short.
+ * A third preset arrived with the shell, for the one thing neither of these serves: a width
+ * that changes. The set is meant to stay short.
  */
 
 /** What answers the hand: hover, press, a width following what the press changed. */
@@ -20,6 +21,16 @@ export const press: Transition = { type: 'spring', stiffness: 500, damping: 30, 
 
 /** What puts itself in place: panels, popups, a swap of content. The prototype's own spring. */
 export const arrival: Transition = { type: 'spring', stiffness: 170, damping: 26 }
+
+/**
+ * What changes size in place: the sidebar folding to its rail and opening back out (D2-03).
+ *
+ * The other two presets are made for a transform, where a little overshoot reads as life. A
+ * dimension that overshoots reads as a mistake — the panel goes past its width and the
+ * columns beside it come back to meet it — so this one sits just past critical damping and
+ * arrives without ever turning round.
+ */
+export const morph: Transition = { type: 'spring', stiffness: 260, damping: 33, mass: 1 }
 
 /** The same arrival, with nothing in between: what a system asking for less movement gets. */
 export const instant: Transition = { duration: 0 }
@@ -39,6 +50,16 @@ export const HOVERED = 1.02
 
 /** How far the mark of a state travels in from under the edge, in pixels. */
 export const MARK_TRAVEL = 12
+
+/** How far the label of a folding panel slides in from, in pixels. */
+export const LABEL_TRAVEL = 8
+
+/**
+ * How long the labels of a folding panel let the width go first, in the seconds motion counts
+ * in. Opening only: on the way out they leave at once, because a label still sitting in a rail
+ * that has already closed is the one frame that reads as a bug.
+ */
+export const LABEL_DELAY = 0.08
 
 /** The durations of the theme, in the seconds motion counts in. */
 export const durations = { fast: 0.16, base: 0.26, slow: 0.4 } as const

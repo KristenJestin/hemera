@@ -93,7 +93,13 @@ export const States: Story = {
     )
     expect(popup.width).toBeGreaterThanOrEqual(control.width)
 
+    // Closed before the story ends, and waited for: the accessibility pass runs on whatever is
+    // on the page when the play is over, and a popup still on its way out has Base UI's focus
+    // guards in it, which read as an error nobody can act on.
     await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('listbox')).toBeNull()
+    })
   },
 }
 
@@ -112,6 +118,11 @@ export const Keyboard: Story = {
     await userEvent.keyboard('{ArrowDown}')
     await waitFor(() => {
       expect(within(document.body).getByRole('listbox')).toBeInTheDocument()
+    })
+    // The list is open before it is walkable: Base UI puts the highlight on the chosen item
+    // once the popup has settled, and a key pressed before then lands on nothing.
+    await waitFor(() => {
+      expect(document.querySelector('[role="option"][data-highlighted]')).not.toBeNull()
     })
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await waitFor(() => {

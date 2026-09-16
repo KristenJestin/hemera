@@ -49,6 +49,20 @@ export const ALLOWED_PROPERTIES = [
   'transition',
 ] as const
 
+/**
+ * The one layout property the design system animates, and the one file allowed to (D2-09).
+ *
+ * The sidebar folds to a rail by changing its width, and that is the movement the user kept:
+ * a panel that grows in place, with the columns beside it following. A transform on a panel
+ * does not reproduce it — it slides something over the content instead of making room. So the
+ * rule stands everywhere and is lifted here, for one file and one property, and the cost is
+ * measured: the fold is played by the frame counter at every recipe, and the exception falls
+ * the day a frame goes above two display periods.
+ */
+export const LAYOUT_EXCEPTIONS = {
+  'packages/ui/src/shell/sidebar.tsx': ['width'],
+} satisfies Record<string, readonly string[]>
+
 /** Props of a motion component that carry the properties it animates. */
 const ANIMATED_PROPS = ['initial', 'animate', 'exit', 'whileHover', 'whileTap', 'whileFocus']
 
@@ -217,10 +231,15 @@ export function unansweredOf(file: string, source: string): Refusal[] {
 
 export function refusalsOf(file: string, source: string): Refusal[] {
   const animated = file.endsWith('.css') ? animatedStyleOf(source) : animatedPropertiesOf(source)
+  const excepted = LAYOUT_EXCEPTIONS[file] ?? []
   return [
     ...(file.endsWith('.css') ? [] : unansweredOf(file, source)),
     ...animated
-      .filter((property) => !ALLOWED_PROPERTIES.some((allowed) => allowed === property))
+      .filter(
+        (property) =>
+          !ALLOWED_PROPERTIES.some((allowed) => allowed === property) &&
+          !excepted.includes(property),
+      )
       .map((property) => ({
         file,
         property,

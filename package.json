@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vp run --filter !hemera --parallel dev",
     "typecheck": "vp run --filter !hemera typecheck",
-    "lint": "vp lint && node tools/boundaries.ts && node tools/window-options.ts && node tools/motion-properties.ts && node tools/scales.ts",
+    "lint": "vp lint && node tools/boundaries.ts && node tools/window-options.ts && node tools/motion-properties.ts && node tools/scales.ts && node tools/text-measure.ts",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
     "test": "vp test",

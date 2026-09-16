@@ -62,13 +62,20 @@ export const States: Story = {
     const inside = within(menu)
 
     // A shortcut is shown beside the command it stands for, and a separator sits between groups.
-    expect(inside.getByText('Ctrl N')).toBeInTheDocument()
+    // The keystroke is drawn as keys, one cap each, the way every shortcut of the shell is.
+    expect(inside.getAllByText('Ctrl').length).toBeGreaterThan(0)
+    expect(inside.getByText('N')).toBeInTheDocument()
     expect(menu.querySelector('[role="separator"]')).not.toBeNull()
     expect(inside.getByRole('menuitem', { name: /delete/i })).toHaveAttribute(
       'aria-disabled',
       'true',
     )
+    // Closed before the story ends, and waited for: the accessibility pass runs on whatever is
+    // on the page when the play is over, and a popup on its way out is not what it judges.
     await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
   },
 }
 
