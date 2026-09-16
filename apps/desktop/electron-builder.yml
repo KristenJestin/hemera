@@ -12,11 +12,18 @@ directories:
   output: ../../dist/package
   buildResources: build
 
-# Only what was built and the manifest that names its entry point. The sources and every
-# development dependency stay out by not being named.
+# Only what was built, the migrations it applies at start-up, and the manifest that names its
+# entry point. The sources and every development dependency stay out by not being named.
 files:
   - dist/**
+  - drizzle/**
   - package.json
+  # The native accelerator `msgpackr` reaches for, which `effect` pulls in and which it does
+  # without: the bundles carry msgpackr's own JavaScript, nothing in them loads this, and a
+  # package of this application carries no native module. electron-builder would otherwise
+  # unpack it beside the archive for being one.
+  - '!node_modules/@msgpackr-extract/**'
+  - '!node_modules/msgpackr-extract/**'
 
 # The 55 locales Chromium ships weigh 47 MB unpacked and the application speaks one language.
 # The folder is emptied through this option and never by hand: an empty locales folder is a

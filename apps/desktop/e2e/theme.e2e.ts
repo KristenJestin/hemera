@@ -37,21 +37,26 @@ async function wearing(): Promise<{
   return { ...platform, ...page }
 }
 
-async function ask(preference: 'system' | 'light' | 'dark'): Promise<void> {
-  await browser.execute(
-    async (asked: 'system' | 'light' | 'dark') =>
-      await window.hemera.invoke('theme.set', { preference: asked }),
-    preference,
-  )
-  await browser.pause(300)
+/**
+ * Presses until the choice is the one wanted, which is never more than three presses.
+ *
+ * Through the control and not through the channel, for the same reason the first suite gives:
+ * a preference written behind the page's back is one the page does not know it has, and what it
+ * wears afterwards is what the last press left rather than what was asked for.
+ */
+async function press(until: 'system' | 'light' | 'dark', left = 3): Promise<void> {
+  if (left === 0 || (await wearing()).source === until) return
+  await toggle()
+  await press(until, left - 1)
 }
 
-/** Presses the theme button of the sidebar, whichever way round it is offering. */
+/** Presses the theme button of the sidebar, whichever of the three it is offering. */
 async function toggle(): Promise<void> {
   await browser.execute(() => {
     const button =
       document.querySelector('[aria-label="Use the dark theme"]') ??
-      document.querySelector('[aria-label="Use the light theme"]')
+      document.querySelector('[aria-label="Use the light theme"]') ??
+      document.querySelector('[aria-label="Follow the desktop theme"]')
     if (button instanceof HTMLElement) button.click()
   })
   await browser.pause(300)
@@ -80,10 +85,10 @@ describe('Thème choisi par la fenêtre', () => {
   })
 
   it('lifts the override again when the user goes back to following the desktop', async () => {
-    await ask('dark')
+    await press('dark')
     expect((await wearing()).source).toBe('dark')
 
-    await ask('system')
+    await press('system')
     const followed = await wearing()
     expect(followed.source).toBe('system')
     // Whatever the desktop is on, the page and the platform agree on it.

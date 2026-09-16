@@ -3,9 +3,30 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { CHANNELS, type ChannelName, windowCommandSchema } from '#index.ts'
+import {
+  CHANNELS,
+  type ChannelName,
+  PROFILE_REQUESTS,
+  type ProfileRequestName,
+  windowCommandSchema,
+} from '#index.ts'
 
 const ipc = resolve(import.meta.dirname, '..')
+
+/**
+ * What a call is written against: the bridge the page is handed, and the way the main process
+ * asks the process that holds the database. Neither is implemented here — a declaration is
+ * what is under test, so a signature is all a probe needs to be written against.
+ */
+const CALLERS = [
+  "import type { Bridge, ProfileArguments, ProfileRequestName, ProfileResponse } from '../../src/index.ts'",
+  '',
+  'declare const bridge: Bridge',
+  'declare function ask<K extends ProfileRequestName>(',
+  '  name: K,',
+  '  argument: ProfileArguments<K>,',
+  '): Promise<ProfileResponse<K>>',
+]
 
 /**
  * Type checks one call against the declaration and answers what the compiler said.
@@ -16,12 +37,7 @@ const ipc = resolve(import.meta.dirname, '..')
 function compile(call: string) {
   const probe = join(ipc, 'tests', '.probe')
   mkdirSync(probe, { recursive: true })
-  writeFileSync(
-    join(probe, 'call.ts'),
-    ["import type { Bridge } from '../../src/index.ts'", '', 'declare const bridge: Bridge', call]
-      .join('\n')
-      .concat('\n'),
-  )
+  writeFileSync(join(probe, 'call.ts'), [...CALLERS, call].join('\n').concat('\n'))
   writeFileSync(
     join(probe, 'tsconfig.json'),
     `${JSON.stringify(
@@ -48,7 +64,12 @@ function compile(call: string) {
 
 describe('Appel typé nominal', () => {
   test('the channels of the application are the ones declared', () => {
-    const names: ChannelName[] = ['env.report', 'theme.set', 'window.command']
+    const names: ChannelName[] = [
+      'env.report',
+      'preferences.read',
+      'preferences.write',
+      'window.command',
+    ]
     expect(Object.keys(CHANNELS).toSorted()).toEqual(names.toSorted())
   })
 
@@ -73,6 +94,45 @@ describe('Appel typé nominal', () => {
   test('the arguments schema rejects a command that is not one of the three', () => {
     expect(windowCommandSchema.safeParse({ command: 'minimize' }).success).toBe(true)
     expect(windowCommandSchema.safeParse({ command: 'explode' }).success).toBe(false)
+  })
+})
+
+describe('Cas d’usage nommés du process dédié', () => {
+  test('the use cases of the process that holds the database are the ones declared', () => {
+    const names: ProfileRequestName[] = ['preferences.read', 'preferences.write', 'profile.status']
+    expect(Object.keys(PROFILE_REQUESTS).toSorted()).toEqual(names.toSorted())
+  })
+
+  test('a declared use case called with conforming arguments compiles', () => {
+    const result = compile("void ask('preferences.write', { theme: 'dark' })")
+    expect(result.output).toBe('')
+    expect(result.ok).toBe(true)
+  })
+
+  test('the answer of a use case has the type the declaration gives it', () => {
+    const result = compile(
+      [
+        "const status = await ask('profile.status', {})",
+        'const writer: string | null = status.writtenByVersion',
+        'void writer',
+      ].join('\n'),
+    )
+    expect(result.output).toBe('')
+    expect(result.ok).toBe(true)
+  })
+})
+
+describe('Cas d’usage non déclaré', () => {
+  test('a use case name the declaration does not carry does not compile', () => {
+    const result = compile("void ask('profile.staus', {})")
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain('profile.staus')
+  })
+
+  test('a declared use case called with the wrong argument type does not compile', () => {
+    const result = compile("void ask('preferences.write', { theme: 'sepia' })")
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain('sepia')
   })
 })
 

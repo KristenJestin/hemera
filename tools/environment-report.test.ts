@@ -6,6 +6,8 @@ import type { EnvironmentReport } from '@hemera/ipc'
 import { renderReport, reportPath } from './environment-report.ts'
 
 const windowsReport: EnvironmentReport = {
+  version: '0.3.0-12-gabc1',
+  channel: 'beta',
   platform: 'windows',
   osVersion: 'Windows 11 Pro (10.0.26200)',
   distribution: null,
@@ -37,6 +39,13 @@ describe('Rapport Windows', () => {
     expect(table).toContain('44.3.0')
     expect(table).toContain('152.0.7977.78')
     expect(table).toContain('24.20.0')
+  })
+
+  test('the report says which build produced it, and which channel that build is', () => {
+    const table = renderReport(windowsReport)
+    expect(table).toContain('0.3.0-12-gabc1')
+    expect(table).toContain('| Version | 0.3.0-12-gabc1 |')
+    expect(table).toContain('| Channel | beta |')
   })
 
   test('it says out loud which target it does not speak for', () => {

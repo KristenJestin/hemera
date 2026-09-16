@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "description": "Desktop cockpit for ACP agents",
+  "homepage": "https://github.com/KristenJestin/hemera",
+  "license": "UNLICENSED",
+  "author": {
+    "name": "Kristen Jestin",
+    "email": "kristen.jestin@pm.me"
+  },
   "type": "module",
   "main": "dist/main/index.js",
   "imports": {
@@ -15,9 +21,12 @@
     "e2e": "wdio run wdio.conf.ts"
   },
   "dependencies": {
+    "@effect/sql-sqlite-node": "4.0.0-rc.112",
     "@hemera/ipc": "workspace:*",
     "@hemera/ui": "workspace:*",
     "@tanstack/react-hotkeys": "0.10.0",
+    "drizzle-orm": "1.0.0-rc.5-5935859",
+    "effect": "4.0.0-rc.112",
     "motion": "13.3.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -33,6 +42,7 @@
     "@wdio/local-runner": "9.31.9",
     "@wdio/mocha-framework": "9.31.9",
     "@wdio/spec-reporter": "9.31.2",
+    "drizzle-kit": "1.0.0-rc.5-5935859",
     "electron": "44.3.0",
     "electron-builder": "26.15.3",
     "vite-plus": "0.3.2"

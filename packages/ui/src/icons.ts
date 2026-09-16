@@ -27,6 +27,8 @@ import {
   IconChevronLeft as TablerChevronLeft,
   IconChevronRight as TablerChevronRight,
   IconCommand as TablerCommand,
+  IconDeviceDesktop as TablerDeviceDesktop,
+  IconDeviceDesktopFilled as TablerDeviceDesktopFilled,
   IconLayoutSidebar as TablerLayoutSidebar,
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
   IconMessages as TablerMessages,
@@ -126,6 +128,11 @@ export const IconChevronRight = catalogued(
 /* Tabler draws no solid command key: the outline stands for both weights, which is what a
    key cap looks like anyway. */
 export const IconCommand = catalogued(TablerCommand, TablerCommand, 'IconCommand')
+export const IconDeviceDesktop = catalogued(
+  TablerDeviceDesktopFilled,
+  TablerDeviceDesktop,
+  'IconDeviceDesktop',
+)
 export const IconLayoutSidebar = catalogued(
   TablerLayoutSidebarFilled,
   TablerLayoutSidebar,

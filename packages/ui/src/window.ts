@@ -14,6 +14,16 @@ import stylesheet from './theme.css?raw'
  */
 export type Theme = 'light' | 'dark'
 
+/**
+ * What a user may choose, which is one more than what a window can wear.
+ *
+ * `system` is a choice and not a colour: it resolves to one of the two above, and which one is
+ * the desktop's to say. The design system declares it here rather than reading it from the
+ * application's shared declaration, which it is not allowed to import — a component that knew
+ * about Hemera's channels would stop being renderable on its own.
+ */
+export type ThemeChoice = Theme | 'system'
+
 export interface WindowColors {
   /** What the frame is painted with before anything is drawn in it. */
   background: string
