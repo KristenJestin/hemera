@@ -23,7 +23,7 @@ import {
 } from '#main/channel.ts'
 
 const WINDOWS = { LOCALAPPDATA: 'C:\\Users\\kris\\AppData\\Local' }
-const LINUX = { XDG_DATA_HOME: '/home/kris/.local/share' }
+const LINUX = { XDG_DATA_HOME: '/home/someone/.local/share' }
 
 /** A package on disk, as Electron would have loaded it: a folder and the manifest it carries. */
 function packaged(hemera: Record<string, string> | null): string {
@@ -71,15 +71,15 @@ describe('Le dossier suit la plateforme', () => {
   test('linux files the profile under the data folder, never under the configuration one', () => {
     const directory = profileDirectory('prod', 'linux', {
       ...LINUX,
-      XDG_CONFIG_HOME: '/home/kris/.config',
+      XDG_CONFIG_HOME: '/home/someone/.config',
     })
     expect(directory).toBe(`${LINUX.XDG_DATA_HOME}/hemera/prod`)
     expect(directory).not.toContain('.config')
   })
 
   test('linux falls back to the data folder the specification names when none is set', () => {
-    const directory = profileDirectory('prod', 'linux', { HOME: '/home/kris' })
-    expect(directory).toBe('/home/kris/.local/share/hemera/prod')
+    const directory = profileDirectory('prod', 'linux', { HOME: '/home/someone' })
+    expect(directory).toBe('/home/someone/.local/share/hemera/prod')
   })
 })
 

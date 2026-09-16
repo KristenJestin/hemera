@@ -68,7 +68,7 @@ describe('Un refus est tracé même sans console', () => {
   test('a refusal reaches the log of the profile, not a console nobody is looking at', () => {
     writeDiagnosticTo(openDiagnosticLog(profile, 'main'))
     try {
-      diagnostic('--profile-dir: refused /home/kris/.local/share/hemera/prod')
+      diagnostic('--profile-dir: refused /home/someone/.local/share/hemera/prod')
       expect(written()).toContain('--profile-dir: refused')
     } finally {
       // The next suite starts again from a console, as a process does before it knows its profile.
