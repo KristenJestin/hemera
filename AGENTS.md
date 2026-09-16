@@ -126,10 +126,6 @@ Never run a real LLM provider from a test.
   of these branches, create a feature branch first.
 - Never rewrite history that is not yours. No `--no-verify`.
 - One commit = one intent. No `wip` commits. Don't mix formatting and logic in one commit.
-- Every lot is a ticket in It's a Plan (`HEM-n`, project `HEM`). The branch of a lot may keep
-  its name, but the title of its pull request starts with the ticket key —
-  `HEM-45 feat(ui): lot 2, the window shell` — so the ticket lists the pull request itself.
-  The squash commit keeps that title.
 - Every commit carries the machine's own Git identity. A tool that writes commits under a
   name of its own invention is a tool to fix, not an identity to keep.
 
