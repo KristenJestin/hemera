@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, within } from 'storybook/test'
 import { useState } from 'react'
 
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
@@ -58,35 +58,6 @@ export const Variants: Story = {
   // offering to change them would only be offering something that does not happen.
   parameters: { controls: { disable: true } },
   args: { collapsed: true },
-}
-
-/** A sidebar shorter than its own list says so at each end, and the arrows move it. */
-export const Scrolling: Story = {
-  // The controls belong to the playground: this story decides these props itself, and a panel
-  // offering to change them would only be offering something that does not happen.
-  parameters: { controls: { disable: true } },
-  // More Sessions than the panel is tall, which is the case the arrows exist for.
-  args: {
-    sessions: Array.from({ length: 30 }, (_, index) => ({
-      id: `session-${index}`,
-      title: `Session number ${index + 1}`,
-    })),
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    // Nothing above to reach yet, and something below.
-    expect(canvas.queryByRole('button', { name: 'Scroll the list up' })).toBeNull()
-    const down = canvas.getByRole('button', { name: 'Scroll the list down' })
-
-    await userEvent.click(down)
-    await waitFor(() => {
-      expect(canvas.getByRole('button', { name: 'Scroll the list up' })).toBeInTheDocument()
-    })
-
-    // The two ends of the panel never move: the command and the settings stay where they are.
-    expect(canvas.getByRole('button', { name: 'Command' })).toBeInTheDocument()
-    expect(canvas.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
-  },
 }
 
 export const States: Story = {

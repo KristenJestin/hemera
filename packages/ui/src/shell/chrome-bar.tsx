@@ -10,6 +10,7 @@ import { IconBell, IconLayoutSidebar, IconPlus } from '../icons.ts'
 import { arrival, useTransition } from '../motion.ts'
 import { HemeraMark } from './mark.tsx'
 import type { ProjectTone, ShellProject } from './model.ts'
+import { Scrollable } from './scrollable.tsx'
 
 /**
  * The one bar of chrome, which is also the title bar (design D2-02).
@@ -34,8 +35,6 @@ import type { ProjectTone, ShellProject } from './model.ts'
 const BAR = 'title-bar chrome-columns items-center bg-background'
 
 const BRAND = 'flex min-w-0 items-center gap-2 overflow-hidden pr-2 pl-6'
-
-const STRIP = 'no-drag-children scroll-quiet flex min-w-0 flex-1 items-center gap-1 overflow-x-auto'
 
 /**
  * A tab says what it is by how present it is, not by a second background.
@@ -131,7 +130,7 @@ export function ChromeBar({
         </span>
         <span aria-hidden="true" className={RULE} />
 
-        <nav aria-label="Projects" className={STRIP}>
+        <Scrollable label="Projects" className="flex-1">
           <LayoutGroup id="projects">
             {projects.map((project) => (
               <span key={project.id} className="relative flex shrink-0">
@@ -155,12 +154,13 @@ export function ChromeBar({
           <Tooltip label="Add a Project" side="bottom">
             <IconButton
               variant="ghost"
+              className="no-drag"
               icon={<IconPlus size="md" />}
               aria-label="Add a Project"
               onClick={onAddProject}
             />
           </Tooltip>
-        </nav>
+        </Scrollable>
 
         <div className="no-drag-children flex shrink-0 items-center gap-1">
           <Popover

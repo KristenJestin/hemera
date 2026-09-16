@@ -1,11 +1,8 @@
-import { cn } from 'cn'
-import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
+import { LayoutGroup, motion } from 'motion/react'
 import type { Transition } from 'motion/react'
-import { type ReactElement, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 
 import {
-  IconChevronDown,
-  IconChevronUp,
   IconCommand,
   IconMessages,
   IconMoon,
@@ -13,8 +10,8 @@ import {
   IconSun,
   IconTimelineEvent,
 } from '../icons.ts'
-import { LABEL_DELAY, LABEL_TRAVEL, arrival, instant, morph, useTransition } from '../motion.ts'
-import { Button, IconButton } from '../components/button/button.tsx'
+import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
+import { Button } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { JOURNAL_ENTRY, PROJECT_SETTINGS_ENTRY, SIDEBAR_RAIL, type ShellSession } from './model.ts'
@@ -125,7 +122,7 @@ export function Sidebar({
 
       {/* The places scroll and the two ends do not: a window short enough to cut the list off
           used to cut it off for good, with the theme and the settings pushed out of reach. */}
-      <Scrollable>
+      <div className="scroll-quiet flex min-h-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto">
         <LayoutGroup id="sidebar">
           <motion.p
             className={GROUP}
@@ -169,7 +166,7 @@ export function Sidebar({
             onSelect={onSelectEntry}
           />
         </LayoutGroup>
-      </Scrollable>
+      </div>
 
       <div className="flex shrink-0 flex-col gap-1">
         <Action
@@ -188,108 +185,6 @@ export function Sidebar({
         />
       </div>
     </motion.aside>
-  )
-}
-
-/** How much of the visible list one press of an arrow moves, as a share of what is on screen. */
-const PAGE = 0.8
-
-/**
- * The part of the sidebar that scrolls, and what says so.
- *
- * A list that is cut off says nothing about it: the scrollbar is hidden, because a scrollbar
- * across a panel of this width is more chrome than list. What says it instead is an edge — the
- * panel's own colour fading up into nothing over what is cut off, with an arrow in it that
- * moves the list by most of a screenful. There is one at each end, and each is there only when
- * there is something that way to reach.
- */
-function Scrollable({ children }: { children: ReactNode }): ReactNode {
-  const list = useRef<HTMLDivElement>(null)
-  const [edges, setEdges] = useState({ top: false, bottom: false })
-
-  // Where the list is in itself, which is not a size read off any text: it is what the element
-  // already knows about its own scrolling, and it is the only way to know an edge is there.
-  const look = useCallback(() => {
-    const node = list.current
-    if (node === null) return
-    const top = node.scrollTop > 1
-    const bottom = node.scrollTop + node.clientHeight < node.scrollHeight - 1
-    // The same answer is the same object: a fresh one would be a new state on every look, and
-    // the look runs after every render — which is a render loop and not a scroll indicator.
-    setEdges((was) => (was.top === top && was.bottom === bottom ? was : { top, bottom }))
-  }, [])
-
-  useEffect(() => {
-    const node = list.current
-    if (node === null) return
-    look()
-    const watch = new ResizeObserver(look)
-    watch.observe(node)
-    for (const child of node.children) watch.observe(child)
-    return () => {
-      watch.disconnect()
-    }
-  })
-
-  const move = (way: number): void => {
-    const node = list.current
-    if (node === null) return
-    node.scrollBy({ top: way * node.clientHeight * PAGE, behavior: 'smooth' })
-  }
-
-  return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div
-        ref={list}
-        onScroll={look}
-        className="scroll-quiet flex min-h-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto"
-      >
-        {children}
-      </div>
-      <Edge side="top" shown={edges.top} onMove={() => move(-1)} />
-      <Edge side="bottom" shown={edges.bottom} onMove={() => move(1)} />
-    </div>
-  )
-}
-
-const FADE = 'pointer-events-none absolute inset-x-0 flex h-10 justify-center'
-
-const FADE_TOP = 'top-0 items-start bg-linear-to-b from-card to-transparent'
-
-const FADE_BOTTOM = 'bottom-0 items-end bg-linear-to-t from-card to-transparent'
-
-/** One end of the list, when there is something past it. */
-function Edge({
-  side,
-  shown,
-  onMove,
-}: {
-  side: 'top' | 'bottom'
-  shown: boolean
-  onMove: () => void
-}): ReactNode {
-  const transition = useTransition(arrival)
-  return (
-    <AnimatePresence initial={false}>
-      {shown && (
-        <motion.div
-          className={cn(FADE, side === 'top' ? FADE_TOP : FADE_BOTTOM)}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={transition}
-        >
-          <IconButton
-            variant="ghost"
-            size="sm"
-            className="pointer-events-auto border-0"
-            icon={side === 'top' ? <IconChevronUp size="sm" /> : <IconChevronDown size="sm" />}
-            aria-label={side === 'top' ? 'Scroll the list up' : 'Scroll the list down'}
-            onClick={onMove}
-          />
-        </motion.div>
-      )}
-    </AnimatePresence>
   )
 }
 
