@@ -57,7 +57,10 @@ export function refusalFor(
 
 /** The version a package carries, which is what the repository answers about itself. */
 export function versionFrom(described: string): string {
-  return described.trim().replace(/^v/, '')
+  const label = described.trim().replace(/^v/, '')
+  // A repository with no tag yet answers a bare commit hash, and a hash may start with a
+  // letter: a Debian version must not, so the hash is carried behind a version that is one.
+  return /^\d/.test(label) ? label : `0.0.0-${label}`
 }
 
 /**
