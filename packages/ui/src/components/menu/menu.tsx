@@ -1,7 +1,9 @@
 import { Menu as BaseMenu } from '@base-ui/react/menu'
 import { type ReactNode, useRef } from 'react'
 
+import { useOverlayContainer } from '../../overlay.ts'
 import { Button } from '../button/button.tsx'
+import { Kbd } from '../kbd/kbd.tsx'
 
 /**
  * The menu, on Base UI (design D1-04).
@@ -48,6 +50,7 @@ export interface MenuProps {
 
 export function Menu({ label, groups, disabled, className }: MenuProps) {
   const anchor = useRef<HTMLSpanElement>(null)
+  const container = useOverlayContainer()
   return (
     <BaseMenu.Root>
       <span ref={anchor} className="inline-flex">
@@ -58,7 +61,7 @@ export function Menu({ label, groups, disabled, className }: MenuProps) {
           {label}
         </BaseMenu.Trigger>
       </span>
-      <BaseMenu.Portal>
+      <BaseMenu.Portal container={container}>
         <BaseMenu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4}>
           <BaseMenu.Popup className={POPUP}>
             {groups.map((group, index) => (
@@ -76,9 +79,7 @@ export function Menu({ label, groups, disabled, className }: MenuProps) {
                     {item.icon}
                     {item.label}
                     {item.shortcut !== undefined && (
-                      <span className="ml-auto font-mono text-xs text-muted-foreground">
-                        {item.shortcut}
-                      </span>
+                      <Kbd keys={item.shortcut} className="ml-auto" />
                     )}
                   </BaseMenu.Item>
                 ))}

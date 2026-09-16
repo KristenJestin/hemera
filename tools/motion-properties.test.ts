@@ -161,3 +161,32 @@ describe('Réponse au mouvement réduit', () => {
     expect(analyze(designSystem, repository)).toEqual([])
   })
 })
+
+describe('Exception mesurée de la largeur de la sidebar', () => {
+  test('the sidebar is the one file allowed to animate a width', () => {
+    const source = '<motion.aside animate={{ width: 256 }} transition={transition} />'
+    expect(refusalsOf('packages/ui/src/shell/sidebar.tsx', source)).toEqual([])
+  })
+
+  test('a width animated anywhere else is still refused, naming the file', () => {
+    const file = 'packages/ui/src/shell/content-area.tsx'
+    const source = '<motion.div animate={{ width: 256 }} transition={transition} />'
+    const refusals = refusalsOf(file, source)
+    expect(refusals.map((refusal) => refusal.property)).toContain('width')
+    expect(refusals[0]!.file).toBe(file)
+  })
+
+  test('the exception is one property, and not a licence for the rest of the layout', () => {
+    const source = '<motion.aside animate={{ height: 48 }} transition={transition} />'
+    const refusals = refusalsOf('packages/ui/src/shell/sidebar.tsx', source)
+    expect(refusals.map((refusal) => refusal.property)).toEqual(['height'])
+  })
+
+  test('the preset the fold reads is a spring of the preset file, not of the shell', () => {
+    const preset =
+      "export const morph: Transition = { type: 'spring', stiffness: 260, damping: 33 }"
+    expect(hardcodedOf(MOTION_PRESET, preset)).toEqual([])
+    const shell = 'const transition = useTransition(morph)'
+    expect(hardcodedOf('packages/ui/src/shell/sidebar.tsx', shell)).toEqual([])
+  })
+})

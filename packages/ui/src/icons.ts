@@ -18,10 +18,19 @@
 import {
   IconAlertTriangle as TablerAlertTriangle,
   IconAlertTriangleFilled as TablerAlertTriangleFilled,
+  IconBell as TablerBell,
+  IconBellFilled as TablerBellFilled,
   IconCheck as TablerCheck,
   IconCheckFilled as TablerCheckFilled,
   IconChevronDown as TablerChevronDown,
   IconChevronDownFilled as TablerChevronDownFilled,
+  IconChevronLeft as TablerChevronLeft,
+  IconChevronRight as TablerChevronRight,
+  IconCommand as TablerCommand,
+  IconLayoutSidebar as TablerLayoutSidebar,
+  IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
+  IconMessages as TablerMessages,
+  IconMessagesFilled as TablerMessagesFilled,
   IconMoon as TablerMoon,
   IconMoonFilled as TablerMoonFilled,
   IconPlayerPlay as TablerPlayerPlay,
@@ -34,6 +43,8 @@ import {
   IconSettingsFilled as TablerSettingsFilled,
   IconSun as TablerSun,
   IconSunFilled as TablerSunFilled,
+  IconTimelineEvent as TablerTimelineEvent,
+  IconTimelineEventFilled as TablerTimelineEventFilled,
   IconTrash as TablerTrash,
   IconTrashFilled as TablerTrashFilled,
   IconX as TablerX,
@@ -97,17 +108,40 @@ export const IconAlertTriangle = catalogued(
   TablerAlertTriangle,
   'IconAlertTriangle',
 )
+export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')
 export const IconCheck = catalogued(TablerCheckFilled, TablerCheck, 'IconCheck')
 export const IconChevronDown = catalogued(
   TablerChevronDownFilled,
   TablerChevronDown,
   'IconChevronDown',
 )
+/* Tabler draws a solid chevron pointing down and none pointing the other three ways; the
+   outline stands for both weights, which is what a chevron is anyway. */
+export const IconChevronLeft = catalogued(TablerChevronLeft, TablerChevronLeft, 'IconChevronLeft')
+export const IconChevronRight = catalogued(
+  TablerChevronRight,
+  TablerChevronRight,
+  'IconChevronRight',
+)
+/* Tabler draws no solid command key: the outline stands for both weights, which is what a
+   key cap looks like anyway. */
+export const IconCommand = catalogued(TablerCommand, TablerCommand, 'IconCommand')
+export const IconLayoutSidebar = catalogued(
+  TablerLayoutSidebarFilled,
+  TablerLayoutSidebar,
+  'IconLayoutSidebar',
+)
+export const IconMessages = catalogued(TablerMessagesFilled, TablerMessages, 'IconMessages')
 export const IconMoon = catalogued(TablerMoonFilled, TablerMoon, 'IconMoon')
 export const IconPlayerPlay = catalogued(TablerPlayerPlayFilled, TablerPlayerPlay, 'IconPlayerPlay')
 export const IconPlus = catalogued(TablerPlusFilled, TablerPlus, 'IconPlus')
 export const IconSearch = catalogued(TablerSearchFilled, TablerSearch, 'IconSearch')
 export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'IconSettings')
 export const IconSun = catalogued(TablerSunFilled, TablerSun, 'IconSun')
+export const IconTimelineEvent = catalogued(
+  TablerTimelineEventFilled,
+  TablerTimelineEvent,
+  'IconTimelineEvent',
+)
 export const IconTrash = catalogued(TablerTrashFilled, TablerTrash, 'IconTrash')
 export const IconX = catalogued(TablerXFilled, TablerX, 'IconX')

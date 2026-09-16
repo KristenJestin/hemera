@@ -59,3 +59,57 @@ describe('Le thème est la seule source visuelle', () => {
     expect(theme).toContain('--color-*: initial')
   })
 })
+
+describe('Densité relevée', () => {
+  test('the base is fourteen, and ordinary text is the base', () => {
+    expect(theme).toContain('--text-base: 0.875rem;')
+    expect(theme).toContain('--text-sm: 0.8125rem;')
+    expect(theme).toContain('--text-lg: 1rem;')
+    // What the density is really about: the page is read at the base size, and not a notch
+    // under it. Lot 1 had the same fourteen and read its body at thirteen.
+    expect(theme).toContain('font-size: var(--text-base);')
+  })
+
+  test('a control is thirty-two, thirty-six or forty-four pixels tall', () => {
+    for (const [step, size] of [
+      ['sm', '2rem'],
+      ['md', '2.25rem'],
+      ['lg', '2.75rem'],
+    ]) {
+      expect(theme).toContain(`--spacing-control-${step}: ${size};`)
+    }
+  })
+
+  test('a component asks for a named step and never for a number', () => {
+    const button = readFileSync(
+      join(import.meta.dirname, '..', 'src', 'components', 'button', 'button.tsx'),
+      'utf8',
+    )
+    for (const step of ['h-control-sm', 'h-control-md', 'h-control-lg']) {
+      expect(button, `the button does not ask for ${step}`).toContain(step)
+    }
+    // A height written as a step of Tailwind's own multiplication is a height that stops
+    // following the theme the day the density changes again.
+    expect(button).not.toMatch(/\bh-\d/)
+  })
+
+  test('the shell takes the window, and not a share of whatever holds it', () => {
+    // A percentage is a share of a parent, and a parent nobody gave a height is nothing at all:
+    // the stories hid this for a whole lot, because their decorator handed the shell a screen.
+    const root = /@utility shell-root \{([\s\S]*?)^\}/m.exec(theme)![1]!
+    expect(root).toContain('100dvh')
+    expect(root).not.toContain('100%')
+  })
+
+  test('the shell is drawn at the theme size, with nothing of the scale written in it', () => {
+    const shell = ['shell.tsx', 'chrome-bar.tsx', 'sidebar.tsx', 'gutter.tsx'].map((file) =>
+      readFileSync(join(import.meta.dirname, '..', 'src', 'shell', file), 'utf8'),
+    )
+    for (const source of shell) {
+      // A control's height is the size it was asked for, never a class the shell writes; the
+      // steps of the spacing scale stay the shell's to use for everything else.
+      expect(source).not.toMatch(/h-control-/)
+      expect(source).not.toMatch(/\btext-\[/)
+    }
+  })
+})

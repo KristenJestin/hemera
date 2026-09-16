@@ -24,6 +24,7 @@
    would arrive stripped of every class it was written with. */
 @source './components';
 @source './icons.ts';
+@source './shell';
 
 /* The dark theme is a class on `<html>`, not a media query: the page follows the system by
    putting the class there, and the user can take it off without the system changing. */
@@ -200,12 +201,15 @@
   --font-sans: 'Inter Variable', system-ui, sans-serif;
   --font-mono: 'Fira Code Variable', ui-monospace, monospace;
 
-  --text-xs: 0.6875rem;
+  /* The base is fourteen, and ordinary text is the base (design D2-07). Lot 1 had the same
+     fourteen but read its body at thirteen, a notch under: what the window is read at all day
+     was the one size nothing was designed around. The scale is the same on both sides of it. */
+  --text-xs: 0.75rem;
   --text-xs--line-height: 1rem;
   --text-sm: 0.8125rem;
-  --text-sm--line-height: 1.25rem;
+  --text-sm--line-height: 1.125rem;
   --text-base: 0.875rem;
-  --text-base--line-height: 1.375rem;
+  --text-base--line-height: 1.25rem;
   --text-lg: 1rem;
   --text-lg--line-height: 1.5rem;
   --text-xl: 1.125rem;
@@ -221,12 +225,30 @@
   /* Named steps of the spacing scale, so an icon is sized by the scale and not by a number:
      `size-icon-md` is a spacing utility like any other, and the scale lint can close the list. */
   /* The strip the system draws its window buttons in. The main process asks the platform for
-     it in pixels; the page reads back what the platform actually gave, and falls back here. */
-  --spacing-title-bar: 2.5rem;
+     it in pixels; the page reads back what the platform actually gave, and falls back here.
+     Tall enough for a control of the `md` size with room around it, which is what it holds. */
+  --spacing-title-bar: 2.75rem;
 
   --spacing-icon-sm: 0.875rem;
   --spacing-icon-md: 1rem;
   --spacing-icon-lg: 1.25rem;
+
+  /* How tall a control is drawn, one step per size of the components (design D2-07). A named
+     step and not a number: `h-control-md` is a class the scale check knows the whole list of,
+     and a change of density is these three lines rather than a search through the catalogue. */
+  --spacing-control-sm: 2rem;
+  --spacing-control-md: 2.25rem;
+  --spacing-control-lg: 2.75rem;
+
+  /* How wide the sidebar may be, what it opens at, and what it folds down to (design D2-03).
+     The bounds belong to the theme because they are sizes; which one is in force belongs to
+     the shell, which hands the current one back as `--sidebar-current-width`. */
+  --spacing-sidebar: 16rem;
+  --spacing-sidebar-min: 12.5rem;
+  --spacing-sidebar-max: 25rem;
+  --spacing-sidebar-rail: 4rem;
+  /* How narrow the separator has to be dragged before the sidebar folds instead of shrinking. */
+  --spacing-sidebar-collapse: 7.5rem;
 
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
@@ -248,18 +270,88 @@
 }
 
 /* Where the system draws its own window buttons, as the platform tells the page. The whole
-   strip moves the window; anything interactive inside it opts back out. */
+   strip moves the window; anything interactive inside it opts back out.
+
+   The bar runs the full width of the window and keeps its contents off the buttons with
+   padding, rather than by stopping short of them. Stopping short is what it used to do, and it
+   left the background and the rule under the bar ending in mid-air a hand's width before the
+   edge of the window — which is exactly where the eye goes to check that a window is one. */
 @utility title-bar {
   position: fixed;
   top: 0;
-  left: env(titlebar-area-x, 0px);
-  width: env(titlebar-area-width, 100%);
+  left: 0;
+  width: 100%;
   height: env(titlebar-area-height, var(--spacing-title-bar));
+  padding-left: env(titlebar-area-x, 0px);
+  padding-right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%));
   -webkit-app-region: drag;
 }
 
 @utility no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* Everything a hand can press inside the chrome bar opts out of moving the window; the gaps
+   between them do not, which is what makes a bar of controls a title bar (design D2-02). */
+@utility no-drag-children {
+  & > * {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/* The shell: a chrome bar in the strip the platform gave us, and everything else underneath
+   (design D2-01). The body is placed rather than padded, so that the one element allowed to
+   scroll is the content area and nothing above it can be pushed out of view. */
+/* The window, and not a share of whatever holds it: a shell asked for a percentage of its
+   parent would be as tall as the element it was dropped into, which in a page that never
+   thought about it is nothing at all. */
+@utility shell-root {
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* The body clips, and the root does not: a sidebar that is folding must not make the window
+   scrollable, and a popup rendered in the overlay root must not be cut off by either. */
+@utility shell-body {
+  position: absolute;
+  inset: 0;
+  top: env(titlebar-area-height, var(--spacing-title-bar));
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+  /* The rule under the chrome bar is drawn here and not on the bar. The system paints its
+     window buttons over the page, and a line the bar draws inside that strip is a line that
+     stops a hand's width before the edge of the window. Drawn on the body it starts just
+     below the strip, and runs the whole width. */
+  border-top: 1px solid var(--color-border);
+}
+
+/* The chrome bar's two segments. The first column is the sidebar's current width, which the
+   shell writes as the sidebar folds: one animated value, two columns that cannot come apart
+   (design D2-02). The fallback is what the bar is drawn at before the shell has said. */
+@utility chrome-columns {
+  display: grid;
+  grid-template-columns: var(--sidebar-current-width, var(--spacing-sidebar)) 1fr;
+}
+
+/* The one level of scrolling of the window (design D2-05). `contain` is what keeps a wheel
+   over the content from carrying on into the page once the content has run out. */
+/* A strip that scrolls without saying so. A scrollbar drawn across the title bar is chrome on
+   top of chrome, and what does not fit is one press away in the panel the add button opens. */
+@utility scroll-quiet {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility content-area {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* What a backdrop does, which is appear and go away. Named here for the same reason as the
@@ -348,8 +440,8 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    line-height: var(--text-sm--line-height);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
     -webkit-font-smoothing: antialiased;
   }
 

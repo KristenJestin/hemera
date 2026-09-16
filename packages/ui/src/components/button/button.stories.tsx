@@ -66,7 +66,7 @@ export const Variants: Story = {
     const rows = SIZES.map(
       (_size, row) => canvas.getAllByRole('button')[row * (VARIANTS.length + 2)]!,
     )
-    expect(rows.map((button) => getComputedStyle(button).height)).toEqual(['24px', '32px', '40px'])
+    expect(rows.map((button) => getComputedStyle(button).height)).toEqual(['32px', '36px', '44px'])
   },
 }
 

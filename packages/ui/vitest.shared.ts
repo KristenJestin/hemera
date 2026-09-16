@@ -37,7 +37,7 @@ export function catalogue(theme: 'light' | 'dark') {
       ],
     },
     test: {
-      name: `ui:${theme}`,
+      name: `storybook-${theme}`,
       root: import.meta.dirname,
       browser: {
         enabled: true,

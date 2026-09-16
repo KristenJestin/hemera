@@ -58,7 +58,7 @@ export default defineConfig({
     // and a padding are the design decision. Everywhere else, passing one is taking it back.
     overrides: [
       {
-        files: ['packages/ui/src/components/**'],
+        files: ['packages/ui/src/components/**', 'packages/ui/src/shell/**'],
         rules: { 'shadcn/no-restyle': 'off' },
       },
     ],
@@ -90,6 +90,7 @@ export default defineConfig({
             'tools/motion-properties.test.ts',
             'tools/package-desktop.test.ts',
             'tools/scales.test.ts',
+            'tools/text-measure.test.ts',
             'tools/verification.test.ts',
             'tools/window-options.test.ts',
           ],

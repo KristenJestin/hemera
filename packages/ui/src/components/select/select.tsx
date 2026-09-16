@@ -3,6 +3,7 @@ import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
 import { IconCheck, IconChevronDown } from '../../icons.ts'
+import { useOverlayContainer } from '../../overlay.ts'
 
 /**
  * The select, on Base UI (design D1-04).
@@ -61,6 +62,7 @@ export function Select<Value extends string>({
   className,
 }: SelectProps<Value>) {
   const groups = grouped(items)
+  const container = useOverlayContainer()
   return (
     <BaseSelect.Root
       items={groups.flatMap((group) => group.items)}
@@ -76,7 +78,7 @@ export function Select<Value extends string>({
       <BaseSelect.Trigger
         aria-label={label}
         className={cn(
-          'flex h-8 items-center justify-between gap-2 rounded-md border border-input bg-card px-2 text-sm text-foreground outline-none focus-ring data-disabled:opacity-50',
+          'flex h-control-md items-center justify-between gap-2 rounded-md border border-input bg-card px-2 text-sm text-foreground outline-none focus-ring data-disabled:opacity-50',
           className,
         )}
       >
@@ -85,7 +87,7 @@ export function Select<Value extends string>({
           <IconChevronDown size="sm" />
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
-      <BaseSelect.Portal>
+      <BaseSelect.Portal container={container}>
         <BaseSelect.Positioner
           // Base UI would otherwise lay the chosen item over the trigger, the way a native
           // macOS menu does — the list covers the control it belongs to and the eye loses
@@ -95,7 +97,9 @@ export function Select<Value extends string>({
           align="start"
           sideOffset={4}
         >
-          <BaseSelect.Popup className={POPUP}>
+          {/* The list carries the control's name too: while it is closing it is still in the
+              page, and a list of options with no name is a list a screen reader cannot place. */}
+          <BaseSelect.Popup aria-label={label} className={POPUP}>
             {groups.map((group, index) => (
               <Section key={group.label === '' ? index : group.label} group={group} />
             ))}
