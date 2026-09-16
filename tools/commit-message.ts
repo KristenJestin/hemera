@@ -60,10 +60,13 @@ export function validateCommitMessage(message: string): ValidationResult {
   if (!COMMIT_TYPES.some((known) => known === type)) {
     return { ok: false, error: `"${header}" uses the unknown type "${type}"; ${EXPECTED}` }
   }
-  if (header.length > MAX_SUBJECT_LENGTH) {
+  // A squash merge appends the pull request's number to the subject it was given, and that
+  // suffix is GitHub's, not the author's: it is not counted against the author's limit.
+  const written = header.replace(/ \(#\d+\)$/, '')
+  if (written.length > MAX_SUBJECT_LENGTH) {
     return {
       ok: false,
-      error: `"${header}" is ${header.length} characters long; keep the subject line under ${MAX_SUBJECT_LENGTH}`,
+      error: `"${header}" is ${written.length} characters long; keep the subject line under ${MAX_SUBJECT_LENGTH}`,
     }
   }
   if (subject.endsWith('.')) {
