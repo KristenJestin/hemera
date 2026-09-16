@@ -80,3 +80,50 @@ jobs:
       # run headless, which is a page and not a window.
       - working-directory: source
         run: pnpm test
+
+  # The beta is the application the user runs every day, and it is built from every push to the
+  # integration branch (design D3-10). It carries no tag: its version is what the repository
+  # answers about itself, which is why the history is fetched whole rather than shallow.
+  package:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        working-directory: source
+        run: corepack enable
+
+      - name: Cache the Electron binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
+
+      - working-directory: source
+        run: pnpm install --frozen-lockfile
+      - name: Fetch the Electron binary
+        working-directory: source/apps/desktop
+        run: pnpm exec install-electron
+
+      # `CI` is set by GitHub, and it is what the packaging refuses to build a beta without.
+      - working-directory: source
+        run: pnpm package --channel beta
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hemera-beta-${{ runner.os }}
+          path: source/dist/package
+          if-no-files-found: error

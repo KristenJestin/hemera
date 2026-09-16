@@ -3,13 +3,16 @@ packages:
   - packages/*
 
 # A dependency only runs an install script if it is allowed here. esbuild links the binary the
-# end-to-end runner transpiles with; the three refused ones download a browser driver or build
-# a Squirrel installer, and this repository drives Electron and ships a zip, an AppImage and a deb.
+# end-to-end runner transpiles with; two of the refused ones download a browser driver and one
+# builds a Squirrel installer, and this repository drives Electron and ships a zip, an AppImage
+# and a deb. The last one is the native accelerator msgpackr reaches for, which effect pulls in
+# and which it does without: nothing native is compiled, and the pure JavaScript path is taken.
 allowBuilds:
   edgedriver: false
   electron-winstaller: false
   esbuild: true
   geckodriver: false
+  msgpackr-extract: false
 
 minimumReleaseAgeExclude:
   - '@voidzero-dev/vite-plus-core@0.3.2'

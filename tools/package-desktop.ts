@@ -13,8 +13,111 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
+import { extractFile, listPackage } from '@electron/asar'
+
 /** Folders whose content has no business inside a package. */
 export const REFUSED_IN_PACKAGE = ['spikes', 'src', 'node_modules'] as const
+
+/** The three channels a package can be built as, and the one it is built as by default. */
+export const CHANNELS = ['prod', 'beta', 'dev'] as const
+
+export type Channel = (typeof CHANNELS)[number]
+
+export const DEFAULT_CHANNEL: Channel = 'dev'
+
+/** What the packaging is asked for, read from the arguments it was given. */
+export function channelAsked(argv: readonly string[]): Channel | string {
+  const flag = argv.indexOf('--channel')
+  const asked =
+    flag === -1
+      ? argv.find((entry) => entry.startsWith('--channel='))?.slice('--channel='.length)
+      : argv[flag + 1]
+  return asked ?? DEFAULT_CHANNEL
+}
+
+/**
+ * Why this machine may not build that channel, or null when it may.
+ *
+ * `prod` and `beta` are what the user runs on real data, and they are built by the pipeline
+ * that tags and publishes them — never by a hand or by an agent on a working tree. What is
+ * built here is `dev`, which opens the `dev` profile and nothing else.
+ */
+export function refusalFor(
+  asked: Channel | string,
+  environment: Record<string, string | undefined>,
+): string | null {
+  // SAFETY: `asked` is compared against the declared channels before it is used as one.
+  if (!CHANNELS.includes(asked as Channel)) {
+    return `--channel ${asked}: there is no such channel; it is one of ${CHANNELS.join(', ')}`
+  }
+  if (asked === DEFAULT_CHANNEL) return null
+  if (environment.CI === 'true') return null
+  return `--channel ${asked}: only the continuous integration builds ${asked} packages; this machine builds ${DEFAULT_CHANNEL}`
+}
+
+/** The version a package carries, which is what the repository answers about itself. */
+export function versionFrom(described: string): string {
+  return described.trim().replace(/^v/, '')
+}
+
+/**
+ * What a channel calls itself, so two of them install beside each other rather than over.
+ *
+ * The executable is named too, and not left to be derived: what it would be derived from is the
+ * package's own name, and `@hemera/desktop` sanitises to something Linux refuses to put in a
+ * path. One name per channel, lowercase and hyphenated, is a name every target accepts.
+ */
+export interface PackageIdentity {
+  appId: string
+  productName: string
+  executableName: string
+}
+
+export function identityOf(channel: Channel): PackageIdentity {
+  if (channel === 'prod') {
+    return { appId: 'dev.hemera.app', productName: 'Hemera', executableName: 'hemera' }
+  }
+  if (channel === 'beta') {
+    return {
+      appId: 'dev.hemera.app.beta',
+      productName: 'Hemera Beta',
+      executableName: 'hemera-beta',
+    }
+  }
+  return { appId: 'dev.hemera.app.dev', productName: 'Hemera Dev', executableName: 'hemera-dev' }
+}
+
+/** Everything electron-builder is told that the configuration file does not already say. */
+export function packagingOptions(channel: Channel, version: string): string[] {
+  const identity = identityOf(channel)
+  return [
+    `--config.extraMetadata.version=${version}`,
+    `--config.extraMetadata.hemera.channel=${channel}`,
+    `--config.appId=${identity.appId}`,
+    `--config.productName=${identity.productName}`,
+    `--config.executableName=${identity.executableName}`,
+  ]
+}
+
+/**
+ * What a built package says it is, read back from the manifest it carries.
+ *
+ * The manifest is inside the archive the application is served from, not beside it, so it is
+ * read the way Electron itself reads it. What a package carries is checked on the package.
+ */
+export function channelOfPackage(unpacked: string): string | null {
+  try {
+    const manifest = extractFile(join(unpacked, 'resources', 'app.asar'), 'package.json')
+    // SAFETY: the manifest electron-builder wrote into the package, read for one field.
+    return (
+      (JSON.parse(manifest.toString('utf8')) as { hemera?: { channel?: string } }).hemera
+        ?.channel ?? null
+    )
+  } catch {
+    // No archive, or no manifest in it: either way the package does not say what it is.
+    return null
+  }
+}
 
 export interface PackageProblem {
   entry: string
@@ -59,12 +162,50 @@ export function localesProblems(locales: string[]): PackageProblem[] {
   return []
 }
 
-export function inspectPackage(unpacked: string): PackageProblem[] {
+/**
+ * Whether the migrations the application applies at start-up travelled with it.
+ *
+ * Looked for inside the archive, because that is where they are: what a package carries is
+ * checked where the application will go looking for it, not where it was built from.
+ */
+export function migrationsProblems(entries: string[]): PackageProblem[] {
+  const carried = entries.some((entry) => /(^|\/)drizzle\/.+\/migration\.sql$/.test(entry))
+  return carried
+    ? []
+    : [{ entry: 'drizzle', problem: 'is missing, and the profile cannot be migrated without it' }]
+}
+
+/** Everything the archive the application is served from carries. */
+export function archiveEntries(unpacked: string): string[] {
+  try {
+    return listPackage(join(unpacked, 'resources', 'app.asar'), { isPack: false })
+  } catch {
+    return []
+  }
+}
+
+/** Whether the package says it is the channel it was asked to be built as. */
+export function channelProblems(found: string | null, asked: string): PackageProblem[] {
+  if (found === asked) return []
+  return [
+    {
+      entry: 'package.json',
+      problem: `says the channel is ${found ?? 'nothing at all'}, and this package was built as ${asked}`,
+    },
+  ]
+}
+
+export function inspectPackage(
+  unpacked: string,
+  asked: Channel = DEFAULT_CHANNEL,
+): PackageProblem[] {
   const entries = entriesUnder(unpacked)
   const locales = join(unpacked, 'locales')
   return [
     ...refusedEntries(entries),
     ...localesProblems(existsSync(locales) ? readdirSync(locales) : []),
+    ...migrationsProblems(archiveEntries(unpacked)),
+    ...channelProblems(channelOfPackage(unpacked), asked),
   ]
 }
 
@@ -85,11 +226,33 @@ if (import.meta.main) {
   const repository = resolve(import.meta.dirname, '..')
   const application = join(repository, 'apps', 'desktop')
 
+  const asked = channelAsked(process.argv.slice(2))
+  const refusal = refusalFor(asked, process.env)
+  if (refusal !== null) {
+    console.error(refusal)
+    process.exit(1)
+  }
+  // SAFETY: `refusalFor` answered null, which it only does for one of the declared channels.
+  const channel = asked as Channel
+
+  const described = spawnSync('git describe --tags --always', {
+    cwd: repository,
+    encoding: 'utf8',
+    shell: true,
+  })
+  const version = versionFrom(described.status === 0 ? described.stdout : '0.0.0')
+
   run('node build.ts', application)
-  run('pnpm exec electron-builder --config electron-builder.yml', application)
+  run(
+    `pnpm exec electron-builder --config electron-builder.yml ${packagingOptions(channel, version)
+      .map((option) => JSON.stringify(option))
+      .join(' ')}`,
+    application,
+  )
 
   const unpacked = join(repository, 'dist', 'package', unpackedFolderOf())
-  const problems = inspectPackage(unpacked)
+  const problems = inspectPackage(unpacked, channel)
+  console.log(`packaged ${identityOf(channel).productName} ${version} as ${channel}`)
   for (const problem of problems) {
     console.error(`${problem.entry}: ${problem.problem}`)
   }

@@ -14,6 +14,7 @@ export default defineConfig({
     jsPlugins: [
       '@shadcn/lint',
       { name: 'anti-slop', specifier: './tools/oxlint/anti-slop/index.ts' },
+      { name: 'anti-slop-effect', specifier: './tools/oxlint/anti-slop-effect/index.ts' },
     ],
     // What the design-system rules consider a component: anything coming out of `@hemera/ui`,
     // through its entry point or through one of its subpaths. The theme itself is found by the
@@ -53,6 +54,15 @@ export default defineConfig({
       'anti-slop/no-unsafe-dictionary-type': 'error',
       'anti-slop/no-widen-then-assert': 'error',
       'anti-slop/require-safety-comment-for-type-assertion': 'error',
+      // What the code outside the renderer is held to now that it is written in Effect (D3-03):
+      // an error carries its tag from the class that declares it, a tag is matched and never
+      // compared by hand, a service is reached through its own accessor, and a branch on a
+      // tagged value goes through `Effect.match` rather than a chain of `if`.
+      'anti-slop-effect/no-manual-effect-error-tag': 'error',
+      'anti-slop-effect/no-manual-tag-comparison': 'error',
+      'anti-slop-effect/no-manual-tagged-construction': 'error',
+      'anti-slop-effect/no-service-constructor-imports': 'error',
+      'anti-slop-effect/prefer-effect-match': 'error',
     },
     // A component is the one place a class of its own is not a restyling: inside it, a colour
     // and a padding are the design decision. Everywhere else, passing one is taking it back.

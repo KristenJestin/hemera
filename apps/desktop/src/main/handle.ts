@@ -10,18 +10,25 @@
 
 import type { ChannelArguments, ChannelName, ChannelResponse } from '@hemera/ipc'
 import { ipcMain, type IpcMainInvokeEvent } from 'electron/main'
+import { Effect } from 'effect'
 
 import { applicationOrigin, decide } from './bridge.ts'
+import { diagnostic, type Log, reported } from './diagnostic.ts'
 
-/** Where a refusal is written. A refused message is a fact, not a silence. */
-export type Log = (reason: string) => void
+export type { Log }
 
-export function handle<K extends ChannelName>(
+/**
+ * One channel, one frontier (design D3-03).
+ *
+ * The handler is a program rather than a function that already ran: everything the main process
+ * does is written in Effect, and this is the one place per channel where such a program is
+ * actually run. A program that fails does so with a type, and the reason reaches the log before
+ * the refusal reaches the page.
+ */
+export function handle<K extends ChannelName, E>(
   channel: K,
-  handler: (argument: ChannelArguments<K>) => ChannelResponse<K> | Promise<ChannelResponse<K>>,
-  log: Log = (reason) => {
-    console.error(reason)
-  },
+  handler: (argument: ChannelArguments<K>) => Effect.Effect<ChannelResponse<K>, E>,
+  log: Log = diagnostic,
 ): void {
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- what Electron hands over is unparsed by definition; `decide` parses it
   ipcMain.handle(channel, async (event: IpcMainInvokeEvent, argument: unknown) => {
@@ -36,6 +43,10 @@ export function handle<K extends ChannelName>(
       log(decision.reason)
       throw new Error(decision.reason)
     }
-    return await handler(decision.argument)
+    return await Effect.runPromise(
+      handler(decision.argument).pipe(
+        Effect.tapError((failed) => Effect.sync(() => log(`${channel}: ${reported(failed)}`))),
+      ),
+    )
   })
 }

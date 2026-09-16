@@ -12,6 +12,7 @@ import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { OverlayContainerProvider } from '../overlay.ts'
 import { ChromeBar } from './chrome-bar.tsx'
 import { Gutter } from './gutter.tsx'
+import { type ThemeChoice } from '../window.ts'
 import { SIDEBAR_RAIL, type ShellProject, type ShellSession, checkedWidth } from './model.ts'
 import { Sidebar } from './sidebar.tsx'
 
@@ -53,7 +54,8 @@ export interface ShellProps {
   commandShortcut: string
   collapseShortcut: string
 
-  theme: 'light' | 'dark'
+  /** What the user chose, which is one more than what the window wears. */
+  theme: ThemeChoice
   onToggleTheme: () => void
 
   collapsed: boolean

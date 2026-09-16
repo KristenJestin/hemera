@@ -113,6 +113,53 @@ describe('Importation interdite', () => {
   })
 })
 
+describe('Le process principal n’importe pas le stockage', () => {
+  test.each([
+    ['the SQLite module itself', "import { DatabaseSync } from 'node:sqlite'\n"],
+    ['the ORM', "import { drizzle } from 'drizzle-orm/node-sqlite'\n"],
+    ['the migration generator', "import { defineConfig } from 'drizzle-kit'\n"],
+  ])('the main process reaching for %s fails the check', (_case, source) => {
+    const path = 'apps/desktop/src/main/index.ts'
+    const root = fixture({ [path]: source })
+    try {
+      const violations = analyzePackage(root, ruleFor('@hemera/desktop'))
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.file).toBe(path)
+      expect(violations[0]!.problem).toContain('apps/desktop/src/profile/')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the process that holds the database is the one place that may open it', () => {
+    const root = fixture({
+      'apps/desktop/src/profile/storage/database.ts': [
+        "import { DatabaseSync } from 'node:sqlite'",
+        "import { drizzle } from 'drizzle-orm/node-sqlite'",
+        '',
+      ].join('\n'),
+    })
+    try {
+      expect(analyzePackage(root, ruleFor('@hemera/desktop'))).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('no leaf package may import the storage layer at all, profile folder or not', () => {
+    const root = fixture({
+      'packages/core/src/domain/profile.ts': "import { DatabaseSync } from 'node:sqlite'\n",
+    })
+    try {
+      const violations = analyzePackage(root, ruleFor('@hemera/core'))
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.problem).toContain('the SQLite storage layer')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('Frontière du design system', () => {
   test.each([
     ['@hemera/core', 'must not depend on'],
