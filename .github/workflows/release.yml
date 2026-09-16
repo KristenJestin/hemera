@@ -39,3 +39,65 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm exec semantic-release
+
+      # What was tagged, told to the packaging jobs below. The latest release is only this
+      # run's when its tag points at the commit this run is for; otherwise nothing was
+      # published and nothing is built.
+      - name: Read the tag that was just pushed
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
+          sha="$( [ -n "$tag" ] && gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" -q .object.sha || true)"
+          [ "$sha" = "$GITHUB_SHA" ] && echo "name=$tag" >> "$GITHUB_OUTPUT" || echo "name=" >> "$GITHUB_OUTPUT"
+    outputs:
+      tag: ${{ steps.tag.outputs.name }}
+
+  # The packages of that version, built on each target from the tag itself and attached to the
+  # release semantic-release just wrote. Nothing is built when no version was published.
+  package:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        run: corepack enable
+
+      - name: Cache the Electron binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch the Electron binary
+        working-directory: apps/desktop
+        run: pnpm exec install-electron
+
+      # `CI` is set by GitHub, and it is what the packaging refuses to build prod without.
+      - run: pnpm package --channel prod
+
+      - name: Attach the packages to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          gh release upload "${{ needs.release.outputs.tag }}" dist/package/*.zip dist/package/*.AppImage dist/package/*.deb --clobber
