@@ -178,7 +178,11 @@ export function migrationsProblems(entries: string[]): PackageProblem[] {
 /** Everything the archive the application is served from carries. */
 export function archiveEntries(unpacked: string): string[] {
   try {
-    return listPackage(join(unpacked, 'resources', 'app.asar'), { isPack: false })
+    // Listed with the separators of the machine that built it, and read with one: the archive
+    // is the same on both systems, and so is the question asked of it.
+    return listPackage(join(unpacked, 'resources', 'app.asar'), { isPack: false }).map((entry) =>
+      entry.replaceAll('\\', '/'),
+    )
   } catch {
     return []
   }
