@@ -144,6 +144,11 @@ describe('Un paquet lit son canal dans son manifeste', () => {
     expect(versionFrom('v0.3.0-12-gabc1\n')).toBe('0.3.0-12-gabc1')
     expect(versionFrom('0.3.0\n')).toBe('0.3.0')
   })
+
+  test('a repository with no tag answers a hash, carried behind a version that starts with a digit', () => {
+    expect(versionFrom('abc1234\n')).toBe('0.0.0-abc1234')
+    expect(versionFrom('3dcdb99\n')).toBe('3dcdb99')
+  })
 })
 
 describe('Migrations embarquées', () => {
