@@ -1,6 +1,6 @@
 import { LayoutGroup, motion } from 'motion/react'
 import type { Transition } from 'motion/react'
-import type { ReactElement, ReactNode } from 'react'
+import { type ReactElement, type ReactNode, useId } from 'react'
 
 import {
   IconCommand,
@@ -86,6 +86,10 @@ export function Sidebar({
   onOpenSettings,
 }: SidebarProps): ReactNode {
   const transition = useTransition(morph)
+  // Scoped to this sidebar: `LayoutGroup` prefixes the `layoutId` of everything under it, and
+  // two sidebars on one page — Storybook shows both themes at once — are not one list with two
+  // marks handing a single element back and forth between them.
+  const group = useId()
   // `useTransition` hands back this very object when the system asks for less movement, and a
   // delay is still a wait: the labels take theirs only when there is a journey to wait for.
   const still = transition === instant
@@ -123,7 +127,7 @@ export function Sidebar({
       {/* The places scroll and the two ends do not: a window short enough to cut the list off
           used to cut it off for good, with the theme and the settings pushed out of reach. */}
       <div className="scroll-quiet flex min-h-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto">
-        <LayoutGroup id="sidebar">
+        <LayoutGroup id={group}>
           <motion.p
             className={GROUP}
             initial={false}
@@ -188,7 +192,14 @@ export function Sidebar({
   )
 }
 
-/** A control of the rail wears its name in a tooltip; the same control open already says it. */
+/**
+ * A control of the rail wears its name in a tooltip; the same control open already says it.
+ *
+ * The tooltip is always there and turns itself off when the sidebar is open, rather than being
+ * wrapped around the control only when it is folded: a wrapper that comes and goes is a control
+ * React unmounts and mounts again, and folding with a sidebar entry focused would drop the
+ * keyboard back to the top of the page.
+ */
 function Folding({
   collapsed,
   label,
@@ -198,12 +209,10 @@ function Folding({
   label: string
   children: ReactElement
 }): ReactNode {
-  return collapsed ? (
-    <Tooltip label={label} side="right">
+  return (
+    <Tooltip label={label} side="right" disabled={!collapsed}>
       {children}
     </Tooltip>
-  ) : (
-    children
   )
 }
 

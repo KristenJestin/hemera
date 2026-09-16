@@ -90,6 +90,10 @@ export const Keyboard: Story = {
       expect(canvas.getByRole('tab', { name: /journal/i })).toHaveAttribute('aria-selected', 'true')
     })
     expect(canvas.getByText('What happened, in order.')).toBeInTheDocument()
-    expect(canvas.queryByText('The Sessions of the Project.')).toBeNull()
+    // Waited for, not read once: Base UI takes the panel that was showing out of the page after
+    // the swap has finished, so the tab is already selected while the old panel is still there.
+    await waitFor(() => {
+      expect(canvas.queryByText('The Sessions of the Project.')).toBeNull()
+    })
   },
 }

@@ -34,18 +34,33 @@ export interface TooltipProps {
   keys?: string | undefined
   /** Which side it opens on; a rail of icons wants them beside it, not over it. */
   side?: TooltipSide | undefined
+  /**
+   * Whether the name is offered at all.
+   *
+   * A control that already wears its label says so here rather than by being rendered without a
+   * tooltip around it: a wrapper that comes and goes takes the control with it — React remounts
+   * the element underneath — and a button remounted under the hand is a button the keyboard has
+   * just lost the focus of.
+   */
+  disabled?: boolean | undefined
   /** The control it belongs to: something the keyboard can land on, never a box. */
   children: ReactElement
 }
 
-export function Tooltip({ label, keys, side = 'top', children }: TooltipProps): ReactNode {
+export function Tooltip({
+  label,
+  keys,
+  side = 'top',
+  disabled = false,
+  children,
+}: TooltipProps): ReactNode {
   const container = useOverlayContainer()
   const refused = refusedTag(children.type)
   if (refused !== null) {
     throw new Error(`a tooltip needs a focusable control, and <${refused}> is not one`)
   }
   return (
-    <BaseTooltip.Root>
+    <BaseTooltip.Root disabled={disabled}>
       <BaseTooltip.Trigger render={children} />
       <BaseTooltip.Portal container={container}>
         <BaseTooltip.Positioner side={side} sideOffset={4}>

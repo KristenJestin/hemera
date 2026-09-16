@@ -1,6 +1,6 @@
 import { cn } from 'cn'
 import { LayoutGroup, motion } from 'motion/react'
-import type { ReactNode, RefObject } from 'react'
+import { type ReactNode, type RefObject, useId } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
@@ -103,6 +103,10 @@ export function ChromeBar({
   ref,
 }: ChromeBarProps): ReactNode {
   const transition = useTransition(arrival)
+  // Scoped to this bar: `LayoutGroup` prefixes the `layoutId` of everything under it, and two
+  // bars on one page — Storybook shows both themes at once — are not one strip of Projects with
+  // a single slab travelling between them.
+  const group = useId()
   const fold = collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'
 
   return (
@@ -131,7 +135,7 @@ export function ChromeBar({
         <span aria-hidden="true" className={RULE} />
 
         <Scrollable label="Projects" className="flex-1">
-          <LayoutGroup id="projects">
+          <LayoutGroup id={group}>
             {projects.map((project) => (
               <span key={project.id} className="relative flex shrink-0">
                 {project.id === activeProjectId && (

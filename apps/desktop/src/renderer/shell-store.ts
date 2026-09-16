@@ -63,10 +63,18 @@ export function selectProjectByRank(rank: number): void {
 }
 
 export function selectEntry(activeEntryId: string): void {
+  if (activeEntryId === state.activeEntryId) return
   change({ ...state, activeEntryId })
 }
 
+/**
+ * Folds or unfolds, and says nothing when it is already that way.
+ *
+ * A drag held under the fold threshold asks for this on every pointer event, and a fresh
+ * snapshot for an answer that has not changed is the whole window rendered again per frame.
+ */
 export function setCollapsed(collapsed: boolean): void {
+  if (collapsed === state.collapsed) return
   change({ ...state, collapsed })
 }
 
@@ -76,5 +84,7 @@ export function toggleCollapsed(): void {
 
 /** Sets the width the sidebar opens at, held inside the bounds the theme declares. */
 export function setWidth(width: number): void {
-  change({ ...state, width: Math.min(Math.max(width, SIDEBAR_MIN), SIDEBAR_MAX) })
+  const held = Math.min(Math.max(width, SIDEBAR_MIN), SIDEBAR_MAX)
+  if (held === state.width) return
+  change({ ...state, width: held })
 }

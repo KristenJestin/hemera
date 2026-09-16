@@ -65,9 +65,14 @@ export function Gutter({
     onWidthChange(clampedWidth(asked))
   }
 
+  // The answer the next pointer event will use, kept up to date on every render. The listeners
+  // read it instead of closing over it, so a drag binds them once rather than once per frame.
+  const answering = useRef(askFor)
+  answering.current = askFor
+
   useEffect(() => {
     const follow = (event: PointerEvent): void => {
-      if (holding.current) askFor(event.clientX)
+      if (holding.current) answering.current(event.clientX)
     }
     const release = (): void => {
       if (!holding.current) return
@@ -82,7 +87,7 @@ export function Gutter({
       globalThis.removeEventListener('pointerup', release)
       globalThis.removeEventListener('pointercancel', release)
     }
-  })
+  }, [onDraggingChange])
 
   const answer = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Enter') {
@@ -98,6 +103,9 @@ export function Gutter({
     }[event.key]
     if (asked === undefined) return
     event.preventDefault()
+    // A key that asks for less than the rail is asking for something the panel already is:
+    // folded, ArrowLeft means "narrower", and unfolding it to the minimum is the opposite.
+    if (collapsed && asked <= SIDEBAR_RAIL) return
     if (collapsed) onToggleCollapsed()
     onWidthChange(clampedWidth(asked))
   }

@@ -62,17 +62,23 @@ export function Scrollable({ label, className, children }: ScrollableProps): Rea
     setEdges((was) => (was.start === start && was.end === end ? was : { start, end }))
   }, [])
 
+  // Bound once, and not once per render: a drag on the separator renders the shell at the
+  // refresh rate, and tearing down an observer per tab on every one of those frames is work
+  // paid during the very interaction this lot measures. The two watchers cover both reasons
+  // the answer can change — the strip resizing, and a Project arriving or leaving.
   useEffect(() => {
     const node = strip.current
     if (node === null) return
     look()
-    const watch = new ResizeObserver(look)
-    watch.observe(node)
-    for (const child of node.children) watch.observe(child)
+    const sized = new ResizeObserver(look)
+    sized.observe(node)
+    const changed = new MutationObserver(look)
+    changed.observe(node, { childList: true, subtree: true, characterData: true })
     return () => {
-      watch.disconnect()
+      sized.disconnect()
+      changed.disconnect()
     }
-  })
+  }, [look])
 
   const move = (way: number): void => {
     const node = strip.current
