@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { ChromeBar } from './chrome-bar.tsx'
 import type { ShellProject } from './model.ts'
@@ -41,6 +41,30 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Playground: Story = {}
+
+/** More Projects than the bar is wide: the strip says where it continues, at the end it has. */
+export const Crowded: Story = {
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  args: {
+    projects: Array.from({ length: 14 }, (_, index) => ({
+      id: `project-${index}`,
+      name: `Project number ${index + 1}`,
+      tone: PROJECTS[index % PROJECTS.length]!.tone,
+      pending: index % 3,
+    })),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // Nothing to the left yet, and plenty to the right.
+    expect(canvas.queryByRole('button', { name: 'Scroll left' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Scroll right' }))
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: 'Scroll left' })).toBeInTheDocument()
+    })
+  },
+}
 
 export const Variants: Story = {
   // The controls belong to the playground: this story decides these props itself, and a panel
