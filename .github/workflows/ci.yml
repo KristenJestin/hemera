@@ -127,3 +127,31 @@ jobs:
           name: hemera-beta-${{ runner.os }}
           path: source/dist/package
           if-no-files-found: error
+
+  # The beta is a single rolling pre-release: it moves with `dev`, it is not a version, and its
+  # tag is deleted and recreated on every push so `beta` always points at the latest build.
+  prerelease:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hemera-beta-*
+          merge-multiple: true
+          path: dist/package
+
+      - name: Publish the beta as a rolling pre-release
+        working-directory: dist/package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete beta --repo "${{ github.repository }}" --yes --cleanup-tag || true
+          gh release create beta \
+            --repo "${{ github.repository }}" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Hemera Beta ${GITHUB_SHA::7}" \
+            --notes "Built from dev at ${GITHUB_SHA::7}. Not a version: the beta moves with dev." \
+            *.zip *.AppImage *.deb
