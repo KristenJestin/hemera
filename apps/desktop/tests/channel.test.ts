@@ -22,7 +22,7 @@ import {
   profileDirectory,
 } from '#main/channel.ts'
 
-const WINDOWS = { LOCALAPPDATA: 'C:\\Users\\kris\\AppData\\Local' }
+const WINDOWS = { LOCALAPPDATA: 'C:\\Users\\someone\\AppData\\Local' }
 const LINUX = { XDG_DATA_HOME: '/home/someone/.local/share' }
 
 /** A package on disk, as Electron would have loaded it: a folder and the manifest it carries. */
@@ -62,7 +62,7 @@ describe('Le dossier suit la plateforme', () => {
   test('windows files the profile under the local data folder, never the roaming one', () => {
     const directory = profileDirectory('prod', 'win32', {
       ...WINDOWS,
-      APPDATA: 'C:\\Users\\kris\\AppData\\Roaming',
+      APPDATA: 'C:\\Users\\someone\\AppData\\Roaming',
     })
     expect(directory).toBe(`${WINDOWS.LOCALAPPDATA}\\hemera\\prod`)
     expect(directory).not.toContain('Roaming')
