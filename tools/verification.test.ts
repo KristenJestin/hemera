@@ -36,5 +36,7 @@ describe('Vérification unique', () => {
     } finally {
       rmSync(path, { force: true })
     }
-  })
+    // A type check of four packages, on a runner that has just started: seconds, not the five
+    // the suite allows a test by default.
+  }, 60_000)
 })

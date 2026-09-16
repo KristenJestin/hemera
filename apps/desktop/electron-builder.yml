@@ -51,6 +51,9 @@ win:
 
 linux:
   category: Development
+  # Named after the product and not the package: `@hemera/desktop` would put the deb under a
+  # folder called `@hemera` that nothing creates, and fpm stops there.
+  artifactName: '${productName}-${version}.${ext}'
   target:
     - AppImage
     - deb
