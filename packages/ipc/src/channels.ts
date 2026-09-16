@@ -10,25 +10,16 @@
 import { z } from 'zod'
 
 import { environmentReportSchema } from './environment.ts'
+import {
+  displayPreferencesChangeSchema,
+  displayPreferencesSchema,
+  nothingSchema,
+} from './profile.ts'
 
 /** What the window can be asked to do. Lot 2 wires these to the shell's own controls. */
 export const windowCommandSchema = z.object({
   command: z.enum(['minimize', 'maximize', 'close']),
 })
-
-/**
- * Which theme the user asked for, which is a preference and not a colour: `system` is a
- * choice too, and it is the one that has to reach the main process — only the platform can
- * lift an override, and only the main process can tell the platform to.
- */
-export const themeSchema = z.object({
-  preference: z.enum(['system', 'light', 'dark']),
-})
-
-/** What the user can ask for; `system` means "whatever the desktop says, from now on". */
-export type ThemePreference = z.infer<typeof themeSchema>['preference']
-
-const nothingSchema = z.object({})
 
 /**
  * Every channel of the application.
@@ -45,8 +36,16 @@ export const CHANNELS = {
     arguments: windowCommandSchema,
     response: z.void(),
   },
-  'theme.set': {
-    arguments: themeSchema,
+  // What the page wears, asked for before it mounts anything and written back on every change.
+  // The theme is a preference and not a colour: `system` is a choice too, and it is the one that
+  // has to reach the main process — only the platform can lift an override, and only the main
+  // process can tell the platform to.
+  'preferences.read': {
+    arguments: nothingSchema,
+    response: displayPreferencesSchema,
+  },
+  'preferences.write': {
+    arguments: displayPreferencesChangeSchema,
     response: z.void(),
   },
 } as const

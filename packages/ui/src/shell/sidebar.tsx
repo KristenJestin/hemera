@@ -5,6 +5,7 @@ import { type ReactElement, type ReactNode, useId } from 'react'
 import {
   IconCommand,
   IconMessages,
+  IconDeviceDesktop,
   IconMoon,
   IconSettings,
   IconSun,
@@ -14,7 +15,27 @@ import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../mot
 import { Button } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
+import { type ThemeChoice } from '../window.ts'
 import { JOURNAL_ENTRY, PROJECT_SETTINGS_ENTRY, SIDEBAR_RAIL, type ShellSession } from './model.ts'
+
+/**
+ * What the one theme control offers next, named and drawn.
+ *
+ * The icon has always shown what pressing will give rather than what the window is wearing, and
+ * it stays that way with three choices — which is also what makes every press visible: from
+ * `dark`, following the desktop may well look identical, and an icon that did not change would
+ * be a control the hand cannot tell it has used.
+ */
+interface ThemeStep {
+  label: string
+  icon: ReactElement
+}
+
+function nextTheme(choice: ThemeChoice): ThemeStep {
+  if (choice === 'system') return { label: 'Use the light theme', icon: <IconSun size="md" /> }
+  if (choice === 'light') return { label: 'Use the dark theme', icon: <IconMoon size="md" /> }
+  return { label: 'Follow the desktop theme', icon: <IconDeviceDesktop size="md" /> }
+}
 
 /**
  * The sidebar, session-first, folding to a rail of icons (design D2-03).
@@ -66,7 +87,8 @@ export interface SidebarProps {
   onOpenCommand: () => void
   /** The keystroke that opens the command, already written for the platform. */
   commandShortcut: string
-  theme: 'light' | 'dark'
+  /** What the user chose, which is one more than what the window wears. */
+  theme: ThemeChoice
   onToggleTheme: () => void
   onOpenSettings: () => void
 }
@@ -95,6 +117,7 @@ export function Sidebar({
   const still = transition === instant
   const labels = collapsed || still ? transition : { ...transition, delay: LABEL_DELAY }
   const target = collapsed ? SIDEBAR_RAIL : width
+  const step = nextTheme(theme)
 
   return (
     <motion.aside
@@ -174,8 +197,8 @@ export function Sidebar({
 
       <div className="flex shrink-0 flex-col gap-1">
         <Action
-          label={theme === 'dark' ? 'Use the light theme' : 'Use the dark theme'}
-          icon={theme === 'dark' ? <IconSun size="md" /> : <IconMoon size="md" />}
+          label={step.label}
+          icon={step.icon}
           collapsed={collapsed}
           labels={labels}
           onSelect={onToggleTheme}

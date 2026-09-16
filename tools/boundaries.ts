@@ -19,9 +19,10 @@ export interface PackageRule {
     pattern: RegExp
     reason: string
     /**
-     * The one file allowed to import it anyway, as a path from the repository root. A
-     * catalogue is exactly that: a single door a dependency comes through, so that the rest
-     * of the tree imports the catalogue instead of the dependency.
+     * The one place allowed to import it anyway, as a path from the repository root: a file,
+     * or a folder and everything under it. A catalogue is exactly that single door a
+     * dependency comes through, so that the rest of the tree imports the catalogue instead of
+     * the dependency; a whole process is the same thing at the scale of a program.
      */
     exceptIn?: string
   }[]
@@ -34,8 +35,24 @@ const NO_PLATFORM = [
     reason: 'a file, process or network API',
   },
   {
-    pattern: /^(drizzle-orm|drizzle-kit|better-sqlite3)(\/|$)/,
+    pattern: /^(drizzle-orm|drizzle-kit|better-sqlite3|node:sqlite)(\/|$)/,
     reason: 'the SQLite storage layer',
+  },
+]
+
+/**
+ * The one process that opens the database, and the only folder the storage layer reaches (D3-11).
+ *
+ * The main process must not so much as import it: a second program holding the same file is
+ * how a profile gets two writers, and the rule is checked here rather than remembered.
+ */
+const PROFILE_PROCESS = 'apps/desktop/src/profile'
+
+const NO_STORAGE_OUTSIDE_THE_PROFILE = [
+  {
+    pattern: /^(drizzle-orm|drizzle-kit|node:sqlite|@effect\/sql-sqlite-node)(\/|$)/,
+    reason: `the SQLite storage layer, which belongs to ${PROFILE_PROCESS}/ alone`,
+    exceptIn: PROFILE_PROCESS,
   },
 ]
 
@@ -101,7 +118,7 @@ export const PACKAGE_RULES: PackageRule[] = [
   {
     name: '@hemera/desktop',
     directory: 'apps/desktop',
-    forbidden: [...NO_RAW_ICONS],
+    forbidden: [...NO_RAW_ICONS, ...NO_STORAGE_OUTSIDE_THE_PROFILE],
   },
 ]
 
@@ -187,6 +204,12 @@ function quoted(part: string): string {
   return part.replaceAll(/[.*+?^${}()|[\]\\]/g, (match) => `\\${match}`)
 }
 
+/** Whether a file is the one place a forbidden import is allowed: that file, or under it. */
+function excused(exceptIn: string | undefined, file: string): boolean {
+  if (exceptIn === undefined) return false
+  return file === exceptIn || file.startsWith(`${exceptIn}/`)
+}
+
 export function analyzePackage(repositoryRoot: string, rule: PackageRule): Violation[] {
   const violations: Violation[] = []
   const packageRoot = resolve(repositoryRoot, rule.directory)
@@ -215,7 +238,7 @@ export function analyzePackage(repositoryRoot: string, rule: PackageRule): Viola
         continue
       }
       const forbidden = rule.forbidden.find(
-        (entry) => entry.pattern.test(specifier) && entry.exceptIn !== reported,
+        (entry) => entry.pattern.test(specifier) && !excused(entry.exceptIn, reported),
       )
       if (forbidden !== undefined) {
         violations.push({

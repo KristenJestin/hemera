@@ -1,0 +1,41 @@
+# The version of an installed Hemera, decided by what was merged (design D3-10).
+#
+# `package.json` stays at 0.0.0 and nobody edits a version by hand: the tag semantic-release
+# puts on `main` is the version, and the package that carries it is built from that tag. No
+# plugin here writes a commit — not a changelog, not a manifest — so the history of `main` is
+# what was merged into it and nothing the pipeline added afterwards.
+#
+# Breaking changes move the minor while the product is 0.x: a 1.0 is a decision, not something
+# a commit message brings about.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Enable the pinned package manager
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tag what was merged, and write the release notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec semantic-release

@@ -3,6 +3,7 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
+import { type ThemeChoice } from '../window.ts'
 import {
   JOURNAL_ENTRY,
   SIDEBAR_DEFAULT,
@@ -13,6 +14,9 @@ import {
   type ShellSession,
 } from './model.ts'
 import { Shell } from './shell.tsx'
+
+/** The three the one theme control cycles through, in the order it offers them. */
+const CHOICES: ThemeChoice[] = ['system', 'light', 'dark']
 
 /**
  * The whole shell, with nothing real in it (design D2-01, D2-08).
@@ -68,7 +72,7 @@ function Harness({
   const [activeEntryId, setActiveEntryId] = useState(sessions[0]?.id ?? JOURNAL_ENTRY)
   const [collapsed, setCollapsed] = useState(folded)
   const [width, setWidth] = useState(opening)
-  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [theme, setTheme] = useState<ThemeChoice>('system')
 
   return (
     <Shell
@@ -85,7 +89,7 @@ function Harness({
       commandShortcut="Ctrl+K"
       collapseShortcut="Ctrl+B"
       theme={theme}
-      onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      onToggleTheme={() => setTheme(CHOICES[(CHOICES.indexOf(theme) + 1) % CHOICES.length]!)}
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
       width={width}

@@ -1,9 +1,10 @@
 /**
- * The three bundles of the application, declared once and used by the build and by the
+ * The four bundles of the application, declared once and used by the build and by the
  * development run.
  *
- * They are three because Electron runs three programs: an ESM main process on Node, a preload
- * that a sandboxed renderer can only load as CommonJS, and a renderer that is a web page.
+ * They are four because Electron runs four programs: an ESM main process on Node, a preload
+ * that a sandboxed renderer can only load as CommonJS, a renderer that is a web page, and the
+ * named utility process that holds the database and nothing else (design D3-01).
  */
 
 import { dirname, resolve } from 'node:path'
@@ -31,6 +32,30 @@ export const mainBundle: InlineConfig = {
     minify: false,
     lib: {
       entry: resolve(application, 'src/main/index.ts'),
+      formats: ['es'],
+      fileName: () => 'index.js',
+    },
+    rollupOptions: { external: PROVIDED_BY_ELECTRON },
+  },
+}
+
+/**
+ * The process that holds the database, which is the only one that carries the storage layer.
+ *
+ * It is bundled like the main process and for the same reason: `utilityProcess.fork` runs a
+ * file, and one file it is. `node:sqlite` stays outside, as every Node built-in does; the ORM
+ * and Effect are bundled in, so what the package carries is what the process needs.
+ */
+export const profileBundle: InlineConfig = {
+  root: application,
+  configFile: false,
+  build: {
+    outDir: resolve(OUTPUT, 'profile'),
+    emptyOutDir: true,
+    target: 'node24',
+    minify: false,
+    lib: {
+      entry: resolve(application, 'src/profile/index.ts'),
       formats: ['es'],
       fileName: () => 'index.js',
     },

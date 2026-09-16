@@ -32,7 +32,7 @@ function Harness({ collapsed = false, sessions = SESSIONS }: HarnessProps) {
           onSelectEntry={setActiveEntryId}
           onOpenCommand={fn()}
           commandShortcut="Ctrl+K"
-          theme="light"
+          theme="system"
           onToggleTheme={fn()}
           onOpenSettings={fn()}
         />

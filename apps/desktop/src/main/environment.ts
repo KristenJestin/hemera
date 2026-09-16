@@ -13,6 +13,8 @@ import { release, version } from 'node:os'
 import type { Display, EnvironmentReport, Graphics } from '@hemera/ipc'
 import { app, screen } from 'electron/main'
 
+import type { ApplicationIdentity } from './channel.ts'
+
 /** Value used when a field exists but could not be read. */
 export const UNKNOWN = 'unknown'
 
@@ -95,10 +97,12 @@ export function targetOf(platform: string = process.platform): string {
   return platform
 }
 
-export async function collectReport(): Promise<EnvironmentReport> {
+export async function collectReport(identity: ApplicationIdentity): Promise<EnvironmentReport> {
   const target = targetOf()
   const graphics = await graphicsOf()
   return {
+    version: identity.version,
+    channel: identity.channel,
     platform: target,
     osVersion: `${version()} (${release()})`,
     distribution: distributionOf(),

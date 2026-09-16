@@ -1,3 +1,4 @@
+import { DEFAULT_DISPLAY_PREFERENCES } from '@hemera/ipc'
 import { MotionConfig } from 'motion/react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -6,14 +7,29 @@ import { createRoot } from 'react-dom/client'
 // oxlint-disable-next-line import/no-unassigned-import
 import '@hemera/ui/theme.css'
 import { Application } from './application.tsx'
-import { syncTheme } from './theme.ts'
+import { startShell } from './shell-store.ts'
+import { startTheme } from './theme.ts'
 
 const root = document.querySelector('#root')
 if (root === null) throw new Error('the page has no root to mount on')
 
-// The page is what decides the theme, so it says so before anything is drawn: the frame is
-// outside the page and would otherwise keep whatever the previous page left it wearing.
-syncTheme()
+/**
+ * What the profile holds, asked for before anything is mounted (design D3-08).
+ *
+ * The shell is mounted once, on the values the user chose, rather than mounted on defaults and
+ * corrected a frame later — a sidebar that appears open and folds itself is the flash this lot
+ * exists to remove. The window is already on screen and already painted while this is asked
+ * for, so the wait costs a frame or two and shows nothing.
+ *
+ * If the profile cannot answer, the page comes up on the declared defaults: a cockpit that
+ * refuses to draw because a sidebar width could not be read would be worse than a wide sidebar.
+ */
+const held = await window.hemera
+  .invoke('preferences.read', {})
+  .catch(() => DEFAULT_DISPLAY_PREFERENCES)
+
+startTheme(held.theme)
+startShell(held.sidebar)
 
 createRoot(root).render(
   // Around the application and not inside it: the design system answers the reduced-motion

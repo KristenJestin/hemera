@@ -18,6 +18,7 @@ import { Dialog, JOURNAL_ENTRY, PROJECT_SETTINGS_ENTRY, Shell } from '@hemera/ui
 
 import { EMPTY, PROJECT_FIXTURES, sessionsOf } from './fixtures.ts'
 import {
+  persistWidthOnRelease,
   selectEntry,
   selectProject,
   selectProjectByRank,
@@ -28,7 +29,12 @@ import {
   toggleCollapsed,
 } from './shell-store.ts'
 import { type ShortcutAction, keysOf, useShellShortcuts } from './shortcuts.ts'
-import { currentTheme, setThemePreference, subscribeToTheme } from './theme.ts'
+import {
+  nextThemePreference,
+  setThemePreference,
+  subscribeToTheme,
+  themePreference,
+} from './theme.ts'
 import { measureFrames } from './witness.ts'
 
 /** The panel a keystroke opens on an empty room, named after the lot that furnishes it. */
@@ -36,7 +42,15 @@ type Placeholder = 'command' | 'settings' | null
 
 export function Application() {
   const shell = useSyncExternalStore(subscribeToShell, shellState, shellState)
-  const theme = useSyncExternalStore(subscribeToTheme, currentTheme, () => 'light' as const)
+  // The preference and not the resolved theme: the one control cycles through what the user
+  // chose, and `system` is a choice no colour can be read back from. What the page wears is put
+  // on `<html>` by the theme store itself, which is subscribed to here all the same — that is
+  // what keeps the page following the desktop while the choice is `system`.
+  const preference = useSyncExternalStore(
+    subscribeToTheme,
+    themePreference,
+    () => 'system' as const,
+  )
   const [placeholder, setPlaceholder] = useState<Placeholder>(null)
 
   const run = useCallback((action: ShortcutAction) => {
@@ -78,6 +92,9 @@ export function Application() {
     window.hemeraWitness = { play }
   }, [play])
 
+  // A width is written down when the hand lets go of it, not while it is being dragged.
+  useEffect(persistWidthOnRelease, [])
+
   const sessions = sessionsOf(shell.activeProjectId)
   const session = sessions.find((one) => one.id === shell.activeEntryId)
 
@@ -95,8 +112,8 @@ export function Application() {
       onOpenCommand={() => setPlaceholder('command')}
       commandShortcut={keysOf('command')}
       collapseShortcut={keysOf('sidebar')}
-      theme={theme}
-      onToggleTheme={() => setThemePreference(theme === 'dark' ? 'light' : 'dark')}
+      theme={preference}
+      onToggleTheme={() => setThemePreference(nextThemePreference(preference))}
       collapsed={shell.collapsed}
       onCollapsedChange={setCollapsed}
       width={shell.width}
