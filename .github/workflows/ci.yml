@@ -142,16 +142,22 @@ jobs:
           merge-multiple: true
           path: dist/package
 
-      - name: Publish the beta as a rolling pre-release
+      # One pre-release per build, and every one of them stays: the tag is the beta's own
+      # version (`beta-0.0.0-<sha>`, then `beta-0.4.0-3-g<sha>` once main is tagged), so two
+      # betas never share a name and an older one can be installed again from the Releases page.
+      - name: Publish the beta as its own pre-release
         working-directory: dist/package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete beta --repo "${{ github.repository }}" --yes --cleanup-tag || true
-          gh release create beta \
+          file="$(ls *.zip | head -1)"
+          version="${file#Hemera.Beta-}"; version="${version%-win.zip}"
+          tag="beta-${version}"
+          gh release create "$tag" \
             --repo "${{ github.repository }}" \
             --prerelease \
+            --latest=false \
             --target "$GITHUB_SHA" \
-            --title "Hemera Beta ${GITHUB_SHA::7}" \
-            --notes "Built from dev at ${GITHUB_SHA::7}. Not a version: the beta moves with dev." \
+            --title "Hemera Beta ${version}" \
+            --notes "Beta built from dev at ${GITHUB_SHA::7} on $(date -u +%Y-%m-%d). Every beta is kept; the newest pre-release is the current one." \
             *.zip *.AppImage *.deb
