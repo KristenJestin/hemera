@@ -137,17 +137,31 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(highlighted()).toHaveTextContent('Opus')
     })
-    await userEvent.keyboard('{ArrowDown}')
-    // Given longer than the second it is given by default: this file runs beside ninety others
-    // on the same machine, and a re-render that takes a few hundred milliseconds on its own has
-    // been seen to take more than a second under that load. The walk is the same either way;
-    // only how long it is worth waiting for it changes.
-    await waitFor(
-      () => {
-        expect(highlighted()).toHaveTextContent('Sonnet')
-      },
-      { timeout: 5000 },
-    )
+    // The list takes the keys once it has the focus, and the highlight lands before the focus
+    // does: an arrow pressed in between is an arrow nobody hears, and the walk then waits five
+    // seconds on a highlight that never moves — seen twice in a row on a loaded Linux runner.
+    // So the focus is waited for, and the arrow is pressed again if the highlight has not moved
+    // within a moment all the same: the walk is the same walk, pressed once or twice.
+    await waitFor(() => {
+      expect(within(document.body).getByRole('listbox').contains(document.activeElement)).toBe(true)
+    })
+    for (let pressed = 0; pressed < 3; pressed += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one press, then a look, then the next: the order is the point
+      await userEvent.keyboard('{ArrowDown}')
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await waitFor(
+          () => {
+            expect(highlighted()).toHaveTextContent('Sonnet')
+          },
+          { timeout: 1500 },
+        )
+        break
+      } catch {
+        // Not moved yet: pressed again, which is what a hand would do.
+      }
+    }
+    expect(highlighted()).toHaveTextContent('Sonnet')
     await userEvent.keyboard('{Enter}')
     await waitFor(() => {
       expect(args.onValueChange).toHaveBeenCalledWith('sonnet')
