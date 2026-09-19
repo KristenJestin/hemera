@@ -46,7 +46,9 @@ function commit(path: string, message: string, file: string): CommandResult {
   return git(path, 'commit', '-m', message)
 }
 
-describe("Commit d'agent sur une branche protégée", () => {
+// Each of these starts git and its hooks under Node: seconds on a runner that has just started,
+// not the five the suite allows a test by default.
+describe("Commit d'agent sur une branche protégée", { timeout: 60_000 }, () => {
   test('a commit made directly on dev is refused', () => {
     const path = repositoryWithHooks()
     try {
@@ -91,7 +93,7 @@ describe("Commit d'agent sur une branche protégée", () => {
   })
 })
 
-describe('Commit hors convention', () => {
+describe('Commit hors convention', { timeout: 60_000 }, () => {
   test('a commit whose message ignores the convention is refused on a feature branch', () => {
     const path = repositoryWithHooks()
     try {
@@ -143,7 +145,7 @@ describe('Commit hors convention', () => {
   })
 })
 
-describe('Crochet ignoré faute de droit', () => {
+describe('Crochet ignoré faute de droit', { timeout: 60_000 }, () => {
   test('both hooks are recorded as executable, or Git skips them without a word', () => {
     // Git for Windows runs a hook whatever its mode; every other system skips one that is
     // not executable, and skips it silently — the protection would simply not exist there.
