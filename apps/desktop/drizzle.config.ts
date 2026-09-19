@@ -1,7 +1,7 @@
 /**
  * What `drizzle-kit generate` reads to produce a migration (design D3-05).
  *
- * The schema is the one file that describes the profile, and `drizzle/` is where the
+ * The schema is the one file that describes the database, and `drizzle/` is where the
  * migrations it generates land — bundled with the application and read back at start-up, so a
  * package carries the migrations it knows how to apply and no others.
  *
@@ -12,6 +12,6 @@ import { defineConfig } from 'drizzle-kit'
 
 export default defineConfig({
   dialect: 'sqlite',
-  schema: './src/profile/storage/schema.ts',
+  schema: './src/engine/storage/schema.ts',
   out: './drizzle',
 })

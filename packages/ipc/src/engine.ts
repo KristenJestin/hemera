@@ -1,0 +1,249 @@
+/**
+ * The use cases the process that holds the database answers, and nothing else (design D3-02).
+ *
+ * A use case is a name, a schema for what it is called with, and a type for what it answers —
+ * the same shape as a channel, read by the same discipline. The main process asks by name and
+ * the process that holds the database refuses anything it has not declared, so a request no
+ * one wrote down cannot be sent by accident. Nothing here knows about Electron or a port: this
+ * is the declaration both ends read, not the wire between them.
+ */
+
+import { z } from 'zod'
+
+/**
+ * Which build this is, and therefore which data folder it opens.
+ *
+ * It is written into the manifest of a package when the package is built and read from there
+ * at start-up. `prod` and `beta` share one data folder; `dev` has its own.
+ */
+export const channelSchema = z.enum(['prod', 'beta', 'dev'])
+
+export type Channel = z.infer<typeof channelSchema>
+
+/** What the user can ask for; `system` means "whatever the desktop says, from now on". */
+export const themePreferenceSchema = z.enum(['system', 'light', 'dark'])
+
+export type ThemePreference = z.infer<typeof themePreferenceSchema>
+
+/**
+ * What the shell of the window keeps of itself: folded or not, and the width it opens at.
+ *
+ * A width of null is one the user has never set, and the answer to it is the design system's
+ * own — which is where that number lives and the one place it may be read from. The engine
+ * holds what the user chose, never what the theme would have chosen for them.
+ */
+export const sidebarPreferenceSchema = z.object({
+  collapsed: z.boolean(),
+  width: z.number().nullable(),
+})
+
+export type SidebarPreference = z.infer<typeof sidebarPreferenceSchema>
+
+/** Everything the engine holds about what the window wears, read in one go at start-up. */
+/**
+ * The Project everything else is about, remembered between two starts (design D4-04).
+ *
+ * A preference and not a column of the profile: `profile` says what the data folder is, this
+ * says what the user was looking at. Null before there is a Project at all, and null again the
+ * moment the one that was active is archived — the shell picks the first of the list when what
+ * it was told to show is gone.
+ */
+export const activeProjectSchema = z.string().nullable()
+
+export const displayPreferencesSchema = z.object({
+  theme: themePreferenceSchema,
+  sidebar: sidebarPreferenceSchema,
+  activeProjectId: activeProjectSchema,
+})
+
+export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
+
+/** What a data folder answers before anyone has chosen anything. */
+export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
+  theme: 'system',
+  sidebar: { collapsed: false, width: null },
+  activeProjectId: null,
+}
+
+/** A change to what the window wears: what is absent is what the user did not touch. */
+export const displayPreferencesChangeSchema = z.object({
+  theme: themePreferenceSchema.optional(),
+  sidebar: sidebarPreferenceSchema.optional(),
+  activeProjectId: activeProjectSchema.optional(),
+})
+
+export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>
+
+/**
+ * Where the engine stands, which is what a diagnostic is written from.
+ *
+ * The last migration and the version that wrote it are null on a data folder the application
+ * has not opened yet: there is nothing to report until something has been written.
+ */
+export const engineStatusSchema = z.object({
+  directory: z.string(),
+  channel: channelSchema,
+  version: z.string(),
+  lastMigration: z.string().nullable(),
+  writtenByVersion: z.string().nullable(),
+  /** How big the database file is, in bytes, so the settings can say it in words. */
+  databaseSize: z.number(),
+  /** How many copies of it there are and which is the most recent (design D4-07). */
+  backups: z.object({ count: z.number(), latest: z.string().nullable() }),
+})
+
+export type EngineStatus = z.infer<typeof engineStatusSchema>
+
+/**
+ * The five tones a Project is told apart by, and the three entities an event is about.
+ *
+ * Written here and produced by these schemas; `packages/core` declares the same names as its
+ * domain types. The domain does not depend on `ipc` and `ipc` does not depend on the domain —
+ * what holds the two together is a table in the application, which is the one program that
+ * sees both (design D4-02).
+ */
+export const projectToneSchema = z.enum(['primary', 'info', 'success', 'warning', 'neutral'])
+
+export const entityKindSchema = z.enum(['project', 'profile', 'session'])
+
+export const eventAuthorSchema = z.enum(['human', 'hemera', 'agent', 'mcp', 'system'])
+
+export const eventSourceSchema = z.enum(['ui', 'system'])
+
+/** A Project as the interface is handed one: the domain's own, its path and its locations. */
+export const projectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  tone: projectToneSchema,
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  archivedAt: z.number().nullable(),
+  version: z.number(),
+  mainPath: z.string(),
+  repositories: z.array(z.string()),
+})
+
+export type Project = z.infer<typeof projectSchema>
+
+/** One line of the Journal, already read out of the database. */
+export const journalEntrySchema = z.object({
+  sequence: z.number(),
+  type: z.string(),
+  entityKind: entityKindSchema,
+  entityId: z.string(),
+  source: eventSourceSchema,
+  author: eventAuthorSchema,
+  occurredAt: z.string(),
+  projectId: z.string().nullable(),
+  payload: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  seenAt: z.string().nullable(),
+})
+
+export type JournalEntry = z.infer<typeof journalEntrySchema>
+
+/**
+ * A cursor into the Journal: the sequence of an entry, and nothing that cannot be one.
+ *
+ * Refused here rather than in the engine, which is the point of declaring it: a page asked for
+ * with a negative or fractional cursor is refused before a database is opened for it.
+ */
+const cursorSchema = z.number().int().nonnegative()
+
+/** How many entries a page may hold, so one call cannot ask for the whole Journal. */
+const limitSchema = z.number().int().positive().max(200)
+
+/** What every change to an existing Project carries: which one, and the version it was read at. */
+const addressedSchema = z.object({ id: z.string(), version: z.number().int().nonnegative() })
+
+/** A call that takes no argument, which both declarations say the same way. */
+export const nothingSchema = z.object({})
+
+/**
+ * Every use case of the process that holds the database.
+ *
+ * `arguments` is what the main process sends and that process validates; `response` is the
+ * schema of what comes back, so the type of an answer is read from the same place.
+ */
+export const ENGINE_REQUESTS = {
+  'preferences.read': {
+    arguments: nothingSchema,
+    response: displayPreferencesSchema,
+  },
+  'preferences.write': {
+    arguments: displayPreferencesChangeSchema,
+    response: z.void(),
+  },
+  'engine.status': {
+    arguments: nothingSchema,
+    response: engineStatusSchema,
+  },
+
+  'projects.list': {
+    arguments: z.object({ includeArchived: z.boolean().optional() }),
+    response: z.array(projectSchema),
+  },
+  'projects.create': {
+    arguments: z.object({
+      name: z.string(),
+      tone: projectToneSchema,
+      mainPath: z.string(),
+    }),
+    response: projectSchema,
+  },
+  'projects.update': {
+    arguments: addressedSchema.extend({
+      name: z.string().optional(),
+      tone: projectToneSchema.optional(),
+    }),
+    response: projectSchema,
+  },
+  'projects.moveMain': {
+    arguments: addressedSchema.extend({ path: z.string() }),
+    response: projectSchema,
+  },
+  'projects.archive': { arguments: addressedSchema, response: projectSchema },
+  'projects.restore': { arguments: addressedSchema, response: projectSchema },
+
+  'repositories.add': {
+    arguments: addressedSchema.extend({ relativePath: z.string() }),
+    response: projectSchema,
+  },
+  'repositories.remove': {
+    arguments: addressedSchema.extend({ relativePath: z.string() }),
+    response: projectSchema,
+  },
+
+  'journal.read': {
+    arguments: z.object({
+      projectId: z.string(),
+      before: cursorSchema.optional(),
+      limit: limitSchema.optional(),
+      kinds: z.array(entityKindSchema).optional(),
+      authors: z.array(eventAuthorSchema).optional(),
+    }),
+    response: z.object({
+      entries: z.array(journalEntrySchema),
+      nextBefore: z.number().nullable(),
+    }),
+  },
+  'journal.unseen': {
+    arguments: nothingSchema,
+    response: z.object({
+      entries: z.array(journalEntrySchema),
+      /** How many each Project has, as pairs: a map does not survive being sent. */
+      byProject: z.array(z.tuple([z.string(), z.number()])),
+    }),
+  },
+  'journal.markSeen': {
+    arguments: z.object({ upTo: cursorSchema }),
+    response: z.void(),
+  },
+} as const
+
+export type EngineRequests = typeof ENGINE_REQUESTS
+
+export type EngineRequestName = keyof EngineRequests
+
+export type EngineArguments<K extends EngineRequestName> = z.infer<EngineRequests[K]['arguments']>
+
+export type EngineResponse<K extends EngineRequestName> = z.infer<EngineRequests[K]['response']>

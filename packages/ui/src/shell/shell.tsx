@@ -12,7 +12,6 @@ import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { OverlayContainerProvider } from '../overlay.ts'
 import { ChromeBar } from './chrome-bar.tsx'
 import { Gutter } from './gutter.tsx'
-import { type ThemeChoice } from '../window.ts'
 import { SIDEBAR_RAIL, type ShellProject, type ShellSession, checkedWidth } from './model.ts'
 import { Sidebar } from './sidebar.tsx'
 
@@ -39,24 +38,33 @@ import { Sidebar } from './sidebar.tsx'
  */
 export interface ShellProps {
   projects: ShellProject[]
-  activeProjectId: string
+  /**
+   * The Project everything else is about, and null when there is none at all.
+   *
+   * Null is the first launch and the moment the last Project is archived (design D4-06): the
+   * bar keeps its mark and its fold, the sidebar is not drawn at all, and the content area is
+   * handed the whole width. The keystroke that opens the command belongs to the application,
+   * and it goes on working here as it does everywhere else.
+   */
+  activeProjectId: string | null
   onSelectProject: (id: string) => void
   onAddProject: () => void
   /** What the bell opens onto; the lot that owns notifications fills it. */
   notifications: ReactNode
+  /** Whether anything at all is left to see, which is the dot on the bell. */
+  unseen: boolean
   onOpenSettings: () => void
+  /** Whether the window is on the settings of the application. */
+  settingsActive?: boolean | undefined
 
   sessions: ShellSession[]
-  activeEntryId: string
+  /** Which entry the window is on, and null when it is somewhere the list does not hold. */
+  activeEntryId: string | null
   onSelectEntry: (id: string) => void
   onOpenCommand: () => void
   /** The two keystrokes the shell shows, already written for the platform. */
   commandShortcut: string
   collapseShortcut: string
-
-  /** What the user chose, which is one more than what the window wears. */
-  theme: ThemeChoice
-  onToggleTheme: () => void
 
   collapsed: boolean
   onCollapsedChange: (collapsed: boolean) => void
@@ -74,15 +82,15 @@ export function Shell({
   onSelectProject,
   onAddProject,
   notifications,
+  unseen,
   onOpenSettings,
+  settingsActive,
   sessions,
   activeEntryId,
   onSelectEntry,
   onOpenCommand,
   commandShortcut,
   collapseShortcut,
-  theme,
-  onToggleTheme,
   collapsed,
   onCollapsedChange,
   width,
@@ -115,7 +123,7 @@ export function Shell({
   return (
     <TooltipProvider>
       <OverlayContainerProvider value={overlay}>
-        <div ref={root} className="shell-root bg-background text-foreground">
+        <div ref={root} className="shell-root bg-surface-page text-foreground">
           <ChromeBar
             ref={bar}
             projects={projects}
@@ -126,29 +134,36 @@ export function Shell({
             onToggleCollapsed={() => onCollapsedChange(!collapsed)}
             collapseShortcut={collapseShortcut}
             notifications={notifications}
+            unseen={unseen}
           />
           <div className="shell-body">
-            <Sidebar
-              collapsed={collapsed}
-              width={checked.width}
-              dragging={dragging}
-              onWidth={poseWidth}
-              sessions={sessions}
-              activeEntryId={activeEntryId}
-              onSelectEntry={onSelectEntry}
-              onOpenCommand={onOpenCommand}
-              commandShortcut={commandShortcut}
-              theme={theme}
-              onToggleTheme={onToggleTheme}
-              onOpenSettings={onOpenSettings}
-            />
-            <Gutter
-              width={checked.width}
-              collapsed={collapsed}
-              onWidthChange={onWidthChange}
-              onToggleCollapsed={() => onCollapsedChange(!collapsed)}
-              onDraggingChange={setDragging}
-            />
+            {/* With no Project there is nothing for the sidebar to list and nothing for the
+                separator to move: both are left out rather than drawn empty, and the content
+                area takes the width they would have had. */}
+            {activeProjectId !== null && (
+              <>
+                <Sidebar
+                  collapsed={collapsed}
+                  width={checked.width}
+                  dragging={dragging}
+                  onWidth={poseWidth}
+                  sessions={sessions}
+                  activeEntryId={activeEntryId}
+                  onSelectEntry={onSelectEntry}
+                  onOpenCommand={onOpenCommand}
+                  commandShortcut={commandShortcut}
+                  onOpenSettings={onOpenSettings}
+                  settingsActive={settingsActive}
+                />
+                <Gutter
+                  width={checked.width}
+                  collapsed={collapsed}
+                  onWidthChange={onWidthChange}
+                  onToggleCollapsed={() => onCollapsedChange(!collapsed)}
+                  onDraggingChange={setDragging}
+                />
+              </>
+            )}
             <ContentArea>{children}</ContentArea>
           </div>
           <OverlayRoot ref={overlay} />
@@ -159,15 +174,27 @@ export function Shell({
 }
 
 /**
- * The one place of the window that scrolls.
+ * The one place of the window that scrolls, and the one surface it is read on.
+ *
+ * The content carries the strongest colour of the theme and the chrome around it stands back:
+ * what is looked at all day is what is in here, not the bar and not the navigation.
+ *
  *
  * Everything else is laid out around it and stays where it is, so a wheel over the content
  * never moves the bar or the sidebar, and a wheel over something scrollable inside the content
  * stops at its own edge rather than carrying on into the page.
  */
 export function ContentArea({ children }: { children: ReactNode }): ReactNode {
+  // A tab stop, because a region that scrolls and cannot be reached by the keyboard is a region
+  // whose content some readers cannot get to at all — which is what axe says about it and what
+  // the suite refuses. What it wears when it is reached is the ring of the theme rather than
+  // the browser's own white line: an outline and not the design system's `focus-ring`, whose
+  // pseudo-element would be laid against the scrolled content and travel with it.
   return (
-    <main tabIndex={0} className="content-area">
+    <main
+      tabIndex={0}
+      className="content-area bg-surface-content outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring"
+    >
       {children}
     </main>
   )
@@ -182,5 +209,5 @@ export function ContentArea({ children }: { children: ReactNode }): ReactNode {
  * screen still wearing the other theme.
  */
 export function OverlayRoot({ ref }: { ref: RefObject<HTMLDivElement | null> }): ReactNode {
-  return <div ref={ref} />
+  return <div ref={ref} className="overlay-root" />
 }

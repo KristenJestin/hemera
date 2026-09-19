@@ -17,6 +17,7 @@ const TONES = [
 ] as const
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Badge',
   component: Badge,
   args: { children: 'Ready' },
@@ -78,7 +79,7 @@ export const States: Story = {
     const withIcon = within(canvasElement).getByText('Passed')
     // The icon is drawn at a step of the icon scale and takes the badge's own colour.
     const icon = withIcon.querySelector('svg')!
-    expect(getComputedStyle(icon).width).toBe('14px')
+    expect(getComputedStyle(icon).width).toBe('16px')
     expect(getComputedStyle(icon).color).toBe(getComputedStyle(withIcon).color)
   },
 }

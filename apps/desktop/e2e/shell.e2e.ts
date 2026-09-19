@@ -6,9 +6,34 @@
  * that reaches the page — is settled here, on the application this package built.
  *
  * Each suite is named after the scenario of `specs/window-shell/spec.md` it covers.
+ *
+ * The two Projects are made by the suite itself. A Project is a row in the data folder since
+ * lot 4, and this one runs on a folder of its own, emptied before the run: what the shell has
+ * to show — a tab, a sidebar, a segment the width of it — does not exist until a hand has
+ * asked for it.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { browser, expect } from '@wdio/globals'
+
+import { addProject, ringBell, strike } from './hand.ts'
+
+/** Somewhere for the two Projects to point at, made by this spec and removed with it. */
+const SOURCES = mkdtempSync(join(tmpdir(), 'hemera-e2e-shell-sources-'))
+
+before(async () => {
+  await addProject('Atlas', SOURCES)
+  await addProject('Notes', SOURCES)
+  // Back on the first, which is what every suite below starts from.
+  await strike('1', 'Digit1')
+})
+
+after(() => {
+  rmSync(SOURCES, { recursive: true, force: true })
+})
 
 /** Puts the sidebar back where the suite expects it, whatever the previous test left. */
 async function unfold(): Promise<void> {
@@ -88,8 +113,8 @@ describe('Segment gauche aligné sur la sidebar', () => {
     const open = await widths()
     expect(Math.abs(open.segment - open.sidebar)).toBeLessThanOrEqual(1)
 
-    await browser.keys(['Control', 'b'])
-    await browser.pause(800)
+    await strike('b', 'KeyB')
+    await browser.pause(400)
     const folded = await widths()
     expect(folded.sidebar).toBeLessThan(open.sidebar)
     expect(Math.abs(folded.segment - folded.sidebar)).toBeLessThanOrEqual(1)
@@ -106,8 +131,7 @@ describe('Changement de Projet actif', () => {
       )
     const first = await named()
 
-    await browser.keys(['Control', '2'])
-    await browser.pause(300)
+    await strike('2', 'Digit2')
     const second = await named()
 
     expect(second).not.toBe(first)
@@ -116,8 +140,7 @@ describe('Changement de Projet actif', () => {
     )
     expect(active).toBe(1)
 
-    await browser.keys(['Control', '1'])
-    await browser.pause(300)
+    await strike('1', 'Digit1')
   })
 })
 
@@ -176,14 +199,8 @@ describe('Séparateur au clavier', () => {
 
 describe('Overlay au-dessus de la coquille et focus rendu', () => {
   it('gives the focus back to the bell when its panel is closed', async () => {
-    await browser.execute(() => {
-      const bell = document.querySelector('[aria-label="Notifications"]')
-      if (bell instanceof HTMLElement) {
-        bell.focus()
-        bell.click()
-      }
-    })
-    await browser.pause(400)
+    const rung = await ringBell()
+    expect(rung).not.toBeNull()
     const opened = await browser.execute(() => document.querySelector('[role="dialog"]') !== null)
     expect(opened).toBe(true)
 
@@ -194,6 +211,6 @@ describe('Overlay au-dessus de la coquille et focus rendu', () => {
       focused: document.activeElement?.getAttribute('aria-label') ?? null,
     }))
     expect(after.closed).toBe(true)
-    expect(after.focused).toBe('Notifications')
+    expect(after.focused).toBe(rung)
   })
 })

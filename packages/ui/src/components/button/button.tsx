@@ -38,6 +38,9 @@ const buttonVariants = cva(
           'border-primary bg-primary text-primary-foreground hover:border-primary-strong hover:bg-primary-strong',
         secondary: 'border-input bg-card text-foreground hover:bg-muted',
         ghost: 'border-transparent bg-transparent text-foreground hover:bg-accent',
+        // What a frame's header and a panel's corner offer: the accent colour and nothing
+        // else. A control that is a place to go rather than a thing to press reads as text.
+        link: 'border-transparent bg-transparent text-primary-muted-foreground hover:bg-transparent hover:text-primary',
         destructive:
           'border-destructive bg-destructive text-destructive-foreground hover:brightness-95',
       },
@@ -47,6 +50,13 @@ const buttonVariants = cva(
         lg: 'h-control-lg px-4 text-lg',
       },
     },
+    compoundVariants: [
+      // A link reads as text, so it is drawn to the height of a line and not of a control.
+      // A control's height is room around a surface, and a link has no surface to give room
+      // to: carrying one is what made the Activity header stand eight pixels taller than the
+      // title it sits beside, for nothing anyone can see.
+      { variant: 'link', class: 'h-control-text' },
+    ],
     defaultVariants: { variant: 'secondary', size: 'md' },
   },
 )

@@ -1,17 +1,17 @@
 /**
- * Which build this is, and which profile it therefore opens (design D3-06).
+ * Which build this is, and which data folder it therefore opens (design D3-06).
  *
  * The channel is engraved in the manifest of a package when the package is built, and read
  * from there and nowhere else: no environment variable and no argument can talk a package into
  * being another channel. An application that is not a package is `dev`, which is the channel a
  * development run, a test and an agent all get.
  *
- * `prod` and `beta` open the same profile on purpose — the beta is the application the user
+ * `prod` and `beta` open the same data folder on purpose — the beta is the application the user
  * runs every day, on real data. `dev` opens its own, and a `dev` build may be pointed at a
  * throwaway folder instead; it may not be pointed at the real one.
  *
  * Everything here that decides is pure and takes what it reads as arguments, so the rules can
- * be checked on every platform from one machine, without Electron and without a profile.
+ * be checked on every platform from one machine, without Electron and without a data folder.
  */
 
 import { readFileSync } from 'node:fs'
@@ -19,11 +19,11 @@ import { join, posix, win32 } from 'node:path'
 
 import { type Channel, channelSchema } from '@hemera/ipc'
 
-/** Where every profile of this application lives, under the system's own data folder. */
-export const PROFILES_FOLDER = 'hemera'
+/** Where every data folder of this application lives, under the system's own data folder. */
+export const DATA_FOLDER = 'hemera'
 
-/** The flag a `dev` build accepts so a test or a trial gets a profile of its own. */
-export const PROFILE_DIRECTORY_FLAG = '--profile-dir'
+/** The flag a `dev` build accepts so a test or a trial gets a data folder of its own. */
+export const DATA_DIRECTORY_FLAG = '--data-dir'
 
 /** Set by the development run to the label `git describe` gave the working tree. */
 export const VERSION_VARIABLE = 'HEMERA_VERSION'
@@ -73,19 +73,19 @@ export function applicationVersion(
   return described === null ? manifestVersion : described.replace(/^v/, '')
 }
 
-/** The profile a channel opens: `prod` and `beta` share one, `dev` has its own. */
-export function profileName(engraved: Channel): string {
+/** The data folder a channel opens: `prod` and `beta` share one, `dev` has its own. */
+export function dataName(engraved: Channel): string {
   return engraved === 'dev' ? 'dev' : 'prod'
 }
 
 /**
- * Where the profile of a channel lives, per system.
+ * Where the data folder of a channel lives, per system.
  *
  * `LOCALAPPDATA` on Windows and `XDG_DATA_HOME` on Linux, which are the data folders — never
  * `APPDATA`, which roams a database across a network, and never `~/.config`, which is for
  * configuration and not for a database, its backups and its log.
  */
-export function profileDirectory(
+export function dataDirectory(
   engraved: Channel,
   platform: string,
   environment: Record<string, string | undefined>,
@@ -94,13 +94,13 @@ export function profileDirectory(
   // for Windows and for Linux from whichever of the two the suite happens to run on.
   const path = platform === 'win32' ? win32 : posix
   return path.join(
-    dataDirectory(path, platform, environment),
-    PROFILES_FOLDER,
-    profileName(engraved),
+    systemDataDirectory(path, platform, environment),
+    DATA_FOLDER,
+    dataName(engraved),
   )
 }
 
-function dataDirectory(
+function systemDataDirectory(
   path: typeof posix,
   platform: string,
   environment: Record<string, string | undefined>,
@@ -120,25 +120,23 @@ function home(environment: Record<string, string | undefined>): string {
   return named(environment.HOME) ?? named(environment.USERPROFILE) ?? '.'
 }
 
-/** The folder a `--profile-dir` argument names, or null when there is no such argument. */
-export function profileArgument(argv: readonly string[]): string | null {
-  const flag = argv.indexOf(PROFILE_DIRECTORY_FLAG)
+/** The folder a `--data-dir` argument names, or null when there is no such argument. */
+export function dataArgument(argv: readonly string[]): string | null {
+  const flag = argv.indexOf(DATA_DIRECTORY_FLAG)
   if (flag !== -1) return named(argv[flag + 1])
-  const joined = argv.find((entry) => entry.startsWith(`${PROFILE_DIRECTORY_FLAG}=`))
-  return joined === undefined ? null : named(joined.slice(PROFILE_DIRECTORY_FLAG.length + 1))
+  const joined = argv.find((entry) => entry.startsWith(`${DATA_DIRECTORY_FLAG}=`))
+  return joined === undefined ? null : named(joined.slice(DATA_DIRECTORY_FLAG.length + 1))
 }
 
 /** Where a start ends up, or the reason it does not start at all. */
-export type ProfileChoice =
-  | { accepted: true; directory: string }
-  | { accepted: false; reason: string }
+export type DataChoice = { accepted: true; directory: string } | { accepted: false; reason: string }
 
 /**
  * Whether two paths name the same folder, as the platform asked about would tell them apart.
  *
  * Windows does not tell case apart, and neither may the rule: `c:\users\kris\appdata\local\
- * hemera\prod` is the real profile as surely as the one Windows spells with capitals, and a
- * comparison that only knows `===` would hand it to a dev build.
+ * hemera\prod` is the real data folder as surely as the one Windows spells with capitals,
+ * and a comparison that only knows `===` would hand it to a dev build.
  */
 function samePath(one: string, other: string, platform: string): boolean {
   return platform === 'win32' ? one.toLowerCase() === other.toLowerCase() : one === other
@@ -148,29 +146,29 @@ function samePath(one: string, other: string, platform: string): boolean {
  * The folder this start opens, argument and all.
  *
  * A `prod` or `beta` package ignores the argument: what it opens is decided at build time. A
- * `dev` build honours it, except when the folder named resolves to the real profile — the one
+ * `dev` build honours it, except when the folder named resolves to the real one — the one
  * thing the argument exists to keep away from.
  */
-export function chooseProfile(
+export function chooseData(
   engraved: Channel,
   platform: string,
   environment: Record<string, string | undefined>,
   argv: readonly string[],
-): ProfileChoice {
+): DataChoice {
   // Resolved by the platform asked about, as the folders themselves are, so the rule answers
   // the same thing from either machine rather than mixing one system's separators with the
   // other's `resolve`.
   const path = platform === 'win32' ? win32 : posix
-  const own = profileDirectory(engraved, platform, environment)
-  const asked = engraved === 'dev' ? profileArgument(argv) : null
+  const own = dataDirectory(engraved, platform, environment)
+  const asked = engraved === 'dev' ? dataArgument(argv) : null
   if (asked === null) return { accepted: true, directory: own }
 
   const wanted = path.resolve(asked)
-  const real = profileDirectory('prod', platform, environment)
+  const real = dataDirectory('prod', platform, environment)
   if (samePath(wanted, path.resolve(real), platform)) {
     return {
       accepted: false,
-      reason: `${PROFILE_DIRECTORY_FLAG}: refused ${wanted}, which is the ${real} profile a dev build must never open`,
+      reason: `${DATA_DIRECTORY_FLAG}: refused ${wanted}, which is the ${real} data folder a dev build must never open`,
     }
   }
   return { accepted: true, directory: wanted }

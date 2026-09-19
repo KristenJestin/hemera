@@ -11,10 +11,19 @@ import { z } from 'zod'
 
 import { environmentReportSchema } from './environment.ts'
 import {
+  ENGINE_REQUESTS,
   displayPreferencesChangeSchema,
   displayPreferencesSchema,
   nothingSchema,
-} from './profile.ts'
+} from './engine.ts'
+
+/** What a location on disk turns out to hold, read at the moment it is asked about. */
+export const repositoryStatusSchema = z.object({
+  path: z.string(),
+  /** The branch checked out there, or null when the location holds no repository. */
+  git: z.string().nullable(),
+  exists: z.boolean(),
+})
 
 /** What the window can be asked to do. Lot 2 wires these to the shell's own controls. */
 export const windowCommandSchema = z.object({
@@ -47,6 +56,90 @@ export const CHANNELS = {
   'preferences.write': {
     arguments: displayPreferencesChangeSchema,
     response: z.void(),
+  },
+
+  // The Projects and their Journal, relayed to the process that holds the database. The very
+  // schemas the engine declares, imported and not rewritten: two copies of a contract are two
+  // contracts, and the day one of them gains a field the other is the bug.
+  // What the settings say about the data folder, which only the engine can answer.
+  'engine.status': ENGINE_REQUESTS['engine.status'],
+  'projects.list': ENGINE_REQUESTS['projects.list'],
+  'projects.create': ENGINE_REQUESTS['projects.create'],
+  'projects.update': ENGINE_REQUESTS['projects.update'],
+  'projects.moveMain': ENGINE_REQUESTS['projects.moveMain'],
+  'projects.archive': ENGINE_REQUESTS['projects.archive'],
+  'projects.restore': ENGINE_REQUESTS['projects.restore'],
+  'repositories.add': ENGINE_REQUESTS['repositories.add'],
+  'repositories.remove': ENGINE_REQUESTS['repositories.remove'],
+  'journal.read': ENGINE_REQUESTS['journal.read'],
+  'journal.unseen': ENGINE_REQUESTS['journal.unseen'],
+  'journal.markSeen': ENGINE_REQUESTS['journal.markSeen'],
+
+  /**
+   * The four the main process answers itself, because each of them is something only it can do.
+   *
+   * A folder chosen by the system, a path opened by the desktop, what a location on disk holds
+   * right now, and the files of a Workspace. None of them is a row, so none of them crosses to
+   * the engine: asking a database where a Git branch is would be asking it to guess.
+   */
+  'dialog.pickFolder': {
+    arguments: nothingSchema,
+    response: z.string().nullable(),
+  },
+  /**
+   * Files chosen by the system, answered relative to the root they were chosen under.
+   *
+   * The root is what the page is looking at and the main process is what enforces it: a file
+   * picked outside the Workspace is dropped rather than attached, because an attachment is
+   * something the Project is about and a path out of its tree is not.
+   */
+  'dialog.pickFiles': {
+    arguments: z.object({ root: z.string() }),
+    response: z.array(z.string()),
+  },
+  /**
+   * Opens one of the two things the settings offer, with the desktop.
+   *
+   * A choice and never a path: the page has no business knowing where the data folder is or
+   * what the diagnostic is called, and a channel that took a path would be a channel a page
+   * could be talked into opening anything with. What each of the two resolves to is the main
+   * process's, which is the one that was started on the folder.
+   */
+  'shell.open': {
+    arguments: z.object({ what: z.enum(['folder', 'diagnostic']) }),
+    response: z.void(),
+  },
+  'repositories.status': {
+    arguments: z.object({ root: z.string(), paths: z.array(z.string()) }),
+    response: z.array(repositoryStatusSchema),
+  },
+  /**
+   * What sits directly under a Workspace, so the settings can offer it instead of asking for it.
+   *
+   * One level: what a Workspace holds at its top is what the Project is made of, and a `src`
+   * two levels down is not a location anybody declares.
+   */
+  'workspace.folders': {
+    arguments: z.object({ root: z.string() }),
+    response: z.array(repositoryStatusSchema),
+  },
+  /**
+   * Whether a folder can hold a Workspace, and what is wrong with it when it cannot.
+   *
+   * A sentence and not a boolean: a folder that is not there, one that is a file, and one that
+   * cannot be read are three refusals, and the specification asks for the cause to be named.
+   */
+  'workspace.check': {
+    arguments: z.object({ path: z.string() }),
+    response: z.object({ ok: z.boolean(), reason: z.string().nullable() }),
+  },
+  'workspace.files': {
+    arguments: z.object({
+      root: z.string(),
+      query: z.string(),
+      limit: z.number().int().positive().max(100).optional(),
+    }),
+    response: z.array(z.string()),
   },
 } as const
 

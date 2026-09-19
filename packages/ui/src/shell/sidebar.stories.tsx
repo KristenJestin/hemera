@@ -15,9 +15,11 @@ const SESSIONS: ShellSession[] = [
 interface HarnessProps {
   collapsed?: boolean
   sessions?: ShellSession[]
+  /** Whether the window is on the settings of the application, which are not one of the entries. */
+  settingsActive?: boolean
 }
 
-function Harness({ collapsed = false, sessions = SESSIONS }: HarnessProps) {
+function Harness({ collapsed = false, sessions = SESSIONS, settingsActive = false }: HarnessProps) {
   const [activeEntryId, setActiveEntryId] = useState(sessions[0]?.id ?? JOURNAL_ENTRY)
   return (
     <TooltipProvider>
@@ -28,13 +30,12 @@ function Harness({ collapsed = false, sessions = SESSIONS }: HarnessProps) {
           dragging={false}
           onWidth={() => undefined}
           sessions={sessions}
-          activeEntryId={activeEntryId}
+          activeEntryId={settingsActive ? null : activeEntryId}
           onSelectEntry={setActiveEntryId}
           onOpenCommand={fn()}
           commandShortcut="Ctrl+K"
-          theme="system"
-          onToggleTheme={fn()}
           onOpenSettings={fn()}
+          settingsActive={settingsActive}
         />
       </div>
     </TooltipProvider>
@@ -42,6 +43,7 @@ function Harness({ collapsed = false, sessions = SESSIONS }: HarnessProps) {
 }
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Shell/Sidebar',
   component: Harness,
   parameters: { layout: 'fullscreen' },
@@ -74,5 +76,27 @@ export const States: Story = {
     expect(canvas.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     // The keystroke that opens the command is drawn beside it, as keys.
     expect(canvas.getByText('Ctrl')).toBeInTheDocument()
+  },
+}
+
+/**
+ * On the settings of the application: the foot of the panel is the one thing marked.
+ *
+ * The entry the window was on before is not where it is now, and a panel marking both is a
+ * panel saying the window is in two places at once.
+ */
+export const OnTheSettings: Story = {
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  args: { settingsActive: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const marked = canvas
+      .getAllByRole('button')
+      .filter((one) => one.getAttribute('aria-current') === 'true')
+
+    expect(marked).toHaveLength(1)
+    expect(marked[0]).toHaveAccessibleName('Settings')
   },
 }

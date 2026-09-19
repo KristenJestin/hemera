@@ -12,8 +12,15 @@ import stylesheet from '../theme.css?raw'
  * stylesheet is drawn from — the way the main process already reads its window colours.
  */
 
-/** The colour a Project is told apart by: a tone of the theme, never a colour. */
-export type ProjectTone = 'primary' | 'info' | 'success' | 'warning' | 'neutral'
+/**
+ * The colour a Project is told apart by: a tone of the theme, never a colour.
+ *
+ * The design system is a leaf — it imports nothing of Hemera — so the list is written here and
+ * in the domain both, and an application test is what holds the two to the same five names.
+ */
+export const PROJECT_TONES = ['primary', 'info', 'success', 'warning', 'neutral'] as const
+
+export type ProjectTone = (typeof PROJECT_TONES)[number]
 
 export interface ShellProject {
   id: string
@@ -30,6 +37,7 @@ export interface ShellSession {
 }
 
 /** The entries of the sidebar that are not Sessions, named so a caller can select them. */
+export const HOME_ENTRY = 'home'
 export const JOURNAL_ENTRY = 'journal'
 export const PROJECT_SETTINGS_ENTRY = 'project-settings'
 

@@ -1,5 +1,5 @@
 /**
- * What the profile keeps of the window, and what it answers about itself (design D3-03).
+ * What the data folder keeps of the window, and what it answers about itself (design D3-03).
  *
  * These are the two services the process that holds the database exposes, exercised directly
  * on a database made for each test and removed after it. What the page eventually sees of them
@@ -14,39 +14,46 @@ import { Effect, Layer } from 'effect'
 
 import { DEFAULT_DISPLAY_PREFERENCES, type DisplayPreferencesChange } from '@hemera/ipc'
 
-import { openProfile } from '#profile/migrate.ts'
-import { Preferences, SIDEBAR_KEY, THEME_KEY, preferencesLayer } from '#profile/preferences.ts'
-import { ProfileStatus, profileStatusLayer } from '#profile/status.ts'
-import { SqliteClient, databaseLayer } from '#profile/storage/database.ts'
+import { carriedMigrations, openProfile } from '#engine/migrate.ts'
+import { Preferences, SIDEBAR_KEY, THEME_KEY, preferencesLayer } from '#engine/preferences.ts'
+import { EngineStatus, engineStatusLayer } from '#engine/status.ts'
+import { SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 
 /** The migration this application really ships. */
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
+/**
+ * The last migration this application ships, which is where a freshly opened profile stands.
+ *
+ * Read from the folder rather than named, because the name changes with every lot that touches
+ * the schema and what is under test is that the status reports it, not which one it is.
+ */
+const LAST_MIGRATION = carriedMigrations(SHIPPED).at(-1)?.name
 
-let profile: string
+let dataFolder: string
 
 beforeEach(() => {
-  profile = mkdtempSync(join(tmpdir(), 'hemera-preferences-'))
-  mkdirSync(profile, { recursive: true })
+  dataFolder = mkdtempSync(join(tmpdir(), 'hemera-preferences-'))
+  mkdirSync(dataFolder, { recursive: true })
 })
 
 afterEach(() => {
-  rmSync(profile, { recursive: true, force: true })
+  rmSync(dataFolder, { recursive: true, force: true })
 })
 
-/** A profile opened and migrated, with both services standing on it. */
+/** A data folder opened and migrated, with both services standing on it. */
 function opened(version = '0.3.0') {
-  const storage = databaseLayer(join(profile, 'hemera.sqlite'))
+  const storage = databaseLayer(join(dataFolder, 'hemera.sqlite'))
   const services = Layer.mergeAll(
     preferencesLayer,
-    profileStatusLayer({ directory: profile, channel: 'dev', version }),
+    engineStatusLayer({ directory: dataFolder, channel: 'dev', version }),
   ).pipe(Layer.provideMerge(storage))
 
-  return <A, E>(program: Effect.Effect<A, E, Preferences | ProfileStatus | SqliteClient>) =>
+  return <A, E>(program: Effect.Effect<A, E, Preferences | EngineStatus | SqliteClient>) =>
     Effect.runPromise(
       Effect.scoped(
         Effect.provide(
           Effect.gen(function* () {
-            yield* openProfile(profile, SHIPPED, version)
+            yield* openProfile(dataFolder, SHIPPED, version)
             return yield* program
           }),
           services,
@@ -66,7 +73,7 @@ function writePreferences(change: DisplayPreferencesChange) {
 }
 
 describe('Le thème et la sidebar sont persistés dans le profil', () => {
-  test('a profile nobody has chosen anything in answers what the declaration calls default', async () => {
+  test('a data folder nobody has chosen anything in answers what the declaration calls default', async () => {
     expect(await opened()(readPreferences)).toEqual(DEFAULT_DISPLAY_PREFERENCES)
   })
 
@@ -146,18 +153,45 @@ describe('Une préférence illisible ne tient pas la fenêtre fermée', () => {
   })
 })
 
-describe('Le process dédié répond profile.status', () => {
+describe('Projet actif restauré', () => {
+  test('the Project that was being looked at is there at the next start', async () => {
+    const run = opened()
+    await run(writePreferences({ activeProjectId: 'atlas' }))
+
+    // A second opening of the same data folder, which is what the next start is.
+    const read = await opened()(readPreferences)
+    expect(read.activeProjectId).toBe('atlas')
+  })
+
+  test('null is a value and not an absence: it is what archiving the last one writes', async () => {
+    const run = opened()
+    await run(writePreferences({ activeProjectId: 'atlas' }))
+    await run(writePreferences({ activeProjectId: null }))
+
+    expect((await opened()(readPreferences)).activeProjectId).toBeNull()
+  })
+
+  test('a change that says nothing about the Project leaves it where it was', async () => {
+    const run = opened()
+    await run(writePreferences({ activeProjectId: 'atlas' }))
+    await run(writePreferences({ theme: 'dark' }))
+
+    expect((await opened()(readPreferences)).activeProjectId).toBe('atlas')
+  })
+})
+
+describe('Le process dédié répond engine.status', () => {
   test('it answers the folder, the channel, the version, the migration and the writer', async () => {
     const status = await opened('0.3.0')(
       Effect.gen(function* () {
-        return yield* (yield* ProfileStatus).read
+        return yield* (yield* EngineStatus).read
       }),
     )
 
-    expect(status.directory).toBe(profile)
+    expect(status.directory).toBe(dataFolder)
     expect(status.channel).toBe('dev')
     expect(status.version).toBe('0.3.0')
-    expect(status.lastMigration).toMatch(/profile_and_preferences$/)
+    expect(status.lastMigration).toBe(LAST_MIGRATION)
     expect(status.writtenByVersion).toBe('0.3.0')
   })
 })

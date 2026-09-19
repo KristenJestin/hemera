@@ -5,6 +5,7 @@ import { IconPlus, IconSettings, IconTrash } from '../../icons.ts'
 import { Menu } from './menu.tsx'
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Menu',
   component: Menu,
   args: { label: 'Session', groups: [] },

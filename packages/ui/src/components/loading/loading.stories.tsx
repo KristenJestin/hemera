@@ -5,6 +5,7 @@ import { emulateReducedMotion } from '../../../.storybook/reduced-motion.ts'
 import { Loading } from './loading.tsx'
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Loading',
   component: Loading,
   args: { label: 'Loading' },
@@ -45,7 +46,7 @@ export const Variants: Story = {
       // They sit a third of a turn apart on the ring they orbit.
       expect(new Set(dots.map((dot) => getComputedStyle(dot).transform)).size).toBe(3)
     }
-    expect(grids.map((grid) => getComputedStyle(grid).width)).toEqual(['14px', '16px', '20px'])
+    expect(grids.map((grid) => getComputedStyle(grid).width)).toEqual(['16px', '18px', '22px'])
   },
 }
 

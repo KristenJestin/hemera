@@ -15,13 +15,13 @@ import { build, createServer } from 'vite-plus'
 
 import { VERSION_VARIABLE } from './src/main/channel.ts'
 import { RENDERER_URL_VARIABLE } from './src/main/renderer-source.ts'
-import { mainBundle, preloadBundle, profileBundle, rendererBundle } from './bundles.ts'
+import { mainBundle, preloadBundle, engineBundle, rendererBundle } from './bundles.ts'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
 await build({ ...mainBundle, build: { ...mainBundle.build, watch: {} } })
 await build({ ...preloadBundle, build: { ...preloadBundle.build, watch: {} } })
-await build({ ...profileBundle, build: { ...profileBundle.build, watch: {} } })
+await build({ ...engineBundle, build: { ...engineBundle.build, watch: {} } })
 
 const server = await createServer(rendererBundle)
 await server.listen()

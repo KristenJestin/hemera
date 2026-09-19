@@ -5,6 +5,7 @@ import { IconSearch } from '../../icons.ts'
 import { Input, Textarea } from './field.tsx'
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Field',
   component: Input,
   args: { label: 'Name', placeholder: 'Hemera', onValueChange: fn() },

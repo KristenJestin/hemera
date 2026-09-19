@@ -13,7 +13,7 @@ import { ipcMain, type IpcMainInvokeEvent } from 'electron/main'
 import { Effect } from 'effect'
 
 import { applicationOrigin, decide } from './bridge.ts'
-import { diagnostic, type Log, reported } from './diagnostic.ts'
+import { diagnostic, type Log, reported, said } from './diagnostic.ts'
 
 export type { Log }
 
@@ -43,10 +43,25 @@ export function handle<K extends ChannelName, E>(
       log(decision.reason)
       throw new Error(decision.reason)
     }
-    return await Effect.runPromise(
+    // Run to an outcome rather than to a rejection: `runPromise` rejects with the fibre's
+    // failure wrapped in one of its own, whose message is a rendering of a cause and not the
+    // sentence a refusal was written as. What crosses back to the page is that sentence.
+    const outcome = await Effect.runPromise(
       handler(decision.argument).pipe(
-        Effect.tapError((failed) => Effect.sync(() => log(`${channel}: ${reported(failed)}`))),
+        Effect.match({
+          onSuccess: (value) => ({ answered: true as const, value }),
+          onFailure: (failed) => ({
+            answered: false as const,
+            line: reported(failed),
+            said: said(failed),
+          }),
+        }),
       ),
     )
+    if (!outcome.answered) {
+      log(`${channel}: ${outcome.line}`)
+      throw new Error(outcome.said)
+    }
+    return outcome.value
   })
 }
