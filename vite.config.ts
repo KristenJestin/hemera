@@ -104,6 +104,11 @@ export default defineConfig({
             'tools/verification.test.ts',
             'tools/window-options.test.ts',
           ],
+          // Some of these start a process — git and its hooks, tsc, a bundle — and on a runner
+          // that has just been created that takes seconds, not the five a test is given by
+          // default. Thirty is not a budget anything here spends; it is what keeps a cold
+          // machine from failing a test the code never failed.
+          testTimeout: 30_000,
         },
       },
       './packages/ui/vitest.config.ts',
