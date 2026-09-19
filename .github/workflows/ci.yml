@@ -150,8 +150,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          file="$(ls *.zip | head -1)"
-          version="${file#Hemera.Beta-}"; version="${version%-win.zip}"
+          # The file is "Hemera Beta-<version>-win.zip" on disk, with a space GitHub shows as a dot.
+          version="$(ls *.zip | head -1 | sed -E 's/^Hemera[ .]Beta-(.*)-win\.zip$/\1/')"
           tag="beta-${version}"
           gh release create "$tag" \
             --repo "${{ github.repository }}" \
