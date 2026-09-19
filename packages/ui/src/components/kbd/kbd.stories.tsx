@@ -4,6 +4,7 @@ import { expect, within } from 'storybook/test'
 import { Kbd } from './kbd.tsx'
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Kbd',
   component: Kbd,
   args: { keys: 'Ctrl+B' },

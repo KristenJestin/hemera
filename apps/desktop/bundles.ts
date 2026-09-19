@@ -46,16 +46,16 @@ export const mainBundle: InlineConfig = {
  * file, and one file it is. `node:sqlite` stays outside, as every Node built-in does; the ORM
  * and Effect are bundled in, so what the package carries is what the process needs.
  */
-export const profileBundle: InlineConfig = {
+export const engineBundle: InlineConfig = {
   root: application,
   configFile: false,
   build: {
-    outDir: resolve(OUTPUT, 'profile'),
+    outDir: resolve(OUTPUT, 'engine'),
     emptyOutDir: true,
     target: 'node24',
     minify: false,
     lib: {
-      entry: resolve(application, 'src/profile/index.ts'),
+      entry: resolve(application, 'src/engine/index.ts'),
       formats: ['es'],
       fileName: () => 'index.js',
     },

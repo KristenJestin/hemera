@@ -6,6 +6,7 @@ import { Button, IconButton } from '../button/button.tsx'
 import { Popover } from './popover.tsx'
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Popover',
   component: Popover,
   args: {

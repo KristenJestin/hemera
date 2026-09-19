@@ -1,7 +1,7 @@
 import { Field } from '@base-ui/react/field'
 import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
-import type { ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 
 import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
 
@@ -13,6 +13,10 @@ import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
  * the control invalid when there is an error to show. That is the whole reason it is here —
  * the parts that are easy to forget are the parts a screen reader depends on.
  *
+ * The control is drawn a step back from whatever it sits on rather than on the card surface.
+ * A dialog is that surface, and a white box on a white sheet is a box the eye has to find by
+ * its outline alone; recessed, it reads as somewhere to put something.
+ *
  * The ring is on the box around the control and not on the control: an input is a replaced
  * element and renders no pseudo-element, so a ring drawn on it would never appear at all.
  *
@@ -22,7 +26,7 @@ import { MARK_TRAVEL, press, useTransition } from '../../motion.ts'
  * eye misses. It is on the `press` preset, because it answers what was just typed.
  */
 const CONTROL =
-  'w-full rounded-md border border-input bg-card text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 data-invalid:border-destructive'
+  'w-full rounded-md border border-input bg-muted text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 data-invalid:border-destructive'
 
 interface FieldShellProps {
   /** What the control is called. Required: a control with no label is a control nobody can use. */
@@ -82,6 +86,18 @@ export interface InputProps extends Omit<FieldShellProps, 'children'> {
   defaultValue?: string | undefined
   value?: string | undefined
   onValueChange?: ((value: string) => void) | undefined
+  onBlur?: (() => void) | undefined
+  onFocus?: (() => void) | undefined
+  onKeyDown?: ((event: KeyboardEvent<HTMLInputElement>) => void) | undefined
+  /**
+   * A control that belongs to the field, drawn on the same line as the box.
+   *
+   * Here rather than beside the whole field, which is where it used to be: a field is a label,
+   * a box, a description and sometimes a message, so a button laid against the bottom of all
+   * that sits under the box on a good day and under the description on any other. Inside, it
+   * has one thing to line up with.
+   */
+  action?: ReactNode
 }
 
 export function Input({
@@ -95,6 +111,10 @@ export function Input({
   defaultValue,
   value,
   onValueChange,
+  onBlur,
+  onFocus,
+  onKeyDown,
+  action,
 }: InputProps) {
   return (
     <FieldShell
@@ -104,19 +124,25 @@ export function Input({
       disabled={disabled}
       className={className}
     >
-      <div className="flex items-center rounded-md focus-ring">
-        {icon !== undefined && (
-          <span className="pointer-events-none absolute left-2 flex text-muted-foreground">
-            {icon}
-          </span>
-        )}
-        <Field.Control
-          placeholder={placeholder}
-          defaultValue={defaultValue}
-          value={value}
-          onValueChange={(next) => onValueChange?.(next)}
-          className={cn(CONTROL, 'h-control-md px-2 text-sm', icon !== undefined && 'pl-6')}
-        />
+      <div className="flex items-center gap-2">
+        <div className="relative flex min-w-0 flex-1 items-center rounded-md focus-ring">
+          {icon !== undefined && (
+            <span className="pointer-events-none absolute left-2 flex text-muted-foreground">
+              {icon}
+            </span>
+          )}
+          <Field.Control
+            placeholder={placeholder}
+            defaultValue={defaultValue}
+            value={value}
+            onValueChange={(next) => onValueChange?.(next)}
+            onBlur={() => onBlur?.()}
+            onFocus={() => onFocus?.()}
+            onKeyDown={(event) => onKeyDown?.(event)}
+            className={cn(CONTROL, 'h-control-md px-2 text-sm', icon !== undefined && 'pl-6')}
+          />
+        </div>
+        {action}
       </div>
     </FieldShell>
   )

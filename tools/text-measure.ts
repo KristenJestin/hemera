@@ -25,13 +25,22 @@ export const MEASUREMENTS = ['getBoundingClientRect', 'offsetWidth', 'offsetHeig
 const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
 
 /**
- * The one file allowed to ask the browser about a position, and why.
+ * The files allowed to ask the browser about a position, and why.
  *
  * The separator follows the pointer, and the pointer is not text: reading where a hand is has
- * none of the costs above. It is named here rather than left to a comment so that the day it
- * starts measuring something else, this list is where the argument happens.
+ * none of the costs above.
+ *
+ * The tab mark reads where the tabs are. It decides nothing about their size — the theme and
+ * the Project's own name already did that — it only has to put a shape over one of them and
+ * then over the next. Anything that follows a moving target measures it; what is unusual here
+ * is only that the measuring is written down rather than done for us by `layoutId`. It is named
+ * here rather than left to a comment so that the day it starts measuring something else, this
+ * list is where the argument happens.
  */
-export const MEASURE_EXCEPTIONS = ['packages/ui/src/shell/gutter.tsx']
+export const MEASURE_EXCEPTIONS = [
+  'packages/ui/src/shell/gutter.tsx',
+  'packages/ui/src/shell/tab-mark.tsx',
+]
 
 export interface Refusal {
   file: string

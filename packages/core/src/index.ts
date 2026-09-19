@@ -14,12 +14,13 @@ export {
   InvalidRepositoryPathError,
   MAIN_WORKSPACE,
   MAX_PROJECT_NAME_LENGTH,
+  PROJECT_TONES,
   ROOT_REPOSITORY,
   projectName,
   repositoryLocations,
   repositoryPath,
 } from './domain/project.ts'
-export type { Project, Workspace } from './domain/project.ts'
+export type { Project, ProjectTone, Workspace } from './domain/project.ts'
 export {
   EmptyMessageError,
   MAX_TITLE_LENGTH,

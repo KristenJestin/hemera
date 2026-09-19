@@ -1,9 +1,10 @@
 import { Select as BaseSelect } from '@base-ui/react/select'
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import { type ReactNode, useRef } from 'react'
 
 import { IconCheck, IconChevronDown } from '../../icons.ts'
 import { useOverlayContainer } from '../../overlay.ts'
+import { Button } from '../button/button.tsx'
 
 /**
  * The select, on Base UI (design D1-04).
@@ -12,6 +13,12 @@ import { useOverlayContainer } from '../../overlay.ts'
  * groups, and gets the keyboard, the typeahead, the scrolling and the positioning for free.
  * Values are typed, so choosing from a list is checked at build time rather than compared as
  * strings at run time.
+ *
+ * The trigger is a button of the catalogue rather than a box that looks like one: it answers
+ * the hand exactly as every other control does — it lifts on hover, gives under the press —
+ * and its chevron turns over while the list is open, so the control itself says which way it
+ * is facing. The list hangs off a wrapper around it and not off the button, or it would ride
+ * the press.
  *
  * The popup animates in CSS through Base UI's `data-starting-style`, not through motion: the
  * element enters and leaves with the popup itself, and a spring driven from React would have
@@ -23,6 +30,18 @@ const POPUP =
 
 const ITEM =
   'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none data-highlighted:bg-accent data-disabled:opacity-50'
+
+/**
+ * The trigger reads as a control: it is one, and the only thing it adds is a wide label.
+ *
+ * It fills the wrapper it hangs the list off, so the two are exactly the same width — the list
+ * is laid out against the wrapper, and a control a fraction wider than its own anchor is a list
+ * that comes up narrower than the thing it belongs to.
+ */
+const TRIGGER = 'w-full justify-between gap-2 font-normal'
+
+/** Half a turn while the list is open, and back when it closes. */
+const CHEVRON = 'flex rotate-0 text-muted-foreground chevron-motion data-popup-open:rotate-180'
 
 export interface SelectItem<Value extends string> {
   value: Value
@@ -62,6 +81,7 @@ export function Select<Value extends string>({
   className,
 }: SelectProps<Value>) {
   const groups = grouped(items)
+  const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
   return (
     <BaseSelect.Root
@@ -75,20 +95,21 @@ export function Select<Value extends string>({
       }}
       disabled={disabled === true}
     >
-      <BaseSelect.Trigger
-        aria-label={label}
-        className={cn(
-          'flex h-control-md items-center justify-between gap-2 rounded-md border border-input bg-card px-2 text-sm text-foreground outline-none focus-ring data-disabled:opacity-50',
-          className,
-        )}
-      >
-        <BaseSelect.Value placeholder={placeholder} />
-        <BaseSelect.Icon className="flex text-muted-foreground">
-          <IconChevronDown size="sm" />
-        </BaseSelect.Icon>
-      </BaseSelect.Trigger>
+      <span ref={anchor} className={cn('inline-flex', className)}>
+        <BaseSelect.Trigger
+          aria-label={label}
+          nativeButton
+          render={<Button variant="secondary" className={TRIGGER} />}
+        >
+          <BaseSelect.Value placeholder={placeholder} />
+          <BaseSelect.Icon className={CHEVRON}>
+            <IconChevronDown size="sm" />
+          </BaseSelect.Icon>
+        </BaseSelect.Trigger>
+      </span>
       <BaseSelect.Portal container={container}>
         <BaseSelect.Positioner
+          anchor={anchor}
           // Base UI would otherwise lay the chosen item over the trigger, the way a native
           // macOS menu does — the list covers the control it belongs to and the eye loses
           // where it came from. It opens below, like every other popup here.

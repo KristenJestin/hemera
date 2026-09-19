@@ -12,11 +12,26 @@ export const MAIN_WORKSPACE = 'main'
 /** Location used when a project declares no repository. */
 export const ROOT_REPOSITORY = '.'
 
+/**
+ * The tones a project is told apart by, in the order they are offered.
+ *
+ * The domain carries the tone because a project has one whether or not anything is drawing it;
+ * the design system draws each of them from its own theme, and never from a colour named here.
+ * The two lists are held together by a test of the application, which is the one place that
+ * sees both the domain and the design system.
+ */
+export const PROJECT_TONES = ['primary', 'info', 'success', 'warning', 'neutral'] as const
+
+export type ProjectTone = (typeof PROJECT_TONES)[number]
+
 export interface Project {
   id: string
   name: string
+  tone: ProjectTone
   createdAt: number
   updatedAt: number
+  /** When the project was archived, and null for as long as it is not. */
+  archivedAt: number | null
   version: number
 }
 

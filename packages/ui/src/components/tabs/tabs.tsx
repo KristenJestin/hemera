@@ -15,8 +15,17 @@ import { arrival, useTransition } from '../../motion.ts'
  * `layoutId` hands it to whichever tab is active and motion carries it across on `arrival`.
  * That is a transform, so the rule about what may be animated is kept. The group is scoped to
  * this instance, because two tab strips on a page are not one strip with two marks.
+ *
+ * The mark is a sibling of the tab and never a child of it. A tab is a control with its own
+ * padding and its own focus ring, and a mark measured inside one and handed to the next is
+ * measured against two different boxes: motion plays the difference, and the line dips below
+ * the strip on its way across. Outside the control there is one box, the wrapper, and the mark
+ * travels along the strip in a straight line.
  */
 const LIST = 'relative flex items-center gap-1 border-b border-border'
+
+/** One tab and the room under it the mark travels through. */
+const SLOT = 'relative flex'
 
 const TAB =
   'relative inline-flex h-control-md items-center gap-1.5 rounded-t-md px-3 text-sm font-medium text-muted-foreground outline-none select-none focus-ring data-selected:text-foreground'
@@ -67,13 +76,15 @@ export function Tabs<Value extends string>({
       <BaseTabs.List activateOnFocus aria-label={label} className={LIST}>
         <LayoutGroup id={group}>
           {items.map((item) => (
-            <BaseTabs.Tab key={item.value} value={item.value} className={TAB}>
-              {item.icon}
-              {item.label}
+            <span key={item.value} className={SLOT}>
               {item.value === current && (
                 <motion.span layoutId={`${group}-tab`} className={MARK} transition={transition} />
               )}
-            </BaseTabs.Tab>
+              <BaseTabs.Tab value={item.value} className={TAB}>
+                {item.icon}
+                {item.label}
+              </BaseTabs.Tab>
+            </span>
           ))}
         </LayoutGroup>
       </BaseTabs.List>

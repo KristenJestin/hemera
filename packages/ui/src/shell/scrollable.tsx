@@ -22,8 +22,21 @@ import { arrival, useTransition } from '../motion.ts'
 /** How much of the visible strip one press of an arrow moves, as a share of what is on screen. */
 const PAGE = 0.8
 
+/**
+ * The tabs are as tall as the bar, not as tall as themselves.
+ *
+ * `items-stretch` and not `items-center`: the active tab is drawn joined to the content under
+ * the bar, and a tab centred in a strip that is centred in turn stops short of it. What is
+ * centred is each tab's own label, inside a tab that now reaches both edges.
+ *
+ * The padding is the width of that join, at both ends. The curve joining the active tab to the
+ * content is drawn outside the tab, and a strip that scrolls clips whatever leaves it on either
+ * axis: the first tab lost the curve on its left and the last one on its right, flush against
+ * an edge with nowhere to draw it. The room is reserved rather than the clipping lifted —
+ * `overflow-x: auto` forces the other axis to clip too, so there is no lifting it.
+ */
 const STRIP =
-  'scroll-quiet flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden'
+  'scroll-quiet flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto overflow-y-hidden px-tab-join'
 
 const EDGE =
   'pointer-events-none absolute inset-y-0 flex w-10 items-center from-background to-transparent'

@@ -44,15 +44,15 @@ const NO_PLATFORM = [
  * The one process that opens the database, and the only folder the storage layer reaches (D3-11).
  *
  * The main process must not so much as import it: a second program holding the same file is
- * how a profile gets two writers, and the rule is checked here rather than remembered.
+ * how a data folder gets two writers, and the rule is checked here rather than remembered.
  */
-const PROFILE_PROCESS = 'apps/desktop/src/profile'
+const ENGINE_PROCESS = 'apps/desktop/src/engine'
 
-const NO_STORAGE_OUTSIDE_THE_PROFILE = [
+const NO_STORAGE_OUTSIDE_THE_ENGINE = [
   {
     pattern: /^(drizzle-orm|drizzle-kit|node:sqlite|@effect\/sql-sqlite-node)(\/|$)/,
-    reason: `the SQLite storage layer, which belongs to ${PROFILE_PROCESS}/ alone`,
-    exceptIn: PROFILE_PROCESS,
+    reason: `the SQLite storage layer, which belongs to ${ENGINE_PROCESS}/ alone`,
+    exceptIn: ENGINE_PROCESS,
   },
 ]
 
@@ -118,7 +118,7 @@ export const PACKAGE_RULES: PackageRule[] = [
   {
     name: '@hemera/desktop',
     directory: 'apps/desktop',
-    forbidden: [...NO_RAW_ICONS, ...NO_STORAGE_OUTSIDE_THE_PROFILE],
+    forbidden: [...NO_RAW_ICONS, ...NO_STORAGE_OUTSIDE_THE_ENGINE],
   },
 ]
 

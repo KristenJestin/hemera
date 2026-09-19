@@ -23,6 +23,12 @@ const withTheme: Decorator = (Story, context) => {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
   }, [dark])
+  // The canvas is the content surface, because that is the surface all of this is drawn on in
+  // the window: the page belongs to the chrome, and a story judged on it is judged on a surface
+  // it never sits on. The shell stories cover the canvas with their own root and see nothing.
+  useEffect(() => {
+    document.body.classList.add('bg-surface-content')
+  }, [])
   if (chosen !== 'both') return <Story />
   return (
     <div className="flex flex-col gap-6">

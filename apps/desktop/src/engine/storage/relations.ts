@@ -1,0 +1,26 @@
+/**
+ * The relations of the schema, declared where the query builder reads them (design D3-04, D4-04).
+ *
+ * Lot 3 declared none and left the file in place so that this one would be an addition rather
+ * than a new shape handed to a database already built. A project owns its working environments
+ * and the locations it reads from; the journal is deliberately not among them — an event is
+ * correlated to a project, not owned by one, and nothing about it is ever loaded by walking
+ * down from a project.
+ */
+
+import { defineRelations } from 'drizzle-orm'
+
+import * as schema from './schema.ts'
+
+export const relations = defineRelations(schema, (r) => ({
+  projects: {
+    workspaces: r.many.workspaces(),
+    repositories: r.many.projectRepositories(),
+  },
+  workspaces: {
+    project: r.one.projects({ from: r.workspaces.projectId, to: r.projects.id }),
+  },
+  projectRepositories: {
+    project: r.one.projects({ from: r.projectRepositories.projectId, to: r.projects.id }),
+  },
+}))

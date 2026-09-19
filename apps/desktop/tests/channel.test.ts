@@ -1,8 +1,8 @@
 /**
- * Which build opens which profile, and what no build can be talked into (design D3-06).
+ * Which build opens which data folder, and what no build can be talked into (design D3-06).
  *
  * Each suite is named after the scenario of `specs/application-foundation/spec.md` it covers.
- * Nothing here touches a real profile: the paths are computed from an environment handed in,
+ * Nothing here touches a real data folder: the paths are computed from an environment handed in,
  * and the one folder that exists is a temporary one holding a manifest.
  */
 
@@ -14,12 +14,12 @@ import { describe, expect, test } from 'vite-plus/test'
 import type { Channel } from '@hemera/ipc'
 
 import {
-  PROFILE_DIRECTORY_FLAG,
+  DATA_DIRECTORY_FLAG,
   VERSION_VARIABLE,
   applicationVersion,
   channel,
-  chooseProfile,
-  profileDirectory,
+  chooseData,
+  dataDirectory,
 } from '#main/channel.ts'
 
 const WINDOWS = { LOCALAPPDATA: 'C:\\Users\\someone\\AppData\\Local' }
@@ -39,28 +39,34 @@ describe('Un paquet prod et un paquet beta ouvrent le même profil', () => {
   test.each([
     ['windows', 'win32', WINDOWS],
     ['linux', 'linux', LINUX],
-  ])('a prod package and a beta package resolve the same profile on %s', (_case, platform, env) => {
-    const prod = profileDirectory('prod', platform, env)
-    const beta = profileDirectory('beta', platform, env)
-    expect(beta).toBe(prod)
-    expect(prod).toMatch(/[/\\]hemera[/\\]prod$/)
-  })
+  ])(
+    'a prod package and a beta package resolve the same data folder on %s',
+    (_case, platform, env) => {
+      const prod = dataDirectory('prod', platform, env)
+      const beta = dataDirectory('beta', platform, env)
+      expect(beta).toBe(prod)
+      expect(prod).toMatch(/[/\\]hemera[/\\]prod$/)
+    },
+  )
 })
 
 describe('Le canal dev a son propre profil', () => {
   test.each([
     ['windows', 'win32', WINDOWS],
     ['linux', 'linux', LINUX],
-  ])('a dev build reads and writes nothing the real profile owns on %s', (_case, platform, env) => {
-    const dev = profileDirectory('dev', platform, env)
-    expect(dev).toMatch(/[/\\]hemera[/\\]dev$/)
-    expect(dev).not.toBe(profileDirectory('prod', platform, env))
-  })
+  ])(
+    'a dev build reads and writes nothing the real data folder owns on %s',
+    (_case, platform, env) => {
+      const dev = dataDirectory('dev', platform, env)
+      expect(dev).toMatch(/[/\\]hemera[/\\]dev$/)
+      expect(dev).not.toBe(dataDirectory('prod', platform, env))
+    },
+  )
 })
 
 describe('Le dossier suit la plateforme', () => {
-  test('windows files the profile under the local data folder, never the roaming one', () => {
-    const directory = profileDirectory('prod', 'win32', {
+  test('windows files the data folder under the local data folder, never the roaming one', () => {
+    const directory = dataDirectory('prod', 'win32', {
       ...WINDOWS,
       APPDATA: 'C:\\Users\\someone\\AppData\\Roaming',
     })
@@ -68,8 +74,8 @@ describe('Le dossier suit la plateforme', () => {
     expect(directory).not.toContain('Roaming')
   })
 
-  test('linux files the profile under the data folder, never under the configuration one', () => {
-    const directory = profileDirectory('prod', 'linux', {
+  test('linux files the data folder under the data folder, never under the configuration one', () => {
+    const directory = dataDirectory('prod', 'linux', {
       ...LINUX,
       XDG_CONFIG_HOME: '/home/someone/.config',
     })
@@ -78,7 +84,7 @@ describe('Le dossier suit la plateforme', () => {
   })
 
   test('linux falls back to the data folder the specification names when none is set', () => {
-    const directory = profileDirectory('prod', 'linux', { HOME: '/home/someone' })
+    const directory = dataDirectory('prod', 'linux', { HOME: '/home/someone' })
     expect(directory).toBe('/home/someone/.local/share/hemera/prod')
   })
 })
@@ -126,12 +132,12 @@ describe('Le canal ne se change pas à l’exécution', () => {
       expect(channel(true, root)).toBe('prod')
       // And what it opens follows the channel, not the argument: the flag is refused the
       // moment a build is not `dev`.
-      const choice = chooseProfile('prod', 'linux', environment, [
+      const choice = chooseData('prod', 'linux', environment, [
         ...argv,
-        PROFILE_DIRECTORY_FLAG,
+        DATA_DIRECTORY_FLAG,
         '/tmp/elsewhere',
       ])
-      expect(choice.accepted && choice.directory).toBe(profileDirectory('prod', 'linux', LINUX))
+      expect(choice.accepted && choice.directory).toBe(dataDirectory('prod', 'linux', LINUX))
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -142,13 +148,10 @@ describe('Un test démarre dans un dossier temporaire', () => {
   test('a dev build pointed at an empty folder opens that folder and nothing else', () => {
     // A real folder of this machine, so the platform asked about is this machine's: a Windows
     // path resolved by the Linux rule is not a folder anywhere.
-    const elsewhere = mkdtempSync(join(tmpdir(), 'hemera-profile-'))
+    const elsewhere = mkdtempSync(join(tmpdir(), 'hemera-data folder-'))
     const here = process.platform === 'win32' ? WINDOWS : LINUX
     try {
-      const choice = chooseProfile('dev', process.platform, here, [
-        PROFILE_DIRECTORY_FLAG,
-        elsewhere,
-      ])
+      const choice = chooseData('dev', process.platform, here, [DATA_DIRECTORY_FLAG, elsewhere])
       expect(choice.accepted && choice.directory).toBe(resolve(elsewhere))
     } finally {
       rmSync(elsewhere, { recursive: true, force: true })
@@ -156,36 +159,33 @@ describe('Un test démarre dans un dossier temporaire', () => {
   })
 
   test('the flag is read written either way round', () => {
-    const choice = chooseProfile('dev', 'linux', LINUX, [`${PROFILE_DIRECTORY_FLAG}=/tmp/apart`])
+    const choice = chooseData('dev', 'linux', LINUX, [`${DATA_DIRECTORY_FLAG}=/tmp/apart`])
     expect(choice.accepted && choice.directory).toBe(posix.resolve('/tmp/apart'))
   })
 })
 
 describe('Le profil prod n’est pas atteignable par ce chemin', () => {
-  test('a dev build pointed at the real profile refuses, and says which folder it refused', () => {
-    const real = profileDirectory('prod', 'linux', LINUX)
-    const choice = chooseProfile('dev', 'linux', LINUX, [PROFILE_DIRECTORY_FLAG, real])
+  test('a dev build pointed at the real data folder refuses, and says which folder it refused', () => {
+    const real = dataDirectory('prod', 'linux', LINUX)
+    const choice = chooseData('dev', 'linux', LINUX, [DATA_DIRECTORY_FLAG, real])
     expect(choice.accepted).toBe(false)
     expect(choice.accepted || choice.reason).toContain(real)
   })
 
   test('the refusal holds however the path is written', () => {
-    const real = profileDirectory('prod', 'linux', LINUX)
+    const real = dataDirectory('prod', 'linux', LINUX)
     const roundabout = `${real}/../prod`
-    const choice = chooseProfile('dev', 'linux', LINUX, [PROFILE_DIRECTORY_FLAG, roundabout])
+    const choice = chooseData('dev', 'linux', LINUX, [DATA_DIRECTORY_FLAG, roundabout])
     expect(choice.accepted).toBe(false)
   })
 
   test('the refusal holds on windows, which does not tell the case of a path apart', () => {
-    const real = profileDirectory('prod', 'win32', WINDOWS)
-    const shouted = chooseProfile('dev', 'win32', WINDOWS, [PROFILE_DIRECTORY_FLAG, real])
+    const real = dataDirectory('prod', 'win32', WINDOWS)
+    const shouted = chooseData('dev', 'win32', WINDOWS, [DATA_DIRECTORY_FLAG, real])
     expect(shouted.accepted).toBe(false)
 
     // The same folder, spelled the way a shell or a script would hand it over.
-    const whispered = chooseProfile('dev', 'win32', WINDOWS, [
-      PROFILE_DIRECTORY_FLAG,
-      real.toLowerCase(),
-    ])
+    const whispered = chooseData('dev', 'win32', WINDOWS, [DATA_DIRECTORY_FLAG, real.toLowerCase()])
     expect(whispered.accepted).toBe(false)
     expect(whispered.accepted || whispered.reason).toContain(real)
   })
@@ -193,13 +193,13 @@ describe('Le profil prod n’est pas atteignable par ce chemin', () => {
 
 describe('Un paquet prod ignore l’argument', () => {
   test.each<Channel>(['prod', 'beta'])(
-    'a %s package opens its own profile, argument or not',
+    'a %s package opens its own data folder, argument or not',
     (built) => {
       const asked = mkdtempSync(join(tmpdir(), 'hemera-ignored-'))
       mkdirSync(asked, { recursive: true })
       try {
-        const choice = chooseProfile(built, 'linux', LINUX, [PROFILE_DIRECTORY_FLAG, asked])
-        expect(choice.accepted && choice.directory).toBe(profileDirectory(built, 'linux', LINUX))
+        const choice = chooseData(built, 'linux', LINUX, [DATA_DIRECTORY_FLAG, asked])
+        expect(choice.accepted && choice.directory).toBe(dataDirectory(built, 'linux', LINUX))
       } finally {
         rmSync(asked, { recursive: true, force: true })
       }

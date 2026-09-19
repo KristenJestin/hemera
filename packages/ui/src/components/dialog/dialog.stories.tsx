@@ -12,6 +12,7 @@ const ACTIONS = (
 )
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Dialog',
   component: Dialog,
   args: {
