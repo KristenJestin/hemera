@@ -7,7 +7,7 @@
 
 import { z } from 'zod'
 
-import { channelSchema } from './profile.ts'
+import { channelSchema } from './engine.ts'
 
 export const displaySchema = z.object({
   /** Identifier the platform gives the display, so two reports can be compared. */
@@ -51,7 +51,7 @@ export const motionMeasureSchema = z.object({
 export const environmentReportSchema = z.object({
   /** What the application calls itself: the version a package carries, or the repository's label. */
   version: z.string(),
-  /** Which build produced this report, and therefore which profile it was speaking from. */
+  /** Which build produced this report, and therefore which data folder it spoke from. */
   channel: channelSchema,
   /** The target this report was produced on: `windows` or `linux`. */
   platform: z.string(),

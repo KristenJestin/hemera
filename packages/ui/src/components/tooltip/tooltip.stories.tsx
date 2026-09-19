@@ -10,6 +10,7 @@ function bell() {
 }
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Tooltip',
   component: Tooltip,
   args: { label: 'Notifications', children: bell() },

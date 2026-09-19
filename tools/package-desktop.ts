@@ -40,7 +40,7 @@ export function channelAsked(argv: readonly string[]): Channel | string {
  *
  * `prod` and `beta` are what the user runs on real data, and they are built by the pipeline
  * that tags and publishes them — never by a hand or by an agent on a working tree. What is
- * built here is `dev`, which opens the `dev` profile and nothing else.
+ * built here is `dev`, which opens the `dev` data folder and nothing else.
  */
 export function refusalFor(
   asked: Channel | string,
@@ -175,7 +175,12 @@ export function migrationsProblems(entries: string[]): PackageProblem[] {
   const carried = entries.some((entry) => /(^|\/)drizzle\/.+\/migration\.sql$/.test(entry))
   return carried
     ? []
-    : [{ entry: 'drizzle', problem: 'is missing, and the profile cannot be migrated without it' }]
+    : [
+        {
+          entry: 'drizzle',
+          problem: 'is missing, and the data folder cannot be migrated without it',
+        },
+      ]
 }
 
 /** Everything the archive the application is served from carries. */

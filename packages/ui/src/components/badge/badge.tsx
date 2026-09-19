@@ -6,14 +6,16 @@ import type { ReactNode } from 'react'
  * The badge: a word and sometimes an icon, in the colour of what it is saying.
  *
  * Every tone is a soft background and the reading colour that goes with it, both from the
- * theme, so a tone is never a colour a caller picked. The mission tones are the three kinds of
+ * theme, so a tone is never a colour a caller picked. The line around it is that same reading
+ * colour worn thin: one rule for nine tones, each of them edged in its own colour a shade
+ * darker than its fill, and not nine more tokens to keep in step. The mission tones are the three kinds of
  * work Hemera does; they sit beside the semantic ones because they are read the same way.
  *
  * There is no Base UI primitive underneath because there is no behaviour underneath: a badge
  * is a span that says something.
  */
 const badgeVariants = cva(
-  'inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs font-medium',
+  'inline-flex items-center gap-1 rounded-sm border border-current/20 px-1.5 py-0.5 text-xs font-medium',
   {
     variants: {
       tone: {

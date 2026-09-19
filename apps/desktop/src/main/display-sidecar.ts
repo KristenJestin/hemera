@@ -18,7 +18,7 @@ import { type DisplayPreferences, displayPreferencesSchema } from '@hemera/ipc'
 
 import { diagnostic } from './diagnostic.ts'
 
-/** The file the hint lives in, inside the profile. */
+/** The file the hint lives in, inside the data folder. */
 export const SIDECAR_FILE = 'display.json'
 
 /** Tells one write from the next, so two of them never reach for the same temporary file. */
@@ -31,9 +31,9 @@ let writes = 0
  * for it because the alternative is a window that appears in the wrong colour and corrects
  * itself afterwards.
  */
-export function readSidecar(profileDirectory: string): DisplayPreferences | null {
+export function readSidecar(dataDirectory: string): DisplayPreferences | null {
   try {
-    const written = readFileSync(join(profileDirectory, SIDECAR_FILE), 'utf8')
+    const written = readFileSync(join(dataDirectory, SIDECAR_FILE), 'utf8')
     const read = displayPreferencesSchema.safeParse(JSON.parse(written))
     return read.success ? read.data : null
   } catch {
@@ -52,11 +52,11 @@ export function readSidecar(profileDirectory: string): DisplayPreferences | null
  * once, and one name between them is one of the two renaming a file the other already moved.
  *
  * A hint that could not be written is written down as a fact and nothing more. It is a hint:
- * failing the channel over it would take a read of the profile down with it, and the page would
- * come up on defaults although the database answered.
+ * failing the channel over it would take a read of the preferences down with it, and the page
+ * would come up on defaults although the database answered.
  */
-export function writeSidecar(profileDirectory: string, preferences: DisplayPreferences): void {
-  const file = join(profileDirectory, SIDECAR_FILE)
+export function writeSidecar(dataDirectory: string, preferences: DisplayPreferences): void {
+  const file = join(dataDirectory, SIDECAR_FILE)
   writes += 1
   const meanwhile = `${file}.${writes.toString()}.writing`
   try {

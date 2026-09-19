@@ -11,6 +11,7 @@ import {
   type Shortcut,
   conflictsIn,
   keysOf,
+  rankOf,
   registrationsOf,
   shownKeys,
 } from '#renderer/shortcuts.ts'
@@ -35,11 +36,30 @@ describe('Raccourci hors saisie', () => {
   })
 
   test('every declared action is registered, and none is registered twice', () => {
+    // Every one but the nine ranks, which are read off the physical key instead: `Mod+1` is a
+    // place on the keyboard, and on a layout whose digit row is shifted no character matcher
+    // ever sees it.
+    const characters = SHORTCUTS.filter((shortcut) => shortcut.action.kind !== 'project')
     const registrations = registrationsOf(SHORTCUTS, () => undefined)
-    expect(registrations).toHaveLength(SHORTCUTS.length)
+    expect(registrations).toHaveLength(characters.length)
     expect(new Set(registrations.map((registration) => registration.hotkey)).size).toBe(
-      SHORTCUTS.length,
+      characters.length,
     )
+  })
+
+  test('a rank is the key of the digit row, whatever that key writes', () => {
+    const pressed = (code: string, ctrlKey: boolean, shiftKey = false): KeyboardEvent =>
+      // SAFETY: `rankOf` reads `code`, `ctrlKey`, `metaKey` and `altKey`, and nothing else; a
+      // test on Node has no `KeyboardEvent` to build, and this stands in for one.
+      ({ code, ctrlKey, shiftKey, metaKey: false, altKey: false }) as KeyboardEvent
+
+    expect(rankOf(pressed('Digit2', true), 'other')).toBe(2)
+    // Shifted, which is what `Ctrl+2` *is* on a layout whose digit row needs Shift.
+    expect(rankOf(pressed('Digit2', true, true), 'other')).toBe(2)
+    // And nothing without the platform's modifier, or past the nine there are.
+    expect(rankOf(pressed('Digit2', false), 'other')).toBeNull()
+    expect(rankOf(pressed('Digit0', true), 'other')).toBeNull()
+    expect(rankOf(pressed('KeyB', true), 'other')).toBeNull()
   })
 
   test('a registration calls the action it was declared for', () => {

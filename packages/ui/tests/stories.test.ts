@@ -1,10 +1,12 @@
 /**
- * What the catalogue claims about itself: twelve components, each with the stories the lot says
- * every component has, and the six pieces of the shell beside them. A component whose stories
- * are missing is a component nobody validated.
+ * What the catalogue claims about itself: the components anything may use, the pieces of the
+ * shell, and the surfaces a lot draws with them — each with the stories the lot says they all
+ * have. A component whose stories are missing is a component nobody validated.
  *
- * Nine of the twelve are lot 1's; Tooltip, Popover and Tabs arrive with the shell of lot 2,
- * which is why the inventory counts to twelve now (`openspec/changes/lot-2-coquille`).
+ * Three families, and the split is what a reader needs to find anything: `Components/` is what
+ * is reusable and knows nothing of Hemera, `Shell/` is the window's own layout, `Surfaces/` is
+ * the Project, the Journal and the composer drawn as themselves. A surface is not a component:
+ * it exists in one place, and it is made of components.
  *
  * Each suite is named after the scenario of `specs/design-system/spec.md` or of
  * `specs/window-shell/spec.md` it covers.
@@ -28,7 +30,7 @@ interface Catalogued {
   keyboard: boolean
 }
 
-/** The twelve, and no thirteenth: the two lots deliver exactly this list. */
+/** The reusable catalogue: the twelve of lots 1 and 2, and the four lot 4 earned. */
 const CATALOGUE: Catalogued[] = [
   { name: 'Button', folder: 'button', keyboard: true },
   { name: 'IconButton', folder: 'button', keyboard: true },
@@ -38,14 +40,32 @@ const CATALOGUE: Catalogued[] = [
   { name: 'Select', folder: 'select', keyboard: true },
   { name: 'Menu', folder: 'menu', keyboard: true },
   { name: 'Dialog', folder: 'dialog', keyboard: true },
+  { name: 'AlertDialog', folder: 'alert-dialog', keyboard: true },
   { name: 'Loading', folder: 'loading', keyboard: false },
   { name: 'Tooltip', folder: 'tooltip', keyboard: true },
   { name: 'Popover', folder: 'popover', keyboard: true },
   { name: 'Tabs', folder: 'tabs', keyboard: true },
+  // Lot 4: the frame every surface is drawn on, the card of a form, the list of named things,
+  // and the five tones of a Project.
+  { name: 'Frame', folder: 'frame', keyboard: false },
+  { name: 'Card', folder: 'card', keyboard: false },
+  { name: 'List', folder: 'list', keyboard: true },
+  { name: 'Timeline', folder: 'timeline', keyboard: false },
+  { name: 'ToneSwatches', folder: 'tone-swatches', keyboard: true },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */
-const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter']
+const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter', 'command-palette']
+
+/** The surfaces of lot 4, one folder per domain: a story file each, and the same discipline. */
+const SURFACES = {
+  project: ['project-dialog', 'project-settings'],
+  journal: ['journal'],
+  composer: ['composer'],
+  home: ['home'],
+  settings: ['settings'],
+  notifications: ['notifications'],
+}
 
 /**
  * What every component shows: a playground where every prop is a control, its variants side by
@@ -66,6 +86,19 @@ function storiesIn(path: string): string[] {
 function storiesOf(folder: string): string[] {
   return storiesIn(join(designSystem, 'components', folder, `${folder}.stories.tsx`))
 }
+
+function sourceOf(folder: string): string {
+  return readFileSync(join(designSystem, 'components', folder, `${folder}.stories.tsx`), 'utf8')
+}
+
+function unique<T>(value: T, index: number, all: T[]): boolean {
+  return all.indexOf(value) === index
+}
+
+/** Every surface as a `[folder, file]` pair, which is how the two suites below walk them. */
+const SURFACE_FILES = Object.entries(SURFACES).flatMap(([folder, files]) =>
+  files.map((file) => [folder, file] as const),
+)
 
 const barrel = readFileSync(join(designSystem, 'index.ts'), 'utf8')
 const preview = readFileSync(join(designSystem, '..', '.storybook', 'preview.tsx'), 'utf8')
@@ -101,6 +134,34 @@ describe('Parcours clavier de chaque composant', () => {
   )
 })
 
+/**
+ * What a reader of the catalogue is owed on everything it shows: the props as controls, the
+ * callbacks reported as actions, and a page of documentation generated from the two.
+ *
+ * Checked on the source rather than on a running Storybook, for the same reason the inventory
+ * itself is: a story file that forgot them is a component the catalogue shows and nobody can
+ * try.
+ */
+describe('Catalogue essayable', () => {
+  test.each(CATALOGUE.map((entry) => entry.folder).filter(unique))(
+    '%s documents itself and offers its props as controls',
+    (folder) => {
+      const source = sourceOf(folder)
+      expect(source, `${folder} has no autodocs tag`).toContain("tags: ['autodocs']")
+      expect(source, `${folder} declares no argTypes`).toContain('argTypes:')
+    },
+  )
+
+  test.each(SURFACE_FILES)(
+    '%s/%s documents itself and offers its props as controls',
+    (folder, file) => {
+      const source = readFileSync(join(designSystem, folder, `${file}.stories.tsx`), 'utf8')
+      expect(source, `${folder}/${file} has no autodocs tag`).toContain("tags: ['autodocs']")
+      expect(source, `${folder}/${file} declares no argTypes`).toContain('argTypes:')
+    },
+  )
+})
+
 /** The components the design system hands out, types left aside. */
 function exportedComponents(source: string): string[] {
   return [...source.matchAll(/export \{([^}]*)\}/g)]
@@ -109,25 +170,106 @@ function exportedComponents(source: string): string[] {
     .filter((name) => name !== '' && !name.startsWith('type '))
 }
 
-describe('Douze composants accessibles écrits maison', () => {
-  test('the design system hands out exactly the twelve, and the shell beside them', () => {
-    // Neither `DialogClose` nor `Kbd` is a thirteenth component: the first is the dialog's own
-    // way of saying that a button of the caller's closes it, and the second is a keystroke
-    // drawn as keys, which every one of the twelve that shows one borrows.
-    const parts = ['DialogClose', 'Kbd', 'TooltipProvider']
-    const shell = ['Shell', 'ContentArea', 'OverlayRoot', 'ChromeBar', 'Sidebar', 'Gutter']
-    // The bounds and the named entries of the sidebar are values of the theme, not components:
-    // the application needs them to hand the shell a width and to say which place it is on.
+describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
+  test('the design system hands out exactly what the three families declare', () => {
+    // Neither `DialogClose` nor `Kbd` is a component of its own: the first is the dialog's own
+    // way of saying that a button of the caller's closes it, the second is a keystroke drawn as
+    // keys, which every component that shows one borrows, and `CardRow` is a row of a card and
+    // nothing outside one.
+    const parts = [
+      'DialogClose',
+      'Kbd',
+      'TooltipProvider',
+      'CardRow',
+      'FrameHeader',
+      'FrameFooter',
+      'ListItem',
+      'TimelineDays',
+      'TimelineSection',
+      'TimelineStop',
+    ]
+    const shell = [
+      'Shell',
+      'ContentArea',
+      'OverlayRoot',
+      'ChromeBar',
+      'Sidebar',
+      'Gutter',
+      'CommandPalette',
+    ]
+    const surfaces = [
+      'ProjectDialog',
+      'ProjectSettings',
+      'RepositoryList',
+      'DangerZone',
+      'Journal',
+      'JournalEntry',
+      'JournalFilters',
+      'DaySeparator',
+      'LoadEarlier',
+      'Composer',
+      'ComposerActions',
+      'ComposerAttachments',
+      'MentionMenu',
+      'WorkspacePill',
+      'Greeting',
+      'QuickActions',
+      'ActivityFrame',
+      'EmptyProject',
+      'FirstLaunch',
+      'Settings',
+      'AppearanceSection',
+      'ProfileSection',
+      'ArchivedProjects',
+      'NotificationBell',
+      'NotificationList',
+    ]
+    // The form hook, its fields and the schemas they check against. Not components of the
+    // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
+    // is the binding — which is the one thing a story cannot show on its own.
+    const forms = [
+      'PathField',
+      'SubmitButton',
+      'SuggestInput',
+      'TextField',
+      'ToneField',
+      'useAppForm',
+      'withForm',
+    ]
+    const schemas = [
+      'NAME_LIMIT',
+      'folderSchema',
+      'nameSchema',
+      'projectFormSchema',
+      'relativePathSchema',
+      'tonesSchema',
+    ]
+    // The bounds, the named entries of the sidebar and the nested radius are values of the
+    // theme, not components: the application needs them to hand the shell a width and to say
+    // which place it is on.
     const values = [
+      'EMPTY_DRAFT',
+      'EVERYWHERE_PREFIX',
+      'HOME_ENTRY',
       'JOURNAL_ENTRY',
+      'NESTED_RADIUS',
       'PROJECT_SETTINGS_ENTRY',
+      'PROJECT_TONES',
       'SIDEBAR_DEFAULT',
       'SIDEBAR_MAX',
       'SIDEBAR_MIN',
       'SIDEBAR_RAIL',
     ]
     expect(exportedComponents(barrel).toSorted()).toEqual(
-      [...CATALOGUE.map((entry) => entry.name), ...parts, ...shell, ...values].toSorted(),
+      [
+        ...CATALOGUE.map((entry) => entry.name),
+        ...parts,
+        ...shell,
+        ...surfaces,
+        ...values,
+        ...forms,
+        ...schemas,
+      ].toSorted(),
     )
   })
 })
@@ -136,6 +278,18 @@ describe('Coquille montrée en Storybook', () => {
   test.each(SHELL)('%s has a story of its own', (piece) => {
     expect(storiesIn(join(designSystem, 'shell', `${piece}.stories.tsx`))).toContain('Playground')
   })
+})
+
+describe('Surfaces du lot 4 montrées en Storybook', () => {
+  test.each(SURFACE_FILES)(
+    '%s/%s has its playground, variant and state stories',
+    (folder, file) => {
+      const stories = storiesIn(join(designSystem, folder, `${file}.stories.tsx`))
+      for (const required of ALWAYS) {
+        expect(stories, `${folder}/${file} has no ${required} story`).toContain(required)
+      }
+    },
+  )
 })
 
 describe('Stories dans les deux thèmes', () => {
@@ -172,13 +326,8 @@ describe('Stories dans les deux thèmes', () => {
 
   test('no story pins a theme of its own', () => {
     const pinning = CATALOGUE.map((entry) => entry.folder)
-      .filter((folder, index, folders) => folders.indexOf(folder) === index)
-      .filter((folder) =>
-        readFileSync(
-          join(designSystem, 'components', folder, `${folder}.stories.tsx`),
-          'utf8',
-        ).includes('globals:'),
-      )
+      .filter(unique)
+      .filter((folder) => sourceOf(folder).includes('globals:'))
     expect(pinning).toEqual([])
   })
 })

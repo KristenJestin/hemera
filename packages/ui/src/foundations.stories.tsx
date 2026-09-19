@@ -91,7 +91,7 @@ export const Icons: Story = {
     const canvas = within(canvasElement)
     // A size is a step of the icon scale, never a number the caller passed in.
     const drawn = canvas.getAllByLabelText('IconCheck')
-    expect(drawn.map((icon) => getComputedStyle(icon).width)).toEqual(['14px', '16px', '20px'])
+    expect(drawn.map((icon) => getComputedStyle(icon).width)).toEqual(['16px', '18px', '22px'])
 
     // The colour is whatever the text around it is: an icon names no colour of its own. A
     // filled one says so by its fill and an outlined one by its stroke, which is the whole

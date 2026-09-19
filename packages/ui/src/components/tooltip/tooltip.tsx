@@ -1,7 +1,6 @@
 import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip'
 import type { ReactElement, ReactNode } from 'react'
 
-import { durations } from '../../motion.ts'
 import { useOverlayContainer } from '../../overlay.ts'
 import { Kbd } from '../kbd/kbd.tsx'
 import { refusedTag } from './focusable.ts'
@@ -9,10 +8,14 @@ import { refusedTag } from './focusable.ts'
 /**
  * The tooltip, on Base UI (design D2-04).
  *
- * One delay for all of them, declared once by the provider the shell puts at its root: the
- * first tooltip of a row waits, and the ones the pointer walks onto next appear at once. That
- * is the behaviour a rail of icons needs — a sidebar folded to icons is unreadable if every
- * name costs the same wait — and it is the reason the delay is not a prop of each tooltip.
+ * It answers at once. A tooltip in Hemera names a control that is already under the hand —
+ * the fold, the bell, an icon in a folded rail — and a name that arrives half a second after
+ * the pointer is a name the hand has already given up on and moved past. What a delay buys is
+ * quiet on a page dense with things to hover over by accident; the chrome of this window is a
+ * handful of deliberate controls, and it does not have that problem to solve.
+ *
+ * It is still declared once by the provider the shell puts at its root rather than per tooltip:
+ * one answer for the whole window is a decision, and a prop would make it a habit.
  *
  * It opens in CSS through Base UI's `data-starting-style` rather than through motion: the
  * element enters and leaves with the popup itself, and a spring driven from React would have
@@ -21,8 +24,8 @@ import { refusedTag } from './focusable.ts'
 const POPUP =
   'inline-flex items-center rounded-md border border-border bg-card px-2 py-1 text-xs text-card-foreground shadow-lg outline-none scale-100 popup-motion data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0'
 
-/** How long a pointer rests on a control before its name appears, in the milliseconds Base UI counts in. */
-export const TOOLTIP_DELAY = durations.slow * 1000
+/** How long a pointer rests on a control before its name appears, in milliseconds. */
+export const TOOLTIP_DELAY = 0
 
 /** Which side of the control the name appears on. */
 export type TooltipSide = 'top' | 'right' | 'bottom' | 'left'
