@@ -43,7 +43,7 @@ describe('Importation interdite', () => {
     [
       'core reaching for a Node platform module',
       '@hemera/core',
-      'packages/core/src/domain/profile.ts',
+      'packages/core/src/domain/engine.ts',
       "import { readFileSync } from 'node:fs'\n",
       'a file, process or network API',
     ],
@@ -125,7 +125,7 @@ describe('Le process principal n’importe pas le stockage', () => {
       const violations = analyzePackage(root, ruleFor('@hemera/desktop'))
       expect(violations).toHaveLength(1)
       expect(violations[0]!.file).toBe(path)
-      expect(violations[0]!.problem).toContain('apps/desktop/src/profile/')
+      expect(violations[0]!.problem).toContain('apps/desktop/src/engine/')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -133,7 +133,7 @@ describe('Le process principal n’importe pas le stockage', () => {
 
   test('the process that holds the database is the one place that may open it', () => {
     const root = fixture({
-      'apps/desktop/src/profile/storage/database.ts': [
+      'apps/desktop/src/engine/storage/database.ts': [
         "import { DatabaseSync } from 'node:sqlite'",
         "import { drizzle } from 'drizzle-orm/node-sqlite'",
         '',
@@ -146,9 +146,9 @@ describe('Le process principal n’importe pas le stockage', () => {
     }
   })
 
-  test('no leaf package may import the storage layer at all, profile folder or not', () => {
+  test('no leaf package may import the storage layer at all, engine folder or not', () => {
     const root = fixture({
-      'packages/core/src/domain/profile.ts': "import { DatabaseSync } from 'node:sqlite'\n",
+      'packages/core/src/domain/engine.ts': "import { DatabaseSync } from 'node:sqlite'\n",
     })
     try {
       const violations = analyzePackage(root, ruleFor('@hemera/core'))

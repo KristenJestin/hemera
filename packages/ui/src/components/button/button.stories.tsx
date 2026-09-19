@@ -4,11 +4,12 @@ import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/tes
 import { IconPlus, IconSettings, IconTrash } from '../../icons.ts'
 import { Button, IconButton } from './button.tsx'
 
-const VARIANTS = ['primary', 'secondary', 'ghost', 'destructive'] as const
+const VARIANTS = ['primary', 'secondary', 'ghost', 'link', 'destructive'] as const
 const SIZES = ['sm', 'md', 'lg'] as const
 const STATES = ['idle', 'loading', 'success', 'error'] as const
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Button',
   component: Button,
   args: { children: 'Save', onClick: fn() },

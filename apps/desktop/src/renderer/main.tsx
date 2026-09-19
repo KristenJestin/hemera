@@ -29,7 +29,7 @@ const held = await window.hemera
   .catch(() => DEFAULT_DISPLAY_PREFERENCES)
 
 startTheme(held.theme)
-startShell(held.sidebar)
+startShell(held)
 
 createRoot(root).render(
   // Around the application and not inside it: the design system answers the reduced-motion

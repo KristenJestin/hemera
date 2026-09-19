@@ -21,7 +21,11 @@ const GROUPED = [
   { label: 'Local', items: [{ value: 'llama', label: 'Llama' }] },
 ]
 
+/** How far the measured width of the anchor and of the control may differ, in pixels. */
+const ROUNDING = 2
+
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Select',
   component: Select,
   args: { label: 'Model', items: FLAT, onValueChange: fn() },
@@ -91,7 +95,11 @@ export const States: Story = {
     expect(popup.top, 'the list rises over the trigger it belongs to').toBeGreaterThanOrEqual(
       control.top,
     )
-    expect(popup.width).toBeGreaterThanOrEqual(control.width)
+    // As wide as the control, give or take the pixel the anchor is measured to. The list is
+    // laid out against the wrapper the trigger hangs off — that wrapper is what keeps the list
+    // still while the button gives under the press — and Base UI rounds the anchor's width
+    // where `getBoundingClientRect` does not.
+    expect(popup.width).toBeGreaterThanOrEqual(control.width - ROUNDING)
 
     // Closed before the story ends, and waited for: the accessibility pass runs on whatever is
     // on the page when the play is over, and a popup still on its way out has Base UI's focus
@@ -120,16 +128,51 @@ export const Keyboard: Story = {
       expect(within(document.body).getByRole('listbox')).toBeInTheDocument()
     })
     // The list is open before it is walkable: Base UI puts the highlight on the chosen item
-    // once the popup has settled, and a key pressed before then lands on nothing.
+    // once the popup has settled, and a key pressed before then lands on nothing. Waiting for
+    // the highlight to be on that item, and then for it to have moved, is what makes the walk
+    // the same walk every time: waiting only for *a* highlight leaves the first arrow racing
+    // the popup, and Enter then chooses the item it opened on.
+    const highlighted = (): Element | null =>
+      document.querySelector('[role="option"][data-highlighted]')
     await waitFor(() => {
-      expect(document.querySelector('[role="option"][data-highlighted]')).not.toBeNull()
+      expect(highlighted()).toHaveTextContent('Opus')
     })
-    await userEvent.keyboard('{ArrowDown}{Enter}')
+    // The list takes the keys once it has the focus, and the highlight lands before the focus
+    // does: an arrow pressed in between is an arrow nobody hears, and the walk then waits five
+    // seconds on a highlight that never moves — seen twice in a row on a loaded Linux runner.
+    // So the focus is waited for, and the arrow is pressed again if the highlight has not moved
+    // within a moment all the same: the walk is the same walk, pressed once or twice.
+    await waitFor(() => {
+      expect(within(document.body).getByRole('listbox').contains(document.activeElement)).toBe(true)
+    })
+    for (let pressed = 0; pressed < 3; pressed += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one press, then a look, then the next: the order is the point
+      await userEvent.keyboard('{ArrowDown}')
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await waitFor(
+          () => {
+            expect(highlighted()).toHaveTextContent('Sonnet')
+          },
+          { timeout: 1500 },
+        )
+        break
+      } catch {
+        // Not moved yet: pressed again, which is what a hand would do.
+      }
+    }
+    expect(highlighted()).toHaveTextContent('Sonnet')
+    await userEvent.keyboard('{Enter}')
     await waitFor(() => {
       expect(args.onValueChange).toHaveBeenCalledWith('sonnet')
     })
 
-    // Escape closes it, and the trigger gets the focus back.
+    // Escape closes it, and the trigger gets the focus back. The popup that choosing closed is
+    // waited out first: an arrow pressed while it is still leaving is an arrow that reopens
+    // nothing, and the story would then be waiting for a list nobody asked for again.
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('listbox')).toBeNull()
+    })
     await userEvent.keyboard('{ArrowDown}')
     await waitFor(() => {
       expect(within(document.body).getByRole('listbox')).toBeInTheDocument()

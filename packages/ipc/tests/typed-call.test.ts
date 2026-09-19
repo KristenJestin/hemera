@@ -6,8 +6,8 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   CHANNELS,
   type ChannelName,
-  PROFILE_REQUESTS,
-  type ProfileRequestName,
+  ENGINE_REQUESTS,
+  type EngineRequestName,
   windowCommandSchema,
 } from '#index.ts'
 
@@ -19,13 +19,13 @@ const ipc = resolve(import.meta.dirname, '..')
  * what is under test, so a signature is all a probe needs to be written against.
  */
 const CALLERS = [
-  "import type { Bridge, ProfileArguments, ProfileRequestName, ProfileResponse } from '../../src/index.ts'",
+  "import type { Bridge, EngineArguments, EngineRequestName, EngineResponse } from '../../src/index.ts'",
   '',
   'declare const bridge: Bridge',
-  'declare function ask<K extends ProfileRequestName>(',
+  'declare function ask<K extends EngineRequestName>(',
   '  name: K,',
-  '  argument: ProfileArguments<K>,',
-  '): Promise<ProfileResponse<K>>',
+  '  argument: EngineArguments<K>,',
+  '): Promise<EngineResponse<K>>',
 ]
 
 /**
@@ -69,6 +69,27 @@ describe('Appel typé nominal', () => {
       'preferences.read',
       'preferences.write',
       'window.command',
+      // Relayed to the engine, one channel per use case of the same name.
+      'engine.status',
+      'projects.list',
+      'projects.create',
+      'projects.update',
+      'projects.moveMain',
+      'projects.archive',
+      'projects.restore',
+      'repositories.add',
+      'repositories.remove',
+      'journal.read',
+      'journal.unseen',
+      'journal.markSeen',
+      // Answered by the main process itself, because only it can.
+      'dialog.pickFolder',
+      'dialog.pickFiles',
+      'shell.open',
+      'repositories.status',
+      'workspace.files',
+      'workspace.folders',
+      'workspace.check',
     ]
     expect(Object.keys(CHANNELS).toSorted()).toEqual(names.toSorted())
   })
@@ -99,8 +120,23 @@ describe('Appel typé nominal', () => {
 
 describe('Cas d’usage nommés du process dédié', () => {
   test('the use cases of the process that holds the database are the ones declared', () => {
-    const names: ProfileRequestName[] = ['preferences.read', 'preferences.write', 'profile.status']
-    expect(Object.keys(PROFILE_REQUESTS).toSorted()).toEqual(names.toSorted())
+    const names: EngineRequestName[] = [
+      'preferences.read',
+      'preferences.write',
+      'engine.status',
+      'projects.list',
+      'projects.create',
+      'projects.update',
+      'projects.moveMain',
+      'projects.archive',
+      'projects.restore',
+      'repositories.add',
+      'repositories.remove',
+      'journal.read',
+      'journal.unseen',
+      'journal.markSeen',
+    ]
+    expect(Object.keys(ENGINE_REQUESTS).toSorted()).toEqual(names.toSorted())
   })
 
   test('a declared use case called with conforming arguments compiles', () => {
@@ -112,7 +148,7 @@ describe('Cas d’usage nommés du process dédié', () => {
   test('the answer of a use case has the type the declaration gives it', () => {
     const result = compile(
       [
-        "const status = await ask('profile.status', {})",
+        "const status = await ask('engine.status', {})",
         'const writer: string | null = status.writtenByVersion',
         'void writer',
       ].join('\n'),
@@ -124,9 +160,9 @@ describe('Cas d’usage nommés du process dédié', () => {
 
 describe('Cas d’usage non déclaré', () => {
   test('a use case name the declaration does not carry does not compile', () => {
-    const result = compile("void ask('profile.staus', {})")
+    const result = compile("void ask('engine.staus', {})")
     expect(result.ok).toBe(false)
-    expect(result.output).toContain('profile.staus')
+    expect(result.output).toContain('engine.staus')
   })
 
   test('a declared use case called with the wrong argument type does not compile', () => {

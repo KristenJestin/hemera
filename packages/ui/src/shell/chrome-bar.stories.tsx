@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { ChromeBar } from './chrome-bar.tsx'
+import { useState } from 'react'
+
+import { ChromeBar, type ChromeBarProps } from './chrome-bar.tsx'
 import type { ShellProject } from './model.ts'
 
 const PROJECTS: ShellProject[] = [
@@ -11,6 +13,7 @@ const PROJECTS: ShellProject[] = [
 ]
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Shell/ChromeBar',
   component: ChromeBar,
   parameters: { layout: 'fullscreen' },
@@ -23,15 +26,23 @@ const meta = {
     onToggleCollapsed: fn(),
     collapseShortcut: 'Ctrl+B',
     notifications: <p className="text-muted-foreground">Notifications: lot 4.</p>,
+    unseen: true,
   },
   argTypes: {
     projects: { table: { disable: true } },
     notifications: { table: { disable: true } },
   },
   decorators: [
+    // With the sheet the bar sits on, because the bar is drawn against it: the active tab runs
+    // a pixel past the bottom of the bar to cover that sheet's top edge, and its two flares are
+    // the sheet's own surface reaching up to meet it. Shown over nothing, all of that is a white
+    // shape floating on grey — which is the bar of a different application, not this one.
     (Story) => (
-      <div className="h-24">
+      <div className="flex h-24 flex-col bg-surface-page">
         <Story />
+        <div className="mt-title-bar flex-1">
+          <div className="content-area size-full bg-surface-content" />
+        </div>
       </div>
     ),
   ],
@@ -54,6 +65,10 @@ export const Crowded: Story = {
       tone: PROJECTS[index % PROJECTS.length]!.tone,
       pending: index % 3,
     })),
+    // One of these fourteen, and not the Project the other stories use: a bar whose active
+    // Project is not in its own strip is a bar with no active tab, which is a different story
+    // from this one.
+    activeProjectId: 'project-0',
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -73,6 +88,19 @@ export const Variants: Story = {
   args: { collapsed: true },
 }
 
+/** The bar of a first launch: the mark, the fold, and nothing that supposes a Project. */
+export const WithoutAProject: Story = {
+  parameters: { controls: { disable: true } },
+  args: { projects: [], activeProjectId: null },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByRole('navigation', { name: 'Projects' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: 'Add a Project' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: /Notifications/ })).toBeNull()
+    expect(canvas.getByRole('button', { name: 'Collapse the sidebar' })).toBeInTheDocument()
+  },
+}
+
 /** Scenario « Déplacement par la barre » of `specs/window-shell/spec.md`. */
 export const States: Story = {
   // The controls belong to the playground: this story decides these props itself, and a panel
@@ -88,4 +116,37 @@ export const States: Story = {
     expect(getComputedStyle(tab).getPropertyValue('app-region')).toBe('no-drag')
     expect(getComputedStyle(fold).getPropertyValue('app-region')).toBe('no-drag')
   },
+}
+
+/**
+ * The mark crossing the strip (design D2-02).
+ *
+ * It stretches: one sheet opens over both the tab it leaves and the tab it is going to, holds,
+ * then closes onto the second, the leading edge first. Press another Project to see it.
+ */
+export const SwitchingProject: Story = {
+  // Held here, because a mark that travels needs something to travel between: the bar itself
+  // holds nothing, and a story handing it a fixed Project would never move it.
+  render: (args) => <Switching {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Notes/ }))
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: /Notes/ })).toHaveAttribute('aria-current', 'page')
+    })
+  },
+}
+
+function Switching({ activeProjectId, onSelectProject, ...rest }: ChromeBarProps) {
+  const [active, setActive] = useState(activeProjectId)
+  return (
+    <ChromeBar
+      {...rest}
+      activeProjectId={active}
+      onSelectProject={(id) => {
+        setActive(id)
+        onSelectProject(id)
+      }}
+    />
+  )
 }

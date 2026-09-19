@@ -45,6 +45,10 @@ function Harness({ collapsed: folded = false }: HarnessProps) {
 }
 
 const meta = {
+  tags: ['autodocs'],
+  argTypes: {
+    collapsed: { control: 'boolean', description: 'Whether the sidebar is folded to its rail.' },
+  },
   title: 'Shell/Gutter',
   component: Harness,
   parameters: { layout: 'fullscreen' },

@@ -32,6 +32,30 @@ export const arrival: Transition = { type: 'spring', stiffness: 170, damping: 26
  */
 export const morph: Transition = { type: 'spring', stiffness: 260, damping: 33, mass: 1 }
 
+/**
+ * How the active tab crosses the strip, as two edges rather than one slab (design D2-02).
+ *
+ * A slab that slides keeps its width the whole way and reads as a piece of chrome being moved.
+ * Two edges let it stretch: the mark first opens far enough to cover both the tab it is leaving
+ * and the tab it is going to, then closes onto the second — so it reads as one sheet reaching
+ * across rather than as a rectangle in transit.
+ *
+ * `reach` is the opening, a tween because it has one job and no weight to it. `lead` is the
+ * edge in the direction of travel closing first, and `trail` the one behind it closing after,
+ * which is what leaves the stretch. `settle` is what takes the trailing edge off the small
+ * overshoot it lands with.
+ */
+export const reach: Transition = { duration: 0.19, ease: [0.23, 1, 0.32, 1] }
+export const lead: Transition = { type: 'spring', duration: 0.3, bounce: 0 }
+export const trail: Transition = { type: 'spring', duration: 0.3, bounce: 0.2 }
+export const settle: Transition = { duration: 0.16, ease: [0.23, 1, 0.32, 1] }
+
+/** How long the mark stays open before the edges begin to close, in seconds. */
+export const REACH_HANDOFF = 0.15
+
+/** How far the trailing edge overshoots before it relaxes, in pixels. */
+export const REACH_OVERSHOOT = 3
+
 /** The same arrival, with nothing in between: what a system asking for less movement gets. */
 export const instant: Transition = { duration: 0 }
 

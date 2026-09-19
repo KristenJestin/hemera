@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@effect/sql-sqlite-node": "4.0.0-rc.112",
+    "@hemera/core": "workspace:*",
     "@hemera/ipc": "workspace:*",
     "@hemera/ui": "workspace:*",
     "@tanstack/react-hotkeys": "0.10.0",
@@ -29,7 +30,8 @@
     "effect": "4.0.0-rc.112",
     "motion": "13.3.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

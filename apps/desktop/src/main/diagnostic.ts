@@ -1,10 +1,10 @@
 /**
- * What a start leaves behind, in the profile and not on a console (design D3-09).
+ * What a start leaves behind, in the data folder and not on a console (design D3-09).
  *
  * An application started from a desktop icon has no console to print to, so what it says about
- * itself has to be somewhere it can be read afterwards: one file per profile, opened in append
- * and written a short dated line at a time. Two programs write to it — the main process and
- * the process that holds the database — which is why every line says which one it came from.
+ * itself has to be somewhere it can be read afterwards: one file per data folder, opened in
+ * append and written a short dated line at a time. Two programs write to it — the main process
+ * and the engine that holds the database — which is why every line says which one it came from.
  */
 
 import { appendFileSync, mkdirSync } from 'node:fs'
@@ -13,17 +13,17 @@ import { join } from 'node:path'
 /** Where a refusal is written. A refused message is a fact, not a silence. */
 export type Log = (line: string) => void
 
-/** The file a profile keeps its diagnostic in. */
+/** The file a data folder keeps its diagnostic in. */
 export const DIAGNOSTIC_FILE = 'diagnostic.log'
 
 /** Which of the two programs a line came from. */
-export type DiagnosticSource = 'main' | 'profile'
+export type DiagnosticSource = 'main' | 'engine'
 
 /**
- * The log of one profile, opened in append.
+ * The log of one data folder, opened in append.
  *
- * The folder is created if it is not there yet: the first start of a profile is the one that
- * has the most to say and the least to write it into.
+ * The folder is created if it is not there yet: the first start on a data folder is the one
+ * that has the most to say and the least to write it into.
  */
 export function openDiagnosticLog(directory: string, source: DiagnosticSource): Log {
   mkdirSync(directory, { recursive: true })
@@ -34,16 +34,16 @@ export function openDiagnosticLog(directory: string, source: DiagnosticSource): 
 }
 
 /**
- * Where a line goes before a profile is known.
+ * Where a line goes before a data folder is known.
  *
- * Which is the one moment a console is the best there is: until the profile is resolved there
+ * Which is the one moment a console is the best there is: until the folder is resolved there
  * is no folder to write into, and what happens before that is a crash Electron prints itself.
  */
 let write: Log = (line) => {
   console.error(line)
 }
 
-/** Makes the log of the profile that was opened the one the application writes to. */
+/** Makes the log of the data folder that was opened the one the application writes to. */
 export function writeDiagnosticTo(log: Log): void {
   write = log
 }
@@ -64,4 +64,16 @@ export const diagnostic: Log = (line) => {
  */
 export function reported<E>(failed: E): string {
   return JSON.stringify(failed) ?? String(failed)
+}
+
+/**
+ * What a failure says to whoever asked for it, which is not what a log line says about it.
+ *
+ * A refusal of the domain is a sentence written for a reader and shown under the field it was
+ * typed in; a timeout and a process that is gone have no such sentence and arrive as what they
+ * carry. The log gets `reported` either way, because a line is read by someone who was not
+ * there and wants the tag and the fields.
+ */
+export function said<E>(failed: E): string {
+  return failed instanceof Error && failed.message !== '' ? failed.message : reported(failed)
 }

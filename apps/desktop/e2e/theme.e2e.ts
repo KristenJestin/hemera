@@ -10,6 +10,8 @@
 
 import { browser, expect } from '@wdio/globals'
 
+import { openSettings } from './hand.ts'
+
 /** What the platform, the page and the frame each say the theme is right now. */
 async function wearing(): Promise<{
   source: string
@@ -38,28 +40,33 @@ async function wearing(): Promise<{
 }
 
 /**
- * Presses until the choice is the one wanted, which is never more than three presses.
+ * Chooses a theme where the user chooses one: the settings, on the segment of three.
  *
  * Through the control and not through the channel, for the same reason the first suite gives:
  * a preference written behind the page's back is one the page does not know it has, and what it
  * wears afterwards is what the last press left rather than what was asked for.
+ *
+ * The sidebar used to carry a button that cycled through the three. It does not any more — a
+ * choice offered in two places is a choice to explain twice — so the walk is: open the
+ * settings, then press the one wanted. And the settings are opened by their shortcut, because
+ * this spec never makes a Project and a window without one has no sidebar to open them from.
  */
-async function press(until: 'system' | 'light' | 'dark', left = 3): Promise<void> {
-  if (left === 0 || (await wearing()).source === until) return
-  await toggle()
-  await press(until, left - 1)
+async function press(until: 'system' | 'light' | 'dark'): Promise<void> {
+  await openSettings()
+  const named = { system: 'System', light: 'Light', dark: 'Dark' }[until]
+  await browser.execute((label: string) => {
+    const choice = [...document.querySelectorAll('[role="radio"]')].find(
+      (radio) => radio.getAttribute('aria-label') === label || radio.textContent?.trim() === label,
+    )
+    if (choice instanceof HTMLElement) choice.click()
+  }, named)
+  await browser.pause(300)
 }
 
-/** Presses the theme button of the sidebar, whichever of the three it is offering. */
+/** Moves to whichever theme is not the one the window is on, and says which it landed on. */
 async function toggle(): Promise<void> {
-  await browser.execute(() => {
-    const button =
-      document.querySelector('[aria-label="Use the dark theme"]') ??
-      document.querySelector('[aria-label="Use the light theme"]') ??
-      document.querySelector('[aria-label="Follow the desktop theme"]')
-    if (button instanceof HTMLElement) button.click()
-  })
-  await browser.pause(300)
+  const before = await wearing()
+  await press(before.dark ? 'light' : 'dark')
 }
 
 describe('Thème choisi par la fenêtre', () => {

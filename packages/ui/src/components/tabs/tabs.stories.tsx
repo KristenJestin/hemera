@@ -26,8 +26,13 @@ const PLACES = [
 ]
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Components/Tabs',
   component: Tabs,
+  // Anchored rather than centred. Each panel is a different height, and a centred story puts
+  // the difference back into the page: the strip itself moves between two tabs, and a mark
+  // travelling along it is handed a vertical distance it never had to cross.
+  parameters: { layout: 'padded' },
   args: { label: 'Places of the Project', items: PLACES, onValueChange: fn() },
   argTypes: {
     label: { control: 'text' },

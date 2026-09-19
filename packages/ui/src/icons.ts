@@ -16,8 +16,13 @@
  */
 
 import {
+  IconActivity as TablerActivity,
   IconAlertTriangle as TablerAlertTriangle,
   IconAlertTriangleFilled as TablerAlertTriangleFilled,
+  IconArchive as TablerArchive,
+  IconArchiveFilled as TablerArchiveFilled,
+  IconArrowUp as TablerArrowUp,
+  IconAt as TablerAt,
   IconBell as TablerBell,
   IconBellFilled as TablerBellFilled,
   IconCheck as TablerCheck,
@@ -27,19 +32,41 @@ import {
   IconChevronLeft as TablerChevronLeft,
   IconChevronRight as TablerChevronRight,
   IconCommand as TablerCommand,
+  IconDatabase as TablerDatabase,
+  IconDatabaseFilled as TablerDatabaseFilled,
   IconDeviceDesktop as TablerDeviceDesktop,
   IconDeviceDesktopFilled as TablerDeviceDesktopFilled,
+  IconFileText as TablerFileText,
+  IconFileTextFilled as TablerFileTextFilled,
+  IconFolder as TablerFolder,
+  IconFolderFilled as TablerFolderFilled,
+  IconFolderOpen as TablerFolderOpen,
+  IconFolderOpenFilled as TablerFolderOpenFilled,
+  IconFolderPlus as TablerFolderPlus,
+  IconGitBranch as TablerGitBranch,
+  IconHome as TablerHome,
+  IconHomeFilled as TablerHomeFilled,
   IconLayoutSidebar as TablerLayoutSidebar,
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
+  IconMessage as TablerMessage,
+  IconMessageFilled as TablerMessageFilled,
   IconMessages as TablerMessages,
   IconMessagesFilled as TablerMessagesFilled,
   IconMoon as TablerMoon,
   IconMoonFilled as TablerMoonFilled,
+  IconPaperclip as TablerPaperclip,
+  IconPencil as TablerPencil,
+  IconPencilFilled as TablerPencilFilled,
   IconPlayerPlay as TablerPlayerPlay,
   IconPlayerPlayFilled as TablerPlayerPlayFilled,
+  IconPlayerStopFilled as TablerPlayerStopFilled,
   IconPlus as TablerPlus,
   IconPlusFilled as TablerPlusFilled,
+  IconRestore as TablerRestore,
+  IconPlugConnected as TablerPlugConnected,
+  IconRobot as TablerRobot,
   IconSearch as TablerSearch,
+  IconSparkles as TablerSparkles,
   IconSearchFilled as TablerSearchFilled,
   IconSettings as TablerSettings,
   IconSettingsFilled as TablerSettingsFilled,
@@ -49,6 +76,8 @@ import {
   IconTimelineEventFilled as TablerTimelineEventFilled,
   IconTrash as TablerTrash,
   IconTrashFilled as TablerTrashFilled,
+  IconUser as TablerUser,
+  IconUserFilled as TablerUserFilled,
   IconX as TablerX,
   IconXFilled as TablerXFilled,
   type IconProps as TablerIconProps,
@@ -105,11 +134,17 @@ function catalogued(
   return Catalogued
 }
 
+export const IconActivity = catalogued(TablerActivity, TablerActivity, 'IconActivity')
 export const IconAlertTriangle = catalogued(
   TablerAlertTriangleFilled,
   TablerAlertTriangle,
   'IconAlertTriangle',
 )
+export const IconArchive = catalogued(TablerArchiveFilled, TablerArchive, 'IconArchive')
+/* Tabler draws no solid arrow, no solid at-sign and no solid paperclip: the outline stands for
+   both weights, which is what a line pointing somewhere looks like anyway. */
+export const IconArrowUp = catalogued(TablerArrowUp, TablerArrowUp, 'IconArrowUp')
+export const IconAt = catalogued(TablerAt, TablerAt, 'IconAt')
 export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')
 export const IconCheck = catalogued(TablerCheckFilled, TablerCheck, 'IconCheck')
 export const IconChevronDown = catalogued(
@@ -128,20 +163,48 @@ export const IconChevronRight = catalogued(
 /* Tabler draws no solid command key: the outline stands for both weights, which is what a
    key cap looks like anyway. */
 export const IconCommand = catalogued(TablerCommand, TablerCommand, 'IconCommand')
+export const IconDatabase = catalogued(TablerDatabaseFilled, TablerDatabase, 'IconDatabase')
 export const IconDeviceDesktop = catalogued(
   TablerDeviceDesktopFilled,
   TablerDeviceDesktop,
   'IconDeviceDesktop',
 )
+export const IconFileText = catalogued(TablerFileTextFilled, TablerFileText, 'IconFileText')
+export const IconFolder = catalogued(TablerFolderFilled, TablerFolder, 'IconFolder')
+export const IconFolderOpen = catalogued(TablerFolderOpenFilled, TablerFolderOpen, 'IconFolderOpen')
+/* A folder with a plus in it has no solid twin; the outline is the folder either way. */
+export const IconFolderPlus = catalogued(TablerFolderPlus, TablerFolderPlus, 'IconFolderPlus')
+export const IconGitBranch = catalogued(TablerGitBranch, TablerGitBranch, 'IconGitBranch')
+export const IconHome = catalogued(TablerHomeFilled, TablerHome, 'IconHome')
 export const IconLayoutSidebar = catalogued(
   TablerLayoutSidebarFilled,
   TablerLayoutSidebar,
   'IconLayoutSidebar',
 )
+export const IconMessage = catalogued(TablerMessageFilled, TablerMessage, 'IconMessage')
 export const IconMessages = catalogued(TablerMessagesFilled, TablerMessages, 'IconMessages')
 export const IconMoon = catalogued(TablerMoonFilled, TablerMoon, 'IconMoon')
+export const IconPaperclip = catalogued(TablerPaperclip, TablerPaperclip, 'IconPaperclip')
+export const IconPencil = catalogued(TablerPencilFilled, TablerPencil, 'IconPencil')
 export const IconPlayerPlay = catalogued(TablerPlayerPlayFilled, TablerPlayerPlay, 'IconPlayerPlay')
+/* The square that says "this is running, and pressing stops it" is solid in both weights: an
+   outlined square at this size reads as an empty checkbox. */
+export const IconPlayerStop = catalogued(
+  TablerPlayerStopFilled,
+  TablerPlayerStopFilled,
+  'IconPlayerStop',
+)
 export const IconPlus = catalogued(TablerPlusFilled, TablerPlus, 'IconPlus')
+/* Neither the arrow that brings something back nor the machine that will answer one day has a
+   solid twin in Tabler; the outline stands for both weights. */
+export const IconRestore = catalogued(TablerRestore, TablerRestore, 'IconRestore')
+export const IconPlugConnected = catalogued(
+  TablerPlugConnected,
+  TablerPlugConnected,
+  'IconPlugConnected',
+)
+export const IconRobot = catalogued(TablerRobot, TablerRobot, 'IconRobot')
+export const IconSparkles = catalogued(TablerSparkles, TablerSparkles, 'IconSparkles')
 export const IconSearch = catalogued(TablerSearchFilled, TablerSearch, 'IconSearch')
 export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'IconSettings')
 export const IconSun = catalogued(TablerSunFilled, TablerSun, 'IconSun')
@@ -151,4 +214,5 @@ export const IconTimelineEvent = catalogued(
   'IconTimelineEvent',
 )
 export const IconTrash = catalogued(TablerTrashFilled, TablerTrash, 'IconTrash')
+export const IconUser = catalogued(TablerUserFilled, TablerUser, 'IconUser')
 export const IconX = catalogued(TablerXFilled, TablerX, 'IconX')

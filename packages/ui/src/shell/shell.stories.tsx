@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { Button } from '../components/button/button.tsx'
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
-import { type ThemeChoice } from '../window.ts'
 import {
   JOURNAL_ENTRY,
   SIDEBAR_DEFAULT,
@@ -14,9 +14,6 @@ import {
   type ShellSession,
 } from './model.ts'
 import { Shell } from './shell.tsx'
-
-/** The three the one theme control cycles through, in the order it offers them. */
-const CHOICES: ThemeChoice[] = ['system', 'light', 'dark']
 
 /**
  * The whole shell, with nothing real in it (design D2-01, D2-08).
@@ -53,6 +50,8 @@ interface HarnessProps {
   sessions?: ShellSession[]
   collapsed?: boolean
   width?: number
+  /** Whether the bell has anything left to show, which is the dot it wears. */
+  unseen?: boolean
 }
 
 /**
@@ -63,24 +62,34 @@ interface HarnessProps {
  * knowing, and it is why a story can drive the whole window with four `useState`.
  */
 function Harness({
-  projects = PROJECTS,
+  projects: given = PROJECTS,
   sessions = SESSIONS,
   collapsed: folded = false,
   width: opening = SIDEBAR_DEFAULT,
+  unseen = true,
 }: HarnessProps) {
-  const [activeProjectId, setActiveProjectId] = useState(projects[0]!.id)
+  const [projects, setProjects] = useState(given)
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(projects[0]?.id ?? null)
   const [activeEntryId, setActiveEntryId] = useState(sessions[0]?.id ?? JOURNAL_ENTRY)
   const [collapsed, setCollapsed] = useState(folded)
   const [width, setWidth] = useState(opening)
-  const [theme, setTheme] = useState<ThemeChoice>('system')
+
+  // What the application does when the Dialog is validated, in one line: the first Project
+  // arrives, it is the active one, and the shell has a sidebar from that moment on.
+  const add = () => {
+    const created: ShellProject = { id: 'first', name: 'Atlas', tone: 'primary', pending: 0 }
+    setProjects([...projects, created])
+    setActiveProjectId(created.id)
+  }
 
   return (
     <Shell
       projects={projects}
       activeProjectId={activeProjectId}
       onSelectProject={setActiveProjectId}
-      onAddProject={() => undefined}
+      onAddProject={add}
       notifications={<p className="text-muted-foreground">Notifications: lot 4.</p>}
+      unseen={unseen}
       onOpenSettings={() => undefined}
       sessions={sessions}
       activeEntryId={activeEntryId}
@@ -88,26 +97,35 @@ function Harness({
       onOpenCommand={() => undefined}
       commandShortcut="Ctrl+K"
       collapseShortcut="Ctrl+B"
-      theme={theme}
-      onToggleTheme={() => setTheme(CHOICES[(CHOICES.indexOf(theme) + 1) % CHOICES.length]!)}
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
       width={width}
       onWidthChange={setWidth}
     >
-      <div className="flex flex-col gap-4 p-6">
-        <h1 className="text-2xl font-medium">Home: lot 4</h1>
-        {Array.from({ length: 40 }, (_, line) => (
-          <p key={line} className="text-muted-foreground">
-            A line of content, so that there is something to scroll. Line {line + 1}.
+      {activeProjectId === null ? (
+        <div className="flex flex-col items-start gap-4 p-6">
+          <h1 className="text-2xl font-medium">Welcome to Hemera</h1>
+          <p className="text-muted-foreground">
+            The page of a first launch, which the Home of lot 4 draws properly.
           </p>
-        ))}
-      </div>
+          <Button onClick={add}>Create the first Project</Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4 p-6">
+          <h1 className="text-2xl font-medium">Home: lot 4</h1>
+          {Array.from({ length: 40 }, (_, line) => (
+            <p key={line} className="text-muted-foreground">
+              A line of content, so that there is something to scroll. Line {line + 1}.
+            </p>
+          ))}
+        </div>
+      )}
     </Shell>
   )
 }
 
 const meta = {
+  tags: ['autodocs'],
   title: 'Shell/Shell',
   component: Harness,
   parameters: { layout: 'fullscreen' },
@@ -274,7 +292,7 @@ export const AWidthOutsideTheBounds: Story = {
 /** Scenario « Overlay au-dessus de la coquille et focus rendu » of `specs/window-shell/spec.md`. */
 export const OverlayOverTheShell: Story = {
   play: async ({ canvasElement }) => {
-    const bell = within(canvasElement).getByRole('button', { name: 'Notifications' })
+    const bell = within(canvasElement).getByRole('button', { name: /Notifications/ })
     await userEvent.click(bell)
     const panel = await waitFor(() => within(document.body).getByRole('dialog'))
 
@@ -322,6 +340,67 @@ export const ManyProjects: Story = {
       bar.getBoundingClientRect().right + 1,
     )
     expect(strip.scrollWidth).toBeGreaterThan(strip.clientWidth)
+  },
+}
+
+/**
+ * Scenario « Aucun Projet au démarrage » of `specs/project-workspaces/spec.md`.
+ *
+ * What the shell is before anything has been created: the mark, the fold, and the page. No tab
+ * to press, no sidebar to list Sessions that do not exist, and no bell for events nobody has
+ * made yet — and the keystroke that opens the command still belongs to the application.
+ */
+export const NoProjectYet: Story = {
+  args: { projects: [], sessions: [] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByRole('complementary')).toBeNull()
+    expect(canvas.queryByRole('separator', { name: 'Sidebar width' })).toBeNull()
+    expect(canvas.queryByRole('navigation', { name: 'Projects' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: 'Notifications' })).toBeNull()
+
+    // The mark and the fold are what is left of the bar, and the page has the rest.
+    expect(canvas.getByText('Hemera')).toBeInTheDocument()
+    expect(canvas.getByRole('button', { name: 'Collapse the sidebar' })).toBeInTheDocument()
+    // The page takes the room the sidebar would have had, which is what "no sidebar" means
+    // here: it starts at the edge of the window, with nothing between the two. Its own width is
+    // not the window's — the content is a sheet set in on three sides — so the claim is made
+    // where it can be made exactly, on the side the sidebar would have been.
+    const content = canvas.getByRole('main')
+    const root = canvasElement.querySelector('.shell-root')!
+    expect(content.getBoundingClientRect().left).toBeCloseTo(root.getBoundingClientRect().left, 0)
+  },
+}
+
+/** Scenario « Premier Projet créé » of `specs/project-workspaces/spec.md`. */
+export const TheFirstProjectArrives: Story = {
+  args: { projects: [], sessions: [] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByRole('complementary')).toBeNull()
+
+    // The story stands in for the Dialog: what the shell is handed is a Project, and what it
+    // does with it is grow a tab, a sidebar and a bell in one arrival.
+    await userEvent.click(canvas.getByRole('button', { name: 'Create the first Project' }))
+
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: /Atlas/ })).toHaveAttribute('aria-current', 'page')
+    })
+    await waitFor(() => {
+      expect(canvas.getByRole('complementary')).toBeInTheDocument()
+    })
+    expect(canvas.getByRole('button', { name: /Notifications/ })).toBeInTheDocument()
+  },
+}
+
+/** Scenario « Rien à voir » of `specs/shell-navigation/spec.md`: the bell wears no dot. */
+export const NothingToSee: Story = {
+  args: { unseen: false },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // Named for what it is, and nothing drawn on it: the dot and the name arrive together.
+    expect(canvas.getByRole('button', { name: 'Notifications' })).toBeInTheDocument()
+    expect(canvas.queryByRole('button', { name: 'Notifications, some unseen' })).toBeNull()
   },
 }
 

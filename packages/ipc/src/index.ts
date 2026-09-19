@@ -24,23 +24,32 @@ export type {
 } from './environment.ts'
 export {
   DEFAULT_DISPLAY_PREFERENCES,
-  PROFILE_REQUESTS,
+  ENGINE_REQUESTS,
   channelSchema,
   displayPreferencesChangeSchema,
+  activeProjectSchema,
   displayPreferencesSchema,
-  profileStatusSchema,
+  engineStatusSchema,
+  entityKindSchema,
+  eventAuthorSchema,
+  eventSourceSchema,
+  journalEntrySchema,
+  projectSchema,
+  projectToneSchema,
   sidebarPreferenceSchema,
   themePreferenceSchema,
-} from './profile.ts'
+} from './engine.ts'
 export type {
   Channel,
   DisplayPreferences,
   DisplayPreferencesChange,
-  ProfileArguments,
-  ProfileRequestName,
-  ProfileRequests,
-  ProfileResponse,
-  ProfileStatus,
+  EngineArguments,
+  EngineRequestName,
+  EngineRequests,
+  EngineResponse,
+  EngineStatus,
   SidebarPreference,
   ThemePreference,
-} from './profile.ts'
+  JournalEntry,
+  Project,
+} from './engine.ts'

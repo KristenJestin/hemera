@@ -6,10 +6,10 @@
  * `ready` itself is not: Electron emits it once this module has finished evaluating, so a
  * top-level `await app.whenReady()` waits for an event its own waiting prevents.
  *
- * Which profile this start opens is decided here, first of all and before anything is created
- * (design D3-06): `userData` is moved onto it, so the single instance lock, the persisted
- * window state and everything else Electron files under `userData` follow the profile rather
- * than the machine.
+ * Which data folder this start opens is decided here, first of all and before anything is
+ * created (design D3-06): `userData` is moved onto it, so the single instance lock, the
+ * persisted window state and everything else Electron files under `userData` follow the data
+ * folder rather than the machine.
  */
 
 import { dirname, join } from 'node:path'
@@ -23,14 +23,14 @@ import {
   type ApplicationIdentity,
   applicationVersion,
   channel,
-  chooseProfile,
-  profileDirectory,
+  chooseData,
+  dataDirectory,
 } from './channel.ts'
 import { registerChannels } from './channels.ts'
 import { openDiagnosticLog, reported, writeDiagnosticTo } from './diagnostic.ts'
 import { readSidecar } from './display-sidecar.ts'
 import { collectReport } from './environment.ts'
-import { startProfile } from './profile-client.ts'
+import { startEngine } from './engine-client.ts'
 import { createWindow, loadWindow } from './window.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
@@ -47,36 +47,47 @@ const MIGRATIONS = join(main, '..', '..', 'drizzle')
 /** Asked for by `pnpm report`: start as usual, say what this machine is, and leave. */
 const REPORT_FLAG = '--report'
 
+/** How long the report waits for the page to mount its witness, in milliseconds. */
+const WITNESS_PATIENCE = 10_000
+
+/** Resolves true once the page has a witness to play, and false if it never does. */
+const WITNESS_READY = `new Promise((resolve) => {
+  const started = performance.now()
+  const look = () => {
+    if (window.hemeraWitness !== undefined) return resolve(true)
+    if (performance.now() - started > ${String(WITNESS_PATIENCE)}) return resolve(false)
+    requestAnimationFrame(look)
+  }
+  look()
+})`
+
 const identity: ApplicationIdentity = {
   channel: channel(app.isPackaged, app.getAppPath()),
   version: applicationVersion(app.isPackaged, app.getVersion(), process.env),
 }
 
-const choice = chooseProfile(identity.channel, process.platform, process.env, process.argv)
+const choice = chooseData(identity.channel, process.platform, process.env, process.argv)
 
 /**
  * A start that was refused, said where it can still be read.
  *
  * The folder the argument named is the one thing this start must not write into, so the
- * refusal goes to the profile this channel would have opened on its own.
+ * refusal goes to the data folder this channel would have opened on its own.
  */
 function refuse(reason: string): never {
-  openDiagnosticLog(
-    profileDirectory(identity.channel, process.platform, process.env),
-    'main',
-  )(reason)
+  openDiagnosticLog(dataDirectory(identity.channel, process.platform, process.env), 'main')(reason)
   app.exit(1)
-  // `app.exit` leaves immediately; its type does not say so, and the profile is a `string`.
+  // `app.exit` leaves immediately; its type does not say so, and the folder is a `string`.
   throw new Error(reason)
 }
 
-const profile = choice.accepted ? choice.directory : refuse(choice.reason)
+const data = choice.accepted ? choice.directory : refuse(choice.reason)
 
-app.setPath('userData', profile)
+app.setPath('userData', data)
 
-const log = openDiagnosticLog(profile, 'main')
+const log = openDiagnosticLog(data, 'main')
 writeDiagnosticTo(log)
-log(`starting channel ${identity.channel}, version ${identity.version}, profile ${profile}`)
+log(`starting channel ${identity.channel}, version ${identity.version}, data folder ${data}`)
 
 /**
  * No menu at all, which also takes its keystrokes with it.
@@ -89,14 +100,14 @@ log(`starting channel ${identity.channel}, version ${identity.version}, profile 
 Menu.setApplicationMenu(null)
 
 /**
- * One instance per profile, and the lock is on the profile because `userData` is.
+ * One instance per data folder, and the lock is on the folder because `userData` is.
  *
- * A second start on the same profile has nothing to do but hand the window back: two programs
- * on one database is how a profile gets two writers. Two profiles run side by side, which is
- * the whole point of the `dev` one.
+ * A second start on the same folder has nothing to do but hand the window back: two programs
+ * on one database is how a data folder gets two writers. Two folders run side by side, which
+ * is the whole point of the `dev` one.
  */
 if (!app.requestSingleInstanceLock()) {
-  log('a first instance already holds this profile; this one steps aside')
+  log('a first instance already holds this data folder; this one steps aside')
   app.quit()
 } else {
   app.on('second-instance', () => {
@@ -108,36 +119,35 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(async () => {
     // The database is opened in its own process, and only once the application is ready: it is
-    // the one program that holds the profile's file, and the main process never touches it.
-    const profileProcess = startProfile(main, profile, identity, MIGRATIONS)
+    // the one program that holds the database file, and the main process never touches it.
+    const engine = startEngine(main, data, identity, MIGRATIONS)
 
-    // Where the profile turned out to stand, written down once (design D3-09). It is asked for
-    // rather than assumed: the migration it is at is the migrator's own answer, and the version
-    // that wrote it last is the name a refusal would have given. Nothing waits for this — a log
-    // line is not what the window is for — and a profile that cannot say so says that instead.
+    // Where the data folder turned out to stand, written down once (design D3-09). It is asked
+    // for rather than assumed: the migration it is at is the migrator's own answer, and the
+    // version that wrote it last is the name a refusal would have given. Nothing waits for this
+    // — a log line is not what the window is for — and an engine that cannot say so says that.
     void Effect.runPromise(
-      profileProcess.ask('profile.status', {}).pipe(
+      engine.ask('engine.status', {}).pipe(
         Effect.match({
           onSuccess: (status) =>
             log(
               `database at ${status.lastMigration ?? 'no migration yet'}, last written by ${status.writtenByVersion ?? 'nobody'}`,
             ),
-          onFailure: (failed) =>
-            log(`the profile did not say where it stands: ${reported(failed)}`),
+          onFailure: (failed) => log(`the engine did not say where it stands: ${reported(failed)}`),
         }),
       ),
     )
 
     // What the last start left, read before there is a window to paint: the frame, the system's
-    // own buttons and the page all come up wearing it, and the profile corrects it afterwards
+    // own buttons and the page all come up wearing it, and the engine corrects it afterwards
     // if it disagrees. A start with nothing to go on opens on the desktop's own theme.
-    const hint = readSidecar(profile)
+    const hint = readSidecar(data)
     if (hint !== null) nativeTheme.themeSource = hint.theme
 
     // Wired before the page loads: the first thing it does is say which theme it wants, and a
     // channel with nobody on it would answer that with an error in the application's own console.
     const window = createWindow(main)
-    registerChannels(window, identity, profileProcess, profile)
+    registerChannels(window, identity, engine, data)
     await loadWindow(window)
 
     if (process.argv.includes(REPORT_FLAG)) {
@@ -149,6 +159,13 @@ if (!app.requestSingleInstanceLock()) {
       // milliseconds on this machine, three periods of a 165 Hz display — and those frames say
       // what starting costs, not what the fold costs. What the lot asks of the fold is measured
       // on a window that has already drawn it.
+      // The page mounts once it has been answered its preferences, which is a round trip after
+      // the window has finished loading: the witness is waited for rather than assumed. Asking
+      // for it too early is a script that throws into a page that was about to be ready, and a
+      // report that says nothing at all about a window that is perfectly fine.
+      const mounted = await window.webContents.executeJavaScript(WITNESS_READY)
+      if (mounted !== true) log('the page never put its witness up; the report has no transition')
+
       const play = 'window.hemeraWitness.play()'
       await window.webContents.executeJavaScript(play)
       await window.webContents.executeJavaScript(play)
