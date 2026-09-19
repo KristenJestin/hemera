@@ -247,9 +247,9 @@ if (import.meta.main) {
   // SAFETY: `refusalFor` answered null, which it only does for one of the declared channels.
   const channel = asked as Channel
 
-  // `beta` is a rolling tag the pipeline moves on every push to `dev`, not a version: excluded
-  // here so it never turns a `git describe` answer into `beta-3-gabc1234`.
-  const described = spawnSync('git describe --tags --always --exclude beta', {
+  // `beta-*` tags are the pre-releases the pipeline cuts on every push to `dev`, one per build
+  // and none of them a version: excluded here so a `git describe` never answers `beta-…-3-gabc`.
+  const described = spawnSync("git describe --tags --always --exclude 'beta-*'", {
     cwd: repository,
     encoding: 'utf8',
     shell: true,
