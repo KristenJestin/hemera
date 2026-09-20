@@ -25,6 +25,26 @@ export async function press(name: string): Promise<void> {
   await browser.pause(300)
 }
 
+/**
+ * Chooses an entry of the menu that is open.
+ *
+ * Not `press`: an entry of a menu is not a button. Base UI draws it as what it is — an element
+ * carrying `menuitem` — and a suite looking for a `<button>` finds the trigger it has just
+ * pressed and nothing at all inside what that opened.
+ */
+export async function choose(label: string): Promise<void> {
+  const chosen = await browser.execute((name: string) => {
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find(
+      (one) => (one.textContent ?? '').trim() === name,
+    )
+    if (!(item instanceof HTMLElement)) return false
+    item.click()
+    return true
+  }, label)
+  expect(chosen).toBe(true)
+  await browser.pause(300)
+}
+
 /** Types into the field with this label, the way a hand does: one value, then an input event. */
 export async function fill(label: string, value: string): Promise<void> {
   const filled = await browser.execute(
