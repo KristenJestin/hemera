@@ -1,38 +1,38 @@
-# Design d'Hemera — références
+# Hemera design — references
 
-## Maquettes
+## Mockups
 
-- `mockups/2026-09-13-home-dark.png` et `mockups/2026-09-13-home-light.png` : allure visuelle
-  cible validée par le mainteneur le 13 septembre 2026 (page Home, sidebar, barre de Projets,
-  cartes, composer, tags de mission, thèmes sombre et clair).
-- Source de la maquette : `../prototypes/home-prototype.html` (HTML/CSS autonome).
-- `../prototypes/lot-4-pages-prototype.html` (16 septembre 2026) : les écrans du lot 4
-  posés sur la coquille du lot 2 : premier lancement, création de Projet, Home sans agent,
-  Session `free` (fil et vide), Journal, réglages du Projet, Sessions archivées, palette Mod+K,
-  réglages de l'application, cloche, et l'écran « Session avec agent » du lot 5 (touche `a`). Touches `1`–`9`, `0`, `a`, `k`, `t`, `b`, `n`. Même règle :
-  tokens et disposition, jamais le balisage.
+- `mockups/2026-09-13-home-dark.png` and `mockups/2026-09-13-home-light.png`: target visual
+  look validated by the maintainer on 13 September 2026 (Home page, sidebar, Projects bar,
+  cards, composer, mission tags, dark and light themes).
+- Source of the mockup: `../prototypes/home-prototype.html` (self-contained HTML/CSS).
+- `../prototypes/lot-4-pages-prototype.html` (16 September 2026): the lot 4 screens
+  laid on the lot 2 shell: first launch, Project creation, Home without an agent,
+  `free` Session (thread and empty), Journal, Project settings, archived Sessions, Mod+K palette,
+  application settings, bell, and the lot 5 "Session with an agent" screen (key `a`). Keys `1`–`9`, `0`, `a`, `k`, `t`, `b`, `n`. Same rule:
+  tokens and layout, never the markup.
 
-## Ce que les maquettes décident, et ce qu'elles ne décident pas
+## What the mockups decide, and what they do not
 
-**Décidé (allure)** : palette et thèmes light/dark, typographie Inter + JetBrains Mono,
-icônes lucide, rayons, densité, style des onglets de Projet, de la sidebar, des cartes, des
-badges de mission (`define`, `build`, `free`), du composer, de la timeline du Journal.
+**Decided (look)**: palette and light/dark themes, Inter + JetBrains Mono typography,
+lucide icons, radii, density, style of the Project tabs, of the sidebar, of the cards, of the
+mission badges (`define`, `build`, `free`), of the composer, of the Journal timeline.
 
-**Non décidé (contenu)** : le contenu de la sidebar de la maquette n'est pas repris. La
-navigation reste celle du [noyau](../product/core.md) : Sessions directement présentes dans la
-sidebar (session-first). Les cartes « Needs you », « Running », « Specs », le sélecteur de
-modèle, la cloche de notifications, ⌘K et les pièces jointes sont des références de style et
-de motifs de composants ; leur présence et leur contenu relèvent des lots qui les livrent.
+**Not decided (content)**: the content of the mockup's sidebar is not adopted. The
+navigation remains that of the [core](../product/core.md): Sessions directly present in the
+sidebar (session-first). The "Needs you", "Running", "Specs" cards, the model selector,
+the notifications bell, ⌘K and the attachments are references of style and
+of component patterns; their presence and their content belong to the lots that deliver them.
 
-**Barre de titre** : objectif = la barre de Projets fait office de barre de titre (fenêtre sans
-cadre, comme Zed). Faisabilité à vérifier avec le renderer sur Windows et Linux ; repli = barre
-OS native au-dessus.
+**Title bar**: goal = the Projects bar acts as the title bar (frameless window,
+like Zed). Feasibility to be verified with the renderer on Windows and Linux; fallback = native
+OS bar above.
 
-## Règle d'usage du prototype HTML
+## Rule for using the HTML prototype
 
-Le prototype sert **uniquement** à extraire les tokens (variables CSS `--*`, tailles, rayons,
-ombres, polices). Il est **interdit** de copier son balisage, ses classes, ses styles inline
-ou sa structure dans l'application. Tout composant est écrit selon les règles du design system
-(`packages/ui`, tokens en trois couches, hook headless + composant stylé, showcase et test par
-composant).
-Un développement qui recopie le prototype est refusé en revue.
+The prototype serves **only** to extract the tokens (CSS variables `--*`, sizes, radii,
+shadows, fonts). It is **forbidden** to copy its markup, its classes, its inline styles
+or its structure into the application. Every component is written according to the design system
+rules (`packages/ui`, tokens in three layers, headless hook + styled component, showcase and test per
+component).
+A development that copies the prototype is rejected in review.

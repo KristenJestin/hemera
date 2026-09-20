@@ -1,14 +1,14 @@
-# Prototypes HTML — références de tokens et de motion
+# HTML prototypes — token and motion references
 
-Les deux fichiers de ce dossier sont des prototypes jetables, à ouvrir dans un navigateur :
+The two files in this folder are throwaway prototypes, to be opened in a browser:
 
-- `home-prototype.html` : la page Home (sidebar, barre de Projets, cartes, composer, thèmes
-  sombre et clair), source des maquettes de `../design/mockups/`.
-- `lot-4-pages-prototype.html` : les écrans du lot 4 posés sur la coquille de l'application,
-  plus l'écran « Session avec agent ». Les touches `1`–`9`, `0`, `a`, `k`, `t`, `b`, `n`
-  changent d'écran.
+- `home-prototype.html`: the Home page (sidebar, Projects bar, cards, composer, dark
+  and light themes), source of the mockups in `../design/mockups/`.
+- `lot-4-pages-prototype.html`: the lot 4 screens laid on the application shell,
+  plus the "Session with an agent" screen. The keys `1`–`9`, `0`, `a`, `k`, `t`, `b`, `n`
+  switch screens.
 
-Ils servent **uniquement** de référence pour les tokens (variables CSS `--*`, tailles, rayons,
-ombres, polices) et pour le motion (durées, courbes, transitions). Leur balisage, leurs classes et
-leurs styles inline ne sont **jamais** recopiés dans un composant : un composant qui les recopie
-est refusé en revue. La règle complète est dans [`../design/README.md`](../design/README.md).
+They serve **only** as a reference for the tokens (CSS variables `--*`, sizes, radii,
+shadows, fonts) and for the motion (durations, curves, transitions). Their markup, their classes and
+their inline styles are **never** copied into a component: a component that copies them
+is rejected in review. The full rule is in [`../design/README.md`](../design/README.md).

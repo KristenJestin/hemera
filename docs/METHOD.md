@@ -1,48 +1,48 @@
-# Méthode : d'une issue au code livré
+# Method: from an issue to shipped code
 
-Comment un besoin devient du code dans ce dépôt. Quatre artefacts, des scénarios testés, des tâches cochées seulement après vérification, des preuves jointes. Tout vit dans les issues et les pull requests de ce dépôt ; le code ne contient que du code, sa documentation et son `AGENTS.md`. Les documents sont en français ; les issues, les pull requests et le code en anglais.
+How a need becomes code in this repository. Four artefacts, tested scenarios, tasks ticked only after their verification ran, evidence attached. Everything lives in the issues and pull requests of this repository; the code holds only code, its documentation and its `AGENTS.md`. Everything is in English.
 
-## 1. L'issue : l'intention
+## 1. The issue: the intention
 
-Une issue dit **ce qu'on veut, où ça s'applique, comment on saura que c'est fait**, et ce qui l'a déclenchée. Elle ne contient pas de solution. Elle est écrite en anglais, comme tout ce qui est public dans le dépôt. Ses labels disent son type (`type:idea`, `type:bug`, `type:debt`, `type:research`) et son domaine (`area:sessions`, `area:agents`, …) ; son milestone dit la version qui la livrera ; son état est le champ **Status** du [projet GitHub « Hemera »](https://github.com/users/KristenJestin/projects/7).
+An issue says **what is wanted, where it applies, how we will know it is done**, and what triggered it. It contains no solution. Its labels say its type (`type:idea`, `type:bug`, `type:debt`, `type:research`) and its area (`area:sessions`, `area:agents`, …); its milestone says the version that will ship it; its state is the **Status** field of the [GitHub project "Hemera"](https://github.com/users/KristenJestin/projects/7).
 
-Les états, dans le projet :
+The states, in the project:
 
-| État | Ce que ça veut dire | Qui agit |
+| State | What it means | Who acts |
 |---|---|---|
-| Backlog | reçue, priorisée, pas engagée | le mainteneur |
-| To frame | retenue ; l'agent écrit les sections Proposal, Design et Spec et les checklists dans l'issue, et finit par les points à trancher ; l'issue y reste tant que le mainteneur n'a pas tranché en commentaire | agent puis mainteneur |
-| Framed | tranchée, rien de commencé : c'est la file où l'on pioche | libre |
-| In progress | branche ouverte, checklists qui se cochent, gate UI de phase 0 ; au plus trois en même temps | dev |
-| In review | pull request prête, validation humaine | le mainteneur |
-| Done | pull request fusionnée, ou abandon dit en commentaire | — |
+| Backlog | received, prioritised, not engaged | the maintainer |
+| To frame | retained; the agent writes the Proposal, Design and Spec sections and the checklists in the issue, and ends with the points to decide; the issue stays there until the maintainer has decided in a comment | agent, then maintainer |
+| Framed | decided, nothing started: the queue to pick from | anyone |
+| In progress | branch open, checklists ticking, UI gate of phase 0; at most three at a time | dev |
+| In review | pull request ready, human validation | the maintainer |
+| Done | pull request merged, or abandonment said in a comment | — |
 
-## 2. Proposal, Design, Spec : trois sections de l'issue
+## 2. Proposal, Design, Spec: three sections of the issue
 
-Au cadrage, l'agent ajoute **trois sections** à l'issue, sous l'intention, en anglais :
+At framing time, the agent adds **three sections** to the issue, under the intention:
 
-- **Proposal** : Why, What changes, Capabilities touchées, Impact (packages, migrations, tests), et les points à trancher avec une recommandation chacun. Le mainteneur tranche en commentaire ; l'agent reporte la décision dans une section « Tranché ».
-- **Design** : les décisions numérotées `D<lot>-01`, `D<lot>-02`… avec leur raison et l'alternative écartée. C'est ce que le code cite en commentaire.
-- **Spec · <capacité>** (une par capacité) : des exigences `Hemera SHALL …` avec leurs scénarios `WHEN … THEN …`. **Chaque scénario devient un test nommé d'après lui.** Un scénario sans test est un défaut.
+- **Proposal**: Why, What changes, Capabilities touched, Impact (packages, migrations, tests), and the points to decide with one recommendation each. The maintainer decides in a comment; the agent records the decision in a "Decided" section.
+- **Design**: the numbered decisions `D<lot>-01`, `D<lot>-02`… with their reason and the alternative set aside. This is what the code cites in comments.
+- **Spec · <capability>** (one per capability): requirements `Hemera SHALL …` with their scenarios `WHEN … THEN …`. **Every scenario becomes a test named after it.** A scenario without a test is a defect.
 
-Ces sections sont la vérité du lot ; le code s'y conforme, et si une section a tort on le dit en commentaire au lieu de dévier en silence. Une décision qui traverse les lots va dans [`docs/decisions/`](decisions/README.md).
+These sections are the truth of the lot; the code conforms to them, and if a section is wrong it is said in a comment instead of silently deviating. A decision that crosses lots goes to [`docs/decisions/`](decisions/README.md).
 
-## 3. Les tâches : des checklists dans l'issue
+## 3. The tasks: checklists in the issue
 
-Une liste de cases à cocher par phase (0 · UI d'abord, 1 · moteur, 2 · branchement, 3 · recette), un item par tâche, chaque item nommant sa **vérification** (« … ; vérifier `pnpm check` vert et le scénario X »). **Un item n'est coché qu'après avoir lancé sa vérification et vu la sortie.**
+One task list per phase (0 · UI first, 1 · engine, 2 · wiring, 3 · acceptance), one item per task, each item naming its **verification** ("…; check `pnpm check` green and scenario X"). **An item is ticked only after its verification ran and its output was seen.**
 
-La phase 0 finit par une gate humaine : le dev pousse sa branche, ouvre une **pull request en brouillon** vers `dev` et mentionne le mainteneur ; celui-ci valide dans Storybook, deux thèmes, au clavier, et le dit en commentaire. L'issue reste In progress pendant ce temps ; la phase 1 attend cette validation.
+Phase 0 ends with a human gate: the dev pushes the branch, opens a **draft pull request** against `dev` and mentions the maintainer; the maintainer validates in Storybook, both themes, with the keyboard, and says so in a comment. The issue stays In progress meanwhile; phase 1 waits for that validation.
 
-## 4. Les preuves : pièces jointes et commentaires
+## 4. The evidence: attachments and comments
 
-Les sorties réelles (`pnpm check`, E2E, paquet, captures) sont **jointes à la pull request** ; un commentaire résume ce qui a été joué, sur quel OS, et ce qui ne l'a pas été. Ce qui n'a pas été joué est dit, jamais supposé. Une vérification Linux non faite sur Linux est « non vérifiée », pas verte.
+The real outputs (`pnpm check`, end-to-end, package, screenshots) are **attached to the pull request**; a comment sums up what was run, on which OS, and what was not. What was not run is said, never assumed. A Linux verification not run on Linux is "not verified", not green.
 
-## 5. La livraison
+## 5. Delivery
 
-Branche `feature/<sujet>` depuis `dev`, commits Angular sous l'identité du mainteneur. Fin de phase 3, la pull request passe de brouillon à prête : titre = sujet Angular pur (semantic-release le lit pour décider la version), description terminée par `Closes #<n>`. L'issue passe In review. Après la recette, **fusion par squash**, l'issue se ferme. Une fusion `dev` → `main` par version (le milestone) pose le tag et la Release.
+Branch `feature/<topic>` from `dev`, Angular commits under the maintainer's identity. At the end of phase 3 the pull request goes from draft to ready: title = a plain Angular subject (semantic-release reads it to decide the version), description ending with `Closes #<n>`. The issue moves to In review. After acceptance, **squash merge**, the issue closes. One `dev` → `main` merge per version (the milestone) sets the tag and the Release.
 
-## 6. Les documents
+## 6. The documents
 
-- [`docs/product/core.md`](product/core.md) prévaut sur tout le reste ; [`docs/decisions/`](decisions/README.md) le précise ; [`docs/technical/`](technical/) porte les recherches ; [`docs/design/`](design/README.md) et [`docs/prototypes/`](prototypes/README.md) sont des références de tokens et de mouvement, jamais de balisage à copier.
-- Une proposal qui change une règle produit modifie le document dans la même pull request et le dit dans l'issue.
-- Une issue nomme dans « Références » les documents dont elle a besoin.
+- [`docs/product/core.md`](product/core.md) prevails over everything else; [`docs/decisions/`](decisions/README.md) refines it; [`docs/technical/`](technical/) holds the research; [`docs/design/`](design/README.md) and [`docs/prototypes/`](prototypes/README.md) are references for tokens and motion, never markup to copy.
+- A proposal that changes a product rule edits the document in the same pull request and says so in the issue.
+- An issue names in "References" the documents it needs.

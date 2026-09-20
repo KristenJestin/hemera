@@ -1,210 +1,210 @@
-# Questions ouvertes du noyau produit
+# Open questions of the product core
 
-**Dernière mise à jour :** 2026-09-12
+**Last updated:** 2026-09-12
 
-Ce document contient les décisions qui ne sont pas encore assez établies pour entrer dans
+This document contains the decisions that are not yet established enough to enter
 [`core.md`](./core.md).
 
-## Priorités de travail proposées
+## Proposed work priorities
 
-Le noyau fixe déjà les principales entités, les missions, le contrat des révisions et les
-validations humaines. Les éléments ci-dessous sont des pistes de travail, pas de nouvelles
-décisions validées :
+The core already fixes the main entities, the missions, the revision contract and the
+human validations. The items below are work leads, not new
+validated decisions:
 
-1. Préciser le découpage de réalisation des blocs retenus dans
-   [`delivery-scope.md`](./delivery-scope.md). Prototype natif, intégrations de PR et mémoire
-   durable sont reportés ; Git et le support des dépendances et du parallélisme sont inclus.
-   Les matrices détaillées par version et leur registre anti-oubli commun sont des
-   propositions à arbitrer, pas des validations.
-2. Prototyper les interactions déjà retenues pour éprouver la navigation et les actions
-   humaines, avant de figer leur présentation ou les détails de configuration.
+1. Specify the realisation breakdown of the blocks retained in
+   [`delivery-scope.md`](./delivery-scope.md). Native prototype, PR integrations and durable
+   memory are postponed; Git and support for dependencies and parallelism are included.
+   The detailed matrices per version and their common anti-omission register are
+   proposals to arbitrate, not validations.
+2. Prototype the interactions already retained to test the navigation and the human
+   actions, before freezing their presentation or the configuration details.
 
-Les questions de cette page mélangent encore choix produit et détails d'implémentation ; elles
-ne nécessitent pas toutes une validation utilisateur individuelle avant de poursuivre.
+The questions on this page still mix product choices and implementation details; they
+do not all require an individual user validation before proceeding.
 
-## Socle technique — apports des spikes
+## Technical foundation — contributions of the spikes
 
-Les expériences importées sont rapprochées dans le rapport technique de rapprochement des
-spikes, sans les réexécuter.
-Le [découpage v1](./spec-map-v1.md) traduit les besoins en scénarios ; il ne remplace
-pas les arbitrages ci-dessous par une implémentation supposée prête.
+The imported experiments are consolidated in the technical report consolidating the
+spikes, without rerunning them.
+The [v1 breakdown](./spec-map-v1.md) translates the needs into scenarios; it does not replace
+the arbitrations below with an implementation assumed ready.
 
-- Les deux dépôts et leur reconstruction ont désormais une proposition dans le
-  design du premier lot ; les remotes
-  restent à renseigner lorsqu'une publication est nécessaire.
-- Windows et Linux sont retenus dès le socle. Le conditionnement natif, les migrations et
-  le serveur MCP compilé doivent être vérifiés sur chacun ; les mesures Linux ne prouvent pas Windows.
-- Claude Code, Codex et OpenCode sont retenus. Quelles garanties ACP sont confirmées pour
-  les versions de chacun ? Comment contrôler ses outils
-  et ses sources personnelles tout en permettant les fichiers Projet explicitement choisis ?
-- Le terminal interactif est retenu en v1 ; le minimum proposé dans la Spec doit être
-  vérifié sur Windows/Linux, notamment sélection/copie/collage, scroll réel et interaction TUI.
-- Quelles limites de presse-papiers, pièces jointes, focus/clavier et accessibilité faut-il
-  résoudre pour le parcours livré ? Les propositions d'exclusion des spikes ne sont pas actées.
+- The two repositories and their reconstruction now have a proposal in the
+  design of the first lot; the remotes
+  remain to be filled in when a publication is necessary.
+- Windows and Linux are retained from the foundation on. Native packaging, migrations and
+  the compiled MCP server must be verified on each; Linux measurements do not prove Windows.
+- Claude Code, Codex and OpenCode are retained. Which ACP guarantees are confirmed for
+  the versions of each? How to control its tools
+  and its personal sources while allowing explicitly chosen Project files?
+- The interactive terminal is retained in v1; the minimum proposed in the Spec must be
+  verified on Windows/Linux, in particular selection/copy/paste, real scrolling and TUI interaction.
+- Which clipboard, attachment, focus/keyboard and accessibility limits must be
+  resolved for the delivered journey? The exclusion proposals from the spikes are not settled.
 
 ## Session
 
-- Comment présenter dans le chat les appels d'outils, résultats et erreurs sans noyer la
-  conversation ?
-- Comment représenter une nouvelle passe de travail sans exposer inutilement les runs
-  techniques ?
-- Quand une activité de sous-agent mérite-t-elle de devenir une Session indépendante dans
-  la sidebar ?
-- Quelle partie d'une Session spécialisée est fournie à la nouvelle Session qu'elle lance
-  pour poursuivre le travail avec une autre mission ?
+- How to present tool calls, results and errors in the chat without drowning the
+  conversation?
+- How to represent a new work pass without needlessly exposing the technical
+  runs?
+- When does a sub-agent activity deserve to become an independent Session in
+  the sidebar?
+- Which part of a specialised Session is provided to the new Session it launches
+  to continue the work with another mission?
 
-## Contexte et reprise
+## Context and resumption
 
-- Quelles capacités de reprise native, de restitution de l'historique et de continuité du
-  contexte sont disponibles par provider ACP ? La reprise native reste prioritaire ; les
-  mécanismes de cache restent gérés par le provider.
-- Quel contexte précis Hemera reconstruit-il pour la reprise de secours proposée à l'utilisateur
-  lorsqu'une reprise ACP est impossible ? Comment vérifier les effets des tâches interrompues
-  avant de continuer, sans les rejouer aveuglément ?
-- Pour une reconstruction de secours uniquement, quelle part de l'historique sauvegardé est
-  renvoyée au modèle, résumée, indexée ou seulement conservée pour l'utilisateur ?
-- Comment articuler les instructions utilisateur du Projet avec les fichiers d'instructions
-  déjà présents dans ses dépôts ? Leur utilisation comme sources sans copie est acquise ;
-  restent la sélection, la portée, les conflits et les doublons avec la lecture native du provider.
-- Quelles informations de contexte fournir initialement, rendre consultables via MCP ou
-  actualiser pendant une Session, en préservant la continuité native du provider ?
-- Comment livrer les mises à jour d'instructions du Projet selon les capacités de chaque
-  provider ? Le principe est acquis : mise à jour ciblée à un point de reprise sûr pour les
-  Sessions en cours, instructions actualisées dès le départ pour les nouvelles Sessions.
+- Which capabilities of native resumption, history restitution and context
+  continuity are available per ACP provider? Native resumption remains the priority; the
+  caching mechanisms remain managed by the provider.
+- Which precise context does Hemera reconstruct for the fallback resumption offered to the user
+  when an ACP resumption is impossible? How to check the effects of interrupted tasks
+  before continuing, without blindly replaying them?
+- For a fallback reconstruction only, which share of the saved history is
+  sent back to the model, summarised, indexed or only kept for the user?
+- How to articulate the Project's user instructions with the instruction files
+  already present in its repositories? Their use as sources without copying is settled;
+  what remains is selection, scope, conflicts and duplicates with the provider's native reading.
+- Which context information to provide initially, make available via MCP or
+  refresh during a Session, while preserving the provider's native continuity?
+- How to deliver updates to the Project's instructions according to each provider's
+  capabilities? The principle is settled: targeted update at a safe resumption point for
+  Sessions in progress, updated instructions from the start for new Sessions.
 
-## Mémoire durable — version mineure ultérieure
+## Durable memory — later minor version
 
-La consultation des Specs existantes via MCP et la sauvegarde des Sessions ne constituent
-pas cette fonctionnalité. Les questions suivantes sont différées et ne bloquent pas la première
-livraison d'Hemera :
+Consulting existing Specs via MCP and saving Sessions do not constitute
+this feature. The following questions are deferred and do not block Hemera's first
+delivery:
 
-- Quels usages justifient une mémoire durable en complément des données déjà consultables ?
-- Comment mesurer son utilité et détecter des souvenirs incorrects ou périmés ?
-- Quelle portée, quelles sources et quelles règles d'alimentation ou de partage retenir ?
-- Quel enseignement tirer de l'usage actuel de Mnemon par l'utilisateur, sans présumer de
-  son adoption dans Hemera ?
+- Which uses justify a durable memory in addition to the data already available for consultation?
+- How to measure its usefulness and detect incorrect or stale memories?
+- Which scope, which sources and which feeding or sharing rules to retain?
+- What lesson to draw from the user's current use of Mnemon, without presuming
+  its adoption in Hemera?
 
 ## Spec
 
-- Jusqu'à quel niveau relier tâches et preuves aux `UserStory` sans imposer une traçabilité
-  artificielle aux petites Specs ?
-- Quels détails de schéma et contrôles implémentent les contrats minimaux déjà définis pour
-  `feature`, `bug` et `maintenance` ?
-- Quels besoins futurs justifieraient réellement un type supplémentaire au-delà de
-  `feature`, `bug` et `maintenance` ?
-- Comment présenter l'édition manuelle du brouillon dans le panneau Spec et coordonner les
-  modifications humaines avec celles de l'agent sans écrasement involontaire ?
-- Comment attribuer et transférer l'écriture d'une Spec entre Sessions `define` dans la première
-  version, puis gérer les conflits si plusieurs Sessions peuvent écrire simultanément plus tard ?
-- Comment nommer et modéliser le mécanisme qui rejoue le scénario d'un bug après le `build`
-  et conserve la preuve de sa correction ?
-- Quels champs et relations précis complètent le socle déjà fixé pour `Prototype`, ses versions,
-  leurs pages, leurs variantes, les rounds et les retours humains ?
+- To what level should tasks and proofs be linked to `UserStory` items without imposing artificial
+  traceability on small Specs?
+- Which schema details and checks implement the minimal contracts already defined for
+  `feature`, `bug` and `maintenance`?
+- Which future needs would really justify an additional type beyond
+  `feature`, `bug` and `maintenance`?
+- How to present manual editing of the draft in the Spec panel and coordinate
+  human modifications with the agent's without unintended overwriting?
+- How to assign and transfer the writing of a Spec between `define` Sessions in the first
+  version, then handle conflicts if several Sessions can write simultaneously later?
+- How to name and model the mechanism that replays a bug's scenario after the `build`
+  and keeps the proof of its fix?
+- Which precise fields and relations complete the base already fixed for `Prototype`, its versions,
+  their pages, their variants, the rounds and the human feedback?
 
-## Projet et Workspace
+## Project and Workspace
 
-- Comment représenter précisément les dossiers, dépôts, checkouts et worktrees d'un Projet
-  et de ses Workspaces ?
-- Comment préparer un Workspace multi-repo : choix des dépôts et branches, traitement des
-  fichiers hors dépôts et modalités techniques de reprise après un échec partiel, sans
-  recréer les ressources déjà préparées ? Le principe de conservation et de reprise est acquis.
-- Quelles recettes de préparation des dépendances, ports, variables, données et services
-  fournir au Projet, et quelles ressources préparer avant le lancement du build ou démarrer
-  ensuite à la demande dans le Workspace déjà configuré ?
-- Comment attribuer les URLs par application et Workspace, notamment en multi-repo, et
-  configurer leurs échanges ? Portless est une piste d'intégration.
-- Comment enregistrer et suivre l'ensemble des PR nécessaires à une Spec, notamment lorsqu'une
-  PR est remplacée ? Le merge de toutes les PR nécessaires rend la clôture proposée éligible,
-  mais seul un clic explicite de l'utilisateur l'autorise.
-- Comment coordonner plusieurs builds lorsque leurs Specs partagent le même Workspace ?
-- **GitHub et les issues (décidé le 15 septembre 2026, à placer dans un lot).** Hemera doit
-  savoir lire et écrire les issues et les PR du dépôt d'un Projet : une Spec qui naît d'une
-  issue ou en crée une, une PR de livraison rattachée à sa Spec, un état renvoyé vers GitHub.
-  Le constat vient de l'outillage du projet lui-même : OpenSpec est purement fichiers et n'a pas de
-  pont vers les issues, et c'est le même manque qu'un utilisateur d'Hemera aura. Reste à
-  trancher : quel lot (après le 7, Workspaces, qui apporte Git), quel fournisseur en premier
-  (GitHub, puis GitLab ?), authentification (`gh` local ou token dans le profil), et si le
-  Journal d'Hemera devient la source et GitHub le miroir, ou l'inverse.
+- How to precisely represent the folders, repositories, checkouts and worktrees of a Project
+  and its Workspaces?
+- How to prepare a multi-repo Workspace: choice of repositories and branches, handling of
+  files outside repositories and technical modalities of resumption after a partial failure, without
+  recreating the resources already prepared? The principle of retention and resumption is settled.
+- Which preparation recipes for dependencies, ports, variables, data and services to
+  provide to the Project, and which resources to prepare before launching the build or start
+  afterwards on demand in the already configured Workspace?
+- How to assign URLs per application and Workspace, in particular in multi-repo, and
+  configure their exchanges? Portless is an integration lead.
+- How to record and track all the PRs needed for a Spec, in particular when a
+  PR is replaced? The merge of all the necessary PRs makes the proposed closure eligible,
+  but only an explicit click by the user authorises it.
+- How to coordinate several builds when their Specs share the same Workspace?
+- **GitHub and issues (decided on 15 September 2026, to be placed in a lot).** Hemera must
+  be able to read and write the issues and PRs of a Project's repository: a Spec born from an
+  issue or creating one, a delivery PR attached to its Spec, a state sent back to GitHub.
+  The observation comes from the project's own tooling: OpenSpec is purely file-based and has no
+  bridge to issues, and it is the same gap that a Hemera user will have. Still to
+  decide: which lot (after 7, Workspaces, which brings Git), which provider first
+  (GitHub, then GitLab?), authentication (local `gh` or token in the Profile), and whether the
+  Hemera Journal becomes the source and GitHub the mirror, or the reverse.
 
-## Commandes
+## Commands
 
-- Comment présenter les applications, vérifications et utilitaires, et leurs éventuels groupes ?
-- Comment importer des scripts et proposer la promotion d'une exécution ponctuelle au catalogue
-  selon la configuration du Projet ?
-- Comment relier les commandes à la préparation d'environnement, aux ports et à l'option
-  système Portless ?
+- How to present applications, verifications and utilities, and their possible groups?
+- How to import scripts and propose promoting a one-off execution to the catalogue
+  according to the Project's configuration?
+- How to link commands to environment preparation, ports and the Portless
+  system option?
 
-## Missions et exécution
+## Missions and execution
 
-- Si une Spec est réouverte après création de la Session build mais avant la première tâche,
-  comment gérer cette Session devenue liée à une ancienne révision ? Ce cas est distinct de
-  la préparation d'environnement, qui se déroule avant toute création de Session build.
-- Le catalogue initial `define` et `build` est-il fermé ou extensible ?
-- Faut-il permettre plusieurs configurations réutilisables pour une même mission ?
-- Quels contrôles supplémentaires deviendraient nécessaires si les critères de sortie initiaux
-  de `shape`, `plan`, `prototype` et `decompose` se révèlent insuffisants en pratique ?
-- Quelle empreinte minimale permet d'invalider une phase aval lorsque ses entrées changent,
-  sans introduire une validation et un hash visibles pour chaque champ de la Spec ?
-- Comment versionner un protocole de mission et traiter une Session encore active lorsqu'une
-  nouvelle version ajoute, retire ou réordonne une phase ?
-- Quelles phases de `build` peuvent être déléguées ou exécutées en
-  parallèle, et quelles dépendances réelles conditionnent leur démarrage ?
-- À quel moment une Session `define` commencée sans Spec doit-elle obligatoirement en créer
-  ou en rejoindre une ?
-- Comment composer les configurations de la documentation entre recettes Hemera, préférences utilisateur,
-  règles du workspace et ajustements propres à une Session ?
-- Sous quelle forme l'utilisateur ajoute-t-il ses propres cibles, règles et livrables de
-  documentation ?
-- Quelles missions peuvent en lancer automatiquement une autre, et selon quel consentement ?
-- Comment composer la politique d'actions externes entre réglages utilisateur, configuration
-  du projet et exception choisie pour une Session `build` ?
-- Quels réglages et quelle présentation permettent de configurer, par projet et par action
-  externe, les modes automatique, avec confirmation humaine ou désactivé, en conservant le
-  clic humain obligatoire pour clôturer une Spec et fermer ou nettoyer son Workspace ?
-- Comment présenter un orchestrateur `build`, ses workers et leurs demandes d'attention ?
-- Quels profils de reviewers fournir, combien en lancer et comment les sélectionner selon la
-  Spec, le diff et les règles du workspace ?
-- Comment l'utilisateur intervient-il pendant un travail autonome ?
-- Faut-il un jour autoriser une micro-intervention experte sans Spec, et sous quelle forme,
-  sans affaiblir la règle de la première version qui exige une Spec pour `build` ?
-- **Un serveur Hemera à qui passer la balle (décidé le 16 septembre 2026, version ultérieure,
-  après la v1).** Hemera aura une part serveur : un poste qui garde les Workspaces, les
-  Sessions et les agents en marche, auquel l'application de bureau se rattache. Depuis
-  l'application on envoie un travail au serveur (une Session `build`, une tâche, une recette
-  automatisable) ; il l'exécute, commite, pousse, et renvoie ce qui demande un humain, une
-  question, un diff à relire, une recette à faire à l'écran. On se passe la balle entre le
-  poste du serveur et n'importe quel autre, sans rien recopier. Le constat vient du
-  développement d'Hemera lui-même : le code avance sur une machine, la recette se fait sur une autre, et le seul
-  relais aujourd'hui est le ticket et la PR. À trancher : ce qui vit sur le serveur et ce qui
-  reste local (le profil et la base sont-ils du serveur ?), le protocole entre l'application
-  et lui (le même canal typé que l'IPC, exposé sur le réseau ?), l'authentification, et si une
-  application peut se rattacher à plusieurs serveurs.
+- If a Spec is reopened after the build Session is created but before the first task,
+  how to handle this Session now linked to an old revision? This case is distinct from
+  environment preparation, which takes place before any build Session is created.
+- Is the initial `define` and `build` catalogue closed or extensible?
+- Should several reusable configurations be allowed for the same mission?
+- Which additional checks would become necessary if the initial exit criteria
+  of `shape`, `plan`, `prototype` and `decompose` prove insufficient in practice?
+- Which minimal fingerprint allows invalidating a downstream phase when its inputs change,
+  without introducing a visible validation and hash for each field of the Spec?
+- How to version a mission protocol and handle a still-active Session when a
+  new version adds, removes or reorders a phase?
+- Which `build` phases can be delegated or executed in
+  parallel, and which real dependencies condition their start?
+- At what point must a `define` Session started without a Spec necessarily create
+  or join one?
+- How to compose documentation configurations between Hemera recipes, user preferences,
+  workspace rules and adjustments specific to a Session?
+- In what form does the user add their own documentation targets, rules and
+  deliverables?
+- Which missions can automatically launch another, and with what consent?
+- How to compose the external actions policy between user settings, project
+  configuration and the exception chosen for a `build` Session?
+- Which settings and which presentation allow configuring, per project and per external
+  action, the automatic, with-human-confirmation or disabled modes, while keeping the
+  mandatory human click to close a Spec and close or clean up its Workspace?
+- How to present a `build` orchestrator, its workers and their requests for attention?
+- Which reviewer profiles to provide, how many to launch and how to select them according to the
+  Spec, the diff and the workspace rules?
+- How does the user intervene during autonomous work?
+- Should an expert micro-intervention without a Spec one day be allowed, and in what form,
+  without weakening the first-version rule that requires a Spec for `build`?
+- **A Hemera server to hand the work over to (decided on 16 September 2026, later version,
+  after v1).** Hemera will have a server part: a machine that keeps the Workspaces, the
+  Sessions and the agents running, to which the desktop application attaches. From
+  the application, a piece of work is sent to the server (a `build` Session, a task, an automatable
+  acceptance test); it executes it, commits, pushes, and sends back what needs a human: a
+  question, a diff to review, an acceptance test to perform on screen. The work is handed back and forth
+  between the server's machine and any other, without copying anything over. The observation comes from the
+  development of Hemera itself: the code advances on one machine, acceptance testing is done on another, and the only
+  relay today is the ticket and the PR. To decide: what lives on the server and what
+  stays local (are the Profile and the database the server's?), the protocol between the application
+  and it (the same typed channel as the IPC, exposed on the network?), authentication, and whether an
+  application can attach to several servers.
 
-## Tâches et plan de réalisation
+## Tasks and realisation plan
 
-- Quels noms de tables et quelles cardinalités précises implémentent les tâches contractuelles,
-  leurs critères, leurs dépendances et leur progression propre à chaque Session `build` ?
-- Comment représenter précisément le blocage et sa résolution par l'utilisateur lorsqu'une
-  tâche contractuelle est incorrecte ? Le signalement, la suspension ciblée et l'interdiction
-  de modifier le contrat figé sont déjà acquis.
+- Which table names and which precise cardinalities implement the contractual tasks,
+  their criteria, their dependencies and their progress specific to each `build` Session?
+- How to precisely represent the blocker and its resolution by the user when a
+  contractual task is incorrect? Reporting, targeted suspension and the prohibition
+  on modifying the frozen contract are already settled.
 
 ## Journal
 
-- Quelle liste initiale d'événements métier mérite d'apparaître dans `domain_events`, et quel
-  niveau de détail reste réservé aux logs techniques ?
-- Quelle politique de rétention et de pagination conserve un Journal utile sur les Specs
-  longues sans rendre la lecture ou la base non bornée ?
+- Which initial list of domain events deserves to appear in `domain_events`, and which
+  level of detail remains reserved for technical logs?
+- Which retention and pagination policy keeps a useful Journal on long Specs
+  without making reading or the database unbounded?
 
 ## Interface
 
-- Comment présenter la vue « Contexte de la Session », ses sources et la distinction entre
-  contenu fourni par Hemera et informations seulement consultables via MCP ? Son principe est acquis.
-- Un espace de discussions `free` hors Projet aurait-il une place claire et utile dans
-  l'interface ? À tester dans le prototype ; la première version les rattache à un Projet.
-- Jusqu'où conserver les forces de la sidebar du produit précédent sans reproduire son interface à l'identique ?
-- Comment rendre immédiatement visibles la mission, la Spec éventuelle, le provider et
-  l'état d'une Session sans surcharger chaque ligne ?
-- Comment filtrer ou rapprocher les Sessions liées à une même Spec tout en les gardant
-  directement accessibles ?
-- Sous quelle forme le chat reste-t-il accessible pendant un `build` actif : panneau,
-  tiroir, overlay ou bascule de vue ?
+- How to present the "Session Context" view, its sources and the distinction between
+  content provided by Hemera and information only available for consultation via MCP? Its principle is settled.
+- Would a space for `free` discussions outside a Project have a clear and useful place in
+  the interface? To test in the prototype; the first version attaches them to a Project.
+- How far to keep the strengths of the previous product's sidebar without reproducing its interface identically?
+- How to make the mission, the possible Spec, the provider and the state of a Session
+  immediately visible without overloading each row?
+- How to filter or bring together the Sessions linked to the same Spec while keeping them
+  directly accessible?
+- In what form does the chat remain accessible during an active `build`: panel,
+  drawer, overlay or view toggle?

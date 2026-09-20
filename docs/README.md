@@ -1,12 +1,12 @@
-# Documentation d'Hemera
+# Hemera documentation
 
-| Dossier | Contenu |
+| Folder | Contents |
 |---|---|
-| [`METHOD.md`](METHOD.md) | comment une issue devient du code livré : états, sections, checklists, gate UI, pull request, release |
-| [`product/`](product/core.md) | les règles du produit ; `core.md` prévaut sur tout le reste |
-| [`decisions/`](decisions/README.md) | les décisions datées qui traversent les lots |
-| [`technical/`](technical/) | les recherches : ACP et agents, surface d'une Session |
-| [`design/`](design/README.md) | maquettes et règles d'usage : tokens seulement, jamais de balisage copié |
-| [`prototypes/`](prototypes/README.md) | prototypes HTML, références de tokens et de mouvement |
+| [`METHOD.md`](METHOD.md) | how an issue becomes shipped code: states, sections, checklists, UI gate, pull request, release |
+| [`product/`](product/core.md) | the product rules; `core.md` prevails over everything else |
+| [`decisions/`](decisions/README.md) | the dated decisions that cross lots |
+| [`technical/`](technical/) | the research: ACP and agents, surface of a Session |
+| [`design/`](design/README.md) | mockups and rules of use: tokens only, never copied markup |
+| [`prototypes/`](prototypes/README.md) | HTML prototypes, token and motion references |
 
-Documents en français ; code, commentaires, commits et interface en anglais.
+Everything in this repository is in English: documents, code, comments, commits, issues and the interface.
