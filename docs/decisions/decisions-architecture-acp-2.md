@@ -1,185 +1,185 @@
-# Architecture du chat multiagents avec ACP
+# Multi-agent chat architecture with ACP
 
-État des décisions au 8 septembre 2026.
+State of the decisions as of 8 September 2026.
 
-Ce document rassemble les orientations retenues et les éléments techniques vérifiés pour construire une interface de chat permettant de connecter Claude, Codex et OpenCode, de choisir leurs modèles et d’utiliser des outils personnalisés. Il conserve les corrections apportées pendant la recherche et distingue les possibilités établies des points restant à éprouver en implémentation.
+This document gathers the orientations retained and the technical elements verified to build a chat interface that connects Claude, Codex and OpenCode, selects their models and uses custom tools. It keeps the corrections made during the research and distinguishes established possibilities from the points that remain to be tested in implementation.
 
-## 1. Objectif et contrainte principale
+## 1. Objective and main constraint
 
-L’utilisateur doit pouvoir connecter ses comptes, sélectionner un agent et un modèle, puis passer de l’un à l’autre dans une interface commune.
+The user must be able to connect their accounts, select an agent and a model, then switch from one to the other in a common interface.
 
-**L’utilisation des abonnements Claude et ChatGPT est une condition indispensable.** Une solution qui imposerait uniquement une facturation API séparée ne répond pas au besoin.
+**Using the Claude and ChatGPT subscriptions is an indispensable condition.** A solution that would impose separate API billing only does not meet the need.
 
-Le produit doit permettre de définir ses propres outils et workflows, tout en déléguant autant que possible les protocoles, l’authentification et l’exécution aux composants maintenus des agents.
+The product must make it possible to define one's own tools and workflows, while delegating protocols, authentication and execution as much as possible to the agents' maintained components.
 
-## 2. Architecture retenue
+## 2. Architecture retained
 
-**ACP v1 constitue la base commune d’intégration.** Un même client ACP pilote plusieurs agents ; leurs adaptateurs traduisent les requêtes et les événements propres à chaque moteur. ACP v2 reste expérimental et ne constitue pas le socle retenu. [S1, S2]
+**ACP v1 is the common integration base.** A single ACP client drives several agents; their adapters translate the requests and events specific to each engine. ACP v2 remains experimental and is not the foundation retained. [S1, S2]
 
-| Composant | Intégration retenue | Moteur utilisé |
+| Component | Integration retained | Engine used |
 |---|---|---|
-| Client commun TypeScript | `@agentclientprotocol/sdk` | Communication ACP |
-| Claude | `@agentclientprotocol/claude-agent-acp` | Claude Agent SDK et moteur Claude Code |
+| Common TypeScript client | `@agentclientprotocol/sdk` | ACP communication |
+| Claude | `@agentclientprotocol/claude-agent-acp` | Claude Agent SDK and Claude Code engine |
 | Codex | `@agentclientprotocol/codex-acp` | Codex App Server |
-| OpenCode | `opencode acp` | OpenCode et ses fournisseurs configurés |
+| OpenCode | `opencode acp` | OpenCode and its configured providers |
 
-L’ancien adaptateur `@zed-industries/codex-acp` est remplacé par `@agentclientprotocol/codex-acp`. Le dépôt historique est archivé et renvoie vers le nouveau projet. [S3–S6]
+The former `@zed-industries/codex-acp` adapter is replaced by `@agentclientprotocol/codex-acp`. The historical repository is archived and points to the new project. [S3–S6]
 
-### Répartition du code
+### Code split
 
-Trois couches permettent de limiter les conditions spécifiques à chaque fournisseur :
+Three layers keep provider-specific conditions to a minimum:
 
-1. **Configuration par agent** : programme à lancer, arguments, environnement, versions et options avancées propres au moteur.
-2. **Client ACP commun** : transport, messages, événements, permissions, réglages et sessions.
-3. **Logique produit** : comptes connectés, catalogue regroupé, sélection active, historique commun et transfert de contexte.
+1. **Per-agent configuration**: program to launch, arguments, environment, versions and advanced options specific to the engine.
+2. **Common ACP client**: transport, messages, events, permissions, settings and sessions.
+3. **Product logic**: connected accounts, aggregated catalogue, active selection, common history and context transfer.
 
-Les comportements ordinaires doivent dépendre des capacités annoncées par l’agent. Les différences profondes de configuration restent isolées dans les modules d’intégration.
+Ordinary behaviours must depend on the capabilities announced by the agent. Deep configuration differences stay isolated in the integration modules.
 
-Un processus local ou distant doit exécuter les agents. Un navigateur seul ne remplace pas cet environnement. L’option locale ou desktop est la recommandation de départ ; le choix définitif de packaging n’est pas arrêté.
+A local or remote process must run the agents. A browser alone does not replace this environment. The local or desktop option is the starting recommendation; the final packaging choice is not settled.
 
-## 3. Abonnements et authentification
+## 3. Subscriptions and authentication
 
 ### OpenAI
 
-Codex distingue la connexion ChatGPT donnant accès aux droits de l’abonnement de la connexion par clé API facturée à l’usage. App Server peut conduire le parcours ChatGPT, conserver les jetons et les renouveler automatiquement. L’application peut ainsi déléguer le cycle d’authentification au moteur officiel. [S7, S8]
+Codex distinguishes the ChatGPT login, which grants the subscription's entitlements, from the API-key login billed per use. App Server can drive the ChatGPT flow, keep the tokens and renew them automatically. The application can thus delegate the authentication cycle to the official engine. [S7, S8]
 
-Le SDK API OpenAI classique n’est pas la solution retenue pour consommer le forfait ChatGPT. Pour une interface riche autour de Codex, App Server est l’interface officielle sous-jacente utilisée par le nouvel adaptateur ACP. [S4, S8]
+The classic OpenAI API SDK is not the solution retained to consume the ChatGPT plan. For a rich interface around Codex, App Server is the official underlying interface used by the new ACP adapter. [S4, S8]
 
 ### Claude
 
-**La clarification de facturation à conserver est celle du centre d’aide Anthropic mise à jour en juin 2026 : le SDK Claude, `claude -p` et les applications tierces continuent à consommer les limites d’usage de l’abonnement.** Le projet de séparation vers un crédit mensuel distinct a été suspendu. La suite de cet article conserve l’ancienne annonce à titre historique ; elle ne doit pas être interprétée comme la mesure active. [S9]
+**The billing clarification to keep is the one from the Anthropic help centre updated in June 2026: the Claude SDK, `claude -p` and third-party applications continue to consume the subscription's usage limits.** The plan to separate them into a distinct monthly credit has been suspended. The rest of that article keeps the old announcement for historical purposes; it must not be read as the active measure. [S9]
 
-Cette possibilité ne transforme pas les identifiants Claude.ai en clés API universelles. Les conditions d’intégration prévoient notamment l’utilisation du binaire Claude Code intact, une connexion personnelle de l’utilisateur dans le parcours Anthropic, la préservation des méthodes d’authentification et l’absence de revente ou d’intermédiation de l’usage. La page Agent SDK conserve par ailleurs une restriction sur l’offre de connexion ou de quotas Claude.ai dans un produit tiers sans approbation. [S10, S11]
+This possibility does not turn Claude.ai credentials into universal API keys. The integration conditions notably require using the Claude Code binary unmodified, a personal login by the user through the Anthropic flow, preserving the authentication methods, and no resale or intermediation of usage. The Agent SDK page also keeps a restriction on offering Claude.ai login or quotas in a third-party product without approval. [S10, S11]
 
-**Statut retenu : accès aux quotas documenté ; autorisation de toute architecture imaginable non établie.** Le produit doit conserver la connexion officielle et ne pas collecter les jetons pour les réutiliser dans son propre service d’inférence.
+**Status retained: access to the quotas is documented; authorisation of every conceivable architecture is not established.** The product must keep the official login and must not collect the tokens to reuse them in its own inference service.
 
-### Le cas T3 Code
+### The T3 Code case
 
-Le code examiné de T3 Code utilise le Claude Agent SDK, appelle `query()` et lui transmet le chemin du binaire Claude Code par `pathToClaudeCodeExecutable`. Son site annonce l’utilisation des abonnements existants. Aucune dérogation particulière n’a été établie pendant la recherche. T3 Code constitue une référence d’intégration, pas une preuve d’autorisation transférable à un autre produit. [S12, S13]
+The T3 Code code examined uses the Claude Agent SDK, calls `query()` and passes it the path of the Claude Code binary through `pathToClaudeCodeExecutable`. Its website announces the use of existing subscriptions. No particular exemption was established during the research. T3 Code is an integration reference, not proof of an authorisation transferable to another product. [S12, S13]
 
-### OpenCode ne remplace pas le chemin Claude officiel
+### OpenCode does not replace the official Claude path
 
-Le chemin retenu pour l’abonnement Claude est Claude ACP. La documentation OpenCode indique que les plugins réutilisant les abonnements Claude Pro/Max dans son moteur sont interdits par Anthropic et ne sont plus intégrés depuis OpenCode 1.3.0. Placer ACP devant OpenCode ne modifie pas cette situation. [S14]
+The path retained for the Claude subscription is Claude ACP. The OpenCode documentation states that plugins reusing Claude Pro/Max subscriptions in its engine are forbidden by Anthropic and are no longer integrated since OpenCode 1.3.0. Putting ACP in front of OpenCode does not change that situation. [S14]
 
-### Conséquences pour l’interface
+### Consequences for the interface
 
-- Distinguer connexion par abonnement et connexion API quand l’information est disponible.
-- Ne pas considérer la réussite d’une connexion comme la preuve que toute requête est incluse dans le forfait.
-- Conserver les limites et erreurs de quota visibles pour l’utilisateur.
-- Ne pas basculer silencieusement vers une route API payante.
+- Distinguish subscription login from API login when the information is available.
+- Do not treat a successful login as proof that every request is included in the plan.
+- Keep quota limits and errors visible to the user.
+- Do not silently fall back to a paid API route.
 
-## 4. Ce qui est mutualisé par ACP
+## 4. What is shared through ACP
 
-| Fonction | Mécanisme commun | Responsabilité produit |
+| Function | Common mechanism | Product responsibility |
 |---|---|---|
-| Initialisation | `initialize` | Démarrer la connexion et retenir les capacités |
-| Authentification | Méthodes annoncées dans `authMethods` | Présenter le parcours approprié |
-| Nouvelle session | `session/new` | Associer la session au chat |
-| Envoi d’un message | `session/prompt` | Saisie et routage |
-| Streaming et progression | `session/update` | Affichage des messages et actions |
-| Permissions | `session/request_permission` | Présenter et transmettre les décisions |
-| Arrêt d’un tour | `session/cancel` | Bouton Stop et état de l’interface |
-| Configuration | `configOptions` et `session/set_config_option` | Construire les sélecteurs |
-| Reprise | `session/load` ou `session/resume`, selon support | Persister les références et restaurer |
+| Initialisation | `initialize` | Start the connection and retain the capabilities |
+| Authentication | Methods announced in `authMethods` | Present the appropriate flow |
+| New session | `session/new` | Bind the session to the chat |
+| Sending a message | `session/prompt` | Input and routing |
+| Streaming and progress | `session/update` | Display messages and actions |
+| Permissions | `session/request_permission` | Present and relay the decisions |
+| Stopping a turn | `session/cancel` | Stop button and interface state |
+| Configuration | `configOptions` and `session/set_config_option` | Build the selectors |
+| Resumption | `session/load` or `session/resume`, depending on support | Persist the references and restore |
 
-Ces noms sont ceux des méthodes du protocole ; les méthodes TypeScript exactes dépendent de la version du SDK. Certaines fonctions sont optionnelles : leur présence doit être vérifiée, pas déduite du seul nom de l’agent. [S1, S15–S17]
+These names are those of the protocol methods; the exact TypeScript methods depend on the SDK version. Some functions are optional: their presence must be checked, not inferred from the agent's name alone. [S1, S15–S17]
 
-La connexion n’est pas un widget prêt à l’emploi. ACP décrit notamment des parcours pilotés par l’agent et des parcours nécessitant un terminal interactif, suivi d’une reconnexion. Le client doit implémenter ces types de parcours et respecter les capacités annoncées. [S15]
+Login is not an off-the-shelf widget. ACP notably describes agent-driven flows and flows requiring an interactive terminal, followed by a reconnection. The client must implement these kinds of flows and honour the announced capabilities. [S15]
 
-## 5. Modèles et réglages
+## 5. Models and settings
 
-### Sélection générique
+### Generic selection
 
-Les agents peuvent exposer leurs réglages dans `configOptions`, avec identifiant, libellé, valeur courante et choix possibles. Les catégories peuvent identifier le modèle, le mode ou le niveau de réflexion.
+Agents can expose their settings in `configOptions`, with an identifier, a label, a current value and possible choices. Categories can identify the model, the mode or the reasoning level.
 
-Le client peut produire les contrôles depuis ces données, puis transmettre une sélection avec `session/set_config_option`. L’agent renvoie l’état complet actualisé ; des notifications peuvent également faire évoluer les options. Cela permet de répercuter les dépendances entre modèle et réglages. [S16]
+The client can generate the controls from this data, then send a selection with `session/set_config_option`. The agent returns the full updated state; notifications can also change the options. This makes it possible to reflect the dependencies between model and settings. [S16]
 
-Les implémentations examinées de Claude ACP, Codex ACP et OpenCode possèdent une gestion des options de session. Il reste nécessaire de vérifier la couverture des versions effectivement distribuées. [S18–S20]
+The implementations examined of Claude ACP, Codex ACP and OpenCode have session option handling. Coverage in the versions actually distributed still needs to be checked. [S18–S20]
 
-### Catalogue du produit
+### Product catalogue
 
-L’application regroupe les modèles annoncés par les connexions actives. Chaque choix conserve au minimum l’identité de la connexion, celle de l’agent et l’identifiant du modèle.
+The application aggregates the models announced by the active connections. Each choice keeps at least the identity of the connection, that of the agent and the model identifier.
 
-**Agent et modèle restent deux notions distinctes.** OpenCode est un moteur pouvant utiliser plusieurs fournisseurs. Un même nom de modèle accessible par deux moteurs ne garantit ni les mêmes outils, ni les mêmes instructions, ni le même mode de facturation.
+**Agent and model remain two distinct notions.** OpenCode is an engine that can use several providers. The same model name reachable through two engines guarantees neither the same tools, nor the same instructions, nor the same billing mode.
 
-Le sélecteur doit afficher les modèles exposés par l’agent dans son contexte, et non promettre l’accès à tout le catalogue commercial du fournisseur. La présence dans une liste ne garantit pas une requête réussie ou un quota disponible.
+The selector must show the models exposed by the agent in its context, not promise access to the provider's whole commercial catalogue. Presence in a list guarantees neither a successful request nor an available quota.
 
-## 6. Conversation commune et changement d’agent
+## 6. Shared conversation and agent switching
 
-### Changement de modèle dans le même agent
+### Model change within the same agent
 
-Le changement porte sur une option de la session existante. La recommandation initiale est de faire appliquer la sélection au prochain message, après la fin ou l’annulation du tour en cours, pour garder un comportement compréhensible.
+The change concerns an option of the existing session. The initial recommendation is to apply the selection to the next message, after the current turn has ended or been cancelled, to keep the behaviour understandable.
 
-### Passage de Claude à Codex ou OpenCode
+### Switching from Claude to Codex or OpenCode
 
-**ACP n’offre pas de migration universelle de mémoire entre agents.** Charger une session signifie demander à son moteur de restaurer une session qu’il connaît ; l’identifiant d’une session Claude n’est pas une mémoire directement exploitable par Codex. [S17]
+**ACP offers no universal memory migration between agents.** Loading a session means asking its engine to restore a session it knows; the identifier of a Claude session is not a memory Codex can use directly. [S17]
 
-L’application doit posséder son propre historique commun et gérer le transfert de contexte. Le schéma de données recommandé comprend :
+The application must have its own shared history and handle context transfer. The recommended data schema includes:
 
-| Objet | Rôle |
+| Object | Role |
 |---|---|
-| Conversation | Fil visible commun |
-| Messages et événements | Contenu conservé avec sa provenance |
-| Session d’agent | Lien entre conversation, connexion et session du moteur |
-| Point de synchronisation | Dernier élément du fil transmis à chaque session |
-| Sélection active | Connexion, agent et modèle du prochain tour |
+| Conversation | Shared visible thread |
+| Messages and events | Content kept with its provenance |
+| Agent session | Link between conversation, connection and engine session |
+| Synchronisation point | Last item of the thread sent to each session |
+| Active selection | Connection, agent and model of the next turn |
 
-Exemple de fonctionnement : l’utilisateur discute avec Claude, sélectionne Codex, puis l’application crée ou reprend la session Codex et lui fournit les éléments pertinents du fil. Lors du retour à Claude, elle transmet ce qui s’est ajouté depuis son dernier tour.
+Example of operation: the user chats with Claude, selects Codex, then the application creates or resumes the Codex session and gives it the relevant items of the thread. When returning to Claude, it sends what was added since its last turn.
 
-Cette stratégie est une architecture applicative à implémenter. Le transfert peut inclure objectif, décisions, messages pertinents, résultats d’outils et état des fichiers. Il consomme des tokens et ne copie pas les raisonnements internes, les processus en cours ou tous les états privés du moteur. Un répertoire partagé aide à partager les fichiers, pas la mémoire conversationnelle.
+This strategy is an application architecture to implement. The transfer may include objective, decisions, relevant messages, tool results and file state. It consumes tokens and does not copy internal reasoning, in-flight processes or all of the engine's private state. A shared directory helps share files, not conversational memory.
 
-## 7. Outils personnalisés et configuration avancée
+## 7. Custom tools and advanced configuration
 
-### Niveau de contrôle retenu
+### Level of control retained
 
-**Construire notre interface, nos instructions, nos outils et notre orchestration est faisable. Remplacer entièrement la boucle interne des moteurs n’est pas une capacité générale d’ACP.**
+**Building our interface, our instructions, our tools and our orchestration is feasible. Fully replacing the engines' internal loop is not a general capability of ACP.**
 
-La boucle Claude, par exemple, continue à appeler le modèle, exécuter les outils et réinjecter les résultats. Les événements exposent l’activité ; ils ne donnent pas automatiquement au client la maîtrise de chaque requête et du contenu exact de son contexte. [S21]
+The Claude loop, for example, keeps calling the model, running the tools and feeding the results back. Events expose the activity; they do not automatically give the client control over each request and the exact content of its context. [S21]
 
 ### Claude ACP
 
-Le code vérifié accepte des extensions à la création de session :
+The verified code accepts extensions at session creation:
 
-| Paramètre | Utilisation |
+| Parameter | Use |
 |---|---|
-| `_meta.systemPrompt` | Prompt système personnalisé |
-| `_meta.claudeCode.options.tools` | Sélection des outils intégrés ; `[]` les désactive |
-| `_meta.claudeCode.options.disallowedTools` | Exclusions d’outils |
-| `mcpServers` | Outils MCP apportés par le client |
-| `_meta.claudeCode.options.settingSources` | Contrôle des sources de réglages chargées |
+| `_meta.systemPrompt` | Custom system prompt |
+| `_meta.claudeCode.options.tools` | Selection of the built-in tools; `[]` disables them |
+| `_meta.claudeCode.options.disallowedTools` | Tool exclusions |
+| `mcpServers` | MCP tools brought by the client |
+| `_meta.claudeCode.options.settingSources` | Control of the settings sources loaded |
 
-L’ancien `_meta.disableBuiltInTools` est un raccourci conservé pour compatibilité. Ces options sont propres à Claude ACP. Certains champs du SDK sont contrôlés ou remplacés par l’adaptateur : il ne faut pas supposer que toute option du SDK traverse librement ACP. Les callbacks JavaScript ne se sérialisent pas dans une requête JSON. [S18, S22]
+The former `_meta.disableBuiltInTools` is a shortcut kept for compatibility. These options are specific to Claude ACP. Some SDK fields are controlled or overridden by the adapter: one must not assume that every SDK option passes freely through ACP. JavaScript callbacks do not serialise into a JSON request. [S18, S22]
 
-`allowedTools` est une liste de préautorisation, pas une liste exclusive des outils visibles. Pour supprimer les outils intégrés tout en gardant les outils MCP, la sélection `tools: []` est adaptée ; `disallowedTools: ["*"]` supprimerait aussi les outils MCP. Refuser une exécution et retirer une définition d’outil sont deux opérations différentes. [S23]
+`allowedTools` is a pre-authorisation list, not an exclusive list of the visible tools. To remove the built-in tools while keeping the MCP tools, the selection `tools: []` is appropriate; `disallowedTools: ["*"]` would also remove the MCP tools. Refusing an execution and removing a tool definition are two different operations. [S23]
 
 ### Codex ACP
 
-Le moteur expose des réglages de permissions, sandbox, modèles et MCP. L’adaptateur accepte notamment `CODEX_CONFIG`. La configuration Codex comprend des contrôles de shell, recherche web et filtrage des outils MCP. **La suppression exhaustive de tous les outils intégrés n’a pas été validée.** Un environnement en lecture seule ne signifie pas que le modèle ne voit plus les outils. [S4, S24]
+The engine exposes settings for permissions, sandbox, models and MCP. The adapter notably accepts `CODEX_CONFIG`. The Codex configuration includes controls for the shell, web search and MCP tool filtering. **The exhaustive removal of all built-in tools has not been validated.** A read-only environment does not mean the model no longer sees the tools. [S4, S24]
 
 ### OpenCode
 
-OpenCode permet des agents personnalisés avec prompts, permissions par outil et outils supplémentaires. Le champ `permission` est à privilégier ; l’ancien champ `tools` est déprécié. Les personnalisations passent par la configuration OpenCode, même lorsque l’interface utilise ACP. [S25, S26]
+OpenCode allows custom agents with prompts, per-tool permissions and additional tools. The `permission` field is to be preferred; the former `tools` field is deprecated. Customisations go through the OpenCode configuration, even when the interface uses ACP. [S25, S26]
 
-### Outils communs via MCP
+### Common tools through MCP
 
-MCP est le format recommandé pour exposer les outils métier communs aux différents moteurs : recherche documentaire, accès aux données, modification d’un projet, demande d’information ou délégation de tâche.
+MCP is the recommended format to expose the business tools common to the different engines: document search, data access, project modification, information request or task delegation.
 
-Le serveur d’outils maîtrise les accès, la validation des entrées et les effets exécutés. Le moteur reste responsable de la boucle de décision. Avec Claude Agent SDK directement, des outils TypeScript peuvent également être exposés dans le même processus ; avec un adaptateur ACP externe, un serveur MCP séparé constitue une intégration naturelle. [S27]
+The tool server controls access, input validation and the effects executed. The engine remains responsible for the decision loop. With the Claude Agent SDK directly, TypeScript tools can also be exposed in the same process; with an external ACP adapter, a separate MCP server is a natural integration. [S27]
 
-## 8. Harness produit et séparation des responsabilités
+## 8. Product harness and separation of responsibilities
 
-Le harness métier appartient à l’application. ACP reste la couche de communication avec Claude, Codex et OpenCode ; MCP constitue le format commun pour exposer les outils ; le produit conserve l’état, les règles de workflow, les artifacts, les validations et l’expérience utilisateur.
+The business harness belongs to the application. ACP remains the communication layer with Claude, Codex and OpenCode; MCP is the common format to expose the tools; the product keeps the state, the workflow rules, the artifacts, the validations and the user experience.
 
 ```text
-Application et moteur de workflow
-    → sélection du rôle, du provider et du modèle
-    → création ou reprise d’une session ACP
-    → mise à disposition des outils via MCP
-    → collecte des événements, artifacts et résultats
-    → application des gates et transitions d’état
+Application and workflow engine
+    → selection of the role, the provider and the model
+    → creation or resumption of an ACP session
+    → tools made available through MCP
+    → collection of events, artifacts and results
+    → application of gates and state transitions
 ```
 
-Le rôle d’un agent ne doit pas être couplé à son provider. Une même opération peut être exécutée par Claude, Codex ou OpenCode sans modifier le workflow métier :
+The role of an agent must not be coupled to its provider. The same operation can be run by Claude, Codex or OpenCode without changing the business workflow:
 
 ```ts
 runAgent({
@@ -190,73 +190,73 @@ runAgent({
 });
 ```
 
-Les différences de lancement et de configuration restent confinées aux adaptateurs ACP. Le workflow manipule des capacités, des rôles et des artifacts, pas des branches conditionnelles dispersées du type `if Claude / else if Codex`.
+Launch and configuration differences stay confined to the ACP adapters. The workflow handles capabilities, roles and artifacts, not scattered conditional branches of the `if Claude / else if Codex` kind.
 
-### Les trois agents retenus
+### The three agents retained
 
-Trois définitions d’agents suffisent. Les différentes activités sont des **modes d’exécution**, pas de nouveaux agents.
+Three agent definitions are enough. The various activities are **execution modes**, not new agents.
 
-| Agent | Responsabilité | Modes principaux | Écritures autorisées par défaut |
+| Agent | Responsibility | Main modes | Writes allowed by default |
 |---|---|---|---|
-| **Spec Agent** | Comprendre, rechercher, challenger et formaliser l’intention | `draft`, `clarify`, `research`, `revise`, `validate` | Specs, décisions et critères d’acceptation |
-| **Dev Agent** | Concevoir techniquement, prototyper, implémenter, tester et reviewer | `plan`, `prototype`, `implement`, `review`, `fix` | Plans, tâches, code et tests |
-| **Doc Agent** | Documenter l’état réellement livré et détecter les divergences | `draft`, `sync`, `audit` | Documentation, guides et changelog |
+| **Spec Agent** | Understand, research, challenge and formalise the intent | `draft`, `clarify`, `research`, `revise`, `validate` | Specs, decisions and acceptance criteria |
+| **Dev Agent** | Design technically, prototype, implement, test and review | `plan`, `prototype`, `implement`, `review`, `fix` | Plans, tasks, code and tests |
+| **Doc Agent** | Document the state actually delivered and detect divergences | `draft`, `sync`, `audit` | Documentation, guides and changelog |
 
-Une code review agentique est une nouvelle exécution du Dev Agent en mode `review`, dans une session isolée de la session d’implémentation. Lorsque possible, le produit peut sélectionner un autre modèle ou provider. La séparation importante porte sur les exécutions et leur contexte, pas sur la multiplication des personnages.
+An agentic code review is a new run of the Dev Agent in `review` mode, in a session isolated from the implementation session. When possible, the product can select another model or provider. The important separation is between runs and their context, not in multiplying personas.
 
-Le Dev Agent ne modifie pas directement une spec approuvée. S’il découvre une contradiction, il crée une proposition d’amendement qui revient au Spec Agent ou à l’utilisateur. Le Doc Agent ne doit pas inventer le comportement du produit : il compare la spec approuvée, le diff accepté et le produit vérifié.
+The Dev Agent does not directly modify an approved spec. If it finds a contradiction, it creates an amendment proposal that goes back to the Spec Agent or to the user. The Doc Agent must not invent the product's behaviour: it compares the approved spec, the accepted diff and the verified product.
 
-## 9. Développement piloté par les specs
+## 9. Spec-driven development
 
-GitHub Spec Kit est une source d’inspiration méthodologique, pas une dépendance centrale. Son workflow sépare constitution, spécification, plan, tâches, implémentation et convergence. Il propose aussi clarification, analyse de cohérence, checklists et une extension dédiée aux bugs. [S30–S34]
+GitHub Spec Kit is a source of methodological inspiration, not a central dependency. Its workflow separates constitution, specification, plan, tasks, implementation and convergence. It also offers clarification, consistency analysis, checklists and an extension dedicated to bugs. [S30–S34]
 
-### Concepts repris de Spec Kit
+### Concepts taken from Spec Kit
 
-- Séparer le besoin fonctionnel du plan technique.
-- Définir des critères d’acceptation observables et testables.
-- Versionner les artifacts et les décisions.
-- Conserver une traçabilité entre exigences, tâches, code et tests.
-- Prévoir des opérations de clarification et de vérification de cohérence.
-- Utiliser des principes de projet communs sans construire un prompt monolithique.
-- Vérifier la convergence entre spec, implémentation et tests.
-- Pour les bugs, séparer diagnostic, correction et vérification.
+- Separate the functional need from the technical plan.
+- Define observable, testable acceptance criteria.
+- Version the artifacts and the decisions.
+- Keep traceability between requirements, tasks, code and tests.
+- Provide clarification and consistency-check operations.
+- Use common project principles without building a monolithic prompt.
+- Check convergence between spec, implementation and tests.
+- For bugs, separate diagnosis, fix and verification.
 
-### Éléments non repris tels quels
+### Elements not taken as is
 
-- La prolifération de commandes slash et de prompts installés différemment dans chaque agent.
-- L’explosion en fichiers Markdown imposés pour chaque étape intermédiaire.
-- Les templates rigides dont tous les champs seraient toujours obligatoires.
-- Les tâches représentées uniquement par des checkboxes Markdown.
-- Les boucles de convergence sans limite d’itérations, de temps ou de tokens.
-- Le couplage entre l’état métier de l’application et une organisation précise du filesystem.
+- The proliferation of slash commands and prompts installed differently in each agent.
+- The explosion into mandatory Markdown files for every intermediate step.
+- Rigid templates whose every field would always be mandatory.
+- Tasks represented only by Markdown checkboxes.
+- Convergence loops with no limit on iterations, time or tokens.
+- Coupling between the application's business state and a precise filesystem layout.
 
-Le produit réimplémente ces concepts sous forme d’objets métier, de transitions et de surfaces UI. Les représentations Markdown restent exportables et versionnables, mais ne constituent pas l’unique base de données applicative.
+The product reimplements these concepts as business objects, transitions and UI surfaces. Markdown representations remain exportable and versionable, but are not the only application data store.
 
-### Spec de fonctionnalité
+### Feature spec
 
-Une spec fonctionnelle décrit le **quoi** et le **pourquoi** :
+A functional spec describes the **what** and the **why**:
 
-- problème, contexte et résultat attendu ;
-- utilisateurs et parcours concernés ;
-- périmètre et hors périmètre ;
-- exigences fonctionnelles ;
-- critères d’acceptation ;
-- cas limites ;
-- exigences non fonctionnelles ;
-- contraintes produit, sécurité et conformité ;
-- questions ouvertes et décisions humaines ;
-- prototypes associés.
+- problem, context and expected outcome;
+- users and journeys concerned;
+- scope and out of scope;
+- functional requirements;
+- acceptance criteria;
+- edge cases;
+- non-functional requirements;
+- product, security and compliance constraints;
+- open questions and human decisions;
+- associated prototypes.
 
-Le framework, les fichiers à modifier, les migrations et le découpage en tâches appartiennent au plan technique produit par le Dev Agent. Cette séparation reprend le principe des templates `spec.md` et `plan.md` de Spec Kit sans en imposer la structure exacte. [S31, S32]
+The framework, the files to modify, the migrations and the breakdown into tasks belong to the technical plan produced by the Dev Agent. This separation takes up the principle of Spec Kit's `spec.md` and `plan.md` templates without imposing their exact structure. [S31, S32]
 
-### Workflow feature
+### Feature workflow
 
 ```text
 DRAFT
 → NEEDS_INPUT
 → SPEC_REVIEW
 → SPEC_APPROVED
-→ PROTOTYPING ou PLANNING
+→ PROTOTYPING or PLANNING
 → BUILDING
 → AGENT_REVIEW
 → HUMAN_REVIEW
@@ -265,24 +265,24 @@ DRAFT
 → DONE
 ```
 
-`CHANGES_REQUESTED` renvoie vers la dernière étape capable de résoudre la demande : révision de spec, modification de prototype, correction de code ou mise à jour documentaire. Les petites modifications peuvent sauter le prototype, mais pas la définition du résultat attendu ni les validations requises par leur niveau de risque.
+`CHANGES_REQUESTED` sends back to the last step able to resolve the request: spec revision, prototype modification, code fix or documentation update. Small changes can skip the prototype, but not the definition of the expected outcome nor the validations required by their risk level.
 
-### Spec et workflow spécifiques aux bugs
+### Bug-specific spec and workflow
 
-Un bug possède un artifact plus court et plus factuel qu’une feature spec :
+A bug has a shorter, more factual artifact than a feature spec:
 
-| Champ | Contenu attendu |
+| Field | Expected content |
 |---|---|
-| Comportement observé | Symptôme effectivement constaté |
-| Comportement attendu | Référence fonctionnelle ou résultat souhaité |
-| Reproduction | Étapes, environnement et fréquence |
-| Preuves | Logs, traces, captures, requêtes et fichiers concernés |
-| Impact | Utilisateurs, données et sévérité |
-| Cause | Statut `suspected` ou `confirmed`, avec preuves |
-| Contraintes de correction | Invariants à préserver et limites de périmètre |
-| Risques de régression | Zones et parcours à revérifier |
-| Critères d’acceptation | Résultat de la reproduction et tests attendus |
-| Impact documentaire | Aucun, interne ou visible utilisateur |
+| Observed behaviour | Symptom actually observed |
+| Expected behaviour | Functional reference or desired outcome |
+| Reproduction | Steps, environment and frequency |
+| Evidence | Logs, traces, screenshots, requests and files concerned |
+| Impact | Users, data and severity |
+| Cause | Status `suspected` or `confirmed`, with evidence |
+| Fix constraints | Invariants to preserve and scope limits |
+| Regression risks | Areas and journeys to re-check |
+| Acceptance criteria | Reproduction result and expected tests |
+| Documentation impact | None, internal or user-visible |
 
 ```text
 REPORTED
@@ -297,13 +297,13 @@ REPORTED
 → DONE
 ```
 
-Le Spec Agent ne modifie pas le code pendant le diagnostic. Le Dev Agent ne présente pas comme confirmée une cause seulement supposée. Un test de régression est requis par défaut ; s’il est impossible, l’absence doit être justifiée. Une reproduction non exécutée reste explicitement `not-run` ou `partial`, jamais `verified`.
+The Spec Agent does not modify code during diagnosis. The Dev Agent does not present a merely suspected cause as confirmed. A regression test is required by default; if it is impossible, its absence must be justified. A reproduction that was not run stays explicitly `not-run` or `partial`, never `verified`.
 
-Spec Kit applique déjà des garde-fous utiles : les étapes d’évaluation et de test ne modifient pas le code, seule l’étape de correction le fait, et un résultat non réellement testé ne peut pas être surévalué. [S34]
+Spec Kit already applies useful safeguards: the evaluation and test steps do not modify code, only the fix step does, and a result that was not actually tested cannot be overrated. [S34]
 
-## 10. Prototypes et reviews comme objets de première classe
+## 10. Prototypes and reviews as first-class objects
 
-Un prototype n’est pas seulement une branche. Il référence au minimum une révision de spec, une variante, un commit, un environnement, une URL de preview, des captures et les retours reçus.
+A prototype is not just a branch. It references at least a spec revision, a variant, a commit, an environment, a preview URL, screenshots and the feedback received.
 
 ```ts
 interface Prototype {
@@ -320,11 +320,11 @@ interface Prototype {
 }
 ```
 
-Le produit peut ainsi produire plusieurs propositions isolées, les afficher côte à côte, recueillir des annotations humaines, demander des itérations, promouvoir la variante retenue et archiver les autres. Les retours sur prototype deviennent des décisions ou une nouvelle révision de spec ; ils ne restent pas enfermés dans le chat.
+The product can thus produce several isolated proposals, display them side by side, collect human annotations, request iterations, promote the retained variant and archive the others. Prototype feedback becomes decisions or a new spec revision; it does not stay locked in the chat.
 
-### Modèle commun de review
+### Common review model
 
-Les reviews humaines et agentiques utilisent la même structure et se distinguent par leur auteur :
+Human and agentic reviews use the same structure and differ by their author:
 
 ```ts
 interface Review {
@@ -342,9 +342,9 @@ interface Review {
 }
 ```
 
-Un finding conserve sévérité, catégorie, message, preuve, emplacement éventuel, correction proposée et état de résolution. Une nouvelle review ne supprime jamais les commentaires précédents. L’UI doit montrer la réponse apportée, le changement réalisé et la décision de résolution ou de rejet.
+A finding keeps severity, category, message, evidence, optional location, proposed fix and resolution state. A new review never deletes previous comments. The UI must show the answer given, the change made and the resolution or rejection decision.
 
-### Modèle métier central
+### Central business model
 
 ```text
 Project
@@ -363,24 +363,24 @@ Project
 └── Environment[]
 ```
 
-Chaque exécution conserve la révision de spec utilisée, le commit de départ, le provider, le modèle, la configuration d’agent, les outils autorisés, l’environnement, les artifacts produits, les limites et le résultat. Cette provenance est nécessaire pour reproduire et expliquer les décisions de l’agent.
+Each run keeps the spec revision used, the starting commit, the provider, the model, the agent configuration, the allowed tools, the environment, the artifacts produced, the limits and the result. This provenance is necessary to reproduce and explain the agent's decisions.
 
-## 11. Environnements de développement et DevFlow
+## 11. Development environments and DevFlow
 
-DevFlow correspond à la couche d’environnements isolés du harness, pas au protocole agent ni au moteur de workflow. Son modèle fournit un worktree, des ports, une base Postgres, des fichiers `.env`, des dépendances, des serveurs et des logs propres à chaque branche. Son interface non interactive, ses sorties JSON, ses erreurs structurées et ses logs persistants sont adaptées aux agents. [S38]
+DevFlow corresponds to the harness's isolated-environments layer, not to the agent protocol nor to the workflow engine. Its model provides a worktree, ports, a Postgres database, `.env` files, dependencies, servers and logs specific to each branch. Its non-interactive interface, its JSON outputs, its structured errors and its persistent logs suit agents. [S38]
 
-La distinction LITE/FULL est retenue comme principe :
+The LITE/FULL distinction is retained as a principle:
 
-| Activité | Environnement recommandé |
+| Activity | Recommended environment |
 |---|---|
-| Lecture du dépôt par le Spec Agent | LITE |
-| Analyse du Doc Agent | LITE |
-| Review statique | LITE |
-| Implémentation | FULL |
-| Prototype exécutable | FULL |
-| Review navigateur ou E2E | FULL |
+| Repository reading by the Spec Agent | LITE |
+| Doc Agent analysis | LITE |
+| Static review | LITE |
+| Implementation | FULL |
+| Runnable prototype | FULL |
+| Browser or E2E review | FULL |
 
-Le produit doit toutefois rester propriétaire de l’état. Un agent ne crée pas silencieusement un environnement par une commande Bash que l’UI découvrirait après coup. Il demande l’opération au harness ; l’orchestrateur l’exécute, publie les événements et renvoie à l’agent un identifiant, les chemins et l’URL.
+The product must nevertheless remain the owner of the state. An agent does not silently create an environment through a Bash command that the UI would discover after the fact. It requests the operation from the harness; the orchestrator executes it, publishes the events and returns an identifier, the paths and the URL to the agent.
 
 ```ts
 interface EnvironmentManager {
@@ -393,117 +393,117 @@ interface EnvironmentManager {
 }
 ```
 
-DevFlow peut être utilisé derrière cette interface ou ses concepts peuvent être réimplémentés. L’UI et le modèle métier ne dépendent pas directement du CLI. Les limites actuelles relevées dans son README — développement principalement macOS, absence de support Windows, orientation Postgres et détection optimisée pour certains monorepos — doivent être intégrées au plan de portabilité. [S38]
+DevFlow can be used behind this interface, or its concepts can be reimplemented. The UI and the business model do not depend directly on the CLI. The current limits noted in its README—development mainly on macOS, no Windows support, Postgres orientation and detection optimised for certain monorepos—must be factored into the portability plan. [S38]
 
-## 12. Briques techniques du harness
+## 12. Technical building blocks of the harness
 
-### Recherche de code : `tgrep`
+### Code search: `tgrep`
 
-`tgrep` est retenu comme moteur possible pour les grands dépôts. Son index trigramme et son serveur local accélèrent fortement les recherches regex répétées ; son flux JSON facilite l’intégration depuis TypeScript. Il ne remplace ni la recherche sémantique ni l’analyse de symboles. Sur les petits dépôts ou lorsqu’une fraîcheur absolue est nécessaire, `ripgrep` ou le mode sans index restent préférables. [S35, S36]
+`tgrep` is retained as a possible engine for large repositories. Its trigram index and its local server greatly speed up repeated regex searches; its JSON stream eases integration from TypeScript. It replaces neither semantic search nor symbol analysis. On small repositories, or when absolute freshness is required, `ripgrep` or the index-less mode remain preferable. [S35, S36]
 
-Le modèle appelle un outil stable du produit, par exemple `code_search`, et le harness choisit l’implémentation. La construction initiale et l’état de fraîcheur de l’index doivent être contrôlés avant de considérer une absence de résultats comme définitive.
+The model calls a stable product tool, for example `code_search`, and the harness chooses the implementation. The initial build and the freshness state of the index must be checked before treating an absence of results as final.
 
-### Ingestion documentaire : MarkItDown
+### Document ingestion: MarkItDown
 
-MarkItDown est retenu comme convertisseur d’entrée pour PDF, DOCX, PPTX, XLSX, HTML, images, audio et autres formats vers un Markdown destiné aux LLM. L’intégration recommandée est un worker Python isolé derrière un outil typé du harness. MarkItDown n’est pas une solution d’édition ou de reconstruction haute fidélité des documents ; la génération de livrables conserve une couche dédiée. Les fichiers non fiables sont traités dans une sandbox avec les privilèges minimaux. [S37]
+MarkItDown is retained as the input converter from PDF, DOCX, PPTX, XLSX, HTML, images, audio and other formats to a Markdown meant for LLMs. The recommended integration is an isolated Python worker behind a typed harness tool. MarkItDown is not a solution for editing or high-fidelity reconstruction of documents; deliverable generation keeps a dedicated layer. Untrusted files are processed in a sandbox with minimal privileges. [S37]
 
-### Compression de contexte : Headroom
+### Context compression: Headroom
 
-Headroom reste une expérimentation optionnelle, pas une dépendance critique. Sa bibliothèque TypeScript, son serveur MCP et ses mécanismes de compression réversible sont intéressants pour les sorties d’outils volumineuses et les longues sessions. Le proxy qui intercepte les communications internes de Claude ou Codex n’est pas retenu comme fondation de l’accès par abonnement. [S39]
+Headroom remains an optional experiment, not a critical dependency. Its TypeScript library, its MCP server and its reversible compression mechanisms are interesting for large tool outputs and long sessions. The proxy that intercepts the internal communications of Claude or Codex is not retained as the foundation of subscription access. [S39]
 
-La première intégration, si les évaluations la justifient, se place uniquement sur les données contrôlées par le produit : le résultat brut est conservé comme artifact, une version compacte est transmise au modèle et celui-ci peut récupérer l’original. Un feature flag et des évaluations comparent réussite, omissions, tokens, latence et fréquence de récupération. La mémoire canonique des specs et décisions reste dans le stockage du produit.
+The first integration, if evaluations justify it, applies only to data controlled by the product: the raw result is kept as an artifact, a compact version is sent to the model and the model can retrieve the original. A feature flag and evaluations compare success, omissions, tokens, latency and retrieval frequency. The canonical memory of specs and decisions stays in the product's storage.
 
-### Principes de harness retenus
+### Harness principles retained
 
-Les travaux consultés convergent sur plusieurs principes : un agent est le modèle plus tout son environnement d’exécution ; chaque échec récurrent doit améliorer le harness ; les instructions orientent, tandis que les tests, linters, hooks et autres sensors vérifient ; les contrôles déterministes sont privilégiés avant le jugement par un autre LLM. [S40–S43]
+The works consulted converge on several principles: an agent is the model plus its whole execution environment; every recurring failure must improve the harness; instructions guide, while tests, linters, hooks and other sensors verify; deterministic checks come before judgement by another LLM. [S40–S43]
 
-Ces principes conduisent à conserver des règles courtes et traçables, à exposer progressivement la documentation utile, à rendre les environnements et les résultats observables, et à transformer les retours de review en améliorations durables plutôt qu’en corrections ponctuelles du chat.
+These principles lead to keeping rules short and traceable, exposing useful documentation progressively, making environments and results observable, and turning review feedback into lasting improvements rather than one-off fixes in the chat.
 
-## 13. Périmètre de réimplémentation
+## 13. Reimplementation scope
 
-Le cœur différenciant à réimplémenter comprend :
+The differentiating core to reimplement includes:
 
-- moteur de workflow et transitions d’état ;
-- modèle de specs et gestion des révisions ;
-- rôles, modes et politiques d’outils des agents ;
-- décisions, tâches, artifacts et provenance ;
-- gates de validation ;
-- reviews humaines et agentiques ;
-- gestion et comparaison des prototypes ;
-- registre des environnements et previews ;
-- événements temps réel, observabilité et UI ;
-- synchronisation entre spec, code et documentation.
+- workflow engine and state transitions;
+- spec model and revision management;
+- agent roles, modes and tool policies;
+- decisions, tasks, artifacts and provenance;
+- validation gates;
+- human and agentic reviews;
+- prototype management and comparison;
+- environment and preview registry;
+- real-time events, observability and UI;
+- synchronisation between spec, code and documentation.
 
-Les briques commoditaires restent remplaçables derrière des interfaces : ACP pour les agents, MCP pour les outils, Git et worktrees pour les versions, Docker pour l’isolation, MarkItDown pour l’extraction documentaire et `ripgrep`/`tgrep` pour la recherche textuelle.
+Commodity building blocks remain replaceable behind interfaces: ACP for agents, MCP for tools, Git and worktrees for versioning, Docker for isolation, MarkItDown for document extraction and `ripgrep`/`tgrep` for text search.
 
-**Décision structurante : trois agents stables, plusieurs modes d’exécution, deux types initiaux de work items (`FEATURE` et `BUG`), des reviews comme gates et les prototypes comme artifacts exécutables de la spec.**
+**Structuring decision: three stable agents, several execution modes, two initial work item types (`FEATURE` and `BUG`), reviews as gates and prototypes as runnable artifacts of the spec.**
 
-## 14. Limites et points à éprouver
+## 14. Limits and points to test
 
-Les validations de cette phase sont documentaires et reposent également sur la lecture de code. Elles ne constituent pas encore une validation de bout en bout avec des comptes connectés.
+The validations of this phase are documentary and also rely on reading code. They do not yet constitute an end-to-end validation with connected accounts.
 
-Les points suivants restent à vérifier lors du prototype :
+The following points remain to be verified during the prototype:
 
-- Consommation effective des quotas des deux abonnements, avec les versions et méthodes de connexion retenues.
-- Compatibilité du parcours produit précis avec les conditions Anthropic ; absence de garantie générale tirée du seul exemple T3 Code.
-- Couverture réelle des modèles, options, reprises et annulations dans les versions distribuées des adaptateurs.
-- Désactivation effective des outils souhaités, particulièrement côté Codex.
-- Installation, mise à jour et isolation des configurations et des comptes.
-- Qualité, coût et stratégie du transfert de contexte entre agents.
-- Gestion des extensions non standard et des événements inconnus.
+- Actual consumption of the quotas of both subscriptions, with the versions and login methods retained.
+- Compatibility of the precise product flow with the Anthropic conditions; no general guarantee drawn from the T3 Code example alone.
+- Actual coverage of models, options, resumptions and cancellations in the distributed versions of the adapters.
+- Effective disabling of the desired tools, particularly on the Codex side.
+- Installation, update and isolation of configurations and accounts.
+- Quality, cost and strategy of the context transfer between agents.
+- Handling of non-standard extensions and unknown events.
 
-Ne sont pas encore arrêtés : framework d’interface, packaging desktop ou web avec compagnon local, base de données, hébergement et politique exacte de résumé de conversation.
+Not yet settled: interface framework, desktop packaging or web with a local companion, database, hosting and the exact conversation summarisation policy.
 
-## 15. Autres bibliothèques examinées
+## 15. Other libraries examined
 
-**Sandbox Agent** fournit une interface commune avec SDK TypeScript et serveur HTTP/SSE pour plusieurs agents, en local ou dans un environnement distant. C’est une alternative à évaluer si l’exécution distante devient centrale ; ce n’est pas une dépendance arrêtée ni une garantie d’accès aux abonnements. [S28]
+**Sandbox Agent** provides a common interface with a TypeScript SDK and an HTTP/SSE server for several agents, locally or in a remote environment. It is an alternative to evaluate if remote execution becomes central; it is neither a settled dependency nor a guarantee of subscription access. [S28]
 
-**spawn-agent** propose une interface compatible Vercel AI SDK au-dessus d’ACP. Elle peut accélérer un prototype, mais sa maturité n’a pas été suffisamment établie pour en faire la dépendance centrale. [S29]
+**spawn-agent** offers a Vercel AI SDK-compatible interface on top of ACP. It can speed up a prototype, but its maturity has not been established enough to make it the central dependency. [S29]
 
-Le socle conservé dans ce document est donc le client ACP officiel et les adaptateurs actuels, avec une couche produit pour la continuité du chat et une couche de configuration propre à chaque moteur.
+The foundation kept in this document is therefore the official ACP client and the current adapters, with a product layer for chat continuity and a configuration layer specific to each engine.
 
 ## Sources
 
-Sources consultées pendant la recherche, état au 8 septembre 2026. Les liens vers `main` ou `dev` évoluent : les versions et commits devront être figés lors de l’implémentation.
+Sources consulted during the research, as of 8 September 2026. Links to `main` or `dev` evolve: versions and commits will have to be frozen at implementation.
 
-- **S1** — [Vue d’ensemble ACP v1](https://agentclientprotocol.com/protocol/v1/overview)
-- **S2** — [SDK TypeScript ACP](https://github.com/agentclientprotocol/typescript-sdk)
+- **S1** — [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview)
+- **S2** — [ACP TypeScript SDK](https://github.com/agentclientprotocol/typescript-sdk)
 - **S3** — [Claude Agent ACP](https://github.com/agentclientprotocol/claude-agent-acp)
-- **S4** — [Codex ACP maintenu](https://github.com/agentclientprotocol/codex-acp)
-- **S5** — [Support ACP dans OpenCode](https://opencode.ai/docs/acp/)
-- **S6** — [Ancien adaptateur Codex et annonce de migration](https://github.com/zed-industries/codex-acp)
-- **S7** — [Authentification Codex](https://learn.chatgpt.com/docs/auth)
+- **S4** — [Maintained Codex ACP](https://github.com/agentclientprotocol/codex-acp)
+- **S5** — [ACP support in OpenCode](https://opencode.ai/docs/acp/)
+- **S6** — [Former Codex adapter and migration notice](https://github.com/zed-industries/codex-acp)
+- **S7** — [Codex authentication](https://learn.chatgpt.com/docs/auth)
 - **S8** — [Codex App Server](https://learn.chatgpt.com/docs/app-server)
-- **S9** — [Usage du Claude Agent SDK avec un abonnement et suspension du changement de facturation](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
-- **S10** — [Conditions d’intégration et d’authentification Claude Code](https://code.claude.com/docs/en/legal-and-compliance)
-- **S11** — [Présentation Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)
-- **S12** — [Adaptateur Claude de T3 Code](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/provider/Layers/ClaudeAdapter.ts)
-- **S13** — [Site T3 Code](https://t3.codes/)
-- **S14** — [Fournisseurs OpenCode et restriction Claude](https://opencode.ai/docs/providers/#anthropic)
-- **S15** — [Authentification ACP](https://agentclientprotocol.com/protocol/v1/authentication)
-- **S16** — [Options de session ACP](https://agentclientprotocol.com/protocol/v1/session-config-options)
-- **S17** — [Création et reprise des sessions ACP](https://agentclientprotocol.com/protocol/v1/session-setup)
-- **S18** — [Implémentation de Claude ACP](https://github.com/agentclientprotocol/claude-agent-acp/blob/main/src/acp-agent.ts)
-- **S19** — [Configuration de modèle Codex ACP](https://github.com/agentclientprotocol/codex-acp/blob/main/src/ModelConfigOption.ts)
-- **S20** — [Implémentation ACP OpenCode](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/acp/agent.ts)
-- **S21** — [Boucle d’exécution Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/agent-loop)
-- **S22** — [Extensions ACP](https://agentclientprotocol.com/protocol/v1/extensibility)
-- **S23** — [Permissions et sélection d’outils Claude](https://code.claude.com/docs/en/agent-sdk/permissions)
-- **S24** — [Référence de configuration Codex](https://learn.chatgpt.com/docs/config-file/config-reference)
-- **S25** — [Agents personnalisés OpenCode](https://opencode.ai/docs/agents/)
-- **S26** — [Outils OpenCode](https://opencode.ai/docs/tools/)
-- **S27** — [Outils personnalisés Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/custom-tools)
+- **S9** — [Using the Claude Agent SDK with a subscription and suspension of the billing change](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
+- **S10** — [Claude Code integration and authentication conditions](https://code.claude.com/docs/en/legal-and-compliance)
+- **S11** — [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
+- **S12** — [T3 Code Claude adapter](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/provider/Layers/ClaudeAdapter.ts)
+- **S13** — [T3 Code website](https://t3.codes/)
+- **S14** — [OpenCode providers and Claude restriction](https://opencode.ai/docs/providers/#anthropic)
+- **S15** — [ACP authentication](https://agentclientprotocol.com/protocol/v1/authentication)
+- **S16** — [ACP session options](https://agentclientprotocol.com/protocol/v1/session-config-options)
+- **S17** — [ACP session creation and resumption](https://agentclientprotocol.com/protocol/v1/session-setup)
+- **S18** — [Claude ACP implementation](https://github.com/agentclientprotocol/claude-agent-acp/blob/main/src/acp-agent.ts)
+- **S19** — [Codex ACP model configuration](https://github.com/agentclientprotocol/codex-acp/blob/main/src/ModelConfigOption.ts)
+- **S20** — [OpenCode ACP implementation](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/acp/agent.ts)
+- **S21** — [Claude Agent SDK execution loop](https://code.claude.com/docs/en/agent-sdk/agent-loop)
+- **S22** — [ACP extensions](https://agentclientprotocol.com/protocol/v1/extensibility)
+- **S23** — [Claude permissions and tool selection](https://code.claude.com/docs/en/agent-sdk/permissions)
+- **S24** — [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+- **S25** — [OpenCode custom agents](https://opencode.ai/docs/agents/)
+- **S26** — [OpenCode tools](https://opencode.ai/docs/tools/)
+- **S27** — [Claude Agent SDK custom tools](https://code.claude.com/docs/en/agent-sdk/custom-tools)
 - **S28** — [Sandbox Agent](https://github.com/rivet-dev/sandbox-agent)
 - **S29** — [spawn-agent](https://github.com/millionco/spawn-agent)
 - **S30** — [GitHub Spec Kit](https://github.com/github/spec-kit)
-- **S31** — [Template de feature spec de Spec Kit](https://github.com/github/spec-kit/blob/main/templates/spec-template.md)
-- **S32** — [Template de plan technique de Spec Kit](https://github.com/github/spec-kit/blob/main/templates/plan-template.md)
-- **S33** — [Template de tâches de Spec Kit](https://github.com/github/spec-kit/blob/main/templates/tasks-template.md)
-- **S34** — [Extension bug de Spec Kit](https://github.com/github/spec-kit/tree/main/extensions/bug)
+- **S31** — [Spec Kit feature spec template](https://github.com/github/spec-kit/blob/main/templates/spec-template.md)
+- **S32** — [Spec Kit technical plan template](https://github.com/github/spec-kit/blob/main/templates/plan-template.md)
+- **S33** — [Spec Kit tasks template](https://github.com/github/spec-kit/blob/main/templates/tasks-template.md)
+- **S34** — [Spec Kit bug extension](https://github.com/github/spec-kit/tree/main/extensions/bug)
 - **S35** — [`tgrep`](https://github.com/microsoft/tgrep)
-- **S36** — [Guide `tgrep` pour les coding agents](https://github.com/microsoft/tgrep/blob/main/AGENTS.md)
+- **S36** — [`tgrep` guide for coding agents](https://github.com/microsoft/tgrep/blob/main/AGENTS.md)
 - **S37** — [Microsoft MarkItDown](https://github.com/microsoft/markitdown)
-- **S38** — [DevFlow — README fourni pour l’analyse](https://github.com/leoleducq/devflow)
+- **S38** — [DevFlow—README provided for the analysis](https://github.com/leoleducq/devflow)
 - **S39** — [Headroom](https://github.com/headroomlabs-ai/headroom)
 - **S40** — [Mitchell Hashimoto — My AI Adoption Journey](https://mitchellh.com/writing/my-ai-adoption-journey)
 - **S41** — [OpenAI — Harness engineering](https://openai.com/index/harness-engineering/)

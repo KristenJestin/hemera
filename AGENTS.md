@@ -12,6 +12,9 @@ and the way work is done in `docs/METHOD.md`. The issue you implement carries it
 Design and Spec sections and its checklists; read them, and `docs/METHOD.md`, before touching
 code, and name every test suite after the scenario it covers.
 
+Everything in this repository is in English: documents, code, comments, commits, issues,
+pull requests and the interface.
+
 Behavioral guidelines below are adapted from the Karpathy-style CLAUDE.md. They bias toward
 caution over speed; for trivial tasks, use judgment.
 
