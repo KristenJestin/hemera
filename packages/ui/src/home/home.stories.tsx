@@ -3,7 +3,15 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconTimelineEvent } from '../icons.ts'
 import type { JournalLine } from '../journal/journal.tsx'
-import { ActivityFrame, EmptyProject, FirstLaunch, Greeting, QuickActions } from './home.tsx'
+import type { ShellSession } from '../shell/model.ts'
+import {
+  ActivityFrame,
+  EmptyProject,
+  FirstLaunch,
+  Greeting,
+  QuickActions,
+  SessionsFrame,
+} from './home.tsx'
 
 /**
  * The pieces the Home of a Project is made of (design D4-07).
@@ -117,6 +125,64 @@ export const FirstLaunchPage: Story = {
 
     await userEvent.click(canvas.getByRole('button', { name: 'Create your first Project' }))
     expect(args.onOpenJournal).toHaveBeenCalled()
+  },
+}
+
+/**
+ * The Sessions to come back to, three of them, and `Resume` for the last one written in
+ * (design D4b-04, D4b-07).
+ */
+const SESSIONS: ShellSession[] = [
+  {
+    id: 'csv',
+    title: 'CSV invoice export',
+    preview: 'Invoices should export with HT and TTC…',
+    messages: 4,
+    writtenAt: '12 min ago',
+  },
+  {
+    id: 'search',
+    title: 'Full-text search',
+    preview: 'Postgres FTS or a separate index?',
+    messages: 2,
+    writtenAt: 'yesterday',
+  },
+  { id: 'fresh', title: '', writtenAt: 'just now' },
+]
+
+const opened = fn()
+const resumed = fn()
+
+export const Sessions: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => <SessionsFrame sessions={SESSIONS} onOpen={opened} onResume={resumed} />,
+  play: async ({ canvasElement }) => {
+    opened.mockClear()
+    resumed.mockClear()
+    const canvas = within(canvasElement)
+
+    expect(
+      canvas.getByText('“Invoices should export with HT and TTC…” · 4 messages'),
+    ).toBeInTheDocument()
+    // A Session no message has named yet is listed under the title it is drawn with.
+    expect(canvas.getByText('New session')).toBeInTheDocument()
+
+    await userEvent.click(canvas.getByRole('button', { name: /CSV invoice export/ }))
+    expect(opened).toHaveBeenCalledWith('csv')
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Resume' }))
+    expect(resumed).toHaveBeenCalled()
+  },
+}
+
+/** A Project with no Session: the frame says so, and offers nothing to resume. */
+export const NoSession: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => <SessionsFrame sessions={[]} onOpen={opened} onResume={resumed} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText(/No Session yet/)).toBeInTheDocument()
+    expect(canvas.queryByRole('button', { name: 'Resume' })).toBeNull()
   },
 }
 

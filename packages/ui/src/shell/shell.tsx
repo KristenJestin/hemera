@@ -61,6 +61,12 @@ export interface ShellProps {
   /** Which entry the window is on, and null when it is somewhere the list does not hold. */
   activeEntryId: string | null
   onSelectEntry: (id: string) => void
+  /** How many Sessions of the active Project are archived (design D4b-06). */
+  archivedCount?: number | undefined
+  onNewSession: () => void
+  onRenameSession: (id: string, title: string) => void
+  onArchiveSession: (id: string) => void
+  onOpenArchived: () => void
   onOpenCommand: () => void
   /** The two keystrokes the shell shows, already written for the platform. */
   commandShortcut: string
@@ -88,6 +94,11 @@ export function Shell({
   sessions,
   activeEntryId,
   onSelectEntry,
+  archivedCount,
+  onNewSession,
+  onRenameSession,
+  onArchiveSession,
+  onOpenArchived,
   onOpenCommand,
   commandShortcut,
   collapseShortcut,
@@ -150,6 +161,11 @@ export function Shell({
                   sessions={sessions}
                   activeEntryId={activeEntryId}
                   onSelectEntry={onSelectEntry}
+                  archivedCount={archivedCount}
+                  onNewSession={onNewSession}
+                  onRenameSession={onRenameSession}
+                  onArchiveSession={onArchiveSession}
+                  onOpenArchived={onOpenArchived}
                   onOpenCommand={onOpenCommand}
                   commandShortcut={commandShortcut}
                   onOpenSettings={onOpenSettings}

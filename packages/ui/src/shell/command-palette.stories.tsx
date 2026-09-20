@@ -11,6 +11,7 @@ import {
   IconSun,
   IconTimelineEvent,
 } from '../icons.ts'
+import { sessionCommands } from '../session/commands.tsx'
 import { CommandPalette, type CommandGroup } from './command-palette.tsx'
 
 /**
@@ -21,6 +22,9 @@ import { CommandPalette, type CommandGroup } from './command-palette.tsx'
  * palette itself — what it shows, what it narrows to, and what the keyboard does to it.
  */
 const switched = fn()
+
+/** What the Session commands report, so a play can read what a chosen entry did. */
+const openedSession = fn()
 
 function projectsOf(names: [string, string][]): CommandGroup {
   return {
@@ -287,5 +291,50 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(document.activeElement).toBe(opener)
     })
+  },
+}
+
+/**
+ * The Sessions in the palette: created, opened by title, archived, restored (design D4b-06).
+ *
+ * The groups come from `sessionCommands`, which is where the wording of a Session lives; the
+ * palette itself is handed lists and callbacks and knows none of it. Opening one is not a
+ * command that then asks which — every Session is an entry, so typing part of a title narrows
+ * to it the way typing part of any other command does. Nothing here deletes anything.
+ */
+export const SessionCommands: Story = {
+  args: {
+    groups: [
+      ...sessionCommands({
+        sessions: [
+          { id: 'csv', title: 'CSV invoice export', writtenAt: '12 min ago' },
+          { id: 'search', title: 'Full-text search', writtenAt: 'yesterday' },
+        ],
+        archived: [{ id: 'billing', title: 'Old billing thoughts', archivedAt: '3 d ago' }],
+        current: { id: 'csv', title: 'CSV invoice export' },
+        newSessionKeys: 'Ctrl+N',
+        onNewSession: fn(),
+        onOpenSession: openedSession,
+        onArchiveSession: fn(),
+        onRestoreSession: fn(),
+      }),
+      ...SCOPED,
+    ],
+  },
+  play: async () => {
+    openedSession.mockClear()
+    const palette = within(document.body).getByRole('dialog', { name: 'Command palette' })
+    const inside = within(palette)
+
+    expect(inside.getByRole('option', { name: /New session/ })).toBeInTheDocument()
+    expect(inside.getByRole('option', { name: /Archive current session/ })).toBeInTheDocument()
+    expect(inside.getByRole('option', { name: /Restore Old billing thoughts/ })).toBeInTheDocument()
+    // Scenario « Aucune suppression proposée », here as everywhere else.
+    expect(inside.queryByRole('option', { name: /Delete/ })).toBeNull()
+
+    // Scenario « Travaux parallèles », from the palette: a Session is reached by its title.
+    await userEvent.type(inside.getByRole('combobox'), 'full')
+    await userEvent.click(await inside.findByRole('option', { name: /Full-text search/ }))
+    expect(openedSession).toHaveBeenCalledWith('search')
   },
 }

@@ -94,6 +94,10 @@ function Harness({
       sessions={sessions}
       activeEntryId={activeEntryId}
       onSelectEntry={setActiveEntryId}
+      onNewSession={() => undefined}
+      onRenameSession={() => undefined}
+      onArchiveSession={() => undefined}
+      onOpenArchived={() => undefined}
       onOpenCommand={() => undefined}
       commandShortcut="Ctrl+K"
       collapseShortcut="Ctrl+B"

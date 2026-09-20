@@ -61,7 +61,12 @@ const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter', 'command-palette']
 const SURFACES = {
   project: ['project-dialog', 'project-settings'],
   journal: ['journal'],
-  composer: ['composer'],
+  composer: ['composer', 'prompt-input'],
+  // Lot 4b: the thread of a Session, and the scrolling that follows its live edge.
+  message: ['message'],
+  'message/scroller': ['scroller'],
+  // Lot 4b: the Session itself — its head, its archives, and its rows in the sidebar.
+  session: ['session-header', 'archived-sessions', 'sidebar-sessions'],
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
@@ -212,6 +217,25 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ComposerAttachments',
       'MentionMenu',
       'WorkspacePill',
+      // Lot 4b: what a Session is written in, and the thread it is written into.
+      'PromptInput',
+      'MessageGroup',
+      'MessageRow',
+      'MessageBubble',
+      'MessageHeader',
+      'MessageFooter',
+      'MessageDaySeparator',
+      'LiveMarker',
+      'MessageScroller',
+      'NavigationRail',
+      'LatestPill',
+      // Lot 4b: the Session as a surface — renamed in place, archived, restored, listed.
+      'SessionHeader',
+      'SessionEmpty',
+      'ArchivedSessions',
+      'SidebarSessionEntry',
+      'SidebarSessions',
+      'SessionsFrame',
       'Greeting',
       'QuickActions',
       'ActivityFrame',
@@ -259,6 +283,11 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'SIDEBAR_MAX',
       'SIDEBAR_MIN',
       'SIDEBAR_RAIL',
+      // Lot 4b: what an untitled Session is called, the rule that decides it, and the commands
+      // the palette is handed. None of the three draws anything.
+      'NEW_SESSION_TITLE',
+      'shownTitle',
+      'sessionCommands',
     ]
     expect(exportedComponents(barrel).toSorted()).toEqual(
       [

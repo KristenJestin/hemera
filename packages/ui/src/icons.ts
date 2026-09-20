@@ -36,6 +36,7 @@ import {
   IconDatabaseFilled as TablerDatabaseFilled,
   IconDeviceDesktop as TablerDeviceDesktop,
   IconDeviceDesktopFilled as TablerDeviceDesktopFilled,
+  IconDots as TablerDots,
   IconFileText as TablerFileText,
   IconFileTextFilled as TablerFileTextFilled,
   IconFolder as TablerFolder,
@@ -169,6 +170,9 @@ export const IconDeviceDesktop = catalogued(
   TablerDeviceDesktop,
   'IconDeviceDesktop',
 )
+/* The three dots a row wears to say it has a menu: Tabler draws no solid twin, and a solid
+   one would read as three full stops anyway. */
+export const IconDots = catalogued(TablerDots, TablerDots, 'IconDots')
 export const IconFileText = catalogued(TablerFileTextFilled, TablerFileText, 'IconFileText')
 export const IconFolder = catalogued(TablerFolderFilled, TablerFolder, 'IconFolder')
 export const IconFolderOpen = catalogued(TablerFolderOpenFilled, TablerFolderOpen, 'IconFolderOpen')

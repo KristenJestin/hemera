@@ -1,5 +1,5 @@
 import { Menu as BaseMenu } from '@base-ui/react/menu'
-import { type ReactNode, useRef } from 'react'
+import { type ReactElement, type ReactNode, useRef } from 'react'
 
 import { useOverlayContainer } from '../../overlay.ts'
 import { Button } from '../button/button.tsx'
@@ -39,8 +39,16 @@ export interface MenuItem {
 }
 
 export interface MenuProps {
-  /** What the trigger says. */
+  /** What the trigger says, and what the menu is called when the trigger is the caller's own. */
   label: string
+  /**
+   * What opens it, when a button with a word on it is not the shape the place has room for.
+   *
+   * The `…` of a sidebar row is the case this exists for: the list of commands is the same one,
+   * and what opens it is a control the caller draws and names itself. Absent, the menu draws
+   * the button it has always drawn.
+   */
+  trigger?: ReactElement | undefined
   /** Groups of commands; a separator is drawn between two groups. */
   groups: MenuItem[][]
   disabled?: boolean | undefined
@@ -48,18 +56,24 @@ export interface MenuProps {
   className?: string | undefined
 }
 
-export function Menu({ label, groups, disabled, className }: MenuProps) {
+export function Menu({ label, trigger, groups, disabled, className }: MenuProps) {
   const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
   return (
     <BaseMenu.Root>
       <span ref={anchor} className="inline-flex">
-        <BaseMenu.Trigger
-          disabled={disabled === true}
-          render={<Button variant="secondary" className={className} />}
-        >
-          {label}
-        </BaseMenu.Trigger>
+        {trigger === undefined ? (
+          <BaseMenu.Trigger
+            disabled={disabled === true}
+            render={<Button variant="secondary" className={className} />}
+          >
+            {label}
+          </BaseMenu.Trigger>
+        ) : (
+          // No children: what the caller handed over already holds its icon, and a trigger
+          // given children would hand them to the control in place of what it draws.
+          <BaseMenu.Trigger disabled={disabled === true} render={trigger} />
+        )}
       </span>
       <BaseMenu.Portal container={container}>
         <BaseMenu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4}>

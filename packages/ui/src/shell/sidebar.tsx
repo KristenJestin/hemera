@@ -3,7 +3,8 @@ import { LayoutGroup, motion } from 'motion/react'
 import type { Transition } from 'motion/react'
 import { type ReactElement, type ReactNode, useId } from 'react'
 
-import { IconCommand, IconHome, IconMessages, IconSettings, IconTimelineEvent } from '../icons.ts'
+import { IconCommand, IconHome, IconSettings, IconTimelineEvent } from '../icons.ts'
+import { SidebarSessions } from '../session/sidebar-sessions.tsx'
 import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
 import { Button } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
@@ -103,6 +104,12 @@ export interface SidebarProps {
    */
   activeEntryId: string | null
   onSelectEntry: (id: string) => void
+  /** How many Sessions of this Project are archived; the line to them is drawn above zero. */
+  archivedCount?: number | undefined
+  onNewSession: () => void
+  onRenameSession: (id: string, title: string) => void
+  onArchiveSession: (id: string) => void
+  onOpenArchived: () => void
   onOpenCommand: () => void
   /** The keystroke that opens the command, already written for the platform. */
   commandShortcut: string
@@ -119,6 +126,11 @@ export function Sidebar({
   sessions,
   activeEntryId,
   onSelectEntry,
+  archivedCount = 0,
+  onNewSession,
+  onRenameSession,
+  onArchiveSession,
+  onOpenArchived,
   onOpenCommand,
   commandShortcut,
   onOpenSettings,
@@ -191,27 +203,28 @@ export function Sidebar({
             labels={labels}
             onSelect={onSelectEntry}
           />
+          {/* The Sessions are a surface of their own: the panel says where they go and hands
+              over what it was given, and what a row offers — its menu, its rename in place,
+              the line to the archives — belongs to `session/`, not to the navigation. */}
+          <SidebarSessions
+            sessions={sessions}
+            activeId={activeEntryId}
+            archivedCount={archivedCount}
+            collapsed={collapsed}
+            onSelect={onSelectEntry}
+            onCreate={onNewSession}
+            onRename={onRenameSession}
+            onArchive={onArchiveSession}
+            onOpenArchived={onOpenArchived}
+          />
           <motion.p
             className={GROUP}
             initial={false}
             animate={{ opacity: collapsed ? 0 : 1 }}
             transition={labels}
           >
-            Sessions
+            Project
           </motion.p>
-          {sessions.map((session) => (
-            <Entry
-              key={session.id}
-              id={session.id}
-              label={session.title}
-              icon={<IconMessages size="md" />}
-              active={session.id === activeEntryId}
-              collapsed={collapsed}
-              transition={transition}
-              labels={labels}
-              onSelect={onSelectEntry}
-            />
-          ))}
           <Entry
             id={JOURNAL_ENTRY}
             label="Journal"

@@ -105,13 +105,34 @@ export {
   FirstLaunch,
   Greeting,
   QuickActions,
+  SessionsFrame,
   type ActivityFrameProps,
   type FirstLaunchProps,
   type QuickAction,
+  type SessionsFrameProps,
 } from './home/home.tsx'
 
-/** The composer: complete, and inert until HEM-57 gives it a Session to write into. */
+/** The Session surfaces: its head, its empty state, its archives, its rows in the sidebar. */
+export {
+  ArchivedSessions,
+  NEW_SESSION_TITLE,
+  SessionEmpty,
+  SessionHeader,
+  SidebarSessionEntry,
+  SidebarSessions,
+  sessionCommands,
+  shownTitle,
+  type ArchivedSession,
+  type ArchivedSessionsProps,
+  type SessionCommandsProps,
+  type SessionHeaderProps,
+  type SidebarSessionEntryProps,
+  type SidebarSessionsProps,
+} from './session/index.ts'
+
+/** The composer: complete, and what a Session is written from. */
 export { Composer, type ComposerProps } from './composer/composer.tsx'
+export { PromptInput, type PromptInputProps } from './composer/prompt-input.tsx'
 export { ComposerActions, type ComposerActionsProps } from './composer/composer-actions.tsx'
 export {
   ComposerAttachments,
@@ -119,6 +140,31 @@ export {
 } from './composer/composer-attachments.tsx'
 export { MentionMenu, type MentionMenuProps } from './composer/mention-menu.tsx'
 export { WorkspacePill } from './composer/workspace-pill.tsx'
+
+/** The thread of a Session: the messages, and the scrolling that follows the live edge. */
+export {
+  LatestPill,
+  LiveMarker,
+  MessageBubble,
+  MessageDaySeparator,
+  MessageFooter,
+  MessageGroup,
+  MessageHeader,
+  MessageRow,
+  MessageScroller,
+  NavigationRail,
+  type LatestPillProps,
+  type MessageBubbleProps,
+  type MessageFooterProps,
+  type MessageGroupProps,
+  type MessageHeaderProps,
+  type MessageRowProps,
+  type MessageScrollerProps,
+  type MessageSide,
+  type MessageState,
+  type NavigationRailProps,
+  type NavigationTick,
+} from './message/index.ts'
 
 /** The Journal: what happened, in the order it happened. */
 export {

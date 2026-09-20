@@ -7,19 +7,26 @@ import { JOURNAL_ENTRY, SIDEBAR_DEFAULT, type ShellSession } from './model.ts'
 import { Sidebar } from './sidebar.tsx'
 
 const SESSIONS: ShellSession[] = [
-  { id: 'csv', title: 'CSV invoice export' },
-  { id: 'search', title: 'Full-text search' },
-  { id: 'drizzle', title: 'Migrate to Drizzle 1.0' },
+  { id: 'csv', title: 'CSV invoice export', writtenAt: '12 min ago' },
+  { id: 'search', title: 'Full-text search', writtenAt: 'yesterday' },
+  { id: 'drizzle', title: 'Migrate to Drizzle 1.0', writtenAt: '3 d ago' },
 ]
 
 interface HarnessProps {
   collapsed?: boolean
   sessions?: ShellSession[]
+  /** How many Sessions of this Project are archived; the line to them appears above zero. */
+  archivedCount?: number
   /** Whether the window is on the settings of the application, which are not one of the entries. */
   settingsActive?: boolean
 }
 
-function Harness({ collapsed = false, sessions = SESSIONS, settingsActive = false }: HarnessProps) {
+function Harness({
+  collapsed = false,
+  sessions = SESSIONS,
+  archivedCount = 2,
+  settingsActive = false,
+}: HarnessProps) {
   const [activeEntryId, setActiveEntryId] = useState(sessions[0]?.id ?? JOURNAL_ENTRY)
   return (
     <TooltipProvider>
@@ -32,6 +39,11 @@ function Harness({ collapsed = false, sessions = SESSIONS, settingsActive = fals
           sessions={sessions}
           activeEntryId={settingsActive ? null : activeEntryId}
           onSelectEntry={setActiveEntryId}
+          archivedCount={archivedCount}
+          onNewSession={fn()}
+          onRenameSession={fn()}
+          onArchiveSession={fn()}
+          onOpenArchived={fn()}
           onOpenCommand={fn()}
           commandShortcut="Ctrl+K"
           onOpenSettings={fn()}

@@ -30,10 +30,23 @@ export interface ShellProject {
   pending: number
 }
 
-/** One Session of the active Project, as the sidebar lists it. */
+/**
+ * One Session of the active Project, as the sidebar lists it and the Home frame shows it.
+ *
+ * The title is the Session's own and is empty for as long as no message has named it: what is
+ * drawn in its place is `shownTitle`'s business and not the caller's (design D4b-03). The three
+ * that follow are already in words — a relative time is read off a clock and a locale, neither
+ * of which the design system has any business holding.
+ */
 export interface ShellSession {
   id: string
   title: string
+  /** When it was last written in, already in words. */
+  writtenAt?: string | undefined
+  /** The first line of what it holds, for the frame that shows more than a title. */
+  preview?: string | undefined
+  /** How many messages it holds, when the caller counted them. */
+  messages?: number | undefined
 }
 
 /** The entries of the sidebar that are not Sessions, named so a caller can select them. */

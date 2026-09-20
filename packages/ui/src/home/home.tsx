@@ -3,12 +3,21 @@ import type { ReactNode } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { Frame, FrameHeader } from '../components/frame/frame.tsx'
+import { List, ListItem } from '../components/list/list.tsx'
 import { Timeline, TimelineStop } from '../components/timeline/timeline.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
-import { IconActivity, IconFolderPlus, IconMessage, IconTimelineEvent } from '../icons.ts'
+import {
+  IconActivity,
+  IconFolderPlus,
+  IconMessage,
+  IconMessages,
+  IconTimelineEvent,
+} from '../icons.ts'
 import type { JournalLine } from '../journal/journal.tsx'
 import { LABEL_DELAY, MARK_TRAVEL, arrival, useTransition } from '../motion.ts'
+import { shownTitle } from '../session/model.ts'
 import { HemeraMark } from '../shell/mark.tsx'
+import type { ShellSession } from '../shell/model.ts'
 
 /**
  * The pieces the Home of a Project is made of, and the page a window with no Project shows
@@ -119,6 +128,71 @@ export function ActivityFrame({ entries, onOpenJournal }: ActivityFrameProps): R
       )}
     </Frame>
   )
+}
+
+export interface SessionsFrameProps {
+  /** The Sessions to come back to, last written first; the caller cuts the list to length. */
+  sessions: ShellSession[]
+  onOpen: (id: string) => void
+  /** Opens the last one written in; not offered when the Project has none. */
+  onResume: () => void
+}
+
+/**
+ * The Sessions to come back to, and one press to the last of them (design D4b-04, D4b-07).
+ *
+ * The rows answer "which one" and `Resume` answers "the one I was in", which is why the second
+ * is the header's link rather than a fourth row. It opens the last Session that is not
+ * archived — work that was put away is not work to resume — and it is not drawn at all when
+ * there is none, rather than sitting there greyed out.
+ */
+export function SessionsFrame({ sessions, onOpen, onResume }: SessionsFrameProps): ReactNode {
+  return (
+    <Frame
+      header={
+        <FrameHeader
+          icon={<IconMessages size="sm" />}
+          title="Sessions"
+          action={
+            sessions.length === 0 ? undefined : (
+              <Button variant="link" size="sm" onClick={onResume}>
+                Resume
+              </Button>
+            )
+          }
+        />
+      }
+    >
+      {sessions.length === 0 ? (
+        <p className="px-4 py-6 text-sm text-muted-foreground">
+          No Session yet. The first message written above opens one.
+        </p>
+      ) : (
+        <List label="Sessions">
+          {sessions.map((session) => (
+            <ListItem
+              key={session.id}
+              icon={<IconMessages size="sm" />}
+              title={shownTitle(session.title)}
+              description={held(session)}
+              trailing={session.writtenAt}
+              onSelect={() => onOpen(session.id)}
+            />
+          ))}
+        </List>
+      )}
+    </Frame>
+  )
+}
+
+/** What a row says under the title: what is in it, and how much of it there is. */
+function held(session: ShellSession): string | undefined {
+  const parts: string[] = []
+  if (session.preview !== undefined) parts.push(`“${session.preview}”`)
+  if (session.messages !== undefined) {
+    parts.push(`${session.messages} ${session.messages === 1 ? 'message' : 'messages'}`)
+  }
+  return parts.length === 0 ? undefined : parts.join(' · ')
 }
 
 /** What a Project with no Session says, which is that it has none. */
