@@ -2,6 +2,8 @@ import { defineConfig } from 'vite-plus'
 
 /** Generated output is not part of the workspace: never linted, formatted, type checked or tested. */
 const OUTSIDE_THE_WORKSPACE = ['reports/**', 'dist/**']
+/** The HTML prototypes are references to read, not code to keep in shape. */
+const REFERENCES = ['docs/prototypes/**']
 /** Vendored lint rules keep their upstream style so a resync stays a readable diff. */
 const VENDORED = ['tools/oxlint/**']
 
@@ -72,7 +74,7 @@ export default defineConfig({
         rules: { 'shadcn/no-restyle': 'off' },
       },
     ],
-    ignorePatterns: [...OUTSIDE_THE_WORKSPACE, ...VENDORED],
+    ignorePatterns: [...OUTSIDE_THE_WORKSPACE, ...VENDORED, ...REFERENCES],
   },
   fmt: {
     printWidth: 100,
@@ -80,7 +82,7 @@ export default defineConfig({
     singleQuote: true,
     trailingComma: 'all',
     endOfLine: 'lf',
-    ignorePatterns: [...OUTSIDE_THE_WORKSPACE, ...VENDORED, '**/*.md'],
+    ignorePatterns: [...OUTSIDE_THE_WORKSPACE, ...VENDORED, ...REFERENCES, '**/*.md'],
   },
   // Two projects, because two things are being proved. The first runs on Node and asks the
   // repository what it claims about itself; the second runs every story of the design system
