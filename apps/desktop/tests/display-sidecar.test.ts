@@ -18,6 +18,7 @@ const DARK: DisplayPreferences = {
   theme: 'dark',
   sidebar: { collapsed: true, width: 280 },
   activeProjectId: null,
+  activeSessions: {},
 }
 
 let dataFolder: string
@@ -58,12 +59,14 @@ describe('Indication divergente', () => {
       theme: 'light',
       sidebar: { collapsed: false, width: null },
       activeProjectId: null,
+      activeSessions: {},
     })
 
     expect(readSidecar(dataFolder)).toEqual({
       theme: 'light',
       sidebar: { collapsed: false, width: null },
       activeProjectId: null,
+      activeSessions: {},
     })
   })
 

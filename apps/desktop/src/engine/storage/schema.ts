@@ -127,6 +127,89 @@ export const projectRepositories = sqliteTable(
   (table) => [unique('repository_once_in_project').on(table.projectId, table.relativePath)],
 )
 
+/** What a title is: proposed from the first message, or chosen by the user (design D4b-03). */
+export const SESSION_TITLE_SOURCES = ['derived', 'user'] as const
+
+/** Who wrote an entry. This lot writes the user's alone: an agent answering is HEM-48. */
+export const SESSION_ENTRY_ROLES = ['user'] as const
+
+/**
+ * A Session: the thread of work of a project, and what it is called (design D4b-01, D4b-03).
+ *
+ * It is attached to a Project and to nothing else — no Spec, no Workspace — and `free` is the
+ * absence of a mission rather than a column: this lot writes one kind of Session, and a column
+ * holding one value is a column that lies about having a choice.
+ *
+ * The title is proposed from the first message and belongs to the engine, because the rule
+ * that derives it is one rule: derived in the renderer, it would be two machines with two
+ * opinions. `title_source` is what makes a proposal and a choice different things — a title
+ * the user typed is never proposed over, and nothing has to remember not to.
+ *
+ * `last_written_at` is written by a message and by a rename both, because both are the user
+ * working on the Session: the list is ordered by what was touched last, and a Session renamed
+ * a minute ago is a Session the user is working on. `version` is incremented by every change
+ * and compared inside the transaction, as a Project's is.
+ *
+ * There is no `deleted_at` and no delete: archiving is how a Session ends, and the absence of
+ * the operation is the guarantee (design D4b-06).
+ */
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    titleSource: text('title_source').notNull(),
+    createdAt: text('created_at').notNull(),
+    lastWrittenAt: text('last_written_at').notNull(),
+    archivedAt: text('archived_at'),
+    version: integer('version').notNull().default(1),
+  },
+  (table) => [
+    check(
+      'session_title_source_is_known',
+      sql`${table.titleSource} IN (${sql.raw(oneOf(SESSION_TITLE_SOURCES))})`,
+    ),
+    // The list of a Project is read in one order, and it is this one: the index is the query.
+    index('session_by_project').on(table.projectId, table.lastWrittenAt),
+  ],
+)
+
+/**
+ * One message of a Session: what the user wrote, and where it sits in the thread (D4b-01).
+ *
+ * `seq` counts from one inside its Session and the pair is unique, so the order of a thread is
+ * the database's own and not the order a read happened to return: two messages written in the
+ * same millisecond are still two messages, in an order that was decided when they were
+ * written. It is a number and not the rank a list uses — a rank exists to insert between two
+ * neighbours, and nothing inserts into a thread.
+ *
+ * The body is stored as it was written, trimmed of nothing: what the user sent is what is read
+ * back, and the domain is where an empty message is refused.
+ *
+ * The `role` column holds the user's alone in this lot, and the check says so: a thread with an
+ * agent in it is HEM-48's, and a value the check has never heard of would be a migration.
+ */
+export const sessionEntries = sqliteTable(
+  'session_entries',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull(),
+    role: text('role').notNull(),
+    body: text('body').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    check('entry_role_is_known', sql`${table.role} IN (${sql.raw(oneOf(SESSION_ENTRY_ROLES))})`),
+    unique('entry_once_in_session').on(table.sessionId, table.seq),
+  ],
+)
+
 /** What an event is about. `session` is declared now and filled by lot 5. */
 export const ENTITY_KINDS = ['project', 'profile', 'session'] as const
 

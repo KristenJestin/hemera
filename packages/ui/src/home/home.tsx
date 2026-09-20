@@ -3,9 +3,16 @@ import type { ReactNode } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { Frame, FrameHeader } from '../components/frame/frame.tsx'
+import { List, ListItem } from '../components/list/list.tsx'
 import { Timeline, TimelineStop } from '../components/timeline/timeline.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
-import { IconActivity, IconFolderPlus, IconMessage, IconTimelineEvent } from '../icons.ts'
+import {
+  IconActivity,
+  IconFolderPlus,
+  IconMessage,
+  IconMessages,
+  IconTimelineEvent,
+} from '../icons.ts'
 import type { JournalLine } from '../journal/journal.tsx'
 import { LABEL_DELAY, MARK_TRAVEL, arrival, useTransition } from '../motion.ts'
 import { HemeraMark } from '../shell/mark.tsx'
@@ -51,7 +58,11 @@ export interface QuickAction {
 }
 
 /**
- * The one or two things worth one press from here. `Resume` arrives with HEM-57.
+ * The one or two things worth one press from here, `Resume` among them.
+ *
+ * `Resume` opens the last Session written in the Project — or the Home with its composer when
+ * there is none, and never the archives: a Session that was put away is not the work being
+ * picked up. Which one that is belongs to the page, which is why it arrives as an action.
  *
  * It lands a moment after the greeting, which is the cascade of the prototype: the same
  * arrival, taken one step later, so the eye reads the page in the order it was written.
@@ -73,6 +84,74 @@ export function QuickActions({ actions }: { actions: QuickAction[] }): ReactNode
         </Button>
       ))}
     </motion.div>
+  )
+}
+
+export interface SessionsFrameProps {
+  /** The last Sessions of this Project, most recently written first. */
+  sessions: HomeSession[]
+  onOpenSession: (id: string) => void
+  /** Opens the whole list, the archived ones included. */
+  onOpenAll?: (() => void) | undefined
+}
+
+/** One Session as the Home says it: its name, and what has happened to it. */
+export interface HomeSession {
+  id: string
+  title: string
+  /** The line under the name, already written: `5 messages · last written 2 weeks ago`. */
+  meta: string
+}
+
+/**
+ * The last Sessions of the Project, and one way to the rest.
+ *
+ * Three of them, because the Home is what is picked up next and not a list: the fourth is the
+ * Journal's business, and a Home that grew with the Project would stop being a greeting. The
+ * order is the engine's — most recently written first — so the one at the top is the one
+ * `Resume` opens.
+ */
+export function SessionsFrame({
+  sessions,
+  onOpenSession,
+  onOpenAll,
+}: SessionsFrameProps): ReactNode {
+  return (
+    <Frame
+      header={
+        <FrameHeader
+          icon={<IconMessages size="sm" />}
+          title="Sessions"
+          action={
+            onOpenAll === undefined ? undefined : (
+              <Button variant="link" size="sm" onClick={onOpenAll}>
+                All
+              </Button>
+            )
+          }
+        />
+      }
+    >
+      {sessions.length === 0 ? (
+        <p className="px-4 py-6 text-sm text-muted-foreground">
+          Nothing written yet. What you start from the composer will be listed here.
+        </p>
+      ) : (
+        <div className="px-4 py-2">
+          <List label="The last Sessions of this Project">
+            {sessions.map((session) => (
+              <ListItem
+                key={session.id}
+                icon={<IconMessages size="sm" />}
+                title={session.title}
+                description={session.meta}
+                onSelect={() => onOpenSession(session.id)}
+              />
+            ))}
+          </List>
+        </div>
+      )}
+    </Frame>
   )
 }
 

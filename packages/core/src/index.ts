@@ -23,14 +23,22 @@ export {
 export type { Project, ProjectTone, Workspace } from './domain/project.ts'
 export {
   EmptyMessageError,
+  EmptyTitleError,
   MAX_TITLE_LENGTH,
+  NEW_SESSION_TITLE,
   NoActiveProjectError,
-  UNTITLED_SESSION,
   archivedSessions,
   currentSessions,
   isArchived,
   messageBody,
+  sessionTitle,
   titleAfterMessage,
   titleFromMessage,
 } from './domain/session.ts'
-export type { Mission, Session, SessionEntry } from './domain/session.ts'
+export type {
+  Mission,
+  Session,
+  SessionEntry,
+  SessionEntryRole,
+  SessionTitleSource,
+} from './domain/session.ts'

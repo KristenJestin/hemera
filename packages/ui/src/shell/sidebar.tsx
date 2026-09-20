@@ -3,11 +3,12 @@ import { LayoutGroup, motion } from 'motion/react'
 import type { Transition } from 'motion/react'
 import { type ReactElement, type ReactNode, useId } from 'react'
 
-import { IconCommand, IconHome, IconMessages, IconSettings, IconTimelineEvent } from '../icons.ts'
+import { IconCommand, IconHome, IconPlus, IconSettings, IconTimelineEvent } from '../icons.ts'
 import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
-import { Button } from '../components/button/button.tsx'
+import { Button, IconButton } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
+import { SidebarSessionEntry } from '../session/session.tsx'
 import {
   HOME_ENTRY,
   JOURNAL_ENTRY,
@@ -103,6 +104,18 @@ export interface SidebarProps {
    */
   activeEntryId: string | null
   onSelectEntry: (id: string) => void
+  /**
+   * Starts a Session in the Project and opens it.
+   *
+   * Absent when the window cannot write yet — before there is a Project, and while the engine
+   * has not said it can be written to — and the list then offers nothing rather than a control
+   * that would refuse.
+   */
+  onNewSession?: (() => void) | undefined
+  /** Renames a Session in place, from its own row in the list. */
+  onRenameSession?: ((id: string) => void) | undefined
+  /** Takes a Session out of the list and keeps it, from its own row. */
+  onArchiveSession?: ((id: string) => void) | undefined
   onOpenCommand: () => void
   /** The keystroke that opens the command, already written for the platform. */
   commandShortcut: string
@@ -119,6 +132,9 @@ export function Sidebar({
   sessions,
   activeEntryId,
   onSelectEntry,
+  onNewSession,
+  onRenameSession,
+  onArchiveSession,
   onOpenCommand,
   commandShortcut,
   onOpenSettings,
@@ -191,27 +207,63 @@ export function Sidebar({
             labels={labels}
             onSelect={onSelectEntry}
           />
+          <Rule />
+          <div className="flex items-center gap-1">
+            <motion.p
+              className={cn(GROUP, 'flex-1')}
+              initial={false}
+              animate={{ opacity: collapsed ? 0 : 1 }}
+              transition={labels}
+            >
+              Sessions
+            </motion.p>
+            {/* The `+` is the one control that makes a Session, and it is the same control in the
+                same place whatever the list holds: a second way to start, further down, is a
+                control the eye has to look for twice. */}
+            {onNewSession !== undefined && (
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={<IconPlus size="sm" />}
+                aria-label="New Session"
+                onClick={onNewSession}
+              />
+            )}
+          </div>
+          {/* A Session is the one entry of this list that carries commands of its own, so its
+              row is its own component — see `session/session.tsx`. The mark is still the panel's:
+              the `LayoutGroup` above prefixes the identifier, and the filled surface is handed
+              from a Session to the Journal rather than drawn once per row. */}
+          {sessions.map((session) => (
+            <SidebarSessionEntry
+              key={session.id}
+              title={session.title}
+              active={session.id === activeEntryId}
+              collapsed={collapsed}
+              onSelect={() => onSelectEntry(session.id)}
+              onRename={
+                onRenameSession === undefined ? undefined : () => onRenameSession(session.id)
+              }
+              onArchive={
+                onArchiveSession === undefined ? undefined : () => onArchiveSession(session.id)
+              }
+            />
+          ))}
+          {/* No Session yet, said in words — the way to make one is the `+` above, which is where
+              it is whether the list holds one Session or none. An empty list that says nothing is
+              a list the user believes is still loading. */}
+          {sessions.length === 0 && !collapsed && (
+            <p className="px-3 py-1 text-xs text-muted-foreground">No Session yet</p>
+          )}
+          <Rule />
           <motion.p
             className={GROUP}
             initial={false}
             animate={{ opacity: collapsed ? 0 : 1 }}
             transition={labels}
           >
-            Sessions
+            Project
           </motion.p>
-          {sessions.map((session) => (
-            <Entry
-              key={session.id}
-              id={session.id}
-              label={session.title}
-              icon={<IconMessages size="md" />}
-              active={session.id === activeEntryId}
-              collapsed={collapsed}
-              transition={transition}
-              labels={labels}
-              onSelect={onSelectEntry}
-            />
-          ))}
           <Entry
             id={JOURNAL_ENTRY}
             label="Journal"
@@ -234,6 +286,7 @@ export function Sidebar({
           />
         </div>
 
+        <Rule />
         <div className="flex shrink-0 flex-col gap-1">
           {/* The theme is not here: it is one of the settings, and the settings are one press
               away. A control offered twice is a control that has to be explained twice. */}
@@ -249,6 +302,20 @@ export function Sidebar({
         </div>
       </LayoutGroup>
     </motion.aside>
+  )
+}
+
+/**
+ * What tells one block of the panel from the next.
+ *
+ * The panel is three things in a column — the places, the Sessions it holds, and the places that
+ * are not Sessions — and with one gap between every row they read as a single list with words in
+ * it: a list of Sessions under a label looked like it was inside whatever came before it. The
+ * rule says where a block ends, at every width, folded or open.
+ */
+function Rule(): ReactNode {
+  return (
+    <div data-separator="" aria-hidden="true" className="mx-3 border-t border-sidebar-border" />
   )
 }
 

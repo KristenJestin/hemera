@@ -82,6 +82,13 @@ describe('Appel typé nominal', () => {
       'journal.read',
       'journal.unseen',
       'journal.markSeen',
+      'sessions.list',
+      'sessions.create',
+      'sessions.rename',
+      'sessions.archive',
+      'sessions.restore',
+      'sessions.append',
+      'sessions.read',
       // Answered by the main process itself, because only it can.
       'dialog.pickFolder',
       'dialog.pickFiles',
@@ -135,6 +142,13 @@ describe('Cas d’usage nommés du process dédié', () => {
       'journal.read',
       'journal.unseen',
       'journal.markSeen',
+      'sessions.list',
+      'sessions.create',
+      'sessions.rename',
+      'sessions.archive',
+      'sessions.restore',
+      'sessions.append',
+      'sessions.read',
     ]
     expect(Object.keys(ENGINE_REQUESTS).toSorted()).toEqual(names.toSorted())
   })

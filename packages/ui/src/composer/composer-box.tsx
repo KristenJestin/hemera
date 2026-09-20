@@ -1,6 +1,14 @@
 import { type ReactNode, type RefObject, useEffect, useRef } from 'react'
 
 import { IconAt, IconFileText } from '../icons.ts'
+import {
+  type FileChipKind,
+  FILE_CHIP_NAME,
+  fileChip,
+  fileName,
+  named,
+  spell,
+} from './file-chip.tsx'
 
 /**
  * The box a message is written in, and the files named inside it (design D4-07).
@@ -19,41 +27,15 @@ import { IconAt, IconFileText } from '../icons.ts'
  * What the caller sees is still a string, because that is what a message is: a mention
  * serialises as `@` and its path, exactly as if it had been typed. The chip is how it is drawn,
  * not what it is.
+ *
+ * A chip is drawn by `file-chip.tsx` and built here, and the two are one chip: the caret needs a
+ * node where the thread needs an element, and neither of them gets to decide what a file named
+ * in a sentence looks like. The marks are drawn by React once, off to the side and never shown,
+ * and a chip takes a copy of the one it needs — an icon of this design system is a component and
+ * a chip is a DOM node built at the caret, and those two do not meet anywhere else.
  */
 const BOX =
   'composer-box field-sizing-content max-h-40 min-h-12 w-full whitespace-pre-wrap outline-none'
-
-/**
- * A file named in the sentence, in the tone of what naming it did.
- *
- * The two are not the same thing and are not drawn the same. A file *attached* is sent along
- * with the message, and it wears the colour it wears in the header above the box — one file,
- * one colour, wherever it appears. A file merely *mentioned* is part of the question and
- * nothing more, so it takes the accent instead.
- *
- * Colour is not the only thing telling them apart: each carries the mark of what it is — the
- * `@` that made a mention, the page of a file, the same one the header draws beside the same
- * name. Two chips that differed only in hue would be two chips nobody could tell apart in a
- * screenshot, let alone with a colour vision deficiency.
- *
- * The marks are drawn by React once, off to the side and never shown, and a chip takes a copy
- * of the one it needs. An icon of this design system is a component and a chip is a DOM node
- * built at the caret, and those two do not meet anywhere else: hand-writing the same glyph as
- * a path here would be a second catalogue of icons nobody would remember to keep in step.
- */
-const TOKEN =
-  'mx-0.5 inline-flex items-center gap-1 rounded-sm border border-current/20 px-1 align-middle font-mono text-xs'
-
-const TONE = {
-  mention: 'bg-primary-muted text-primary-muted-foreground',
-  file: 'bg-info-muted text-info-muted-foreground',
-} as const
-
-/** What naming the file did, which is what the chip is drawn as. */
-export type MentionKind = keyof typeof TONE
-
-/** What a mention is written as, both in the value and to whatever reads the message. */
-export const MENTION_MARK = '@'
 
 /** The attribute a chip carries its path in, which is what the value is rebuilt from. */
 const PATH = 'data-file'
@@ -61,17 +43,13 @@ const PATH = 'data-file'
 /** The attribute saying which of the two it is, so the DOM says it as plainly as the eye does. */
 const KIND = 'data-kind'
 
-/** What a chip says: the name, since the folders above it are the same for most of them. */
-function shortName(path: string): string {
-  return path.split('/').at(-1) ?? path
-}
-
-/** The text of the box, with every chip written back out as the mention it stands for. */
+/** The text of the box, with every chip written back out as the file it names. */
 function serialise(box: HTMLElement): string {
   let text = ''
   for (const node of box.childNodes) {
     if (node instanceof HTMLElement && node.dataset.file !== undefined) {
-      text += MENTION_MARK + node.dataset.file
+      const kind = node.getAttribute(KIND) === 'file' ? 'file' : 'mention'
+      text += spell(node.dataset.file, kind)
     } else if (node instanceof HTMLBRElement) {
       text += '\n'
     } else {
@@ -82,20 +60,23 @@ function serialise(box: HTMLElement): string {
 }
 
 /** One chip, built as a node because that is what goes into the sentence at the caret. */
-function chipFor(path: string, kind: MentionKind, mark: Element | null): HTMLSpanElement {
+function chipFor(path: string, kind: FileChipKind, mark: Element | null): HTMLSpanElement {
   const chip = document.createElement('span')
-  chip.className = `${TOKEN} ${TONE[kind]}`
+  chip.className = fileChip(kind)
   chip.contentEditable = 'false'
   chip.setAttribute(PATH, path)
   chip.setAttribute(KIND, kind)
   if (mark !== null) chip.append(mark.cloneNode(true))
-  chip.append(document.createTextNode(shortName(path)))
+  const name = document.createElement('span')
+  name.className = FILE_CHIP_NAME
+  name.append(document.createTextNode(fileName(path)))
+  chip.append(name)
   return chip
 }
 
 export interface ComposerBoxHandle {
   /** Writes a file where the caret is, in the tone of what naming it did. */
-  insertFile: (path: string, kind: MentionKind) => void
+  insertFile: (path: string, kind: FileChipKind) => void
   /** Writes plain text where the caret is, which is how the `@` itself goes in. */
   insertText: (text: string) => void
   /** What is written, as the caller's own string. */
@@ -161,9 +142,13 @@ export function ComposerBox({
     onValueChange(serialise(element))
   }
 
+  /** The mark of a kind, cloned into the chip rather than drawn again per chip. */
+  const markFor = (kind: FileChipKind): Element | null =>
+    marks.current?.querySelector(`[${KIND}='${kind}'] svg`) ?? null
+
   handle.current = {
     insertFile: (path, kind) => {
-      put(chipFor(path, kind, marks.current?.querySelector(`[${KIND}='${kind}'] svg`) ?? null))
+      put(chipFor(path, kind, markFor(kind)))
       // A space after it, or the next word is typed inside a chip it does not belong to.
       put(document.createTextNode(' '))
     },
@@ -188,7 +173,21 @@ export function ComposerBox({
   useEffect(() => {
     const element = box.current
     if (element === null || serialise(element) === value) return
-    element.replaceChildren(document.createTextNode(value))
+    // Read back the way the thread reads a message, in the one reading there is: a value that
+    // came from somewhere else names its files in the same words, so it draws the same chips. A
+    // box that took the words at face value would show `@"C:\…"` to the person who wrote it.
+    const rebuilt = document.createDocumentFragment()
+    for (const piece of named(value)) {
+      if (piece.at === 'words') {
+        for (const [at, line] of piece.said.split('\n').entries()) {
+          if (at > 0) rebuilt.append(document.createElement('br'))
+          if (line !== '') rebuilt.append(document.createTextNode(line))
+        }
+      } else {
+        rebuilt.append(chipFor(piece.path, piece.kind, markFor(piece.kind)))
+      }
+    }
+    element.replaceChildren(rebuilt)
   }, [value])
 
   return (
@@ -216,6 +215,20 @@ export function ComposerBox({
           if (box.current !== null) onValueChange(serialise(box.current))
         }}
         onKeyDown={onKeyDown}
+        /**
+         * What is pasted is the text and nothing else.
+         *
+         * A copy taken inside the application carries the surfaces it was copied from, and a
+         * sentence pasted from the thread arrived in the box wearing their chips, their colours
+         * and their boxes — a message written about the application is a message, not a picture
+         * of one. The plain half of the clipboard is what a sentence is, and it is the half
+         * every other application writes too.
+         */
+        onPaste={(event) => {
+          event.preventDefault()
+          const text = event.clipboardData.getData('text/plain')
+          if (text !== '') put(document.createTextNode(text))
+        }}
       />
     </>
   )

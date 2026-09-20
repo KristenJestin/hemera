@@ -75,6 +75,14 @@ export const HOVERED = 1.02
 /** How far the mark of a state travels in from under the edge, in pixels. */
 export const MARK_TRAVEL = 12
 
+/**
+ * How far the foot of a message travels as it appears, in pixels.
+ *
+ * Less than a mark and less than a label: the foot is a line of small type under a bubble, and
+ * what it has to read as is the bubble settling rather than as a piece of chrome being moved.
+ */
+export const FOOT_TRAVEL = 6
+
 /** How far the label of a folding panel slides in from, in pixels. */
 export const LABEL_TRAVEL = 8
 

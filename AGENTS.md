@@ -244,6 +244,12 @@ writes at start-up.
   references only**. Never copy their markup, classes or inline styles. Copying them is a
   rejected change.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
+- Storybook badges: a story file the lot **created** wears the `new` tag, one whose component the
+  lot **changed** wears `updated`. The badge belongs to the lot that touches the design system
+  and not to the component: the first thing such a lot does is take the previous lot's badges
+  off, so what the sidebar shows is always what is being reviewed — and a branch that changes
+  nothing of `packages/ui` carries no badge change at all. `pnpm test` refuses a badge the branch
+  did not earn, and a tag nothing reads.
 
 The design system itself — tokens, Base UI, Tailwind 4, Storybook, the component catalogue —
 is lot 1. Lot 0 ships an empty window and one witness panel.

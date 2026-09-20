@@ -14,6 +14,7 @@
 import {
   DEFAULT_DISPLAY_PREFERENCES,
   activeProjectSchema,
+  activeSessionsSchema,
   type DisplayPreferences,
   type DisplayPreferencesChange,
   type SidebarPreference,
@@ -31,6 +32,7 @@ import { appPreferences } from './storage/schema.ts'
 export const THEME_KEY = 'theme'
 export const SIDEBAR_KEY = 'sidebar'
 export const ACTIVE_PROJECT_KEY = 'activeProjectId'
+export const ACTIVE_SESSIONS_KEY = 'activeSessions'
 
 function themeOf(value: string | undefined): ThemePreference | null {
   if (value === undefined) return null
@@ -63,6 +65,20 @@ function sidebarOf(value: string | undefined): SidebarPreference | null {
   }
 }
 
+/**
+ * Which Session of which Project was open, or undefined when the row says something this version
+ * cannot read — which answers the same way as never having opened one.
+ */
+function activeSessionsOf(value: string | undefined): Record<string, string> | undefined {
+  if (value === undefined) return undefined
+  try {
+    const read = activeSessionsSchema.safeParse(JSON.parse(value))
+    return read.success ? read.data : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export class Preferences extends Context.Service<
   Preferences,
   {
@@ -92,6 +108,9 @@ export const preferencesLayer = Layer.effect(
           activeProjectId:
             activeProjectOf(stored.get(ACTIVE_PROJECT_KEY)) ??
             DEFAULT_DISPLAY_PREFERENCES.activeProjectId,
+          activeSessions:
+            activeSessionsOf(stored.get(ACTIVE_SESSIONS_KEY)) ??
+            DEFAULT_DISPLAY_PREFERENCES.activeSessions,
         }
       }),
 
@@ -109,6 +128,12 @@ export const preferencesLayer = Layer.effect(
             written.push({
               key: ACTIVE_PROJECT_KEY,
               value: JSON.stringify(change.activeProjectId),
+            })
+          }
+          if (change.activeSessions !== undefined) {
+            written.push({
+              key: ACTIVE_SESSIONS_KEY,
+              value: JSON.stringify(change.activeSessions),
             })
           }
           if (written.length === 0) return

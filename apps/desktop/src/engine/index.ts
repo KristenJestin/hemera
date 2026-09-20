@@ -21,6 +21,7 @@ import { journalLayer } from './journal.ts'
 import { preferencesLayer } from './preferences.ts'
 import { projectsLayer } from './projects.ts'
 import { type EngineAnswer, type EngineRequest, answer, decideRequest } from './request.ts'
+import { sessionsLayer } from './sessions.ts'
 import { engineStatusLayer } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
 
@@ -49,6 +50,7 @@ function servicesOf(start: EngineStart) {
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),
     projectsLayer,
     journalLayer,
+    sessionsLayer,
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
 }
 

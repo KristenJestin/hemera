@@ -30,7 +30,7 @@ import { Loading } from '../loading/loading.tsx'
  * the page under the user's hands.
  */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 overflow-hidden rounded-md border font-medium whitespace-nowrap outline-none focus-ring',
+  'inline-flex items-center justify-center gap-1.5 overflow-hidden border font-medium whitespace-nowrap outline-none focus-ring',
   {
     variants: {
       variant: {
@@ -43,6 +43,15 @@ const buttonVariants = cva(
         link: 'border-transparent bg-transparent text-primary-muted-foreground hover:bg-transparent hover:text-primary',
         destructive:
           'border-destructive bg-destructive text-destructive-foreground hover:brightness-95',
+      },
+      /**
+       * The radius, which is a shape and not a size: a control that floats over what it is
+       * about — the pill that takes the reader back to the live edge of a thread — is round,
+       * and everything else is the corner of the theme.
+       */
+      shape: {
+        default: 'rounded-md',
+        pill: 'rounded-full',
       },
       size: {
         sm: 'h-control-sm px-2 text-sm',
@@ -57,7 +66,7 @@ const buttonVariants = cva(
       // title it sits beside, for nothing anyone can see.
       { variant: 'link', class: 'h-control-text' },
     ],
-    defaultVariants: { variant: 'secondary', size: 'md' },
+    defaultVariants: { variant: 'secondary', shape: 'default', size: 'md' },
   },
 )
 
@@ -85,6 +94,7 @@ export interface ButtonProps
 
 export function Button({
   variant,
+  shape,
   size,
   state = 'idle',
   disabled = false,
@@ -98,7 +108,7 @@ export function Button({
   return (
     <BaseButton
       {...rest}
-      className={cn(buttonVariants({ variant, size }), className)}
+      className={cn(buttonVariants({ variant, shape, size }), className)}
       disabled={disabled || working}
       focusableWhenDisabled={working}
       render={

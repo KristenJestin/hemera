@@ -61,6 +61,17 @@ export interface ShellProps {
   /** Which entry the window is on, and null when it is somewhere the list does not hold. */
   activeEntryId: string | null
   onSelectEntry: (id: string) => void
+  /**
+   * What a Session's row offers, when there is anything to offer.
+   *
+   * Left out, the list is read-only: the control that makes a Session is not drawn, and the row
+   * carries no menu. That is the state a window has before Sessions are wired — the surface was
+   * drawn and accepted with them, so what changes here is one line of the shell and nothing of
+   * what the user sees.
+   */
+  onNewSession?: (() => void) | undefined
+  onRenameSession?: ((id: string) => void) | undefined
+  onArchiveSession?: ((id: string) => void) | undefined
   onOpenCommand: () => void
   /** The two keystrokes the shell shows, already written for the platform. */
   commandShortcut: string
@@ -88,6 +99,9 @@ export function Shell({
   sessions,
   activeEntryId,
   onSelectEntry,
+  onNewSession,
+  onRenameSession,
+  onArchiveSession,
   onOpenCommand,
   commandShortcut,
   collapseShortcut,
@@ -150,6 +164,9 @@ export function Shell({
                   sessions={sessions}
                   activeEntryId={activeEntryId}
                   onSelectEntry={onSelectEntry}
+                  onNewSession={onNewSession}
+                  onRenameSession={onRenameSession}
+                  onArchiveSession={onArchiveSession}
                   onOpenCommand={onOpenCommand}
                   commandShortcut={commandShortcut}
                   onOpenSettings={onOpenSettings}
