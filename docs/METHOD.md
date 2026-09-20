@@ -4,7 +4,7 @@ How a need becomes code in this repository. Four artefacts, tested scenarios, ta
 
 ## 1. The issue: the intention
 
-An issue says **what is wanted, where it applies, how we will know it is done**, and what triggered it. It contains no solution. Its labels say its type (`type:idea`, `type:bug`, `type:debt`, `type:research`) and its area (`area:sessions`, `area:agents`, …); its milestone says the version that will ship it; its state is the **Status** field of the [GitHub project "Hemera"](https://github.com/users/KristenJestin/projects/7).
+An issue says **what is wanted, where it applies, how we will know it is done**, and what triggered it, with the headings of the issue templates (`.github/ISSUE_TEMPLATE/`). It contains no solution. Its labels say its type (`type:idea`, `type:bug`, `type:debt`, `type:research`) and its area (`area:sessions`, `area:agents`, …); its milestone says the version that will ship it; its state is the **Status** field of the [GitHub project "Hemera"](https://github.com/users/KristenJestin/projects/7).
 
 The states, in the project:
 
@@ -19,7 +19,7 @@ The states, in the project:
 
 ## 2. Proposal, Design, Spec: three sections of the issue
 
-At framing time, the agent adds **three sections** to the issue, under the intention:
+At framing time, the agent adds **three sections** to the issue, under the intention, with the exact headings of [`docs/templates/framing.md`](templates/framing.md):
 
 - **Proposal**: Why, What changes, Capabilities touched, Impact (packages, migrations, tests), and the points to decide with one recommendation each. The maintainer decides in a comment; the agent records the decision in a "Decided" section.
 - **Design**: the numbered decisions `D<lot>-01`, `D<lot>-02`… with their reason and the alternative set aside. This is what the code cites in comments.
@@ -29,7 +29,7 @@ These sections are the truth of the lot; the code conforms to them, and if a sec
 
 ## 3. The tasks: checklists in the issue
 
-One task list per phase (0 · UI first, 1 · engine, 2 · wiring, 3 · acceptance), one item per task, each item naming its **verification** ("…; check `pnpm check` green and scenario X"). **An item is ticked only after its verification ran and its output was seen.**
+One task list per phase (0 · UI first, 1 · engine, 2 · wiring, 3 · acceptance), as laid out in [`docs/templates/framing.md`](templates/framing.md), one item per task, each item naming its **verification** ("…; check `pnpm check` green and scenario X"). **An item is ticked only after its verification ran and its output was seen.**
 
 Phase 0 ends with a human gate: the dev pushes the branch, opens a **draft pull request** against `dev` and mentions the maintainer; the maintainer validates in Storybook, both themes, with the keyboard, and says so in a comment. The issue stays In progress meanwhile; phase 1 waits for that validation.
 
