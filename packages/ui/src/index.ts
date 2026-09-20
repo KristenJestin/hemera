@@ -189,6 +189,8 @@ export {
   type MessageHeaderProps,
   type MessageRowProps,
 } from './message/message.tsx'
+/** What an agent says, drawn from the Markdown that is still arriving. */
+export { AgentText } from './message/agent-text.tsx'
 export { MessageText } from './message/message-text.tsx'
 export {
   type MessageAuthor,

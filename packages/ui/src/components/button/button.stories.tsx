@@ -10,7 +10,7 @@ const SIZES = ['sm', 'md', 'lg'] as const
 const STATES = ['idle', 'loading', 'success', 'error'] as const
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/Button',
   component: Button,
   args: { children: 'Save', onClick: fn() },

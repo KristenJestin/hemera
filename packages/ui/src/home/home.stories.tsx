@@ -58,7 +58,7 @@ const SESSIONS: HomeSession[] = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Home',
   component: ActivityFrame,
   parameters: { layout: 'padded' },

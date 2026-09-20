@@ -268,7 +268,7 @@ const THREAD: ScrollerEntry[] = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Components/Message Scroller',
   component: MessageScroller,
   decorators: [withTooltips],

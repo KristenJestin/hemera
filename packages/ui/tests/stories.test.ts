@@ -229,7 +229,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'WorkspacePill',
       // HEM-57: the thread of a Session, the viewport it is read in, and its own surface. The
       // day separator of a thread is `MessageDaySeparator`: the Journal already hands out a
-      // `DaySeparator`, and one barrel cannot export two things under one word.
+      // `DaySeparator`, and one barrel cannot export two things under one word. The two ways
+      // a line of a thread is made are `MessageText` — what somebody typed — and `AgentText`,
+      // which is the Markdown an agent is still writing (D5-14).
+      'AgentText',
       'MessageGroup',
       'MessageRow',
       'MessageText',

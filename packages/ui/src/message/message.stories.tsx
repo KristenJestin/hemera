@@ -4,6 +4,7 @@ import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/tes
 
 import { Button } from '../components/button/button.tsx'
 import { IconSparkles } from '../icons.ts'
+import { AgentText } from './agent-text.tsx'
 import { MessageText } from './message-text.tsx'
 import { LiveMarker, MessageDaySeparator, MessageGroup, MessageRow } from './message.tsx'
 import type { MessageLine, MessageState } from './model.ts'
@@ -15,13 +16,14 @@ import type { MessageLine, MessageState } from './model.ts'
  * the right, and Hemera's own notes are lines without a surface. Nothing here answers: the
  * thread is what the user wrote, and the last thing written is the last thing shown.
  *
- * The agent of `Conversation` and of `ARealThread` is a fixture and not a reply: `agent` is a
- * value of the model this lot never produces, and the catalogue shows it because a component
- * that can draw three authors is a component whose three authors have been looked at. HEM-48
- * is what makes one.
+ * The agent of `Conversation` and of `ARealThread` is a fixture and not a reply — nothing in
+ * this catalogue answers — but the author itself is drawn, and `AgentAnswer` is what it looks
+ * like: an agent writes Markdown and writes it while thinking, so its lines are drawn from the
+ * text as it arrives (`AgentText`) while what the user wrote is drawn as it was typed. A thread
+ * that drew the two the same way would show the syntax of an answer instead of the answer.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Message',
   component: MessageGroup,
   parameters: { layout: 'padded' },
@@ -616,5 +618,84 @@ export const AFileHandedOver: Story = {
     expect(name?.scrollWidth ?? 0).toBeGreaterThan(name?.clientWidth ?? 0)
     const narrow = canvasElement.firstElementChild
     expect(narrow?.scrollWidth ?? 0).toBeLessThanOrEqual((narrow?.clientWidth ?? 0) + 1)
+  },
+}
+
+/**
+ * What an agent answered, under the question that was asked of it.
+ *
+ * The two bodies of a thread side by side, because they are drawn differently on purpose. What
+ * the user wrote is what they typed: a star in a message is a star, and the line breaks they put
+ * in are the line breaks they meant. An agent answers in Markdown and answers while writing, so
+ * its text is reparsed as it arrives and what is read is the answer so far rather than the syntax
+ * of it (D5-14). `AgentText` is the whole of that difference, and this is the story that holds
+ * the two apart: the same punctuation, drawn two ways.
+ */
+export const AgentAnswer: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <div className="flex w-full flex-col gap-3">
+      <MessageGroup
+        author="user"
+        name="You"
+        at="14:02"
+        state="saved"
+        lines={[
+          {
+            id: 'asked',
+            body: (
+              <MessageText body="Why does a January run export December, and why is the sheet empty *sometimes*?" />
+            ),
+          },
+        ]}
+      />
+      <MessageGroup
+        author="agent"
+        name="Claude Code"
+        at="14:02"
+        lines={[
+          {
+            id: 'answered',
+            body: (
+              <AgentText
+                text={`Two things, and they are the same thing twice.
+
+The month comes from \`query.get('month')\`, which is the *previous* month:
+
+- A run in January exports December.
+- The file is written before the totals are checked.`}
+              />
+            ),
+          },
+        ]}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const fromAgent = canvasElement.querySelector('[aria-label="Messages from Claude Code"]')!
+    const fromUser = canvasElement.querySelector('[aria-label="Messages from You"]')!
+
+    // The two voices are not on the same side: an answer begins at the left edge of the thread
+    // and a question ends against the right one, which is what `items-end` on the group of the
+    // user does. The group itself is a full-width block, so what is measured is the body inside
+    // it — the same measurement the file makes of a line that has to sit under a sentence.
+    const asked = canvas.getByText(/empty \*sometimes\*/).getBoundingClientRect()
+    const answered = canvas
+      .getByText(/Two things, and they are the same thing twice/)
+      .getBoundingClientRect()
+    expect(answered.left).toBeLessThan(asked.left)
+
+    // The answer is Markdown: a list of two items, code in a sentence, and an emphasis.
+    expect(fromAgent.querySelectorAll('li')).toHaveLength(2)
+    expect(fromAgent.querySelector('code')?.textContent).toBe("query.get('month')")
+    expect(fromAgent.querySelector('em')?.textContent).toBe('previous')
+
+    // And what the user wrote is not: a star in a message is a star, and no part of a message
+    // is an element a parser made. The same punctuation, and the one place where the two
+    // bodies of a thread could be confused for each other.
+    expect(fromUser.querySelector('em')).toBeNull()
+    expect(fromUser.querySelectorAll('code, li')).toHaveLength(0)
+    expect(canvas.getByText(/empty \*sometimes\*/)).toBeInTheDocument()
   },
 }

@@ -12,8 +12,10 @@ import type { ReactNode } from 'react'
  * Who wrote a line.
  *
  * `hemera` is the application speaking about itself — the note that says a Session was created
- * or renamed, read from the Journal and drawn in the ghost tone. `agent` exists for HEM-48 and
- * draws nothing yet: this lot has no agent and the thread says so by never producing one.
+ * or renamed, read from the Journal and drawn in the ghost tone. `agent` is the third voice, and
+ * it is drawn: an agent answers in Markdown and answers while writing, so its lines go through
+ * `AgentText` and not through `MessageText`, and the two are the two ways a line of a thread can
+ * be made (D5-14).
  */
 export type MessageAuthor = 'user' | 'hemera' | 'agent'
 

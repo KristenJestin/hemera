@@ -46,7 +46,7 @@ function Harness({ collapsed = false, sessions = SESSIONS, settingsActive = fals
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Shell/Sidebar',
   component: Harness,
   parameters: { layout: 'fullscreen' },

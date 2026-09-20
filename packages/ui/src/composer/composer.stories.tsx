@@ -89,7 +89,7 @@ function Controlled({ value, files, onValueChange, onFilesChange, ...rest }: Com
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
