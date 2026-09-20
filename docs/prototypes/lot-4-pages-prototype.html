@@ -1,0 +1,677 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE — do not ship. Token and layout reference only (see docs/design/README.md).
+  The pages lot 4 has to deliver, laid over the lot 2 shell: first launch, new Project,
+  Home, Session (free, empty), Journal, Project settings, archived Sessions, the Mod+K palette,
+  application settings and the notification bell. No agent anywhere: a Session is a thread the
+  user writes in, nothing answers.
+  Switch pages with the floating bar, or `1`–`9`, `0` and `a` (the agent session of lot 5). `k` opens the palette, `t` toggles the
+  theme, `b` folds the sidebar, `n` opens the bell.
+-->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · Hemera lot 4 pages</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
+  :root{
+    --p:#d946ef; --p-600:#c026d3; --p-soft:#fdf4ff; --p-soft2:#fae8ff; --p-ring:rgba(217,70,239,.25); --p-text:#a21caf;
+    --bg:#ededf0; --surface:#ffffff; --surface2:#f6f6f8; --surface3:#e9e9ee; --line:#e2e2e8; --line2:#d3d3db;
+    --text:#111118; --muted:#6b6b7b; --dim:#9a9aa8;
+    --ok:#16a34a; --ok-soft:#ecfdf3; --warn:#d97706; --warn-soft:#fffbeb; --bad:#dc2626; --bad-soft:#fef2f2; --info:#2563eb; --info-soft:#eff6ff;
+    --define:#7c3aed; --define-soft:#f3efff; --build:#0891b2; --build-soft:#ecfeff; --free:#6b6b7b; --free-soft:#f1f1f4;
+    --shadow:0 1px 2px rgba(16,16,24,.05),0 1px 3px rgba(16,16,24,.04); --shadow-lg:0 12px 32px rgba(16,16,24,.12);
+    --sans:"Inter",system-ui,"Segoe UI",sans-serif; --mono:"Fira Code",ui-monospace,Consolas,monospace;
+    --radius:10px; --radius-lg:14px; --control:36px; --sidebar:256px; --rail:56px; --chrome:44px;
+  }
+  html[data-theme=dark]{
+    --p:#e879f9; --p-600:#d946ef; --p-soft:rgba(232,121,249,.10); --p-soft2:rgba(232,121,249,.18); --p-ring:rgba(232,121,249,.3); --p-text:#f0abfc;
+    --bg:#040406; --surface:#18181e; --surface2:#0e0e12; --surface3:#121217; --line:#27272f; --line2:#363640;
+    --text:#ececf1; --muted:#9a9aab; --dim:#62627a;
+    --ok:#4ade80; --ok-soft:rgba(74,222,128,.10); --warn:#fbbf24; --warn-soft:rgba(251,191,36,.10); --bad:#f87171; --bad-soft:rgba(248,113,113,.10); --info:#60a5fa; --info-soft:rgba(96,165,250,.10);
+    --define:#a78bfa; --define-soft:rgba(167,139,250,.12); --build:#22d3ee; --build-soft:rgba(34,211,238,.10); --free:#9a9aab; --free-soft:rgba(154,154,171,.12);
+    --shadow:0 1px 2px rgba(0,0,0,.5); --shadow-lg:0 14px 40px rgba(0,0,0,.6);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:16px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0} input,textarea{font:inherit;color:inherit}
+  svg.lucide{width:18px;height:18px;flex:none;stroke-width:2} .i14 svg.lucide{width:14px;height:14px} .i16 svg.lucide{width:16px;height:16px} .i22 svg.lucide{width:22px;height:22px}
+  .mono{font-family:var(--mono);font-size:13px} .muted{color:var(--muted)} .dim{color:var(--dim)} .small{font-size:14px} .xs{font-size:12px} .b{font-weight:600}
+  .row{display:flex;align-items:center;gap:8px} .grow{flex:1;min-width:0} .col{display:flex;flex-direction:column} .ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .h1{font:600 26px/1.2 var(--sans);letter-spacing:-.01em;margin:0} .h2{font:600 18px/1.3 var(--sans);margin:0} .sect{font:600 12px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);box-shadow:var(--shadow)}
+  .btn{display:inline-flex;align-items:center;gap:8px;height:var(--control);padding:0 14px;border:1px solid var(--line2);background:var(--surface);border-radius:var(--radius);font-size:14px;font-weight:500;white-space:nowrap;box-shadow:var(--shadow);transition:.12s}
+  .btn:hover{border-color:var(--p);color:var(--p-text)} .btn.primary{background:var(--p);border-color:var(--p);color:#fff;font-weight:600} .btn.primary:hover{background:var(--p-600);color:#fff}
+  .btn.ghost{background:transparent;border-color:transparent;box-shadow:none} .btn.ghost:hover{background:var(--surface3)} .btn.sm{height:32px;padding:0 10px;font-size:13px} .btn.danger{color:var(--bad)} .btn.danger:hover{border-color:var(--bad)} .btn[disabled]{opacity:.45;pointer-events:none}
+  .btn.icon{width:var(--control);padding:0;justify-content:center} .btn.icon.sm{width:32px}
+  .kbd{display:inline-block;font:12px var(--mono);border:1px solid var(--line2);border-bottom-width:3px;border-radius:6px;padding:1px 6px;color:var(--muted);background:var(--surface);line-height:1.4}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:8px;font-size:12px;font-weight:600;line-height:1.3}
+  .chip.free{background:var(--free-soft);color:var(--free)} .chip.build{background:var(--build-soft);color:var(--build)} .chip.define{background:var(--define-soft);color:var(--define)} .chip.ok{background:var(--ok-soft);color:var(--ok)} .chip.warn{background:var(--warn-soft);color:var(--warn)} .chip.info{background:var(--info-soft);color:var(--info)} .chip.p{background:var(--p-soft2);color:var(--p-text)} .chip.n{background:var(--surface3);color:var(--muted)}
+  .field{display:flex;flex-direction:column;gap:6px} .field label{font-size:13px;font-weight:600;color:var(--muted)} .field .help{font-size:13px;color:var(--dim)}
+  .input{display:flex;align-items:center;gap:8px;height:var(--control);padding:0 12px;border:1px solid var(--line2);border-radius:var(--radius);background:var(--surface);font-size:14px} .input input{flex:1;border:0;outline:0;background:transparent} .input:focus-within{border-color:var(--p);box-shadow:0 0 0 3px var(--p-ring)} .input.mono input{font-family:var(--mono);font-size:13px}
+  .swatch{width:18px;height:18px;border-radius:5px;flex:none} .swatch.c1{background:#e879f9} .swatch.c2{background:#22d3ee} .swatch.c3{background:#fbbf24} .swatch.c4{background:#9a9aab} .swatch.c5{background:#4ade80}
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;padding:64px 24px;color:var(--muted)} .empty .ico{width:52px;height:52px;border-radius:14px;background:var(--surface3);display:grid;place-items:center;color:var(--dim)} .empty .t{font-weight:600;color:var(--text);font-size:16px} .empty p{margin:0;max-width:420px;font-size:14px}
+
+  /* ===== marker + shell ===== */
+  #marker{position:fixed;top:0;left:0;right:0;height:20px;z-index:50;background:repeating-linear-gradient(45deg,#fdf4ff 0 8px,#fae8ff 8px 16px);color:#a21caf;font:600 10px/20px var(--mono);letter-spacing:.06em;text-align:center;text-transform:uppercase;border-bottom:1px solid #f0abfc}
+  html[data-theme=dark] #marker{background:repeating-linear-gradient(45deg,#2a0f2e 0 8px,#3b1440 8px 16px);color:#f0abfc;border-color:#701a75}
+  #app{position:fixed;inset:20px 0 0 0;display:grid;grid-template-columns:var(--sidebar) 1fr;grid-template-rows:var(--chrome) 1fr;background:var(--bg)}
+  #app.folded{grid-template-columns:var(--rail) 1fr}
+  .chrome{grid-column:1/-1;display:grid;grid-template-columns:var(--sidebar) 1fr;align-items:center;height:var(--chrome);border-bottom:1px solid var(--line)}
+  #app.folded .chrome{grid-template-columns:var(--rail) 1fr}
+  .chrome .left{display:flex;align-items:center;gap:8px;padding:0 10px 0 14px;height:100%;border-right:1px solid var(--line)} #app.folded .chrome .left{padding:0;justify-content:center}
+  .chrome .left .mark{width:16px;height:16px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#f0abfc,var(--p) 60%,#7c3aed)} .chrome .left .name{font-weight:600} #app.folded .chrome .left .name,#app.folded .chrome .left .fold{display:none}
+  .chrome .left .fold{margin-left:auto;color:var(--muted);width:28px;height:28px;border-radius:7px;display:grid;place-items:center} .chrome .left .fold:hover{background:var(--surface3);color:var(--text)}
+  .chrome .right{display:flex;align-items:center;gap:2px;padding:0 140px 0 10px;height:100%;position:relative} /* 140px = window controls overlay */
+  .ptab{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 10px;border-radius:8px;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap;border:1px solid transparent}
+  .ptab:hover{background:var(--surface3)} .ptab.on{background:var(--surface);color:var(--text);border-color:var(--line);box-shadow:var(--shadow)} .ptab .swatch{width:8px;height:8px;border-radius:50%} .ptab .n{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--surface3);color:var(--muted);font:600 11px/18px var(--sans);text-align:center}
+  .ptab.add{width:30px;padding:0;justify-content:center}
+  .chrome .bell{position:absolute;right:150px;width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:var(--muted)} .chrome .bell:hover{background:var(--surface3);color:var(--text)} .chrome .bell .dotn{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--p);border:2px solid var(--bg)}
+  .wco{position:absolute;right:0;top:0;height:100%;width:138px;display:flex;color:var(--dim)} .wco span{flex:1;display:grid;place-items:center;font-size:12px}
+
+  .sidebar{display:flex;flex-direction:column;padding:10px;gap:2px;border-right:1px solid var(--line);overflow:auto;min-height:0}
+  .nav{display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border-radius:var(--radius);font-size:15px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap;position:relative} .nav svg{color:var(--dim)} .nav:hover{background:var(--surface3);color:var(--text)} .nav.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow)} .nav.on svg{color:var(--p)}
+  .nav .kbds{margin-left:auto;display:flex;gap:3px} .nav .cnt{margin-left:auto;font-size:12px;color:var(--muted);background:var(--surface3);padding:0 7px;border-radius:999px;line-height:20px}
+  .nav .more{position:absolute;right:8px;top:8px;opacity:0;width:24px;height:24px;border-radius:6px;display:grid;place-items:center} .nav:hover .more{opacity:1} .nav .more:hover{background:var(--line)}
+  .sidebar .grp{display:flex;align-items:center;gap:6px;padding:16px 10px 6px;font:600 12px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--dim)} .sidebar .grp .plus{margin-left:auto;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;color:var(--dim)} .sidebar .grp .plus:hover{background:var(--surface3);color:var(--text)}
+  .sidebar .bottom{margin-top:auto;padding-top:8px}
+  .sidebar .archived{font-size:13px;color:var(--dim);padding:6px 10px;display:flex;align-items:center;gap:6px;cursor:pointer} .sidebar .archived:hover{color:var(--muted)}
+  #app.folded .sidebar{padding:10px 8px} #app.folded .nav{justify-content:center;padding:0;width:40px} #app.folded .nav span,#app.folded .nav .kbds,#app.folded .nav .cnt,#app.folded .nav .more,#app.folded .grp,#app.folded .archived{display:none}
+
+  .content{overflow:auto;min-height:0;position:relative;display:flex;flex-direction:column}
+  .page{padding:28px 32px 120px;max-width:1040px;width:100%;margin:0 auto;flex:1}
+  .page.narrow{max-width:720px}
+  .head{display:flex;align-items:flex-start;gap:14px;margin-bottom:22px} .head .actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+
+  /* composer — the launcher hero validated on 2026-09-13 (home-prototype C1) with the "Calme"
+     personality of spikes/proto-motion: spring-like entrances in cascade, a press at .985,
+     nothing that jumps. Durations here are the prototype's; the app reads them off the theme. */
+  .cframe{background:var(--surface3);border:1px solid var(--line);border-radius:18px;padding:6px;box-shadow:var(--shadow);transition:box-shadow .26s cubic-bezier(.22,1,.36,1)}
+  .cframe:focus-within{box-shadow:var(--shadow-lg)}
+  .cframe .ch{display:grid;grid-template-rows:0fr;transition:grid-template-rows .26s cubic-bezier(.22,1,.36,1)} .cframe .ch.open{grid-template-rows:1fr} .cframe .ch>div{overflow:hidden;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 10px}
+  .cframe .ch.open>div{padding:6px 10px 10px} .cframe .ch .lbl{font-size:12px;color:var(--muted);display:inline-flex;gap:6px;align-items:center;margin-right:2px} .cframe .ch .clear{margin-left:auto;font-size:12px;color:var(--p-text);cursor:pointer}
+  .cbox{background:var(--surface);border:1px solid var(--line2);border-radius:14px;box-shadow:var(--shadow);padding:14px 16px 8px;position:relative;transition:border-color .18s,box-shadow .26s cubic-bezier(.22,1,.36,1)}
+  .cbox:focus-within{border-color:var(--p);box-shadow:0 0 0 3px var(--p-ring),var(--shadow)}
+  .cbox textarea{width:100%;border:0;outline:0;background:transparent;resize:none;min-height:96px;font-size:16px;line-height:1.55} .cbox.inline textarea{min-height:56px} .cbox textarea::placeholder{color:var(--dim)}
+  .cbox .tools{display:flex;align-items:center;gap:2px;margin-top:4px} .cbox .tools .hint{font-size:13px;color:var(--dim);display:inline-flex;align-items:center;gap:5px;margin-left:6px} .cbox .tools .recent{margin-left:auto;font-size:13px;color:var(--p-text);cursor:pointer}
+  .cframe .cf{display:flex;align-items:center;gap:6px;padding:10px 8px 4px}
+  .sel{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:9px;font-size:13px;font-weight:500;color:var(--muted);background:transparent;border:1px solid transparent;cursor:pointer;transition:background .12s,border-color .12s} .sel:hover{background:var(--surface2);border-color:var(--line)} .sel b{color:var(--text);font-weight:500;font-family:var(--mono);font-size:12.5px} .sel.off{opacity:.55;cursor:default} .sel.off:hover{background:transparent;border-color:transparent}
+  .press{transition:transform .12s cubic-bezier(.22,1,.36,1)} .press:active{transform:scale(.985)}
+  .btn .kbd.onp{background:transparent;color:rgba(255,255,255,.85);border-color:rgba(255,255,255,.35)}
+  .ctxchip{animation:pop .26s cubic-bezier(.22,1,.36,1) both} @keyframes pop{from{transform:scale(.6);opacity:0}}
+  .mention{position:absolute;left:14px;bottom:52px;width:380px;background:var(--surface);border:1px solid var(--line2);border-radius:12px;box-shadow:var(--shadow-lg);padding:6px;z-index:10;animation:up .18s cubic-bezier(.22,1,.36,1)}
+  .mention .mq{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--line);margin-bottom:4px;color:var(--dim);font-size:13px} .mention .mq input{flex:1;border:0;outline:0;background:transparent;font-size:14px;color:var(--text)}
+  .mention .mi{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;cursor:pointer;font-size:14px} .mention .mi:hover,.mention .mi.on{background:var(--surface2)} .mention .mi .mono{color:var(--muted)} .mention .mi .chip{margin-left:auto}
+  .cascade>*{animation:rise .42s cubic-bezier(.22,1,.36,1) both} .cascade>*:nth-child(2){animation-delay:.05s} .cascade>*:nth-child(3){animation-delay:.1s} .cascade>*:nth-child(4){animation-delay:.15s} .cascade>*:nth-child(5){animation-delay:.2s}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}}
+  .send{width:36px;height:36px;border-radius:50%;background:var(--p);color:#fff;display:grid;place-items:center;transition:transform .12s cubic-bezier(.22,1,.36,1),background .18s,color .18s} .send.off{background:var(--surface3);color:var(--dim)} .send:active{transform:scale(.92)}
+  @media (prefers-reduced-motion: reduce){ .cascade>*,.ctxchip,.mention{animation:none} .cframe,.cbox,.press,.send,.cframe .ch{transition:none} }
+  /* thread — beui "Message" and "Message Scroller", redrawn: rows aligned by author (the user on
+     the right, Hemera's own notes on the left, ghost tone), consecutive messages grouped with one
+     header and one footer, avatar once per group, bubbles capped at 82% with a 16px radius; a
+     navigation rail of ticks on the right when the thread overflows, following the live edge and
+     letting go when the reader scrolls up. Entrances are the "Calme" spring. */
+  .thread-wrap{position:relative;display:flex;gap:14px;min-height:0}
+  .thread{flex:1;min-width:0;display:flex;flex-direction:column;gap:18px;padding:8px 0 24px}
+  .daysep{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:12px} .daysep::before,.daysep::after{content:"";flex:1;height:1px;background:var(--line)}
+  .mgroup{display:flex;flex-direction:column;gap:6px} .mgroup.user{align-items:flex-end} .mgroup.system{align-items:flex-start}
+  .mgroup .mhead,.mgroup .mfoot{font-size:11.5px;color:var(--dim);display:flex;gap:6px;align-items:center;padding:0 38px}
+  .mrow{display:flex;align-items:flex-start;gap:10px;width:100%} .mgroup.user .mrow{flex-direction:row-reverse}
+  .mrow .avatar{width:28px;height:28px;border-radius:50%;flex:none;background:linear-gradient(135deg,var(--p),#f59e0b)} .mrow .avatar.hemera{background:radial-gradient(circle at 35% 35%,#f0abfc,var(--p) 60%,#7c3aed)} .mrow .avatar.ph{visibility:hidden}
+  .bubble{max-width:82%;padding:10px 14px;border-radius:16px;line-height:1.55;font-size:15px;animation:bubble .36s cubic-bezier(.22,1,.36,1) both}
+  .bubble.soft{background:var(--surface);border:1px solid var(--line)} .mgroup.user .bubble.soft{border-bottom-right-radius:6px} .mgroup.user .mrow:not(:last-of-type) .bubble{border-bottom-right-radius:16px;border-top-right-radius:6px}
+  .bubble.tint{background:var(--p-soft);border:1px solid transparent}
+  .bubble.ghost{background:transparent;max-width:none;padding:4px 0;color:var(--muted);font-size:14px;display:flex;align-items:center;gap:8px} .bubble.ghost a{color:var(--p-text)}
+  .bubble code{font-family:var(--mono);font-size:13px;background:var(--surface3);padding:1px 5px;border-radius:5px}
+  .bubble.pending{opacity:.6} .mfoot .saving{display:inline-flex;gap:5px;align-items:center} .mfoot .saving svg{animation:spin 1s linear infinite} @keyframes spin{to{transform:rotate(360deg)}}
+  .mfoot .failed{color:var(--bad);display:inline-flex;gap:5px;align-items:center} .mfoot .failed .btn{height:22px;padding:0 8px;font-size:11.5px;margin-left:4px}
+  @keyframes bubble{from{opacity:0;transform:translateY(8px) scale(.95)}}
+  .live{align-self:flex-end;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);padding:0 38px} .live .dotl{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+  /* navigation rail */
+  .rail{width:14px;flex:none;position:sticky;top:12px;align-self:flex-start;display:flex;flex-direction:column;align-items:center;gap:7px;padding:6px 0}
+  .rail i{display:block;width:6px;height:2px;border-radius:2px;background:var(--line2);transition:transform .26s cubic-bezier(.22,1,.36,1),background .18s;transform-origin:center}
+  .rail i.near{transform:scaleX(1.6)} .rail i.on{background:var(--p);transform:scaleX(2.2)} .rail i.day{width:2px;height:6px;background:var(--dim)}
+  .rail .preview{position:absolute;right:22px;width:240px;background:var(--surface);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--shadow-lg);padding:8px 10px;font-size:12.5px;color:var(--muted);animation:up .18s cubic-bezier(.22,1,.36,1)}
+  .latest{position:sticky;bottom:150px;align-self:center;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;background:var(--surface);border:1px solid var(--line2);box-shadow:var(--shadow-lg);font-size:13px;color:var(--muted);cursor:pointer;animation:up .18s cubic-bezier(.22,1,.36,1)} .latest:hover{color:var(--text);border-color:var(--p)}
+  .sticky-composer{position:sticky;bottom:0;padding:12px 0 0;background:linear-gradient(to top,var(--bg) 70%,transparent)}
+  .title-edit{display:inline-flex;align-items:center;gap:8px;font:600 26px/1.2 var(--sans);border-bottom:2px solid var(--p);padding-bottom:2px} .title-edit input{border:0;outline:0;background:transparent;font:inherit;min-width:320px}
+  .sendmorph{position:relative;width:18px;height:18px} .sendmorph svg{position:absolute;inset:0;transition:opacity .18s,transform .26s cubic-bezier(.22,1,.36,1)} .sendmorph .stop{opacity:0;transform:scale(.6)} .busy .sendmorph .up{opacity:0;transform:scale(.6) translateY(-4px)} .busy .sendmorph .stop{opacity:1;transform:scale(1)}
+  /* agent session (lot 5) — the thread is a list of events. Every agent block is a
+     Disclosure: one line of title + status, open while running, folded when done. A permission
+     freezes the turn: the block is the last thing in the thread and the composer waits. */
+  .session-grid{display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start}
+  .side{position:sticky;top:12px;display:flex;flex-direction:column;gap:12px}
+  .side .card{padding:12px 14px} .side .card .h3{font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px;margin-bottom:8px} .side .card .h3 .r{margin-left:auto;font-weight:500;color:var(--dim);font-size:12px}
+  .todo{display:flex;flex-direction:column;gap:6px} .todo .ti{display:flex;align-items:flex-start;gap:8px;font-size:13.5px;color:var(--muted)} .todo .ti .st{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line2);flex:none;margin-top:2px;display:grid;place-items:center;transition:background .18s,border-color .18s} .todo .ti.done .st{background:var(--ok);border-color:var(--ok);color:#fff} .todo .ti.done{color:var(--dim);text-decoration:line-through} .todo .ti.now .st{border-color:var(--p);box-shadow:0 0 0 3px var(--p-ring)} .todo .ti.now{color:var(--text)} .todo .ti .pri{margin-left:auto;font-size:10.5px;color:var(--dim);font-family:var(--mono)}
+  .files .fi{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;padding:3px 0;color:var(--muted)} .files .fi .pm{margin-left:auto} .files .pm b{font-weight:500} .files .pm .add{color:var(--ok)} .files .pm .del{color:var(--bad)}
+  .mode{display:flex;align-items:center;gap:8px;font-size:13px} .mode .chip{cursor:pointer}
+  .usage{font-size:12.5px;color:var(--muted)} .usage .bar{height:4px;border-radius:2px;background:var(--surface3);margin:6px 0;overflow:hidden} .usage .bar i{display:block;height:100%;width:38%;background:var(--p);border-radius:2px}
+  .agent .mrow{flex-direction:row} .agent .bubble{max-width:100%;background:transparent;padding:0}
+  .disc{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden;margin:6px 0;transition:border-color .18s} .disc.running{border-color:var(--p-ring)}
+  .disc .dh{display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:14px;cursor:pointer;user-select:none} .disc .dh:hover{background:var(--surface2)} .disc .dh .ti{font-weight:500} .disc .dh .meta{color:var(--dim);font-size:12.5px;font-family:var(--mono)} .disc .dh .st{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)} .disc .dh .chev{transition:transform .26s cubic-bezier(.22,1,.36,1);color:var(--dim)} .disc.open .dh .chev{transform:rotate(90deg)}
+  .disc .db{display:grid;grid-template-rows:0fr;transition:grid-template-rows .26s cubic-bezier(.22,1,.36,1)} .disc.open .db{grid-template-rows:1fr} .disc .db>div{overflow:hidden} .disc .db .inner{padding:0 12px 12px;border-top:1px solid var(--line);padding-top:10px;font-size:13.5px;color:var(--muted)}
+  .st .ok{color:var(--ok)} .st .run{color:var(--p)} .st .run svg{animation:spin 1s linear infinite} .st .bad{color:var(--bad)}
+  .tools .tl{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13.5px} .tools .tl .k{width:22px;height:22px;border-radius:6px;background:var(--surface3);display:grid;place-items:center;color:var(--muted);flex:none} .tools .tl .loc{font-family:var(--mono);font-size:12px;color:var(--p-text);cursor:pointer} .tools .tl .st{margin-left:auto}
+  .term{font-family:var(--mono);font-size:12.5px;background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--muted);white-space:pre;overflow:auto;max-height:140px;margin-top:6px} .term .cur{display:inline-block;width:7px;height:13px;background:var(--p);vertical-align:-2px;animation:blink 1s steps(2) infinite} @keyframes blink{50%{opacity:0}}
+  .diff{font-family:var(--mono);font-size:12.5px;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:6px} .diff .dl{display:grid;grid-template-columns:36px 1fr;padding:1px 0} .diff .dl .n{color:var(--dim);text-align:right;padding-right:8px;user-select:none} .diff .dl.add{background:var(--ok-soft)} .diff .dl.add .n::after{content:"+";color:var(--ok)} .diff .dl.del{background:var(--bad-soft)} .diff .dl.del .n::after{content:"−";color:var(--bad)} .diff .fh{display:flex;gap:8px;align-items:center;padding:6px 10px;background:var(--surface2);border-bottom:1px solid var(--line);font-size:12px} .diff .fh .pm{margin-left:auto}
+  .stream{line-height:1.6} .stream p{margin:0 0 8px} .stream .cur{display:inline-block;width:2px;height:16px;background:var(--p);vertical-align:-3px;animation:blink 1s steps(2) infinite;margin-left:2px}
+  .perm{border:1px solid var(--p);border-radius:14px;background:var(--surface);box-shadow:0 0 0 4px var(--p-ring),var(--shadow-lg);padding:14px 16px;margin:10px 0;animation:bubble .36s cubic-bezier(.22,1,.36,1) both}
+  .perm .ph{display:flex;align-items:center;gap:10px;font-weight:600;margin-bottom:6px} .perm .ph .chip{margin-left:auto} .perm .pt{font-size:14px;color:var(--muted);margin-bottom:10px} .perm .pt code{font-family:var(--mono);font-size:12.5px;background:var(--surface3);padding:1px 5px;border-radius:5px}
+  .perm .po{display:flex;gap:8px;flex-wrap:wrap} .perm .po .kbd{margin-left:2px}
+  .blocked .cbox{opacity:.6} .blocked .cbox textarea{pointer-events:none} .banner{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--p-text);padding:0 8px 8px}
+  .agentpill{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:9px;font-size:13px;font-weight:500;color:var(--text);background:var(--surface2);border:1px solid var(--line);cursor:pointer} .agentpill .prov{width:16px;height:16px;border-radius:4px;display:grid;place-items:center;font:700 9px var(--mono);color:#fff;background:#d97757}
+  .nav .runningdot{margin-left:auto;width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+  /* lists */
+  .list{display:flex;flex-direction:column} .li{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)} .li:last-child{border-bottom:0} .li:hover{background:var(--surface2)} .li .t{font-weight:600} .li .d{font-size:13px;color:var(--muted)} .li .r{display:flex;gap:6px;align-items:center;color:var(--dim);font-size:13px}
+  .li .ico{width:34px;height:34px;border-radius:9px;background:var(--surface3);display:grid;place-items:center;color:var(--muted)}
+
+  /* journal */
+  .jfilters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px} .jfilters .chip{cursor:pointer;border:1px solid transparent} .jfilters .chip.line{background:transparent;border-color:var(--line2);color:var(--muted);font-weight:500} .jfilters .chip.line:hover{border-color:var(--p);color:var(--p-text)}
+  .tl{position:relative;padding-left:26px} .tl::before{content:"";position:absolute;left:8px;top:6px;bottom:6px;width:2px;background:var(--line)}
+  .ev{position:relative;padding:8px 0 14px} .ev .dot{position:absolute;left:-23px;top:13px;width:11px;height:11px;border-radius:50%;background:var(--surface);border:2px solid var(--p)} .ev.tech .dot{border-color:var(--dim)}
+  .ev .l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .ev .l1 .seq{font-family:var(--mono);font-size:12px;color:var(--dim)} .ev .l2{font-size:13px;color:var(--dim);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap} .ev .l2 a{color:var(--p-text)}
+  .more-row{display:flex;justify-content:center;padding:14px}
+
+  /* settings */
+  .form{display:flex;flex-direction:column;gap:22px} .form .card{padding:18px 20px} .form .card .h2{margin-bottom:14px} .form .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .repos{display:flex;flex-direction:column;gap:8px} .repo{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface2)} .repo .path{font-family:var(--mono);font-size:13px} .repo .st{font-size:12px}
+  .danger{border-color:rgba(248,113,113,.35)} .danger .h2{color:var(--bad)}
+  .seg{display:inline-flex;background:var(--surface3);border-radius:var(--radius);padding:3px;gap:2px} .seg .tab{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer} .seg .tab.on{background:var(--surface);box-shadow:var(--shadow);color:var(--text)}
+  .kv{display:grid;grid-template-columns:200px 1fr;gap:8px 16px;font-size:14px} .kv .k{color:var(--muted)} .kv .v{font-family:var(--mono);font-size:13px}
+
+  /* home */
+  .greet{text-align:center;padding:36px 0 22px} .greet .h1{font-size:30px} .greet .sub{font-size:15px}
+  .home-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:22px}
+  .frame{background:var(--surface3);border:1px solid var(--line);border-radius:16px;padding:6px} .frame .fh{display:flex;align-items:center;gap:8px;padding:8px 10px 10px;font-weight:600} .frame .fh .lnk{margin-left:auto;font-size:13px;font-weight:500;color:var(--p-text);cursor:pointer} .frame .fb{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+  .quick{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+
+  /* palette + overlays */
+  .overlay{position:fixed;inset:20px 0 0 0;background:rgba(6,6,10,.5);backdrop-filter:blur(2px);z-index:80;display:none;align-items:flex-start;justify-content:center;padding-top:12vh} .overlay.open{display:flex}
+  .overlay.center{align-items:center;padding-top:0}
+  .pal{width:640px;max-width:94vw;background:var(--surface);border:1px solid var(--line2);border-radius:16px;box-shadow:var(--shadow-lg);overflow:hidden;animation:up .15s}
+  @keyframes up{from{transform:translateY(6px);opacity:0}}
+  .pal .phead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .pal .phead input{flex:1;border:0;outline:0;background:transparent;font-size:16px} .pal .phead .scope{font-size:12px;color:var(--p-text);background:var(--p-soft2);padding:2px 8px;border-radius:6px}
+  .pal .pbody{max-height:52vh;overflow:auto;padding:6px} .pal .pg{padding:10px 10px 4px;font:600 11px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  .pal .pi{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:9px;cursor:pointer;font-size:15px} .pal .pi:hover,.pal .pi.on{background:var(--surface2)} .pal .pi svg{color:var(--muted)} .pal .pi .r{margin-left:auto;display:flex;gap:4px;align-items:center;color:var(--dim);font-size:12px} .pal .pi .sub{color:var(--dim);font-size:13px}
+  .pal .pfoot{display:flex;gap:16px;padding:8px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--dim)} .pal .pfoot span{display:inline-flex;gap:5px;align-items:center}
+  .modal{width:560px;max-width:92vw;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-lg);padding:22px 24px;animation:up .15s} .modal .h2{margin-bottom:6px} .modal .form{gap:16px;margin-top:18px} .modal .mfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}
+  .pop{position:absolute;top:44px;right:140px;width:360px;background:var(--surface);border:1px solid var(--line2);border-radius:14px;box-shadow:var(--shadow-lg);padding:6px;z-index:60;animation:up .15s;display:none} .pop.open{display:block} .pop .ph{display:flex;align-items:center;gap:8px;padding:8px 10px;font-weight:600} .pop .ph .lnk{margin-left:auto;font-size:13px;font-weight:500;color:var(--p-text)}
+  .pop .ni{display:grid;grid-template-columns:auto 1fr;gap:10px;padding:8px 10px;border-radius:9px;align-items:start} .pop .ni:hover{background:var(--surface2)} .pop .ni .t{font-size:14px} .pop .ni .d{font-size:12px;color:var(--dim)} .pop .ni .ico{width:28px;height:28px;border-radius:8px;background:var(--surface3);display:grid;place-items:center;color:var(--muted)}
+
+  /* first launch */
+  .launch{display:grid;place-items:center;flex:1;padding:40px} .launch .box{width:520px;max-width:92vw;text-align:center} .launch .mark{width:56px;height:56px;border-radius:50%;margin:0 auto 18px;background:radial-gradient(circle at 35% 35%,#f0abfc,var(--p) 60%,#7c3aed)}
+
+  /* floating page bar */
+  #bar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:90;display:flex;gap:4px;padding:6px;background:#16161c;border:1px solid #2b2b34;border-radius:14px;box-shadow:var(--shadow-lg)} #bar button{color:#c9c9d6;font-size:12px;padding:6px 9px;border-radius:8px;display:flex;gap:6px;align-items:center} #bar button:hover{background:#26262e} #bar button.on{background:#e879f9;color:#1a0a1e;font-weight:600} #bar button i{font:11px var(--mono);opacity:.6;font-style:normal}
+  .pg{display:none} .pg.on{display:contents}
+  .note{position:absolute;right:16px;top:12px;max-width:300px;max-height:34px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;transition:max-height .26s cubic-bezier(.22,1,.36,1),white-space 0s .26s;font-size:12px;color:var(--dim);background:var(--surface);border:1px dashed var(--line2);border-radius:10px;padding:8px 10px;z-index:5} .note b{color:var(--muted)} .note:hover{max-height:240px;white-space:normal;transition:max-height .26s cubic-bezier(.22,1,.36,1)}
+</style>
+</head>
+<body>
+<div id="marker">prototype · lot 4 pages · tokens and layout only · never copy markup</div>
+
+<div id="app">
+  <!-- ===== chrome bar (lot 2) ===== -->
+  <div class="chrome">
+    <div class="left">
+      <span class="mark"></span><span class="name">Hemera</span>
+      <button class="fold" title="Fold the sidebar · Ctrl B" onclick="fold()"><i data-lucide="panel-left"></i></button>
+    </div>
+    <div class="right" id="tabs">
+      <button class="ptab on"><span class="swatch c1"></span>Atlas<span class="n">3</span></button>
+      <button class="ptab"><span class="swatch c2"></span>Notes</button>
+      <button class="ptab"><span class="swatch c3"></span>Hemera docs<span class="n">1</span></button>
+      <button class="ptab"><span class="swatch c4"></span>Legacy shop</button>
+      <button class="ptab add" title="New Project" onclick="go(2)"><i data-lucide="plus"></i></button>
+      <button class="bell" title="Notifications" onclick="togglePop()"><i data-lucide="bell"></i><span class="dotn"></span></button>
+      <div class="wco"><span>—</span><span>▢</span><span>✕</span></div>
+      <!-- bell popover -->
+      <div class="pop" id="pop">
+        <div class="ph"><i data-lucide="bell"></i>Notifications<span class="lnk">Mark all read</span></div>
+        <div class="ni"><div class="ico"><i data-lucide="archive-restore"></i></div><div><div class="t">“Old billing thoughts” restored to Atlas</div><div class="d">Session · 2 min ago</div></div></div>
+        <div class="ni"><div class="ico"><i data-lucide="folder-plus"></i></div><div><div class="t">Project “Notes” created</div><div class="d">Project · yesterday</div></div></div>
+        <div class="ni"><div class="ico"><i data-lucide="database"></i></div><div><div class="t">Profile migrated to 20260916_projects_and_sessions</div><div class="d">Profile · at start-up · a backup was taken</div></div></div>
+        <div style="padding:8px 10px 6px" class="xs dim">Only Hemera speaks here in lot 4. Agents will, from lot 5.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== sidebar (lot 2, now real) ===== -->
+  <aside class="sidebar" id="sidebar">
+    <button class="nav" onclick="openPal()"><i data-lucide="command"></i><span>Command</span><span class="kbds"><span class="kbd">Ctrl</span><span class="kbd">K</span></span></button>
+    <button class="nav" data-page="3" onclick="go(3)"><i data-lucide="home"></i><span>Home</span></button>
+    <div class="grp">Sessions<button class="plus" title="New Session" onclick="go(5)"><i data-lucide="plus"></i></button></div>
+    <div class="nav" role="button" tabindex="0" data-page="4" onclick="go(4)"><i data-lucide="message-square-text"></i><span class="ell">CSV invoice export</span><button class="more" title="Rename, archive" onclick="event.stopPropagation()"><i data-lucide="ellipsis"></i></button></div>
+    <div class="nav" role="button" tabindex="0" onclick="go(4)"><i data-lucide="message-square-text"></i><span class="ell">Full-text search</span><button class="more" onclick="event.stopPropagation()"><i data-lucide="ellipsis"></i></button></div>
+    <div class="nav" role="button" tabindex="0" data-page="a" onclick="go('a')"><i data-lucide="hammer"></i><span class="ell">Migrate to Drizzle 1.0</span><span class="runningdot" title="running"></span><button class="more" onclick="event.stopPropagation()"><i data-lucide="ellipsis"></i></button></div>
+    <button class="archived" onclick="go(7)"><i data-lucide="archive" class="i14"></i>2 archived</button>
+    <div class="grp">Project</div>
+    <button class="nav" data-page="6" onclick="go(6)"><i data-lucide="scroll-text"></i><span>Journal</span></button>
+    <button class="nav" data-page="8" onclick="go(8)"><i data-lucide="settings-2"></i><span>Project settings</span></button>
+    <div class="bottom">
+      <button class="nav" onclick="toggleTheme()"><i data-lucide="sun"></i><span>Use the light theme</span></button>
+      <button class="nav" data-page="9" onclick="go(9)"><i data-lucide="settings"></i><span>Settings</span><span class="kbds"><span class="kbd">Ctrl</span><span class="kbd">,</span></span></button>
+    </div>
+  </aside>
+
+  <!-- ===== content ===== -->
+  <main class="content" id="content">
+
+    <!-- 1 · first launch -->
+    <section class="pg" data-pg="1">
+      <div class="note"><b>First launch.</b> No Project yet: the chrome bar has no tabs, the sidebar has nothing to list. One action, and it is the same dialog as “+”.</div>
+      <div class="launch"><div class="box">
+        <div class="mark"></div>
+        <h1 class="h1">Welcome to Hemera</h1>
+        <p class="sub" style="margin:8px 0 22px">A Project holds your Sessions, your Journal and, later, your Specs and Workspaces. Start with one, even before its sources exist.</p>
+        <button class="btn primary" onclick="go(2)"><i data-lucide="folder-plus"></i>Create your first Project</button>
+        <p class="xs dim" style="margin-top:18px">Ctrl K opens the command palette from anywhere, even here.</p>
+      </div></div>
+    </section>
+
+    <!-- 2 · new project (dialog over whatever page) -->
+    <section class="pg" data-pg="2">
+      <div class="note"><b>New Project.</b> A Dialog from the lot 1 catalogue. Name, colour, the folder of the <code>main</code> Workspace. Sources are not required: the folder may be empty. Repositories are configured afterwards, in Project settings.</div>
+      <div class="overlay center open" style="position:absolute;inset:0">
+        <div class="modal">
+          <h2 class="h2">New Project</h2>
+          <p class="sub">A Project is a logical group. Its path belongs to its <b>main</b> Workspace.</p>
+          <div class="form">
+            <div class="field"><label>Name</label><div class="input"><input value="Atlas" placeholder="What is it called?"></div></div>
+            <div class="field"><label>Colour</label><div class="row"><span class="swatch c1" style="outline:2px solid var(--p);outline-offset:2px"></span><span class="swatch c2"></span><span class="swatch c3"></span><span class="swatch c5"></span><span class="swatch c4"></span><span class="xs dim" style="margin-left:6px">shown on the tab and in the palette</span></div></div>
+            <div class="field"><label>Folder of the main Workspace</label><div class="input mono"><i data-lucide="folder" class="i16"></i><input value="D:\Projects\atlas"><button class="btn sm ghost">Browse…</button></div><div class="help">May be empty for now: preparation and design documents can live here before any source arrives.</div></div>
+          </div>
+          <div class="mfoot"><button class="btn ghost" onclick="go(3)">Cancel</button><button class="btn primary" onclick="go(3)">Create Project</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 · home -->
+    <section class="pg" data-pg="3">
+      <div class="note"><b>Home, lot 4 shape.</b> The composer opens a new Session with the text as its first message. Below: the Sessions to come back to, and the last Journal entries. No “Needs you”, no “Running”: nothing runs yet.</div>
+      <div class="page">
+        <div class="greet cascade"><h1 class="h1">What are we doing in Atlas?</h1><p class="sub">Write freely. It becomes a Session the moment you send.</p></div>
+        <div data-composer="hero"></div>
+        <div class="quick cascade"><button class="btn sm"><i data-lucide="history"></i>Resume: CSV invoice export</button><button class="btn sm"><i data-lucide="scroll-text"></i>Open the Journal</button></div>
+        <div class="home-grid">
+          <div class="frame"><div class="fh"><i data-lucide="message-square-text"></i>Sessions<span class="lnk" onclick="go(7)">Archived</span></div><div class="fb list">
+            <div class="li" onclick="go(4)"><div class="ico"><i data-lucide="message-square-text"></i></div><div><div class="t">CSV invoice export</div><div class="d">“Invoices should export with HT and TTC…” · 4 messages</div></div><div class="r">12 min ago</div></div>
+            <div class="li" onclick="go(4)"><div class="ico"><i data-lucide="message-square-text"></i></div><div><div class="t">Full-text search</div><div class="d">“Postgres FTS or a separate index?” · 2 messages</div></div><div class="r">yesterday</div></div>
+            <div class="li" onclick="go(4)"><div class="ico"><i data-lucide="message-square-text"></i></div><div><div class="t">Migrate to Drizzle 1.0</div><div class="d">“Keep static SQL migrations or…” · 7 messages</div></div><div class="r">3 d ago</div></div>
+          </div></div>
+          <div class="frame"><div class="fh"><i data-lucide="activity"></i>Activity<span class="lnk" onclick="go(6)">Journal</span></div><div class="fb" style="padding:14px 16px 6px"><div class="tl">
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="chip free">session</span>Message added · <a>CSV invoice export</a></div><div class="l2">12 min ago</div></div>
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="chip free">session</span>Renamed “Untitled” → “Full-text search”</div><div class="l2">yesterday</div></div>
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="chip n">session</span>Archived “Old billing thoughts”</div><div class="l2">3 d ago</div></div>
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="chip info">project</span>Repository <code class="mono">./sources/api</code> added</div><div class="l2">5 d ago</div></div>
+          </div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 · session free -->
+    <section class="pg" data-pg="4">
+      <div class="note"><b>Session <code>free</code>.</b> beui Message + Message Scroller, redrawn. The user on the right, grouped when consecutive; Hemera's own notes (created, renamed) on the left in ghost tone, read from the Journal. One header and one footer per group; the footer carries the persistence state (saving, saved, refused with retry). The rail on the right is one tick per message, the active one wider, a preview on hover; the “Latest” pill appears when the reader has scrolled up. No answer, no typing indicator: nothing responds in lot 4.</div>
+      <div class="page">
+        <div class="head">
+          <div><h1 class="h1">CSV invoice export</h1><p class="sub"><span class="chip free"><i data-lucide="message-circle" class="i14"></i>free</span> · Atlas · created 3 d ago · 5 messages</p></div>
+          <div class="actions"><button class="btn sm ghost press" onclick="go(5)"><i data-lucide="pencil"></i>Rename</button><button class="btn sm ghost press"><i data-lucide="archive"></i>Archive</button><button class="btn icon sm ghost press"><i data-lucide="ellipsis"></i></button></div>
+        </div>
+        <div class="thread-wrap">
+          <div class="thread" id="thread">
+            <div class="daysep">3 days ago</div>
+            <div class="mgroup system"><div class="mrow"><span class="avatar hemera"></span><div class="bubble ghost"><i data-lucide="sparkles" class="i14"></i>Session created in Atlas · <a onclick="go(6)">Journal #41</a></div></div></div>
+            <div class="mgroup user">
+              <div class="mhead"><b>You</b><span>14:02</span></div>
+              <div class="mrow"><span class="avatar"></span><div class="bubble soft">Invoices should export with HT and TTC amounts per line. Today the CSV only has totals, and accounting re-keys everything by hand.</div></div>
+              <div class="mrow"><span class="avatar ph"></span><div class="bubble soft">Constraints: one file per month, semicolon separator, UTF-8 with BOM for Excel. The <code>vat_rate</code> column exists on the line model already.</div></div>
+              <div class="mfoot"><i data-lucide="check" class="i14"></i>Saved</div>
+            </div>
+            <div class="mgroup system"><div class="mrow"><span class="avatar hemera"></span><div class="bubble ghost"><i data-lucide="pencil" class="i14"></i>Renamed “Untitled” → “CSV invoice export”</div></div></div>
+            <div class="daysep">today</div>
+            <div class="mgroup user">
+              <div class="mhead"><b>You</b><span>10:41</span></div>
+              <div class="mrow"><span class="avatar"></span><div class="bubble soft">Open question: does the client number go on every line, or once in a header block? Ask Marie before turning this into a Spec.</div></div>
+              <div class="mfoot"><i data-lucide="check" class="i14"></i>Saved</div>
+            </div>
+            <div class="mgroup user">
+              <div class="mhead"><b>You</b><span>10:58</span></div>
+              <div class="mrow"><span class="avatar"></span><div class="bubble soft pending">Answer from Marie: every line. She wants to filter in Excel.</div></div>
+              <div class="mfoot"><span class="saving"><i data-lucide="loader-circle" class="i14"></i>Saving…</span></div>
+            </div>
+            <div class="mgroup user">
+              <div class="mhead"><b>You</b><span>10:59</span></div>
+              <div class="mrow"><span class="avatar"></span><div class="bubble soft pending">Also: the export runs from the billing page, not from a command.</div></div>
+              <div class="mfoot"><span class="failed"><i data-lucide="triangle-alert" class="i14"></i>Not saved: the profile is read-only<button class="btn sm press">Retry</button></span></div>
+            </div>
+            <div class="live"><span class="dotl"></span>You are at the latest message</div>
+          </div>
+          <div class="rail" id="rail" aria-hidden="true">
+            <i class="day"></i><i></i><i></i><i></i><i></i><i class="day"></i><i class="near"></i><i class="on"></i><i class="near"></i>
+          </div>
+        </div>
+        <div class="sticky-composer"><div data-composer="inline" data-ph="Write in this Session…" data-filled="1"></div></div>
+      </div>
+    </section>
+
+    <!-- 5 · session, new and empty, title being edited -->
+    <section class="pg" data-pg="5">
+      <div class="note"><b>New Session, empty.</b> Same skeleton, nothing in it but the note of its creation. Title “Untitled” edited inline, derived from the first message once sent (a proposal, not a decision). No fake entry; the composer has the focus.</div>
+      <div class="page">
+        <div class="head">
+          <div><div class="title-edit"><input value="Untitled" autofocus><span class="xs dim">Enter to save · Esc to cancel</span></div><p class="sub"><span class="chip free"><i data-lucide="message-circle" class="i14"></i>free</span> · Atlas · just now</p></div>
+          <div class="actions"><button class="btn sm ghost press" disabled><i data-lucide="archive"></i>Archive</button></div>
+        </div>
+        <div class="thread-wrap"><div class="thread">
+          <div class="mgroup system"><div class="mrow"><span class="avatar hemera"></span><div class="bubble ghost"><i data-lucide="sparkles" class="i14"></i>Session created in Atlas · just now</div></div></div>
+          <div class="empty" style="padding:40px 24px 24px"><div class="ico"><i data-lucide="message-square-dashed" class="i22"></i></div><div class="t">Nothing written yet</div><p>Your first message names the Session for you. Everything you write here is kept, whether or not an agent ever joins.</p></div>
+        </div></div>
+        <div class="sticky-composer"><div data-composer="inline" data-ph="What is on your mind?"></div></div>
+      </div>
+    </section>
+
+    <!-- 6 · journal -->
+    <section class="pg" data-pg="6">
+      <div class="note"><b>Journal of the Project.</b> A paginated projection of <code>domain_events</code>, cursor-based, newest first, grouped by day. Filters by entity. Each entry names its Session when it has one. Technical activity is not here.</div>
+      <div class="page">
+        <div class="head"><div><h1 class="h1">Journal</h1><p class="sub">Every change made in Atlas, in the order it happened. 61 entries.</p></div><div class="actions"><div class="input" style="width:260px"><i data-lucide="search" class="i16"></i><input placeholder="Search entries"></div></div></div>
+        <div class="jfilters"><span class="chip p">All</span><span class="chip line">Sessions</span><span class="chip line">Project</span><span class="chip line">Profile</span><span class="chip line" style="margin-left:auto"><i data-lucide="user" class="i14"></i>by you</span></div>
+        <div class="card" style="padding:18px 22px 4px">
+          <div class="sect" style="margin-bottom:12px">Today</div>
+          <div class="tl">
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="seq">#61</span><span class="chip free">session</span>Message added</div><div class="l2"><span>10:41</span><span>Session <a>CSV invoice export</a></span><span>by you</span></div></div>
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="seq">#60</span><span class="chip free">session</span>Session restored: “Old billing thoughts”</div><div class="l2"><span>09:12</span><span>by you</span></div></div>
+            <div class="ev tech"><div class="dot"></div><div class="l1"><span class="seq">#59</span><span class="chip n">profile</span>Profile opened by 0.4.0-beta.3</div><div class="l2"><span>09:10</span><span>by Hemera</span></div></div>
+          </div>
+          <div class="sect" style="margin:6px 0 12px">Yesterday</div>
+          <div class="tl">
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="seq">#58</span><span class="chip free">session</span>Renamed “Untitled” → “Full-text search”</div><div class="l2"><span>18:30</span><span>Session <a>Full-text search</a></span><span>by you</span></div></div>
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="seq">#57</span><span class="chip free">session</span>Session created</div><div class="l2"><span>18:29</span><span>Session <a>Full-text search</a></span><span>by you</span></div></div>
+            <div class="ev"><div class="dot"></div><div class="l1"><span class="seq">#56</span><span class="chip info">project</span>Repository <code class="mono">./sources/api</code> added</div><div class="l2"><span>11:02</span><span>by you</span></div></div>
+          </div>
+          <div class="more-row"><button class="btn sm"><i data-lucide="chevron-down"></i>Earlier entries</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7 · archived sessions -->
+    <section class="pg" data-pg="7">
+      <div class="note"><b>Archived Sessions.</b> Reached from the sidebar's “2 archived” line or the palette. Restore puts a Session back in the sidebar; nothing is ever deleted in lot 4.</div>
+      <div class="page narrow">
+        <div class="head"><div><h1 class="h1">Archived Sessions</h1><p class="sub">Out of the sidebar, kept whole. Restore one to work in it again.</p></div></div>
+        <div class="card list">
+          <div class="li"><div class="ico"><i data-lucide="archive"></i></div><div><div class="t">Old billing thoughts</div><div class="d">archived 3 d ago · 5 messages · last written 2 weeks ago</div></div><div class="r"><button class="btn sm"><i data-lucide="archive-restore"></i>Restore</button></div></div>
+          <div class="li"><div class="ico"><i data-lucide="archive"></i></div><div><div class="t">Onboarding checklist</div><div class="d">archived last month · 1 message</div></div><div class="r"><button class="btn sm"><i data-lucide="archive-restore"></i>Restore</button></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8 · project settings -->
+    <section class="pg" data-pg="8">
+      <div class="note"><b>Project settings.</b> Stored in the base, edited here. Repositories are relative to the main Workspace root; an empty list means <code>.</code>. Nothing is initialised: a path that has no Git repository just says so. Archiving a Project hides it; it is not deleted.</div>
+      <div class="page narrow">
+        <div class="head"><div><h1 class="h1">Project settings</h1><p class="sub">Atlas · created 12 d ago</p></div><div class="actions"><button class="btn primary" disabled>Saved</button></div></div>
+        <div class="form">
+          <div class="card"><h2 class="h2">Identity</h2><div class="grid2">
+            <div class="field"><label>Name</label><div class="input"><input value="Atlas"></div></div>
+            <div class="field"><label>Colour</label><div class="row" style="height:36px"><span class="swatch c1" style="outline:2px solid var(--p);outline-offset:2px"></span><span class="swatch c2"></span><span class="swatch c3"></span><span class="swatch c5"></span><span class="swatch c4"></span></div></div>
+          </div></div>
+          <div class="card"><h2 class="h2">Main Workspace</h2>
+            <div class="field"><label>Folder</label><div class="input mono"><i data-lucide="folder" class="i16"></i><input value="D:\Projects\atlas"><button class="btn sm ghost">Change…</button></div><div class="help">The root every repository path below is relative to.</div></div>
+          </div>
+          <div class="card"><h2 class="h2">Repositories</h2>
+            <p class="sub" style="margin:-6px 0 12px">Relative to the folder above. Leave the list empty to use the root itself.</p>
+            <div class="repos">
+              <div class="repo"><i data-lucide="git-branch" class="i16"></i><span class="path">./sources/api</span><span class="chip ok st">git · main</span><button class="btn icon sm ghost"><i data-lucide="x"></i></button></div>
+              <div class="repo"><i data-lucide="git-branch" class="i16"></i><span class="path">./sources/front</span><span class="chip ok st">git · develop</span><button class="btn icon sm ghost"><i data-lucide="x"></i></button></div>
+              <div class="repo"><i data-lucide="folder" class="i16"></i><span class="path">./docs</span><span class="chip n st">no repository</span><button class="btn icon sm ghost"><i data-lucide="x"></i></button></div>
+            </div>
+            <div class="row" style="margin-top:10px"><button class="btn sm"><i data-lucide="plus"></i>Add a path</button><span class="xs dim">Nothing is cloned or initialised here. Lot 7 brings preparation.</span></div>
+          </div>
+          <div class="card danger"><h2 class="h2">Archive this Project</h2><p class="sub" style="margin:-6px 0 12px">Its tab disappears, its Sessions and Journal stay. Restore from Settings.</p><button class="btn danger"><i data-lucide="archive"></i>Archive Atlas</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9 · application settings -->
+    <section class="pg" data-pg="9">
+      <div class="note"><b>Application settings</b> (Ctrl ,). Theme preference from lot 3, the profile as <code>profile.status</code> reports it, archived Projects. Nothing about agents or providers before lot 5.</div>
+      <div class="page narrow">
+        <div class="head"><div><h1 class="h1">Settings</h1><p class="sub">Hemera Beta 0.4.0-beta.3 · channel beta</p></div></div>
+        <div class="form">
+          <div class="card"><h2 class="h2">Appearance</h2><div class="field"><label>Theme</label><div class="seg"><span class="tab"><i data-lucide="monitor" class="i16"></i>System</span><span class="tab"><i data-lucide="sun" class="i16"></i>Light</span><span class="tab on"><i data-lucide="moon" class="i16"></i>Dark</span></div><div class="help">Followed by the frame, the window buttons and every native control, not only the page.</div></div></div>
+          <div class="card"><h2 class="h2">Profile</h2><div class="kv">
+            <span class="k">Folder</span><span class="v">C:\Users\someone\AppData\Local\hemera\prod</span>
+            <span class="k">Database</span><span class="v">hemera.sqlite · 1.2 MB</span>
+            <span class="k">Last migration</span><span class="v">20260916_projects_and_sessions</span>
+            <span class="k">Written by</span><span class="v">0.4.0-beta.3</span>
+            <span class="k">Backups</span><span class="v">2 · latest before 20260916_projects_and_sessions</span>
+          </div><div class="row" style="margin-top:14px"><button class="btn sm"><i data-lucide="folder-open"></i>Open the folder</button><button class="btn sm"><i data-lucide="file-text"></i>Open diagnostic.log</button></div></div>
+          <div class="card"><h2 class="h2">Archived Projects</h2><div class="list"><div class="li" style="padding:10px 0"><div class="ico"><i data-lucide="archive"></i></div><div><div class="t">ML playground</div><div class="d">archived last week · 4 Sessions</div></div><div class="r"><button class="btn sm"><i data-lucide="archive-restore"></i>Restore</button></div></div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- a · session with an agent (lot 5) -->
+    <section class="pg" data-pg="a">
+      <div class="note"><b>Session with an agent (lot 5).</b> The thread is a list of ACP events, not messages: text streamed, a thought folded to “Thought for 4 s”, tool calls as one line each with status and locations, grouped when consecutive, open while running and folded once done, a diff that fills, terminal output live. A permission request is the last block, the composer waits, Stop stays live. The side panel keeps what must survive scrolling: the plan, the files touched, the mode, the usage. Agent and model come from the agent's own configOptions.</div>
+      <div class="page" style="max-width:1240px">
+        <div class="head">
+          <div><h1 class="h1">Migrate to Drizzle 1.0</h1><p class="sub"><span class="chip build"><i data-lucide="hammer" class="i14"></i>build</span> · Atlas · <span class="agentpill"><span class="prov">C</span>Claude Code<span class="dim">·</span>Opus 5<i data-lucide="chevron-down" class="i14"></i></span> · turn 3 · <span class="chip warn"><i data-lucide="hand" class="i14"></i>waiting for you</span></p></div>
+          <div class="actions"><button class="btn sm press"><i data-lucide="square"></i>Stop</button><button class="btn sm ghost press"><i data-lucide="pencil"></i>Rename</button><button class="btn icon sm ghost press"><i data-lucide="ellipsis"></i></button></div>
+        </div>
+        <div class="session-grid">
+          <div class="thread-wrap"><div class="thread" id="thread-agent">
+            <div class="daysep">today</div>
+            <div class="mgroup user"><div class="mhead"><b>You</b><span>10:41</span></div><div class="mrow"><span class="avatar"></span><div class="bubble soft">Migrate the storage layer to Drizzle 1.0. Keep the generated migrations, no hand-written SQL. Run the migration tests when you are done.</div></div><div class="mfoot"><i data-lucide="check" class="i14"></i>Saved</div></div>
+
+            <div class="mgroup agent"><div class="mhead"><span class="prov" style="width:16px;height:16px;border-radius:4px;display:inline-grid;place-items:center;font:700 9px var(--mono);color:#fff;background:#d97757">C</span><b>Claude Code</b><span>10:41</span></div><div class="mrow"><span class="avatar hemera" style="visibility:hidden"></span><div class="bubble">
+              <div class="disc" onclick="this.classList.toggle('open')"><div class="dh"><i data-lucide="brain" class="i16"></i><span class="ti">Thought for 4 s</span><span class="st"><span class="ok"><i data-lucide="check" class="i14"></i></span></span><i data-lucide="chevron-right" class="i14 chev"></i></div><div class="db"><div><div class="inner">The schema imports <code>sqlite-core</code> only; the driver lives in <code>database.ts</code>. The migrator API changed in rc.5: one folder per migration, no journal. I should read the current migrate.ts before touching the config.</div></div></div></div>
+              <div class="disc open tools"><div class="dh" onclick="this.parentElement.classList.toggle('open')"><i data-lucide="wrench" class="i16"></i><span class="ti">Ran 3 tools</span><span class="meta">read · search · read</span><span class="st"><span class="ok"><i data-lucide="check" class="i14"></i>done</span></span><i data-lucide="chevron-right" class="i14 chev"></i></div><div class="db"><div><div class="inner">
+                <div class="tl"><span class="k"><i data-lucide="file-search" class="i14"></i></span>Read <span class="loc">apps/desktop/src/profile/storage/database.ts</span><span class="st"><span class="ok"><i data-lucide="check" class="i14"></i></span></span></div>
+                <div class="tl"><span class="k"><i data-lucide="search" class="i14"></i></span>Search <span class="mono">drizzle-orm/effect</span> in <span class="loc">apps/desktop</span><span class="meta" style="margin-left:6px">4 results</span><span class="st"><span class="ok"><i data-lucide="check" class="i14"></i></span></span></div>
+                <div class="tl"><span class="k"><i data-lucide="file-search" class="i14"></i></span>Read <span class="loc">apps/desktop/src/profile/migrate.ts</span><span class="st"><span class="ok"><i data-lucide="check" class="i14"></i></span></span></div>
+              </div></div></div></div>
+              <div class="stream"><p>The driver is already on <code>drizzle-orm/effect-sqlite-node</code>; what is left is the migrator call and the config. I am editing <code>drizzle.config.ts</code> first, then the migrator.</p></div>
+              <div class="disc open running"><div class="dh" onclick="this.parentElement.classList.toggle('open')"><i data-lucide="file-pen" class="i16"></i><span class="ti">Edit</span><span class="loc" style="font-family:var(--mono);font-size:12px;color:var(--p-text)">apps/desktop/drizzle.config.ts</span><span class="st"><span class="run"><i data-lucide="loader-circle" class="i14"></i>writing</span></span><i data-lucide="chevron-right" class="i14 chev"></i></div><div class="db"><div><div class="inner">
+                <div class="diff"><div class="fh"><i data-lucide="file-code" class="i14"></i>drizzle.config.ts<span class="pm"><b class="add">+3</b> <b class="del">−1</b></span></div>
+                  <div class="dl"><span class="n">14</span><span>  dialect: 'sqlite',</span></div>
+                  <div class="dl del"><span class="n">15</span><span>  out: './drizzle', driver: 'better-sqlite',</span></div>
+                  <div class="dl add"><span class="n">15</span><span>  out: './drizzle',</span></div>
+                  <div class="dl add"><span class="n">16</span><span>  // rc.5: one folder per migration, no journal file</span></div>
+                  <div class="dl add"><span class="n">17</span><span>  migrations: { prefix: 'timestamp' },</span></div>
+                  <div class="dl"><span class="n">18</span><span>}</span></div>
+                </div>
+              </div></div></div></div>
+              <div class="disc open running"><div class="dh" onclick="this.parentElement.classList.toggle('open')"><i data-lucide="terminal" class="i16"></i><span class="ti">Run</span><span class="meta">pnpm --filter @hemera/desktop exec drizzle-kit generate</span><span class="st"><span class="run"><i data-lucide="loader-circle" class="i14"></i>12 s</span></span><i data-lucide="chevron-right" class="i14 chev"></i></div><div class="db"><div><div class="inner"><div class="term">$ drizzle-kit generate
+Reading config file 'drizzle.config.ts'
+1 tables
+profile 3 columns 0 indexes 1 fks
+[✓] Your SQL migration file ➜ drizzle/20260916175530_profile/migration.sql
+<span class="cur"></span></div></div></div></div></div>
+              <div class="stream"><p>Now the tests. This needs a command outside the Workspace root: the temporary profile lives under <code>%LOCALAPPDATA%</code>.<span class="cur"></span></p></div>
+            </div></div></div>
+
+            <div class="perm" role="dialog" aria-live="assertive">
+              <div class="ph"><i data-lucide="shield-question" class="i16"></i>Claude Code asks for a permission<span class="chip warn">turn paused</span></div>
+              <div class="pt">Run <code>pnpm test -- migrate.test.ts</code> with <code>HEMERA_PROFILE_DIR=C:\Users\someone\AppData\Local\Temp\hemera-xk2</code>. The folder is <b>outside</b> the Workspace root <code>D:\Projects\atlas</code>, so it is not covered by the build rule.</div>
+              <div class="po"><button class="btn primary press"><i data-lucide="check"></i>Allow once<span class="kbd onp">Y</span></button><button class="btn press"><i data-lucide="check-check"></i>Allow for this Session<span class="kbd">A</span></button><button class="btn press danger"><i data-lucide="x"></i>Reject<span class="kbd">N</span></button></div>
+              <div class="xs dim" style="margin-top:8px">The buttons are the agent's own options (ACP <code>options</code>): never three hard-coded ones. Escape rejects.</div>
+            </div>
+          </div></div>
+
+          <aside class="side">
+            <div class="card"><div class="h3"><i data-lucide="list-checks" class="i16"></i>Plan<span class="r">2 / 5</span></div><div class="todo">
+              <div class="ti done"><span class="st"><i data-lucide="check" class="i14"></i></span>Read the current storage layer</div>
+              <div class="ti done"><span class="st"><i data-lucide="check" class="i14"></i></span>Update drizzle.config.ts for rc.5</div>
+              <div class="ti now"><span class="st"></span>Regenerate the migration<span class="pri">high</span></div>
+              <div class="ti"><span class="st"></span>Adapt migrate.ts to the folder layout</div>
+              <div class="ti"><span class="st"></span>Run the migration tests<span class="pri">high</span></div>
+            </div></div>
+            <div class="card files"><div class="h3"><i data-lucide="file-diff" class="i16"></i>Changed files<span class="r">2 · +38 −7</span></div>
+              <div class="fi"><i data-lucide="file-code" class="i14"></i>drizzle.config.ts<span class="pm"><b class="add">+3</b> <b class="del">−1</b></span></div>
+              <div class="fi"><i data-lucide="file-plus" class="i14"></i>drizzle/20260916…/migration.sql<span class="pm"><b class="add">+35</b> <b class="del">−6</b></span></div>
+            </div>
+            <div class="card"><div class="h3"><i data-lucide="sliders-horizontal" class="i16"></i>Mode</div><div class="mode"><span class="chip build">build</span><span class="chip n">auto-approve in root</span><span class="xs dim" style="margin-left:auto">Ctrl .</span></div></div>
+            <div class="card usage"><div class="h3"><i data-lucide="gauge" class="i16"></i>Usage<span class="r">$0.42</span></div>38 % of the context window · 71 k tokens<div class="bar"><i></i></div><span class="xs dim">from <code>usage_update</code>; Codex reports tokens only</span></div>
+            <div class="card"><div class="h3"><i data-lucide="book-open" class="i16"></i>Context<span class="r">lot 5b</span></div><div class="xs dim">What was handed to the agent, what it can read by MCP, what stays private.</div></div>
+          </aside>
+        </div>
+        <div class="sticky-composer blocked"><div class="banner"><i data-lucide="hand" class="i16"></i>Waiting for your answer above. Stop is still live.</div><div data-composer="inline" data-ph="Answer the permission first…"></div></div>
+      </div>
+    </section>
+
+    <!-- 0 · empty project (no session yet) -->
+    <section class="pg" data-pg="0">
+      <div class="note"><b>Project without a Session.</b> The sidebar says so instead of listing a fake one; Home still offers the composer, which creates the first Session.</div>
+      <div class="page">
+        <div class="greet cascade"><h1 class="h1">What are we doing in Notes?</h1><p class="sub">Nothing here yet. Write, and it becomes the first Session.</p></div>
+        <div data-composer="hero" data-ph="Nothing here yet. Write, and it becomes the first Session…"></div>
+        <div class="empty" style="padding-top:48px"><div class="ico"><i data-lucide="message-square-dashed" class="i22"></i></div><div class="t">No Session in Notes</div><p>The sidebar will list them as you create them. The Journal already has the creation of the Project.</p><button class="btn sm" style="margin-top:6px" onclick="go(6)"><i data-lucide="scroll-text"></i>Open the Journal</button></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== palette ===== -->
+  <div class="overlay" id="paloverlay" onclick="if(event.target===this)closePal()">
+    <div class="pal">
+      <div class="phead"><i data-lucide="command"></i><span class="scope">Atlas</span><input placeholder="Type a command, a Session, a Project…" id="palq"></div>
+      <div class="pbody">
+        <div class="pg" style="display:block">Sessions</div>
+        <div class="pi on"><i data-lucide="plus"></i>New Session<span class="r"><span class="kbd">Ctrl</span><span class="kbd">N</span></span></div>
+        <div class="pi"><i data-lucide="message-square-text"></i>CSV invoice export<span class="sub">12 min ago</span><span class="r">Open</span></div>
+        <div class="pi"><i data-lucide="message-square-text"></i>Full-text search<span class="sub">yesterday</span><span class="r">Open</span></div>
+        <div class="pi"><i data-lucide="archive"></i>Archive current Session<span class="sub">CSV invoice export</span></div>
+        <div class="pi"><i data-lucide="archive-restore"></i>Restore a Session…<span class="sub">2 archived</span><span class="r">›</span></div>
+        <div class="pg" style="display:block">Projects</div>
+        <div class="pi"><span class="swatch c2"></span>Switch to Notes<span class="r"><span class="kbd">Ctrl</span><span class="kbd">2</span></span></div>
+        <div class="pi"><span class="swatch c3"></span>Switch to Hemera docs<span class="r"><span class="kbd">Ctrl</span><span class="kbd">3</span></span></div>
+        <div class="pi"><i data-lucide="folder-plus"></i>New Project…</div>
+        <div class="pg" style="display:block">Go to</div>
+        <div class="pi"><i data-lucide="home"></i>Home</div>
+        <div class="pi"><i data-lucide="scroll-text"></i>Journal</div>
+        <div class="pi"><i data-lucide="settings-2"></i>Project settings</div>
+        <div class="pi"><i data-lucide="settings"></i>Settings<span class="r"><span class="kbd">Ctrl</span><span class="kbd">,</span></span></div>
+        <div class="pg" style="display:block">Appearance</div>
+        <div class="pi"><i data-lucide="sun-moon"></i>Theme: system · light · dark<span class="r">›</span></div>
+        <div class="pi"><i data-lucide="panel-left"></i>Fold the sidebar<span class="r"><span class="kbd">Ctrl</span><span class="kbd">B</span></span></div>
+      </div>
+      <div class="pfoot"><span><span class="kbd">↑↓</span> move</span><span><span class="kbd">Enter</span> run</span><span><span class="kbd">Esc</span> close</span><span style="margin-left:auto">Results are scoped to the active Project; type <span class="kbd">></span> for every Project</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="bar">
+  <button onclick="go(1)"><i>1</i>First launch</button>
+  <button onclick="go(2)"><i>2</i>New Project</button>
+  <button onclick="go(3)"><i>3</i>Home</button>
+  <button onclick="go(4)"><i>4</i>Session</button>
+  <button onclick="go(5)"><i>5</i>New Session</button>
+  <button onclick="go(6)"><i>6</i>Journal</button>
+  <button onclick="go(7)"><i>7</i>Archived</button>
+  <button onclick="go(8)"><i>8</i>Project settings</button>
+  <button onclick="go(9)"><i>9</i>Settings</button>
+  <button onclick="go(0)"><i>0</i>Empty Project</button>
+  <button onclick="go('a')"><i>a</i>Agent (lot 5)</button>
+  <button onclick="openPal()"><i>k</i>Palette</button>
+  <button onclick="toggleTheme()"><i>t</i>Theme</button>
+</div>
+
+<script>
+  const app = document.getElementById('app')
+  const FILES = ['sources/api/src/invoices/export.service.ts', 'sources/api/AGENTS.md', 'sources/front/src/pages/billing.tsx', 'docs/decisions/2026-09-15.md']
+  function composer(kind, ph, filled) {
+    const hero = kind === 'hero'
+    return '<div class="cframe">'
+      + '<div class="ch"><div><span class="lbl"><i data-lucide="paperclip" class="i14"></i>Attached</span><span class="chips"></span><span class="clear" onclick="clearCtx(this)">Clear</span></div></div>'
+      + '<div class="cbox ' + (hero ? '' : 'inline') + '">'
+      + '<textarea rows="' + (hero ? 4 : 2) + '" placeholder="' + ph + '" oninput="onType(this)" onkeydown="onKey(event)"></textarea>'
+      + '<div class="tools"><button class="btn ghost icon sm press" title="Mention (@)" onclick="openMention(this)"><i data-lucide="at-sign"></i></button><button class="btn ghost icon sm press" title="Attach"><i data-lucide="paperclip"></i></button><span class="hint"><i data-lucide="at-sign" class="i14"></i>attach a file of the Project · Specs and commands come with lots 6 and 7</span>' + (hero ? '<span class="recent" onclick="go(4)">Recent</span>' : '') + '</div>'
+      + '</div>'
+      + '<div class="cf">'
+      + '<span class="sel" title="The main Workspace of the Project; lot 7 adds others"><i data-lucide="git-branch" class="i16"></i><b>main</b><i data-lucide="chevron-down" class="i14"></i></span>'
+      + '<span class="sel off" title="No provider before lot 5"><i data-lucide="bot" class="i16"></i><b>no agent yet</b></span>'
+      + '<span class="grow"></span>'
+      + '<button class="btn press" disabled title="A Spec comes with lot 6"><i data-lucide="pen-line"></i>New Spec<span class="kbd">⇧↵</span></button>'
+      + '<button class="btn primary press send-btn" ' + (filled ? '' : 'disabled') + ' onclick="pretendSend(this)"><span class="sendmorph"><i data-lucide="arrow-up" class="up"></i><i data-lucide="square" class="stop"></i></span>' + (hero ? 'Start chat' : 'Send') + '<span class="kbd onp">↵</span></button>'
+      + '</div></div>'
+  }
+  document.querySelectorAll('[data-composer]').forEach((el) => { el.outerHTML = composer(el.dataset.composer, el.dataset.ph || 'Ask anything, think out loud, or describe what you want to do…', el.dataset.filled) })
+  function frameOf(el) { return el.closest('.cframe') }
+  // A send that takes a moment: the arrow becomes a square while the entry is written, then comes back.
+  function pretendSend(b) { const f = frameOf(b); f.classList.add('busy'); setTimeout(() => { f.classList.remove('busy'); const ta = f.querySelector('textarea'); ta.value = ''; onType(ta); ta.focus() }, 700) }
+  // auto-grow between two and eight rows, the way beui's prompt input does
+  document.addEventListener('input', (e) => { if (e.target.matches('.cbox textarea')) { const t = e.target; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 8 * 24 + 8) + 'px' } })
+  // the rail: the active tick follows the scroll position; a preview on hover; "Latest" when the reader left the edge
+  const content = document.getElementById('content')
+  content.addEventListener('scroll', () => {
+    const thread = document.getElementById('thread'); if (!thread || !thread.offsetParent) return
+    const groups = [...thread.querySelectorAll('.mgroup')]; const ticks = [...document.querySelectorAll('#rail i:not(.day)')]
+    const mid = content.scrollTop + content.clientHeight / 2
+    let active = 0; groups.forEach((g, i) => { if (g.offsetTop < mid) active = i })
+    ticks.forEach((t, i) => { t.classList.toggle('on', i === active); t.classList.toggle('near', Math.abs(i - active) === 1) })
+    const atEnd = content.scrollHeight - content.scrollTop - content.clientHeight < 56
+    let pill = thread.querySelector('.latest')
+    if (!atEnd && !pill) { pill = document.createElement('button'); pill.className = 'latest'; pill.innerHTML = '<i data-lucide="arrow-down" class="i14"></i>Latest'; pill.onclick = () => content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' }); thread.appendChild(pill); lucide.createIcons() }
+    if (atEnd && pill) pill.remove()
+  })
+  document.addEventListener('mouseover', (e) => { const t = e.target.closest('#rail i:not(.day)'); document.querySelectorAll('.rail .preview').forEach((x) => x.remove()); if (!t) return; const ticks = [...document.querySelectorAll('#rail i:not(.day)')]; const g = document.querySelectorAll('#thread .mgroup')[ticks.indexOf(t)]; if (!g) return; const d = document.createElement('div'); d.className = 'preview'; d.style.top = (t.offsetTop - 10) + 'px'; d.textContent = g.querySelector('.bubble').textContent.trim().slice(0, 90) + '…'; t.parentElement.appendChild(d) })
+  function onType(ta) {
+    const f = frameOf(ta); f.querySelector('.send-btn').toggleAttribute('disabled', ta.value.trim() === '')
+    const m = ta.value.match(/@(\w*)$/)
+    if (m) openMention(ta, m[1]); else closeMention(f)
+  }
+  function onKey(e) { if (e.key === 'Escape') closeMention(frameOf(e.target)); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const m = frameOf(e.target).querySelector('.mention .mi'); if (m) m.click() } }
+  function openMention(el, q) {
+    q = q || ''
+    const f = frameOf(el); closeMention(f)
+    const items = FILES.filter((x) => x.toLowerCase().includes(q.toLowerCase())).slice(0, 5)
+    const box = f.querySelector('.cbox'); const d = document.createElement('div'); d.className = 'mention'
+    d.innerHTML = '<div class="mq"><i data-lucide="at-sign" class="i14"></i><input placeholder="A file of the Project…" value="' + q + '" oninput="filterMention(this)"></div>'
+      + (items.map((x, i) => '<div class="mi ' + (i === 0 ? 'on' : '') + '" onclick="addCtx(this, \'' + x + '\')"><i data-lucide="file-code" class="i16"></i><span class="mono ell">' + x + '</span><span class="chip n">file</span></div>').join('') || '<div class="mi dim">No match</div>')
+    box.appendChild(d); lucide.createIcons(); if (el.tagName !== 'TEXTAREA') d.querySelector('input').focus()
+  }
+  function filterMention(inp) { const f = frameOf(inp); const q = inp.value; closeMention(f); openMention(f.querySelector('.tools button'), q); const i = f.querySelector('.mention input'); i.focus(); i.setSelectionRange(q.length, q.length) }
+  function closeMention(f) { f.querySelectorAll('.mention').forEach((m) => m.remove()) }
+  function addCtx(mi, file) {
+    const f = frameOf(mi); const chips = f.querySelector('.chips')
+    if (![...chips.children].some((c) => c.dataset.v === file)) { const c = document.createElement('span'); c.className = 'chip info ctxchip'; c.dataset.v = file; c.innerHTML = '<i data-lucide="file-code" class="i14"></i>' + file.split('/').pop() + '<i data-lucide="x" class="i14" style="opacity:.6;cursor:pointer" onclick="rmCtx(this)"></i>'; chips.appendChild(c) }
+    f.querySelector('.ch').classList.add('open'); closeMention(f)
+    const ta = f.querySelector('textarea'); ta.value = ta.value.replace(/@\w*$/, ''); ta.focus(); lucide.createIcons()
+  }
+  function rmCtx(x) { const f = frameOf(x); x.parentElement.remove(); if (!f.querySelector('.chips').children.length) f.querySelector('.ch').classList.remove('open') }
+  function clearCtx(el) { const f = frameOf(el); f.querySelector('.chips').innerHTML = ''; f.querySelector('.ch').classList.remove('open') }
+  function go(n) {
+    document.querySelectorAll('.pg[data-pg]').forEach((s) => s.classList.toggle('on', s.dataset.pg === String(n)))
+    document.querySelectorAll('#bar button').forEach((b) => b.classList.toggle('on', b.querySelector('i') && b.querySelector('i').textContent === String(n)))
+    document.querySelectorAll('.sidebar .nav[data-page]').forEach((b) => b.classList.toggle('on', b.dataset.page === String(n)))
+    // the empty-project page and first launch show other tabs / no tabs
+    document.getElementById('tabs').style.visibility = n === 1 ? 'hidden' : 'visible'
+    document.getElementById('sidebar').style.visibility = n === 1 ? 'hidden' : 'visible'
+    document.querySelectorAll('.chrome .ptab').forEach((t, i) => t.classList.toggle('on', n === 0 ? i === 1 : i === 0))
+    closePal(); closePop()
+    location.hash = '#/' + n
+    lucide.createIcons()
+  }
+  function fold() { app.classList.toggle('folded') }
+  function toggleTheme() { const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark' }
+  function openPal() { document.getElementById('paloverlay').classList.add('open'); setTimeout(() => document.getElementById('palq').focus(), 0); lucide.createIcons() }
+  function closePal() { document.getElementById('paloverlay').classList.remove('open') }
+  function togglePop() { document.getElementById('pop').classList.toggle('open'); lucide.createIcons() }
+  function closePop() { document.getElementById('pop').classList.remove('open') }
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('input,textarea') && e.key !== 'Escape') return
+    if (e.key === 'Escape') { closePal(); closePop(); return }
+    if (/^[0-9]$/.test(e.key)) go(Number(e.key))
+    if (e.key === 'a') go('a')
+    if (e.key === 'k') openPal()
+    if (e.key === 't') toggleTheme()
+    if (e.key === 'b') fold()
+    if (e.key === 'n') togglePop()
+  })
+  const first = (location.hash.match(/#\/(\w)/) || [, '3'])[1]; go(first === 'a' ? 'a' : Number(first))
+</script>
+</body>
+</html>

@@ -3,13 +3,14 @@
 Instructions for any coding agent working in this repository. `CLAUDE.md` is a symbolic link
 to this file: there is one contract, not two that drift apart.
 
-Hemera (code name of Nyx v3) is a desktop cockpit for ACP agents: Electron 44 with its
+Hemera is a desktop cockpit for ACP agents: Electron 44 with its
 Chromium, Node in the main process, React served by Vite in the renderer, SQLite through
 `node:sqlite` + Drizzle in a named `utilityProcess`. GPUiX and Bun were abandoned on
-15 September 2026. This repository is the product monorepo and holds code only: no
-`openspec/`, no specs, no reports. The OpenSpec change being implemented is given to you
-when you are launched; read its `proposal.md`, `specs/`, `design.md` and `tasks.md` before
-touching code, and name every test suite after the scenario it covers.
+15 September 2026. This repository holds the code and its documentation: the product rules
+in `docs/product/`, the dated decisions in `docs/decisions/`, the research in `docs/technical/`,
+and the way work is done in `docs/METHOD.md`. The issue you implement carries its Proposal,
+Design and Spec sections and its checklists; read them, and `docs/METHOD.md`, before touching
+code, and name every test suite after the scenario it covers.
 
 Behavioral guidelines below are adapted from the Karpathy-style CLAUDE.md. They bias toward
 caution over speed; for trivial tasks, use judgment.
@@ -22,7 +23,7 @@ caution over speed; for trivial tasks, use judgment.
 - If multiple interpretations exist, present them; don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop, name what is confusing, ask.
-- A product rule lives in `docs/product/core.md` and the lot's specs. If code and spec
+- A product rule lives in `docs/product/core.md` and the issue's Spec section. If code and spec
   disagree, the spec wins; if the spec is wrong, say so instead of quietly deviating.
 
 ## 2. Simplicity first
