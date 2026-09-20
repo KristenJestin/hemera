@@ -147,6 +147,7 @@ describe('Un message conforme est traité', () => {
       theme: 'dark',
       sidebar: { collapsed: false, width: null },
       activeProjectId: null,
+      activeSessionIds: {},
     })
   })
 })

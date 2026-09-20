@@ -50,10 +50,24 @@ export type SidebarPreference = z.infer<typeof sidebarPreferenceSchema>
  */
 export const activeProjectSchema = z.string().nullable()
 
+/**
+ * Which Session was open in each Project, remembered between two starts (design D4b-07).
+ *
+ * One entry per Project and not one Session for the window: a Session belongs to a Project, so
+ * a window coming back on the Session of whichever Project happened to be in front last would
+ * have forgotten where the work was in every other one. Where an entry points is not settled
+ * here — a Session that has been archived, or is no longer there at all, is answered by the
+ * latest one that is neither, and by the Home when the Project has none.
+ */
+export const activeSessionsSchema = z.record(z.string(), z.string())
+
+export type ActiveSessions = z.infer<typeof activeSessionsSchema>
+
 export const displayPreferencesSchema = z.object({
   theme: themePreferenceSchema,
   sidebar: sidebarPreferenceSchema,
   activeProjectId: activeProjectSchema,
+  activeSessionIds: activeSessionsSchema,
 })
 
 export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
@@ -63,6 +77,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   theme: 'system',
   sidebar: { collapsed: false, width: null },
   activeProjectId: null,
+  activeSessionIds: {},
 }
 
 /** A change to what the window wears: what is absent is what the user did not touch. */
@@ -70,6 +85,7 @@ export const displayPreferencesChangeSchema = z.object({
   theme: themePreferenceSchema.optional(),
   sidebar: sidebarPreferenceSchema.optional(),
   activeProjectId: activeProjectSchema.optional(),
+  activeSessionIds: activeSessionsSchema.optional(),
 })
 
 export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>

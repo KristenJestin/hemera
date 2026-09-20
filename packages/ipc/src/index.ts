@@ -28,6 +28,7 @@ export {
   channelSchema,
   displayPreferencesChangeSchema,
   activeProjectSchema,
+  activeSessionsSchema,
   displayPreferencesSchema,
   engineStatusSchema,
   entityKindSchema,
@@ -44,6 +45,7 @@ export {
   titleSourceSchema,
 } from './engine.ts'
 export type {
+  ActiveSessions,
   Channel,
   DisplayPreferences,
   DisplayPreferencesChange,

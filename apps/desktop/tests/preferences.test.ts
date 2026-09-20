@@ -180,6 +180,21 @@ describe('Projet actif restauré', () => {
   })
 })
 
+describe('Session sélectionnée conservée', () => {
+  test('the Session open in each Project is there at the next start', async () => {
+    const run = opened()
+    await run(writePreferences({ activeSessionIds: { atlas: 'first', orion: 'second' } }))
+
+    // A second opening of the same data folder, which is what the next start is.
+    const read = await opened()(readPreferences)
+    expect(read.activeSessionIds).toEqual({ atlas: 'first', orion: 'second' })
+  })
+
+  test('a Project nobody has opened a Session in is not in the map at all', async () => {
+    expect((await opened()(readPreferences)).activeSessionIds).toEqual({})
+  })
+})
+
 describe('Le process dédié répond engine.status', () => {
   test('it answers the folder, the channel, the version, the migration and the writer', async () => {
     const status = await opened('0.3.0')(

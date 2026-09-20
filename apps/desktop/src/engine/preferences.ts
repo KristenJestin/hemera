@@ -14,6 +14,8 @@
 import {
   DEFAULT_DISPLAY_PREFERENCES,
   activeProjectSchema,
+  activeSessionsSchema,
+  type ActiveSessions,
   type DisplayPreferences,
   type DisplayPreferencesChange,
   type SidebarPreference,
@@ -31,6 +33,7 @@ import { appPreferences } from './storage/schema.ts'
 export const THEME_KEY = 'theme'
 export const SIDEBAR_KEY = 'sidebar'
 export const ACTIVE_PROJECT_KEY = 'activeProjectId'
+export const ACTIVE_SESSIONS_KEY = 'activeSessionIds'
 
 function themeOf(value: string | undefined): ThemePreference | null {
   if (value === undefined) return null
@@ -49,6 +52,23 @@ function activeProjectOf(value: string | undefined): string | null | undefined {
     return read.success ? read.data : undefined
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Which Session was open in each Project, or nothing when the row cannot be read here.
+ *
+ * A row written by a version that knew more answers the same way as a Project nobody has
+ * opened a Session in: the window opens the latest one instead, which is what D4b-07 asks for
+ * whenever the preference points nowhere.
+ */
+function activeSessionsOf(value: string | undefined): ActiveSessions | null {
+  if (value === undefined) return null
+  try {
+    const read = activeSessionsSchema.safeParse(JSON.parse(value))
+    return read.success ? read.data : null
+  } catch {
+    return null
   }
 }
 
@@ -92,6 +112,9 @@ export const preferencesLayer = Layer.effect(
           activeProjectId:
             activeProjectOf(stored.get(ACTIVE_PROJECT_KEY)) ??
             DEFAULT_DISPLAY_PREFERENCES.activeProjectId,
+          activeSessionIds:
+            activeSessionsOf(stored.get(ACTIVE_SESSIONS_KEY)) ??
+            DEFAULT_DISPLAY_PREFERENCES.activeSessionIds,
         }
       }),
 
@@ -109,6 +132,15 @@ export const preferencesLayer = Layer.effect(
             written.push({
               key: ACTIVE_PROJECT_KEY,
               value: JSON.stringify(change.activeProjectId),
+            })
+          }
+          // The whole map every time, because that is what the window holds: a Session opened
+          // in one Project says nothing about the others, and a row merged here would be a
+          // second place deciding what the preference is made of.
+          if (change.activeSessionIds !== undefined) {
+            written.push({
+              key: ACTIVE_SESSIONS_KEY,
+              value: JSON.stringify(change.activeSessionIds),
             })
           }
           if (written.length === 0) return
