@@ -1,57 +1,57 @@
-# Périmètre de livraison d'Hemera
+# Hemera delivery scope
 
-**Dernière mise à jour :** 2026-09-12
+**Last updated:** 2026-09-12
 
-Le [noyau produit](./core.md) décrit les règles validées du produit cible. Ce document
-distingue leur disponibilité à la première livraison des évolutions ultérieures. Il ne fixe
-ni calendrier ni numéro de version mineure et ne constitue pas encore un plan de développement.
+The [product core](./core.md) describes the validated rules of the target product. This document
+distinguishes their availability in the first delivery from later evolutions. It fixes
+neither a calendar nor a minor version number and does not yet constitute a development plan.
 
-Le détail par capacité, les critères d'acceptation et les affectations proposées vivent dans
-des matrices par version, hors de ce document. Les numéros de versions ultérieures et les lignes proposées
-restent à valider ; les reports actés ici continuent de faire autorité.
+The detail per capability, the acceptance criteria and the proposed assignments live in
+matrices per version, outside this document. The numbers of later versions and the proposed rows
+remain to be validated; the postponements settled here continue to be authoritative.
 
-## Première livraison — blocs retenus
+## First delivery — retained blocks
 
-- Système de Sessions : `free`, `define`, `build` et leur fonctionnement avec les agents ACP.
-- Windows et Linux dès le premier socle ; Claude Code, Codex et OpenCode visés en v1,
-  avec vérification distincte des capacités par provider et plateforme.
-- Terminal interactif intégré en v1, distinct des commandes managées et rattaché à un Workspace.
-- Gestion des Specs et de leur contrat révisionné.
-- Intégration MCP Hemera et contexte permettant aux agents d'utiliser ses outils.
-- Gestion des Projets et Workspaces, avec préparation d'environnement par Hemera.
-- Gestion multi-repo.
-- Workflow multi-phase : dépendances, phases déléguées et parallélisme font partie du socle.
-- Intégration Git : les usages Git du noyau ne sont pas reportés avec les intégrations de PR.
-  Le détail des opérations et des écrans Git reste à préciser. Le fonctionnement sans Git
-  reste possible, sans code review fondée sur un diff.
+- Session system: `free`, `define`, `build` and how they work with ACP agents.
+- Windows and Linux from the first foundation; Claude Code, Codex and OpenCode targeted in v1,
+  with distinct verification of capabilities per provider and platform.
+- Integrated interactive terminal in v1, distinct from managed commands and attached to a Workspace.
+- Management of Specs and their revisioned contract.
+- Hemera MCP integration and context allowing agents to use its tools.
+- Management of Projects and Workspaces, with environment preparation by Hemera.
+- Multi-repo management.
+- Multi-phase workflow: dependencies, delegated phases and parallelism are part of the foundation.
+- Git integration: the core's Git uses are not postponed along with the PR integrations.
+  The detail of Git operations and screens remains to be specified. Working without Git
+  remains possible, without diff-based code review.
 
-Les tâches, retours, commandes, validations humaines, contexte, persistance et Journal sont
-décrits dans le noyau. Leur découpage de réalisation et le niveau exact de finition à livrer
-restent à préciser avec les blocs ci-dessus.
+Tasks, feedback, commands, human validations, context, persistence and Journal are
+described in the core. Their realisation breakdown and the exact level of finish to deliver
+remain to be specified along with the blocks above.
 
-## Prototype — phase prévue, fonctionnalité indisponible
+## Prototype — planned phase, unavailable feature
 
-La phase `prototype` figure dans la définition du protocole dès la première livraison, avec
-ses dépendances et sa possibilité de travail délégué en parallèle. Le moteur doit prendre en
-charge ces mécanismes dès ce socle, même si le prototype utilisateur arrive ultérieurement.
+The `prototype` phase appears in the protocol definition from the first delivery, with
+its dependencies and its possibility of delegated work in parallel. The engine must support
+these mechanisms from this foundation on, even if the user prototype arrives later.
 
-Cette phase ne peut pas être déclenchée dans la première livraison, ni par l'utilisateur ni
-par l'agent. Elle est indisponible, et non une exécution suspendue à reprendre. Les instructions
-ne proposent pas son lancement. Elle ne bloque pas le passage de la Spec à `ready` et ne
-nécessite ni faux résultat ni validation humaine de pages inexistantes.
+This phase cannot be triggered in the first delivery, neither by the user nor
+by the agent. It is unavailable, not a suspended execution to resume. The instructions
+do not propose launching it. It does not block the Spec's move to `ready` and
+requires neither a fake result nor human validation of non-existent pages.
 
-La création, l'affichage, les variantes et la validation du prototype natif sont reportés.
-Leur contrat cible reste conservé dans le noyau, sans imposer de réaliser maintenant tout
-leur modèle de stockage ou leur interface.
+The creation, display, variants and validation of the native prototype are postponed.
+Their target contract remains kept in the core, without requiring all of
+their storage model or their interface to be realised now.
 
-## Évolutions ultérieures
+## Later evolutions
 
-- Prototype natif : activation de la phase et fonctionnalités correspondantes.
-- Intégrations de pull requests : création, suivi, actions sur les PR et constat du merge
-  depuis la forge. Les règles produit déjà validées restent la cible, pas une capacité initiale.
-- Mémoire durable native : usages et utilité à évaluer avant de choisir son fonctionnement.
+- Native prototype: activation of the phase and corresponding features.
+- Pull request integrations: creation, tracking, actions on PRs and observation of the merge
+  from the forge. The product rules already validated remain the target, not an initial capability.
+- Native durable memory: uses and usefulness to evaluate before choosing how it works.
 
-Sans intégration de PR à la première livraison, Hemera ne suppose pas connaître leur état ni
-leur merge. La livraison repose sur la confirmation explicite de l'utilisateur ; la clôture
-de la Spec et la fermeture ou le nettoyage du Workspace restent soumis aux actions humaines
-définies dans le noyau. Git local n'est pas assimilé à une intégration de forge.
+Without PR integration in the first delivery, Hemera does not assume it knows their state or
+their merge. Delivery relies on the user's explicit confirmation; the closure
+of the Spec and the closing or cleanup of the Workspace remain subject to the human actions
+defined in the core. Local Git is not equated with a forge integration.

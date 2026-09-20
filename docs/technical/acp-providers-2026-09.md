@@ -1,51 +1,51 @@
-# ACP : SDK et agents disponibles — état au 16 septembre 2026
+# ACP: SDK and available agents — state as of 16 September 2026
 
-Veille pour Hemera (client ACP Electron), faite le **16 septembre 2026** sur sources primaires uniquement (npm registry, code source GitHub, documentation officielle). Identifiants, noms de paquets et citations en anglais. Machine de relevé : Windows ; aucun paquet installé, rien exécuté — les comportements décrits sont **lus dans le code, non vérifiés à l'exécution**.
+Research for Hemera (Electron ACP client), done on **16 September 2026** from primary sources only (npm registry, GitHub source code, official documentation). Identifiers, package names and quotations in English. Survey machine: Windows; no package installed, nothing executed — the behaviours described are **read in the code, not verified at run time**.
 
-## Tableau de synthèse
+## Summary table
 
 | | Claude (Anthropic) | Codex (OpenAI) | OpenCode |
 |---|---|---|---|
-| Paquet adaptateur | `@agentclientprotocol/claude-agent-acp@0.78.0` (2026-09-15) | `@agentclientprotocol/codex-acp@1.12.0` (2026-09-15) | aucun — ACP **natif** dans `opencode-ai@1.18.31` (2026-09-14) |
-| Lancement | `npx -y @agentclientprotocol/claude-agent-acp` (bin `claude-agent-acp`), stdio | `npx -y @agentclientprotocol/codex-acp` (bin `codex-acp`), stdio | `opencode acp`, stdio |
-| SDK ACP utilisé | `@agentclientprotocol/sdk@1.4.0` | `@agentclientprotocol/sdk@^1.4.0` | `@agentclientprotocol/sdk` |
+| Adapter package | `@agentclientprotocol/claude-agent-acp@0.78.0` (2026-09-15) | `@agentclientprotocol/codex-acp@1.12.0` (2026-09-15) | none — ACP is **native** in `opencode-ai@1.18.31` (2026-09-14) |
+| Launch | `npx -y @agentclientprotocol/claude-agent-acp` (bin `claude-agent-acp`), stdio | `npx -y @agentclientprotocol/codex-acp` (bin `codex-acp`), stdio | `opencode acp`, stdio |
+| ACP SDK used | `@agentclientprotocol/sdk@1.4.0` | `@agentclientprotocol/sdk@^1.4.0` | `@agentclientprotocol/sdk` |
 | `protocolVersion` | 1 | 1 | 1 |
-| Auth | `claude-ai-login` (abonnement), `console-login` (Console Anthropic / facturation API), `gateway` + `gateway-bedrock` si annoncé | `api-key`, `chat-gpt`, `chat-gpt-device-code`, `gateway` | une seule méthode : `opencode auth login` en terminal |
-| `session/load` | oui | oui | oui |
-| `session/resume` | oui | oui | oui |
-| `fork` / `list` / `delete` / `close` | oui / oui / oui / oui | oui / oui / oui / oui | oui / oui / **non** / oui |
-| `session/cancel` | oui (interrompt la query, `stopReason: "cancelled"`) | oui (`turnInterrupt` puis `turn/completed`) | oui (baseline ACP) |
-| MCP au `session/new` | `stdio`, `http`, `sse` | `stdio`, `http` (`sse: false`, `acp: false`) | `stdio`, `http`, `sse` |
-| Coût / tokens via ACP | `usage_update` avec `cost` USD + `usage` dans `PromptResponse` | `usage_update` tokens + fenêtre de contexte, **pas** de `cost` | `usage_update` avec `cost` USD |
+| Auth | `claude-ai-login` (subscription), `console-login` (Anthropic Console / API billing), `gateway` + `gateway-bedrock` if advertised | `api-key`, `chat-gpt`, `chat-gpt-device-code`, `gateway` | a single method: `opencode auth login` in a terminal |
+| `session/load` | yes | yes | yes |
+| `session/resume` | yes | yes | yes |
+| `fork` / `list` / `delete` / `close` | yes / yes / yes / yes | yes / yes / yes / yes | yes / yes / **no** / yes |
+| `session/cancel` | yes (interrupts the query, `stopReason: "cancelled"`) | yes (`turnInterrupt` then `turn/completed`) | yes (ACP baseline) |
+| MCP at `session/new` | `stdio`, `http`, `sse` | `stdio`, `http` (`sse: false`, `acp: false`) | `stdio`, `http`, `sse` |
+| Cost / tokens over ACP | `usage_update` with `cost` in USD + `usage` in `PromptResponse` | `usage_update` tokens + context window, **no** `cost` | `usage_update` with `cost` in USD |
 
-Les adaptateurs officiels de Claude et de Codex vivent tous deux dans l'organisation [`agentclientprotocol`](https://github.com/agentclientprotocol) ; OpenCode implémente ACP dans son propre dépôt.
+The official Claude and Codex adapters both live in the [`agentclientprotocol`](https://github.com/agentclientprotocol) organisation; OpenCode implements ACP in its own repository.
 
-## 1. `@agentclientprotocol/sdk` — version, protocole, API client
+## 1. `@agentclientprotocol/sdk` — version, protocol, client API
 
-Sources : <https://registry.npmjs.org/@agentclientprotocol/sdk> et <https://github.com/agentclientprotocol/typescript-sdk>, branche `main` (`CHANGELOG.md`, `src/acp.ts`, `src/schema/index.ts`, `src/schema/types.gen.ts`, `src/examples/client.ts`, `src/node-adapter.ts`).
+Sources: <https://registry.npmjs.org/@agentclientprotocol/sdk> and <https://github.com/agentclientprotocol/typescript-sdk>, branch `main` (`CHANGELOG.md`, `src/acp.ts`, `src/schema/index.ts`, `src/schema/types.gen.ts`, `src/examples/client.ts`, `src/node-adapter.ts`).
 
-- **Version `1.4.0`**, publiée le **2026-08-20** (changelog : « Stabilize elicitation APIs »).
-- **Version de protocole** : `export const PROTOCOL_VERSION = 1;` (`src/schema/index.ts`) ; schéma
-  suivi `1.20.0` (changelog 1.3.0 : « Update to schema v1.20.0 and v2.0.0-alpha.2 »).
-- **ACP v2 est un brouillon** : un `src/v2/` parallèle est publié, documenté « ACP v2 is still a
-  draft. Its wire protocol and this TypeScript API may change incompatibly in any SDK release ».
-  À ignorer aujourd'hui.
+- **Version `1.4.0`**, published on **2026-08-20** (changelog: "Stabilize elicitation APIs").
+- **Protocol version**: `export const PROTOCOL_VERSION = 1;` (`src/schema/index.ts`); schema
+  tracked `1.20.0` (changelog 1.3.0: "Update to schema v1.20.0 and v2.0.0-alpha.2").
+- **ACP v2 is a draft**: a parallel `src/v2/` is published, documented as "ACP v2 is still a
+  draft. Its wire protocol and this TypeScript API may change incompatibly in any SDK release".
+  To be ignored today.
 
-### Méthodes exactes
+### Exact methods
 
-`AGENT_METHODS` (client → agent) : `initialize`, `authenticate`, `logout`, `providers/list`, `providers/set`, `providers/disable`, `session/new`, `session/load`, `session/list`, `session/delete`, `session/fork`, `session/resume`, `session/close`, `session/set_mode`, `session/set_config_option`, `session/prompt`, `session/cancel`, `mcp/message`, plus les familles expérimentales `nes/*` et `document/did*`.
+`AGENT_METHODS` (client → agent): `initialize`, `authenticate`, `logout`, `providers/list`, `providers/set`, `providers/disable`, `session/new`, `session/load`, `session/list`, `session/delete`, `session/fork`, `session/resume`, `session/close`, `session/set_mode`, `session/set_config_option`, `session/prompt`, `session/cancel`, `mcp/message`, plus the experimental families `nes/*` and `document/did*`.
 
-`CLIENT_METHODS` (agent → client, donc à implémenter par Hemera) : `session/request_permission`, `session/update`, `fs/write_text_file`, `fs/read_text_file`, `terminal/create`, `terminal/output`, `terminal/release`, `terminal/wait_for_exit`, `terminal/kill`, `mcp/connect`, `mcp/message`, `mcp/disconnect`, `elicitation/create`, `elicitation/complete`. `PROTOCOL_METHODS` : `$/cancel_request`. `session/cancel` et `session/update` sont des **notifications**, pas des requêtes (`CancelNotification`, `SessionNotification`).
+`CLIENT_METHODS` (agent → client, hence to be implemented by Hemera): `session/request_permission`, `session/update`, `fs/write_text_file`, `fs/read_text_file`, `terminal/create`, `terminal/output`, `terminal/release`, `terminal/wait_for_exit`, `terminal/kill`, `mcp/connect`, `mcp/message`, `mcp/disconnect`, `elicitation/create`, `elicitation/complete`. `PROTOCOL_METHODS`: `$/cancel_request`. `session/cancel` and `session/update` are **notifications**, not requests (`CancelNotification`, `SessionNotification`).
 
-### Forme de `SessionUpdate`
+### Shape of `SessionUpdate`
 
-Union discriminée par le champ `sessionUpdate`, 15 variantes (`src/schema/types.gen.ts`), nom → type porté : `user_message_chunk`, `agent_message_chunk`, `agent_thought_chunk` → `ContentChunk` ; `tool_call` → `ToolCall` ; `tool_call_update` → `ToolCallUpdate` ; `plan` → `Plan` ; `plan_update` → `PlanUpdate` ; `plan_removed` → `PlanRemoved` ; `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update` ; `usage_update` → `UsageUpdate` ; `compaction_update`, `compaction_summary_chunk`.
+Union discriminated by the `sessionUpdate` field, 15 variants (`src/schema/types.gen.ts`), name → carried type: `user_message_chunk`, `agent_message_chunk`, `agent_thought_chunk` → `ContentChunk`; `tool_call` → `ToolCall`; `tool_call_update` → `ToolCallUpdate`; `plan` → `Plan`; `plan_update` → `PlanUpdate`; `plan_removed` → `PlanRemoved`; `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`; `usage_update` → `UsageUpdate`; `compaction_update`, `compaction_summary_chunk`.
 
-La notification est `SessionNotification { sessionId, update }`. `ContentChunk` porte `content: ContentBlock` et `messageId?` — « A change in `messageId` indicates a new message has started », c'est la clé pour regrouper les chunks côté UI. `ToolCall` porte `toolCallId`, `title`, `kind?`, `status?`, `content?`, `locations?`, `rawInput?`, `rawOutput?`. Enfin `StopReason = "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | "cancelled"`.
+The notification is `SessionNotification { sessionId, update }`. `ContentChunk` carries `content: ContentBlock` and `messageId?` — "A change in `messageId` indicates a new message has started", which is the key for grouping chunks on the UI side. `ToolCall` carries `toolCallId`, `title`, `kind?`, `status?`, `content?`, `locations?`, `rawInput?`, `rawOutput?`. Finally, `StopReason = "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | "cancelled"`.
 
-### API TypeScript côté client
+### Client-side TypeScript API
 
-Style « app », celui de l'exemple officiel `src/examples/client.ts` :
+"App" style, the one of the official example `src/examples/client.ts`:
 
 ```ts
 const promptResult = await acp
@@ -68,13 +68,13 @@ const promptResult = await acp
   });
 ```
 
-`ctx.buildSession(cwd)` renvoie un `SessionBuilder` (`withMcpServer`, `withAdditionalDirectories`, `toRequest`, `start`, `withSession`) ; `ActiveSession` expose `prompt(...)`, `nextUpdate()` et `dispose()`, `nextUpdate()` renvoyant un `ActiveSessionMessage` `{ kind: "session_update", notification, update }` ou `{ kind: "stop", response, stopReason }`. La classe historique `ClientSideConnection` (qui implémente l'interface `Agent`) et l'interface `Client` (`requestPermission`, `sessionUpdate`, `readTextFile`, `writeTextFile`, `createTerminal`…) restent exportées ; les adaptateurs s'en servent côté agent (`AgentSideConnection`).
+`ctx.buildSession(cwd)` returns a `SessionBuilder` (`withMcpServer`, `withAdditionalDirectories`, `toRequest`, `start`, `withSession`); `ActiveSession` exposes `prompt(...)`, `nextUpdate()` and `dispose()`, with `nextUpdate()` returning an `ActiveSessionMessage` `{ kind: "session_update", notification, update }` or `{ kind: "stop", response, stopReason }`. The historical `ClientSideConnection` class (which implements the `Agent` interface) and the `Client` interface (`requestPermission`, `sessionUpdate`, `readTextFile`, `writeTextFile`, `createTerminal`…) remain exported; the adapters use them on the agent side (`AgentSideConnection`).
 
-Capacités négociées — client → agent : `clientCapabilities.fs.{readTextFile,writeTextFile}`, `terminal`, `session`, `elicitation`. Agent → client : `AgentCapabilities` = `loadSession?: boolean`, `promptCapabilities {image, audio, embeddedContext}`, `mcpCapabilities {http, sse, acp?}`, `sessionCapabilities {list, delete, additionalDirectories, fork, resume, close}`, `auth {logout}`, `providers?`, `nes?`. Le schéma note que « `session/load` is still handled by the top-level `load_session` capability », à unifier dans une version ultérieure.
+Negotiated capabilities — client → agent: `clientCapabilities.fs.{readTextFile,writeTextFile}`, `terminal`, `session`, `elicitation`. Agent → client: `AgentCapabilities` = `loadSession?: boolean`, `promptCapabilities {image, audio, embeddedContext}`, `mcpCapabilities {http, sse, acp?}`, `sessionCapabilities {list, delete, additionalDirectories, fork, resume, close}`, `auth {logout}`, `providers?`, `nes?`. The schema notes that "`session/load` is still handled by the top-level `load_session` capability", to be unified in a later version.
 
-### Lancement de l'agent et transport
+### Launching the agent and transport
 
-ndJSON sur stdio ; l'exemple officiel fait le `spawn` à la main :
+ndJSON over stdio; the official example does the `spawn` by hand:
 
 ```ts
 const agentProcess = spawn(npxCmd, ["tsx", agentPath], { stdio: ["pipe", "pipe", "inherit"] });
@@ -83,102 +83,102 @@ const output = Readable.toWeb(agentProcess.stdout!) as ReadableStream<Uint8Array
 const stream = acp.ndJsonStream(input, output);
 ```
 
-**Le SDK n'offre aucun helper de spawn** : `src/node-adapter.ts` n'exporte que `createNodeHttpHandler` et `createNodeWebSocketUpgradeHandler`. Hemera devra écrire son propre superviseur de processus enfant (spawn, `stderr`, mort du processus, relance). Le SDK fournit en revanche des transports HTTP, SSE et WebSocket (`http-stream.ts`, `server-sse.ts`, `ws-stream.ts`) si l'agent cesse un jour d'être un enfant local.
+**The SDK offers no spawn helper**: `src/node-adapter.ts` exports only `createNodeHttpHandler` and `createNodeWebSocketUpgradeHandler`. Hemera will have to write its own child-process supervisor (spawn, `stderr`, process death, restart). The SDK does, however, provide HTTP, SSE and WebSocket transports (`http-stream.ts`, `server-sse.ts`, `ws-stream.ts`) should the agent one day stop being a local child.
 
-## 2. Claude comme agent ACP
+## 2. Claude as an ACP agent
 
-Sources : <https://registry.npmjs.org/@agentclientprotocol/claude-agent-acp> et <https://github.com/agentclientprotocol/claude-agent-acp> (`README.md`, `src/acp-agent.ts`, `src/resumed-session.ts`).
+Sources: <https://registry.npmjs.org/@agentclientprotocol/claude-agent-acp> and <https://github.com/agentclientprotocol/claude-agent-acp> (`README.md`, `src/acp-agent.ts`, `src/resumed-session.ts`).
 
-- **`@agentclientprotocol/claude-agent-acp`, version 0.78.0, publiée le 2026-09-15.** Binaire
-  `claude-agent-acp` ; dépendances épinglées `@agentclientprotocol/sdk@1.4.0`,
-  `@anthropic-ai/claude-agent-sdk@0.3.270`, `zod@4.6.5` ; canal `@preview` publié à chaque push sur
+- **`@agentclientprotocol/claude-agent-acp`, version 0.78.0, published on 2026-09-15.** Binary
+  `claude-agent-acp`; pinned dependencies `@agentclientprotocol/sdk@1.4.0`,
+  `@anthropic-ai/claude-agent-sdk@0.3.270`, `zod@4.6.5`; a `@preview` channel published on every push to
   `main`.
-- **L'ancien `@zed-industries/claude-code-acp` est déprécié** : dernière version `0.16.2` du
-  2026-02-17, message npm « This package has been renamed to
-  `@agentclientprotocol/claude-agent-acp`. Please migrate to continue receiving updates. » Resté sur
-  `@agentclientprotocol/sdk@0.14.1` : ne pas l'utiliser.
-- **Ce n'est pas le CLI `claude`** mais le **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`,
-  0.3.273 sur npm au 2026-09-15). Le CLI `@anthropic-ai/claude-code` (2.1.273, 2026-09-15) n'expose
-  pas de sous-commande `acp` d'après les paquets publiés, et aucune source officielle annonçant un
-  mode ACP natif côté Anthropic n'a été trouvée.
+- **The former `@zed-industries/claude-code-acp` is deprecated**: last version `0.16.2` from
+  2026-02-17, npm message "This package has been renamed to
+  `@agentclientprotocol/claude-agent-acp`. Please migrate to continue receiving updates." Stuck on
+  `@agentclientprotocol/sdk@0.14.1`: do not use it.
+- **It is not the `claude` CLI** but the **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`,
+  0.3.273 on npm as of 2026-09-15). The `@anthropic-ai/claude-code` CLI (2.1.273, 2026-09-15) exposes
+  no `acp` subcommand according to the published packages, and no official source announcing a
+  native ACP mode on Anthropic's side was found.
 
-Réponse à `initialize` (`src/acp-agent.ts`, ~l. 2093) : `protocolVersion: 1`, `promptCapabilities { image: true, embeddedContext: true }`, `mcpCapabilities { http: true, sse: true }`, `auth { logout: {} }`, `providers: {}`, `loadSession: true`, `sessionCapabilities { additionalDirectories, close, delete, fork, list, resume, subagents }` (tous à `{}`). Extensions hors spec dans `_meta` : `steering` (injecter un message dans un tour en cours), `goal`, `authStatus` (`_auth/status_update`), les extensions AIR de JetBrains (session failure, file change report, subagents natifs, async tasks, recommended config values), `promptQueueing: true` sous `_meta.claudeCode`.
+Response to `initialize` (`src/acp-agent.ts`, ~l. 2093): `protocolVersion: 1`, `promptCapabilities { image: true, embeddedContext: true }`, `mcpCapabilities { http: true, sse: true }`, `auth { logout: {} }`, `providers: {}`, `loadSession: true`, `sessionCapabilities { additionalDirectories, close, delete, fork, list, resume, subagents }` (all set to `{}`). Off-spec extensions in `_meta`: `steering` (inject a message into a turn in progress), `goal`, `authStatus` (`_auth/status_update`), JetBrains' AIR extensions (session failure, file change report, native subagents, async tasks, recommended config values), `promptQueueing: true` under `_meta.claudeCode`.
 
-Le README annonce : @-mentions de contexte, images, tool calls avec demandes de permission, following, revue d'édition, listes TODO, transcripts de sous-agents imbriqués, terminaux interactifs et d'arrière-plan, slash commands personnalisées, serveurs MCP fournis par le client. Les modes de permission passent par `session/set_mode`, le modèle et l'effort par `session/set_config_option`, les slash commands par `available_commands_update`.
+The README announces: context @-mentions, images, tool calls with permission requests, following, edit review, TODO lists, nested subagent transcripts, interactive and background terminals, custom slash commands, client-provided MCP servers. Permission modes go through `session/set_mode`, the model and effort through `session/set_config_option`, slash commands through `available_commands_update`.
 
-**Authentification** : `claude-ai-login` (« Use Claude subscription », `type: "terminal"`, `args: ["--cli", "auth", "login", "--claudeai"]`) ; `console-login` (« Use Anthropic Console (API usage billing) », même mécanique) ; `gateway` et `gateway-bedrock` seulement si le client annonce `clientCapabilities.auth._meta.gateway === true`. Les deux premières sont de type `terminal` : **elles ne sont proposées que si le client sait exécuter une commande d'auth dans un terminal** (`supportsTerminalAuth` ou l'extension `_meta["terminal-auth"]`) ; sinon il faut s'authentifier hors de Hemera avec le CLI `claude`. `logout` est supporté.
+**Authentication**: `claude-ai-login` ("Use Claude subscription", `type: "terminal"`, `args: ["--cli", "auth", "login", "--claudeai"]`); `console-login` ("Use Anthropic Console (API usage billing)", same mechanism); `gateway` and `gateway-bedrock` only if the client advertises `clientCapabilities.auth._meta.gateway === true`. The first two are of type `terminal`: **they are offered only if the client can run an auth command in a terminal** (`supportsTerminalAuth` or the `_meta["terminal-auth"]` extension); otherwise one must authenticate outside Hemera with the `claude` CLI. `logout` is supported.
 
-**Limites lues dans le code** : les sous-agents natifs demandent une négociation bilatérale et retombent sinon sur un tool call ordinaire ; `goal`, `steering` et `session failure` sont hors spec et peuvent bouger ; un minuteur de « force cancel » existe parce que `query.interrupt()` peut ne pas faire revenir la boucle du SDK (`DEFAULT_FORCE_CANCEL_GRACE_MS`, issue #680 citée en commentaire) — l'annulation n'est donc pas garantie instantanée.
+**Limits read in the code**: native subagents require a bilateral negotiation and otherwise fall back to an ordinary tool call; `goal`, `steering` and `session failure` are off-spec and may move; a "force cancel" timer exists because `query.interrupt()` may fail to make the SDK loop return (`DEFAULT_FORCE_CANCEL_GRACE_MS`, issue #680 cited in a comment) — cancellation is therefore not guaranteed to be instantaneous.
 
-## 3. Codex (OpenAI) comme agent ACP
+## 3. Codex (OpenAI) as an ACP agent
 
-Sources : <https://registry.npmjs.org/@agentclientprotocol/codex-acp> et <https://github.com/agentclientprotocol/codex-acp> (`README.md`, `src/CodexAcpServer.ts`, `src/CodexAuthMethod.ts`, `src/CodexEventHandler.ts`, `src/TokenCount.ts`).
+Sources: <https://registry.npmjs.org/@agentclientprotocol/codex-acp> and <https://github.com/agentclientprotocol/codex-acp> (`README.md`, `src/CodexAcpServer.ts`, `src/CodexAuthMethod.ts`, `src/CodexEventHandler.ts`, `src/TokenCount.ts`).
 
-Il existe un adaptateur **officiel et activement maintenu**, dans la même organisation que celui de Claude.
+There is an **official and actively maintained** adapter, in the same organisation as Claude's.
 
-- **`@agentclientprotocol/codex-acp`, version 1.12.0, publiée le 2026-09-15.** Binaire `codex-acp` ;
-  dépendances `@agentclientprotocol/sdk@^1.4.0`, `@openai/codex@^0.154.0` (0.154.0 publiée le
+- **`@agentclientprotocol/codex-acp`, version 1.12.0, published on 2026-09-15.** Binary `codex-acp`;
+  dependencies `@agentclientprotocol/sdk@^1.4.0`, `@openai/codex@^0.154.0` (0.154.0 published on
   2026-09-09), `vscode-jsonrpc`, `diff`, `zod`.
-- **Architecture** : « `codex-acp` is a stdio ACP agent server. It starts the Codex App Server,
-  translates ACP requests into Codex operations, and maps Codex events back into the client. » Le
-  binaire Codex est embarqué comme dépendance npm ; `CODEX_PATH` permet d'en imposer un autre.
-- **Variables** : `CODEX_API_KEY`, `OPENAI_API_KEY`, `CODEX_PATH`, `CODEX_CONFIG` (JSON fusionné
-  dans la config de session), `MODEL_PROVIDER`, `DEFAULT_AUTH_REQUEST`, `INITIAL_AGENT_MODE`
+- **Architecture**: "`codex-acp` is a stdio ACP agent server. It starts the Codex App Server,
+  translates ACP requests into Codex operations, and maps Codex events back into the client." The
+  Codex binary is bundled as an npm dependency; `CODEX_PATH` allows imposing another one.
+- **Variables**: `CODEX_API_KEY`, `OPENAI_API_KEY`, `CODEX_PATH`, `CODEX_CONFIG` (JSON merged
+  into the session config), `MODEL_PROVIDER`, `DEFAULT_AUTH_REQUEST`, `INITIAL_AGENT_MODE`
   (`read-only`, `agent`, `agent-full-access`), `NO_BROWSER`, `APP_SERVER_LOGS`.
 
-Réponse à `initialize` (`src/CodexAcpServer.ts`, ~l. 353) : `protocolVersion: acp.PROTOCOL_VERSION`, `auth { logout: {} }`, `providers: {}`, `loadSession: true`, `promptCapabilities { embeddedContext: true, image: true }`, `sessionCapabilities { resume, list, close, delete, fork, additionalDirectories, subagents }`, `mcpCapabilities { acp: false, http: true, sse: false }`.
+Response to `initialize` (`src/CodexAcpServer.ts`, ~l. 353): `protocolVersion: acp.PROTOCOL_VERSION`, `auth { logout: {} }`, `providers: {}`, `loadSession: true`, `promptCapabilities { embeddedContext: true, image: true }`, `sessionCapabilities { resume, list, close, delete, fork, additionalDirectories, subagents }`, `mcpCapabilities { acp: false, http: true, sse: false }`.
 
-**Authentification** (`getCodexAuthMethods`) : `api-key` toujours proposée (clé lue dans `CODEX_API_KEY` puis `OPENAI_API_KEY`, ou passée dans `_meta["api-key"].apiKey` de la requête `authenticate`) ; `chat-gpt`, connexion ChatGPT par navigateur, masquée si `NO_BROWSER` est défini ; `chat-gpt-device-code`, proposée seulement si le client supporte l'élicitation d'URL (`clientSupportsUrlElicitation`) — utile pour Hemera si l'on ne veut pas ouvrir un navigateur système ; `gateway` (passerelle compatible OpenAI) si le client annonce `auth._meta.gateway === true`.
+**Authentication** (`getCodexAuthMethods`): `api-key` always offered (key read from `CODEX_API_KEY` then `OPENAI_API_KEY`, or passed in `_meta["api-key"].apiKey` of the `authenticate` request); `chat-gpt`, ChatGPT login through a browser, hidden if `NO_BROWSER` is set; `chat-gpt-device-code`, offered only if the client supports URL elicitation (`clientSupportsUrlElicitation`) — useful for Hemera if one does not want to open a system browser; `gateway` (OpenAI-compatible gateway) if the client advertises `auth._meta.gateway === true`.
 
-Slash commands exposées : `/status`, `/mcp`, `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, `/logout`, plus les skills configurées.
+Exposed slash commands: `/status`, `/mcp`, `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, `/logout`, plus the configured skills.
 
-**Limite notable** : `sse: false` et `acp: false` côté MCP — un serveur MCP en SSE n'est pas acceptable pour Codex, il faut du stdio ou du streamable HTTP. Adaptateurs tiers repérés, non retenus ni audités : `Xuanwo/acp-claude-code`, `beyond5959/acp-adapter` (Go), `cola-io/codex-acp`.
+**Notable limit**: `sse: false` and `acp: false` on the MCP side — an SSE MCP server is not acceptable for Codex; it has to be stdio or streamable HTTP. Third-party adapters spotted, neither retained nor audited: `Xuanwo/acp-claude-code`, `beyond5959/acp-adapter` (Go), `cola-io/codex-acp`.
 
-## 4. OpenCode comme agent ACP
+## 4. OpenCode as an ACP agent
 
-Sources : <https://opencode.ai/docs/acp/>, <https://github.com/anomalyco/opencode> branche `dev` (`packages/opencode/src/cli/cmd/acp.ts`, `src/acp/service.ts`, `src/acp/usage.ts`), <https://registry.npmjs.org/opencode-ai>.
+Sources: <https://opencode.ai/docs/acp/>, <https://github.com/anomalyco/opencode> branch `dev` (`packages/opencode/src/cli/cmd/acp.ts`, `src/acp/service.ts`, `src/acp/usage.ts`), <https://registry.npmjs.org/opencode-ai>.
 
-- **ACP est natif** : la sous-commande `opencode acp` (« start ACP (Agent Client Protocol) server »)
-  construit un `ndJsonStream` sur `process.stdin`/`stdout` et un `AgentSideConnection` du SDK ACP.
-  Aucun paquet adaptateur à installer.
-- **`opencode-ai@1.18.31`, publiée le 2026-09-14** (binaire `opencode`). Le dépôt a **déménagé de
-  `sst/opencode` vers `anomalyco/opencode`** (redirection de l'API GitHub, branche par défaut `dev`).
-- **Architecture** : `opencode acp` démarre d'abord un serveur HTTP OpenCode local
-  (`Server.listen`) et se parle à lui-même via `createOpencodeClient` ; l'état de session vit dans
-  le stockage d'OpenCode, pas dans le processus ACP.
+- **ACP is native**: the `opencode acp` subcommand ("start ACP (Agent Client Protocol) server")
+  builds an `ndJsonStream` on `process.stdin`/`stdout` and an `AgentSideConnection` from the ACP SDK.
+  No adapter package to install.
+- **`opencode-ai@1.18.31`, published on 2026-09-14** (binary `opencode`). The repository has **moved from
+  `sst/opencode` to `anomalyco/opencode`** (GitHub API redirect, default branch `dev`).
+- **Architecture**: `opencode acp` first starts a local OpenCode HTTP server
+  (`Server.listen`) and talks to itself through `createOpencodeClient`; the session state lives in
+  OpenCode's storage, not in the ACP process.
 
-Réponse à `initialize` (`src/acp/service.ts`, ~l. 112) : `protocolVersion: 1`, `loadSession: true`, `mcpCapabilities { http: true, sse: true }`, `promptCapabilities { embeddedContext: true, image: true }`, `sessionCapabilities { close: {}, fork: {}, list: {}, resume: {} }` — ni `delete`, ni `additionalDirectories`, ni `subagents`.
+Response to `initialize` (`src/acp/service.ts`, ~l. 112): `protocolVersion: 1`, `loadSession: true`, `mcpCapabilities { http: true, sse: true }`, `promptCapabilities { embeddedContext: true, image: true }`, `sessionCapabilities { close: {}, fork: {}, list: {}, resume: {} }` — no `delete`, no `additionalDirectories`, no `subagents`.
 
-- **Auth** : une seule méthode, `{ id: AuthMethodID, name: "Login with opencode", description: "Run
-  \`opencode auth login\` in the terminal" }`, avec `_meta["terminal-auth"]` si le client l'annonce ;
-  `authenticate` échoue pour tout autre `methodId`.
-- **Modèles et fournisseurs** : configurés dans la configuration OpenCode, pas par ACP. Modèle,
-  variante et mode sont exposés comme `configOptions` ACP (`session/set_config_option`) et restaurés
-  au chargement de session.
-- **Parité annoncée par la doc** : « OpenCode works the same via ACP as it does in the terminal. All
-  features are supported », avec une exception citée : « Some built-in slash commands like `/undo`
-  and `/redo` are currently unsupported. » Les serveurs MCP de la config OpenCode, les règles
-  `AGENTS.md`, les agents et le système de permissions fonctionnent.
+- **Auth**: a single method, `{ id: AuthMethodID, name: "Login with opencode", description: "Run
+  \`opencode auth login\` in the terminal" }`, with `_meta["terminal-auth"]` if the client advertises it;
+  `authenticate` fails for any other `methodId`.
+- **Models and providers**: configured in the OpenCode configuration, not through ACP. Model,
+  variant and mode are exposed as ACP `configOptions` (`session/set_config_option`) and restored
+  when the session is loaded.
+- **Parity announced by the docs**: "OpenCode works the same via ACP as it does in the terminal. All
+  features are supported", with one cited exception: "Some built-in slash commands like `/undo`
+  and `/redo` are currently unsupported." The MCP servers of the OpenCode config, the
+  `AGENTS.md` rules, the agents and the permission system all work.
 
-## 5. Durabilité des sessions
+## 5. Session durability
 
-**Les trois annoncent `loadSession: true` et `sessionCapabilities.resume`.** La règle « la session survit au fournisseur » est donc tenable sur les trois, mais les deux méthodes diffèrent.
+**All three advertise `loadSession: true` and `sessionCapabilities.resume`.** The rule "the session outlives the provider" is therefore tenable on all three, but the two methods differ.
 
 - `session/load` (`LoadSessionRequest { sessionId, cwd, mcpServers, additionalDirectories? }`) →
-  l'agent **rejoue l'historique** en notifications `session/update` avant de répondre. Explicite
-  dans les trois implémentations : `replaySessionHistory(...)` (Claude),
+  the agent **replays the history** as `session/update` notifications before answering. Explicit
+  in all three implementations: `replaySessionHistory(...)` (Claude),
   `streamThreadHistory(sessionId, thread)` (Codex), `replayMessages(events, messages)` (OpenCode).
-  Le client reconstruit son transcript depuis le flux, sans stockage propre obligatoire.
+  The client rebuilds its transcript from the stream, with no storage of its own required.
 - `session/resume` (`ResumeSessionRequest { sessionId, cwd, mcpServers?, additionalDirectories? }`)
-  → rattache la session sans rejeu ; utile quand Hemera a déjà le transcript en base.
+  → reattaches the session without replay; useful when Hemera already has the transcript in its database.
 
-Où vit l'état : **Claude** dans les transcripts locaux du Claude Agent SDK — `readResumedSession` appelle `getSessionMessages(sessionId)` en cherchant « all project directories, matching `replaySessionHistory` », puis relance la query avec `resume: sessionId`, et **l'identifiant de session ACP est l'identifiant de session Claude** (« `resume` names the Claude session, which shares the ACP session id »), donc un `session/load` sur un id inconnu du CLI échoue ; **Codex** dans les threads de son App Server, énumérés par `session/list` avec pagination par curseur et reconstruits par `getOrCreateSessionWithHistory` ; **OpenCode** dans son propre stockage, relu par `session.get` et `session.messages` puis rejoué — l'état survit trivialement à la mort du processus ACP.
+Where the state lives: **Claude** in the local transcripts of the Claude Agent SDK — `readResumedSession` calls `getSessionMessages(sessionId)` searching "all project directories, matching `replaySessionHistory`", then relaunches the query with `resume: sessionId`, and **the ACP session identifier is the Claude session identifier** ("`resume` names the Claude session, which shares the ACP session id"), so a `session/load` on an id unknown to the CLI fails; **Codex** in the threads of its App Server, enumerated by `session/list` with cursor pagination and rebuilt by `getOrCreateSessionWithHistory`; **OpenCode** in its own storage, re-read by `session.get` and `session.messages` then replayed — the state trivially survives the death of the ACP process.
 
-**Conséquence** : Hemera doit persister, par conversation, le triplet (`agentId`, `sessionId`, `cwd`) — `cwd` est obligatoire dans `load` comme dans `resume` et doit correspondre au `cwd` de la session. Si un agent a perdu sa session côté disque, le repli est un `session/new` suivi d'un prompt de contexte : **aucun des trois n'accepte d'injecter un historique dans une session neuve**, il n'y a pas de champ pour ça dans `NewSessionRequest` (`cwd`, `additionalDirectories?`, `mcpServers`, `_meta` seulement). Non vérifié : la rétention réelle des transcripts (purge, compaction, rotation), qu'aucune des sources lues ne documente.
+**Consequence**: Hemera must persist, per conversation, the triplet (`agentId`, `sessionId`, `cwd`) — `cwd` is mandatory in `load` as in `resume` and must match the session's `cwd`. If an agent has lost its session on disk, the fallback is a `session/new` followed by a context prompt: **none of the three accepts injecting a history into a fresh session**; there is no field for that in `NewSessionRequest` (`cwd`, `additionalDirectories?`, `mcpServers`, `_meta` only). Not verified: the actual retention of transcripts (purge, compaction, rotation), which none of the sources read documents.
 
-## 6. MCP : passer le serveur MCP de Hemera à l'agent
+## 6. MCP: handing Hemera's MCP server to the agent
 
-`NewSessionRequest.mcpServers: Array<McpServer>` est **obligatoire** (tableau vide accepté) ; `LoadSessionRequest.mcpServers` l'est aussi, sur `ResumeSessionRequest` il est optionnel. L'union :
+`NewSessionRequest.mcpServers: Array<McpServer>` is **mandatory** (empty array accepted); `LoadSessionRequest.mcpServers` is too, and on `ResumeSessionRequest` it is optional. The union:
 
 ```ts
 type McpServer =
@@ -188,11 +188,11 @@ type McpServer =
   | McpServerStdio;                      // { name, command, args, env: EnvVariable[] }
 ```
 
-La forme **stdio est la variante par défaut, sans champ `type`** — le seul transport que tout agent doit accepter, avec `command` = « Absolute path to the MCP server executable ». Les autres formes dépendent de `mcpCapabilities` : Claude et OpenCode annoncent `http` et `sse`, Codex `http` seulement. La variante `acp` (serveur MCP porté par le canal ACP lui-même, via `mcp/connect`, `mcp/message`, `mcp/disconnect`) est marquée **UNSTABLE** et n'est annoncée par aucun des trois. **Donc** : pour être accepté partout, le serveur MCP de Hemera doit être exposé en **stdio** (chemin absolu vers un exécutable) ou en **streamable HTTP** (URL locale plus en-têtes) ; ne pas compter sur SSE, refusé par Codex, ni sur le transport `acp`.
+The **stdio form is the default variant, with no `type` field** — the only transport every agent must accept, with `command` = "Absolute path to the MCP server executable". The other forms depend on `mcpCapabilities`: Claude and OpenCode advertise `http` and `sse`, Codex `http` only. The `acp` variant (an MCP server carried by the ACP channel itself, through `mcp/connect`, `mcp/message`, `mcp/disconnect`) is marked **UNSTABLE** and is advertised by none of the three. **Therefore**: to be accepted everywhere, Hemera's MCP server must be exposed over **stdio** (absolute path to an executable) or over **streamable HTTP** (local URL plus headers); do not count on SSE, refused by Codex, nor on the `acp` transport.
 
-Côté SDK TypeScript MCP (<https://github.com/modelcontextprotocol/typescript-sdk>, <https://registry.npmjs.org/@modelcontextprotocol/server>, <https://registry.npmjs.org/@modelcontextprotocol/node>) : le SDK a été **scindé en v2**, publiée le **2026-07-27**, « released alongside the 2026-07-28 spec » — `@modelcontextprotocol/server@2.0.0` (serveurs ; dépend de `@modelcontextprotocol/core@2.0.0` et `zod@^4.2.0`), `@modelcontextprotocol/client@2.0.0`, `@modelcontextprotocol/node@2.0.0` (streamable HTTP pour `IncomingMessage`/`ServerResponse`), plus les intégrations `/express`, `/fastify`, `/hono`. L'ancien monopaquet `@modelcontextprotocol/sdk` est en **1.30.0** (2026-07-27) et reste sur la branche `v1.x` : « v1.x continues to receive bug fixes and security updates for at least 6 months after v2's release », soit fin janvier 2027 au minimum.
+On the MCP TypeScript SDK side (<https://github.com/modelcontextprotocol/typescript-sdk>, <https://registry.npmjs.org/@modelcontextprotocol/server>, <https://registry.npmjs.org/@modelcontextprotocol/node>): the SDK has been **split in v2**, published on **2026-07-27**, "released alongside the 2026-07-28 spec" — `@modelcontextprotocol/server@2.0.0` (servers; depends on `@modelcontextprotocol/core@2.0.0` and `zod@^4.2.0`), `@modelcontextprotocol/client@2.0.0`, `@modelcontextprotocol/node@2.0.0` (streamable HTTP for `IncomingMessage`/`ServerResponse`), plus the `/express`, `/fastify`, `/hono` integrations. The former monopackage `@modelcontextprotocol/sdk` is at **1.30.0** (2026-07-27) and stays on the `v1.x` branch: "v1.x continues to receive bug fixes and security updates for at least 6 months after v2's release", that is, end of January 2027 at the minimum.
 
-Serveur stdio minimal (README v2, verbatim) :
+Minimal stdio server (v2 README, verbatim):
 
 ```ts
 import { McpServer } from '@modelcontextprotocol/server';
@@ -207,77 +207,77 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
-En streamable HTTP sur `node:http` (README de `@modelcontextprotocol/node`) : `NodeStreamableHTTPServerTransport` puis `transport.handleRequest(req, res, req.body)`, avec les gardes `localhostHostValidation()` et `localhostOriginValidation()` composées devant le transport quand on câble `node:http` à la main (les factories `createMcpExpressApp`, `createMcpHonoApp`, `createMcpFastifyApp` les appliquent d'office) ; pour un runtime web standard, `WebStandardStreamableHTTPServerTransport` vient de `@modelcontextprotocol/server`. Pour mémoire, l'adaptateur Claude déprécié embarquait `@modelcontextprotocol/sdk@1.26.0` : le choix de version côté Hemera est indépendant de celui des agents, nos serveurs MCP ne partagent pas de code avec eux.
+Over streamable HTTP on `node:http` (README of `@modelcontextprotocol/node`): `NodeStreamableHTTPServerTransport` then `transport.handleRequest(req, res, req.body)`, with the `localhostHostValidation()` and `localhostOriginValidation()` guards composed in front of the transport when wiring `node:http` by hand (the `createMcpExpressApp`, `createMcpHonoApp`, `createMcpFastifyApp` factories apply them by default); for a standard web runtime, `WebStandardStreamableHTTPServerTransport` comes from `@modelcontextprotocol/server`. For the record, the deprecated Claude adapter bundled `@modelcontextprotocol/sdk@1.26.0`: the version choice on Hemera's side is independent of the agents', as our MCP servers share no code with them.
 
-## 7. Interruption et coût
+## 7. Interruption and cost
 
-La spec (<https://agentclientprotocol.com/protocol/prompt-turn>) : l'agent « **SHOULD** stop all language model requests and all tool call invocations as soon as possible », puis « after all ongoing operations have been successfully aborted and pending updates have been sent, the Agent **MUST** respond to the original `session/prompt` request with the `cancelled` stop reason ».
+The spec (<https://agentclientprotocol.com/protocol/prompt-turn>): the agent "**SHOULD** stop all language model requests and all tool call invocations as soon as possible", then "after all ongoing operations have been successfully aborted and pending updates have been sent, the Agent **MUST** respond to the original `session/prompt` request with the `cancelled` stop reason".
 
-- **Claude** : `cancel()` marque `session.cancelled = true`, annule les rendus d'usage en cours,
-  termine les sous-agents natifs en `"cancelled"`, puis interrompt la query ; un minuteur de secours
-  force le tour à se conclure en `"cancelled"` si la boucle du SDK ne rend jamais la main. Les tool
-  calls interrompus sont remontés en `tool_call_update` avec un statut dérivé du texte
+- **Claude**: `cancel()` sets `session.cancelled = true`, cancels the usage renderings in progress,
+  ends the native subagents as `"cancelled"`, then interrupts the query; a fallback timer
+  forces the turn to conclude as `"cancelled"` if the SDK loop never yields. Interrupted tool
+  calls are reported as `tool_call_update` with a status derived from the text
   (`/\b(?:cancelled|canceled|interrupted|stopped|killed)\b/` → `"cancelled"`).
-- **Codex** : `cancel()` appelle `interruptSessionTurn(...)` ; commentaire du code : « After
+- **Codex**: `cancel()` calls `interruptSessionTurn(...)`; code comment: "After
   `turnInterrupt()`, Codex will send `turn/completed`, which naturally completes
-  `awaitTurnCompleted()` ». Une session inconnue fait un no-op silencieux.
-- **OpenCode** : capacité baseline ACP dans `packages/opencode/src/acp/` ; le détail de l'arrêt des
-  outils en cours **n'a pas été vérifié** ligne par ligne.
+  `awaitTurnCompleted()`". An unknown session is a silent no-op.
+- **OpenCode**: ACP baseline capability in `packages/opencode/src/acp/`; the detail of how running
+  tools are stopped **has not been verified** line by line.
 
-Dans les trois cas l'annulation est *coopérative* : Hemera ne peut pas garantir qu'un outil s'arrête au milieu, seulement que le tour se soldera par `stopReason: "cancelled"`.
+In all three cases cancellation is *cooperative*: Hemera cannot guarantee that a tool stops midway, only that the turn will end with `stopReason: "cancelled"`.
 
-Pour les tokens et le coût, deux canaux — `session/update` avec `sessionUpdate: "usage_update"` → `UsageUpdate { used, size, cost?: { amount, currency } }` (`used` = tokens actuellement dans le contexte, `size` = taille de la fenêtre) ; et `PromptResponse.usage?: Usage`, marqué **UNSTABLE** dans le schéma, = `{ totalTokens, inputTokens, outputTokens, thoughtTokens?, cachedReadTokens?, cachedWriteTokens? }`.
+For tokens and cost, two channels — `session/update` with `sessionUpdate: "usage_update"` → `UsageUpdate { used, size, cost?: { amount, currency } }` (`used` = tokens currently in the context, `size` = window size); and `PromptResponse.usage?: Usage`, marked **UNSTABLE** in the schema, = `{ totalTokens, inputTokens, outputTokens, thoughtTokens?, cachedReadTokens?, cachedWriteTokens? }`.
 
-- **Claude** : `usage_update` à plusieurs moments du tour (résultat, compaction,
-  `rate_limit_event`), avec `cost: { amount: message.total_cost_usd, currency: "USD" }` en fin de
-  tour, et un `PromptResponse.usage` complet (`sessionUsage`) incluant les tokens de cache ; quotas
-  dans `_meta.quota` et `_meta["_claude/rateLimit"]`.
-- **Codex** : `usage_update` avec `used` (tokens du dernier tour) et `size`
-  (`modelContextWindow`) — **pas de champ `cost`**. `toPromptUsage` remplit `PromptResponse.usage`
-  (`cachedInputTokens` → `cachedReadTokens`, `reasoningOutputTokens` → `thoughtTokens`) ; rate
-  limits dans `_meta` (`account/rateLimits/updated`).
-- **OpenCode** : `usage_update` avec `used`, `size` et
-  `cost: { amount: totalSessionCost(messages), currency: "USD" }`, coût cumulé de la session agrégé
-  depuis le champ `cost` de ses propres messages assistants.
+- **Claude**: `usage_update` at several points of the turn (result, compaction,
+  `rate_limit_event`), with `cost: { amount: message.total_cost_usd, currency: "USD" }` at the end of the
+  turn, and a complete `PromptResponse.usage` (`sessionUsage`) including cache tokens; quotas
+  in `_meta.quota` and `_meta["_claude/rateLimit"]`.
+- **Codex**: `usage_update` with `used` (tokens of the last turn) and `size`
+  (`modelContextWindow`) — **no `cost` field**. `toPromptUsage` fills `PromptResponse.usage`
+  (`cachedInputTokens` → `cachedReadTokens`, `reasoningOutputTokens` → `thoughtTokens`); rate
+  limits in `_meta` (`account/rateLimits/updated`).
+- **OpenCode**: `usage_update` with `used`, `size` and
+  `cost: { amount: totalSessionCost(messages), currency: "USD" }`, the cumulative session cost aggregated
+  from the `cost` field of its own assistant messages.
 
-**Le coût monétaire n'est donc disponible que pour Claude et OpenCode**, et seulement en USD ; pour Codex, Hemera ne peut afficher que des tokens et une occupation de fenêtre.
+**Monetary cost is therefore available only for Claude and OpenCode**, and only in USD; for Codex, Hemera can display only tokens and a window occupancy.
 
-## Conséquences pour Hemera
+## Consequences for Hemera
 
-Acquis :
+Established:
 
-- **Le socle ACP est stable** : `@agentclientprotocol/sdk@1.4.0`, `protocolVersion: 1`, schéma
-  1.20.0. Cibler v1, ignorer `src/v2`.
-- **Les trois fournisseurs visés ont un agent ACP vivant**, tous publiés dans les 48 h avant ce
-  relevé, tous en stdio, tous en `protocolVersion: 1`.
-- **Hemera écrit son propre superviseur de processus** : pas de helper de spawn dans le SDK —
-  `spawn`, `Writable.toWeb`/`Readable.toWeb`, `acp.ndJsonStream`, `stderr` à part.
-- **La règle « la session survit au fournisseur » tient** : `session/load` existe chez les trois et
-  rejoue l'historique en `session/update` ; persister (`agentId`, `sessionId`, `cwd`) suffit. Pas de
-  repli par injection d'historique : session perdue = session neuve plus un prompt de contexte
-  rédigé par Hemera, à afficher comme telle.
-- **Le serveur MCP de Hemera doit être stdio ou streamable HTTP** ; SSE est refusé par Codex et le
-  transport `acp` est instable.
-- **SDK MCP : partir sur la v2** (`@modelcontextprotocol/server@2.0.0`, plus
-  `@modelcontextprotocol/node@2.0.0` si HTTP) ; la v1 n'est maintenue en correctifs que jusqu'à fin
-  janvier 2027 au plus tôt.
-- **Capacités client à implémenter** : `fs/read_text_file`, `fs/write_text_file`,
-  `session/request_permission`, la famille `terminal/*` et `elicitation/*`. La capacité terminal
-  n'est pas un luxe : sans elle l'adaptateur Claude ne propose pas ses méthodes d'auth par
-  abonnement, et OpenCode ne peut pas proposer son `opencode auth login`.
-- **Coût** : afficher `usage_update.cost` quand il vient (Claude, OpenCode) et se rabattre sur les
-  tokens pour Codex ; ne pas construire l'UI sur un coût universel.
+- **The ACP foundation is stable**: `@agentclientprotocol/sdk@1.4.0`, `protocolVersion: 1`, schema
+  1.20.0. Target v1, ignore `src/v2`.
+- **The three targeted providers have a living ACP agent**, all published within the 48 hours before this
+  survey, all over stdio, all at `protocolVersion: 1`.
+- **Hemera writes its own process supervisor**: no spawn helper in the SDK —
+  `spawn`, `Writable.toWeb`/`Readable.toWeb`, `acp.ndJsonStream`, `stderr` handled separately.
+- **The rule "the session outlives the provider" holds**: `session/load` exists in all three and
+  replays the history as `session/update`; persisting (`agentId`, `sessionId`, `cwd`) is enough. No
+  fallback by history injection: a lost session = a fresh session plus a context prompt
+  written by Hemera, displayed as such.
+- **Hemera's MCP server must be stdio or streamable HTTP**; SSE is refused by Codex and the
+  `acp` transport is unstable.
+- **MCP SDK: start on v2** (`@modelcontextprotocol/server@2.0.0`, plus
+  `@modelcontextprotocol/node@2.0.0` if HTTP); v1 is maintained with fixes only until the end of
+  January 2027 at the earliest.
+- **Client capabilities to implement**: `fs/read_text_file`, `fs/write_text_file`,
+  `session/request_permission`, the `terminal/*` family and `elicitation/*`. The terminal capability
+  is not a luxury: without it the Claude adapter does not offer its subscription auth methods,
+  and OpenCode cannot offer its `opencode auth login`.
+- **Cost**: display `usage_update.cost` when it comes (Claude, OpenCode) and fall back on
+  tokens for Codex; do not build the UI on a universal cost.
 
-Incertain ou non vérifié :
+Uncertain or not verified:
 
-- Aucune vérification à l'exécution, ni sur Windows ni sur Linux : tout est lu dans le code.
-- La rétention réelle des transcripts côté agents n'est pas documentée : un `session/load` peut
-  échouer sur une session ancienne.
-- OpenCode : le détail de l'arrêt des outils sur `session/cancel` n'a pas été lu.
-- Les extensions hors spec (`steering`, `goal`, `session failure`, sous-agents natifs, async tasks)
-  sont portées par Claude et Codex mais pas par OpenCode, et vivent dans `_meta` : s'en servir crée
-  une dépendance à deux agents sur trois.
-- Le déménagement du dépôt OpenCode (`sst/opencode` vers `anomalyco/opencode`) est récent ; la
-  gouvernance du projet mériterait un point avant d'en dépendre.
-- Aucune déclaration officielle d'Anthropic ou d'OpenAI sur un mode ACP natif dans leurs CLI : les
-  deux passent par un adaptateur hébergé par le projet ACP.
+- No run-time verification, neither on Windows nor on Linux: everything is read in the code.
+- The actual retention of transcripts on the agents' side is not documented: a `session/load` may
+  fail on an old session.
+- OpenCode: the detail of how tools are stopped on `session/cancel` has not been read.
+- The off-spec extensions (`steering`, `goal`, `session failure`, native subagents, async tasks)
+  are carried by Claude and Codex but not by OpenCode, and live in `_meta`: using them creates
+  a dependency on two agents out of three.
+- The move of the OpenCode repository (`sst/opencode` to `anomalyco/opencode`) is recent; the
+  project's governance would deserve a check before depending on it.
+- No official statement from Anthropic or OpenAI about a native ACP mode in their CLIs: both
+  go through an adapter hosted by the ACP project.
