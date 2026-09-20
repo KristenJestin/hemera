@@ -12,6 +12,7 @@ import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { DIAGNOSTIC_FILE } from './diagnostic.ts'
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
+import { RELAYED, type Relayed } from './relayed.ts'
 import type { EngineConversation } from './engine-conversation.ts'
 import { wearPreference } from './window.ts'
 import {
@@ -81,7 +82,8 @@ export function registerChannels(
   )
 
   /**
-   * The Projects and their Journal, handed straight to the process that holds the database.
+   * The Projects, their Sessions and their Journal, handed straight to the process that holds
+   * the database.
    *
    * One line each, because that is all a relay is: the origin was checked before this function
    * was reached, the schema was checked there too, and the engine checks it again on the way
@@ -160,24 +162,6 @@ export function registerChannels(
 
   handle('workspace.check', ({ path }) => Effect.promise(() => checkFolder(path)))
 }
-
-/** Every channel that is nothing but a message on its way to the engine and back. */
-const RELAYED = [
-  'engine.status',
-  'projects.list',
-  'projects.create',
-  'projects.update',
-  'projects.moveMain',
-  'projects.archive',
-  'projects.restore',
-  'repositories.add',
-  'repositories.remove',
-  'journal.read',
-  'journal.unseen',
-  'journal.markSeen',
-] as const
-
-type Relayed = (typeof RELAYED)[number]
 
 /** One channel, answered by asking the engine the use case of the same name. */
 function relay(name: Relayed, engine: EngineConversation): void {

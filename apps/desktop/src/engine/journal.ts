@@ -7,9 +7,9 @@
  *
  * What an event is correlated to is a column, never something to be dug out of its payload: a
  * journal read by project finds its rows through an index, without opening a single JSON
- * document. The correlations of the Session, the Spec, the revision and the phase are declared
- * with the rest and left empty by this lot, because a column that exists costs nothing and a
- * column added later costs a migration.
+ * document. The correlations of the Session, the Spec, the revision and the phase were declared
+ * with the rest a lot before anything filled them, because a column that exists costs nothing
+ * and a column added later costs a migration; the Session's is written from lot 4b on.
  */
 
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm'
@@ -52,6 +52,14 @@ export interface NewEvent {
   author: EventAuthor
   /** The project the event belongs to, and null for what belongs to the profile itself. */
   projectId?: string | null
+  /**
+   * The Session it happened in, and null for everything that happened in none.
+   *
+   * Written from lot 4b on: `entity_id` already names the Session of a `session.*` event, and
+   * this column is what makes a Journal read by Session an index rather than a scan — which is
+   * the reason it was declared with the rest a lot before anything filled it.
+   */
+  sessionId?: string | null
   payload?: EventPayload
 }
 
@@ -84,6 +92,7 @@ export function record(
         // that is what is true — and it leaves the Journal itself listing everything.
         seenAt: event.author === 'human' ? occurredAt : null,
         projectId: event.projectId ?? null,
+        sessionId: event.sessionId ?? null,
         payload: JSON.stringify(event.payload ?? {}),
       })),
     )

@@ -58,7 +58,8 @@ export const CHANNELS = {
     response: z.void(),
   },
 
-  // The Projects and their Journal, relayed to the process that holds the database. The very
+  // The Projects, their Sessions and their Journal, relayed to the process that holds the
+  // database. The very
   // schemas the engine declares, imported and not rewritten: two copies of a contract are two
   // contracts, and the day one of them gains a field the other is the bug.
   // What the settings say about the data folder, which only the engine can answer.
@@ -71,6 +72,13 @@ export const CHANNELS = {
   'projects.restore': ENGINE_REQUESTS['projects.restore'],
   'repositories.add': ENGINE_REQUESTS['repositories.add'],
   'repositories.remove': ENGINE_REQUESTS['repositories.remove'],
+  'sessions.list': ENGINE_REQUESTS['sessions.list'],
+  'sessions.create': ENGINE_REQUESTS['sessions.create'],
+  'sessions.rename': ENGINE_REQUESTS['sessions.rename'],
+  'sessions.archive': ENGINE_REQUESTS['sessions.archive'],
+  'sessions.restore': ENGINE_REQUESTS['sessions.restore'],
+  'sessions.append': ENGINE_REQUESTS['sessions.append'],
+  'sessions.read': ENGINE_REQUESTS['sessions.read'],
   'journal.read': ENGINE_REQUESTS['journal.read'],
   'journal.unseen': ENGINE_REQUESTS['journal.unseen'],
   'journal.markSeen': ENGINE_REQUESTS['journal.markSeen'],

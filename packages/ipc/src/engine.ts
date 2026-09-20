@@ -141,6 +141,46 @@ export const journalEntrySchema = z.object({
 
 export type JournalEntry = z.infer<typeof journalEntrySchema>
 
+/** Whether a Session's title is still Hemera's to propose, or the user's decision (D4b-03). */
+export const titleSourceSchema = z.enum(['derived', 'user'])
+
+/** Who wrote a message of a thread. One value while no agent is plugged in (design D4b-09). */
+export const entryRoleSchema = z.enum(['user'])
+
+/**
+ * A Session as the interface is handed one (design D4b-01).
+ *
+ * The dates are milliseconds, as a Project's are: what crosses the port is a number the page
+ * builds a `Date` from, and never a string two sides could read two ways. A Session with no
+ * message carries the title the engine wrote at creation — the interface's own "New session" —
+ * so nothing that shows a thread has to invent a name for one.
+ */
+export const sessionSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  title: z.string(),
+  titleSource: titleSourceSchema,
+  archivedAt: z.number().nullable(),
+  createdAt: z.number(),
+  /** The last message or rename, which is what the sidebar sorts on (design D4b-04). */
+  lastWrittenAt: z.number(),
+  version: z.number(),
+})
+
+export type Session = z.infer<typeof sessionSchema>
+
+/** One message of a thread, numbered by the Session it belongs to. */
+export const sessionEntrySchema = z.object({
+  id: z.string(),
+  sessionId: z.string(),
+  seq: z.number(),
+  role: entryRoleSchema,
+  body: z.string(),
+  createdAt: z.number(),
+})
+
+export type SessionEntry = z.infer<typeof sessionEntrySchema>
+
 /**
  * A cursor into the Journal: the sequence of an entry, and nothing that cannot be one.
  *
@@ -152,8 +192,16 @@ const cursorSchema = z.number().int().nonnegative()
 /** How many entries a page may hold, so one call cannot ask for the whole Journal. */
 const limitSchema = z.number().int().positive().max(200)
 
-/** What every change to an existing Project carries: which one, and the version it was read at. */
+/** What a change to an existing Project or Session carries: which one, at which version. */
 const addressedSchema = z.object({ id: z.string(), version: z.number().int().nonnegative() })
+
+/**
+ * What a message has to be to be one: text, and not the absence of it.
+ *
+ * A composer that was never typed in is not a message and is refused here, before a thread is
+ * opened for it — the draft stays where it is, which is what the spec asks for.
+ */
+const messageSchema = z.string().min(1)
 
 /** A call that takes no argument, which both declarations say the same way. */
 export const nothingSchema = z.object({})
@@ -211,6 +259,44 @@ export const ENGINE_REQUESTS = {
   'repositories.remove': {
     arguments: addressedSchema.extend({ relativePath: z.string() }),
     response: projectSchema,
+  },
+
+  'sessions.list': {
+    arguments: z.object({ projectId: z.string(), archived: z.boolean().optional() }),
+    response: z.array(sessionSchema),
+  },
+  /** With the message the Home composer was sent with, when it was sent with one. */
+  'sessions.create': {
+    arguments: z.object({ projectId: z.string(), firstMessage: messageSchema.optional() }),
+    response: sessionSchema,
+  },
+  'sessions.rename': {
+    arguments: addressedSchema.extend({ title: z.string().min(1) }),
+    response: sessionSchema,
+  },
+  'sessions.archive': { arguments: addressedSchema, response: sessionSchema },
+  'sessions.restore': { arguments: addressedSchema, response: sessionSchema },
+  /**
+   * The one use case that carries no version, because it takes nothing away.
+   *
+   * A message is a row added to a thread, so there is no change of another window's it could
+   * overwrite — and a burst typed faster than the answers come back could not carry ten
+   * versions nobody has been handed yet (design D4b-02).
+   */
+  'sessions.append': {
+    arguments: z.object({ id: z.string(), body: messageSchema }),
+    response: z.object({ session: sessionSchema, entry: sessionEntrySchema }),
+  },
+  'sessions.read': {
+    arguments: z.object({
+      sessionId: z.string(),
+      after: cursorSchema.optional(),
+      limit: limitSchema.optional(),
+    }),
+    response: z.object({
+      entries: z.array(sessionEntrySchema),
+      nextAfter: z.number().nullable(),
+    }),
   },
 
   'journal.read': {

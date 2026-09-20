@@ -23,6 +23,7 @@ import type { InvalidProjectNameError, InvalidRepositoryPathError } from '@hemer
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
 import { Projects, type UnknownProjectError } from './projects.ts'
+import { Sessions, type UnknownSessionError } from './sessions.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
@@ -47,7 +48,7 @@ export type EngineAnswer<K extends EngineRequestName = EngineRequestName> =
  * unions in it. Those are not the same type: with the second, a name narrowed to
  * `journal.markSeen` leaves the argument as every argument any use case takes, and the thing
  * that routes them cannot ask it for a cursor. Here, narrowing the name narrows the argument
- * with it, which is what makes a router of fourteen use cases type at all.
+ * with it, which is what makes a router of twenty-one use cases type at all.
  */
 export type AcceptedRequest = {
   [K in EngineRequestName]: { accepted: true; name: K; argument: EngineArguments<K> }
@@ -98,7 +99,7 @@ export function answer(
 ): Effect.Effect<
   EngineResponse<EngineRequestName>,
   Refusal,
-  Preferences | EngineStatus | Projects | Journal
+  Preferences | EngineStatus | Projects | Sessions | Journal
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -117,6 +118,27 @@ export function answer(
     if (decision.name === 'journal.markSeen') {
       return yield* (yield* Journal).markSeen(decision.argument.upTo)
     }
+
+    if (decision.name === 'sessions.list') {
+      return yield* (yield* Sessions).list(decision.argument)
+    }
+    if (decision.name === 'sessions.create') {
+      return yield* (yield* Sessions).create(decision.argument)
+    }
+    if (decision.name === 'sessions.rename') {
+      const { id, version, title } = decision.argument
+      return yield* (yield* Sessions).rename(id, version, title)
+    }
+    if (decision.name === 'sessions.archive') {
+      return yield* (yield* Sessions).archive(decision.argument.id, decision.argument.version)
+    }
+    if (decision.name === 'sessions.restore') {
+      return yield* (yield* Sessions).restore(decision.argument.id, decision.argument.version)
+    }
+    if (decision.name === 'sessions.append') {
+      return yield* (yield* Sessions).append(decision.argument.id, decision.argument.body)
+    }
+    if (decision.name === 'sessions.read') return yield* (yield* Sessions).read(decision.argument)
 
     const projects = yield* Projects
     if (decision.name === 'projects.list') {
@@ -154,6 +176,7 @@ export type Refusal =
   | DatabaseError
   | StaleVersionError
   | UnknownProjectError
+  | UnknownSessionError
   | InvalidCursorError
   | InvalidProjectNameError
   | InvalidRepositoryPathError

@@ -17,6 +17,7 @@ import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
 import { type Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
+import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 
@@ -42,12 +43,17 @@ afterEach(() => {
 
 /** Runs one accepted message against a data folder of this test's own. */
 function running<A, E>(
-  program: Effect.Effect<A, E, Preferences | EngineStatus | Projects | Journal | SqliteClient>,
+  program: Effect.Effect<
+    A,
+    E,
+    Preferences | EngineStatus | Projects | Sessions | Journal | SqliteClient
+  >,
 ) {
   const services = Layer.mergeAll(
     preferencesLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
     projectsLayer,
+    sessionsLayer,
     journalLayer,
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
 

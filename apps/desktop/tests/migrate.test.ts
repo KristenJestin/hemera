@@ -43,6 +43,9 @@ const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
  */
 const LOT_THREE = '20260916123330_profile_and_preferences'
 
+/** The same, for lot 4a: the profile a user of the first Projects release carries. */
+const LOT_FOUR_A = '20260918102229_projects_and_journal'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -177,7 +180,7 @@ describe('Neuf et migré donnent le même schéma', () => {
     expect(await on(migrated, schemaOf)).toEqual(await on(fresh, schemaOf))
   })
 
-  test('the two migrations this application ships agree the same way', async () => {
+  test('the migrations this application ships agree the same way', async () => {
     // The same claim, on what really ships rather than on a folder written for the test: a
     // profile created today, and a profile of lot 3 brought up to today.
     const fresh = join(workspace, 'fresh-shipped')
@@ -235,8 +238,12 @@ describe('Un profil du lot 3 est migré vers le lot 4', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
 
-    // One migration behind, and the copy taken before it runs is named after it.
-    expect(standing.behind).toEqual([carriedMigrations(SHIPPED).at(-1)?.name])
+    // Behind by everything shipped since lot 3, and the copy is taken before the first of them.
+    expect(standing.behind).toEqual(
+      carriedMigrations(SHIPPED)
+        .slice(1)
+        .map((one) => one.name),
+    )
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${standing.behind[0]!}.sqlite`])
 
     // The domain arrived...
@@ -270,6 +277,78 @@ describe('Un profil du lot 3 est migré vers le lot 4', () => {
       'profile.migrated',
     ])
     expect(entries.every((entry) => entry.author === 'hemera')).toBe(true)
+  })
+})
+
+describe('Un profil du lot 4a est migré vers le lot 4b', () => {
+  test('a profile carrying the lot 4a migration gains the Sessions and keeps its Projects', async () => {
+    const dataFolder = join(workspace, 'from-lot-four-a')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(LOT_FOUR_A), '0.4.0'))
+
+    // A Project and a line of its Journal, as a user of that version really had.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`
+          INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-18T10:00:00.000Z', '2026-09-18T10:00:00.000Z', 1)`
+        yield* sql`
+          INSERT INTO domain_events
+            (type, entity_kind, entity_id, source, author, occurred_at, project_id, payload)
+          VALUES ('project.created', 'project', 'atlas', 'ui', 'human',
+            '2026-09-18T10:00:00.000Z', 'atlas', '{"name":"Atlas"}')`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+
+    // One migration behind, and the copy taken before it runs is named after it.
+    expect(standing.behind).toEqual([carriedMigrations(SHIPPED).at(-1)?.name])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${standing.behind[0]!}.sqlite`])
+
+    // The Sessions arrived, with the index the sidebar reads them through...
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const table of ['sessions', 'session_entries', 'session_by_project']) {
+      expect(schema).toContain(table)
+    }
+
+    // ...and nothing of lot 4a left with them.
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const projects = yield* sql<{ name: string }>`SELECT name FROM projects`
+        const events = yield* sql<{
+          type: string
+        }>`SELECT type FROM domain_events ORDER BY sequence`
+        return { projects: projects.map((row) => row.name), events: events.map((row) => row.type) }
+      }),
+    )
+    expect(kept.projects).toEqual(['Atlas'])
+    expect(kept.events).toEqual([
+      'profile.opened',
+      'profile.migrated',
+      'project.created',
+      'profile.opened',
+      'profile.backed_up',
+      'profile.migrated',
+    ])
+
+    // And a Session can be written in the profile that has just been migrated.
+    const written = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`
+          INSERT INTO sessions
+            (id, project_id, title, title_source, created_at, last_written_at, version)
+          VALUES ('one', 'atlas', 'New session', 'derived',
+            '2026-09-20T10:00:00.000Z', '2026-09-20T10:00:00.000Z', 1)`
+        return yield* sql<{ id: string }>`SELECT id FROM sessions`
+      }),
+    )
+    expect(written.map((row) => row.id)).toEqual(['one'])
   })
 })
 

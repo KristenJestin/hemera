@@ -36,8 +36,12 @@ export {
   journalEntrySchema,
   projectSchema,
   projectToneSchema,
+  entryRoleSchema,
+  sessionEntrySchema,
+  sessionSchema,
   sidebarPreferenceSchema,
   themePreferenceSchema,
+  titleSourceSchema,
 } from './engine.ts'
 export type {
   Channel,
@@ -52,4 +56,6 @@ export type {
   ThemePreference,
   JournalEntry,
   Project,
+  Session,
+  SessionEntry,
 } from './engine.ts'

@@ -5,9 +5,9 @@
  * migration, so a profile created today and a profile migrated up to today have the same schema
  * by construction rather than by care.
  *
- * Lot 3 gave it what the application knows about itself; lot 4 adds the domain — the Projects,
- * their working environments and the journal every change is written to (design D4-04). The
- * Sessions are lot 5's.
+ * Lot 3 gave it what the application knows about itself; lot 4a added the domain — the Projects,
+ * their working environments and the journal every change is written to (design D4-04) — and
+ * lot 4b the Sessions, which is where what the user writes is kept (design D4b-01).
  *
  * Two conventions run through all of it. An identifier is a `crypto.randomUUID()` in a text
  * column, because an identifier the database hands out is one that cannot be decided before the
@@ -127,7 +127,86 @@ export const projectRepositories = sqliteTable(
   (table) => [unique('repository_once_in_project').on(table.projectId, table.relativePath)],
 )
 
-/** What an event is about. `session` is declared now and filled by lot 5. */
+/**
+ * Where a title came from, which is what says whether Hemera may still choose it.
+ *
+ * `derived` is a proposal the engine made and may make again; `user` is a decision, and a
+ * decision is never overwritten by a proposal (design D4b-03).
+ */
+export const TITLE_SOURCES = ['derived', 'user'] as const
+
+/**
+ * Who wrote an entry of a thread.
+ *
+ * One value in this lot, because no agent is plugged in and a thread is the user's own
+ * (design D4b-09). The column exists all the same: the day an agent answers, that is a row
+ * with another role and not a migration.
+ */
+export const ENTRY_ROLES = ['user'] as const
+
+/**
+ * A Session: a thread of a Project, with no Spec and no Workspace of its own (design D4b-01).
+ *
+ * It is never deleted — `archived_at` is how one ends, and it is a date that can be cleared —
+ * and `version` is compared inside the transaction that writes it, as a Project's is.
+ *
+ * `last_written_at` is what the sidebar sorts on and is not `created_at` under another name:
+ * a message and a rename both count as writing to a Session, and what is looked for in a list
+ * of threads is the one worked on last (design D4b-04). `title` is never null: a Session with
+ * no message carries the default the interface shows, and `title_source` is what says the
+ * engine is still allowed to replace it.
+ */
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    titleSource: text('title_source').notNull(),
+    archivedAt: text('archived_at'),
+    createdAt: text('created_at').notNull(),
+    lastWrittenAt: text('last_written_at').notNull(),
+    version: integer('version').notNull().default(1),
+  },
+  (table) => [
+    check(
+      'session_title_source_is_known',
+      sql`${table.titleSource} IN (${sql.raw(oneOf(TITLE_SOURCES))})`,
+    ),
+    // The three columns the sidebar asks by, in the order it asks them: whose Sessions, which
+    // of them are still current, and the most recently written first.
+    index('session_by_project').on(table.projectId, table.archivedAt, table.lastWrittenAt),
+  ],
+)
+
+/**
+ * One message of a thread, in the order it was written down.
+ *
+ * `seq` is handed out by the Session and not by the table: a thread is read and paged by its
+ * own numbering, so two Sessions both start at one, and the uniqueness of the pair is what
+ * makes a burst of messages either an order or a refusal — never two rows claiming a place.
+ */
+export const sessionEntries = sqliteTable(
+  'session_entries',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull(),
+    role: text('role').notNull(),
+    body: text('body').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    check('entry_role_is_known', sql`${table.role} IN (${sql.raw(oneOf(ENTRY_ROLES))})`),
+    unique('entry_seq_in_session').on(table.sessionId, table.seq),
+  ],
+)
+
+/** What an event is about. `session` is filled from lot 4b on. */
 export const ENTITY_KINDS = ['project', 'profile', 'session'] as const
 
 /** Where an event came from: the user acting, or the application doing its work. */
@@ -155,8 +234,9 @@ export const EVENT_AUTHORS = ['human', 'hemera', 'agent', 'mcp', 'system'] as co
  *
  * The correlations are columns and not a payload to be searched: a journal read by project
  * finds its rows through an index, without opening a single JSON document. Those of the
- * Session, the Spec, the revision and the phase exist from today and stay empty until the lot
- * that fills them — a column added later is a migration, a column left null is nothing at all.
+ * Session, the Spec, the revision and the phase were all declared by lot 4a; the Session's is
+ * written from lot 4b on and the others stay empty until the lot that fills them — a column
+ * added later is a migration, a column left null is nothing at all.
  */
 export const domainEvents = sqliteTable(
   'domain_events',
