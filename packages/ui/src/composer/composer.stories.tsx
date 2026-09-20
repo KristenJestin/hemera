@@ -6,12 +6,13 @@ import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { Composer, type ComposerProps } from './composer.tsx'
 
 /**
- * The composer, complete and inert (design D4-07, D4-08).
+ * The composer, complete and live (design D4-07, D4-08).
  *
  * Three bands in one frame: the files attached above, the box the caret lives in, and what
  * sending does below. The files are the Project's, read by the main process in the application
- * and by the story here; sending is refused in this lot, and the refusal names the ticket that
- * will carry it, which is exactly what the page hands over.
+ * and by the story here. Sending used to be refused, and the refusal named the ticket that
+ * would carry it; that ticket is this lot, so `Start chat` hands the text over and the page
+ * decides what to do with it.
  */
 /**
  * A Project's folder as it really looks, so the list is answered the way the application will
@@ -58,7 +59,13 @@ function lookUp(query: string): string[] {
   return TREE.filter((file) => file.toLowerCase().includes(asked)).slice(0, SHOWN)
 }
 
-const REFUSAL = 'Sessions arrive with HEM-57; nothing was written.'
+/**
+ * What the page answers a send with: nothing to say.
+ *
+ * `onSend` answers the words a refusal would be shown in, and `null` when there are none. A
+ * Session takes the message and keeps it, so there are none.
+ */
+const ACCEPTED = null
 
 /**
  * The composer holds nothing: what is written and what is attached belong to the page. The
@@ -102,7 +109,7 @@ const meta = {
     onFilesChange: fn(),
     onWorkspaceChange: fn(),
     onSearchFiles: fn(async (query: string) => await Promise.resolve(lookUp(query))),
-    onSend: fn(async (text: string) => await Promise.resolve(text.trim() === '' ? null : REFUSAL)),
+    onSend: fn(async (_text: string) => await Promise.resolve(ACCEPTED)),
   },
   argTypes: {
     value: { control: 'text', description: 'What is written; the page holds it.' },
@@ -345,8 +352,8 @@ export const Attachments: Story = {
   },
 }
 
-/** Scenario « Envoi refusé » of `specs/shell-navigation/spec.md`. */
-export const SendingIsRefused: Story = {
+/** Scenario « Message enregistré » of the Spec · sessions: `Start chat` writes, and refuses nothing. */
+export const StartChatSends: Story = {
   play: async ({ canvasElement, args }) => {
     args.onSend.mockClear()
     const canvas = within(canvasElement)
@@ -356,11 +363,12 @@ export const SendingIsRefused: Story = {
     await userEvent.click(canvas.getByRole('button', { name: /Start chat/ }))
 
     await waitFor(() => {
-      expect(canvas.getByRole('alert')).toHaveTextContent('HEM-57')
+      expect(args.onSend).toHaveBeenCalledWith('Start something')
     })
-    // The text is still there: a refusal is not a reason to throw a sentence away.
+    // Nothing is refused any more: the panel says nothing at all when the send went through.
+    expect(canvas.queryByRole('alert')).toBeNull()
+    // And the text is the page's to clear, once it knows the message was kept.
     expect(box).toHaveTextContent('Start something')
-    expect(args.onSend).toHaveBeenCalledWith('Start something')
 
     // The button comes back from the quiet it went into while the send was in flight, and the
     // story waits for it: a colour read halfway through a fade is a contrast axe refuses.

@@ -6,10 +6,12 @@ import { IconAt, IconPaperclip } from '../icons.ts'
 import { ComposerActions } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
+import { answerTo } from './keystroke.ts'
 import { MentionMenu } from './mention-menu.tsx'
 
 /**
- * The composer: what a Session is started from, complete and inert in this lot (D4-07, D4-08).
+ * The composer: what a Session is started from (D4-07, D4-08), and what writes into it since
+ * HEM-57 gave `onSend` a Session to write to rather than a refusal to report.
  *
  * A `Frame`, and the one frame whose rim comes and goes. The box is the body — where the caret
  * is, the border and the ring — the Workspace and the actions stay open in the rim below it,
@@ -254,9 +256,18 @@ export function Composer({
                   return
                 }
               }
-              // Enter sends and Shift+Enter breaks the line, which is what every box of this
-              // shape does and what the hand already expects of this one.
-              if (event.key === 'Enter' && !event.shiftKey) {
+              // Enter sends, Shift+Enter breaks the line, and an Enter an input method owns is
+              // left alone. The same decision the Session's own box reads, out of the same
+              // file: two boxes that answered the keyboard differently would be two boxes to
+              // learn.
+              if (
+                answerTo({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  isComposing: event.nativeEvent.isComposing,
+                  keyCode: event.nativeEvent.keyCode,
+                }) === 'send'
+              ) {
                 event.preventDefault()
                 if (value.trim() !== '') void send()
               }
