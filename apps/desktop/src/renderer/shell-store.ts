@@ -1,4 +1,4 @@
-import type { DisplayPreferences } from '@hemera/ipc'
+import type { ActiveSessions, DisplayPreferences, DisplayPreferencesChange } from '@hemera/ipc'
 import { HOME_ENTRY, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '@hemera/ui'
 
 /**
@@ -60,6 +60,7 @@ let chosen: number | null = null
  */
 export function startShell(held: DisplayPreferences): void {
   chosen = held.sidebar.width
+  openSessions = held.activeSessionIds
   state = {
     ...state,
     activeProjectId: held.activeProjectId,
@@ -69,17 +70,48 @@ export function startShell(held: DisplayPreferences): void {
 }
 
 /**
+ * Which Session was open in each Project, as the data folder holds it (design D4b-07).
+ *
+ * Beside the state rather than in it: nothing on screen is drawn from it. It is read once, when
+ * the Sessions of a Project arrive and the window decides which one to open, and written every
+ * time the user goes into another one.
+ */
+let openSessions: ActiveSessions = {}
+
+/** The Session this Project was left on, and null when it was never left on one. */
+export function rememberedSession(projectId: string): string | null {
+  return openSessions[projectId] ?? null
+}
+
+/**
+ * Writes down the Session the window is in, for the next start.
+ *
+ * The whole map goes, because that is what the preference is: one Session per Project, and a
+ * window that sent only the one it is in would be asking the engine to merge what it holds
+ * with what it is told — which is a second place deciding what the preference is made of.
+ */
+export function rememberSession(projectId: string, sessionId: string): void {
+  if (openSessions[projectId] === sessionId) return
+  openSessions = { ...openSessions, [projectId]: sessionId }
+  write({ activeSessionIds: openSessions })
+}
+
+/**
  * Hands a change to the engine. What comes back is nothing: the page already has it.
  *
  * Nothing but the answer, that is: a channel that refused, timed out or found nobody there
  * rejects, and a rejection nobody is holding is an unhandled one.
  */
 function persist(): void {
+  write({ sidebar: { collapsed: state.collapsed, width: chosen } })
+}
+
+function write(wanted: DisplayPreferencesChange): void {
   window.hemera
-    .invoke('preferences.write', { sidebar: { collapsed: state.collapsed, width: chosen } })
+    .invoke('preferences.write', wanted)
     // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejected channel carries whatever the main process threw, and this is where it stops
     .catch((failed: unknown) => {
-      console.error('preferences.write: the sidebar was not written to the data folder', failed)
+      console.error('preferences.write: the shell was not written to the data folder', failed)
     })
 }
 
