@@ -1,8 +1,11 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  DESCRIBE_ARGUMENTS,
   channelAsked,
   channelProblems,
   identityOf,
@@ -148,6 +151,40 @@ describe('Un paquet lit son canal dans son manifeste', () => {
   test('a repository with no tag answers a hash, carried behind a version that starts with a digit', () => {
     expect(versionFrom('abc1234\n')).toBe('0.0.0-abc1234')
     expect(versionFrom('3dcdb99\n')).toBe('3dcdb99')
+  })
+
+  test('a beta tag closer than the version tag is not what a package is named after, on this OS', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-describe-'))
+    const git = (...args: string[]) => {
+      const run = spawnSync('git', args, { cwd: folder, encoding: 'utf8' })
+      expect(run.status, run.stderr).toBe(0)
+      return run.stdout.trim()
+    }
+    const commit = (message: string) =>
+      git(
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        message,
+      )
+    try {
+      git('init', '-q')
+      commit('one')
+      git('tag', 'v0.0.0')
+      commit('two')
+      git('tag', 'beta-0.0.0-1-gabc')
+      commit('three')
+      // The exclusion holds only when the pattern reaches git without a shell in between.
+      expect(git(...DESCRIBE_ARGUMENTS)).toMatch(/^v0\.0\.0-2-g[0-9a-f]+$/)
+      expect(DESCRIBE_ARGUMENTS.join(' ')).not.toContain("'")
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
   })
 })
 

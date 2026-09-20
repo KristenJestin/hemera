@@ -55,6 +55,13 @@ export function refusalFor(
   return `--channel ${asked}: only the continuous integration builds ${asked} packages; this machine builds ${DEFAULT_CHANNEL}`
 }
 
+/**
+ * How the repository is asked what it is, as arguments and not as a line: a line goes through
+ * a shell, and `cmd.exe` hands the quotes of `'beta-*'` to git as part of the pattern, so the
+ * beta tags were never excluded on Windows and a beta was named after the previous one.
+ */
+export const DESCRIBE_ARGUMENTS = ['describe', '--tags', '--always', '--exclude', 'beta-*'] as const
+
 /** The version a package carries, which is what the repository answers about itself. */
 export function versionFrom(described: string): string {
   const label = described.trim().replace(/^v/, '')
@@ -249,11 +256,7 @@ if (import.meta.main) {
 
   // `beta-*` tags are the pre-releases the pipeline cuts on every push to `dev`, one per build
   // and none of them a version: excluded here so a `git describe` never answers `beta-…-3-gabc`.
-  const described = spawnSync("git describe --tags --always --exclude 'beta-*'", {
-    cwd: repository,
-    encoding: 'utf8',
-    shell: true,
-  })
+  const described = spawnSync('git', DESCRIBE_ARGUMENTS, { cwd: repository, encoding: 'utf8' })
   const version = versionFrom(described.status === 0 ? described.stdout : '0.0.0')
 
   run('node build.ts', application)
