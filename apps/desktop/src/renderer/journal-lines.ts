@@ -1,43 +1,21 @@
 import type { JournalEntry } from '@hemera/ipc'
 import type { JournalLine } from '@hemera/ui'
 
+import { dayOf, timeOf } from './when.ts'
+
 /**
- * What an event of the Journal reads as, in the language and the locale of this window.
+ * What an event of the Journal reads as, in the language of this window.
  *
- * The one place in the application where a date becomes words. The engine writes an ISO string
- * and the design system draws whatever it is handed — neither of them has a locale, and neither
- * should: a component that formatted a date would carry one into every application that used
- * it, and a database that did would carry one into a file that outlives the machine.
- *
- * What an event says is written here too, from its type and its payload. The type is what the
+ * What an event says is written here, from its type and its payload. The type is what the
  * engine will always have; the sentence is what a reader wants, and it changes with the
- * language while the type never does.
- */
-const TODAY = 'Today'
-const YESTERDAY = 'Yesterday'
-
-/**
- * How a day is named: the two everyone reads as themselves, then a date.
+ * language while the type never does. When it happened becomes words in `when.ts`, which the
+ * thread of a Session reads as well.
  *
- * The year is said as soon as it is not this one. It is what tells `12 September` of this year
- * from `12 September` of the last, and the Journal groups its entries by the words written
- * here: two days a year apart carrying the same name are one day to whatever reads them.
+ * An event about a Session carries somewhere to go: the line opens the Session it is about,
+ * archived or not — an archived one arrives with its whole thread and the `Restore` of its
+ * header, which is the way back the Journal offers (design D4b-06).
  */
-function dayOf(at: Date, now: Date): string {
-  const days = Math.round((startOf(now).getTime() - startOf(at).getTime()) / 86_400_000)
-  if (days <= 0) return TODAY
-  if (days === 1) return YESTERDAY
-  return at.toLocaleDateString(
-    undefined,
-    at.getFullYear() === now.getFullYear()
-      ? { day: 'numeric', month: 'long' }
-      : { day: 'numeric', month: 'long', year: 'numeric' },
-  )
-}
-
-function startOf(at: Date): Date {
-  return new Date(at.getFullYear(), at.getMonth(), at.getDate())
-}
+const SESSION_TARGET = 'Open the Session'
 
 /** What each type of event says, with what its payload adds to it. */
 function labelOf(entry: JournalEntry): string {
@@ -58,6 +36,16 @@ function labelOf(entry: JournalEntry): string {
       return `Repository ${said('relativePath')} added`
     case 'project.repository_removed':
       return `Repository ${said('relativePath')} removed`
+    case 'session.created':
+      return `Session created · ${said('title')}`
+    case 'session.renamed':
+      return `Session renamed to “${said('title')}”`
+    case 'session.message_recorded':
+      return 'Message recorded'
+    case 'session.archived':
+      return 'Session archived'
+    case 'session.restored':
+      return 'Session restored'
     case 'profile.opened':
       return `Profile opened by ${said('version')}`
     case 'profile.backed_up':
@@ -71,19 +59,35 @@ function labelOf(entry: JournalEntry): string {
   }
 }
 
+/** What the window can do about an entry, which for a Session is to open it. */
+export interface LineActions {
+  onOpenSession?: ((sessionId: string) => void) | undefined
+}
+
 /** One entry, as the Journal and the Activity frame draw one. */
-export function lineOf(entry: JournalEntry, now = new Date()): JournalLine {
+export function lineOf(
+  entry: JournalEntry,
+  now = new Date(),
+  actions: LineActions = {},
+): JournalLine {
   const at = new Date(entry.occurredAt)
-  return {
+  const line: JournalLine = {
     sequence: entry.sequence,
     kind: entry.entityKind,
     label: labelOf(entry),
     day: dayOf(at, now),
-    time: at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
+    time: timeOf(at),
     author: entry.author,
   }
+  const open = actions.onOpenSession
+  if (entry.entityKind !== 'session' || open === undefined) return line
+  return { ...line, target: { label: SESSION_TARGET, onOpen: () => open(entry.entityId) } }
 }
 
-export function linesOf(entries: readonly JournalEntry[], now = new Date()): JournalLine[] {
-  return entries.map((entry) => lineOf(entry, now))
+export function linesOf(
+  entries: readonly JournalEntry[],
+  now = new Date(),
+  actions: LineActions = {},
+): JournalLine[] {
+  return entries.map((entry) => lineOf(entry, now, actions))
 }
