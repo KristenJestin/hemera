@@ -14,9 +14,9 @@
  * honest (design D2-09).
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
-import type { EngineStatus, MotionMeasure, Project } from '@hemera/ipc'
+import type { EngineStatus, MotionMeasure, Project, Session } from '@hemera/ipc'
 import {
   CommandPalette,
   EMPTY_DRAFT,
@@ -26,13 +26,16 @@ import {
   PROJECT_SETTINGS_ENTRY,
   ProjectDialog,
   Shell,
+  sessionCommands,
   type ArchivedProject,
+  type ArchivedSession,
   type CommandGroup,
   type JournalFilter,
   type ProfileFacts,
   type ProjectDraft,
   type RepositoryLine,
   type ShellProject,
+  type ShellSession,
 } from '@hemera/ui'
 import {
   IconFolderPlus,
@@ -43,12 +46,28 @@ import {
   IconTimelineEvent,
 } from '@hemera/ui/icons'
 
+import { ArchivedPage } from './pages/archived.tsx'
 import { FirstLaunchPage } from './pages/first-launch.tsx'
 import { HomePage } from './pages/home.tsx'
 import { JournalPage } from './pages/journal.tsx'
 import { ProjectSettingsPage } from './pages/project-settings.tsx'
+import { SessionPage } from './pages/session.tsx'
 import { SettingsPage } from './pages/settings.tsx'
 import { lineOf, linesOf } from './journal-lines.ts'
+import { dayOf } from './when.ts'
+import {
+  archiveSession,
+  closeSessions,
+  createSession,
+  loadSessions,
+  openSession,
+  renameSession,
+  restoreSession,
+  retryMessage,
+  sendMessage,
+  sessionsSnapshot,
+  subscribeToSessions,
+} from './sessions-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -79,6 +98,8 @@ import {
 import {
   keepActiveProject,
   persistWidthOnRelease,
+  rememberSession,
+  rememberedSession,
   selectEntry,
   selectProject,
   selectProjectByRank,
@@ -97,8 +118,8 @@ import {
 } from './theme.ts'
 import { measureFrames } from './witness.ts'
 
-/** What sending answers for as long as there is no Session to write into. */
-const NO_SESSION_YET = 'Sessions arrive with HEM-57; nothing was written.'
+/** The entries of the sidebar that are places and not Sessions, so an id can be told apart. */
+const PLACES: string[] = [HOME_ENTRY, JOURNAL_ENTRY, PROJECT_SETTINGS_ENTRY]
 
 /** How many of the most recent entries the Home shows, which is a glance and not a page. */
 const ACTIVITY = 4
@@ -176,7 +197,7 @@ async function checkFolder(path: string): Promise<string | null> {
 }
 
 /** Where the window is looking, beyond the entries the sidebar itself lists. */
-type Place = 'entry' | 'settings'
+type Place = 'entry' | 'settings' | 'archived'
 
 export function Application() {
   const shell = useSyncExternalStore(subscribeToShell, shellState, shellState)
@@ -197,6 +218,7 @@ export function Application() {
     notificationsSnapshot,
   )
   const journal = useSyncExternalStore(subscribeToJournal, journalSnapshot, journalSnapshot)
+  const threads = useSyncExternalStore(subscribeToSessions, sessionsSnapshot, sessionsSnapshot)
 
   const [place, setPlace] = useState<Place>('entry')
   const [commanding, setCommanding] = useState(false)
@@ -233,6 +255,42 @@ export function Application() {
 
   const active = projects.find((project) => project.id === shell.activeProjectId) ?? null
 
+  /**
+   * Which Session the window is in, read off the entry it is on (design D4b-04).
+   *
+   * The sidebar lists its places and its Sessions in one list and answers with one identifier,
+   * so what is not one of the three places is a Session — and the thread below follows that,
+   * wherever the entry came from: a row, the palette, a line of the Journal or the preference
+   * the window started on.
+   */
+  const openId = PLACES.includes(shell.activeEntryId) ? null : shell.activeEntryId
+  const open =
+    threads.sessions.find((one) => one.id === openId) ??
+    threads.archived.find((one) => one.id === openId) ??
+    null
+
+  /** The Sessions of the active Project, as the sidebar, the Home and the palette draw them. */
+  const sessions = useMemo(
+    (): ShellSession[] =>
+      threads.sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        writtenAt: dayOf(new Date(session.lastWrittenAt), new Date()),
+      })),
+    [threads.sessions],
+  )
+
+  /** The archived ones, as the palette offers to restore them. */
+  const archivedSessions = useMemo(
+    (): ArchivedSession[] =>
+      threads.archived.map((session) => ({
+        id: session.id,
+        title: session.title,
+        archivedAt: dayOf(new Date(session.archivedAt ?? session.lastWrittenAt), new Date()),
+      })),
+    [threads.archived],
+  )
+
   // Everything the window shows about the data folder, asked for once it is open.
   useEffect(() => {
     void loadProjects()
@@ -267,14 +325,65 @@ export function Application() {
       .catch(unanswered('preferences.write'))
   }, [shell.activeProjectId, held.loaded])
 
-  // The Journal of whichever Project is in front, read again when that changes.
+  /**
+   * The Journal of whichever Project is in front, read again when that changes and every time
+   * the window lands on one of the two pages that show it.
+   *
+   * Asked again rather than followed: the engine writes a line for everything that happens —
+   * a Session made, a message kept — and a page holding the answer it was given when the
+   * Project was opened would be a Journal that stops at whatever had happened by then.
+   */
   useEffect(() => {
     if (shell.activeProjectId === null) {
       closeJournal()
       return
     }
+    if (place !== 'entry') return
+    if (shell.activeEntryId !== JOURNAL_ENTRY && shell.activeEntryId !== HOME_ENTRY) return
     void openJournal(shell.activeProjectId)
+  }, [shell.activeProjectId, shell.activeEntryId, place])
+
+  // The Sessions of that Project, open and archived, read again when the Project changes.
+  useEffect(() => {
+    if (shell.activeProjectId === null) {
+      closeSessions()
+      return
+    }
+    void loadSessions(shell.activeProjectId)
   }, [shell.activeProjectId])
+
+  // The thread of whichever Session the window is on, and nothing at all when it is elsewhere.
+  useEffect(() => {
+    void openSession(openId)
+  }, [openId])
+
+  /**
+   * Where a Project opens, once its Sessions have arrived (design D4b-07).
+   *
+   * The Session it was left on, if it is still there and not archived; the one written in most
+   * recently otherwise; and the Home when the Project has none — never the archives, because
+   * work that was put away is not work to come back to.
+   *
+   * Once per Project and per run of the window, which is what the set is for: this answers
+   * "where does this Project open", and a window that answered it again every time a list came
+   * back would take the user out of the Home they had just gone to.
+   */
+  const opened = useRef(new Set<string>())
+  useEffect(() => {
+    const projectId = shell.activeProjectId
+    if (projectId === null || !threads.loaded || threads.projectId !== projectId) return
+    if (opened.current.has(projectId)) return
+    opened.current.add(projectId)
+    const remembered = threads.sessions.find((one) => one.id === rememberedSession(projectId))
+    const wanted = remembered ?? threads.sessions[0]
+    if (wanted !== undefined) selectEntry(wanted.id)
+  }, [shell.activeProjectId, threads.loaded, threads.projectId, threads.sessions])
+
+  // And written down as it changes, so the next start opens where this one was left.
+  useEffect(() => {
+    if (shell.activeProjectId === null || openId === null) return
+    rememberSession(shell.activeProjectId, openId)
+  }, [shell.activeProjectId, openId])
 
   /**
    * What each declared location holds, read every time the settings are opened.
@@ -332,10 +441,42 @@ export function Application() {
     selectEntry(entryId)
   }, [])
 
+  /**
+   * A Session made in the Project in front, and the window taken into it.
+   *
+   * With no Project there is nothing to make it in: the store refuses it in words and creates
+   * nothing, which is the scenario « Aucun Projet actif ».
+   */
+  const newSession = useCallback(async (): Promise<void> => {
+    const made = await createSession(shell.activeProjectId)
+    if (made !== null) goTo(made.id)
+  }, [shell.activeProjectId, goTo])
+
+  /** Archived, and the window taken to the Home when what it was reading has just left it. */
+  const archiveOne = useCallback(
+    async (id: string): Promise<void> => {
+      const went = await archiveSession(id)
+      if (went && openId === id) goTo(HOME_ENTRY)
+    },
+    [openId, goTo],
+  )
+
+  /** Restored, and opened: bringing a Session back is going back to work in it. */
+  const restoreOne = useCallback(
+    async (id: string): Promise<void> => {
+      if (await restoreSession(id)) goTo(id)
+    },
+    [goTo],
+  )
+
   const run = useCallback(
     (action: ShortcutAction) => {
       if (action.kind === 'sidebar') {
         toggleCollapsed()
+        return
+      }
+      if (action.kind === 'new-session') {
+        void newSession()
         return
       }
       if (action.kind === 'command') {
@@ -354,7 +495,7 @@ export function Application() {
         projects.map((project) => project.id),
       )
     },
-    [projects],
+    [projects, newSession],
   )
 
   useShellShortcuts(run)
@@ -383,9 +524,34 @@ export function Application() {
   // A width is written down when the hand lets go of it, not while it is being dragged.
   useEffect(persistWidthOnRelease, [])
 
+  /**
+   * What the palette offers about the Sessions, written by the design system and not here.
+   *
+   * The wording of a Session — what `New session` is called, what restoring one says — belongs
+   * beside the sidebar row and the header that use the same words; this hands over the lists
+   * and what each entry does.
+   */
+  const sessionGroups = useMemo(
+    (): CommandGroup[] =>
+      active === null
+        ? []
+        : sessionCommands({
+            sessions,
+            archived: archivedSessions,
+            current: sessions.find((one) => one.id === openId) ?? null,
+            newSessionKeys: keysOf('new-session'),
+            onNewSession: () => void newSession(),
+            onOpenSession: goTo,
+            onArchiveSession: (id) => void archiveOne(id),
+            onRestoreSession: (id) => void restoreOne(id),
+          }),
+    [active, sessions, archivedSessions, openId, goTo, newSession, archiveOne, restoreOne],
+  )
+
   const groups = useMemo(
-    (): CommandGroup[] => commandsFor(active, projects, goTo, setPlace, setCreating, preference),
-    [active, projects, goTo, preference],
+    (): CommandGroup[] =>
+      commandsFor(active, projects, goTo, setPlace, setCreating, preference, sessionGroups),
+    [active, projects, goTo, preference, sessionGroups],
   )
 
   return (
@@ -422,11 +588,16 @@ export function Application() {
       unseen={bell.unseen}
       onOpenSettings={() => setPlace('settings')}
       settingsActive={place === 'settings'}
-      sessions={[]}
-      // Nothing of the list while the settings of the application are open: they are a place of
+      sessions={sessions}
+      // Nothing of the list while the settings or the archives are open: they are places of
       // their own, and the entry the window was on before is not where it is now.
-      activeEntryId={place === 'settings' ? null : shell.activeEntryId}
+      activeEntryId={place === 'entry' ? shell.activeEntryId : null}
       onSelectEntry={goTo}
+      archivedCount={archivedSessions.length}
+      onNewSession={() => void newSession()}
+      onRenameSession={(id, title) => void renameSession(id, title)}
+      onArchiveSession={(id) => void archiveOne(id)}
+      onOpenArchived={() => setPlace('archived')}
       onOpenCommand={() => setCommanding(true)}
       commandShortcut={keysOf('command')}
       collapseShortcut={keysOf('sidebar')}
@@ -508,11 +679,17 @@ export function Application() {
         />
       )
     }
+    if (place === 'archived') {
+      return <ArchivedPage sessions={threads.archived} onRestore={(id) => void restoreOne(id)} />
+    }
+    if (open !== null) {
+      return sessionPage(open)
+    }
     if (shell.activeEntryId === JOURNAL_ENTRY) {
       return (
         <JournalPage
           projectName={active.name}
-          entries={linesOf(journal.entries)}
+          entries={linesOf(journal.entries, new Date(), { onOpenSession: goTo })}
           filter={journal.kind === 'all' ? 'all' : journal.kind}
           byYou={journal.byYou}
           onFilterChange={(filter: JournalFilter) => {
@@ -566,8 +743,16 @@ export function Application() {
       <HomePage
         key={active.id}
         projectName={active.name}
-        entries={linesOf(journal.entries).slice(0, ACTIVITY)}
+        entries={linesOf(journal.entries, new Date(), { onOpenSession: goTo }).slice(0, ACTIVITY)}
+        sessions={sessions}
         onOpenJournal={() => goTo(JOURNAL_ENTRY)}
+        onOpenSession={goTo}
+        // `Resume` is the last Session that is not archived, which is the first of the list
+        // the engine answered with (design D4b-07).
+        onResume={() => {
+          const latest = threads.sessions[0]
+          if (latest !== undefined) goTo(latest.id)
+        }}
         onSearchFiles={async (query: string) =>
           current === null
             ? []
@@ -581,7 +766,33 @@ export function Application() {
             ? []
             : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
         }
-        onSend={async () => await Promise.resolve(NO_SESSION_YET)}
+        // A Session with what was written as its first message, in one transaction, and the
+        // window goes into it: the composer of the Home is where a Session begins (D4b-03).
+        onSend={async (text: string) => {
+          const made = await createSession(shell.activeProjectId, text)
+          if (made === null) return sessionsSnapshot().refusal
+          goTo(made.id)
+          return null
+        }}
+      />
+    )
+  }
+
+  /** The thread of the Session the window is on, with what can be done to it. */
+  function sessionPage(session: Session) {
+    return (
+      <SessionPage
+        // Keyed on the Session: what is half written in one thread is not a draft of the next.
+        key={session.id}
+        session={session}
+        projectName={active?.name ?? ''}
+        entries={threads.entries}
+        pending={threads.pending.filter((one) => one.sessionId === session.id)}
+        onSend={sendMessage}
+        onRename={(title) => void renameSession(session.id, title)}
+        onArchive={() => void archiveOne(session.id)}
+        onRestore={() => void restoreOne(session.id)}
+        onRetry={retryMessage}
       />
     )
   }
@@ -595,6 +806,8 @@ function commandsFor(
   setPlace: (place: Place) => void,
   setCreating: (creating: boolean) => void,
   preference: ReturnType<typeof themePreference>,
+  /** What the Sessions offer, written by the design system and placed right after the places. */
+  sessionGroups: CommandGroup[],
 ): CommandGroup[] {
   const places: CommandGroup = {
     label: 'Go to',
@@ -633,6 +846,7 @@ function commandsFor(
 
   return [
     places,
+    ...sessionGroups,
     {
       label: 'Projects',
       entries: [

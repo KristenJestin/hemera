@@ -24,6 +24,19 @@ describe('Raccourci hors saisie', () => {
     expect(inFields('Mod+1')).toBe(false)
     expect(inFields('Mod+K')).toBe(true)
     expect(inFields('Mod+,')).toBe(true)
+    // A Session is started from wherever the hand is, the composer of the Home included.
+    expect(inFields('Mod+N')).toBe(true)
+  })
+
+  test('a new Session has a keystroke of its own, and it is registered', () => {
+    const declared = SHORTCUTS.find((shortcut) => shortcut.action.kind === 'new-session')
+    expect(declared?.combination).toBe('Mod+N')
+    expect(keysOf('new-session')).not.toContain('Mod')
+    expect(
+      registrationsOf(SHORTCUTS, () => undefined).some(
+        (registration) => registration.hotkey === 'Mod+N',
+      ),
+    ).toBe(true)
   })
 
   test('the registration says it the way the manager reads it, which is the other way round', () => {
