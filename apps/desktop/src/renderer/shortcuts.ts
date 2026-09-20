@@ -26,6 +26,7 @@ export type ShortcutAction =
   | { kind: 'sidebar' }
   | { kind: 'command' }
   | { kind: 'settings' }
+  | { kind: 'session' }
   | { kind: 'project'; rank: number }
 
 export interface Shortcut {
@@ -53,6 +54,12 @@ export const SHORTCUTS: Shortcut[] = [
     label: 'Open the settings',
     inFields: true,
   },
+  {
+    action: { kind: 'session' },
+    combination: 'Mod+N',
+    label: 'New Session',
+    inFields: false,
+  },
   ...RANKS.map((digit, index) => ({
     action: { kind: 'project' as const, rank: index + 1 },
     combination: `Mod+${digit}` as const,
@@ -77,8 +84,8 @@ export function shownKeys(combination: Hotkey): string {
   return formatForDisplay(combination)
 }
 
-/** The keystroke of one of the three named actions, ready to be drawn as keys. */
-export function keysOf(kind: 'sidebar' | 'command' | 'settings'): string {
+/** The keystroke of one of the named actions, ready to be drawn as keys. */
+export function keysOf(kind: 'sidebar' | 'command' | 'settings' | 'session'): string {
   const found = SHORTCUTS.find((shortcut) => shortcut.action.kind === kind)
   if (found === undefined) throw new Error(`no shortcut is declared for ${kind}`)
   return shownKeys(found.combination)

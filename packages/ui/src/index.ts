@@ -105,13 +105,22 @@ export {
   FirstLaunch,
   Greeting,
   QuickActions,
+  SessionsFrame,
   type ActivityFrameProps,
   type FirstLaunchProps,
+  type HomeSession,
   type QuickAction,
+  type SessionsFrameProps,
 } from './home/home.tsx'
 
-/** The composer: complete, and inert until HEM-57 gives it a Session to write into. */
+/**
+ * The composer: what a Session is started from and what is written into one.
+ *
+ * The `Start chat` of the Home and the `Send` of a Session are one control: the word on it is
+ * the page's, and the write is `onSend`, which answers with the reason it could not be written.
+ */
 export { Composer, type ComposerProps } from './composer/composer.tsx'
+export { PromptInput, type PromptInputProps, type PromptShape } from './composer/prompt-input.tsx'
 export { ComposerActions, type ComposerActionsProps } from './composer/composer-actions.tsx'
 export {
   ComposerAttachments,
@@ -161,3 +170,53 @@ export {
 } from './form/schemas.ts'
 export { SuggestInput, type Suggestion } from './components/suggest/suggest-input.tsx'
 export { AlertDialog } from './components/alert-dialog/alert-dialog.tsx'
+
+/**
+ * The thread of a Session: what the user wrote, grouped by author, and what Hemera says about
+ * the Session itself (design D4b-08, D4b-09).
+ */
+export {
+  LiveMarker,
+  MessageBubble,
+  MessageDaySeparator,
+  MessageFooter,
+  MessageGroup,
+  MessageHeader,
+  MessageRow,
+  type MessageBubbleProps,
+  type MessageFooterProps,
+  type MessageGroupProps,
+  type MessageHeaderProps,
+  type MessageRowProps,
+} from './message/message.tsx'
+export { MessageText } from './message/message-text.tsx'
+export {
+  type MessageAuthor,
+  type MessageLine,
+  type MessageState,
+  type MessageTone,
+} from './message/model.ts'
+/** The viewport a thread is read in: the rail of marks, and the way back to the live edge. */
+export {
+  LatestPill,
+  MessageScroller,
+  NavigationRail,
+  type LatestPillProps,
+  type MessageScrollerProps,
+  type NavigationMark,
+  type NavigationRailProps,
+  type ScrollerDay,
+  type ScrollerEntry,
+  type ScrollerMessage,
+} from './message/scroller/scroller.tsx'
+
+/** The Session as a surface: its head, its empty state, its archives, its line in the sidebar. */
+export {
+  ArchivedSessions,
+  SessionEmpty,
+  SessionHeader,
+  SidebarSessionEntry,
+  type ArchivedSession,
+  type ArchivedSessionsProps,
+  type SessionHeaderProps,
+} from './session/session.tsx'

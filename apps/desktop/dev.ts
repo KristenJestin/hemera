@@ -1,9 +1,24 @@
 /**
- * Development run: the renderer is served, the two Node bundles are rebuilt on change, and
+ * Development run: the renderer is served, the three Node bundles are rebuilt on change, and
  * Electron is started once on the address the server picked.
  *
  * Electron is started last and on purpose: the main process reads the address from its
  * environment, so there is nothing to guess and no port kept in two places.
+ *
+ * The order of the steps is the whole of this file, and two of them were learned the hard way.
+ *
+ * A build in watch mode answers before its first build has been written, and that first build
+ * empties its own output folder on the way in: started on that answer, Electron looks into a
+ * folder being emptied under it and dies on `Cannot find module dist/main/index.js`. That is what
+ * a second `pnpm dev` did, with the first one working. So each bundle is built once for real
+ * before anything watches it.
+ *
+ * A watcher's first pass is a build like any other, and it rewrites its bundle in place: the file
+ * is removed, written back in pieces, and only whole at the end. Measured on the engine bundle,
+ * it is gone for 60 to 130 ms and has been seen at 266 KB of its 1 MB. Anything started in that
+ * window dies on it, and `utilityProcess.fork` reads `dist/engine/index.js` as soon as Electron
+ * boots — which is exactly when the watchers run that pass. So the pass is waited for, and only
+ * then is the application started.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -19,9 +34,40 @@ import { mainBundle, preloadBundle, engineBundle, rendererBundle } from './bundl
 
 const application = dirname(fileURLToPath(import.meta.url))
 
-await build({ ...mainBundle, build: { ...mainBundle.build, watch: {} } })
-await build({ ...preloadBundle, build: { ...preloadBundle.build, watch: {} } })
-await build({ ...engineBundle, build: { ...engineBundle.build, watch: {} } })
+const NODE_BUNDLES = [mainBundle, preloadBundle, engineBundle]
+
+/**
+ * A build in watch mode answers with its watcher before its first build is written, and the
+ * watcher says `END` once that build is whole. `emptyOutDir` stays off: these bundles were just
+ * built for real, and a watcher's pass has no business emptying what it is about to overwrite.
+ */
+const watched = async (): Promise<void> => {
+  const armed = await Promise.all(
+    NODE_BUNDLES.map((bundle) =>
+      build({ ...bundle, build: { ...bundle.build, emptyOutDir: false, watch: {} } }),
+    ),
+  )
+  await Promise.all(
+    armed.map(
+      (built) =>
+        new Promise<void>((done, failed) => {
+          // The watcher is the only arm of what `build` answers with that can be waited on.
+          if (!('on' in built)) return done()
+          built.on('event', (event) => {
+            if (event.code === 'END') done()
+            if (event.code === 'ERROR') failed(event.error)
+          })
+        }),
+    ),
+  )
+}
+
+// Once, for real, and only then can anything be started on what they write: a watcher answers
+// before this point.
+await Promise.all(NODE_BUNDLES.map((bundle) => build(bundle)))
+
+// And the same three, watched — their first pass waited for, because it rewrites what they hold.
+await watched()
 
 const server = await createServer(rendererBundle)
 await server.listen()

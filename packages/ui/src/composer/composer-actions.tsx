@@ -10,10 +10,15 @@ import { WorkspacePill } from './workspace-pill.tsx'
 /**
  * The foot of the composer: which Workspace is being written about, and what sending does.
  *
- * Nothing answers in lot 4 and the row does not pretend otherwise — `New Spec` is disabled
- * because a Spec is lot 6, and sending is the one live control. The arrow becomes a square
- * while the send is in flight: two icons crossing in opacity and scale, a morph a compositor
- * carries, and never a swap that flickers.
+ * Sending is the one live control of the row, and the only one that writes: `onSend` hands the
+ * sentence to the page, which records it and answers with the reason it could not, or with
+ * nothing when it did. `New Spec` stays disabled — a Spec is lot 6 — and the arrow becomes a
+ * square while the write is in flight: two icons crossing in opacity and scale, a morph a
+ * compositor carries, and never a swap that flickers.
+ *
+ * The square is a state and not a stop. Pressing it does nothing, and the button is disabled
+ * for as long as it is drawn: interrupting a write is lot 5's, and a control that looked like it
+ * could stop something it cannot would be the one lie in the row.
  */
 const MORPH = 'relative flex size-icon-md items-center justify-center'
 

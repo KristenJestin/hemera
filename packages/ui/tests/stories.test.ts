@@ -1,7 +1,8 @@
 /**
  * What the catalogue claims about itself: the components anything may use, the pieces of the
  * shell, and the surfaces a lot draws with them — each with the stories the lot says they all
- * have. A component whose stories are missing is a component nobody validated.
+ * have, and with the badge that says whether the lot in flight created it or changed it. A
+ * component whose stories are missing is a component nobody validated.
  *
  * Three families, and the split is what a reader needs to find anything: `Components/` is what
  * is reusable and knows nothing of Hemera, `Shell/` is the window's own layout, `Surfaces/` is
@@ -12,8 +13,9 @@
  * `specs/window-shell/spec.md` it covers.
  */
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
 const designSystem = join(import.meta.dirname, '..', 'src')
@@ -61,7 +63,12 @@ const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter', 'command-palette']
 const SURFACES = {
   project: ['project-dialog', 'project-settings'],
   journal: ['journal'],
-  composer: ['composer'],
+  composer: ['composer', 'prompt-input'],
+  // The thread of a Session (HEM-57): the messages, the viewport they are read in, and the
+  // Session as a surface. One folder per domain and not per screen, as the lot asks.
+  message: ['message'],
+  'message/scroller': ['scroller'],
+  session: ['session', 'session-page'],
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
@@ -91,6 +98,13 @@ function sourceOf(folder: string): string {
   return readFileSync(join(designSystem, 'components', folder, `${folder}.stories.tsx`), 'utf8')
 }
 
+/** Every tag a story file declares, wherever it writes it: the meta and the stories alike. */
+function tagsOf(source: string): string[] {
+  return [...source.matchAll(/tags: \[([^\]]*)\]/g)].flatMap((declared) =>
+    [...(declared[1] ?? '').matchAll(/'([^']+)'/g)].map((tag) => tag[1]!),
+  )
+}
+
 function unique<T>(value: T, index: number, all: T[]): boolean {
   return all.indexOf(value) === index
 }
@@ -107,6 +121,7 @@ const runner = ['vitest.config.ts', 'vitest.dark.config.ts'].map((file) =>
 )
 const shared = readFileSync(join(designSystem, '..', 'vitest.shared.ts'), 'utf8')
 const manager = readFileSync(join(designSystem, '..', '.storybook', 'manager.ts'), 'utf8')
+const main = readFileSync(join(designSystem, '..', '.storybook', 'main.ts'), 'utf8')
 
 describe('Stories complètes', () => {
   test.each(CATALOGUE)(
@@ -147,7 +162,7 @@ describe('Catalogue essayable', () => {
     '%s documents itself and offers its props as controls',
     (folder) => {
       const source = sourceOf(folder)
-      expect(source, `${folder} has no autodocs tag`).toContain("tags: ['autodocs']")
+      expect(tagsOf(source), `${folder} has no autodocs tag`).toContain('autodocs')
       expect(source, `${folder} declares no argTypes`).toContain('argTypes:')
     },
   )
@@ -156,7 +171,7 @@ describe('Catalogue essayable', () => {
     '%s/%s documents itself and offers its props as controls',
     (folder, file) => {
       const source = readFileSync(join(designSystem, folder, `${file}.stories.tsx`), 'utf8')
-      expect(source, `${folder}/${file} has no autodocs tag`).toContain("tags: ['autodocs']")
+      expect(tagsOf(source), `${folder}/${file} has no autodocs tag`).toContain('autodocs')
       expect(source, `${folder}/${file} declares no argTypes`).toContain('argTypes:')
     },
   )
@@ -212,8 +227,28 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ComposerAttachments',
       'MentionMenu',
       'WorkspacePill',
+      // HEM-57: the thread of a Session, the viewport it is read in, and its own surface. The
+      // day separator of a thread is `MessageDaySeparator`: the Journal already hands out a
+      // `DaySeparator`, and one barrel cannot export two things under one word.
+      'MessageGroup',
+      'MessageRow',
+      'MessageText',
+      'MessageBubble',
+      'MessageHeader',
+      'MessageFooter',
+      'MessageDaySeparator',
+      'LiveMarker',
+      'MessageScroller',
+      'NavigationRail',
+      'LatestPill',
+      'SessionHeader',
+      'SessionEmpty',
+      'ArchivedSessions',
+      'SidebarSessionEntry',
+      'PromptInput',
       'Greeting',
       'QuickActions',
+      'SessionsFrame',
       'ActivityFrame',
       'EmptyProject',
       'FirstLaunch',
@@ -329,5 +364,123 @@ describe('Stories dans les deux thèmes', () => {
       .filter(unique)
       .filter((folder) => sourceOf(folder).includes('globals:'))
     expect(pinning).toEqual([])
+  })
+})
+
+/**
+ * The badges of the sidebar, which are how a lot's stories are found in the catalogue rather
+ * than read out of a diff.
+ *
+ * A story file the lot created wears `new`, one whose component the lot changed wears `updated`.
+ * The badge belongs to the lot that touches the design system and not to the component: the
+ * first thing such a lot does is take the previous lot's badges off, and a branch that changes
+ * nothing of this package carries no badge change at all — which is what keeps a PR that is not
+ * about the interface from showing up in the catalogue. Git is the only thing that can say
+ * whether a badge was earned, so the test asks Git, and where Git cannot answer (a checkout of
+ * `dev`, a shallow clone) there is nothing to refuse.
+ */
+describe('Badges du lot en cours', () => {
+  const BADGES = ['new', 'updated']
+
+  /** The repository, which is what Git is asked about. */
+  const repositoryRoot = join(import.meta.dirname, '..', '..', '..')
+
+  /** Every story file of the catalogue, wherever it sits under `src`. */
+  function storyFilesIn(directory: string): string[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? storyFilesIn(join(directory, entry.name))
+        : entry.name.endsWith('.stories.tsx')
+          ? [join(directory, entry.name)]
+          : [],
+    )
+  }
+
+  const STORY_FILES = storyFilesIn(designSystem)
+
+  /** A file as Git names it, which is always with forward slashes. */
+  function asGitPath(file: string): string {
+    return relative(repositoryRoot, file).replaceAll('\\', '/')
+  }
+
+  /** The package, as Git names it: what a branch has to touch for a badge to be its business. */
+  const PACKAGE = `${asGitPath(join(import.meta.dirname, '..'))}/`
+
+  /**
+   * Whether the badges are this branch's business at all.
+   *
+   * A branch that changes nothing of this package is asked nothing: the badges of the lot
+   * before stay where they are, and a PR that is not about the interface shows up nowhere in
+   * the catalogue — which is the whole point of a badge that belongs to a lot rather than to a
+   * component.
+   */
+  function badgesAreTheBranchsBusiness(touched: Set<string>): boolean {
+    return [...touched].some((path) => path.startsWith(PACKAGE))
+  }
+
+  /**
+   * What this branch did to a file, told by Git, or `null` when Git cannot tell.
+   *
+   * A checkout of `dev` itself, a shallow clone and a folder without Git all answer nothing,
+   * and then there is nothing to check.
+   */
+  function touchedByTheBranch(): Set<string> | null {
+    const git = (args: string[]): string =>
+      execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' })
+    try {
+      const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim()
+      if (branch === 'dev' || branch === 'main' || branch === 'HEAD') return null
+      const base = git(['merge-base', 'dev', 'HEAD']).trim()
+      const committed = git(['diff', '--name-only', base]).split('\n')
+      const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n')
+      return new Set(
+        [...committed, ...untracked].map((path) => path.trim()).filter((path) => path !== ''),
+      )
+    } catch {
+      return null
+    }
+  }
+
+  test('the sidebar draws the two badges of a lot, and nothing else', () => {
+    expect(main, 'the addon that draws the badges is not declared').toContain(
+      'storybook-addon-tag-badges',
+    )
+    expect(manager, 'the manager configures no badge').toContain('tagBadges')
+    for (const badge of BADGES) {
+      expect(manager, `the manager draws no ${badge} badge`).toContain(`tags: '${badge}'`)
+    }
+    expect(manager, 'the addon default set is back, and nobody asked for it').not.toContain(
+      'defaultConfig',
+    )
+  })
+
+  test('a story file declares no tag that nothing reads', () => {
+    const unknown = STORY_FILES.flatMap((file) =>
+      tagsOf(readFileSync(file, 'utf8'))
+        .filter((tag) => tag !== 'autodocs' && !BADGES.includes(tag))
+        .map((tag) => `${asGitPath(file)}: ${tag}`),
+    )
+    expect(unknown).toEqual([])
+  })
+
+  test('a branch that changes nothing of the design system is asked nothing', () => {
+    // A PR about the engine, the IPC or the tools carries no badge diff: the rule only bites
+    // where the interface was touched, which is what keeps the catalogue out of unrelated PRs.
+    expect(badgesAreTheBranchsBusiness(new Set(['tools/boundaries.ts']))).toBe(false)
+    expect(
+      badgesAreTheBranchsBusiness(new Set(['apps/desktop/src/main/channels.ts', 'README.md'])),
+    ).toBe(false)
+    expect(badgesAreTheBranchsBusiness(new Set([`${PACKAGE}src/message/message.tsx`]))).toBe(true)
+  })
+
+  test('a badge the branch did not earn is refused', () => {
+    const touched = touchedByTheBranch()
+    if (touched === null) return
+    if (!badgesAreTheBranchsBusiness(touched)) return
+    const lying = STORY_FILES.filter((file) => {
+      const worn = tagsOf(readFileSync(file, 'utf8')).some((tag) => BADGES.includes(tag))
+      return worn && !touched.has(asGitPath(file))
+    }).map(asGitPath)
+    expect(lying, 'the badge of the lot before, on files this branch never touched').toEqual([])
   })
 })

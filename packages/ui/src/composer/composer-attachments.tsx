@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Button } from '../components/button/button.tsx'
 import { IconFileText, IconX } from '../icons.ts'
 import { MARK_TRAVEL, PRESSED_COMPACT, arrival, press, useTransition } from '../motion.ts'
+import { fileName } from './file-chip.tsx'
 
 /**
  * The files attached to what is being written, above the box (design D4-08).
@@ -31,15 +32,13 @@ const CHIP =
 const REMOVE = 'flex size-icon-md items-center justify-center rounded-sm hover:bg-info-muted'
 
 export interface ComposerAttachmentsProps {
-  /** The files chosen so far, as paths relative to the folder of the Workspace. */
+  /**
+   * The files chosen so far, as the paths they were handed over by: relative to the folder of
+   * the Workspace, or absolute for one chosen outside it.
+   */
   files: string[]
   onRemove: (file: string) => void
   onClear: () => void
-}
-
-/** What a path is called where only the name fits: the file, never the folders above it. */
-function named(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1)
 }
 
 export function ComposerAttachments({
@@ -74,7 +73,7 @@ export function ComposerAttachments({
                 transition={chip}
               >
                 <IconFileText size="sm" />
-                {named(file)}
+                {fileName(file)}
                 {/* Its own control rather than an `IconButton`: a control of the catalogue is
                     as tall as a control, and a chip built around one is a chip twice the size
                     of the word it carries. */}

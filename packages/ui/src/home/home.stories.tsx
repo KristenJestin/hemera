@@ -1,9 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { IconTimelineEvent } from '../icons.ts'
+import { IconMessages, IconTimelineEvent } from '../icons.ts'
 import type { JournalLine } from '../journal/journal.tsx'
-import { ActivityFrame, EmptyProject, FirstLaunch, Greeting, QuickActions } from './home.tsx'
+import {
+  ActivityFrame,
+  EmptyProject,
+  FirstLaunch,
+  Greeting,
+  QuickActions,
+  SessionsFrame,
+  type HomeSession,
+} from './home.tsx'
 
 /**
  * The pieces the Home of a Project is made of (design D4-07).
@@ -39,8 +47,18 @@ const ENTRIES: JournalLine[] = [
   },
 ]
 
+const SESSIONS: HomeSession[] = [
+  {
+    id: 'csv',
+    title: 'CSV invoice export',
+    meta: '5 messages · last written 2 weeks ago',
+  },
+  { id: 'search', title: 'Full-text search', meta: '2 messages · last written last month' },
+  { id: 'drizzle', title: 'Migrate to Drizzle 1.0', meta: 'No message yet · created 2 months ago' },
+]
+
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Home',
   component: ActivityFrame,
   parameters: { layout: 'padded' },
@@ -69,6 +87,12 @@ export const Variants: Story = {
       <QuickActions
         actions={[
           {
+            id: 'resume',
+            label: 'Resume “CSV invoice export”',
+            icon: <IconMessages size="sm" />,
+            onSelect: args.onOpenJournal,
+          },
+          {
             id: 'journal',
             label: 'Open the Journal',
             icon: <IconTimelineEvent size="sm" />,
@@ -76,6 +100,7 @@ export const Variants: Story = {
           },
         ]}
       />
+      <SessionsFrame sessions={SESSIONS} onOpenSession={args.onOpenJournal} />
       <ActivityFrame entries={args.entries} onOpenJournal={args.onOpenJournal} />
       <EmptyProject projectName="Atlas" onOpenJournal={args.onOpenJournal} />
     </div>
@@ -128,5 +153,34 @@ export const ToTheJournal: Story = {
 
     await userEvent.click(canvas.getByRole('button', { name: 'Journal' }))
     expect(args.onOpenJournal).toHaveBeenCalled()
+  },
+}
+
+/**
+ * The last Sessions of the Project, and the one press that resumes the most recent.
+ *
+ * The order is the engine's — most recently written first — so the row at the top is the one
+ * `Resume` opens, and a Session that has never been written into is still a Session.
+ */
+export const TheLastSessions: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <SessionsFrame sessions={SESSIONS} onOpenSession={args.onOpenJournal} />
+    </div>
+  ),
+  play: async ({ canvasElement, args }) => {
+    args.onOpenJournal.mockClear()
+    const canvas = within(canvasElement)
+
+    const rows = canvas.getAllByRole('listitem')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toHaveTextContent('CSV invoice export')
+    expect(rows[0]).toHaveTextContent('5 messages · last written 2 weeks ago')
+    // A Session nothing was written into says so instead of pretending to hold a thread.
+    expect(rows[2]).toHaveTextContent('No message yet')
+
+    await userEvent.click(canvas.getByRole('button', { name: /CSV invoice export/ }))
+    expect(args.onOpenJournal).toHaveBeenCalledWith('csv')
   },
 }

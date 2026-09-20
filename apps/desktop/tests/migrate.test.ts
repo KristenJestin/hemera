@@ -43,6 +43,14 @@ const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
  */
 const LOT_THREE = '20260916123330_profile_and_preferences'
 
+/**
+ * The migration lot 4a shipped, which is what a profile of the version before this one carries.
+ *
+ * One lot behind, and not two: the fixture that matters for this lot is the one the users have,
+ * which is the one the previous package wrote.
+ */
+const LOT_FOUR_A = '20260918102229_projects_and_journal'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -177,7 +185,7 @@ describe('Neuf et migré donnent le même schéma', () => {
     expect(await on(migrated, schemaOf)).toEqual(await on(fresh, schemaOf))
   })
 
-  test('the two migrations this application ships agree the same way', async () => {
+  test('the migrations this application ships agree the same way', async () => {
     // The same claim, on what really ships rather than on a folder written for the test: a
     // profile created today, and a profile of lot 3 brought up to today.
     const fresh = join(workspace, 'fresh-shipped')
@@ -235,8 +243,13 @@ describe('Un profil du lot 3 est migré vers le lot 4', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
 
-    // One migration behind, and the copy taken before it runs is named after it.
-    expect(standing.behind).toEqual([carriedMigrations(SHIPPED).at(-1)?.name])
+    // Everything this version carries after the one the fixture was opened at, in the order it
+    // runs them: the Projects, and the Sessions this lot adds.
+    const carried = carriedMigrations(SHIPPED)
+    const from = carried.findIndex((one) => one.name === LOT_THREE)
+    expect(standing.behind).toEqual(carried.slice(from + 1).map((one) => one.name))
+    // One copy, taken before the first of them: a profile is backed up once per opening and not
+    // once per migration.
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${standing.behind[0]!}.sqlite`])
 
     // The domain arrived...
@@ -270,6 +283,48 @@ describe('Un profil du lot 3 est migré vers le lot 4', () => {
       'profile.migrated',
     ])
     expect(entries.every((entry) => entry.author === 'hemera')).toBe(true)
+  })
+})
+
+describe('Un profil du lot 4a est migré vers le lot 4b', () => {
+  test('a profile carrying the Projects and the Journal gains the Sessions and keeps what it had', async () => {
+    const dataFolder = join(workspace, 'from-lot-four-a')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(LOT_FOUR_A), '0.4.0'))
+
+    // Something the user had before the migration, so that what survives it can be named.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-18T10:00:00.000Z', '2026-09-18T10:00:00.000Z', 1)`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.1'))
+
+    // One migration behind, and the copy taken before it is named after it.
+    expect(standing.behind).toEqual([carriedMigrations(SHIPPED).at(-1)?.name])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${standing.behind[0]!}.sqlite`])
+
+    // The Sessions arrived...
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const table of ['sessions', 'session_entries']) {
+      expect(schema).toContain(table)
+    }
+
+    // ...and the Project the user had is still there, with an empty thread beside it.
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const projects = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = 'atlas'`
+        const sessions = yield* sql<{ n: number }>`SELECT COUNT(*) AS n FROM sessions`
+        return { name: projects[0]?.name, sessions: sessions[0]?.n }
+      }),
+    )
+    expect(kept.name).toBe('Atlas')
+    expect(kept.sessions).toBe(0)
   })
 })
 

@@ -39,6 +39,25 @@ function startOf(at: Date): Date {
   return new Date(at.getFullYear(), at.getMonth(), at.getDate())
 }
 
+/**
+ * When something happened, in the lowercase words a Session says it in.
+ *
+ * The same one answer in the three places it is read — the last Sessions of the Home, the list
+ * of what was put away, and the separators of a thread — because a Home saying `today` of what
+ * the thread above it calls `yesterday` is two clocks in one window. The count is in days and
+ * not in hours, for the same reason the Journal's is: midnight is when a day becomes the day
+ * before, whatever hour the writing happened at.
+ */
+export function whenOf(when: number, now: number = Date.now()): string {
+  const days = Math.round(
+    (startOf(new Date(now)).getTime() - startOf(new Date(when)).getTime()) / 86_400_000,
+  )
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 7) return `${String(days)} days ago`
+  return new Date(when).toLocaleDateString()
+}
+
 /** What each type of event says, with what its payload adds to it. */
 function labelOf(entry: JournalEntry): string {
   const payload = entry.payload
@@ -64,6 +83,16 @@ function labelOf(entry: JournalEntry): string {
       return `Profile backed up before ${said('before')}`
     case 'profile.migrated':
       return `Profile migrated to ${said('migration')}`
+    case 'session.created':
+      return 'Session created'
+    case 'session.renamed':
+      return `Renamed “${said('from')}” → “${said('to')}”`
+    case 'session.message_recorded':
+      return 'Message added'
+    case 'session.archived':
+      return 'Session archived'
+    case 'session.restored':
+      return 'Session restored'
     default:
       // An event written by a version that knew more still has a type, and a type read out is
       // more use than a line that says nothing at all.

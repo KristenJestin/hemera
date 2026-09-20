@@ -109,27 +109,24 @@ export function registerChannels(
   )
 
   /**
-   * Files the user chose, answered relative to the root they were chosen under.
+   * Files the user chose, each named the way it can be named.
    *
-   * What is outside that root is dropped here rather than shown and refused later: the page
-   * attaches what it is handed, and the one place that can tell a path inside a Workspace from
-   * a path outside it is the process that has a disk.
+   * The clip is for any file on the machine, not for the Workspace's own: what is chosen inside
+   * the root is answered relative to it, since that is the name the Project itself uses, and
+   * what is chosen anywhere else is answered by the absolute path it has — which is the only
+   * name it has. Dropping the second kind here is what made the clip look broken: a file picked
+   * from the wrong folder attaches nothing at all, and nothing says why.
    */
   handle('dialog.pickFiles', ({ root }) =>
     Effect.promise(async () => {
       const chosen = await dialog.showOpenDialog(window, {
-        title: 'Attach files of the Project',
+        title: 'Attach files',
         buttonLabel: 'Attach',
         defaultPath: root,
         properties: ['openFile', 'multiSelections'],
       })
       if (chosen.canceled) return []
-      const under: string[] = []
-      for (const path of chosen.filePaths) {
-        const inside = within(root, path)
-        if (inside !== null) under.push(inside)
-      }
-      return under
+      return chosen.filePaths.map((path) => within(root, path) ?? path)
     }),
   )
 
@@ -175,6 +172,13 @@ const RELAYED = [
   'journal.read',
   'journal.unseen',
   'journal.markSeen',
+  'sessions.list',
+  'sessions.create',
+  'sessions.rename',
+  'sessions.archive',
+  'sessions.restore',
+  'sessions.append',
+  'sessions.read',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

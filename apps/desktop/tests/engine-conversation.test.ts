@@ -41,7 +41,12 @@ describe('Un message conforme est traité', () => {
     const answering = port((request) => ({
       id: request.id,
       ok: true,
-      value: { theme: 'dark', sidebar: { collapsed: true, width: null }, activeProjectId: null },
+      value: {
+        theme: 'dark',
+        sidebar: { collapsed: true, width: null },
+        activeProjectId: null,
+        activeSessions: {},
+      },
     }))
     const conversation = engineConversation(answering, alive)
 
@@ -49,6 +54,7 @@ describe('Un message conforme est traité', () => {
       theme: 'dark',
       sidebar: { collapsed: true, width: null },
       activeProjectId: null,
+      activeSessions: {},
     })
   })
 
@@ -60,6 +66,7 @@ describe('Un message conforme est traité', () => {
         theme: request.id === 0 ? 'dark' : 'light',
         sidebar: { collapsed: false, width: null },
         activeProjectId: null,
+        activeSessions: {},
       },
     }))
     const conversation = engineConversation(answering, alive)

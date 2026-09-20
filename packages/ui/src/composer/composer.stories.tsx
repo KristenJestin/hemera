@@ -6,12 +6,13 @@ import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { Composer, type ComposerProps } from './composer.tsx'
 
 /**
- * The composer, complete and inert (design D4-07, D4-08).
+ * The composer, complete (design D4b-02, D4-07).
  *
- * Three bands in one frame: the files attached above, the box the caret lives in, and what
- * sending does below. The files are the Project's, read by the main process in the application
- * and by the story here; sending is refused in this lot, and the refusal names the ticket that
- * will carry it, which is exactly what the page hands over.
+ * Three bands in one frame: the files attached above, the prompt input the caret lives in, and
+ * what sending does below. The files are the Project's, read by the main process in the
+ * application and by the story here; sending is the page's, and the page is what this story
+ * plays — a sentence handed over, written, and the box let go of, or a write that failed and
+ * the sentence still there.
  */
 /**
  * A Project's folder as it really looks, so the list is answered the way the application will
@@ -58,7 +59,8 @@ function lookUp(query: string): string[] {
   return TREE.filter((file) => file.toLowerCase().includes(asked)).slice(0, SHOWN)
 }
 
-const REFUSAL = 'Sessions arrive with HEM-57; nothing was written.'
+/** Why a write can fail, in the words the profile is refused with. */
+const NOT_SAVED = 'Nothing was written: the profile is read-only.'
 
 /**
  * The composer holds nothing: what is written and what is attached belong to the page. The
@@ -87,7 +89,7 @@ function Controlled({ value, files, onValueChange, onFilesChange, ...rest }: Com
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
@@ -102,7 +104,7 @@ const meta = {
     onFilesChange: fn(),
     onWorkspaceChange: fn(),
     onSearchFiles: fn(async (query: string) => await Promise.resolve(lookUp(query))),
-    onSend: fn(async (text: string) => await Promise.resolve(text.trim() === '' ? null : REFUSAL)),
+    onSend: fn(async (): Promise<string | null> => await Promise.resolve(null)),
   },
   argTypes: {
     value: { control: 'text', description: 'What is written; the page holds it.' },
@@ -113,11 +115,20 @@ const meta = {
       description: 'The word on the button that sends.',
       table: { defaultValue: { summary: 'Start chat' } },
     },
+    variant: {
+      control: 'inline-radio',
+      options: ['hero', 'inline'],
+      description: 'The shape of the box: the Home greets with a hero, a Session sends inline.',
+      table: { defaultValue: { summary: 'hero' } },
+    },
     placeholder: { control: 'text' },
     onValueChange: { action: 'value changed' },
     onFilesChange: { action: 'files changed' },
     onWorkspaceChange: { action: 'workspace changed' },
-    onSend: { action: 'sent' },
+    onSend: {
+      action: 'sent',
+      description: 'Writes the sentence; answers why it could not, or nothing when it did.',
+    },
     onSearchFiles: { control: false, description: 'Asks the Project for the files that match.' },
   },
 } satisfies Meta<typeof Composer>
@@ -154,6 +165,16 @@ export const States: Story = {
   },
 }
 
+/** The other shape: the foot of a Session, where the box gives itself its own two lines. */
+export const InASession: Story = {
+  args: { variant: 'inline', action: 'Send', value: 'Ask Marie before turning this into a Spec' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('textbox')).toHaveTextContent('Ask Marie')
+    expect(canvas.getByRole('button', { name: /Send/ })).toBeEnabled()
+  },
+}
+
 /**
  * Waits for the menu to be gone, not merely told to go.
  *
@@ -167,6 +188,57 @@ async function menuGone() {
       within(document.body).queryByRole('listbox', { name: 'Files of the Project' }),
     ).toBeNull()
   })
+}
+
+/**
+ * The clip where the application is behind it: one press, one window, and no list.
+ *
+ * The window is the system's, it opens over the whole machine, and what comes back from outside
+ * the Workspace is the absolute path it has — the only name such a file has. A list opening
+ * under the same press as the window was one gesture answering twice, and a file chosen from the
+ * wrong folder used to be dropped in silence.
+ */
+export const AttachAnywhere: Story = {
+  args: {
+    onPickFiles: fn(
+      async (): Promise<string[]> =>
+        await Promise.resolve(['D:\\Perso\\serveur\\notes.md', 'sources/api/AGENTS.md']),
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Attach a file' }))
+
+    expect(args.onPickFiles).toHaveBeenCalledTimes(1)
+    // No menu: the press opened the system's window and nothing else.
+    expect(within(document.body).queryByRole('listbox')).toBeNull()
+
+    // Both are attached, each named the way it can be named: the one outside the Workspace by
+    // its own path, the one inside by the name the Project gives it. Waited for as they rise:
+    // a colour read while a chip is still fading is two colours mixed with what is behind them,
+    // and a contrast the accessibility pass is right to refuse.
+    await waitFor(() => {
+      const outside = canvas.getByTitle('D:\\Perso\\serveur\\notes.md')
+      expect(outside).toHaveStyle({ opacity: '1' })
+      expect(outside.parentElement).toHaveStyle({ opacity: '1' })
+      expect(canvas.getByTitle('sources/api/AGENTS.md')).toBeInTheDocument()
+    })
+    // And the send leaves the quiet it was in while there was nothing to send.
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
+    })
+
+    // In the sentence, as the same chips, saying the file's name rather than the folders above
+    // it — for a path of the Workspace and for one from anywhere else alike.
+    const box = canvas.getByRole('textbox')
+    const chips = box.querySelectorAll('[data-file]')
+    expect(chips).toHaveLength(2)
+    expect(chips[0]).toHaveAttribute('data-kind', 'file')
+    expect(chips[0]).toHaveTextContent('notes.md')
+    expect(chips[1]).toHaveTextContent('AGENTS.md')
+    expect(box).toHaveTextContent('notes.md')
+  },
 }
 
 /** Scenario « Mention d'un fichier » of `specs/shell-navigation/spec.md`. */
@@ -246,7 +318,7 @@ export const AttachAFile: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
 
-    await userEvent.click(canvas.getByRole('button', { name: 'Attach a file of the Project' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Attach a file' }))
     const menu = await within(document.body).findByRole('listbox', {
       name: 'Files of the Project',
     })
@@ -345,8 +417,47 @@ export const Attachments: Story = {
   },
 }
 
-/** Scenario « Envoi refusé » of `specs/shell-navigation/spec.md`. */
-export const SendingIsRefused: Story = {
+/**
+ * Scenario « Message enregistré » of `specs/sessions/spec.md`.
+ *
+ * The send is the whole gesture: what is written is handed over, and once it has been written
+ * the box lets it go — the sentence, and the files that went with it. A box that kept what it
+ * had just sent would have to be cleared by every page that uses it, and one of them would
+ * forget.
+ */
+export const Sends: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onSend.mockClear()
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+
+    await userEvent.type(box, 'Export the invoices with HT and TTC')
+    await userEvent.click(canvas.getByRole('button', { name: /Start chat/ }))
+
+    await waitFor(() => {
+      expect(args.onSend).toHaveBeenCalledWith('Export the invoices with HT and TTC')
+    })
+    await waitFor(() => {
+      expect(box.textContent).toBe('')
+    })
+    // Empty again, so the send is back to waiting for something to send, and nothing is said
+    // under the frame: a write that went through has nothing to report.
+    expect(canvas.getByRole('button', { name: /Start chat/ })).toBeDisabled()
+    expect(canvas.queryByRole('alert')).toBeNull()
+  },
+}
+
+/**
+ * Scenario « Échec d'enregistrement » of `specs/sessions/spec.md`.
+ *
+ * A write that failed says so, and nothing is thrown away: the sentence stays exactly where it
+ * was, because the one thing a hand must not have to do is type it again. A message is never
+ * shown as kept when it was not.
+ */
+export const WriteRefused: Story = {
+  args: {
+    onSend: fn(async (): Promise<string | null> => await Promise.resolve(NOT_SAVED)),
+  },
   play: async ({ canvasElement, args }) => {
     args.onSend.mockClear()
     const canvas = within(canvasElement)
@@ -356,13 +467,12 @@ export const SendingIsRefused: Story = {
     await userEvent.click(canvas.getByRole('button', { name: /Start chat/ }))
 
     await waitFor(() => {
-      expect(canvas.getByRole('alert')).toHaveTextContent('HEM-57')
+      expect(canvas.getByRole('alert')).toHaveTextContent('read-only')
     })
-    // The text is still there: a refusal is not a reason to throw a sentence away.
     expect(box).toHaveTextContent('Start something')
     expect(args.onSend).toHaveBeenCalledWith('Start something')
 
-    // The button comes back from the quiet it went into while the send was in flight, and the
+    // The button comes back from the quiet it went into while the write was in flight, and the
     // story waits for it: a colour read halfway through a fade is a contrast axe refuses.
     await waitFor(() => {
       expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
@@ -377,7 +487,7 @@ export const ReducedMotion: Story = {
     try {
       const canvas = within(canvasElement)
 
-      await userEvent.click(canvas.getByRole('button', { name: 'Attach a file of the Project' }))
+      await userEvent.click(canvas.getByRole('button', { name: 'Attach a file' }))
       const menu = await within(document.body).findByRole('listbox', {
         name: 'Files of the Project',
       })
@@ -399,5 +509,58 @@ export const ReducedMotion: Story = {
     } finally {
       await restore?.()
     }
+  },
+}
+
+/**
+ * What the sentence says once the files are in it, which is what the message will carry.
+ *
+ * Two gestures, two words: the `@` menu writes a mention, `@path`, and the paperclip writes a file
+ * handed over, `@"path"`. The double quote is not decoration — it is what the thread reads to draw
+ * a file given to the Session as the file it is, and what keeps a path with a space in it in one
+ * piece instead of ending it at the first space.
+ */
+export const WhatTheSentenceSays: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onSend.mockClear()
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+
+    // A file named in the question, written by the menu that names files.
+    await userEvent.type(box, 'Look at @billing')
+    const menu = await within(document.body).findByRole('listbox', {
+      name: 'Files of the Project',
+    })
+    const options = await within(menu).findAllByRole('option')
+    await userEvent.click(options[0]!)
+    await waitFor(() => {
+      expect(box.querySelector('[data-file]')).toBeInTheDocument()
+    })
+    const named = box.querySelector('[data-file]')?.getAttribute('data-file') ?? ''
+    expect(named).not.toBe('')
+
+    // A file picked with the paperclip: given to the Session, not named in it.
+    await userEvent.click(canvas.getByRole('button', { name: 'Attach a file' }))
+    const files = await within(document.body).findByRole('listbox', {
+      name: 'Files of the Project',
+    })
+    await userEvent.click(await within(files).findByRole('option', { name: /invoice.entity/ }))
+    await waitFor(() => {
+      expect(box.querySelectorAll('[data-file]')).toHaveLength(2)
+    })
+
+    await userEvent.click(canvas.getByRole('button', { name: /Start chat/ }))
+    await waitFor(() => {
+      // The mention is written as the mention it is: the `@` menu's file carries no quote.
+      expect(args.onSend).toHaveBeenCalledWith(expect.stringContaining(`@${named}`))
+    })
+
+    // The file the paperclip gave is written with one, which is what the thread reads to draw it
+    // as a file handed over rather than as one more thing pointed at.
+    expect(args.onSend).toHaveBeenCalledWith(
+      expect.stringContaining('@"sources/api/src/invoices/invoice.entity.ts"'),
+    )
+
+    await menuGone()
   },
 }

@@ -5,16 +5,18 @@ import { IconPlus, IconSettings, IconTrash } from '../../icons.ts'
 import { Button, IconButton } from './button.tsx'
 
 const VARIANTS = ['primary', 'secondary', 'ghost', 'link', 'destructive'] as const
+const SHAPES = ['default', 'pill'] as const
 const SIZES = ['sm', 'md', 'lg'] as const
 const STATES = ['idle', 'loading', 'success', 'error'] as const
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Button',
   component: Button,
   args: { children: 'Save', onClick: fn() },
   argTypes: {
     variant: { control: 'inline-radio', options: VARIANTS },
+    shape: { control: 'inline-radio', options: SHAPES },
     size: { control: 'inline-radio', options: SIZES },
     state: { control: 'inline-radio', options: STATES },
     disabled: { control: 'boolean' },
@@ -68,6 +70,36 @@ export const Variants: Story = {
       (_size, row) => canvas.getAllByRole('button')[row * (VARIANTS.length + 2)]!,
     )
     expect(rows.map((button) => getComputedStyle(button).height)).toEqual(['32px', '36px', '44px'])
+  },
+}
+
+/**
+ * The two radii of the design system: the corner of the theme, and the round shape a control
+ * wears when it floats over what it is about — the pill that takes a reader back to the live
+ * edge of a thread. Nothing else is round, and a caller asks for it rather than writing it.
+ */
+export const Shapes: Story = {
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <div className="flex items-center gap-2">
+      <Button {...args}>Default</Button>
+      <Button {...args} shape="pill">
+        Pill
+      </Button>
+      <IconButton {...args} shape="pill" icon={<IconSettings />} aria-label="Settings, round" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const corner = getComputedStyle(canvas.getByRole('button', { name: 'Default' }))
+    const pill = getComputedStyle(canvas.getByRole('button', { name: 'Pill' }))
+
+    // The corner is a step of the theme and the pill is round: a difference of shape, and not
+    // a number a caller passed in.
+    expect(corner.borderTopLeftRadius).not.toBe(pill.borderTopLeftRadius)
+    expect(parseFloat(pill.borderTopLeftRadius)).toBeGreaterThan(1000)
   },
 }
 

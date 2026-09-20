@@ -52,6 +52,8 @@ export interface NewEvent {
   author: EventAuthor
   /** The project the event belongs to, and null for what belongs to the profile itself. */
   projectId?: string | null
+  /** The Session the event is about, for what happens inside one (design D4b-04). */
+  sessionId?: string | null
   payload?: EventPayload
 }
 
@@ -84,6 +86,7 @@ export function record(
         // that is what is true — and it leaves the Journal itself listing everything.
         seenAt: event.author === 'human' ? occurredAt : null,
         projectId: event.projectId ?? null,
+        sessionId: event.sessionId ?? null,
         payload: JSON.stringify(event.payload ?? {}),
       })),
     )

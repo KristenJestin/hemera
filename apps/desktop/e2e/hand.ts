@@ -60,6 +60,26 @@ export async function fill(label: string, value: string): Promise<void> {
 }
 
 /**
+ * Types into the composer, which is a box and not a field.
+ *
+ * The composer is a `contenteditable`: there is no `value` to set through the platform's own
+ * setter, and what it reads is what it is holding. So the text is put in the box the way a
+ * sentence ends up in one, and the event a keystroke would have caused is dispatched — the box
+ * listens for exactly that and hands the page what it reads.
+ */
+export async function write(text: string): Promise<void> {
+  const wrote = await browser.execute((said: string) => {
+    const box = document.querySelector('[role="textbox"][contenteditable]')
+    if (!(box instanceof HTMLElement)) return false
+    box.replaceChildren(document.createTextNode(said))
+    box.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    return true
+  }, text)
+  expect(wrote).toBe(true)
+  await browser.pause(120)
+}
+
+/**
  * Holds the platform's modifier and strikes a key, as a keystroke on the page.
  *
  * Not through the driver: `browser.keys` types a *character*, and Chromium turns it back into a

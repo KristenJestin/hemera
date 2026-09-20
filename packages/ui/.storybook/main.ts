@@ -9,7 +9,12 @@ import type { StorybookConfig } from '@storybook/react-vite'
  */
 const config: StorybookConfig = {
   stories: ['../src/**/*.stories.tsx'],
-  addons: ['@storybook/addon-a11y', '@storybook/addon-vitest', '@storybook/addon-mcp'],
+  addons: [
+    '@storybook/addon-a11y',
+    '@storybook/addon-vitest',
+    '@storybook/addon-mcp',
+    'storybook-addon-tag-badges',
+  ],
   framework: { name: '@storybook/react-vite', options: {} },
   viteFinal: async (vite) => {
     const { default: tailwindcss } = await import('@tailwindcss/vite')

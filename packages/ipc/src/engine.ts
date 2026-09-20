@@ -50,10 +50,22 @@ export type SidebarPreference = z.infer<typeof sidebarPreferenceSchema>
  */
 export const activeProjectSchema = z.string().nullable()
 
+/**
+ * Which Session of which Project the window was looking at, remembered between two starts
+ * (design D4b-07).
+ *
+ * One identifier per Project rather than one in all, because coming back to a Project is coming
+ * back to what was being written there. A Session that has since been archived, or that is not
+ * there any more, is not an error: the shell opens the most recently written one instead, which
+ * is the same answer as a Project where nothing was ever opened.
+ */
+export const activeSessionsSchema = z.record(z.string(), z.string())
+
 export const displayPreferencesSchema = z.object({
   theme: themePreferenceSchema,
   sidebar: sidebarPreferenceSchema,
   activeProjectId: activeProjectSchema,
+  activeSessions: activeSessionsSchema,
 })
 
 export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
@@ -63,6 +75,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   theme: 'system',
   sidebar: { collapsed: false, width: null },
   activeProjectId: null,
+  activeSessions: {},
 }
 
 /** A change to what the window wears: what is absent is what the user did not touch. */
@@ -70,6 +83,7 @@ export const displayPreferencesChangeSchema = z.object({
   theme: themePreferenceSchema.optional(),
   sidebar: sidebarPreferenceSchema.optional(),
   activeProjectId: activeProjectSchema.optional(),
+  activeSessions: activeSessionsSchema.optional(),
 })
 
 export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>
@@ -159,6 +173,45 @@ const addressedSchema = z.object({ id: z.string(), version: z.number().int().non
 export const nothingSchema = z.object({})
 
 /**
+ * A Session as the interface is handed one, and one message of its thread (design D4b-01).
+ *
+ * The mission does not cross: this lot writes one kind of Session, and what the interface needs
+ * is what it shows — a name, a side of the archive, and a `version` to write against.
+ *
+ * `titleSource` is handed over rather than only used by the engine because the interface asks
+ * the question it answers: a title still `derived` is one the first message may still propose.
+ */
+export const sessionTitleSourceSchema = z.enum(['derived', 'user'])
+
+export const sessionSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  title: z.string(),
+  titleSource: sessionTitleSourceSchema,
+  archivedAt: z.number().nullable(),
+  createdAt: z.number(),
+  lastWrittenAt: z.number(),
+  version: z.number(),
+})
+
+export type Session = z.infer<typeof sessionSchema>
+
+/** Where a Session's title came from, which is what decides whether it can still change. */
+export type SessionTitleSource = z.infer<typeof sessionTitleSourceSchema>
+
+export const sessionEntrySchema = z.object({
+  id: z.string(),
+  sessionId: z.string(),
+  /** Its place in the thread, counting from one: what the messages are ordered by. */
+  seq: z.number(),
+  role: z.enum(['user']),
+  body: z.string(),
+  createdAt: z.number(),
+})
+
+export type SessionEntry = z.infer<typeof sessionEntrySchema>
+
+/**
  * Every use case of the process that holds the database.
  *
  * `arguments` is what the main process sends and that process validates; `response` is the
@@ -237,6 +290,38 @@ export const ENGINE_REQUESTS = {
   'journal.markSeen': {
     arguments: z.object({ upTo: cursorSchema }),
     response: z.void(),
+  },
+
+  'sessions.list': {
+    arguments: z.object({ projectId: z.string(), archived: z.boolean().optional() }),
+    response: z.array(sessionSchema),
+  },
+  'sessions.create': {
+    // The Project is what the interface has and may not: a refusal says so in a sentence, where
+    // a schema that refused `null` would say it in the words of a parser.
+    arguments: z.object({ projectId: z.string().nullable() }),
+    response: sessionSchema,
+  },
+  'sessions.rename': {
+    arguments: addressedSchema.extend({ title: z.string() }),
+    response: sessionSchema,
+  },
+  'sessions.archive': { arguments: addressedSchema, response: sessionSchema },
+  'sessions.restore': { arguments: addressedSchema, response: sessionSchema },
+  'sessions.append': {
+    arguments: z.object({ sessionId: z.string(), body: z.string() }),
+    response: z.object({ session: sessionSchema, entry: sessionEntrySchema }),
+  },
+  'sessions.read': {
+    arguments: z.object({
+      sessionId: z.string(),
+      before: cursorSchema.optional(),
+      limit: limitSchema.optional(),
+    }),
+    response: z.object({
+      entries: z.array(sessionEntrySchema),
+      nextBefore: z.number().nullable(),
+    }),
   },
 } as const
 

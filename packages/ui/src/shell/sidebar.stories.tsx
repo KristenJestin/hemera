@@ -32,6 +32,9 @@ function Harness({ collapsed = false, sessions = SESSIONS, settingsActive = fals
           sessions={sessions}
           activeEntryId={settingsActive ? null : activeEntryId}
           onSelectEntry={setActiveEntryId}
+          onNewSession={fn()}
+          onRenameSession={fn()}
+          onArchiveSession={fn()}
           onOpenCommand={fn()}
           commandShortcut="Ctrl+K"
           onOpenSettings={fn()}
@@ -43,7 +46,7 @@ function Harness({ collapsed = false, sessions = SESSIONS, settingsActive = fals
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Shell/Sidebar',
   component: Harness,
   parameters: { layout: 'fullscreen' },
@@ -76,6 +79,38 @@ export const States: Story = {
     expect(canvas.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     // The keystroke that opens the command is drawn beside it, as keys.
     expect(canvas.getByText('Ctrl')).toBeInTheDocument()
+    // A Project with no Session says so in words, and the way to make one is the `+` in the head
+    // of the list — the same control in the same place, whether the list is empty or full.
+    expect(canvas.getByText('No Session yet')).toBeInTheDocument()
+    expect(canvas.getAllByRole('button', { name: 'New Session' })).toHaveLength(1)
+    // Both blocks of the column are named, and named the same way: the two places below the list
+    // are a section of their own rather than what the Sessions ran into.
+    expect(canvas.getByText('Sessions')).toBeInTheDocument()
+    expect(canvas.getByText('Project')).toBeInTheDocument()
+    // Three blocks in the column — the places, the Sessions, the rest of the places — and a
+    // rule between them, so a list under a label is not read as part of what came before it.
+    expect(canvasElement.querySelectorAll('[data-separator]')).toHaveLength(3)
+  },
+}
+
+/**
+ * What a row of the list carries: the two commands of a Session, drawn under the hand.
+ *
+ * A Session is renamed and put away from its own row, and the Journal is not: it is a place
+ * rather than something somebody wrote, and nothing of it is renamed or archived. The commands
+ * are drawn over the end of the row instead of beside it, so the title does not shorten the
+ * moment the pointer arrives.
+ */
+export const Commands: Story = {
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('button', { name: 'Rename CSV invoice export' })).toBeInTheDocument()
+    expect(canvas.getByRole('button', { name: 'Archive CSV invoice export' })).toBeInTheDocument()
+    // The Journal is a place and not a Session: nothing of its own to rename or to put away.
+    expect(canvas.queryByRole('button', { name: 'Rename Journal' })).toBeNull()
   },
 }
 

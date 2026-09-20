@@ -74,6 +74,13 @@ export const CHANNELS = {
   'journal.read': ENGINE_REQUESTS['journal.read'],
   'journal.unseen': ENGINE_REQUESTS['journal.unseen'],
   'journal.markSeen': ENGINE_REQUESTS['journal.markSeen'],
+  'sessions.list': ENGINE_REQUESTS['sessions.list'],
+  'sessions.create': ENGINE_REQUESTS['sessions.create'],
+  'sessions.rename': ENGINE_REQUESTS['sessions.rename'],
+  'sessions.archive': ENGINE_REQUESTS['sessions.archive'],
+  'sessions.restore': ENGINE_REQUESTS['sessions.restore'],
+  'sessions.append': ENGINE_REQUESTS['sessions.append'],
+  'sessions.read': ENGINE_REQUESTS['sessions.read'],
 
   /**
    * The four the main process answers itself, because each of them is something only it can do.

@@ -28,6 +28,7 @@ export {
   channelSchema,
   displayPreferencesChangeSchema,
   activeProjectSchema,
+  activeSessionsSchema,
   displayPreferencesSchema,
   engineStatusSchema,
   entityKindSchema,
@@ -36,6 +37,9 @@ export {
   journalEntrySchema,
   projectSchema,
   projectToneSchema,
+  sessionEntrySchema,
+  sessionSchema,
+  sessionTitleSourceSchema,
   sidebarPreferenceSchema,
   themePreferenceSchema,
 } from './engine.ts'
@@ -52,4 +56,7 @@ export type {
   ThemePreference,
   JournalEntry,
   Project,
+  Session,
+  SessionEntry,
+  SessionTitleSource,
 } from './engine.ts'

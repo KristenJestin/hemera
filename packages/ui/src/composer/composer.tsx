@@ -7,26 +7,28 @@ import { ComposerActions } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
 import { MentionMenu } from './mention-menu.tsx'
+import { PromptInput, type PromptShape } from './prompt-input.tsx'
 
 /**
- * The composer: what a Session is started from, complete and inert in this lot (D4-07, D4-08).
+ * The composer: what a Session is started from, and what is written into one (design D4b-02,
+ * D4-08).
  *
- * A `Frame`, and the one frame whose rim comes and goes. The box is the body — where the caret
- * is, the border and the ring — the Workspace and the actions stay open in the rim below it,
- * and the files attached appear open in the rim above it the moment there is one.
+ * A `Frame`, and the one frame whose rim comes and goes. The body is the prompt input — the
+ * box, its shape and the keys that end a sentence — the Workspace and the actions stay open in
+ * the rim below it, and the files attached appear open in the rim above it the moment there is
+ * one.
  *
  * Nothing inside animates a height. The frame carries `layout`, the header enters in opacity
  * and travel, and motion plays the difference between the two frames as a transform: the box
  * and the footer slide down as the header appears, which is the movement the prototype earned.
  *
- * The box itself grows with the text, from two lines to eight, and stops there. That is the
- * browser's own `field-sizing`, not an animation: a box that eased its way to a new height
- * would be a box lagging behind the sentence being typed into it.
+ * What is written and what is attached belong to the page, and so does the write: `onSend`
+ * answers with the reason a message could not be recorded, or with nothing when it was. A
+ * refusal leaves the sentence exactly where it was — a sentence that could not be written is
+ * the one thing a hand must not have to type twice. A write that went through empties the box
+ * and the files that went with it and puts the caret back, because a box that kept what it had
+ * just sent would have to be cleared by every page that uses it, and one of them would forget.
  */
-const BOX = 'flex flex-col gap-1 px-4 pt-3 pb-2'
-
-const TOOLS = 'flex items-center gap-1'
-
 /** What `@` is written as, and what the composer looks for behind the caret. */
 const MENTION = /@([\w./-]*)$/
 
@@ -40,7 +42,10 @@ export interface ComposerProps {
   /** What is written, held by the caller so a page can keep it across a refusal. */
   value: string
   onValueChange: (value: string) => void
-  /** The files attached so far, as paths relative to the folder of the Workspace. */
+  /**
+   * The files attached so far, as the paths they were handed over by: relative to the folder of
+   * the Workspace, or absolute for a file chosen outside it, which the clip allows.
+   */
   files: string[]
   onFilesChange: (files: string[]) => void
   /** Asks for the files of the Project that match what has been typed after the `@`. */
@@ -48,10 +53,11 @@ export interface ComposerProps {
   /**
    * Asks the system for files to attach, and answers what was chosen.
    *
-   * The clip is not the `@`: one names a file in the sentence from what the Project holds, the
-   * other opens the window the desktop opens for choosing files, several at a time. Absent, the
-   * clip falls back to the same list as the `@` — which is what Storybook has, having no system
-   * to ask.
+   * The clip is not the `@`: one names a file of the Project in the sentence, the other opens
+   * the window the desktop opens for choosing files — any file, anywhere on the machine, which
+   * is the whole point of it — and answers them by the paths they are named by there. Absent,
+   * the clip falls back to the same list as the `@`, which is what a catalogue with no disk
+   * behind it has.
    */
   onPickFiles?: (() => Promise<string[]>) | undefined
   /** The Workspaces on offer; this lot has one, and lot 7 brings the others. */
@@ -60,8 +66,10 @@ export interface ComposerProps {
   onWorkspaceChange?: ((workspace: string) => void) | undefined
   /** The word on the button that sends: `Start chat` on the Home. */
   action?: string | undefined
+  /** The shape of the box: the Home's greeting, or the foot of a Session. */
+  variant?: PromptShape | undefined
   placeholder?: string | undefined
-  /** What is done with the text; the message it answers is shown under the frame. */
+  /** Writes the text, and answers why it could not be written, or nothing when it was. */
   onSend: (text: string) => Promise<string | null>
 }
 
@@ -76,6 +84,7 @@ export function Composer({
   workspace,
   onWorkspaceChange,
   action = 'Start chat',
+  variant = 'hero',
   placeholder = 'Ask anything, think out loud, or describe what you want to do…',
   onSend,
 }: ComposerProps): ReactNode {
@@ -87,6 +96,9 @@ export function Composer({
   const [refusal, setRefusal] = useState<string | null>(null)
   const [chosen, setChosen] = useState(workspaces[0] ?? 'main')
   const current = workspace ?? chosen
+
+  /** Whether there is anything to send, which Enter and the button both ask. */
+  const ready = value.trim() !== '' && !sending
 
   /**
    * Asks for the files matching what has been typed, once the typing has stopped.
@@ -160,6 +172,11 @@ export function Composer({
   /**
    * Attaches whatever the system's own window was used to choose, all of it at once.
    *
+   * The window is opened over the whole machine and not over the Workspace: the `@` is how a
+   * file of the Project is named, and a clip that could only reach inside one folder would be
+   * the `@` with an extra step. What comes back outside the Workspace is named by its own
+   * absolute path, since that is the only name it has.
+   *
    * The header is told once, with everything that was chosen. Told one file at a time it would
    * be told each of them against the list this render was given — so three files picked
    * together arrived as one, the last, and the other two were named in the sentence and
@@ -177,11 +194,17 @@ export function Composer({
     setPicking(null)
   }
 
+  /** Writes what is written, and lets the box go when it has been written. */
   const send = async () => {
+    if (!ready) return
     setSending(true)
     const said = await onSend(value)
     setSending(false)
     setRefusal(said)
+    if (said !== null) return
+    onValueChange('')
+    onFilesChange([])
+    box.current?.focus()
   }
 
   const typed = (next: string) => {
@@ -194,6 +217,23 @@ export function Composer({
       if (picking === 'mention') setPicking(null)
     } else search('mention', found[1] ?? '')
   }
+
+  /**
+   * The clip: one press, one window.
+   *
+   * The same button either way — the system's window where the application has one, the list of
+   * the Project where it does not — and never both at once. A window opening under a list that
+   * the same press had just opened is what made one control look like two.
+   */
+  const clip = (
+    <IconButton
+      variant="ghost"
+      size="sm"
+      icon={<IconPaperclip size="sm" />}
+      aria-label="Attach a file"
+      onClick={() => void pick()}
+    />
+  )
 
   return (
     <div className="flex flex-col gap-2">
@@ -216,7 +256,7 @@ export function Composer({
                 setChosen(next)
                 onWorkspaceChange?.(next)
               }}
-              ready={value.trim() !== '' && !sending}
+              ready={ready}
               sending={sending}
               action={action}
               onSend={() => void send()}
@@ -224,13 +264,67 @@ export function Composer({
           </FrameFooter>
         }
       >
-        <div className={BOX}>
+        <PromptInput
+          variant={variant}
+          ready={ready}
+          onSend={() => void send()}
+          tools={
+            <>
+              {/* Two ways to the same files, and what tells them apart is what else happens.
+                  A mention is named in the sentence and nothing more; an attachment is named
+                  there too and handed along with the message, which is what the header above
+                  the box holds. The paperclip is not a list where the application can answer
+                  it: it opens the system's own window, over any folder on the machine, and a
+                  list opening on top of that window was one gesture answering twice. The list
+                  is what a catalogue with no disk behind it has. */}
+              <MentionMenu
+                open={picking === 'mention'}
+                onOpenChange={(next) => setPicking(next ? 'mention' : null)}
+                files={matches}
+                activeIndex={active}
+                onActiveIndexChange={setActive}
+                onChoose={mention}
+                trigger={
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<IconAt size="sm" />}
+                    aria-label="Mention a file of the Project"
+                    onClick={() => {
+                      // The `@` goes in where the caret is, so what is typed next narrows the
+                      // list exactly as it does when the `@` was typed by hand.
+                      box.current?.insertText('@')
+                      search('mention', '')
+                    }}
+                  />
+                }
+              />
+              {onPickFiles === undefined ? (
+                <MentionMenu
+                  open={picking === 'attach'}
+                  onOpenChange={(next) => setPicking(next ? 'attach' : null)}
+                  files={matches}
+                  activeIndex={active}
+                  onActiveIndexChange={setActive}
+                  onChoose={attach}
+                  hint="Attach a file of the Project…"
+                  trigger={clip}
+                />
+              ) : (
+                clip
+              )}
+            </>
+          }
+        >
           <ComposerBox
             handle={box}
             value={value}
             placeholder={placeholder}
             onValueChange={typed}
             onKeyDown={(event) => {
+              // The list open over the box reads the arrows and Enter, and says so by taking the
+              // key: the prompt input one band up reads what is left. Enter sends, Shift+Enter
+              // breaks the line, and an IME mid-word is left alone.
               if (picking !== null && matches.length > 0) {
                 if (event.key === 'ArrowDown') {
                   event.preventDefault()
@@ -251,68 +345,11 @@ export function Composer({
                 if (event.key === 'Escape') {
                   event.preventDefault()
                   setPicking(null)
-                  return
                 }
-              }
-              // Enter sends and Shift+Enter breaks the line, which is what every box of this
-              // shape does and what the hand already expects of this one.
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                if (value.trim() !== '') void send()
               }
             }}
           />
-
-          <div className={TOOLS}>
-            {/* Two ways to the same files, and what tells them apart is what else happens.
-                A mention is named in the sentence and nothing more; an attachment is named
-                there too and handed along with the message, which is what the header above the
-                box holds. In the application the paperclip opens the system's file dialog
-                rather than this list — the list is what a catalogue with no disk behind it can
-                offer, and what it does with the answer is the same either way. Lot 7 gives it
-                the dialog. */}
-            <MentionMenu
-              open={picking === 'mention'}
-              onOpenChange={(next) => setPicking(next ? 'mention' : null)}
-              files={matches}
-              activeIndex={active}
-              onActiveIndexChange={setActive}
-              onChoose={mention}
-              trigger={
-                <IconButton
-                  variant="ghost"
-                  size="sm"
-                  icon={<IconAt size="sm" />}
-                  aria-label="Mention a file of the Project"
-                  onClick={() => {
-                    // The `@` goes in where the caret is, so what is typed next narrows the
-                    // list exactly as it does when the `@` was typed by hand.
-                    box.current?.insertText('@')
-                    search('mention', '')
-                  }}
-                />
-              }
-            />
-            <MentionMenu
-              open={picking === 'attach'}
-              onOpenChange={(next) => setPicking(next ? 'attach' : null)}
-              files={matches}
-              activeIndex={active}
-              onActiveIndexChange={setActive}
-              onChoose={attach}
-              hint="Attach a file of the Project…"
-              trigger={
-                <IconButton
-                  variant="ghost"
-                  size="sm"
-                  icon={<IconPaperclip size="sm" />}
-                  aria-label="Attach a file of the Project"
-                  onClick={() => void pick()}
-                />
-              }
-            />
-          </div>
-        </div>
+        </PromptInput>
       </Frame>
 
       {refusal !== null && (

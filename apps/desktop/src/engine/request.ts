@@ -18,11 +18,17 @@ import {
 } from '@hemera/ipc'
 import { Effect } from 'effect'
 
-import type { InvalidProjectNameError, InvalidRepositoryPathError } from '@hemera/core'
+import type {
+  EmptyMessageError,
+  EmptyTitleError,
+  InvalidProjectNameError,
+  InvalidRepositoryPathError,
+} from '@hemera/core'
 
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
 import { Projects, type UnknownProjectError } from './projects.ts'
+import { Sessions, type UnknownSessionError } from './sessions.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
@@ -98,7 +104,7 @@ export function answer(
 ): Effect.Effect<
   EngineResponse<EngineRequestName>,
   Refusal,
-  Preferences | EngineStatus | Projects | Journal
+  Preferences | EngineStatus | Projects | Journal | Sessions
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -116,6 +122,32 @@ export function answer(
     }
     if (decision.name === 'journal.markSeen') {
       return yield* (yield* Journal).markSeen(decision.argument.upTo)
+    }
+
+    const sessions = yield* Sessions
+    if (decision.name === 'sessions.list') {
+      return yield* sessions.list(decision.argument.projectId, decision.argument.archived)
+    }
+    if (decision.name === 'sessions.create') {
+      return yield* sessions.create(decision.argument.projectId)
+    }
+    if (decision.name === 'sessions.rename') {
+      const { id, version, title } = decision.argument
+      return yield* sessions.rename(id, version, title)
+    }
+    if (decision.name === 'sessions.archive') {
+      return yield* sessions.archive(decision.argument.id, decision.argument.version)
+    }
+    if (decision.name === 'sessions.restore') {
+      return yield* sessions.restore(decision.argument.id, decision.argument.version)
+    }
+    if (decision.name === 'sessions.append') {
+      const { sessionId, body } = decision.argument
+      return yield* sessions.append(sessionId, body)
+    }
+    if (decision.name === 'sessions.read') {
+      const { sessionId, before, limit } = decision.argument
+      return yield* sessions.read(sessionId, before, limit)
     }
 
     const projects = yield* Projects
@@ -154,6 +186,9 @@ export type Refusal =
   | DatabaseError
   | StaleVersionError
   | UnknownProjectError
+  | UnknownSessionError
   | InvalidCursorError
   | InvalidProjectNameError
   | InvalidRepositoryPathError
+  | EmptyMessageError
+  | EmptyTitleError
