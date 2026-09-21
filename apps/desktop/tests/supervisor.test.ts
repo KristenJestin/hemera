@@ -25,7 +25,13 @@ import { Effect, Layer, Ref } from 'effect'
 import type { Scope } from 'effect'
 
 import type { SupervisedProcess } from '#engine/agents/supervisor.ts'
-import { AgentSpawnError, ProcessSupervisor, StderrSink, hostProcessesLayer, processSupervisorLayer } from '#engine/agents/supervisor.ts'
+import {
+  AgentSpawnError,
+  ProcessSupervisor,
+  StderrSink,
+  hostProcessesLayer,
+  processSupervisorLayer,
+} from '#engine/agents/supervisor.ts'
 
 let folder: string
 let scripts = 0
@@ -83,9 +89,8 @@ function opened(sink: Sink) {
   const layer = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink.layer)),
   )
-  return <A, E>(
-    program: Effect.Effect<A, E, ProcessSupervisor | Scope.Scope>,
-  ): Promise<A> => Effect.runPromise(Effect.scoped(Effect.provide(program, layer)))
+  return <A, E>(program: Effect.Effect<A, E, ProcessSupervisor | Scope.Scope>): Promise<A> =>
+    Effect.runPromise(Effect.scoped(Effect.provide(program, layer)))
 }
 
 /** Starts one command through the supervisor. */
@@ -121,9 +126,7 @@ const ALIVE_FOR = STAYS_UP
  * `resume` is what makes the input flow: a stream nobody reads never reports that it ended.
  */
 const ENDS_WHEN_INPUT_ENDS =
-  'process.stdin.resume()\n' +
-  "process.stdin.on('end', () => process.exit(0))\n" +
-  STAYS_UP
+  "process.stdin.resume()\nprocess.stdin.on('end', () => process.exit(0))\n" + STAYS_UP
 
 /** A child that says back what it was written, so that a suite can see the line arrived. */
 const ECHOES_ITS_INPUT =
@@ -224,8 +227,7 @@ async function untilTrue(check: () => boolean, milliseconds: number): Promise<bo
  * A `stop` that returned is not the claim under test; the claim is that nothing is alive
  * afterwards, which is a question only the kernel can answer.
  */
-const goneWithin = (pid: number, milliseconds: number) =>
-  untilTrue(() => !alive(pid), milliseconds)
+const goneWithin = (pid: number, milliseconds: number) => untilTrue(() => !alive(pid), milliseconds)
 
 /** The pid of a child that has one, or a refusal to go on with a test that needs one. */
 function pidOf(child: SupervisedProcess): number {
@@ -389,10 +391,7 @@ describe('No orphan after stop', () => {
     const [child, grandchild] = await opened(sink)(
       Effect.gen(function* () {
         const started = yield* starting(process.execPath, [spawnsAGrandchild, where], {})
-        return [
-          pidOf(started),
-          Number(yield* Effect.promise(() => writtenIn(where))),
-        ] as const
+        return [pidOf(started), Number(yield* Effect.promise(() => writtenIn(where)))] as const
       }),
     )
 

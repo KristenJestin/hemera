@@ -45,8 +45,4 @@ export type {
   SessionEntryRole,
   SessionTitleSource,
 } from './domain/session.ts'
-export {
-  AGENT_PROVIDERS,
-  NATIVE_STATES,
-  SESSION_ENTRY_KINDS,
-} from './domain/session.ts'
+export { AGENT_PROVIDERS, NATIVE_STATES, SESSION_ENTRY_KINDS } from './domain/session.ts'

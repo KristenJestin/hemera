@@ -63,7 +63,10 @@ export type FakeStep =
         }[]
       }
     }
-  | { readonly does: 'plans'; readonly lines: readonly { readonly content: string; readonly status: PlanEntryStatus }[] }
+  | {
+      readonly does: 'plans'
+      readonly lines: readonly { readonly content: string; readonly status: PlanEntryStatus }[]
+    }
 
 /** What the agent announces, and what it does when it is asked for a turn. */
 export interface FakeBehaviour {

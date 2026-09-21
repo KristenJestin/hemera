@@ -54,9 +54,7 @@ describe('Ce que l’agent annonce de lui-même', () => {
   test('the agent is read from what it announces, by its own adapter', async () => {
     const signedIn = await opened({ authMethods: [{ id: 'api-key', name: 'API key' }] }, codex)
     expect(signedIn.connection.handshake.authenticated).toBe(true)
-    expect(signedIn.connection.handshake.authMethods).toEqual([
-      { id: 'api-key', name: 'API key' },
-    ])
+    expect(signedIn.connection.handshake.authMethods).toEqual([{ id: 'api-key', name: 'API key' }])
     // Codex cannot be asked to continue a session, and its adapter knows that: this is what
     // makes the Agents page say so before a turn is ever sent.
     expect(signedIn.connection.handshake.continues).toBe(false)
@@ -109,7 +107,13 @@ describe('Un tour en cours', () => {
       steps: [
         {
           does: 'calls',
-          call: { id: 'call-1', title: 'Read parser.ts', kind: 'read', status: 'pending', path: '/tmp/atlas/parser.ts' },
+          call: {
+            id: 'call-1',
+            title: 'Read parser.ts',
+            kind: 'read',
+            status: 'pending',
+            path: '/tmp/atlas/parser.ts',
+          },
         },
         { does: 'updates', call: { id: 'call-1', status: 'completed' } },
       ],

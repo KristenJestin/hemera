@@ -716,15 +716,19 @@ export const sessionsLayer = Layer.effect(
                 result: { session, entry: entryOf(settledRow) },
                 events: [
                   {
-                    type:
-                      settled === undefined ? 'session.entry_written' : 'session.entry_settled',
+                    type: settled === undefined ? 'session.entry_written' : 'session.entry_settled',
                     entityKind: 'session',
                     entityId: id,
                     source: 'system',
                     author: entry.role === 'agent' ? 'agent' : 'hemera',
                     projectId: session.projectId,
                     sessionId: id,
-                    payload: { seq, kind: entry.kind, role: entry.role, state: entry.state ?? null },
+                    payload: {
+                      seq,
+                      kind: entry.kind,
+                      role: entry.role,
+                      state: entry.state ?? null,
+                    },
                   },
                 ],
               } satisfies Mutation<Written>

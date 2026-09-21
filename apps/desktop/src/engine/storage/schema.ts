@@ -18,12 +18,7 @@
 import { sql } from 'drizzle-orm'
 import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
 
-import {
-  AGENT_PROVIDERS,
-  NATIVE_STATES,
-  PROJECT_TONES,
-  SESSION_ENTRY_KINDS,
-} from '@hemera/core'
+import { AGENT_PROVIDERS, NATIVE_STATES, PROJECT_TONES, SESSION_ENTRY_KINDS } from '@hemera/core'
 
 /**
  * What the window wears, one key at a time.

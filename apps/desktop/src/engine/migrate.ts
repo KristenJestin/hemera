@@ -173,9 +173,7 @@ export function openProfile(dataDirectory: string, migrationsFolder: string, ver
         standing.backedUp = first
       }
       yield* migrateWithoutForeignKeys(migrationsFolder).pipe(
-        Effect.mapError(
-          (cause) => new MigrationError({ migrations: standing.behind, cause }),
-        ),
+        Effect.mapError((cause) => new MigrationError({ migrations: standing.behind, cause })),
       )
     }
 

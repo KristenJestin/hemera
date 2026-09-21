@@ -125,9 +125,7 @@ export interface PermissionQuestion {
  * `cancelled` is not a refusal by the user of what was asked but the end of the question — the
  * turn was stopped while the question stood, and the protocol has an outcome for exactly that.
  */
-export type PermissionAnswer =
-  | { readonly optionId: string }
-  | { readonly cancelled: true }
+export type PermissionAnswer = { readonly optionId: string } | { readonly cancelled: true }
 
 /** How a turn ended, and what it cost. */
 export interface PromptOutcome {
@@ -238,7 +236,9 @@ function usageOf(usage: Usage | null | undefined): UsageReport | null {
  * agent before it: what comes back is what says whether this agent can be talked to at all, and
  * what the Agents page shows about it.
  */
-export function connect(options: ConnectionOptions): Effect.Effect<AgentConnection, AgentProtocolError> {
+export function connect(
+  options: ConnectionOptions,
+): Effect.Effect<AgentConnection, AgentProtocolError> {
   return Effect.gen(function* () {
     const adapter = options.adapter
     /**
@@ -311,8 +311,7 @@ export function connect(options: ConnectionOptions): Effect.Effect<AgentConnecti
       open: (workingDirectory) =>
         Effect.gen(function* () {
           const opened = yield* Effect.tryPromise({
-            try: () =>
-              connection.newSession({ cwd: workingDirectory, mcpServers: [] }),
+            try: () => connection.newSession({ cwd: workingDirectory, mcpServers: [] }),
             catch: (cause) => new AgentProtocolError({ what: 'newSession', cause: String(cause) }),
           })
           sessionId = opened.sessionId
