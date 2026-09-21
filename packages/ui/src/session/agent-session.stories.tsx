@@ -274,6 +274,7 @@ function Page(): ReactNode {
 }
 
 const meta = {
+  tags: ['autodocs', 'new'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
