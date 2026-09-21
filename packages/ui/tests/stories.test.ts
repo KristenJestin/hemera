@@ -353,6 +353,15 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'SessionSideColumn',
       'StoppedTurn',
       'ResumeFallbackBanner',
+      // HEM-18: Hemera lends the agent its own tools. A call to one of them is a block of the
+      // thread with the mark that tells it from a native call, a command it runs is a block of
+      // its own, and the Session says what it runs and what it works from beside the thread.
+      'HemeraToolCall',
+      'CommandRun',
+      'CommandsPanel',
+      'ContextView',
+      'BareModeState',
+      'CommandList',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

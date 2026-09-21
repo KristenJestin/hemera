@@ -75,9 +75,11 @@ export { Sidebar, type SidebarProps } from './shell/sidebar.tsx'
 /** The Project surfaces: where one is created, and where the one in front is configured. */
 export { EMPTY_DRAFT, ProjectDialog, type ProjectDialogProps } from './project/project-dialog.tsx'
 export {
+  CommandList,
   DangerZone,
   ProjectSettings,
   RepositoryList,
+  type CommandLine,
   type ProjectSettingsProps,
 } from './project/project-settings.tsx'
 
@@ -248,6 +250,21 @@ export {
 } from './activity/tool-call-card.tsx'
 export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
 export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
+/** The tools Hemera lends the agent (HEM-18): the call it made, and the command it ran. A call
+ * to one of Hemera's own tools is not the agent's business alone, so it wears the mark. */
+export {
+  HemeraToolCall,
+  type HemeraToolArgument,
+  type HemeraToolCallProps,
+  type HemeraToolProvenance,
+  type HemeraToolStatus,
+} from './activity/hemera-tool-call.tsx'
+export {
+  CommandRun,
+  type CommandKind,
+  type CommandRunProps,
+  type CommandState,
+} from './activity/command-run.tsx'
 
 /** The gate a turn stops at, and the one line the answer leaves behind. */
 export {
@@ -290,6 +307,7 @@ export {
   type AgentOnTheMachine,
   type AgentStanding,
   type AgentsSectionProps,
+  type BareMode,
 } from './settings/agents-section.tsx'
 
 /** What a Session says about itself beside its thread: its plan, its files, a turn that was
@@ -304,8 +322,27 @@ export {
 export {
   SessionSideColumn,
   type SessionSideColumnProps,
+  type SideColumnTab,
   type TouchedFile,
 } from './session/session-side-column.tsx'
+export {
+  CommandsPanel,
+  type CommandPanelRun,
+  type CommandsPanelProps,
+} from './session/commands-panel.tsx'
+export {
+  ContextView,
+  type ContextAgent,
+  type ContextCommand,
+  type ContextEntry,
+  type ContextTool,
+  type ContextViewProps,
+} from './session/context-view.tsx'
+export {
+  BareModeState,
+  type BareModeEntry,
+  type BareModeStateProps,
+} from './session/bare-mode-state.tsx'
 export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
 /** What the turn is doing right now, at the end of the thread while it runs. */
 export { ActivityRow, type ActivityRowProps, type ActivityState } from './session/activity-row.tsx'
