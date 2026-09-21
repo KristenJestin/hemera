@@ -52,7 +52,7 @@ const SAID = `added 1 package in 4s
 updated 1 package and audited 2 packages in 3.812s`
 
 const meta = {
-  title: 'Components/AgentsSection',
+  title: 'Surfaces/Settings/Agents',
   component: AgentsSection,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

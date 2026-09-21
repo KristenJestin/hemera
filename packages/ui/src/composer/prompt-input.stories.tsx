@@ -83,7 +83,7 @@ function Played({ variant, onSend }: PromptInputProps) {
 
 const meta = {
   tags: ['autodocs'],
-  title: 'Surfaces/PromptInput',
+  title: 'Blocks/Composer/PromptInput',
   component: PromptInput,
   render: (args) => (
     <div className="mx-auto flex w-full max-w-2xl flex-col p-6">

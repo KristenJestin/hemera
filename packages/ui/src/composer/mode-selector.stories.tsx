@@ -8,7 +8,7 @@ import { ModeSelector } from './mode-selector.tsx'
  * a mode it refused to take is never drawn as taken.
  */
 const meta = {
-  title: 'Components/ModeSelector',
+  title: 'Blocks/Composer/ModeSelector',
   component: ModeSelector,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

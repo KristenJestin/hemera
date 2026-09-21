@@ -24,7 +24,7 @@ import type { MessageLine, MessageState } from './model.ts'
  */
 const meta = {
   tags: ['autodocs', 'updated'],
-  title: 'Components/Message',
+  title: 'Blocks/Message/Message',
   component: MessageGroup,
   parameters: { layout: 'padded' },
   args: {

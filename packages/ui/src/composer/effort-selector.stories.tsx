@@ -7,7 +7,7 @@ import { EffortSelector } from './effort-selector.tsx'
  * The efforts the agent announced. Three here, none for an agent that thinks at one speed.
  */
 const meta = {
-  title: 'Components/EffortSelector',
+  title: 'Blocks/Composer/EffortSelector',
   component: EffortSelector,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

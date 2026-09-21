@@ -10,7 +10,7 @@ import { ComposerActions } from './composer-actions.tsx'
  * its square is the Stop — and the word beside it says which of the two is being drawn.
  */
 const meta = {
-  title: 'Components/ComposerActions',
+  title: 'Blocks/Composer/ComposerActions',
   component: ComposerActions,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

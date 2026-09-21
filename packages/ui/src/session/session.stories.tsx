@@ -19,6 +19,11 @@ import {
  * renamed, a Session is archived and restored, and no engine is asked for anything — what the
  * stories assert is what the page shows and what it says it will do, which is the whole of
  * what there is to check before the thread is persisted for real.
+ *
+ * This file, the page and the whole Session an agent fills are the single entry
+ * `Surfaces/Session`. Three files under one title cannot each carry `Playground`, `Variants`
+ * and `States` — Storybook refuses a story id twice — so those three stay with the page, which
+ * is the screen itself, and what is shown here is named after the state it shows.
  */
 
 /**
@@ -114,7 +119,7 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /** A Session with a name, a Project, and the two things that can be done to it. */
-export const Playground: Story = {
+export const Named: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
@@ -133,7 +138,7 @@ export const Playground: Story = {
  * The two heads are the same head — only whether the name is being typed changes — and the two
  * panels are the same panel, so what a reader learns from one is true of the other.
  */
-export const Variants: Story = {
+export const ReadAndTyped: Story = {
   parameters: { layout: 'padded', controls: { disable: true } },
   render: () => (
     <div className="flex w-full flex-col gap-8">
@@ -185,7 +190,7 @@ export const Variants: Story = {
  * the head is the same head before and after the first line is written. An archived Session is
  * kept whole and has one verb, because nothing in this lot is ever deleted.
  */
-export const States: Story = {
+export const NewNamedAndArchived: Story = {
   parameters: { layout: 'padded', controls: { disable: true } },
   render: () => (
     <div className="flex w-full flex-col gap-10">

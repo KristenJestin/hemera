@@ -90,7 +90,7 @@ function Controlled({ value, files, onValueChange, onFilesChange, ...rest }: Com
 
 const meta = {
   tags: ['autodocs'],
-  title: 'Surfaces/Composer',
+  title: 'Blocks/Composer/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
   parameters: { layout: 'fullscreen' },

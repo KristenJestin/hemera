@@ -13,7 +13,7 @@ import { ThoughtBlock } from './thought-block.tsx'
  */
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Components/ThoughtBlock',
+  title: 'Blocks/Message/ThoughtBlock',
   component: ThoughtBlock,
   parameters: { layout: 'padded' },
   args: {

@@ -7,7 +7,7 @@ import { StoppedTurn } from './stopped-turn.tsx'
  * A turn that was cut off, said for what it is: not an ending, and not an error.
  */
 const meta = {
-  title: 'Components/StoppedTurn',
+  title: 'Blocks/Session/StoppedTurn',
   component: StoppedTurn,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

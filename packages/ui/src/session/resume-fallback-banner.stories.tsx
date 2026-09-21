@@ -7,7 +7,7 @@ import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
  * A thread that looks resumed and was rebuilt: the one case where saying nothing would be a lie.
  */
 const meta = {
-  title: 'Components/ResumeFallbackBanner',
+  title: 'Blocks/Session/ResumeFallbackBanner',
   component: ResumeFallbackBanner,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

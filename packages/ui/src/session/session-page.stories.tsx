@@ -152,7 +152,7 @@ const THREAD = [
 
 const meta = {
   tags: ['autodocs'],
-  title: 'Surfaces/Session page',
+  title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
   args: {

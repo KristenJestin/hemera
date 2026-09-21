@@ -8,7 +8,7 @@ import { ModelSelector } from './model-selector.tsx'
  * no model the agent behind it cannot run.
  */
 const meta = {
-  title: 'Components/ModelSelector',
+  title: 'Blocks/Composer/ModelSelector',
   component: ModelSelector,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

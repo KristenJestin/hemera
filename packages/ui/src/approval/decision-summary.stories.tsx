@@ -7,7 +7,7 @@ import { DecisionSummary } from './decision-summary.tsx'
  * The line a decision leaves behind, read at a glance in a thread that kept going.
  */
 const meta = {
-  title: 'Components/DecisionSummary',
+  title: 'Blocks/Session/DecisionSummary',
   component: DecisionSummary,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

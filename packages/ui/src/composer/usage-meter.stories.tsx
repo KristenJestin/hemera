@@ -9,7 +9,7 @@ import { UsageMeter } from './usage-meter.tsx'
  * did not (D5-20).
  */
 const meta = {
-  title: 'Components/UsageMeter',
+  title: 'Blocks/Composer/UsageMeter',
   component: UsageMeter,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

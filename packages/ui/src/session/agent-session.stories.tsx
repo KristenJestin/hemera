@@ -274,7 +274,7 @@ function Page(): ReactNode {
 }
 
 const meta = {
-  title: 'Surfaces/Agent session',
+  title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof Page>
@@ -288,8 +288,10 @@ type Story = StoryObj<typeof meta>
  * what it read and ran, the change it made, the console it opened, the plan it is working to,
  * the permission it is waiting on and the answer it was given, a turn that was stopped, and the
  * foot with the agent's models, its effort, its mode and what the turn has cost.
+ *
+ * The first story of the entry, and the one the UI gate reads on `Surfaces/Session`.
  */
-export const Playground: Story = {
+export const Complete: Story = {
   render: () => <Page />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)

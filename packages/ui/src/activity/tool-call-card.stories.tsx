@@ -14,7 +14,7 @@ import { ToolCallCard } from './tool-call-card.tsx'
  */
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Components/ToolCallCard',
+  title: 'Blocks/Activity/ToolCallCard',
   component: ToolCallCard,
   parameters: { layout: 'padded' },
   args: {

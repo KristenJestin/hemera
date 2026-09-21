@@ -7,7 +7,7 @@ import { SessionSideColumn } from './session-side-column.tsx'
  * The two things a reader checks on while an agent works, beside the thread rather than in it.
  */
 const meta = {
-  title: 'Components/SessionSideColumn',
+  title: 'Blocks/Session/SessionSideColumn',
   component: SessionSideColumn,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

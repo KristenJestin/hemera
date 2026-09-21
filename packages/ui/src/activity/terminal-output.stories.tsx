@@ -18,7 +18,7 @@ const LINES = Array.from(
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Components/TerminalOutput',
+  title: 'Blocks/Activity/TerminalOutput',
   component: TerminalOutput,
   parameters: { layout: 'padded' },
   args: { terminalId: 'pnpm check', output: LINES, released: false },

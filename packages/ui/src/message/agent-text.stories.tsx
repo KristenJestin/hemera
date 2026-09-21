@@ -21,7 +21,7 @@ import { MessageBubble } from './message.tsx'
  */
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Components/AgentText',
+  title: 'Blocks/Message/AgentText',
   component: AgentText,
   parameters: { layout: 'padded' },
   decorators: [

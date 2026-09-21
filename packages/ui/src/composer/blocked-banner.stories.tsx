@@ -7,7 +7,7 @@ import { BlockedBanner } from './blocked-banner.tsx'
  * The composer while a turn waits on a person: what is being waited on, and the way out.
  */
 const meta = {
-  title: 'Components/BlockedBanner',
+  title: 'Blocks/Session/BlockedBanner',
   component: BlockedBanner,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },

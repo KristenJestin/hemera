@@ -10,7 +10,7 @@ import { PermissionRequest } from './permission-request.tsx'
  * The card is drawn where it will be read: in a column, with the change it is guarding under it.
  */
 const meta = {
-  title: 'Components/PermissionRequest',
+  title: 'Blocks/Session/PermissionRequest',
   component: PermissionRequest,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },
