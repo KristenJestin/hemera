@@ -20,6 +20,10 @@ import { WorkspacePill } from './workspace-pill.tsx'
  * is lot 5's, and the button is disabled while it is drawn. A turn running can be: the square is
  * then the Stop of design D17-13, it says so, and pressing it cancels the turn. One glyph, two
  * meanings, told apart by the word beside it and by whether it can be pressed at all.
+ *
+ * A write in flight changes nothing of the control: the same square, in the same place, and the
+ * same word. It adds the indicator the button draws in front of its label, and takes the press
+ * away until the engine has answered — the row does not move under the hand that pressed it.
  */
 const MORPH = 'relative flex size-icon-md items-center justify-center'
 
@@ -55,7 +59,8 @@ export function ComposerActions({
   const transition = useTransition(arrival)
   const morphs = sending || running
   // A write in flight is a wait, and a wait that only took the press away would look like a
-  // control that stopped working. It says what it is doing until the engine answers.
+  // control that stopped working. The indicator the button draws is what says so; the word and
+  // the glyph stay as they are.
   const busy = sending && !running
   return (
     <>
@@ -101,8 +106,8 @@ export function ComposerActions({
               )}
             </AnimatePresence>
           </span>
-          {running ? 'Stop' : busy ? 'Sending' : action}
-          {running || busy ? null : <Kbd keys="Enter" />}
+          {running ? 'Stop' : action}
+          {running ? null : <Kbd keys="Enter" />}
         </Button>
       </span>
     </>
