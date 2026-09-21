@@ -73,7 +73,7 @@ const TITLE = 'truncate text-foreground'
 const BODY = 'text-sm text-muted-foreground'
 
 /** A failure keeps the colour of a failure, in the body it opened for it. */
-const ERROR = 'mb-1 text-sm text-destructive'
+const ERROR = 'mb-1 text-sm text-destructive-muted-foreground'
 
 /** The kind ACP names for a tool call, which is what says how it is read. */
 export type ToolKind =
