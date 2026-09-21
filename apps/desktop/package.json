@@ -21,6 +21,7 @@
     "e2e": "wdio run wdio.conf.ts"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@effect/sql-sqlite-node": "4.0.0-rc.112",
     "@hemera/core": "workspace:*",
     "@hemera/ipc": "workspace:*",
