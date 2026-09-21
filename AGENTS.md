@@ -252,6 +252,15 @@ writes at start-up.
   references only**. Never copy their markup, classes or inline styles. Copying them is a
   rejected change.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
+- Storybook tree, three roots and nothing else: **Components** for the design-system pieces of
+  `packages/ui/src/components` (one entry per component, `Components/<Name>`); **Surfaces** for
+  the assembled screens and panels of a feature folder (`Surfaces/<Feature>`, and
+  `Surfaces/<Feature>/<Part>` when the feature has several); **Shell** for the window frame.
+  A story file sits next to its component, named `<component>.stories.tsx`; one story per state
+  (empty, loading, error, filled, dense), named after the state; the story that shows the whole
+  surface with every piece in place comes first in its file, because it is the one the UI gate
+  looks at. The skill in `.agents/skills/storybook` says how to write a story; this list says
+  where it goes and what it is called, and it wins when the two differ.
 - Storybook badges: a story file the lot **created** wears the `new` tag, one whose component the
   lot **changed** wears `updated`. The badge belongs to the lot that touches the design system
   and not to the component: the first thing such a lot does is take the previous lot's badges
