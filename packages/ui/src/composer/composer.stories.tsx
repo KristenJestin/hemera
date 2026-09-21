@@ -562,5 +562,14 @@ export const WhatTheSentenceSays: Story = {
     )
 
     await menuGone()
+
+    // And the files that went with the sentence leave with it: waited for, because the row leaves
+    // on its own, and a colour read while it is still on its way out is two colours mixed with
+    // what is behind them — a contrast the accessibility pass is right to refuse. The chip's own
+    // arrival is waited for the same way in `AttachAnywhere`; this is the other end of the same
+    // gesture, and the run that flaked on it read 3.62 where the settled colour is 6.32.
+    await waitFor(() => {
+      expect(canvas.queryByRole('button', { name: 'Clear' })).toBeNull()
+    })
   },
 }
