@@ -1,0 +1,288 @@
+/**
+ * The agent channels and what the engine pushes while a Session is worked on (D5-12, D5-13).
+ *
+ * A declaration is what is under test: what the window may ask about an agent, what it is
+ * answered, and what reaches it without being asked. The suites are named after the scenarios
+ * they cover — the Agents page, the agent's own options, the end of a turn, a stop during a
+ * permission, a resume that replays nothing, and the stream a turn arrives as.
+ */
+
+import { describe, expect, test } from 'vite-plus/test'
+
+import {
+  CHANNELS,
+  ENGINE_EVENTS,
+  ENGINE_EVENT_CHANNEL,
+  ENGINE_REQUESTS,
+  agentAvailabilitySchema,
+  agentProviderSchema,
+  configOptionSchema,
+  resumeStateSchema,
+  sessionEntrySchema,
+  stopReasonSchema,
+  type SessionEntry,
+} from '#index.ts'
+
+/** One entry of a thread, as the interface is handed one: a message the agent wrote. */
+const ENTRY: SessionEntry = {
+  id: 'entry-1',
+  sessionId: 'session-1',
+  seq: 1,
+  role: 'agent',
+  kind: 'message',
+  body: 'The file is read.',
+  payload: '{}',
+  correlationId: null,
+  turnId: 'turn-1',
+  state: null,
+  origin: 'live',
+  createdAt: 1,
+}
+
+describe('The agent channels are declared once', () => {
+  test('every use case of the agents is a channel of the same name', () => {
+    const relayed = Object.keys(ENGINE_REQUESTS).filter((name) => name.startsWith('agents.'))
+    const channels = Object.keys(CHANNELS).filter((name) => name.startsWith('agents.'))
+
+    expect(channels.toSorted()).toEqual(relayed.toSorted())
+    expect(relayed.toSorted()).toEqual([
+      'agents.decide',
+      'agents.list',
+      'agents.options',
+      'agents.prompt',
+      'agents.resume',
+      'agents.setOption',
+      'agents.stop',
+    ])
+  })
+})
+
+describe('The Agents page tells what is available', () => {
+  test('an agent that is on the machine and one that is not are told apart', () => {
+    expect(
+      agentAvailabilitySchema.safeParse({
+        id: 'claude',
+        label: 'Claude Code',
+        found: true,
+        version: '2.1.0',
+        authenticated: true,
+        installHint: 'npm install -g claude-agent-acp',
+      }).success,
+    ).toBe(true)
+
+    expect(
+      agentAvailabilitySchema.safeParse({
+        id: 'codex',
+        label: 'Codex',
+        found: false,
+        version: null,
+        authenticated: false,
+        installHint: 'npm install -g @agentclientprotocol/codex-acp',
+      }).success,
+    ).toBe(true)
+  })
+
+  test('a version nothing answered is null and not a field that went missing', () => {
+    expect(
+      agentAvailabilitySchema.safeParse({
+        id: 'opencode',
+        label: 'OpenCode',
+        found: true,
+        version: null,
+        authenticated: false,
+        installHint: 'npm install -g opencode',
+      }).success,
+    ).toBe(true)
+
+    // The two ways of saying nothing are the same thing to a page, so only one of them is read.
+    expect(
+      agentAvailabilitySchema.safeParse({
+        id: 'opencode',
+        label: 'OpenCode',
+        found: true,
+        authenticated: false,
+        installHint: 'npm install -g opencode',
+      }).success,
+    ).toBe(false)
+  })
+
+  test('an agent Hemera does not know how to start cannot be asked for', () => {
+    expect(agentProviderSchema.safeParse('claude').success).toBe(true)
+    expect(agentProviderSchema.safeParse('gemini').success).toBe(false)
+  })
+})
+
+describe('The options are the agent’s', () => {
+  test('the values a Session can be put in are the ones the agent announced', () => {
+    expect(
+      configOptionSchema.safeParse({
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        values: [
+          { value: 'claude-sonnet-4-5', name: 'Sonnet 4.5' },
+          { value: 'claude-opus-4-1', name: 'Opus 4.1' },
+        ],
+        current: 'claude-sonnet-4-5',
+      }).success,
+    ).toBe(true)
+  })
+
+  test('an option the agent put in no category is read', () => {
+    expect(
+      configOptionSchema.safeParse({
+        id: 'effort',
+        name: 'Effort',
+        category: null,
+        values: [{ value: 'high', name: 'High' }],
+        current: 'high',
+      }).success,
+    ).toBe(true)
+  })
+
+  test('a value the agent did not name is refused', () => {
+    expect(
+      configOptionSchema.safeParse({
+        id: 'effort',
+        name: 'Effort',
+        category: null,
+        values: [{ value: 'high' }],
+        current: 'high',
+      }).success,
+    ).toBe(false)
+  })
+
+  test('an option is set with the value the agent offered', () => {
+    const setOption = ENGINE_REQUESTS['agents.setOption'].arguments
+
+    expect(
+      setOption.safeParse({ sessionId: 'session-1', optionId: 'model', value: 'claude-opus-4-1' })
+        .success,
+    ).toBe(true)
+    expect(setOption.safeParse({ sessionId: 'session-1', optionId: 'model' }).success).toBe(false)
+  })
+})
+
+describe('The turn ends with its reason', () => {
+  test('a turn that ended says why, in the words of the protocol', () => {
+    expect(stopReasonSchema.safeParse('end_turn').success).toBe(true)
+    expect(stopReasonSchema.safeParse('cancelled').success).toBe(true)
+  })
+
+  test('a reason the protocol does not name is refused', () => {
+    expect(stopReasonSchema.safeParse('finished').success).toBe(false)
+  })
+
+  test('a prompt is answered with the reason it ended and nothing else', () => {
+    const answer = ENGINE_REQUESTS['agents.prompt'].response
+
+    expect(answer.safeParse({ stopReason: 'max_tokens' }).success).toBe(true)
+    expect(answer.safeParse({ stopReason: 'finished' }).success).toBe(false)
+    expect(answer.safeParse({}).success).toBe(false)
+  })
+})
+
+describe('Stop during a permission', () => {
+  test('a decision with no option is the user closing the request', () => {
+    const decision = ENGINE_REQUESTS['agents.decide'].arguments
+
+    expect(decision.safeParse({ sessionId: 'session-1', optionId: 'allow-once' }).success).toBe(
+      true,
+    )
+    expect(decision.safeParse({ sessionId: 'session-1', optionId: null }).success).toBe(true)
+  })
+
+  test('a decision that names no option at all is refused', () => {
+    expect(
+      ENGINE_REQUESTS['agents.decide'].arguments.safeParse({ sessionId: 'session-1' }).success,
+    ).toBe(false)
+  })
+
+  test('stopping is asked for by the Session alone', () => {
+    const stop = ENGINE_REQUESTS['agents.stop'].arguments
+
+    expect(stop.safeParse({ sessionId: 'session-1' }).success).toBe(true)
+    expect(stop.safeParse({}).success).toBe(false)
+  })
+})
+
+describe('No tool is replayed on resume', () => {
+  test('an entry says whether it was written as it happened or from what the agent replayed', () => {
+    expect(sessionEntrySchema.safeParse(ENTRY).success).toBe(true)
+    expect(sessionEntrySchema.safeParse({ ...ENTRY, origin: 'replay' }).success).toBe(true)
+  })
+
+  test('an entry that does not say where it came from is refused', () => {
+    expect(
+      sessionEntrySchema.safeParse({
+        id: 'entry-2',
+        sessionId: 'session-1',
+        seq: 2,
+        role: 'agent',
+        kind: 'message',
+        body: 'No one knows where this one came from.',
+        payload: '{}',
+        correlationId: null,
+        turnId: null,
+        state: null,
+        createdAt: 2,
+      }).success,
+    ).toBe(false)
+  })
+
+  test('a resume answers how far the native session came back', () => {
+    const answer = ENGINE_REQUESTS['agents.resume'].response
+
+    expect(answer.safeParse({ state: 'attached', reason: null }).success).toBe(true)
+    expect(
+      answer.safeParse({ state: 'fallback', reason: 'the agent lost its own session' }).success,
+    ).toBe(true)
+  })
+
+  test('a resume cannot answer that there was nothing to resume', () => {
+    expect(resumeStateSchema.safeParse('lost').success).toBe(true)
+    expect(resumeStateSchema.safeParse('none').success).toBe(false)
+    expect(
+      ENGINE_REQUESTS['agents.resume'].response.safeParse({ state: 'none', reason: null }).success,
+    ).toBe(false)
+  })
+})
+
+describe('Text arrives as a stream', () => {
+  test('the four things the engine pushes are the ones declared', () => {
+    expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
+      'agent',
+      'entry',
+      'permission',
+      'turn',
+    ])
+  })
+
+  test('an entry is pushed with the Session it belongs to', () => {
+    expect(
+      ENGINE_EVENTS.entry.safeParse({ event: 'entry', sessionId: 'session-1', entry: ENTRY })
+        .success,
+    ).toBe(true)
+  })
+
+  test('a turn that ended is pushed about its Session and no entry', () => {
+    expect(
+      ENGINE_EVENTS.turn.safeParse({ event: 'turn', sessionId: 'session-1', entry: null }).success,
+    ).toBe(true)
+  })
+
+  test('a message that names an event the engine does not push is refused', () => {
+    expect(
+      ENGINE_EVENTS.entry.safeParse({ event: 'progress', sessionId: 'session-1', entry: null })
+        .success,
+    ).toBe(false)
+    expect(
+      ENGINE_EVENTS.permission.safeParse({ event: 'turn', sessionId: 'session-1', entry: null })
+        .success,
+    ).toBe(false)
+  })
+
+  test('every pushed message travels under one name, declared once', () => {
+    expect(ENGINE_EVENT_CHANNEL).toBe('agents.event')
+  })
+})

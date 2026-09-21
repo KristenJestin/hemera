@@ -24,6 +24,8 @@ export type {
 } from './environment.ts'
 export {
   DEFAULT_DISPLAY_PREFERENCES,
+  ENGINE_EVENTS,
+  ENGINE_EVENT_CHANNEL,
   ENGINE_REQUESTS,
   channelSchema,
   displayPreferencesChangeSchema,
@@ -37,6 +39,7 @@ export {
   journalEntrySchema,
   projectSchema,
   projectToneSchema,
+  sessionEntryOriginSchema,
   sessionEntrySchema,
   sessionSchema,
   sessionTitleSourceSchema,
@@ -48,6 +51,8 @@ export type {
   DisplayPreferences,
   DisplayPreferencesChange,
   EngineArguments,
+  EngineEvent,
+  EngineEventName,
   EngineRequestName,
   EngineRequests,
   EngineResponse,
@@ -58,5 +63,20 @@ export type {
   Project,
   Session,
   SessionEntry,
+  SessionEntryOrigin,
   SessionTitleSource,
 } from './engine.ts'
+export {
+  agentAvailabilitySchema,
+  agentProviderSchema,
+  configOptionSchema,
+  resumeStateSchema,
+  stopReasonSchema,
+} from './agents.ts'
+export type {
+  AgentAvailability,
+  AgentProvider,
+  ConfigOption,
+  ResumeState,
+  StopReason,
+} from './agents.ts'

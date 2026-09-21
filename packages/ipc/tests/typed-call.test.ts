@@ -89,6 +89,14 @@ describe('Appel typé nominal', () => {
       'sessions.restore',
       'sessions.append',
       'sessions.read',
+      // The agents, relayed to the engine the same way.
+      'agents.list',
+      'agents.options',
+      'agents.setOption',
+      'agents.prompt',
+      'agents.stop',
+      'agents.decide',
+      'agents.resume',
       // Answered by the main process itself, because only it can.
       'dialog.pickFolder',
       'dialog.pickFiles',
@@ -149,6 +157,13 @@ describe('Cas d’usage nommés du process dédié', () => {
       'sessions.restore',
       'sessions.append',
       'sessions.read',
+      'agents.list',
+      'agents.options',
+      'agents.setOption',
+      'agents.prompt',
+      'agents.stop',
+      'agents.decide',
+      'agents.resume',
     ]
     expect(Object.keys(ENGINE_REQUESTS).toSorted()).toEqual(names.toSorted())
   })
@@ -165,6 +180,18 @@ describe('Cas d’usage nommés du process dédié', () => {
         "const status = await ask('engine.status', {})",
         'const writer: string | null = status.writtenByVersion',
         'void writer',
+      ].join('\n'),
+    )
+    expect(result.output).toBe('')
+    expect(result.ok).toBe(true)
+  })
+
+  test('an agent use case is called and answered like any other', () => {
+    const result = compile(
+      [
+        "const over = await ask('agents.prompt', { sessionId: 'session-1', text: 'read it' })",
+        'const reason: string = over.stopReason',
+        'void reason',
       ].join('\n'),
     )
     expect(result.output).toBe('')
