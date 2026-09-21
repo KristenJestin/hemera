@@ -34,8 +34,13 @@ const VERSION = '0.4.0'
 
 /** A machine that has every agent, at a path nothing has to be installed at. */
 export const machine = Layer.succeed(MachineEnvironment, {
+  home: '/home/ana',
+  env: {},
   locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
   readVersion: () => Effect.succeed('1.0.0'),
+  // Nothing is signed in on this machine: what a suite of the application is about is the turn,
+  // and no turn here depends on a login file being there (D5-21).
+  holds: () => Effect.succeed(false),
 })
 
 /** A run of the application over one scripted agent, on one data folder. */

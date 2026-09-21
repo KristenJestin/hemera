@@ -1,28 +1,35 @@
 import { exec, execFile } from 'node:child_process'
-import { accessSync, constants, readdirSync, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, readdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { delimiter, extname, join } from 'node:path'
 import { Context, Data, Effect, Layer } from 'effect'
 
 import type { InstallerTool } from '@hemera/ipc'
 
-import { AGENT_PROVIDERS, type AgentAdapter, type AgentProvider } from './adapter.ts'
+import {
+  AGENT_PROVIDERS,
+  type AgentAdapter,
+  type AgentProvider,
+  type Environment,
+} from './adapter.ts'
 import { claude } from './adapters/claude.ts'
 import { codex } from './adapters/codex.ts'
 import { opencode } from './adapters/opencode.ts'
 
 /**
- * The agents this machine has (D5-02).
+ * The agents this machine has, and which of them can be used (D5-02, D5-21).
  *
  * Everything else about an agent is a description; this is where the machine answers. Discovery
- * looks each adapter's command up on the `PATH` the user already has — `npx` never, a download
- * never (issue decision 93) — reads the version the command prints, and reports the three
- * agents in the order Hemera knows them, found or missing, each with what to install it when it
- * is not there.
+ * looks each agent's own command up on the `PATH` the user already has — `npx` never, a download
+ * never (issue decision 93) — reads the version the command prints, looks for the login file the
+ * agent's own command writes, and reports the three agents in the order Hemera knows them, found
+ * or missing, each with what to install it and what signs it in.
  *
  * It picks nothing. An agent that is missing is reported missing, and the other two are not
- * offered in its place (D5-17). It starts nothing either, and that is why nothing here can say
- * an agent is signed in: being signed in is what an agent reports when it is asked to
- * `initialize`, which happens when a Session starts, not when this page is read.
+ * offered in its place (D5-17). It never starts anything, and it never opens the file it looks
+ * for: being signed in is the one bit of it this page shows, and the file belongs to the reader
+ * (D5-21). What the word really is, the agent says when a Session asks it to `initialize`; this
+ * is what can be said before one starts.
  */
 
 /** A path, as one string, whichever separator the machine wrote it with. */
@@ -76,15 +83,19 @@ export interface DiscoveredAgent {
   /** What the command answered to `--version`, when it answered with a version. */
   readonly version?: string
   /**
-   * Whether the agent is signed in.
+   * Whether the agent is signed in, as far as a file can say.
    *
-   * `false` until a Session has started the agent: signing in is what the agent reports in its
-   * `initialize` answer, and discovery starts nothing. A page that cannot know does not guess,
-   * and the Session that finds out is the one that reports it (D5-17).
+   * The login the agent's own command wrote is looked for where that agent keeps it, and never
+   * opened: the file is the reader's business, and signed in or not is the whole of what this
+   * page shows of it (D5-21). An agent whose credentials no file answers for — the Keychain on
+   * macOS, a keyring — reads as signed out here. The word that counts is the one the agent gives
+   * to a Session that asks it to `initialize` (D5-17).
    */
   readonly authenticated: boolean
   /** What to tell someone who does not have this agent yet, in one sentence. */
   readonly installHint: string
+  /** The command that signs this agent in, for the page to offer when it is not signed in. */
+  readonly loginHint: string
   /**
    * The tool the command was installed with, read off the path it resolved to (D5-18).
    *
@@ -113,18 +124,26 @@ export class AgentNotInstalledError extends Data.TaggedError('AgentNotInstalledE
 }> {}
 
 /**
- * What discovery asks of the machine, which is two questions and no more.
+ * What discovery asks of the machine: where a command is, what it answers, and what the reader's
+ * own home and environment say about a login.
  *
- * Both of them leave this process: one reads the `PATH` and the file system, the other starts
- * the command to ask it its version. They are handed in rather than reached for, so that a
- * suite drives them instead of finding a real agent on the machine running it (D5-16), the same
- * way the database and the clock are handed to the rest of the engine.
+ * All of them leave this process: one reads the `PATH` and the file system, one starts the
+ * command to ask it its version, and two are what an agent's own directories are read against.
+ * They are handed in rather than reached for, so that a suite drives them instead of finding a
+ * real agent on the machine running it (D5-16), the same way the database and the clock are
+ * handed to the rest of the engine.
  */
 export interface MachineEnvironmentService {
   /** Where a command resolves on the `PATH`, or `undefined` when it is not on it. */
   readonly locate: (command: string) => Effect.Effect<string | undefined>
   /** What the command answers to `--version`, or `undefined` when it does not answer. */
   readonly readVersion: (command: string) => Effect.Effect<string | undefined>
+  /** The home directory an agent's own paths are read against. */
+  readonly home: string
+  /** The environment those paths take their override from, which is the user's own. */
+  readonly env: Environment
+  /** Whether any of these files is there. None of them is ever opened. */
+  readonly holds: (paths: readonly string[]) => Effect.Effect<boolean>
 }
 
 export class MachineEnvironment extends Context.Service<
@@ -170,17 +189,21 @@ export const discoveryLayer = Layer.effect(
   Effect.gen(function* () {
     const machine = yield* MachineEnvironment
 
-    /** One agent's answer: found or not, and the version the command had to give. */
+    /** One agent's answer: found or not, signed in or not, and the version it gave. */
     const probe = (adapter: AgentAdapter): Effect.Effect<DiscoveredAgent, never> =>
       Effect.gen(function* () {
+        // Asked before the command is looked for, because the answer does not depend on it: a
+        // reader who signed in and then removed the command is still signed in.
+        const authenticated = yield* machine.holds(adapter.loginFiles(machine.home, machine.env))
         const path = yield* machine.locate(adapter.command)
         if (path === undefined) {
           return {
             id: adapter.id,
             label: adapter.label,
             found: false,
-            authenticated: false,
+            authenticated,
             installHint: adapter.installHint,
+            loginHint: adapter.loginHint,
             installer: 'unknown',
             latest: null,
           }
@@ -193,8 +216,9 @@ export const discoveryLayer = Layer.effect(
             label: adapter.label,
             found: true,
             path,
-            authenticated: false,
+            authenticated,
             installHint: adapter.installHint,
+            loginHint: adapter.loginHint,
             installer: installerOf(path),
             latest: null,
           }
@@ -205,8 +229,9 @@ export const discoveryLayer = Layer.effect(
           found: true,
           path,
           version,
-          authenticated: false,
+          authenticated,
           installHint: adapter.installHint,
+          loginHint: adapter.loginHint,
           installer: installerOf(path),
           latest: null,
         }
@@ -220,7 +245,10 @@ export const discoveryLayer = Layer.effect(
       resolve: (id) =>
         Effect.gen(function* () {
           const adapter = ADAPTERS[id]
-          const path = yield* machine.locate(adapter.command)
+          // What a Session starts is the ACP command, which is Hemera's own and may not be the
+          // one the reader installed (D5-21). An adapter nobody has is an agent this machine
+          // cannot start either, and the refusal names the agent rather than the package.
+          const path = yield* machine.locate(adapter.acp.command)
           if (path === undefined) return yield* Effect.fail(new AgentNotInstalledError({ id }))
           return { adapter, path }
         }),
@@ -339,6 +367,9 @@ function versionOf(command: string, signal: AbortSignal): Promise<string | undef
  * that is a table of commands instead of the one running the tests.
  */
 export const machineEnvironmentLayer = Layer.succeed(MachineEnvironment, {
+  home: homedir(),
+  env: process.env,
   locate: (command) => Effect.sync(() => locate(command)),
   readVersion: (command) => Effect.promise((signal) => versionOf(command, signal)),
+  holds: (paths) => Effect.sync(() => paths.some((path) => existsSync(path))),
 })

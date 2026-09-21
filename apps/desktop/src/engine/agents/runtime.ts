@@ -552,7 +552,7 @@ export const runtimeLayer = Layer.effect(
         const resolved = yield* attempt('finding the agent', discovery.resolve(provider))
         const process = yield* attempt(
           'starting the agent',
-          supervisor.start(resolved.adapter.command, resolved.adapter.args, { cwd }),
+          supervisor.start(resolved.adapter.acp.command, resolved.adapter.acp.args, { cwd }),
         )
 
         const announced = yield* Effect.ensuring(
@@ -655,7 +655,7 @@ export const runtimeLayer = Layer.effect(
         const cwd = yield* workingDirectory(session, native)
         const process = yield* attempt(
           'starting the agent',
-          supervisor.start(resolved.adapter.command, resolved.adapter.args, { cwd }),
+          supervisor.start(resolved.adapter.acp.command, resolved.adapter.acp.args, { cwd }),
         )
 
         const queue = yield* Queue.unbounded<AgentEvent>()

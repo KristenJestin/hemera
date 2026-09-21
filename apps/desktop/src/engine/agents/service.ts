@@ -61,6 +61,7 @@ export function availabilityOf(agent: DiscoveredAgent, latest: string | null): A
     version: agent.version ?? null,
     authenticated: agent.authenticated,
     installHint: agent.installHint,
+    loginHint: agent.loginHint,
     installer: agent.installer,
     latest,
   }

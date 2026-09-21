@@ -759,6 +759,7 @@ export function Application() {
               version: one.version,
               authenticated: one.authenticated,
               installHint: one.installHint,
+              loginHint: one.loginHint,
               installer: one.installer,
               latest: one.latest,
             })),

@@ -67,7 +67,8 @@ const CLAUDE_UNDER_PNPM: DiscoveredAgent = {
   path: '/Users/kris/Library/pnpm/claude',
   version: '1.4.0',
   authenticated: false,
-  installHint: 'npm install -g @agentclientprotocol/claude-agent-acp',
+  installHint: 'npm install -g @anthropic-ai/claude-code',
+  loginHint: 'claude auth login',
   installer: 'pnpm',
   latest: null,
 }
@@ -77,7 +78,8 @@ const CODEX_ABSENT: DiscoveredAgent = {
   label: 'Codex',
   found: false,
   authenticated: false,
-  installHint: 'npm install -g @agentclientprotocol/codex-acp',
+  installHint: 'npm install -g @openai/codex',
+  loginHint: 'codex login',
   installer: 'unknown',
   latest: null,
 }
@@ -90,6 +92,7 @@ const OPENCODE_FROM_A_CURL: DiscoveredAgent = {
   version: '0.9.1',
   authenticated: false,
   installHint: 'npm install -g opencode-ai',
+  loginHint: 'opencode auth login',
   installer: 'unknown',
   latest: null,
 }

@@ -2,11 +2,12 @@
  * The agents on this machine, and what the Agents page can say about them (D5-02, D5-17).
  *
  * Each suite is named after the scenario of the issue's `Spec · agent-runtime` section that it
- * covers. The machine is scripted here: the `PATH` lookup and the version probes are handed to
- * discovery, so a suite reads what the settings page reads without finding this machine's
- * agents, starting one of them, or downloading anything. What the scripted machine was asked is
- * recorded, which is how a suite can say that no other agent was reached for — the point of
- * D5-17 being that a missing agent is reported, never replaced.
+ * covers. The machine is scripted here: the `PATH` lookup, the version probes and the login files
+ * are handed to discovery, so a suite reads what the settings page reads without finding this
+ * machine's agents, starting one of them, or downloading anything. What the scripted machine was
+ * asked is recorded, which is how a suite can say that no other agent was reached for — the point
+ * of D5-17 being that a missing agent is reported, never replaced — and that the names on the
+ * page are the agents' own (D5-21).
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -33,21 +34,34 @@ interface Installed {
   readonly version?: string | undefined
 }
 
+/** The home every scripted machine has, so that a suite can name the paths looked for. */
+const HOME = '/home/ana'
+
 /** A machine that is a table of commands, and the questions it was asked, in order. */
 interface Machine {
   readonly layer: Layer.Layer<MachineEnvironment>
   readonly asked: readonly string[]
+  /** Every path discovery looked for a login at, in the order it looked. */
+  readonly logins: readonly string[]
 }
 
 /**
- * A machine that has exactly the commands it is given.
+ * A machine that has exactly the commands and the login files it is given.
  *
  * A command this table does not hold is a command that is not on the `PATH`, which is what a
- * missing agent looks like from discovery's side.
+ * missing agent looks like from discovery's side. A login path it does not hold is a machine that
+ * is not signed in — and only the path is asked for, because nothing reads what a login file
+ * holds (D5-21).
  */
-function machineOf(installed: Readonly<Record<string, Installed>>): Machine {
+function machineOf(
+  installed: Readonly<Record<string, Installed>>,
+  logins: readonly string[] = [],
+): Machine {
   const asked: string[] = []
+  const sought: string[] = []
   const layer = Layer.succeed(MachineEnvironment, {
+    home: HOME,
+    env: {},
     locate: (command: string) => {
       asked.push(command)
       return Effect.succeed(installed[command]?.path)
@@ -56,13 +70,17 @@ function machineOf(installed: Readonly<Record<string, Installed>>): Machine {
       asked.push(`${command} --version`)
       return Effect.succeed(installed[command]?.version)
     },
+    holds: (paths: readonly string[]) => {
+      sought.push(...paths)
+      return Effect.succeed(paths.some((path) => logins.includes(path)))
+    },
   })
-  return { layer, asked }
+  return { layer, asked, logins: sought }
 }
 
-/** The version lines the three agents really print, as far as they matter here. */
-const CLAUDE = { path: '/usr/local/bin/claude-agent-acp', version: 'claude-agent-acp 0.78.0' }
-const CODEX = { path: '/usr/local/bin/codex-acp', version: '1.12.0' }
+/** The three agents' own commands, and the lines they really print, as far as they matter here. */
+const CLAUDE = { path: '/usr/local/bin/claude', version: '2.0.31 (Claude Code)' }
+const CODEX = { path: '/usr/local/bin/codex', version: 'codex-cli 0.154.0' }
 const OPENCODE = { path: '/usr/local/bin/opencode', version: '1.18.31' }
 
 /** Runs a program against a scripted machine. Discovery is the only service it asks for. */
@@ -88,7 +106,7 @@ function resolving(id: AgentProvider) {
 
 describe('The Agents page tells what is available', () => {
   test('each agent is reported found or missing, with the version of the ones that are there', async () => {
-    const agents = await on(machineOf({ 'claude-agent-acp': CLAUDE, opencode: OPENCODE }), listing)
+    const agents = await on(machineOf({ claude: CLAUDE, opencode: OPENCODE }), listing)
 
     expect(agents).toEqual([
       {
@@ -96,9 +114,10 @@ describe('The Agents page tells what is available', () => {
         label: 'Claude Code',
         found: true,
         path: CLAUDE.path,
-        version: '0.78.0',
+        version: '2.0.31',
         authenticated: false,
-        installHint: 'npm install -g @agentclientprotocol/claude-agent-acp',
+        installHint: 'npm install -g @anthropic-ai/claude-code',
+        loginHint: 'claude auth login',
         // `/usr/local/bin` belongs to nobody: a command there was put by a package manager or by
         // hand, and the path does not tell them apart (D5-18).
         installer: 'unknown',
@@ -109,7 +128,8 @@ describe('The Agents page tells what is available', () => {
         label: 'Codex',
         found: false,
         authenticated: false,
-        installHint: 'npm install -g @agentclientprotocol/codex-acp',
+        installHint: 'npm install -g @openai/codex',
+        loginHint: 'codex login',
         installer: 'unknown',
         latest: null,
       },
@@ -121,13 +141,15 @@ describe('The Agents page tells what is available', () => {
         version: '1.18.31',
         authenticated: false,
         installHint: 'npm install -g opencode-ai',
+        loginHint: 'opencode auth login',
         installer: 'unknown',
         latest: null,
       },
     ])
-    // What the page shows for the one that is missing is its adapter's own hint, which is the
-    // only thing Hemera can tell someone whose machine does not have Codex.
-    expect(codex.installHint).toBe('npm install -g @agentclientprotocol/codex-acp')
+    // What the page shows for the one that is missing is the agent's own hint, which is the only
+    // thing Hemera can tell someone whose machine does not have Codex — and it is the agent's
+    // package, never the one Hemera spawns on its behalf (D5-21).
+    expect(codex.installHint).toBe('npm install -g @openai/codex')
   })
 
   test('an agent that is there but answers no version is still found, without a version', async () => {
@@ -143,6 +165,7 @@ describe('The Agents page tells what is available', () => {
       path: '/home/ana/.local/bin/opencode',
       authenticated: false,
       installHint: 'npm install -g opencode-ai',
+      loginHint: 'opencode auth login',
       installer: 'unknown',
       latest: null,
     })
@@ -150,12 +173,12 @@ describe('The Agents page tells what is available', () => {
 
   test('the tool a command came from is read off where it was found (D5-18)', async () => {
     const agents = await on(
-      machineOf({ 'claude-agent-acp': { path: '/Users/ana/Library/pnpm/claude-agent-acp' } }),
+      machineOf({ claude: { path: '/Users/ana/Library/pnpm/claude' } }),
       listing,
     )
 
     // Read from the path and never from the command's name, which says nothing about where it
-    // came from: `claude-agent-acp` is the same string whichever tool installed it.
+    // came from: `claude` is the same string whichever tool installed it.
     expect(agents.find((agent) => agent.id === 'claude')).toMatchObject({
       found: true,
       installer: 'pnpm',
@@ -165,27 +188,57 @@ describe('The Agents page tells what is available', () => {
     expect(agents.every((agent) => agent.latest === null)).toBe(true)
   })
 
-  test('nothing is claimed about signing in, because nothing has been started', async () => {
-    const agents = await on(
-      machineOf({ 'claude-agent-acp': CLAUDE, 'codex-acp': CODEX, opencode: OPENCODE }),
-      listing,
-    )
+  test('the agents section shows the agent, not its adapter (D5-21)', async () => {
+    const machine = machineOf({ claude: CLAUDE, codex: CODEX, opencode: OPENCODE })
+    const agents = await on(machine, listing)
 
-    expect(agents.map((agent) => agent.authenticated)).toEqual([false, false, false])
+    // The three agents, under their own names, with the command and the package their own
+    // documentation gives — and never the package Hemera spawns on their behalf.
+    expect(agents.map((agent) => agent.id)).toEqual(['claude', 'codex', 'opencode'])
+    expect(agents.map((agent) => agent.label)).toEqual(['Claude Code', 'Codex', 'OpenCode'])
+    expect(agents.map((agent) => agent.installHint)).toEqual([
+      'npm install -g @anthropic-ai/claude-code',
+      'npm install -g @openai/codex',
+      'npm install -g opencode-ai',
+    ])
+    expect(agents.map((agent) => agent.loginHint)).toEqual([
+      'claude auth login',
+      'codex login',
+      'opencode auth login',
+    ])
+    // Looking for the agent's command never reaches for an adapter's: the two packages that
+    // expose Claude Code and Codex are Hemera's own business, and this page is about the
+    // reader's machine (D5-21).
+    expect(machine.asked.some((one) => one.includes('-acp'))).toBe(false)
+  })
+
+  test('signed in or not is read from the login file, as a presence and never as a value', async () => {
+    const signedIn = join(HOME, '.claude', '.credentials.json')
+    const machine = machineOf({ claude: CLAUDE, codex: CODEX, opencode: OPENCODE }, [signedIn])
+    const agents = await on(machine, listing)
+
+    expect(agents.map((agent) => agent.authenticated)).toEqual([true, false, false])
     expect(agents.map((agent) => agent.found)).toEqual([true, true, true])
+    // Each agent is asked where it keeps the login its own command wrote, and the three paths are
+    // the agents' own: nothing else about a login is read, and no file is ever opened.
+    expect([...machine.logins].sort()).toEqual([
+      join(HOME, '.claude', '.credentials.json'),
+      join(HOME, '.codex', 'auth.json'),
+      join(HOME, '.local', 'share', 'opencode', 'auth.json'),
+    ])
   })
 
   test('the machine is asked about the three commands and no others: no npx, no download', async () => {
-    const machine = machineOf({ 'claude-agent-acp': CLAUDE, opencode: OPENCODE })
+    const machine = machineOf({ claude: CLAUDE, opencode: OPENCODE })
     await on(machine, listing)
 
-    // The three commands are looked for — that is how the page knows what this machine does not
-    // have — and only the two that were found are asked a version. Nothing installs anything,
-    // and the command is the agent's own binary rather than `npx`.
+    // The three agents' own commands are looked for — that is how the page knows what this
+    // machine does not have — and only the two that were found are asked a version. Nothing
+    // installs anything, and the command is the agent's own binary rather than `npx`.
     expect([...machine.asked].sort()).toEqual([
-      'claude-agent-acp',
-      'claude-agent-acp --version',
-      'codex-acp',
+      'claude',
+      'claude --version',
+      'codex',
       'opencode',
       'opencode --version',
     ])
@@ -203,20 +256,23 @@ describe('The Agents page tells what is available', () => {
 
 describe('A missing agent cannot be picked', () => {
   test('resolving an agent this machine does not have is refused, naming that agent', async () => {
-    const failure = await on(machineOf({ 'codex-acp': CODEX }), Effect.flip(resolving('opencode')))
+    const failure = await on(machineOf({ codex: CODEX }), Effect.flip(resolving('opencode')))
 
     expect(failure).toBeInstanceOf(AgentNotInstalledError)
     expect(failure.id).toBe('opencode')
   })
 
   test('no other agent is offered in its place, and none other is even looked for', async () => {
-    const machine = machineOf({ 'claude-agent-acp': CLAUDE })
+    const machine = machineOf({
+      claude: CLAUDE,
+      'claude-agent-acp': { path: '/usr/local/bin/claude-agent-acp' },
+    })
 
     const failure = await on(machine, Effect.flip(resolving('codex')))
 
     expect(failure.id).toBe('codex')
-    // Claude Code is on this machine; a client that falls back to what is there would have
-    // looked it up, and the point of D5-17 is that it does not.
+    // Claude Code is on this machine, adapter and all; a client that falls back to what is there
+    // would have looked it up, and the point of D5-17 is that it does not.
     expect(machine.asked).toEqual(['codex-acp'])
   })
 
@@ -226,8 +282,23 @@ describe('A missing agent cannot be picked', () => {
     const resolved = await on(machine, resolving('opencode'))
 
     expect(resolved.adapter).toBe(opencode)
-    expect(resolved.adapter.args).toEqual(['acp'])
+    expect(resolved.adapter.acp.command).toBe('opencode')
+    expect(resolved.adapter.acp.args).toEqual(['acp'])
     expect(resolved.path).toBe(OPENCODE.path)
+  })
+
+  test('what a session starts is the command Hemera runs, not the one the reader installed', async () => {
+    const machine = machineOf({
+      claude: CLAUDE,
+      'claude-agent-acp': { path: '/usr/local/bin/claude-agent-acp' },
+    })
+
+    const resolved = await on(machine, resolving('claude'))
+
+    // Claude Code speaks no ACP itself, so what a Session starts is the command Hemera carries,
+    // and the agent's own command is only what the reader has (D5-21).
+    expect(resolved.path).toBe('/usr/local/bin/claude-agent-acp')
+    expect(machine.asked).toEqual(['claude-agent-acp'])
   })
 })
 

@@ -32,16 +32,24 @@ export const installerToolSchema = z.enum(['npm', 'pnpm', 'bun', 'brew', 'unknow
 export type InstallerTool = z.infer<typeof installerToolSchema>
 
 /**
- * One agent, as this machine answers for it (design D5-02, D5-17).
+ * One agent, as this machine answers for it (design D5-02, D5-17, D5-21).
  *
- * `found` is whether the command is on the machine at all, and `version` is what it answered to
- * `--version`: null when it is not there, or there and silent about its version. Null and not
- * absent, because nothing is optional over this wire — a field the page does not receive and a
- * field nothing answered look the same to it, and the page has to say which one it is showing.
+ * The agent, and never the adapter that may expose it: every name and every command on this wire
+ * belongs to the tool the reader installed, and the package Hemera spawns on its behalf is named
+ * nowhere (D5-21).
  *
- * `authenticated` is false until a Session has started the agent: being signed in is what an
- * agent reports when it is asked to `initialize`, and this page starts nothing (D5-17). When
- * the agent is not there, `installHint` is the one sentence that says how to get it.
+ * `found` is whether the agent's own command is on the machine at all, and `version` is what it
+ * answered to `--version`: null when it is not there, or there and silent about its version.
+ * Null and not absent, because nothing is optional over this wire — a field the page does not
+ * receive and a field nothing answered look the same to it, and the page has to say which one it
+ * is showing.
+ *
+ * `authenticated` is what the login file that agent writes says: the file is looked for and never
+ * opened, and signed in or not is the one bit of it the page shows (D5-21). An agent whose
+ * credentials no file answers for — the Keychain on macOS, a keyring — reads as signed out here,
+ * and the word that counts is the one it gives to a Session that asks it to `initialize` (D5-17).
+ * `installHint` is the one sentence that says how to get the agent, and `loginHint` the command
+ * that signs it in, which the page offers when it is not signed in.
  *
  * `latest` is the version published by the registry of `installer`, and it is null whenever
  * nobody asked: the list a Session is created from is read locally, and only the Agents section
@@ -54,6 +62,7 @@ export const agentAvailabilitySchema = z.object({
   version: z.string().nullable(),
   authenticated: z.boolean(),
   installHint: z.string(),
+  loginHint: z.string(),
   installer: installerToolSchema,
   latest: z.string().nullable(),
 })

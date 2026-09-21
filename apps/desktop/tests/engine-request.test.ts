@@ -68,8 +68,11 @@ function running<A, E>(
   // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
   const agents = Layer.mergeAll(
     Layer.succeed(MachineEnvironment, {
+      home: '/home/ana',
+      env: {},
       locate: () => Effect.succeed('/usr/local/bin/claude-agent-acp'),
       readVersion: () => Effect.succeed('1.0.0'),
+      holds: () => Effect.succeed(true),
     }),
     fakeSupervisor(fakeAgent()),
     NoNotices,

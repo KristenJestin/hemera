@@ -1,21 +1,26 @@
 /**
- * What an agent is, from Hemera's side (design D5-02).
+ * What an agent is, from Hemera's side (design D5-02, D5-21).
  *
  * Three agents are supported — Claude Code, Codex and OpenCode — and each of them is described
- * by one file under `adapters/`: the command to look for on the machine, the arguments that
- * start it as an ACP agent, how to read its version out of what it prints, and what its own
- * answer to `initialize` says about being signed in. This file holds the shape those three
- * agree on, so that a fourth agent becomes a compile error everywhere it has to be mentioned
- * rather than a place someone forgets.
+ * by one file under `adapters/`: the command a reader installs and signs into, the sentence
+ * that says how to get it, the command that signs it in, where it keeps that login, how to read
+ * its version out of what it prints, and what its own answer to `initialize` says about being
+ * signed in. This file holds the shape those three agree on, so that a fourth agent becomes a
+ * compile error everywhere it has to be mentioned rather than a place someone forgets.
  *
  * The list of them is the domain's and not this file's (`AGENT_PROVIDERS` in `@hemera/core`):
  * a check on `sessions.provider` admits exactly it, so an agent added here alone would be a
  * value the database has never heard of, which is a migration.
  *
- * Nothing about an agent is embedded here. None of the three is a dependency of this
- * application, and every command is looked for on the `PATH` the user already has (issue
- * decision 93). An agent that is not installed is not installed, and no other one takes its
- * place (D5-17).
+ * The agent is the subject of every field below, and the adapter that may expose it is not. Two
+ * of the three speak no ACP themselves, and what exposes them is a package of Hemera's — named
+ * in `acp`, spawned by the supervisor, never shown and never asked of the reader (D5-21). The
+ * Agents page speaks of Claude Code, Codex and OpenCode, and of nothing else.
+ *
+ * Nothing about an agent is embedded here. Neither the agent nor its adapter is a dependency of
+ * this application yet, and both commands — the reader's and Hemera's — are looked for on the
+ * `PATH` the user already has (issue decision 93). An agent that is not installed is not
+ * installed, and no other one takes its place (D5-17).
  */
 
 import { AGENT_PROVIDERS, type AgentProvider } from '@hemera/core'
@@ -34,21 +39,51 @@ export interface AgentAdapter {
   readonly id: AgentProvider
   /** What the Agents page calls it, as its own documentation does. */
   readonly label: string
-  /** The command to look for on the `PATH`: never `npx`, never a path Hemera ships. */
+  /** The agent's own command on the `PATH`: never `npx`, never a path Hemera ships. */
   readonly command: string
-  /** What starts it as an ACP agent, over standard input and standard output. */
-  readonly args: readonly string[]
   /** What to tell someone who does not have the agent yet. */
   readonly installHint: string
   /**
-   * The published package the command comes from, as the registry names it (design D5-18).
+   * The command that signs this agent in, which is the agent's own and not Hemera's (D5-21).
+   *
+   * Hemera types none of it: the three sign-ins open a browser or ask a question, and they
+   * belong to the tool the reader installed. The line is what the Agents page offers the reader
+   * when the machine is not signed in.
+   */
+  readonly loginHint: string
+  /**
+   * Where this agent keeps the login its own command wrote, and never what it holds.
+   *
+   * Read as a presence: discovery needs one bit of it — signed in or not — and the file is the
+   * reader's, so it is looked for and never opened (D5-21). The paths are built from the home
+   * and the environment of the machine they are looked for on, because each agent decides its
+   * own directory and reads its own override: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_DATA_HOME`.
+   *
+   * A machine that keeps its credentials somewhere no file answers for — the Keychain on macOS,
+   * a keyring — is read as signed out here. The word that counts is the one the agent gives at
+   * `initialize`, and this is only what can be said before a Session starts.
+   */
+  readonly loginFiles: (home: string, env: Environment) => readonly string[]
+  /**
+   * The published package the agent's own command comes from, as the registry names it (design
+   * D5-18).
    *
    * It is what an update installs a newer version of, and it is not the command: the command is
    * what the machine runs, the package is what the machine fetches. The two differ for exactly
    * one of the three agents — the command is `opencode`, the package is `opencode-ai` — which is
-   * why it is written down rather than read off the command's name.
+   * why it is written down rather than read off the command's name. It is the agent's package
+   * and never the adapter's: an update moves the agent the reader has (D5-21).
    */
   readonly package: string
+  /**
+   * How Hemera starts this agent as an agent, which is its own business and never the reader's.
+   *
+   * Two of the three speak no ACP themselves, and what exposes them is a package of Hemera's:
+   * spawned by the supervisor, shown to nobody, asked of the reader never (D5-21). One of the
+   * three is the agent's own command with a subcommand, and the same field carries it. What this
+   * is not is something the Agents page may name.
+   */
+  readonly acp: AcpProcess
   /** The version this agent printed, or `undefined` when the line carries none. */
   readonly readVersion: (output: string) => string | undefined
   /**
@@ -64,6 +99,17 @@ export interface AgentAdapter {
     methods: readonly { readonly id: string; readonly name?: string }[],
   ) => boolean
 }
+
+/** A command that speaks ACP, and the arguments that make it start as one. */
+export interface AcpProcess {
+  /** The command Hemera spawns for this agent, out of its own dependencies. */
+  readonly command: string
+  /** What starts it as an ACP agent, over standard input and standard output. */
+  readonly args: readonly string[]
+}
+
+/** The home and the environment an agent's own paths are read against. */
+export type Environment = Readonly<Record<string, string | undefined>>
 
 /**
  * The version inside a line an agent printed, wherever in the line it sits.
