@@ -1,0 +1,350 @@
+import type { SessionEntry } from '@hemera/ipc'
+import {
+  AgentText,
+  DecisionSummary,
+  DiffBlock,
+  MessageGroup,
+  PermissionRequest,
+  StoppedTurn,
+  ThoughtBlock,
+  ToolCallCard,
+  type PermissionOption,
+  type PermissionOptionKind,
+  type PlanEntry,
+  type PlanPriority,
+  type PlanStatus,
+  type ToolKind,
+  type ToolStatus,
+  type TouchedFile,
+} from '@hemera/ui'
+import type { ReactNode } from 'react'
+import { z } from 'zod'
+
+/**
+ * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
+ *
+ * The thread a Session holds is not a list of messages: it is what the agent reported, entry by
+ * entry, and the kind of an entry is what says which block draws it. This is the one place that
+ * reads that — a page asks for the blocks of a thread and draws them, and the side column asks
+ * for the same thread for the two things it keeps beside it.
+ *
+ * Everything is parsed and nothing is assumed. `payload` is JSON text on the wire rather than a
+ * shape of its own — the same column holds every kind's details, and each kind validates what it
+ * reads (ipc, `sessionEntrySchema`) — so each shape the engine writes is declared here, and an
+ * entry that does not parse is an entry this version does not know how to draw. It is left out
+ * rather than drawn from a guess: a version that met a newer entry still draws the thread it
+ * understands.
+ */
+
+/** The `Call` the runtime stores under `tool_call` (engine, `agents/client.ts`). */
+const callSchema = z.object({
+  title: z.string(),
+  kind: z.string().nullable(),
+  status: z.string().nullable(),
+  locations: z.array(z.string()),
+  detail: z.string(),
+})
+
+/** One block of what a call produced, as ACP defines it (the SDK's `ToolCallContent`). */
+const blockSchema = z.object({
+  type: z.string(),
+  path: z.string().optional(),
+  oldText: z.string().nullable().optional(),
+  newText: z.string().optional(),
+  terminalId: z.string().optional(),
+})
+
+/** A step of the plan the agent published, as it wrote it (the SDK's `PlanEntry`). */
+const planEntrySchema = z.object({
+  content: z.string(),
+  status: z.string(),
+  priority: z.string().optional(),
+})
+
+const choiceSchema = z.object({
+  optionId: z.string(),
+  name: z.string(),
+  kind: z.string(),
+})
+
+const permissionSchema = z.object({
+  toolCallId: z.string(),
+  options: z.array(choiceSchema),
+})
+
+const decisionSchema = z.object({
+  toolCallId: z.string(),
+  optionId: z.string().nullable(),
+})
+
+const turnSchema = z.object({ stopReason: z.string() })
+
+const planSchema = z.object({ entries: z.array(planEntrySchema) })
+
+const callPayloadSchema = z.object({ call: callSchema })
+
+/** What the agent's own vocabulary is when it names something this window does not know. */
+const TOOL_KINDS: readonly ToolKind[] = [
+  'read',
+  'edit',
+  'delete',
+  'move',
+  'search',
+  'execute',
+  'think',
+  'fetch',
+  'other',
+]
+
+const TOOL_STATES: readonly ToolStatus[] = ['pending', 'in_progress', 'completed', 'failed']
+
+const PLAN_STATES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed']
+
+const PLAN_PRIORITIES: readonly PlanPriority[] = ['high', 'medium', 'low']
+
+const PERMISSION_KINDS: readonly PermissionOptionKind[] = [
+  'allow_once',
+  'allow_always',
+  'reject_once',
+  'reject_always',
+]
+
+/**
+ * Which of a closed list a value is, or what the caller says to read instead.
+ *
+ * The fallback is named by the caller rather than being the last of the list: what an unknown
+ * kind means is a decision about the block that draws it, and a routine that picked for everyone
+ * would put that decision where nobody would look for it.
+ */
+function among<T extends string>(allowed: readonly T[], said: string | null, or: T): T {
+  return allowed.find((one) => one === said) ?? or
+}
+
+/**
+ * The payload of an entry, read as the shape this kind is written in.
+ *
+ * Answering null for anything that does not parse, which is what an unknown entry gets: the
+ * thread draws what it understands and says nothing about the rest (see the note above).
+ */
+function readPayload<S extends z.ZodType>(schema: S, payload: string): z.infer<S> | null {
+  try {
+    const read = schema.safeParse(JSON.parse(payload))
+    return read.success ? read.data : null
+  } catch {
+    return null
+  }
+}
+
+/** How much of what a change did, for the column: what the file gained and what it lost. */
+function countsOf(oldText: string | null, newText: string) {
+  const before = oldText === null ? [] : oldText.split('\n')
+  const after = newText.split('\n')
+  // The head and the tail both files share are not part of the change, and everything between
+  // them is: what is left is what a reader would see coloured. It is not a full comparison — two
+  // lines swapped would count as two of each — and it is what the column needs, which counts
+  // rather than shows (the block above shows, and compares for itself).
+  let head = 0
+  while (head < before.length && head < after.length && before[head] === after[head]) head += 1
+  let tail = 0
+  while (
+    tail < before.length - head &&
+    tail < after.length - head &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]
+  ) {
+    tail += 1
+  }
+  return { added: after.length - head - tail, removed: before.length - head - tail }
+}
+
+/** Which Session block an entry is, when the thread is read in order. */
+export interface AgentContext {
+  /** When this render happened, so a line about time is written once. */
+  now: number
+  /** When the next entry was written, which is what a thought's seconds are measured to. */
+  nextAt: number | null
+  /** Answers a permission the agent is waiting on, in the agent's own option. */
+  onDecide: (option: PermissionOption) => void
+}
+
+/**
+ * The block an entry is drawn as, or null when the page draws it elsewhere.
+ *
+ * Two kinds are not blocks of the thread: the plan is the side column's, and the usage is the
+ * composer's — both are states rather than events, and the thread already carries every call
+ * they add up. The console is the third: what a terminal would show is not in the thread (the
+ * engine does not answer `terminal/output`), so an entry that only names a console says its name
+ * as the call it belongs to rather than opening an empty box.
+ */
+export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode | null {
+  if (entry.kind === 'message') {
+    return entry.role === 'user' ? null : <AgentText text={entry.body} />
+  }
+
+  if (entry.kind === 'thought') {
+    const seconds =
+      context.nextAt === null
+        ? 0
+        : Math.max(0, Math.round((context.nextAt - entry.createdAt) / 1000))
+    return (
+      <ThoughtBlock seconds={seconds}>
+        <AgentText text={entry.body} />
+      </ThoughtBlock>
+    )
+  }
+
+  if (entry.kind === 'tool_call') {
+    const read = readPayload(callPayloadSchema, entry.payload)
+    if (read === null) return null
+    const { call } = read
+    return (
+      <ToolCallCard
+        title={call.title}
+        kind={among(TOOL_KINDS, call.kind, 'other')}
+        status={among(TOOL_STATES, call.status, 'pending')}
+        locations={call.locations.map((path) => ({ path }))}
+        defaultOpen={call.status === 'failed'}
+        error={call.status === 'failed' ? entry.body : undefined}
+      />
+    )
+  }
+
+  if (entry.kind === 'diff') {
+    const blocks = readPayload(z.array(blockSchema), entry.payload) ?? []
+    const changes = blocks.filter((block) => block.type === 'diff' && block.newText !== undefined)
+    if (changes.length === 0) return null
+    return (
+      <div className="flex flex-col gap-2">
+        {changes.map((change) => (
+          <DiffBlock
+            key={`${entry.id}:${change.path ?? ''}`}
+            path={change.path ?? ''}
+            oldText={change.oldText ?? null}
+            newText={change.newText ?? ''}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  if (entry.kind === 'permission_request') {
+    const read = readPayload(permissionSchema, entry.payload)
+    if (read === null) return null
+    return (
+      <PermissionRequest
+        toolName={entry.body}
+        intent={entry.body}
+        options={read.options.map((option) => ({
+          optionId: option.optionId,
+          name: option.name,
+          kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
+        }))}
+        scope="For this Session"
+        onDecide={context.onDecide}
+      />
+    )
+  }
+
+  if (entry.kind === 'permission_decision') {
+    const read = readPayload(decisionSchema, entry.payload)
+    const refused = (read?.optionId ?? null) === null
+    return (
+      <DecisionSummary
+        answer={entry.body}
+        at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}
+        refused={refused}
+      />
+    )
+  }
+
+  if (entry.kind === 'turn') {
+    const read = readPayload(turnSchema, entry.payload)
+    // A turn that simply ended is not news: the agent's answer above it is. What is worth a line
+    // is a turn that stopped for a reason the reader has to know about (D5-13).
+    if (read === null || read.stopReason === 'end_turn') return null
+    return (
+      <StoppedTurn
+        doing={entry.body}
+        at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}
+        byTheReader={read.stopReason === 'cancelled'}
+      />
+    )
+  }
+
+  if (entry.kind === 'note') {
+    return (
+      <MessageGroup author="hemera" name="Hemera" lines={[{ id: entry.id, body: entry.body }]} />
+    )
+  }
+
+  return null
+}
+
+/** The plan the agent last published, which is the whole of it and never a merge. */
+export function planOf(entries: readonly SessionEntry[]): readonly PlanEntry[] {
+  for (let at = entries.length - 1; at >= 0; at -= 1) {
+    const entry = entries[at]
+    if (entry === undefined || entry.kind !== 'plan') continue
+    const read = readPayload(planSchema, entry.payload)
+    if (read === null) return []
+    return read.entries.map((step) => ({
+      content: step.content,
+      status: among(PLAN_STATES, step.status, 'pending'),
+      priority: among(PLAN_PRIORITIES, step.priority ?? null, 'medium'),
+    }))
+  }
+  return []
+}
+
+/** The files the turn has touched, counted, in the order the calls named them. */
+export function touchedOf(entries: readonly SessionEntry[]): readonly TouchedFile[] {
+  const files: TouchedFile[] = []
+  for (const entry of entries) {
+    if (entry.kind !== 'diff') continue
+    const blocks = readPayload(z.array(blockSchema), entry.payload) ?? []
+    for (const block of blocks) {
+      if (block.type !== 'diff' || block.newText === undefined) continue
+      const path = block.path ?? ''
+      const counted = countsOf(block.oldText ?? null, block.newText)
+      const held = files.find((one) => one.path === path)
+      if (held === undefined) files.push({ path, ...counted })
+      else {
+        held.added += counted.added
+        held.removed += counted.removed
+      }
+    }
+  }
+  return files
+}
+
+/**
+ * The permission the agent is waiting on, when it is waiting.
+ *
+ * A request is answered by the decision written after it, and the two share the call they are
+ * about: that is what says the question is closed, rather than the fact that something else has
+ * happened since. A Session whose agent was stopped mid-question has a request and no decision —
+ * and is not waiting, because no turn is running (D5-17).
+ */
+export function waitingOf(entries: readonly SessionEntry[]): SessionEntry | null {
+  for (let at = entries.length - 1; at >= 0; at -= 1) {
+    const entry = entries[at]
+    if (entry === undefined) continue
+    if (entry.kind === 'permission_decision') return null
+    if (entry.kind === 'permission_request') {
+      for (let after = at + 1; after < entries.length; after += 1) {
+        const later = entries[after]
+        if (later === undefined || later.kind !== 'permission_decision') continue
+        const read = readPayload(decisionSchema, later.payload)
+        const asked = readPayload(permissionSchema, entry.payload)
+        if (read !== null && asked !== null && read.toolCallId === asked.toolCallId) return null
+      }
+      return entry
+    }
+  }
+  return null
+}

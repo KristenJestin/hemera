@@ -53,6 +53,20 @@ import { JournalPage } from './pages/journal.tsx'
 import { ProjectSettingsPage } from './pages/project-settings.tsx'
 import { SessionPage } from './pages/session.tsx'
 import { SettingsPage } from './pages/settings.tsx'
+import {
+  agentOf,
+  agentSnapshot,
+  checkAgents,
+  chooseOption,
+  decide,
+  listenToAgents,
+  optionsOf,
+  readOptions,
+  say,
+  stopTurn,
+  subscribeToAgent,
+  updateAgent,
+} from './agent-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
   archivedSessions,
@@ -219,6 +233,9 @@ export function Application() {
   )
   const journal = useSyncExternalStore(subscribeToJournal, journalSnapshot, journalSnapshot)
   const sessions = useSyncExternalStore(subscribeToSessions, sessionsSnapshot, sessionsSnapshot)
+  // What the agents are doing, per Session: a turn is not a fact about the window, and a window
+  // that heard only about the Session on screen would lose the one behind it (design D5-12).
+  const agents = useSyncExternalStore(subscribeToAgent, agentSnapshot, agentSnapshot)
 
   const [place, setPlace] = useState<Place>('entry')
   const [commanding, setCommanding] = useState(false)
@@ -232,6 +249,15 @@ export function Application() {
   const [folders, setFolders] = useState<RepositoryLine[]>([])
   /** Which Session of which Project was open last, as the preferences remembered it. */
   const [remembered, setRemembered] = useState<Record<string, string> | null>(null)
+  /**
+   * Which agent is being updated, and what its own tool last said about it (design D5-18).
+   *
+   * The output is kept per agent and never overwritten by the next one: an update is a command
+   * whose words are the reason it refused, and losing them would leave the reader with a button
+   * that has nothing to show for itself.
+   */
+  const [updating, setUpdating] = useState<string | null>(null)
+  const [updateOutput, setUpdateOutput] = useState<Readonly<Record<string, string>>>({})
   /** What was put away, which only the archived page asks for and only while it is open. */
   const [putAway, setPutAway] = useState<Session[]>([])
   /** The Session whose title is being typed into, when one is. */
@@ -286,6 +312,9 @@ export function Application() {
     () => sessions.sessions.find((one) => one.id === shell.activeEntryId) ?? null,
     [sessions.sessions, shell.activeEntryId],
   )
+  /** The two halves of `open` that effects may depend on, which are not the same every render. */
+  const openId = open?.id ?? null
+  const provider = open?.provider ?? null
 
   // Everything the window shows about the data folder, asked for once it is open.
   useEffect(() => {
@@ -371,6 +400,27 @@ export function Application() {
     if (!sessions.sessions.some((one) => one.id === id)) return
     void openSession(id)
   }, [shell.activeEntryId, sessions.sessions, sessions.open, sessions.loaded])
+
+  // The engine, listened to for as long as the window is open: an entry an agent writes is a fact
+  // about a Session and not about the page on screen, so one subscription holds them all and each
+  // page reads the Session it draws (design D5-12).
+  useEffect(() => listenToAgents(), [])
+
+  // What the agent of the Session on screen offers, asked when that Session becomes the one the
+  // window is on: an agent announces its models and its modes when it starts, and what it is on
+  // now is its own answer rather than a value this window remembers (design D5-13).
+  useEffect(() => {
+    if (openId === null || provider === null) return
+    void readOptions(openId)
+  }, [openId, provider])
+
+  // What each registry published, asked when the Agents section is opened and only then: the
+  // question leaves the machine, and a list read on every start would be a list asked on the
+  // reader's behalf (design D5-18).
+  useEffect(() => {
+    if (place !== 'settings') return
+    void checkAgents()
+  }, [place])
 
   // Remembered for the next start, which is one Session per Project and not one in all. What
   // was written is kept here too: this is the answer the next opening of a Project is placed
@@ -694,6 +744,35 @@ export function Application() {
               .invoke('shell.open', { what: 'diagnostic' })
               .catch(unanswered('shell.open'))
           }}
+          agents={{
+            agents: agents.agents.map((one) => ({
+              id: one.id,
+              name: one.label,
+              found: one.found,
+              version: one.version,
+              authenticated: one.authenticated,
+              installHint: one.installHint,
+              installer: one.installer,
+              latest: one.latest,
+            })),
+            checked: agents.checked,
+            updating,
+            output: updateOutput,
+            onUpdate: (id) => {
+              // Resolved among the agents the engine knows: what the page holds is a string, and
+              // the one the channel takes is the agent's own name.
+              const chosen = agents.agents.find((one) => one.id === id)
+              if (chosen === undefined) return
+              setUpdating(id)
+              void updateAgent(chosen.id)
+                .then((answered) => {
+                  if (answered !== null) {
+                    setUpdateOutput((said) => ({ ...said, [id]: answered.output }))
+                  }
+                })
+                .finally(() => setUpdating(null))
+            },
+          }}
           archived={archived.map((project): ArchivedProject => ({
             id: project.id,
             name: project.name,
@@ -796,7 +875,13 @@ export function Application() {
           now={Date.now()}
           editing={naming === open.id}
           refusal={sessions.refusal}
+          agent={agentOf(open.id)}
+          options={optionsOf(open.id)}
           onWrite={async (body) => await writeInto(open.id, body)}
+          onSay={(text) => void say(open.id, text)}
+          onStop={() => void stopTurn(open.id)}
+          onDecide={(option) => void decide(open.id, option.optionId)}
+          onChooseOption={(optionId, value) => void chooseOption(open.id, optionId, value)}
           onRename={(title) => void renameTo(open, title)}
           onStartEditing={() => setNaming(open.id)}
           onCancelEditing={() => setNaming(null)}

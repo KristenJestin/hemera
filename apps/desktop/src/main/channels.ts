@@ -188,6 +188,17 @@ const RELAYED = [
   'sessions.restore',
   'sessions.append',
   'sessions.read',
+  // The agents, relayed like the rest: what a Session is, what it was asked, and whether the
+  // command of an agent is on this machine are all the engine's to answer (design D5-13, D5-18).
+  'agents.list',
+  'agents.options',
+  'agents.setOption',
+  'agents.prompt',
+  'agents.stop',
+  'agents.decide',
+  'agents.resume',
+  'agents.check',
+  'agents.update',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]
