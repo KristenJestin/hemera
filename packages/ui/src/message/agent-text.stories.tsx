@@ -33,6 +33,12 @@ const meta = {
       </div>
     ),
   ],
+  argTypes: {
+    text: {
+      control: 'text',
+      description: 'The answer as it stands, which may stop in the middle of a fence or a list.',
+    },
+  },
   args: {
     text: 'The export reads the month from the query, so a run in January exports December.',
   },
