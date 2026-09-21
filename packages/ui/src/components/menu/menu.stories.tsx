@@ -1,16 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { IconPlus, IconSettings, IconTrash } from '../../icons.ts'
+import { IconDots, IconPlus, IconSettings, IconTrash } from '../../icons.ts'
 import { Menu } from './menu.tsx'
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Menu',
   component: Menu,
   args: { label: 'Session', groups: [] },
   argTypes: {
     label: { control: 'text' },
+    icon: { table: { disable: true } },
     disabled: { control: 'boolean' },
     groups: { table: { disable: true } },
     className: { table: { disable: true } },
@@ -49,6 +50,30 @@ export const Variants: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('button', { name: 'Session' })).toBeInTheDocument()
     expect(canvas.getByRole('button', { name: 'Locked' })).toBeDisabled()
+  },
+}
+
+/**
+ * The trigger as one icon of the catalogue: the mark says what is behind it, and the label
+ * becomes the control's name, which is what a screen reader reads and what the tests find.
+ *
+ * It is the shape the head of a Session uses for its two commands (review of #40, defect 4).
+ */
+export const IconTrigger: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => <Menu {...args} icon={<IconDots size="sm" />} groups={commands(fn())} />,
+  play: async ({ canvasElement }) => {
+    const trigger = within(canvasElement).getByRole('button', { name: 'Session' })
+    expect(trigger).toBeInTheDocument()
+
+    await userEvent.click(trigger)
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    expect(within(menu).getByRole('menuitem', { name: /new session/i })).toBeInTheDocument()
+
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
   },
 }
 

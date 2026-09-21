@@ -38,6 +38,8 @@ import {
   IconDatabaseFilled as TablerDatabaseFilled,
   IconDeviceDesktop as TablerDeviceDesktop,
   IconDeviceDesktopFilled as TablerDeviceDesktopFilled,
+  IconDots as TablerDots,
+  IconDotsFilled as TablerDotsFilled,
   IconFileText as TablerFileText,
   IconFileTextFilled as TablerFileTextFilled,
   IconFolder as TablerFolder,
@@ -175,6 +177,7 @@ export const IconDeviceDesktop = catalogued(
   TablerDeviceDesktop,
   'IconDeviceDesktop',
 )
+export const IconDots = catalogued(TablerDotsFilled, TablerDots, 'IconDots')
 export const IconFileText = catalogued(TablerFileTextFilled, TablerFileText, 'IconFileText')
 export const IconFolder = catalogued(TablerFolderFilled, TablerFolder, 'IconFolder')
 export const IconFolderOpen = catalogued(TablerFolderOpenFilled, TablerFolderOpen, 'IconFolderOpen')
