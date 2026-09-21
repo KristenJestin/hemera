@@ -28,6 +28,8 @@ import {
   type SessionNotification,
   type StopReason,
   type Usage,
+  type SessionConfigOption,
+  type SessionConfigSelectOptions,
 } from '@agentclientprotocol/sdk'
 import { Data, Effect } from 'effect'
 
@@ -59,6 +61,15 @@ export interface ToolCallReport {
    * then have to keep in step with the protocol.
    */
   readonly detail: string
+  /**
+   * What kinds of content the call carries — `diff`, `terminal`, `text`, `image` — as it named
+   * them.
+   *
+   * The runtime reads them to write the entries the side column draws on their own, and never
+   * reads the detail to find out: a report says what it holds rather than making its reader
+   * parse it.
+   */
+  readonly contents: readonly string[]
 }
 
 /** One line of the plan the agent is keeping, as it reports it. */
@@ -88,8 +99,19 @@ export interface UsageReport {
  * reported rather than dropped, so the banner over a resumed thread can say what arrived.
  */
 export type AgentEvent =
-  | { readonly type: 'message'; readonly text: string; readonly replay: boolean }
-  | { readonly type: 'thought'; readonly text: string; readonly replay: boolean }
+  | {
+      readonly type: 'message'
+      readonly text: string
+      readonly replay: boolean
+      /** The message this chunk belongs to, when the agent named one (D5-08). */
+      readonly messageId: string | null
+    }
+  | {
+      readonly type: 'thought'
+      readonly text: string
+      readonly replay: boolean
+      readonly messageId: string | null
+    }
   | { readonly type: 'tool_call'; readonly call: ToolCallReport; readonly replay: boolean }
   | { readonly type: 'plan'; readonly entries: readonly PlanLine[]; readonly replay: boolean }
 
@@ -106,6 +128,32 @@ export interface AgentHandshake {
   readonly authenticated: boolean
   /** Whether this agent can be asked to continue a session it handed back (D5-06). */
   readonly continues: boolean
+  /**
+   * Whether it can carry that session on without streaming it back first (D5-07).
+   *
+   * `session/resume` hands the conversation over as it stands, where `session/load` sends the
+   * whole history again. Which one was used is what tells the thread whether what arrives is a
+   * replay to be matched against what it already holds, or new work.
+   */
+  readonly resumes: boolean
+}
+
+/**
+ * One thing the agent lets this Session choose, as the composer offers it (design D5-13).
+ *
+ * The list is the agent's own: Hemera draws a selector per option the agent announced and
+ * invents none, so an agent offering a model and an effort gets two and one offering nothing
+ * gets none. A `select` carries the values it accepts; a `boolean` is a switch and carries
+ * none, its `value` being `true` or `false` as text.
+ */
+export interface AgentOption {
+  readonly id: string
+  readonly name: string
+  /** `model`, `mode`, `thought_level` — or null when the agent did not say. */
+  readonly category: string | null
+  readonly kind: 'select' | 'boolean'
+  readonly value: string
+  readonly values: readonly { readonly id: string; readonly name: string }[]
 }
 
 /** A permission the agent is waiting for, as a question with the answers it offers. */
@@ -142,6 +190,13 @@ export interface PromptOutcome {
  */
 export interface AgentConnection {
   readonly handshake: AgentHandshake
+  /** What the agent lets this Session choose, as it announced it when the session opened. */
+  readonly options: () => readonly AgentOption[]
+  /** Asks the agent for one of them, and answers what it says the options are now. */
+  readonly setOption: (
+    optionId: string,
+    value: string,
+  ) => Effect.Effect<readonly AgentOption[], AgentProtocolError>
   /** Opens a session in that directory and answers the handle the agent gave it. */
   readonly open: (workingDirectory: string) => Effect.Effect<string, AgentProtocolError>
   /** Asks the agent to carry on the session it handed back, streaming its history again. */
@@ -177,11 +232,15 @@ function eventOf(notification: SessionNotification, replay: boolean): AgentEvent
   switch (update.sessionUpdate) {
     case 'agent_message_chunk': {
       const text = textOf(update.content)
-      return text === null ? null : { type: 'message', text, replay }
+      return text === null
+        ? null
+        : { type: 'message', text, replay, messageId: update.messageId ?? null }
     }
     case 'agent_thought_chunk': {
       const text = textOf(update.content)
-      return text === null ? null : { type: 'thought', text, replay }
+      return text === null
+        ? null
+        : { type: 'thought', text, replay, messageId: update.messageId ?? null }
     }
     case 'tool_call':
     case 'tool_call_update': {
@@ -200,6 +259,9 @@ function eventOf(notification: SessionNotification, replay: boolean): AgentEvent
             (location) => location.path,
           ),
           detail: JSON.stringify('content' in update ? (update.content ?? []) : []),
+          contents: ('content' in update ? (update.content ?? []) : []).map(
+            (block) => block.type,
+          ),
         },
       }
     }
@@ -215,6 +277,37 @@ function eventOf(notification: SessionNotification, replay: boolean): AgentEvent
     default:
       return null
   }
+}
+
+/**
+ * The values one announced option accepts, flattened.
+ *
+ * ACP lets an agent group its values; the composer draws one flat list per option, so a group
+ * is a heading the window does not need and its values are what it has.
+ */
+function choicesOf(options: SessionConfigSelectOptions): readonly {
+  readonly id: string
+  readonly name: string
+}[] {
+  return options.flatMap((choice) =>
+    'value' in choice
+      ? [{ id: choice.value, name: choice.name }]
+      : choice.options.map((nested) => ({ id: nested.value, name: nested.name })),
+  )
+}
+
+/** What an agent lets a Session choose, in Hemera's words. */
+function optionsOf(
+  announced: readonly SessionConfigOption[] | null | undefined,
+): readonly AgentOption[] {
+  return (announced ?? []).map((option) => ({
+    id: option.id,
+    name: option.name,
+    category: option.category ?? null,
+    kind: option.type === 'boolean' ? ('boolean' as const) : ('select' as const),
+    value: option.type === 'boolean' ? String(option.currentValue) : option.currentValue,
+    values: option.type === 'boolean' ? [] : choicesOf(option.options),
+  }))
 }
 
 /** What a finished turn used, or null when the agent accounted for nothing. */
@@ -250,6 +343,14 @@ export function connect(
      */
     let replaying = false
     let sessionId: string | null = null
+    /**
+     * What the agent said it lets this Session choose, as it last said it.
+     *
+     * Held here rather than in the caller because every answer that changes an option carries
+     * the whole set back: the composer is drawn from the agent's own words, and this is the one
+     * place that keeps them.
+     */
+    let announced: readonly AgentOption[] = []
 
     const client: AcpClient = {
       // ACP's own contract: whatever the user answered, in the shape the protocol takes it in.
@@ -306,7 +407,28 @@ export function connect(
         authMethods: methods,
         authenticated: adapter.isAuthenticated(methods),
         continues: handshake.agentCapabilities?.loadSession === true,
+        resumes: handshake.agentCapabilities?.sessionCapabilities?.resume != null,
       },
+
+      options: () => announced,
+
+      setOption: (optionId, value) =>
+        Effect.gen(function* () {
+          const open = yield* named(sessionId ?? '', 'setSessionConfigOption')
+          const chosen = announced.find((option) => option.id === optionId)
+          const answered = yield* Effect.tryPromise({
+            try: () =>
+              connection.setSessionConfigOption(
+                chosen?.kind === 'boolean'
+                  ? { sessionId: open, configId: optionId, type: 'boolean', value: value === 'true' }
+                  : { sessionId: open, configId: optionId, value },
+              ),
+            catch: (cause) =>
+              new AgentProtocolError({ what: 'setSessionConfigOption', cause: String(cause) }),
+          })
+          announced = optionsOf(answered.configOptions)
+          return announced
+        }),
 
       open: (workingDirectory) =>
         Effect.gen(function* () {
@@ -315,22 +437,37 @@ export function connect(
             catch: (cause) => new AgentProtocolError({ what: 'newSession', cause: String(cause) }),
           })
           sessionId = opened.sessionId
+          announced = optionsOf(opened.configOptions)
           return opened.sessionId
         }),
 
       continueSession: (nativeSessionId, workingDirectory) =>
         Effect.gen(function* () {
-          replaying = true
-          yield* Effect.tryPromise({
+          // `resume` hands the conversation over as it stands; `load` sends it back and every
+          // chunk of it arrives as a replay, which is why only one of the two sets the flag.
+          const resumes = handshake.agentCapabilities?.sessionCapabilities?.resume != null
+          replaying = !resumes
+          const answered = yield* Effect.tryPromise({
             try: () =>
-              connection.loadSession({
-                sessionId: nativeSessionId,
-                cwd: workingDirectory,
-                mcpServers: [],
+              resumes
+                ? connection.resumeSession({
+                    sessionId: nativeSessionId,
+                    cwd: workingDirectory,
+                    mcpServers: [],
+                  })
+                : connection.loadSession({
+                    sessionId: nativeSessionId,
+                    cwd: workingDirectory,
+                    mcpServers: [],
+                  }),
+            catch: (cause) =>
+              new AgentProtocolError({
+                what: resumes ? 'resumeSession' : 'loadSession',
+                cause: String(cause),
               }),
-            catch: (cause) => new AgentProtocolError({ what: 'loadSession', cause: String(cause) }),
           }).pipe(Effect.ensuring(Effect.sync(() => (replaying = false))))
           sessionId = nativeSessionId
+          announced = optionsOf(answered.configOptions)
         }),
 
       prompt: (text) =>
