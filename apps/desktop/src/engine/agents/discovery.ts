@@ -1,5 +1,5 @@
 import { exec, execFile } from 'node:child_process'
-import { accessSync, constants, statSync } from 'node:fs'
+import { accessSync, constants, readdirSync, statSync } from 'node:fs'
 import { delimiter, extname, join } from 'node:path'
 import { Context, Data, Effect, Layer } from 'effect'
 
@@ -271,7 +271,15 @@ function runnable(candidate: string, windows: boolean): boolean {
   }
 }
 
-/** Where a command resolves on this process's `PATH`, or `undefined` when it is not on it. */
+/**
+ * Where a command resolves on this process's `PATH`, or `undefined` when it is not on it.
+ *
+ * On Windows the name that answers is not always the name that was asked for: `PATHEXT` is looked
+ * up against a file system that does not care about case, so `fake-agent.cmd` answers to
+ * `fake-agent.CMD`. What a caller needs back is the name the file is really called — running a
+ * batch file means naming it to `cmd`, and a name that only matches by case is a name nothing
+ * there resolves. The directory is listed for it, and the candidate is the entry that matched.
+ */
 function locate(command: string): string | undefined {
   const windows = process.platform === 'win32'
   const extensions = windows ? extensionsFrom(process.env.PATHEXT) : []
@@ -279,10 +287,23 @@ function locate(command: string): string | undefined {
     if (directory === '') continue
     for (const shim of shimsOf(command, windows, extensions)) {
       const candidate = join(directory, shim)
-      if (runnable(candidate, windows)) return candidate
+      if (!runnable(candidate, windows)) continue
+      const written = windows ? spelledIn(directory, shim) : undefined
+      return written === undefined ? candidate : join(directory, written)
     }
   }
   return undefined
+}
+
+/** The name one directory holds for a candidate, spelled as the file system spells it. */
+function spelledIn(directory: string, shim: string): string | undefined {
+  try {
+    const wanted = shim.toLowerCase()
+    return readdirSync(directory).find((name) => name.toLowerCase() === wanted)
+  } catch {
+    // A directory this process may not list is still one a candidate can be started from.
+    return undefined
+  }
 }
 
 /**
