@@ -301,10 +301,15 @@ export const Complete: Story = {
     // The column is the state: the plan the agent works to, and the files the turn touched.
     await expect(canvas.getByText('Files')).toBeVisible()
     await expect(canvas.getByText('src/billing/export.ts')).toBeVisible()
-    // The change is read in the language of its file, which is what the extension bought.
-    await waitFor(() => {
-      expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
-    })
+    // The change is read in the language of its file, which is what the extension bought. The
+    // grammar of that language is a module loaded on demand, so the first diff of a session waits
+    // for it: on a cold machine that load is slower than the default patience of a wait.
+    await waitFor(
+      () => {
+        expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
+      },
+      { timeout: 10_000 },
+    )
     // The agent is waiting for an answer, and the turn it is in can be stopped.
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
     // One Stop on the box and one on the strip that says why the box is waiting.
