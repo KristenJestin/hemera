@@ -737,3 +737,59 @@
     background-color: var(--color-primary-muted);
   }
 }
+
+/* ---- What a diff is coloured with (design D17-13) ----
+
+   The highlighter names a role per token and writes it as a variable — `var(--shiki-token-keyword)`
+   — and the block below is the only place a role meets a colour, exactly as every other colour of
+   the interface. Nothing in a component knows that a keyword is magenta; the classes below are
+   what a token wears, and the role's variable is set on the diff's own box so that what a diff is
+   coloured with cannot leak into the rest of the window. The names are the ones shiki's own
+   css-variables theme uses: swap the colour without touching the highlighter, or the highlighter
+   without touching a colour. */
+.code-diff {
+  --shiki-foreground: var(--foreground);
+  --shiki-background: transparent;
+  --shiki-token-comment: var(--muted-foreground);
+  --shiki-token-constant: var(--info-muted-foreground);
+  --shiki-token-keyword: var(--primary-strong);
+  --shiki-token-string: var(--success-muted-foreground);
+  --shiki-token-function: var(--mission-define-muted-foreground);
+  --shiki-token-parameter: var(--mission-build-muted-foreground);
+  --shiki-token-punctuation: var(--muted-foreground);
+  --shiki-token-link: var(--info-muted-foreground);
+}
+
+.tok-comment {
+  color: var(--shiki-token-comment);
+  font-style: italic;
+}
+
+.tok-constant {
+  color: var(--shiki-token-constant);
+}
+
+.tok-keyword {
+  color: var(--shiki-token-keyword);
+}
+
+.tok-string {
+  color: var(--shiki-token-string);
+}
+
+.tok-function {
+  color: var(--shiki-token-function);
+}
+
+.tok-parameter {
+  color: var(--shiki-token-parameter);
+}
+
+.tok-punctuation {
+  color: var(--shiki-token-punctuation);
+}
+
+.tok-link {
+  color: var(--shiki-token-link);
+  text-decoration: underline;
+}

@@ -1,8 +1,15 @@
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import { useCallback, useSyncExternalStore, type ReactNode } from 'react'
 
 import { IconGitBranch } from '../icons.ts'
 import { Disclosure } from './disclosure.tsx'
+import {
+  highlighted,
+  languageOf,
+  subscribeToHighlight,
+  warm,
+  type HighlightedLine,
+} from './highlight.ts'
 
 /**
  * One file's change, as the turn made it (design D17-07).
@@ -21,6 +28,11 @@ import { Disclosure } from './disclosure.tsx'
  *
  * The body has its own box and its own scroll: a three-hundred-line file whose only change is
  * on line four would otherwise push the rest of the turn off the screen.
+ *
+ * The lines are coloured in the language of the file, taken from its extension (design
+ * D17-13): not here, in `highlight.ts`, and with the roles of the theme rather than with
+ * colours. A file nothing here has a grammar for is drawn plain, and so is the first frame:
+ * the grammar is loaded when a diff of its language is first read, never one frame earlier.
  */
 
 /**
@@ -58,9 +70,10 @@ interface Change {
 /** The line that is read: the path, then how much of it moved. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
-/** Where the lines are written: a box of a bounded height, scrolling inside the thread. */
+/** Where the lines are written: a box of a bounded height, scrolling inside the thread, and
+    the element the colours of the code are read from. */
 const BOX =
-  'scroll-quiet max-h-64 overflow-auto rounded-md border border-border bg-muted py-1 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
+  'code-diff scroll-quiet max-h-64 overflow-auto rounded-md border border-border bg-muted py-1 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
 
 /** One line: its mark, and the line itself, which does not wrap but scrolls across. */
 const ROW = 'flex gap-2 px-2 font-mono text-xs whitespace-pre'
@@ -111,6 +124,35 @@ function compare(oldText: string | null, newText: string): Change {
   return { lines, added: added.length, removed: removed.length }
 }
 
+/**
+ * The tokens of the code, once its grammar is in hand — and null until then, so the first
+ * frame draws the change plain rather than drawing nothing at all.
+ */
+function useHighlighted(code: string, language: string | null): HighlightedLine[] | null {
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      if (language !== null) void warm(language)
+      return subscribeToHighlight(listener)
+    },
+    [language],
+  )
+  return useSyncExternalStore(
+    subscribe,
+    () => highlighted(code, language),
+    () => null,
+  )
+}
+
+/** One line of the change: what the grammar found in it, or the line itself, plain. */
+function tokensOfLine(line: HighlightedLine | undefined, text: string): ReactNode {
+  if (line === undefined) return text
+  return line.map((token, index) => (
+    <span key={index} className={token.className === '' ? undefined : token.className}>
+      {token.text}
+    </span>
+  ))
+}
+
 export interface DiffBlockProps {
   /** The absolute path of the file, as the agent reported it. */
   path: string
@@ -132,6 +174,12 @@ export function DiffBlock({
   className,
 }: DiffBlockProps): ReactNode {
   const change = compare(oldText, newText)
+  const language = languageOf(path)
+  // The lines as one text, so that a construct spanning several of them — a block comment, a
+  // template string — is read as the one thing it is; each drawn line then takes its own
+  // tokens back, which is what the grammar counted them against.
+  const code = change.lines.map((line) => line.text).join('\n')
+  const drawn = useHighlighted(code, language)
   return (
     <Disclosure
       className={className}
@@ -162,7 +210,7 @@ export function DiffBlock({
               <span aria-hidden="true" className={cn(GUTTER[line.kind], MARKS)}>
                 {MARK[line.kind]}
               </span>
-              <span>{line.text}</span>
+              <span>{drawn === null ? line.text : tokensOfLine(drawn[index], line.text)}</span>
             </div>
           </div>
         ))}
