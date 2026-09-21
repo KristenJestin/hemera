@@ -36,6 +36,15 @@ import {
 let folder: string
 let scripts = 0
 
+/**
+ * A signal is not what ends a process on Windows: there is no `SIGTERM` to send and no `SIGKILL`
+ * to escalate to, and a death there is observed with an exit code and no signal at all. What takes
+ * a tree down there is `taskkill /T /F`, the platform branch of `supervisor.ts`, and it is the
+ * Windows job of the pipeline that runs it. These four cases assert what that platform cannot
+ * produce — a signal, and one death seen once — so they are skipped rather than weakened.
+ */
+const onWindows = process.platform === 'win32'
+
 beforeEach(() => {
   folder = mkdtempSync(join(tmpdir(), 'hemera-supervisor-'))
 })
@@ -236,28 +245,31 @@ function pidOf(child: SupervisedProcess): number {
 }
 
 describe('The process is killed by hand', () => {
-  test('a child that dies is seen to die, with the signal that ended it', async () => {
-    const sink = sinkOf()
-    const aliveFor = script(ALIVE_FOR)
+  test.skipIf(onWindows)(
+    'a child that dies is seen to die, with the signal that ended it',
+    async () => {
+      const sink = sinkOf()
+      const aliveFor = script(ALIVE_FOR)
 
-    const [observation, where] = await opened(sink)(
-      Effect.gen(function* () {
-        const child = yield* starting(process.execPath, [aliveFor], {})
-        const pid = pidOf(child)
-        // Killed by hand, the way a user or the system does it: this death is not one the
-        // supervisor asked for, and it still has to notice it.
-        process.kill(pid, 'SIGTERM')
-        return [yield* child.exited, pid] as const
-      }),
-    )
+      const [observation, where] = await opened(sink)(
+        Effect.gen(function* () {
+          const child = yield* starting(process.execPath, [aliveFor], {})
+          const pid = pidOf(child)
+          // Killed by hand, the way a user or the system does it: this death is not one the
+          // supervisor asked for, and it still has to notice it.
+          process.kill(pid, 'SIGTERM')
+          return [yield* child.exited, pid] as const
+        }),
+      )
 
-    expect(observation.signal).toBe('SIGTERM')
-    expect(observation.code).toBeNull()
-    expect(Number.isNaN(Date.parse(observation.when))).toBe(false)
-    expect(await goneWithin(where, 2_000)).toBe(true)
-    // The engine is told, and being told is what lets a thread survive a death it did not cause.
-    expect(said(sink)).toContain(`${String(where)} ended with SIGTERM`)
-  })
+      expect(observation.signal).toBe('SIGTERM')
+      expect(observation.code).toBeNull()
+      expect(Number.isNaN(Date.parse(observation.when))).toBe(false)
+      expect(await goneWithin(where, 2_000)).toBe(true)
+      // The engine is told, and being told is what lets a thread survive a death it did not cause.
+      expect(said(sink)).toContain(`${String(where)} ended with SIGTERM`)
+    },
+  )
 
   test('a child that ends by itself is seen to end, with the code it chose', async () => {
     const sink = sinkOf()
@@ -277,7 +289,7 @@ describe('The process is killed by hand', () => {
     expect(observation.signal).toBeNull()
   })
 
-  test('the death is observed once, however many wait for it', async () => {
+  test.skipIf(onWindows)('the death is observed once, however many wait for it', async () => {
     const sink = sinkOf()
     const aliveFor = script(ALIVE_FOR)
 
@@ -331,57 +343,63 @@ describe('The process is killed by hand', () => {
 })
 
 describe('No orphan after stop', () => {
-  test('a child that spawned a grandchild leaves neither behind when it is stopped', async () => {
-    const sink = sinkOf()
-    const where = join(folder, 'grandchild.pid')
-    const spawnsAGrandchild = script(SPAWNS_A_GRANDCHILD)
+  test.skipIf(onWindows)(
+    'a child that spawned a grandchild leaves neither behind when it is stopped',
+    async () => {
+      const sink = sinkOf()
+      const where = join(folder, 'grandchild.pid')
+      const spawnsAGrandchild = script(SPAWNS_A_GRANDCHILD)
 
-    const [child, grandchild, bothUp] = await opened(sink)(
-      Effect.gen(function* () {
-        const started = yield* starting(process.execPath, [spawnsAGrandchild, where], {})
-        const childPid = pidOf(started)
-        const grandchildPid = Number(yield* Effect.promise(() => writtenIn(where)))
-        const bothWereUp = alive(childPid) && alive(grandchildPid)
-        // The graceful stop: the input closes, the group is signalled, the grace is spent.
-        yield* started.stop
-        return [childPid, grandchildPid, bothWereUp] as const
-      }),
-    )
+      const [child, grandchild, bothUp] = await opened(sink)(
+        Effect.gen(function* () {
+          const started = yield* starting(process.execPath, [spawnsAGrandchild, where], {})
+          const childPid = pidOf(started)
+          const grandchildPid = Number(yield* Effect.promise(() => writtenIn(where)))
+          const bothWereUp = alive(childPid) && alive(grandchildPid)
+          // The graceful stop: the input closes, the group is signalled, the grace is spent.
+          yield* started.stop
+          return [childPid, grandchildPid, bothWereUp] as const
+        }),
+      )
 
-    expect(bothUp).toBe(true)
-    // The signal, and not the escalation, is what ended the child: the group carried it.
-    expect(said(sink)).toContain(`${String(child)} ended with SIGTERM`)
-    // Both are really gone, asked of the kernel and not of the call that returned.
-    expect(await goneWithin(child, 3_000)).toBe(true)
-    expect(await goneWithin(grandchild, 3_000)).toBe(true)
-  })
+      expect(bothUp).toBe(true)
+      // The signal, and not the escalation, is what ended the child: the group carried it.
+      expect(said(sink)).toContain(`${String(child)} ended with SIGTERM`)
+      // Both are really gone, asked of the kernel and not of the call that returned.
+      expect(await goneWithin(child, 3_000)).toBe(true)
+      expect(await goneWithin(grandchild, 3_000)).toBe(true)
+    },
+  )
 
-  test('a child that ignores the signal is taken down when the grace expires', async () => {
-    const sink = sinkOf()
-    const ready = join(folder, 'ready')
-    const refusesToDie = script(REFUSES_TO_DIE)
+  test.skipIf(onWindows)(
+    'a child that ignores the signal is taken down when the grace expires',
+    async () => {
+      const sink = sinkOf()
+      const ready = join(folder, 'ready')
+      const refusesToDie = script(REFUSES_TO_DIE)
 
-    const [where, spent, signal] = await opened(sink)(
-      Effect.gen(function* () {
-        const child = yield* starting(process.execPath, [refusesToDie, ready], {
-          graceMilliseconds: 200,
-        })
-        const pid = pidOf(child)
-        // The child is up and refusing only once it says so.
-        yield* Effect.promise(() => writtenIn(ready))
-        const from = Date.now()
-        yield* child.stop
-        const observation = yield* child.exited
-        return [pid, Date.now() - from, observation.signal] as const
-      }),
-    )
+      const [where, spent, signal] = await opened(sink)(
+        Effect.gen(function* () {
+          const child = yield* starting(process.execPath, [refusesToDie, ready], {
+            graceMilliseconds: 200,
+          })
+          const pid = pidOf(child)
+          // The child is up and refusing only once it says so.
+          yield* Effect.promise(() => writtenIn(ready))
+          const from = Date.now()
+          yield* child.stop
+          const observation = yield* child.exited
+          return [pid, Date.now() - from, observation.signal] as const
+        }),
+      )
 
-    expect(await goneWithin(where, 3_000)).toBe(true)
-    // The grace was really spent before the tree was taken down: a stop that killed at once
-    // would be an escalation that never waited, and a child mid-turn would lose its work.
-    expect(spent).toBeGreaterThanOrEqual(200)
-    expect(signal).toBe('SIGKILL')
-  })
+      expect(await goneWithin(where, 3_000)).toBe(true)
+      // The grace was really spent before the tree was taken down: a stop that killed at once
+      // would be an escalation that never waited, and a child mid-turn would lose its work.
+      expect(spent).toBeGreaterThanOrEqual(200)
+      expect(signal).toBe('SIGKILL')
+    },
+  )
 
   test('a grandchild does not survive the engine scope closing either', async () => {
     const sink = sinkOf()
