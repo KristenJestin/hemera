@@ -7,13 +7,21 @@ import { IconRefresh } from '../icons.ts'
 
 /**
  * The agents this machine has, and the one thing the reader can do about them (design D17-01,
- * D5-18).
+ * D5-18, D5-21).
  *
  * Hemera runs the agents that are installed here and nothing else. There is no fallback: an
  * agent that is missing is missing, and a session that opened on another one would be a session
- * the reader did not ask for. So the section says what was found, version and all, what was not
- * found and what to do about it, and which one is installed but not signed in — three answers
- * that are not the same answer, and only the last one is the reader's to fix in one command.
+ * the reader did not ask for. So the section says whether the agent is signed in, what was found
+ * version and all, what was not found and what to do about it, and which one is installed but
+ * not signed in — answers that are not the same answer, and only the last one is the reader's to
+ * fix in one command.
+ *
+ * It names the agent and never the adapter a Session may reach it through: Claude Code, Codex
+ * and OpenCode are what the reader installs, what the reader signs in, and the only names that
+ * appear here (D5-21). The sign-in is read first and the command second, because two of the
+ * three are reached through an adapter that carries its own copy of the agent — on such a
+ * machine the login is what the agent needs to be usable, and the command is only where the
+ * reader's own CLI is or is not.
  *
  * It is the shape of the other sections and not a shape of its own: the same card, the same rows
  * of key and value, the same quiet buttons under them. A reader who has read the Profile block
@@ -69,10 +77,12 @@ export interface AgentOnTheMachine {
   found: boolean
   /** What the command answered when it was asked its version, or null when it answered none. */
   version: string | null
-  /** Whether it said it was signed in, which is only ever learned from a Session it started. */
+  /** Whether the login this agent's own command wrote is there. Looked for, never opened (D5-21). */
   authenticated: boolean
   /** The one sentence that says how to get it, for an agent that is not there. */
   installHint: string
+  /** The command that signs it in, which is the agent's own and not Hemera's (D5-21). */
+  loginHint: string
   /** The tool that installed it, which is the only one that can move it. */
   installer: string
   /** What its registry published, or null when nobody has asked it yet. */
@@ -125,11 +135,13 @@ export function AgentsSection({
                   <Badge tone={standing.tone}>{standing.word}</Badge>
                 </div>
                 <dl className={ROW}>
+                  <Pair label="Signed in">{agent.authenticated ? 'yes' : 'no'}</Pair>
                   <Pair label="Installed">{installedOf(agent)}</Pair>
                   <Pair label="Published">{publishedOf(agent, checked)}</Pair>
                   <Pair label={agent.found ? 'Installed with' : 'How to get it'}>
                     {agent.found ? agent.installer : agent.installHint}
                   </Pair>
+                  {agent.authenticated ? null : <Pair label="To sign in">{agent.loginHint}</Pair>}
                 </dl>
                 {update === null ? null : (
                   <div className="flex flex-wrap items-center gap-2">

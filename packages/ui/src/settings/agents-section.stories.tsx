@@ -19,6 +19,7 @@ const CLAUDE = {
   version: '2.0.31',
   authenticated: true,
   installHint: 'npm i -g @anthropic-ai/claude-code',
+  loginHint: 'claude auth login',
   installer: 'npm',
   latest: '2.0.35',
 } as const
@@ -29,7 +30,8 @@ const CODEX = {
   found: true,
   version: '0.9.4',
   authenticated: false,
-  installHint: 'codex login',
+  installHint: 'npm i -g @openai/codex',
+  loginHint: 'codex login',
   installer: 'pnpm',
   latest: '0.9.4',
 } as const
@@ -40,7 +42,8 @@ const OPENCODE = {
   found: false,
   version: null,
   authenticated: false,
-  installHint: 'bun add -g opencode-ai',
+  installHint: 'npm i -g opencode-ai',
+  loginHint: 'opencode auth login',
   installer: 'unknown',
   latest: null,
 } as const
@@ -131,7 +134,7 @@ export const MissingSaysHowToGetIt: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('not on this machine')).toBeVisible()
-    await expect(canvas.getByText('bun add -g opencode-ai')).toBeVisible()
+    await expect(canvas.getByText('npm i -g opencode-ai')).toBeVisible()
     // The registries were asked and this one answered nothing, which is not the same absence
     // as never having asked, and neither of them is a version.
     await expect(canvas.getByText('no registry answered')).toBeVisible()
@@ -145,8 +148,34 @@ export const InstalledButNotSignedIn: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Not signed in')).toBeVisible()
+    // The one command that would fix it, in the agent's own words (D5-21).
+    await expect(canvas.getByText('codex login')).toBeVisible()
     // The version it is on, and the one its registry published: the same number twice.
     await expect(canvas.getAllByText('0.9.4')).toHaveLength(2)
+  },
+}
+
+/**
+ * The agent and never the adapter behind it: the names and the commands the reader is handed are
+ * the agent's own, and the package Hemera spawns on its behalf is named nowhere (D5-21).
+ */
+export const NamesTheAgentAndNotItsAdapter: Story = {
+  args: { agents: [{ ...CLAUDE, authenticated: false }, CODEX, OPENCODE] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await Promise.all([
+      ...['Claude Code', 'Codex', 'OpenCode'].map((name) =>
+        expect(canvas.getByText(name)).toBeVisible(),
+      ),
+      // Each of them is signed in by its own command, which is what the page offers a reader
+      // whose machine is not signed in. Hemera types none of these lines for anybody.
+      ...['claude auth login', 'codex login', 'opencode auth login'].map((login) =>
+        expect(canvas.getByText(login)).toBeVisible(),
+      ),
+    ])
+    expect(canvasElement.textContent ?? '').not.toMatch(
+      /agentclientprotocol|claude-agent-acp|codex-acp/,
+    )
   },
 }
 
