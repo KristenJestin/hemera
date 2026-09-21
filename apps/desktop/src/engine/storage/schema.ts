@@ -18,7 +18,13 @@
 import { sql } from 'drizzle-orm'
 import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
 
-import { AGENT_PROVIDERS, NATIVE_STATES, PROJECT_TONES, SESSION_ENTRY_KINDS } from '@hemera/core'
+import {
+  AGENT_PROVIDERS,
+  NATIVE_STATES,
+  PROJECT_TONES,
+  SESSION_ENTRY_KINDS,
+  SESSION_ENTRY_ORIGINS,
+} from '@hemera/core'
 
 /**
  * What the window wears, one key at a time.
@@ -236,6 +242,13 @@ export const sessionEntries = sqliteTable(
     kind: text('kind').notNull().default('message'),
     body: text('body').notNull(),
     payload: text('payload').notNull().default('{}'),
+    /**
+     * Whether the entry was written as it happened or from what an agent replayed (D5-08).
+     *
+     * `live` by default, because an entry written by a turn that is happening is the ordinary
+     * case: only a resume writes `replay`, and it says so on every entry it inserts.
+     */
+    origin: text('origin').notNull().default('live'),
     correlationId: text('correlation_id'),
     turnId: text('turn_id'),
     state: text('state'),
@@ -244,6 +257,10 @@ export const sessionEntries = sqliteTable(
   (table) => [
     check('entry_role_is_known', sql`${table.role} IN (${sql.raw(oneOf(SESSION_ENTRY_ROLES))})`),
     check('entry_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(SESSION_ENTRY_KINDS))})`),
+    check(
+      'entry_origin_is_known',
+      sql`${table.origin} IN (${sql.raw(oneOf(SESSION_ENTRY_ORIGINS))})`,
+    ),
     unique('entry_once_in_session').on(table.sessionId, table.seq),
     // An update finds the row it updates by what it is about, inside its own session.
     index('entry_by_correlation').on(table.sessionId, table.correlationId),

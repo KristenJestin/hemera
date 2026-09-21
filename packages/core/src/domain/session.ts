@@ -44,6 +44,18 @@ export const NATIVE_STATES = ['none', 'attached', 'lost', 'fallback'] as const
 export type NativeState = (typeof NATIVE_STATES)[number]
 
 /**
+ * How an entry came to be in the thread (design D5-08).
+ *
+ * `live` is an entry written while the turn that produced it was happening; `replay` is one
+ * written from what an agent sent again when a Session came back to its own native session.
+ * They are told apart because a resumed thread holds both, and only one of them is happening
+ * now — a tool call that is running and a tool call that ran before the window was opened.
+ */
+export const SESSION_ENTRY_ORIGINS = ['live', 'replay'] as const
+
+export type SessionEntryOrigin = (typeof SESSION_ENTRY_ORIGINS)[number]
+
+/**
  * What an entry of a thread is (design D5-11): everything an agent does is one of these.
  *
  * `body` carries what a one-line reader shows — the markdown of a message, the title of a tool
@@ -109,6 +121,8 @@ export interface SessionEntry {
   body: string
   /** What this kind carries, as the JSON text it was written as. */
   payload: string
+  /** Whether it was written as it happened, or from what the agent replayed (design D5-08). */
+  origin: SessionEntryOrigin
   /** What this entry belongs to — a `messageId`, a `toolCallId` — when it belongs to something. */
   correlationId: string | null
   /** The turn it was written in, when the agent's own turn id is known. */

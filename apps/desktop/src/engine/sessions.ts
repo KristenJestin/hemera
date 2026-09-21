@@ -20,6 +20,7 @@ import {
   type Session as DomainSession,
   type SessionEntry as DomainSessionEntry,
   type SessionEntryKind,
+  type SessionEntryOrigin,
   type SessionEntryRole,
   type SessionTitleSource,
   EmptyMessageError,
@@ -89,6 +90,14 @@ export interface ThreadWrite {
   readonly correlationId?: string | null
   readonly turnId?: string | null
   readonly state?: string | null
+  /**
+   * Whether this entry is being written as it happens or from what an agent replayed (D5-08).
+   *
+   * Absent means `live`, which is what a turn writes; only a resume writes `replay`, and it says
+   * so on the entries it inserts. An entry that already exists keeps the origin it was born
+   * with: a replayed update to a live entry is that same entry, updated.
+   */
+  readonly origin?: SessionEntryOrigin
 }
 
 /**
@@ -109,6 +118,7 @@ export interface SessionsService {
   ) => Effect.Effect<Session[], DatabaseError>
   readonly create: (
     projectId: string | null,
+    provider?: AgentProvider | null,
   ) => Effect.Effect<Session, DatabaseError | NoActiveProjectError | UnknownProjectError>
   readonly rename: (id: string, version: number, title: string) => Effect.Effect<Session, Refusal>
   readonly archive: (id: string, version: number) => Effect.Effect<Session, Refusal>
@@ -150,6 +160,17 @@ export interface SessionsService {
    * and nothing else writes them.
    */
   readonly recordNative: (id: string, native: NativeRecord) => Effect.Effect<Session, Refusal>
+  /**
+   * One Session, and what the agent handed back about it (design D5-06).
+   *
+   * The engine reads a Session by its identifier where the window reads a Project's list: a turn
+   * names the Session it belongs to, and the handle the agent gave is the engine's own — the
+   * window is told how far the Session is still attached, never which conversation the agent is
+   * keeping.
+   */
+  readonly one: (
+    id: string,
+  ) => Effect.Effect<{ readonly session: Session; readonly native: NativeRecord }, Refusal>
   /**
    * Writes one entry of the thread the user did not write — what the agent said, called, ran or
    * asked for (design D5-11).
@@ -243,6 +264,9 @@ function entryOf(row: typeof sessionEntries.$inferSelect): SessionEntry {
     kind: row.kind as SessionEntryKind,
     body: row.body,
     payload: row.payload,
+    // SAFETY: the column is constrained by a check to exactly the values the domain declares,
+    // and only this service and the agent runtime beside it write it.
+    origin: row.origin as SessionEntryOrigin,
     correlationId: row.correlationId,
     turnId: row.turnId,
     state: row.state,
@@ -342,7 +366,7 @@ export const sessionsLayer = Layer.effect(
             ),
         ),
 
-      create: (projectId) =>
+      create: (projectId, provider = null) =>
         withDatabase(
           mutate('creating a Session', (transaction) =>
             Effect.gen(function* () {
@@ -365,9 +389,11 @@ export const sessionsLayer = Layer.effect(
                 title: NEW_SESSION_TITLE,
                 titleSource: 'derived',
                 mission: 'free',
-                // A Session is created with no agent: the user picks one in the composer, and a
-                // Session nothing has talked to in says so by holding nothing.
-                provider: null,
+                // A Session is created with no agent unless the caller named one: the user picks
+                // one in the composer, and a Session nothing has talked to in says so by holding
+                // nothing. The create form names one up front, so it is written with the row
+                // rather than by a second mutation a moment later.
+                provider,
                 model: null,
                 nativeState: 'none',
                 archivedAt: null,
@@ -382,6 +408,7 @@ export const sessionsLayer = Layer.effect(
                   projectId,
                   title: session.title,
                   titleSource: session.titleSource,
+                  provider,
                   createdAt: at,
                   lastWrittenAt: at,
                 })
@@ -516,6 +543,7 @@ export const sessionsLayer = Layer.effect(
                 kind: 'message',
                 body: text,
                 payload: '{}',
+                origin: 'live',
                 correlationId: null,
                 turnId: null,
                 state: null,
@@ -626,6 +654,30 @@ export const sessionsLayer = Layer.effect(
           ),
         ),
 
+      one: (id) =>
+        withDatabase(
+          Effect.gen(function* () {
+            const rows = yield* database
+              .select()
+              .from(sessions)
+              .where(eq(sessions.id, id))
+              .limit(1)
+              .pipe(Effect.mapError(failed('reading the Session')))
+            const row = rows[0]
+            if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
+            return {
+              session: sessionOf(row),
+              native: {
+                nativeSessionId: row.nativeSessionId,
+                // SAFETY: the same check the Session's own mapping reads: the column admits
+                // exactly the states the domain declares.
+                nativeState: row.nativeState as NativeState,
+                cwd: row.cwd,
+              },
+            }
+          }),
+        ),
+
       write: (id, entry) =>
         withDatabase(
           mutate('writing an entry', (transaction) =>
@@ -674,6 +726,7 @@ export const sessionsLayer = Layer.effect(
                     kind: entry.kind,
                     body: entry.body,
                     payload,
+                    origin: entry.origin ?? 'live',
                     correlationId: held,
                     turnId: entry.turnId ?? null,
                     state: entry.state ?? null,

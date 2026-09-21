@@ -43,6 +43,12 @@ export type {
   SessionEntry,
   SessionEntryKind,
   SessionEntryRole,
+  SessionEntryOrigin,
   SessionTitleSource,
 } from './domain/session.ts'
-export { AGENT_PROVIDERS, NATIVE_STATES, SESSION_ENTRY_KINDS } from './domain/session.ts'
+export {
+  AGENT_PROVIDERS,
+  NATIVE_STATES,
+  SESSION_ENTRY_KINDS,
+  SESSION_ENTRY_ORIGINS,
+} from './domain/session.ts'

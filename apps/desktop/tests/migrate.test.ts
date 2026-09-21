@@ -60,7 +60,7 @@ const LOT_FOUR_A = '20260918102229_projects_and_journal'
 const LOT_FOUR_B = '20260920001303_sessions_and_entries'
 
 /** The migration this lot adds: the one a profile of lot 4b has never heard of. */
-const AGENTS_MIGRATION = '20260921111531_sessions_with_agents'
+const AGENTS_MIGRATION = '20260921133441_sessions_with_agents'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
