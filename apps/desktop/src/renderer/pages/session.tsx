@@ -267,30 +267,42 @@ export function SessionPage({
     onChooseOption,
   )
 
+  // What the column beside the thread would hold: the plan the agent last published and the files
+  // the turn has touched. Both are states rather than events, and they are read here because the
+  // composer's own counter and the column are two readings of the same turn.
+  const plan = planOf(thread)
+  const touched = touchedOf(thread)
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
-        <SessionHeader
-          title={session.title}
-          projectName={projectName}
-          meta={metaOf(session, thread.length, now)}
-          onRename={onRename}
-          editing={editing}
-          onStartEditing={onStartEditing}
-          onCancelEditing={onCancelEditing}
-          onArchive={onArchive}
-          // A Session nothing was ever written in is one the user made by mistake far more often
-          // than one they are done with, and putting it away is a press they would come to
-          // regret: the archive is where threads go.
-          archiveDisabled={thread.length === 0}
-        />
-        {refusal !== null && (
-          <p role="alert" className="text-sm text-muted-foreground">
-            {refusal}
-          </p>
-        )}
-      </div>
-      <div className="flex min-h-0 flex-1">
+    /*
+      One column, with the side column beside it (review of #40, defect 2). The header, the thread
+      and the composer share one width and one left edge: a composer centred in the whole window
+      while the thread was centred in what the column left over is what put them visibly out of
+      line. The screen runs under the frame all the same, and the page's own scroll is the thread's.
+    */
+    <div className="flex h-full min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
+          <SessionHeader
+            title={session.title}
+            projectName={projectName}
+            meta={metaOf(session, thread.length, now)}
+            onRename={onRename}
+            editing={editing}
+            onStartEditing={onStartEditing}
+            onCancelEditing={onCancelEditing}
+            onArchive={onArchive}
+            // A Session nothing was ever written in is one the user made by mistake far more often
+            // than one they are done with, and putting it away is a press they would come to
+            // regret: the archive is where threads go.
+            archiveDisabled={thread.length === 0}
+          />
+          {refusal !== null && (
+            <p role="alert" className="text-sm text-muted-foreground">
+              {refusal}
+            </p>
+          )}
+        </div>
         <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
           {thread.length === 0 ? (
             loaded ? (
@@ -300,46 +312,41 @@ export function SessionPage({
             <MessageScroller label="The thread of this Session" entries={scroller} />
           )}
         </div>
-        {/*
-          The column is beside the thread and not under it, and it holds the two things that are
-          states rather than events: the plan the agent last published, and the files the turn has
-          touched. A Session whose agent has sent neither draws an empty column, which is what the
-          design says it is — the two headings and nothing under them.
-        */}
-        <div className="w-sidebar shrink-0 overflow-y-auto border-l border-border px-4 py-6">
-          <SessionSideColumn
-            plan={planOf(thread)}
-            files={touchedOf(thread)}
-            onSelectFile={onOpenFile}
+        <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+          <Composer
+            value={value}
+            onValueChange={setValue}
+            files={files}
+            onFilesChange={setFiles}
+            onSearchFiles={onSearchFiles}
+            onPickFiles={onPickFiles}
+            variant="inline"
+            action={session.provider === null ? 'Write' : 'Send'}
+            placeholder={
+              session.provider === null
+                ? 'Write to this Session…'
+                : `Say something to ${session.provider}…`
+            }
+            onSend={write}
+            controls={controls}
+            running={agent.running}
+            onStop={onStop}
+            blocked={
+              waiting === null ? undefined : (
+                <BlockedBanner waiting="The agent is asking to go on." onStop={onStop} />
+              )
+            }
           />
         </div>
       </div>
-      <div className="mx-auto w-full max-w-3xl px-6 pb-4">
-        <Composer
-          value={value}
-          onValueChange={setValue}
-          files={files}
-          onFilesChange={setFiles}
-          onSearchFiles={onSearchFiles}
-          onPickFiles={onPickFiles}
-          variant="inline"
-          action={session.provider === null ? 'Write' : 'Send'}
-          placeholder={
-            session.provider === null
-              ? 'Write to this Session…'
-              : `Say something to ${session.provider}…`
-          }
-          onSend={write}
-          controls={controls}
-          running={agent.running}
-          onStop={onStop}
-          blocked={
-            waiting === null ? undefined : (
-              <BlockedBanner waiting="The agent is asking to go on." onStop={onStop} />
-            )
-          }
-        />
-      </div>
+      {/*
+        The column stands beside the thread and not under it, and it is the width the thread gave
+        up for it. A Session whose agent has sent neither a plan nor a file draws no column at all
+        (review of #40, defect 3): `Plan 0 of 0` and `Files 0` take that width and say nothing with
+        it. The box is the page's and the emptiness is the column's — there is no wrapper here, so
+        a column that draws nothing leaves the width where it was.
+      */}
+      <SessionSideColumn plan={plan} files={touched} onSelectFile={onOpenFile} />
     </div>
   )
 }

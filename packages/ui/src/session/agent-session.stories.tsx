@@ -199,13 +199,21 @@ const THREAD: ScrollerEntry[] = [
   },
 ]
 
+interface PageProps {
+  /** The plan the column stands beside the thread with, and the files the turn has touched. */
+  plan?: PlanEntry[] | undefined
+  touched?: TouchedFile[] | undefined
+}
+
 /**
  * The page, held together by the same state the renderer holds.
  *
  * The composer's words, the files it carries and the three things the agent is set on are this
  * story's own, because a control that cannot be moved in a story is a control nobody has read.
+ * The plan and the files are props, because a Session whose agent has published neither is a
+ * state of this page and not a second page (review of #40, defect 3).
  */
-function Page(): ReactNode {
+function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [model, setModel] = useState('claude-sonnet-4-5')
@@ -213,19 +221,26 @@ function Page(): ReactNode {
   const [mode, setMode] = useState('acceptEdits')
   return (
     <TooltipProvider>
-      <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
-          <SessionHeader
-            title="CSV invoice export"
-            projectName="Atlas"
-            meta="started 12 minutes ago · 9 entries"
-            onRename={fn()}
-            onStartEditing={fn()}
-            onCancelEditing={fn()}
-            onArchive={fn()}
-          />
-        </div>
-        <div className="flex min-h-0 flex-1">
+      {/*
+        One column, and the side column beside it (review of #40, defect 2). The head, the thread
+        and the composer share one width and one left edge: a composer centred in the whole window
+        while the thread was centred in what the column left over is exactly what put them out of
+        line. The column stands beside all three, and it is not opened at all when it holds
+        nothing — the thread keeps its width and its line (defect 3).
+      */}
+      <div className="flex h-screen min-h-0 bg-background text-foreground">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
+            <SessionHeader
+              title="CSV invoice export"
+              projectName="Atlas"
+              meta="started 12 minutes ago · 9 entries"
+              onRename={fn()}
+              onStartEditing={fn()}
+              onCancelEditing={fn()}
+              onArchive={fn()}
+            />
+          </div>
           <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 px-6">
             <ResumeFallbackBanner
               agent="claude-code"
@@ -235,39 +250,37 @@ function Page(): ReactNode {
             />
             <MessageScroller label="The thread of this Session" entries={THREAD} />
           </div>
-          <div className="w-sidebar shrink-0 overflow-y-auto border-l border-border px-4 py-6">
-            <SessionSideColumn plan={PLAN} files={TOUCHED} onSelectFile={fn()} />
+          <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+            <Composer
+              value={value}
+              onValueChange={setValue}
+              files={files}
+              onFilesChange={setFiles}
+              onSearchFiles={() => Promise.resolve([])}
+              variant="inline"
+              action="Send"
+              placeholder="Say something to claude-code…"
+              onSend={() => Promise.resolve(null)}
+              running
+              onStop={fn()}
+              blocked={<BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />}
+              controls={
+                <>
+                  <ModelSelector
+                    agent="claude-code"
+                    models={MODELS}
+                    value={model}
+                    onValueChange={setModel}
+                  />
+                  <EffortSelector efforts={EFFORTS} value={effort} onValueChange={setEffort} />
+                  <ModeSelector modes={MODES} value={mode} onValueChange={setMode} />
+                  <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
+                </>
+              }
+            />
           </div>
         </div>
-        <div className="mx-auto w-full max-w-3xl px-6 pb-4">
-          <Composer
-            value={value}
-            onValueChange={setValue}
-            files={files}
-            onFilesChange={setFiles}
-            onSearchFiles={() => Promise.resolve([])}
-            variant="inline"
-            action="Send"
-            placeholder="Say something to claude-code…"
-            onSend={() => Promise.resolve(null)}
-            running
-            onStop={fn()}
-            blocked={<BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />}
-            controls={
-              <>
-                <ModelSelector
-                  agent="claude-code"
-                  models={MODELS}
-                  value={model}
-                  onValueChange={setModel}
-                />
-                <EffortSelector efforts={EFFORTS} value={effort} onValueChange={setEffort} />
-                <ModeSelector modes={MODES} value={mode} onValueChange={setMode} />
-                <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
-              </>
-            }
-          />
-        </div>
+        <SessionSideColumn plan={plan} files={touched} onSelectFile={fn()} />
       </div>
     </TooltipProvider>
   )
@@ -315,5 +328,27 @@ export const Complete: Story = {
     // One Stop on the box and one on the strip that says why the box is waiting.
     await expect(canvas.getAllByRole('button', { name: 'Stop' })).toHaveLength(2)
     await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()
+  },
+}
+
+/**
+ * The same page before the agent has published a plan or touched a file: no column at all.
+ *
+ * A column with no section is not drawn (review of #40, defect 3), and the thread keeps the width
+ * it had — which is the state a Session is in for its first turns, and the one the empty column
+ * used to take a third of a window to say.
+ */
+export const NoColumn: Story = {
+  render: () => <Page plan={[]} touched={[]} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByText('2 of 4')).toBeNull()
+    expect(canvas.queryByText('Files')).toBeNull()
+    // The thread and its foot are still the page, and the head is still its head: the thread is
+    // drawn the width the column used to take.
+    await expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
+    await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()
+    // One Stop on the box and one on the strip that says why the box is waiting.
+    await expect(canvas.getAllByRole('button', { name: 'Stop' })).toHaveLength(2)
   },
 }

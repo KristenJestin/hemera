@@ -45,13 +45,35 @@ export const WhatTheTurnHasDone: Story = {
   },
 }
 
-/** A turn that has touched nothing yet says so, rather than showing an empty list. */
+/**
+ * A turn that has touched nothing yet draws no Files section (review of #40, defect 3).
+ *
+ * A section with nothing to show is not drawn: what is left is the plan, and the files are not a
+ * section until one of them is named.
+ */
 export const NothingTouched: Story = {
   args: { files: [] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /Files/ }))
-    await expect(canvas.getByText('No file has been touched yet.')).toBeVisible()
+    expect(canvas.queryByRole('button', { name: /Files/ })).toBeNull()
+    // What is left is the plan, folded: its count and the step it is on are what a folded plan
+    // still says.
+    await expect(canvas.getByText('Plan')).toBeVisible()
+    await expect(canvas.getByText('1 of 2')).toBeVisible()
+    await expect(canvas.getByText('Draw the stopped turn line')).toBeVisible()
+  },
+}
+
+/**
+ * A Session with neither a plan nor a file draws no column at all (review of #40, defect 3).
+ *
+ * An empty `Plan 0 of 0` and an empty Files section take the width of the thread beside them to
+ * say nothing, so the column is not there and the width is the thread's.
+ */
+export const NothingToStandBeside: Story = {
+  args: { plan: [], files: [] },
+  play: async ({ canvasElement }) => {
+    expect(canvasElement).toBeEmptyDOMElement()
   },
 }
 
