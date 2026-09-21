@@ -60,8 +60,12 @@ const LIST = 'flex flex-col gap-1.5 pt-1'
 /** What a plan that has not been sent yet says, rather than an empty box. */
 const EMPTY = 'pt-1 text-sm text-muted-foreground'
 
+/** The step being worked on, in the folded line, where it is clipped rather than wrapped. */
+const CURRENT = 'min-w-0 truncate text-sm text-muted-foreground'
+
 export function PlanPanel({ entries, defaultOpen = false, className }: PlanPanelProps): ReactNode {
   const done = entries.filter((entry) => entry.status === 'completed').length
+  const current = entries.find((entry) => entry.status === 'in_progress')
   return (
     <Disclosure
       className={className}
@@ -71,13 +75,15 @@ export function PlanPanel({ entries, defaultOpen = false, className }: PlanPanel
           <span aria-hidden="true" className="flex shrink-0 text-muted-foreground">
             <IconTimelineEvent size="sm" />
           </span>
-          <span className="text-sm text-foreground">Plan</span>
+          <span className="shrink-0 text-sm text-foreground">Plan</span>
           <Badge tone={done === entries.length && entries.length > 0 ? 'success' : 'neutral'}>
             {`${done} of ${entries.length}`}
           </Badge>
-          {entries.some((entry) => entry.priority === 'high') ? (
-            <Badge tone="warning">High priority</Badge>
-          ) : null}
+          {current === undefined ? null : (
+            // The step the agent is on is read without opening the panel: it is the one thing a
+            // folded plan can still tell, and the reason the count beside it is moving.
+            <span className={CURRENT}>{current.content}</span>
+          )}
         </span>
       }
     >
@@ -93,6 +99,11 @@ export function PlanPanel({ entries, defaultOpen = false, className }: PlanPanel
               <span className={cn(CONTENT, entry.status === 'completed' && DONE)}>
                 {entry.content}
               </span>
+              {/* The priority is read at the step it belongs to, and only where it is worth
+                  saying: a list whose every line wears a chip says nothing with any of them. */}
+              {entry.priority === 'high' && entry.status !== 'completed' ? (
+                <Badge tone="warning">High</Badge>
+              ) : null}
             </li>
           ))}
         </ul>
