@@ -76,6 +76,14 @@ export interface SupervisedProcess {
   readonly stop: Effect.Effect<void>
   /** Ends them now, with no grace at all. */
   readonly kill: Effect.Effect<void>
+  /**
+   * Reads what the child writes on its standard output, one line at a time, as it arrives.
+   *
+   * The lines are handed over rather than buffered: an agent's answer is read as it is spoken,
+   * and the supervisor is not a mailbox. Reading is one-way — what arrived before a reader
+   * attached is gone, which is why the runtime attaches its reader before it writes anything.
+   */
+  readonly onStdout: (read: (line: string) => void) => void
 }
 
 /** What the engine hands its children's `stderr` to. `main/diagnostic.ts` holds the `Log`. */
@@ -133,6 +141,14 @@ export interface HostProcess {
   readonly onFailure: (failed: (cause: string) => void) => void
   /** A line the child wrote on standard error, without its newline. */
   readonly onStderr: (read: (line: string) => void) => void
+  /**
+   * A line the child wrote on standard output, without its newline.
+   *
+   * This is where an agent speaks ACP: the engine hands every line to the client and parses it
+   * (design D5-01). Nothing else reads it — the supervisor keeps no copy, and what an agent says
+   * belongs to the thread rather than to the log.
+   */
+  readonly onStdout: (read: (line: string) => void) => void
 }
 
 /**
@@ -200,6 +216,12 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
         child.stderr?.setEncoding('utf8')
         child.stderr?.on('data', (chunk: string) => {
           // The newline is the writer's, not the line's: what a sink is handed is a line.
+          for (const line of chunk.split('\n')) if (line !== '') read(line)
+        })
+      },
+      onStdout: (read) => {
+        child.stdout?.setEncoding('utf8')
+        child.stdout?.on('data', (chunk: string) => {
           for (const line of chunk.split('\n')) if (line !== '') read(line)
         })
       },
@@ -430,6 +452,9 @@ export const processSupervisorLayer = Layer.effect(
           }
         }),
       closeInput: Effect.sync(child.process.end),
+      onStdout: (read) => {
+        child.process.onStdout(read)
+      },
       stop: stopOf(child),
       kill: Effect.gen(function* () {
         yield* Ref.set(child.lifecycle, 'exiting')
