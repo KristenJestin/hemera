@@ -33,7 +33,13 @@ export function EffortSelector({
     <Select
       label="Effort"
       mark={<IconBrain size="sm" />}
-      items={efforts.map((effort) => ({ value: effort.id, label: effort.name }))}
+      // The mark is on the value and on every level of the list: an option carrying nothing
+      // would read as something other than the control it belongs to.
+      items={efforts.map((effort) => ({
+        value: effort.id,
+        label: effort.name,
+        icon: <IconBrain size="sm" />,
+      }))}
       value={value}
       onValueChange={onValueChange}
       className={className}

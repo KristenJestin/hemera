@@ -40,7 +40,14 @@ export function ModelSelector({
     <Select
       label="Model"
       mark={<AgentMark agent={agent} />}
-      items={models.map((model) => ({ value: model.id, label: model.name }))}
+      // The agent's mark is on the value and on every model of the list, out of the same
+      // catalogue: an option carrying nothing would read as something other than the control it
+      // belongs to.
+      items={models.map((model) => ({
+        value: model.id,
+        label: model.name,
+        icon: <AgentMark agent={agent} />,
+      }))}
       value={value}
       onValueChange={onValueChange}
       className={className}

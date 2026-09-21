@@ -72,6 +72,10 @@ export const ChoosingAModel: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('combobox', { name: 'Model' }))
+    const models = await screen.findAllByRole('option')
+    await expect(models).toHaveLength(3)
+    // Every model of the list wears the agent's mark, not only the chosen one.
+    await expect(models.map((model) => model.querySelector('.size-icon-md'))).not.toContain(null)
     await userEvent.click(await screen.findByRole('option', { name: 'Haiku 4.5' }))
     await expect(args.onValueChange).toHaveBeenCalledWith('claude-haiku-4-5')
     // The list is waited out before the play ends: a popup on its way out is a focus guard still

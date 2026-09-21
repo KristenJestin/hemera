@@ -58,6 +58,10 @@ export const AskingForAnotherMode: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('combobox', { name: 'Mode' }))
+    const choices = await screen.findAllByRole('option')
+    await expect(choices).toHaveLength(3)
+    // Every mode of the list wears the mark of the control, not only the chosen one.
+    await expect(choices.map((choice) => choice.querySelector('.size-icon-sm'))).not.toContain(null)
     await userEvent.click(await screen.findByRole('option', { name: 'Plan only' }))
     await expect(args.onValueChange).toHaveBeenCalledWith('plan')
     await expect(canvas.getByRole('combobox', { name: 'Mode' })).toHaveTextContent(

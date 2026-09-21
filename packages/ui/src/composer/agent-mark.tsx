@@ -34,7 +34,13 @@ export function AgentMark({ agent, className }: AgentMarkProps): ReactNode {
     return <IconBrandOpenai size="md" className={className} />
   }
   return (
-    <span className={className === undefined ? MONOGRAM : `${MONOGRAM} ${className}`}>
+    // A mark and not a word: beside a label that already names the thing, initials are read as
+    // part of that name — "CC Haiku 4.5" — and two letters that stand for an agent are not its
+    // name.
+    <span
+      aria-hidden="true"
+      className={className === undefined ? MONOGRAM : `${MONOGRAM} ${className}`}
+    >
       {initialsOf(agent)}
     </span>
   )

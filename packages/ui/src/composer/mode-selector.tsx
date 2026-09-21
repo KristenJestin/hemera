@@ -36,7 +36,13 @@ export function ModeSelector({
     <Select
       label="Mode"
       mark={<IconShield size="sm" />}
-      items={modes.map((mode) => ({ value: mode.id, label: mode.name }))}
+      // The mark is on the value and on every mode of the list: an option carrying nothing would
+      // read as something other than the control it belongs to.
+      items={modes.map((mode) => ({
+        value: mode.id,
+        label: mode.name,
+        icon: <IconShield size="sm" />,
+      }))}
       value={value}
       onValueChange={onValueChange}
       className={className}

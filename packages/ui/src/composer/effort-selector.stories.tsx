@@ -55,6 +55,10 @@ export const AskingForMore: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('combobox', { name: 'Effort' }))
+    const levels = await screen.findAllByRole('option')
+    await expect(levels).toHaveLength(3)
+    // Every level of the list wears the mark of the control, not only the chosen one.
+    await expect(levels.map((level) => level.querySelector('.size-icon-sm'))).not.toContain(null)
     await userEvent.click(await screen.findByRole('option', { name: 'High' }))
     await expect(args.onValueChange).toHaveBeenCalledWith('high')
     // The list is waited out before the play ends: a popup on its way out is a focus guard still
