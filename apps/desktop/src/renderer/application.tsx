@@ -60,6 +60,9 @@ import {
   chooseOption,
   decide,
   listenToAgents,
+  loadAgents,
+  offerAgent,
+  offeringOf,
   optionsOf,
   readOptions,
   say,
@@ -414,6 +417,14 @@ export function Application() {
     void readOptions(openId)
   }, [openId, provider])
 
+  // What this machine has, read when the window opens. The Home's composer picks the agent a
+  // Session is made with, and a list that arrived only once the Settings had been opened would
+  // make the Home claim there is none. This question stays on the machine — a command and the
+  // version it prints — where the one below it leaves (design D5-18).
+  useEffect(() => {
+    void loadAgents()
+  }, [])
+
   // What each registry published, asked when the Agents section is opened and only then: the
   // question leaves the machine, and a list read on every start would be a list asked on the
   // reader's behalf (design D5-18).
@@ -508,21 +519,17 @@ export function Application() {
   }, [])
 
   /**
-   * A new Session in the Project in front, opened with its title in hand.
+   * A new Session in the Project in front.
    *
-   * The Session exists from the moment it is made — that is what lets it be named before
-   * anything is written in it, and what makes `New session` a name waiting to be replaced — and
-   * the Journal of the Project gains a line about it, so the Journal on screen is read again
-   * rather than left saying nothing happened.
+   * A Session is made with the agent it will run and keeps it, so the agent is chosen where the
+   * Session is started — the composer of the Home, which is where this goes (design D5-17). The
+   * Session exists from the moment that first message is sent, and the message names it (D4b-01):
+   * a Session made before there is an agent to answer it would be a thread nothing can be said
+   * to, which is exactly what the Home used to make.
    */
-  const newSession = useCallback(async () => {
-    const projectId = shell.activeProjectId
-    if (projectId === null) return
-    const made = await startSession(projectId)
-    if (made === null) return
-    setNaming(made.id)
-    goTo(made.id)
-    void openJournal(projectId)
+  const newSession = useCallback(() => {
+    if (shell.activeProjectId === null) return
+    goTo(HOME_ENTRY)
   }, [shell.activeProjectId, goTo])
 
   /** Writes a message into a Session, and reads the Journal again when one was written. */
@@ -911,6 +918,13 @@ export function Application() {
         projectName={active.name}
         sessions={recent}
         entries={linesOf(journal.entries).slice(0, ACTIVITY)}
+        agents={agents.agents.map((one) => ({
+          id: one.id,
+          name: one.label,
+          available: one.found,
+        }))}
+        offeringOf={(chosen) => offeringOf(active.id, chosen)}
+        onChooseAgent={(chosen) => void offerAgent(active.id, chosen)}
         onOpenSession={goTo}
         onOpenAllSessions={() => setPlace('archived')}
         onOpenJournal={() => goTo(JOURNAL_ENTRY)}
@@ -927,15 +941,28 @@ export function Application() {
             ? []
             : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
         }
-        // What the greeting promises: the first message makes the Session. A refusal is the
-        // sentence the composer shows, and the Session it could not be written into stays —
-        // empty, and named `New session` like any other.
-        onSend={async (text) => {
-          const made = await startSession(active.id)
+        // What the greeting promises: the first message makes the Session, and the Session is
+        // made with the agent chosen above the box. What was chosen with it is handed over before
+        // the first word, so the turn that answers runs on the model and the mode the user picked
+        // rather than on the agent's own defaults (D5-17). A refusal is the sentence the composer
+        // shows, and no Session is made when the one it would run was refused.
+        onSend={async (text, agent, choices) => {
+          const made = await startSession(active.id, agent)
           if (made === null) return sessionsSnapshot().refusal
-          const said = await writeInto(made.id, text)
-          if (said === null) goTo(made.id)
-          return said
+          // Each of them answers on its own, and all of them are over before the window moves:
+          // the Session page asks the agent what it is on the moment it opens, and a setting
+          // still in flight there would have that answer say what the agent was on before.
+          await Promise.all(
+            [...choices].map(([optionId, value]) => chooseOption(made.id, optionId, value)),
+          )
+          goTo(made.id)
+          // The thread is read before the agent is spoken to: the message the engine writes as
+          // part of the prompt then lands on a thread that is already on screen (D5-11).
+          await openSession(made.id)
+          // The turn is watched in the Session, which is where the window just went, and the Home
+          // does not wait for it: a first answer can take a minute.
+          void say(made.id, text)
+          return null
         }}
       />
     )

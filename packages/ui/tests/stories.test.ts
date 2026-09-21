@@ -323,6 +323,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ModeSelector',
       'UsageMeter',
       'BlockedBanner',
+      'AgentSelector',
       'AgentsSection',
       'PlanPanel',
       'SessionSideColumn',

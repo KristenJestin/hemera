@@ -1,4 +1,4 @@
-import type { Session, SessionEntry } from '@hemera/ipc'
+import type { AgentProvider, Session, SessionEntry } from '@hemera/ipc'
 
 /**
  * The Sessions of the Project in front, and the thread of the one that is open (design D4b-02).
@@ -129,18 +129,20 @@ export async function openSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Makes a Session and answers it, so whoever asked can go and open it.
+ * Makes a Session with the agent it will run, and answers it so whoever asked can open it.
  *
- * A Session exists from the moment it is made, before anything is written in it: that is what
- * `New session` is, and what makes it renaming-able and archivable straight away. Nothing else
- * is created with it — no Spec, no Workspace (design D4b-01) — and the engine is where that is
- * true rather than here.
+ * A Session exists from the moment it is made, before anything is written in it, and what is
+ * chosen when it is made is the agent: a Session keeps the one it was made with, so the composer
+ * that starts it is where that is decided, and `null` is not a choice — it is the Sessions
+ * written before the agents existed (D5-06, D5-17). Nothing else is created with it — no Spec,
+ * no Workspace (design D4b-01) — and the engine is where that is true rather than here.
  */
-export async function startSession(projectId: string): Promise<Session | null> {
+export async function startSession(
+  projectId: string,
+  provider: AgentProvider | null,
+): Promise<Session | null> {
   try {
-    // A Session is made without an agent: the agent is chosen once it is open, and one that is
-    // not on this machine is a refusal the page shows rather than another agent (D5-17).
-    const session = await window.hemera.invoke('sessions.create', { projectId, provider: null })
+    const session = await window.hemera.invoke('sessions.create', { projectId, provider })
     const sessions = await listed(projectId)
     if (shown !== projectId) return session
     replace({ ...state, sessions, refusal: null })

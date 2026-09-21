@@ -25,6 +25,7 @@ import type {
   InvalidRepositoryPathError,
 } from '@hemera/core'
 
+import { type AgentOption } from './agents/client.ts'
 import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { Discovery } from './agents/discovery.ts'
@@ -35,6 +36,23 @@ import { Sessions, type UnknownSessionError } from './sessions.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
+
+/**
+ * The options an agent announced, in the page's words.
+ *
+ * The engine holds an option as a value with a kind, and what crosses is the list of values the
+ * agent announced and the one it is on now, which is what the composer draws (D5-13). Asked of a
+ * Session and asked of a Project that has none yet, the shape crossing the port is the same.
+ */
+function announced(options: readonly AgentOption[]) {
+  return options.map((option) => ({
+    id: option.id,
+    name: option.name,
+    category: option.category,
+    values: option.values.map((value) => ({ value: value.id, name: value.name })),
+    current: option.value,
+  }))
+}
 
 /** What the main process sends: an identifier to answer, a use case, and its argument. */
 export interface EngineRequest {
@@ -132,7 +150,10 @@ export function answer(
       return yield* sessions.list(decision.argument.projectId, decision.argument.archived)
     }
     if (decision.name === 'sessions.create') {
-      return yield* sessions.create(decision.argument.projectId)
+      // The agent the Session is made with crosses with the Project (D5-06): it is chosen once,
+      // in the composer that starts it, and every turn of that Session runs it.
+      const { projectId, provider } = decision.argument
+      return yield* sessions.create(projectId, provider)
     }
     if (decision.name === 'sessions.rename') {
       const { id, version, title } = decision.argument
@@ -188,18 +209,14 @@ export function answer(
     const runtime = yield* AgentRuntime
     if (decision.name === 'agents.options') {
       const offered = yield* runtime.options(decision.argument.sessionId)
-      // The agent's own vocabulary, in the page's words: the engine holds an option as a value
-      // with a kind, and what crosses is the list of values the agent announced and the one it is
-      // on now, which is what the composer draws (D5-13).
-      return {
-        options: offered.map((option) => ({
-          id: option.id,
-          name: option.name,
-          category: option.category,
-          values: option.values.map((value) => ({ value: value.id, name: value.name })),
-          current: option.value,
-        })),
-      }
+      return { options: announced(offered) }
+    }
+    if (decision.name === 'agents.offer') {
+      // What an agent offers a Project that no Session holds yet (D5-17): the Home's composer
+      // has the agent to choose and its own controls before anything is written.
+      const { projectId, provider } = decision.argument
+      const offered = yield* runtime.offer(projectId, provider)
+      return { options: announced(offered) }
     }
     if (decision.name === 'agents.setOption') {
       const { sessionId, optionId, value } = decision.argument

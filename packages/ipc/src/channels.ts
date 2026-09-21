@@ -87,6 +87,7 @@ export const CHANNELS = {
   // what the window asks of a Session that is running — a turn, a stop, a decision, a resume.
   'agents.list': ENGINE_REQUESTS['agents.list'],
   'agents.options': ENGINE_REQUESTS['agents.options'],
+  'agents.offer': ENGINE_REQUESTS['agents.offer'],
   'agents.setOption': ENGINE_REQUESTS['agents.setOption'],
   'agents.prompt': ENGINE_REQUESTS['agents.prompt'],
   'agents.stop': ENGINE_REQUESTS['agents.stop'],

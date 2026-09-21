@@ -5,17 +5,13 @@ import type { ConfigOption, Session, SessionEntry } from '@hemera/ipc'
 import {
   BlockedBanner,
   Composer,
-  EffortSelector,
   MessageDaySeparator,
   MessageGroup,
   MessageScroller,
   MessageText,
-  ModeSelector,
-  ModelSelector,
   SessionEmpty,
   SessionHeader,
   SessionSideColumn,
-  type AgentChoice,
   type MessageLine,
   type MessageState,
   type PermissionOption,
@@ -23,6 +19,7 @@ import {
 } from '@hemera/ui'
 
 import type { AgentSessionState } from '../agent-store.ts'
+import { controlsOf } from '../agent-controls.tsx'
 import { drawEntry, planOf, touchedOf, waitingOf } from '../agent-blocks.tsx'
 import { whenOf } from '../journal-lines.ts'
 
@@ -65,23 +62,6 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
     ...read.map((entry) => since.get(entry.id) ?? entry),
     ...live.filter((entry) => !known.has(entry.id)),
   ]
-}
-
-/** The option an agent offers under one of its own names, or nothing when it has no such one. */
-function choicesOf(
-  options: readonly ConfigOption[],
-  names: readonly string[],
-): ConfigOption | null {
-  for (const option of options) {
-    if (names.includes(option.category ?? '') || names.includes(option.id)) return option
-  }
-  return null
-}
-
-/** One of an agent's options, as the three selectors read their own. */
-function asChoices(option: ConfigOption | null): readonly AgentChoice[] {
-  if (option === null) return []
-  return option.values.map((value) => ({ id: value.value, name: value.name }))
 }
 
 /** `4 messages`, and the singular for the one that has just been written. */
@@ -278,34 +258,13 @@ export function SessionPage({
     if (block !== undefined) scroller.push(block)
   }
 
-  const model = choicesOf(options, ['model'])
-  const effort = choicesOf(options, ['thought_level', 'effort', 'reasoning'])
-  const mode = choicesOf(options, ['mode'])
-  const controls = (
-    <>
-      {model === null ? null : (
-        <ModelSelector
-          agent={session.provider ?? ''}
-          models={asChoices(model)}
-          value={model.current ?? ''}
-          onValueChange={(chosen) => onChooseOption(model.id, chosen)}
-        />
-      )}
-      {effort === null ? null : (
-        <EffortSelector
-          efforts={asChoices(effort)}
-          value={effort.current ?? ''}
-          onValueChange={(chosen) => onChooseOption(effort.id, chosen)}
-        />
-      )}
-      {mode === null ? null : (
-        <ModeSelector
-          modes={asChoices(mode)}
-          value={mode.current ?? ''}
-          onValueChange={(chosen) => onChooseOption(mode.id, chosen)}
-        />
-      )}
-    </>
+  // What the agent is on is the agent's own answer, read back after every change: this page
+  // draws what it was told and never a value it remembers (D5-13).
+  const controls = controlsOf(
+    session.provider ?? '',
+    options,
+    (option) => option.current ?? '',
+    onChooseOption,
   )
 
   return (

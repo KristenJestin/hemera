@@ -254,6 +254,11 @@ export { EffortSelector, type EffortSelectorProps } from './composer/effort-sele
 export { ModeSelector, type ModeSelectorProps } from './composer/mode-selector.tsx'
 export { UsageMeter, type UsageCost, type UsageMeterProps } from './composer/usage-meter.tsx'
 export { BlockedBanner, type BlockedBannerProps } from './composer/blocked-banner.tsx'
+export {
+  AgentSelector,
+  type AgentSelectorProps,
+  type OfferedAgent,
+} from './composer/agent-selector.tsx'
 
 /** The agents this machine has, with what it can say about each. */
 export {

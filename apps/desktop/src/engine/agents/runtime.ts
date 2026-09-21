@@ -96,6 +96,18 @@ export interface AgentRuntimeService {
   readonly start: (sessionId: string) => Effect.Effect<AgentHandshake, AgentRuntimeError>
   /** What the agent lets this Session choose, as it announced it (design D5-13). */
   readonly options: (sessionId: string) => Effect.Effect<readonly AgentOption[], AgentRuntimeError>
+  /**
+   * What an agent offers a Project, before any Session holds it (design D5-17).
+   *
+   * The composer of a Project's Home has an agent and its own controls to choose before there is
+   * a Session to ask: what an agent offers is said by the agent itself, and asking it is what
+   * this does. Nothing is written and no Session is made — what it answers is what the Session
+   * made from that choice will offer.
+   */
+  readonly offer: (
+    projectId: string,
+    provider: AgentProvider,
+  ) => Effect.Effect<readonly AgentOption[], AgentRuntimeError>
   readonly setOption: (
     sessionId: string,
     optionId: string,
@@ -480,21 +492,25 @@ export const runtimeLayer = Layer.effect(
       }
     }
 
-    /** The path of the Project a Session belongs to, which is where its agent is run. */
-    const projectPath = (session: Session): Effect.Effect<string, AgentRuntimeError> =>
+    /** The path of a Project, which is where an agent runs for it. */
+    const mainPathOf = (projectId: string): Effect.Effect<string, AgentRuntimeError> =>
       Effect.gen(function* () {
         const held = yield* attempt('reading the Project', projects.list())
-        const project = held.find((candidate) => candidate.id === session.projectId)
+        const project = held.find((candidate) => candidate.id === projectId)
         if (project === undefined) {
           return yield* Effect.fail(
             new AgentRuntimeError({
               what: 'reading the Project',
-              cause: `no Project has the identifier "${session.projectId}"`,
+              cause: `no Project has the identifier "${projectId}"`,
             }),
           )
         }
         return project.mainPath
       })
+
+    /** The path of the Project a Session belongs to, which is where its agent is run. */
+    const projectPath = (session: Session): Effect.Effect<string, AgentRuntimeError> =>
+      mainPathOf(session.projectId)
 
     /** Where an agent runs for this Session: where it ran before, or the Project's own path. */
     const workingDirectory = (
@@ -507,6 +523,61 @@ export const runtimeLayer = Layer.effect(
         // stop being one because its folder was moved: the Project's own path takes it in.
         if (native.cwd !== null && existsSync(native.cwd)) return native.cwd
         return project
+      })
+
+    /**
+     * What each agent announced for a Project, for as long as the engine runs.
+     *
+     * Nothing about the answer depends on a Session: the same agent in the same Project offers
+     * the same models, and asking again would start a second process to be told the same thing.
+     * Picking one agent, another, and the first again therefore costs one start.
+     */
+    const offered = new Map<string, readonly AgentOption[]>()
+
+    /**
+     * What an agent offers a Project, before any Session holds it (D5-17).
+     *
+     * It starts the agent, opens a session on the Project and lets it go: what an agent offers is
+     * said by the agent, and this is how the Home knows what to put in its composer before there
+     * is a Session to ask. Nothing is written, the process is stopped whatever happens, and the
+     * Session the choice starts runs an agent of its own.
+     */
+    const offer = (projectId: string, provider: AgentProvider) =>
+      Effect.gen(function* () {
+        const key = `${projectId}:${provider}`
+        const known = offered.get(key)
+        if (known !== undefined) return known
+
+        const cwd = yield* mainPathOf(projectId)
+        const resolved = yield* attempt('finding the agent', discovery.resolve(provider))
+        const process = yield* attempt(
+          'starting the agent',
+          supervisor.start(resolved.adapter.command, resolved.adapter.args, { cwd }),
+        )
+
+        const announced = yield* Effect.ensuring(
+          Effect.gen(function* () {
+            const connection = yield* attempt(
+              'speaking to the agent',
+              connect({
+                ...pipes(process),
+                adapter: resolved.adapter,
+                // Nobody is in the session this probe opens: what it reports has nowhere to go,
+                // and a question asked there is cancelled rather than put to a window.
+                onEvent: () => undefined,
+                onPermission: () => Promise.resolve({ cancelled: true } satisfies PermissionAnswer),
+              }),
+            )
+            yield* attempt('opening a session', connection.open(cwd))
+            return connection.options()
+          }),
+          // An agent kept for what it announced would be a process holding a folder open for a
+          // window that may never pick it, so it goes as soon as it has answered.
+          attempt('stopping the agent', process.stop).pipe(Effect.ignore),
+        )
+
+        offered.set(key, announced)
+        return announced
       })
 
     /**
@@ -558,9 +629,10 @@ export const runtimeLayer = Layer.effect(
     /**
      * The agent of a Session, started if it was not running.
      *
-     * A Session is created with no agent and given one when the user picks it: a Session that has
-     * none is a refusal the interface shows, and one whose agent this machine does not have is
-     * the same refusal naming it (D5-17). Neither is replaced by another agent.
+     * A Session is made with the agent it will run, and it keeps it: the Sessions written before
+     * the agents existed have none, and asking one of those to speak is a refusal the interface
+     * shows, as is one whose agent this machine does not have (D5-17). Neither is replaced by
+     * another agent.
      */
     const opened = (sessionId: string): Effect.Effect<Live, AgentRuntimeError, Scope.Scope> =>
       Effect.gen(function* () {
@@ -1037,6 +1109,7 @@ export const runtimeLayer = Layer.effect(
     const service: AgentRuntimeService = {
       start: (sessionId) => owned(start(sessionId)),
       options: (sessionId) => owned(options(sessionId)),
+      offer: (projectId, provider) => owned(offer(projectId, provider)),
       setOption: (sessionId, optionId, value) => owned(setOption(sessionId, optionId, value)),
       prompt: (sessionId, text) => owned(prompt(sessionId, text)),
       stop: (sessionId) => owned(stop(sessionId)),

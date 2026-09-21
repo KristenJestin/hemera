@@ -66,6 +66,15 @@ export interface ComposerProps {
   onWorkspaceChange?: ((workspace: string) => void) | undefined
   /** The word on the button that sends: `Start chat` on the Home. */
   action?: string | undefined
+  /**
+   * What this composer cannot be sent without, drawn above the box (design D4b-02).
+   *
+   * The Home's composer starts a Session, and a Session is made with the agent it will run: with
+   * no agent chosen there is nothing to make and nobody to answer, so the action stays off and
+   * the sentence says what is missing. It is neither a refusal nor a permission: nothing was
+   * written and lost, and nothing is waiting on an answer — the choice above the box is.
+   */
+  missing?: string | undefined
   /** The shape of the box: the Home's greeting, or the foot of a Session. */
   variant?: PromptShape | undefined
   placeholder?: string | undefined
@@ -112,6 +121,7 @@ export function Composer({
   workspace,
   onWorkspaceChange,
   action = 'Start chat',
+  missing,
   variant = 'hero',
   placeholder = 'Ask anything, think out loud, or describe what you want to do…',
   onSend,
@@ -129,8 +139,14 @@ export function Composer({
   const [chosen, setChosen] = useState(workspaces[0] ?? 'main')
   const current = workspace ?? chosen
 
-  /** Whether there is anything to send, which Enter and the button both ask. */
-  const ready = value.trim() !== '' && !sending
+  /**
+   * Whether there is anything to send, which Enter and the button both ask.
+   *
+   * `missing` is part of the answer: a sentence with nothing behind it to send it to is a
+   * sentence that would be written into a Session that cannot answer, and the reason it is off
+   * is on screen while it is.
+   */
+  const ready = value.trim() !== '' && !sending && missing === undefined
 
   /**
    * Asks for the files matching what has been typed, once the typing has stopped.
@@ -269,6 +285,7 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2">
+      {missing !== undefined && <p className="text-sm text-muted-foreground">{missing}</p>}
       {blocked}
       <Frame
         animated

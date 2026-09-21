@@ -192,6 +192,7 @@ const RELAYED = [
   // command of an agent is on this machine are all the engine's to answer (design D5-13, D5-18).
   'agents.list',
   'agents.options',
+  'agents.offer',
   'agents.setOption',
   'agents.prompt',
   'agents.stop',

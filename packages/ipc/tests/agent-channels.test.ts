@@ -49,6 +49,7 @@ describe('The agent channels are declared once', () => {
       'agents.check',
       'agents.decide',
       'agents.list',
+      'agents.offer',
       'agents.options',
       'agents.prompt',
       'agents.resume',

@@ -408,6 +408,13 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string() }),
     response: z.object({ options: z.readonly(z.array(configOptionSchema)) }),
   },
+  'agents.offer': {
+    // Asked before a Session exists: the composer of a Project's Home chooses an agent and what
+    // that agent offers, and the Session it starts keeps that agent (design D5-17). Nothing is
+    // written by the question, and the answer is the same list `agents.options` would give.
+    arguments: z.object({ projectId: z.string(), provider: agentProviderSchema }),
+    response: z.object({ options: z.readonly(z.array(configOptionSchema)) }),
+  },
   'agents.setOption': {
     arguments: z.object({ sessionId: z.string(), optionId: z.string(), value: z.string() }),
     response: z.void(),

@@ -43,6 +43,14 @@ export interface AgentState {
   sessions: ReadonlyMap<string, AgentSessionState>
   /** What each agent offers, per Session, as its own handshake answered. */
   options: ReadonlyMap<string, readonly ConfigOption[]>
+  /**
+   * What each agent offers a Project no Session holds yet, keyed `projectId:provider` (D5-17).
+   *
+   * The Home's composer picks an agent before there is a Session to ask, and the question — what
+   * does this agent offer this folder — has the same answer either way: it is asked once per
+   * agent and Project, and the Session made from that choice offers its own.
+   */
+  offerings: ReadonlyMap<string, readonly ConfigOption[]>
   /** What this machine has, as `agents.list` and `agents.check` answered. */
   agents: readonly AgentAvailability[]
   /** Whether that list is the one a registry answered, which is the settings' own question. */
@@ -54,6 +62,7 @@ export interface AgentState {
 const EMPTY: AgentState = {
   sessions: new Map(),
   options: new Map(),
+  offerings: new Map(),
   agents: [],
   checked: false,
   refusal: null,
@@ -171,6 +180,40 @@ export async function readOptions(sessionId: string): Promise<void> {
     const options = new Map(state.options)
     options.set(sessionId, answered.options)
     replace({ ...state, options, refusal: null })
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/**
+ * What an agent offers a Project that no Session holds yet, or nothing while it is being asked.
+ *
+ * An agent that this machine does not have offers nothing here, and the refusal `offerAgent` kept
+ * is what the composer shows instead of a choice.
+ */
+export function offeringOf(
+  projectId: string | null,
+  provider: AgentProvider | null,
+): readonly ConfigOption[] {
+  if (projectId === null || provider === null) return []
+  return state.offerings.get(`${projectId}:${provider}`) ?? []
+}
+
+/**
+ * Asks an agent what it offers a Project, before any Session holds it (D5-17).
+ *
+ * Asked when an agent is picked in the Home's composer, and never again for that Project: the
+ * engine starts the agent to be told, so the answer is kept rather than asked for on every
+ * render. A refusal leaves the composer with nothing to choose and the reason on screen.
+ */
+export async function offerAgent(projectId: string, provider: AgentProvider): Promise<void> {
+  const key = `${projectId}:${provider}`
+  if (state.offerings.has(key)) return
+  try {
+    const answered = await window.hemera.invoke('agents.offer', { projectId, provider })
+    const offerings = new Map(state.offerings)
+    offerings.set(key, answered.options)
+    replace({ ...state, offerings, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }
