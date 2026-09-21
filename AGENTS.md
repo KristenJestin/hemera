@@ -134,6 +134,10 @@ Never run a real LLM provider from a test.
   of these branches, create a feature branch first.
 - Never rewrite history that is not yours. No `--no-verify`.
 - One commit = one intent. No `wip` commits. Don't mix formatting and logic in one commit.
+- The subject is `<type>(<scope>): <subject>`: the **scope is required**, the subject is 72
+  characters at most, and the type is one of feat, fix, refactor, test, docs, chore, build, ci,
+  perf. `node tools/commit-message.ts --range origin/dev..HEAD` is the judge; run it before a
+  push, the `commit-messages` check runs the same tool.
 - **Pull requests are merged by squash, and by squash only.** The squash commit takes the pull
   request's title and description, so the title is a plain Angular subject —
   `feat(desktop): lot 3, the profile and its database` — with nothing in front of it: `main`
