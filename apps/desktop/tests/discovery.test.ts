@@ -272,7 +272,14 @@ describe('The command is looked for on the PATH the user already has', () => {
         }).pipe(Effect.provide(machineEnvironmentLayer)),
       )
 
-      expect(found.path).toBe(join(directory, name))
+      // Windows answers with the extension in `PATHEXT`'s own case — `fake-agent.CMD` for the file
+      // the suite wrote as `fake-agent.cmd` — because that is the name it resolved the command to,
+      // and the file it names is the same one. A POSIX file system is case-sensitive, so there the
+      // name has to come back exactly as it is on disk.
+      const asWritten = join(directory, name)
+      expect(windows ? found.path?.toLowerCase() : found.path).toBe(
+        windows ? asWritten.toLowerCase() : asWritten,
+      )
       expect(found.output?.trim()).toBe('9.9.9')
     } finally {
       if (pathBefore === undefined) delete process.env.PATH
