@@ -51,3 +51,13 @@ Branch `feature/<topic>` from `dev`, Angular commits under the maintainer's iden
 - [`docs/product/core.md`](product/core.md) prevails over everything else; [`docs/decisions/`](decisions/README.md) refines it; [`docs/technical/`](technical/) holds the research; [`docs/design/`](design/README.md) and [`docs/prototypes/`](prototypes/README.md) are references for tokens and motion, never markup to copy.
 - A proposal that changes a product rule edits the document in the same pull request and says so in the issue.
 - An issue names in "References" the documents it needs.
+
+## 7. How the developer agent works
+
+- **One issue, one branch, one worktree.** A Framed issue gets `feature/<n>-<topic>` (or `fix/<n>-<topic>`) from `dev`, in a worktree of its own. Nothing else is done in that worktree; nothing of that issue is done elsewhere.
+- **One run at a time per repository.** A second request on the same repository waits until the current run has ended; it is never started beside it. Two runs on one branch is a defect, whatever their titles.
+- **Sub-agents inherit the identity.** Every worktree, every sub-agent, commits as the maintainer (`kris <kristen.jestin@pm.me>`, author and committer). A commit under any other identity is rewritten before it is pushed.
+- **A branch is rewritten only while the pull request is a draft**, and the rewrite is said in a comment (what changed, that the trees are unchanged). Once the pull request is ready, the branch only grows.
+- **Every push leaves the checks green** (`commit-messages`, `pull-request`, the Linux `verify`). A push that does not is followed by the push that fixes it, before anything else.
+- **The pull request is opened once**, at the end of phase 0, as a draft, with `Closes #<n>`; it is the only pull request of the issue. Progress is reported in its comments, not in new pull requests.
+- **The agent reads the issue, `docs/METHOD.md` and `AGENTS.md` at the start of every run**, and the comments of the pull request since its last one; a review is answered point by point, in the order given.
