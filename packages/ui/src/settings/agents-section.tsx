@@ -87,6 +87,29 @@ export interface AgentOnTheMachine {
   installer: string
   /** What its registry published, or null when nobody has asked it yet. */
   latest: string | null
+  /**
+   * Where its adapter stands with bare mode (design D6-15), or nothing when it has not been asked.
+   *
+   * Asked of the adapter and not guessed from the agent: what it says is whether this agent
+   * leaves its own tools behind and works through the ones Hemera lends it, why, and the date
+   * the answer was last true. A reader who is told "no" is told what would make it "yes".
+   *
+   * An adapter that has not answered is not an agent that answered no, and the line says which
+   * of the two it is — the same distinction the published version makes.
+   */
+  bare?: BareMode | undefined
+}
+
+/** What an adapter answered about bare mode, and when it answered it. */
+export interface BareMode {
+  /** Whether this agent runs without its own tools. */
+  qualified: boolean
+  /** Why it does, or why it does not. */
+  reason: string
+  /** What would qualify it, said only where something would. */
+  remedy?: string | undefined
+  /** When the adapter last answered, as it records the date itself. */
+  checkedAt?: string | undefined
 }
 
 export interface AgentsSectionProps {
@@ -142,7 +165,9 @@ export function AgentsSection({
                     {agent.found ? agent.installer : agent.installHint}
                   </Pair>
                   {agent.authenticated ? null : <Pair label="To sign in">{agent.loginHint}</Pair>}
+                  <Pair label="Bare mode">{bareWord(agent.bare)}</Pair>
                 </dl>
+                {agent.bare === undefined ? null : <p className={NOTE}>{bareOf(agent.bare)}</p>}
                 {update === null ? null : (
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
@@ -189,6 +214,29 @@ function Pair({ label, children }: { label: string; children: ReactNode }): Reac
       <dd className={VALUE}>{children}</dd>
     </div>
   )
+}
+
+/**
+ * The word the row stands on: what the adapter answered, or that nobody has asked it.
+ *
+ * Lowercase and bare, like `not asked yet` beside it: the row is a value in a list, and the
+ * sentence under it is where the reason goes.
+ */
+function bareWord(bare: BareMode | undefined): string {
+  if (bare === undefined) return 'not asked yet'
+  return bare.qualified ? 'bare' : 'not bare'
+}
+
+/**
+ * What the adapter said about bare mode, in one sentence.
+ *
+ * The reason, then what would change it, then the date it was last true — in that order, because
+ * that is the order a reader asks in. An agent that is not qualified is not a broken agent: it
+ * runs with its own tools, and what is missing is said rather than implied.
+ */
+function bareOf(bare: BareMode): string {
+  const said = [bare.reason, bare.remedy].filter((part) => part !== undefined).join(' ')
+  return bare.checkedAt === undefined ? said : `${said} Checked ${bare.checkedAt}.`
 }
 
 /** The three answers, which are read off what the machine said rather than stored beside it. */

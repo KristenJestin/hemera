@@ -22,6 +22,11 @@ const CLAUDE = {
   loginHint: 'claude auth login',
   installer: 'npm',
   latest: '2.0.35',
+  bare: {
+    qualified: true,
+    reason: 'it works through the tools Hemera lends it',
+    checkedAt: '21 Sep 2026',
+  },
 } as const
 
 const CODEX = {
@@ -34,6 +39,11 @@ const CODEX = {
   loginHint: 'codex login',
   installer: 'pnpm',
   latest: '0.9.4',
+  bare: {
+    qualified: true,
+    reason: 'it works through the tools Hemera lends it',
+    checkedAt: '21 Sep 2026',
+  },
 } as const
 
 const OPENCODE = {
@@ -46,6 +56,11 @@ const OPENCODE = {
   loginHint: 'opencode auth login',
   installer: 'unknown',
   latest: null,
+  bare: {
+    qualified: false,
+    reason: 'its adapter has not answered for bare mode yet',
+    remedy: 'it qualifies once its own tools are known to be switchable',
+  },
 } as const
 
 /** What an installer says when it has moved a package, kept as the tool wrote it. */
@@ -57,7 +72,7 @@ updated 1 package and audited 2 packages in 3.812s`
 const meta = {
   title: 'Surfaces/Settings/Agents',
   component: AgentsSection,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     agents: [CLAUDE, CODEX, OPENCODE],

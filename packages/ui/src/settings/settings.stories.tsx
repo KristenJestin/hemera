@@ -62,6 +62,11 @@ const AGENTS: SettingsProps['agents'] = {
       loginHint: 'claude auth login',
       installer: 'npm',
       latest: '2.0.35',
+      bare: {
+        qualified: true,
+        reason: 'it works through the tools Hemera lends it',
+        checkedAt: '21 Sep 2026',
+      },
     },
     {
       id: 'codex',
@@ -73,6 +78,11 @@ const AGENTS: SettingsProps['agents'] = {
       loginHint: 'codex login',
       installer: 'pnpm',
       latest: '0.9.4',
+      bare: {
+        qualified: true,
+        reason: 'it works through the tools Hemera lends it',
+        checkedAt: '21 Sep 2026',
+      },
     },
     {
       id: 'opencode',
@@ -84,6 +94,11 @@ const AGENTS: SettingsProps['agents'] = {
       loginHint: 'opencode auth login',
       installer: 'unknown',
       latest: null,
+      bare: {
+        qualified: false,
+        reason: 'its adapter has not answered for bare mode yet',
+        remedy: 'it qualifies once its own tools are known to be switchable',
+      },
     },
   ],
   checked: true,
@@ -93,7 +108,7 @@ const AGENTS: SettingsProps['agents'] = {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Settings',
   component: Settings,
   render: (args) => <Controlled {...args} />,
