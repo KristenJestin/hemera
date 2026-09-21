@@ -10,7 +10,7 @@
  * a port that never answers can be handed to it and the waiting watched from outside.
  */
 
-import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
+import type { EngineArguments, EngineEvent, EngineRequestName, EngineResponse } from '@hemera/ipc'
 import { Data, Duration, Effect } from 'effect'
 
 import type { EngineAnswer, EngineRequest } from '../engine/request.ts'
@@ -51,7 +51,7 @@ export class EngineGone extends Data.TaggedError('EngineGone')<OnUseCase> {}
 /** What a conversation needs of a port, which is all a test has to stand in for. */
 export interface EnginePort {
   postMessage: (message: EngineRequest) => void
-  on: (event: 'message', listener: (event: { data: EngineAnswer }) => void) => void
+  on: (event: 'message', listener: (event: { data: EngineAnswer | EngineEvent }) => void) => void
   start: () => void
 }
 
@@ -61,6 +61,15 @@ export interface EngineConversation {
     name: K,
     argument: EngineArguments<K>,
   ) => Effect.Effect<EngineResponse<K>, EngineRefused | EngineTimeout | EngineGone>
+  /**
+   * Everything the engine says without being asked (design D5-12).
+   *
+   * A turn happens over minutes, and what the page is drawn from is what arrives while it does:
+   * an entry was written, a turn ended, a permission is being asked for, the agent itself
+   * changed. Nothing waits for these and nothing is answered, so they travel beside the answers
+   * rather than as one — the identifier is what tells the two apart.
+   */
+  hear: (listener: (event: EngineEvent) => void) => void
 }
 
 /**
@@ -76,17 +85,28 @@ export function engineConversation(
   patience: Duration.Duration = PATIENCE,
 ): EngineConversation {
   const waiting = new Map<number, (answer: EngineAnswer) => void>()
+  const heard: ((event: EngineEvent) => void)[] = []
   let next = 0
 
   port.on('message', (event) => {
-    const settle = waiting.get(event.data.id)
+    const said = event.data
+    // What has no identifier is not an answer to anything: it is the engine saying something
+    // happened, and it goes to whoever is listening for it.
+    if (!('id' in said)) {
+      for (const listener of heard) listener(said)
+      return
+    }
+    const settle = waiting.get(said.id)
     if (settle === undefined) return
-    waiting.delete(event.data.id)
-    settle(event.data)
+    waiting.delete(said.id)
+    settle(said)
   })
   port.start()
 
   return {
+    hear: (listener) => {
+      heard.push(listener)
+    },
     ask: <K extends EngineRequestName>(name: K, argument: EngineArguments<K>) => {
       const asked = Effect.callback<EngineAnswer, EngineGone>((resume) => {
         if (!alive()) {
