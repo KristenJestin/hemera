@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { exec, execFile } from 'node:child_process'
 import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, extname, join } from 'node:path'
 import { Context, Data, Effect, Layer } from 'effect'
@@ -296,19 +296,18 @@ function locate(command: string): string | undefined {
 function versionOf(command: string, signal: AbortSignal): Promise<string | undefined> {
   const path = locate(command)
   if (path === undefined) return Promise.resolve(undefined)
-  // A `.cmd` shim is a batch file, and Windows runs one through its command interpreter.
+  // A `.cmd` shim is a batch file, and Windows runs one through its command interpreter. The line
+  // is handed to `exec`, whose shell *is* that interpreter: Node wraps the whole line in the pair
+  // of quotes `cmd /s /c` strips back off, so a path with a space in it survives. Building the
+  // same line by hand and passing it as one argument of `execFile` does not — the argument is
+  // escaped a second time on the way out — which is how a version probe answered nothing at all.
   const shimmed = process.platform === 'win32' && SHIM.test(path)
-  const executable = shimmed ? (process.env.ComSpec ?? 'cmd.exe') : path
-  const args = shimmed ? ['/d', '/s', '/c', `"${path}" --version`] : ['--version']
   return new Promise((resolve) => {
-    execFile(
-      executable,
-      args,
-      { signal, timeout: VERSION_TIMEOUT_MS, windowsHide: true },
-      (failure, stdout) => {
-        resolve(failure === null ? stdout : undefined)
-      },
-    )
+    const settle = (failure: Error | null, stdout: string) =>
+      resolve(failure === null ? stdout : undefined)
+    const options = { signal, timeout: VERSION_TIMEOUT_MS, windowsHide: true }
+    if (shimmed) exec(`"${path}" --version`, options, settle)
+    else execFile(path, ['--version'], options, settle)
   })
 }
 
