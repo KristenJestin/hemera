@@ -263,3 +263,79 @@ describe('Stop ends the turn cleanly', () => {
     )
   })
 })
+
+/**
+ * The context window, as the one thing that ever announces one (design D5-20).
+ *
+ * `usage_update` is the protocol's only word on the subject — nothing in `initialize` and nothing
+ * among the models a session publishes — and an agent is free never to say it. What the thread
+ * keeps then is the announcement itself, beside what the turn used, and a reader that has neither
+ * is told the window was not provided rather than being handed a size Hemera invented.
+ */
+describe('The context window of a turn', () => {
+  test('what the agent announced is written beside what the turn used', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'spends', used: 12400, size: 200000, cost: { amount: 0.42, currency: 'USD' } },
+        { does: 'says', text: 'the reader is where the project is opened' },
+      ],
+      usage: { inputTokens: 7361, outputTokens: 3, totalTokens: 7364 },
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const report = yield* runtime.prompt(session.id, 'what does this project do')
+
+        expect(report.usage?.totalTokens).toBe(7364)
+
+        const spent = entryOf(yield* threadOf(session.id), 'usage')
+        // What the turn used is the line the entry is read by, and it is the agent's accounting.
+        expect(spent.body).toBe('7364 tokens')
+
+        // SAFETY: the payload of a usage entry is what the runtime wrote for it, and what is read
+        // here are the fields it wrote there — a payload of another shape is a failure of this
+        // suite that made it rather than of this reader.
+        const payload = JSON.parse(spent.payload ?? '{}') as {
+          used?: number | null
+          size?: number | null
+          cost?: { amount: number; currency: string } | null
+        }
+        expect(payload.used).toBe(12400)
+        expect(payload.size).toBe(200000)
+        expect(payload.cost).toEqual({ amount: 0.42, currency: 'USD' })
+      }),
+    )
+  })
+
+  test('a window nobody announced is written as missing, never as a size', async () => {
+    const agent = fakeAgent({
+      steps: [{ does: 'says', text: 'done' }],
+      usage: { inputTokens: 7358, outputTokens: 3, totalTokens: 7361 },
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'say something')
+
+        const spent = entryOf(yield* threadOf(session.id), 'usage')
+        expect(spent.body).toBe('7361 tokens')
+
+        // SAFETY: as above — the payload of this kind of entry is the runtime's own writing.
+        const payload = JSON.parse(spent.payload ?? '{}') as {
+          totalTokens?: number | null
+          used?: number | null
+          size?: number | null
+          cost?: unknown
+        }
+        expect(payload.totalTokens).toBe(7361)
+        expect(payload.used).toBeNull()
+        expect(payload.size).toBeNull()
+        expect(payload.cost).toBeNull()
+      }),
+    )
+  })
+})

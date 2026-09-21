@@ -25,6 +25,7 @@ import {
   ndJsonStream,
   type Client as AcpClient,
   type ContentBlock,
+  type Cost,
   type SessionNotification,
   type StopReason,
   type Usage,
@@ -98,12 +99,28 @@ export interface UsageReport {
 }
 
 /**
+ * The context window, as the agent announced it (design D5-20).
+ *
+ * `usage_update` is the only place the protocol ever names a window: `initialize` says nothing
+ * about it and neither do the models a session publishes, so an agent that announces a window
+ * announces it here and an agent that does not has none to read. What arrives is what it said —
+ * how much of the window is in use, how big the window is, and the session's cost when it
+ * accounts for one.
+ */
+export interface WindowReport {
+  readonly used: number
+  readonly size: number
+  readonly cost: Cost | null
+}
+
+/**
  * What a turn reports while it runs, in Hemera's words.
  *
  * The kinds are the thread's own (design D5-11): a message, a thought, a tool call and a plan
- * are what a turn can be said to be doing at any moment, and everything else the protocol
- * publishes — the commands it offers, the mode it is in, a compaction — is an update this lot
- * does not draw and so does not carry.
+ * are what a turn can be said to be doing at any moment, and the window it is filling is what
+ * the agent announced it against; everything else the protocol publishes — the commands it
+ * offers, the mode it is in, a compaction — is an update this lot does not draw and so does not
+ * carry.
  *
  * `replay` is true for what the agent sends back while a session is being continued: ACP asks it
  * to stream the whole history again, and those turns are already in Hemera's thread. A replay is
@@ -125,6 +142,7 @@ export type AgentEvent =
     }
   | { readonly type: 'tool_call'; readonly call: ToolCallReport; readonly replay: boolean }
   | { readonly type: 'plan'; readonly entries: readonly PlanLine[]; readonly replay: boolean }
+  | { readonly type: 'usage'; readonly window: WindowReport; readonly replay: boolean }
 
 /** What the agent published about itself at `initialize`. */
 export interface AgentHandshake {
@@ -297,6 +315,12 @@ function eventOf(notification: SessionNotification, replay: boolean): AgentEvent
           content: entry.content,
           status: entry.status,
         })),
+      }
+    case 'usage_update':
+      return {
+        type: 'usage',
+        replay,
+        window: { used: update.used, size: update.size, cost: update.cost ?? null },
       }
     default:
       return null

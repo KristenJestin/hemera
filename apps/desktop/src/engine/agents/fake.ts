@@ -85,6 +85,19 @@ export type FakeStep =
       readonly does: 'plans'
       readonly lines: readonly { readonly content: string; readonly status: PlanEntryStatus }[]
     }
+  | {
+      /**
+       * What the agent says the window is filling to (design D5-20).
+       *
+       * `usage_update` is the only place a context window is ever named, so a script that wants
+       * one announced announces it here — and a script that says nothing has the agent say
+       * nothing, which is what every agent on this machine does.
+       */
+      readonly does: 'spends'
+      readonly used: number
+      readonly size: number
+      readonly cost?: { readonly amount: number; readonly currency: string }
+    }
 
 /**
  * What the agent is scripted to be: what it announces, and what it does when it is asked.
@@ -261,6 +274,15 @@ function updateOf(step: FakeStep): SessionUpdate | null {
         status: step.call.status,
       }
       if (step.call.title !== undefined) update.title = step.call.title
+      return update
+    }
+    case 'spends': {
+      const update: Extract<SessionUpdate, { sessionUpdate: 'usage_update' }> = {
+        sessionUpdate: 'usage_update',
+        used: step.used,
+        size: step.size,
+      }
+      if (step.cost !== undefined) update.cost = step.cost
       return update
     }
     case 'plans':

@@ -39,6 +39,7 @@ import {
   type PermissionAnswer,
   type PermissionQuestion,
   type UsageReport,
+  type WindowReport,
   connect,
 } from './client.ts'
 import { Discovery } from './discovery.ts'
@@ -169,6 +170,13 @@ interface Live {
   context: string | null
   /** Why that context had to be rebuilt, in the agent's own terms; null when it did not. */
   why: string | null
+  /**
+   * The context window the agent announced, and how much of it it says is in use (D5-20).
+   *
+   * Held for the life of the connection rather than for the turn that heard it: an agent says
+   * how big its window is once, and every turn after that is measured against the same one.
+   */
+  window: WindowReport | null
   /**
    * What the agent has said that the thread does not hold yet.
    *
@@ -355,6 +363,15 @@ export const runtimeLayer = Layer.effect(
             turnId: turn?.id ?? null,
             origin,
           })
+          return
+        }
+
+        if (event.type === 'usage') {
+          // The window is not a thing the agent said, it is the measure the turn is read against:
+          // it changes no entry and is kept for the next turn to be measured by. A replay is
+          // history, and an older reading written over a newer one is a meter that goes backwards.
+          const running = live.get(sessionId)
+          if (!event.replay && running !== undefined) running.window = event.window
           return
         }
 
@@ -595,6 +612,7 @@ export const runtimeLayer = Layer.effect(
           death: null,
           context: null,
           why: null,
+          window: null,
           pending: 0,
         }
         live.set(sessionId, started)
@@ -836,17 +854,34 @@ export const runtimeLayer = Layer.effect(
           const outcome = yield* Effect.result(attempt('prompting', held.connection.prompt(sent)))
           if (Result.isSuccess(outcome)) {
             const answered = outcome.success
-            if (answered.usage !== null) {
+            // What is in the thread is read before the window is: the announcement travels as a
+            // notification of its own, and the entry is written from it once everything the agent
+            // said is held rather than racing it.
+            yield* drained(held)
+            const window = held.window
+            // What a turn used and what the window holds are two readings, and either can be
+            // missing: an agent that accounts for a turn but never announces a window leaves the
+            // meter with nothing to divide by, and one that announces a window and answers
+            // nothing leaves it with what it is filling (D5-20). The entry is written when the
+            // agent had anything to say at all, and the payload says which halves it said.
+            if (answered.usage !== null || window !== null) {
               yield* write(sessionId, {
                 role: 'hemera',
                 kind: 'usage',
-                body: `${answered.usage.totalTokens} tokens`,
-                payload: JSON.stringify(answered.usage),
+                body: `${answered.usage?.totalTokens ?? window?.used ?? 0} tokens`,
+                payload: JSON.stringify({
+                  totalTokens: answered.usage?.totalTokens ?? null,
+                  inputTokens: answered.usage?.inputTokens ?? null,
+                  outputTokens: answered.usage?.outputTokens ?? null,
+                  thoughtTokens: answered.usage?.thoughtTokens ?? null,
+                  used: window?.used ?? null,
+                  size: window?.size ?? null,
+                  cost: window?.cost ?? null,
+                }),
                 correlationId: `turn:${turn.id}:usage`,
                 turnId: turn.id,
               })
             }
-            yield* drained(held)
             yield* closeTurn(sessionId, turn, turn.closed ?? answered.stopReason)
             return {
               stopReason: turn.closed ?? answered.stopReason,

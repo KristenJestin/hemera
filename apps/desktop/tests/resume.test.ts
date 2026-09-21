@@ -16,7 +16,7 @@ import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
-import { application, aSession, entryOf, heldInThread } from './application.ts'
+import { application, aSession, entryOf, heldInThread, threadOf } from './application.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -137,6 +137,53 @@ describe('A Session is taken back by its agent', () => {
         // Nothing was re-executed: no prompt was sent, and the turn is the one the first run had.
         expect(second.answers.prompts).toEqual([])
         expect(entries.filter((entry) => entry.kind === 'turn')).toHaveLength(1)
+      }),
+    )
+  })
+
+  test('a window replayed with a history is not the window of the next turn', async () => {
+    const first = fakeAgent({ steps: [{ does: 'says', text: 'the reader is a mess' }] })
+    let sessionId = ''
+
+    await opened(first)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        sessionId = session.id
+        yield* runtime.prompt(session.id, 'start on the reader')
+      }),
+    )
+
+    // The window the session was left in comes back with the history, and coming back does not
+    // make it a reading of now: what the thread keeps is what was announced while the session was
+    // open, and an older reading taken for the current one is a meter that goes backwards (D5-20).
+    const second = fakeAgent({
+      advertisesResume: false,
+      continues: true,
+      history: [
+        { does: 'says', text: 'the reader is a mess', messageId: 'msg-1' },
+        { does: 'spends', used: 198000, size: 200000 },
+      ],
+      steps: [{ does: 'says', text: 'and this one is new' }],
+      usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+    })
+    await opened(second)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        yield* runtime.resume(sessionId)
+        yield* runtime.prompt(sessionId, 'carry on')
+
+        const spent = entryOf(yield* threadOf(sessionId), 'usage')
+        // SAFETY: the payload of a usage entry is what the runtime wrote for it, and what is read
+        // here are the two fields it wrote there.
+        const payload = JSON.parse(spent.payload ?? '{}') as {
+          used?: number | null
+          size?: number | null
+        }
+        // The agent announced a window, and the turn is measured against none of it: this agent
+        // announced it about a session it was handing back, not about this turn.
+        expect(payload.used).toBeNull()
+        expect(payload.size).toBeNull()
       }),
     )
   })
