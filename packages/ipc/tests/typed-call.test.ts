@@ -97,6 +97,8 @@ describe('Appel typé nominal', () => {
       'agents.stop',
       'agents.decide',
       'agents.resume',
+      'agents.check',
+      'agents.update',
       // Answered by the main process itself, because only it can.
       'dialog.pickFolder',
       'dialog.pickFiles',
@@ -164,6 +166,8 @@ describe('Cas d’usage nommés du process dédié', () => {
       'agents.stop',
       'agents.decide',
       'agents.resume',
+      'agents.check',
+      'agents.update',
     ]
     expect(Object.keys(ENGINE_REQUESTS).toSorted()).toEqual(names.toSorted())
   })

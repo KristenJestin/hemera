@@ -69,14 +69,18 @@ export type {
 export {
   agentAvailabilitySchema,
   agentProviderSchema,
+  agentUpdateSchema,
   configOptionSchema,
+  installerToolSchema,
   resumeStateSchema,
   stopReasonSchema,
 } from './agents.ts'
 export type {
   AgentAvailability,
   AgentProvider,
+  AgentUpdate,
   ConfigOption,
+  InstallerTool,
   ResumeState,
   StopReason,
 } from './agents.ts'

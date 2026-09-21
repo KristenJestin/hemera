@@ -46,6 +46,7 @@ describe('The agent channels are declared once', () => {
 
     expect(channels.toSorted()).toEqual(relayed.toSorted())
     expect(relayed.toSorted()).toEqual([
+      'agents.check',
       'agents.decide',
       'agents.list',
       'agents.options',
@@ -53,6 +54,7 @@ describe('The agent channels are declared once', () => {
       'agents.resume',
       'agents.setOption',
       'agents.stop',
+      'agents.update',
     ])
   })
 })
@@ -67,6 +69,8 @@ describe('The Agents page tells what is available', () => {
         version: '2.1.0',
         authenticated: true,
         installHint: 'npm install -g claude-agent-acp',
+        installer: 'pnpm',
+        latest: '2.2.0',
       }).success,
     ).toBe(true)
 
@@ -78,6 +82,8 @@ describe('The Agents page tells what is available', () => {
         version: null,
         authenticated: false,
         installHint: 'npm install -g @agentclientprotocol/codex-acp',
+        installer: 'unknown',
+        latest: null,
       }).success,
     ).toBe(true)
   })
@@ -91,6 +97,8 @@ describe('The Agents page tells what is available', () => {
         version: null,
         authenticated: false,
         installHint: 'npm install -g opencode',
+        installer: 'npm',
+        latest: null,
       }).success,
     ).toBe(true)
 
@@ -102,6 +110,8 @@ describe('The Agents page tells what is available', () => {
         found: true,
         authenticated: false,
         installHint: 'npm install -g opencode',
+        installer: 'npm',
+        latest: null,
       }).success,
     ).toBe(false)
   })

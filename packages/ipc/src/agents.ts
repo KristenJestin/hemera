@@ -18,6 +18,20 @@ export const agentProviderSchema = z.enum(['claude', 'codex', 'opencode'])
 export type AgentProvider = z.infer<typeof agentProviderSchema>
 
 /**
+ * The installer a command came from (design D5-18).
+ *
+ * An agent is a global package before it is a command, and the tool that installed it is the
+ * only one that can update it: `npm i -g`, `pnpm add -g`, `bun add -g` and `brew upgrade` are
+ * four different ways to move the same binary, and none of them stands in for another. The tool
+ * is read off the command's path — a pnpm global prefix, a Homebrew cellar — and `unknown` is
+ * an honest answer rather than a guess: a command from anywhere else is one Hemera will not
+ * offer to update.
+ */
+export const installerToolSchema = z.enum(['npm', 'pnpm', 'bun', 'brew', 'unknown'])
+
+export type InstallerTool = z.infer<typeof installerToolSchema>
+
+/**
  * One agent, as this machine answers for it (design D5-02, D5-17).
  *
  * `found` is whether the command is on the machine at all, and `version` is what it answered to
@@ -28,6 +42,10 @@ export type AgentProvider = z.infer<typeof agentProviderSchema>
  * `authenticated` is false until a Session has started the agent: being signed in is what an
  * agent reports when it is asked to `initialize`, and this page starts nothing (D5-17). When
  * the agent is not there, `installHint` is the one sentence that says how to get it.
+ *
+ * `latest` is the version published by the registry of `installer`, and it is null whenever
+ * nobody asked: the list a Session is created from is read locally, and only the Agents section
+ * goes to the network, when it is opened (D5-18).
  */
 export const agentAvailabilitySchema = z.object({
   id: agentProviderSchema,
@@ -36,9 +54,26 @@ export const agentAvailabilitySchema = z.object({
   version: z.string().nullable(),
   authenticated: z.boolean(),
   installHint: z.string(),
+  installer: installerToolSchema,
+  latest: z.string().nullable(),
 })
 
 export type AgentAvailability = z.infer<typeof agentAvailabilitySchema>
+
+/**
+ * What an update answered (design D5-18).
+ *
+ * The tool's own output, kept whole: it is what the reader is shown under the button, and a
+ * sentence Hemera wrote instead would hide the reason an update refused. `version` is what the
+ * command reports once the update is over, or null when it reported nothing — the section
+ * rechecks by itself, so this is only what the run itself said.
+ */
+export const agentUpdateSchema = z.object({
+  output: z.string(),
+  version: z.string().nullable(),
+})
+
+export type AgentUpdate = z.infer<typeof agentUpdateSchema>
 
 /**
  * One choice an agent offers, and the one it is on now (design D5-13).

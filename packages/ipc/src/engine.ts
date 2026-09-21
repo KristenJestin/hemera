@@ -17,6 +17,7 @@ import { z } from 'zod'
 import {
   agentAvailabilitySchema,
   agentProviderSchema,
+  agentUpdateSchema,
   configOptionSchema,
   resumeStateSchema,
   stopReasonSchema,
@@ -430,6 +431,21 @@ export const ENGINE_REQUESTS = {
   'agents.resume': {
     arguments: z.object({ sessionId: z.string() }),
     response: z.object({ state: resumeStateSchema, reason: z.string().nullable() }),
+  },
+
+  // What the Agents section of the settings asks for, and what it does about the answer
+  // (design D5-18). `check` is the one use case here that leaves the machine: it reads the
+  // registry of the tool each agent was installed with, which is why it is asked when the
+  // section is opened and never on a schedule. `update` runs that tool's own update command,
+  // only ever because somebody pressed a button, and answers with its output rather than with a
+  // sentence of Hemera's — an update that refused says why in its own words.
+  'agents.check': {
+    arguments: nothingSchema,
+    response: z.object({ agents: z.readonly(z.array(agentAvailabilitySchema)) }),
+  },
+  'agents.update': {
+    arguments: z.object({ id: agentProviderSchema }),
+    response: agentUpdateSchema,
   },
 } as const
 
