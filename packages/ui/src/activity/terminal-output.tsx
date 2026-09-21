@@ -66,13 +66,7 @@ export function TerminalOutput({
         </span>
       }
     >
-      <pre
-        ref={box}
-        tabIndex={0}
-        role="log"
-        aria-label={`Output of ${terminalId}`}
-        className={BOX}
-      >
+      <pre ref={box} tabIndex={0} role="log" aria-label={`Output of ${terminalId}`} className={BOX}>
         {output}
       </pre>
     </Disclosure>

@@ -44,18 +44,15 @@ const LABEL = 'shrink-0 text-xs text-muted-foreground'
 const VALUE = 'min-w-0 truncate font-mono text-foreground'
 
 /** The command or the path the decision is about, in the font that reads as an instruction. */
-const COMMAND = 'overflow-x-auto rounded-md border border-border bg-card px-2 py-1 font-mono text-xs whitespace-pre text-foreground'
+const COMMAND =
+  'overflow-x-auto rounded-md border border-border bg-card px-2 py-1 font-mono text-xs whitespace-pre text-foreground'
 
 const OPTIONS = 'flex flex-wrap items-center justify-end gap-2'
 
 const SCOPE = 'text-xs text-muted-foreground'
 
 /** The kinds of option an agent may offer, as the protocol names them. */
-export type PermissionOptionKind =
-  | 'allow_once'
-  | 'allow_always'
-  | 'reject_once'
-  | 'reject_always'
+export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'
 
 export interface PermissionOption {
   /** The id the agent gave this option; it is what goes back in the reply. */

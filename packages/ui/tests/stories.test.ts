@@ -261,6 +261,27 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ArchivedProjects',
       'NotificationBell',
       'NotificationList',
+      // HEM-17: a turn with an agent, from the call it makes to the gate it stops at. The blocks
+      // of a turn (its calls, its thoughts, its console, its changes), the permission card and
+      // the line an answer leaves, what the agent advertises and the reader sets, the agents this
+      // machine has, and what a Session says about itself beside its thread.
+      'Disclosure',
+      'ThoughtBlock',
+      'ToolCallCard',
+      'TerminalOutput',
+      'DiffBlock',
+      'PermissionRequest',
+      'DecisionSummary',
+      'ModelSelector',
+      'EffortSelector',
+      'ModeSelector',
+      'UsageMeter',
+      'BlockedBanner',
+      'AgentsSection',
+      'PlanPanel',
+      'SessionSideColumn',
+      'StoppedTurn',
+      'ResumeFallbackBanner',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

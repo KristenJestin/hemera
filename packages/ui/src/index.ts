@@ -222,3 +222,63 @@ export {
   type ArchivedSessionsProps,
   type SessionHeaderProps,
 } from './session/session.tsx'
+
+/** A turn with an agent, drawn as it happens: what it thought, what it called, what it ran, and
+ * what it changed. These are the blocks the thread of a Session with an agent is made of. */
+export { Disclosure, type DisclosureProps } from './activity/disclosure.tsx'
+export { ThoughtBlock, type ThoughtBlockProps } from './activity/thought-block.tsx'
+export {
+  ToolCallCard,
+  type ToolCallCardProps,
+  type ToolKind,
+  type ToolLocation,
+  type ToolStatus,
+} from './activity/tool-call-card.tsx'
+export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
+export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
+
+/** The gate a turn stops at, and the one line the answer leaves behind. */
+export {
+  PermissionRequest,
+  type PermissionOption,
+  type PermissionOptionKind,
+  type PermissionParameter,
+  type PermissionRequestProps,
+} from './approval/permission-request.tsx'
+export { DecisionSummary, type DecisionSummaryProps } from './approval/decision-summary.tsx'
+
+/** What an agent advertises, what the reader sets, and what the session has spent. */
+export { type AgentChoice } from './composer/agent-choice.ts'
+export { ModelSelector, type ModelSelectorProps } from './composer/model-selector.tsx'
+export { EffortSelector, type EffortSelectorProps } from './composer/effort-selector.tsx'
+export { ModeSelector, type ModeSelectorProps } from './composer/mode-selector.tsx'
+export { UsageMeter, type UsageCost, type UsageMeterProps } from './composer/usage-meter.tsx'
+export { BlockedBanner, type BlockedBannerProps } from './composer/blocked-banner.tsx'
+
+/** The agents this machine has, with what it can say about each. */
+export {
+  AgentsSection,
+  type AgentOnTheMachine,
+  type AgentStanding,
+  type AgentsSectionProps,
+} from './settings/agents-section.tsx'
+
+/** What a Session says about itself beside its thread: its plan, its files, a turn that was
+ * stopped, and a thread that was rebuilt rather than resumed. */
+export {
+  PlanPanel,
+  type PlanEntry,
+  type PlanPanelProps,
+  type PlanPriority,
+  type PlanStatus,
+} from './session/plan-panel.tsx'
+export {
+  SessionSideColumn,
+  type SessionSideColumnProps,
+  type TouchedFile,
+} from './session/session-side-column.tsx'
+export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
+export {
+  ResumeFallbackBanner,
+  type ResumeFallbackBannerProps,
+} from './session/resume-fallback-banner.tsx'
