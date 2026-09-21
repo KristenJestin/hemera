@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
-import { expect, fn, waitFor, within } from 'storybook/test'
+import { expect, userEvent, fn, waitFor, within } from 'storybook/test'
 
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { DiffBlock } from '../activity/diff-block.tsx'
@@ -27,6 +27,10 @@ import { ActivityRow } from './activity-row.tsx'
 import type { PlanEntry } from './plan-panel.tsx'
 import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
 import { SessionHeader } from './session.tsx'
+import { CommandRun } from '../activity/command-run.tsx'
+import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
+import { CommandsPanel } from './commands-panel.tsx'
+import { ContextView } from './context-view.tsx'
 import { SessionSideColumn, type TouchedFile } from './session-side-column.tsx'
 import { StoppedTurn } from './stopped-turn.tsx'
 
@@ -153,6 +157,28 @@ const THREAD: ScrollerEntry[] = [
     ),
   },
   {
+    id: 'hemera-read',
+    content: (
+      <HemeraToolCall
+        tool="fs.read"
+        status="completed"
+        summary="1 842 lines, 61 KiB"
+        arguments={[
+          { label: 'path', value: 'src/billing/export.ts' },
+          { label: 'limit', value: '2 000 lines' },
+        ]}
+        paths={['src/billing/export.ts']}
+        ms={38}
+        provenance={{
+          session: 'CSV invoice export',
+          agent: 'claude-code',
+          token: 'call_8f21c4',
+        }}
+        onOpenPath={fn()}
+      />
+    ),
+  },
+  {
     id: 'change',
     content: (
       <DiffBlock path="src/billing/export.ts" oldText={BEFORE} newText={AFTER} defaultOpen />
@@ -190,6 +216,22 @@ const THREAD: ScrollerEntry[] = [
     content: <ToolCallCard title="pnpm build" kind="execute" status="cancelled" input="cwd: ." />,
   },
   {
+    id: 'command',
+    content: (
+      <CommandRun
+        name="dev"
+        command="pnpm dev"
+        kind="app"
+        state="running"
+        folder="./sources/front"
+        url="http://localhost:5173/"
+        output={'vite v7.1.4  ready in 412 ms\n\n  Local:   http://localhost:5173/\n'}
+        onOpenUrl={fn()}
+        onStop={fn()}
+      />
+    ),
+  },
+  {
     id: 'permission',
     content: (
       <PermissionRequest
@@ -218,10 +260,79 @@ const THREAD: ScrollerEntry[] = [
   },
 ]
 
+/** What the column of this Session holds: the runs it has made, and what it works from. */
+const COMMANDS = (
+  <CommandsPanel
+    runs={[
+      {
+        id: 'run-dev',
+        name: 'dev',
+        command: 'pnpm dev',
+        kind: 'app',
+        state: 'running',
+        folder: './sources/front',
+        url: 'http://localhost:5173/',
+        output: 'vite v7.1.4  ready in 412 ms',
+      },
+      {
+        id: 'run-check',
+        name: 'check',
+        command: 'pnpm check',
+        kind: 'check',
+        state: 'failed',
+        folder: '.',
+        exitCode: 1,
+        output: 'Test Files  154 passed | 1 failed (155)',
+      },
+    ]}
+    onStop={fn()}
+    onOpenUrl={fn()}
+    onRun={fn()}
+  />
+)
+
+const CONTEXT = (
+  <ContextView
+    provided={[
+      { kind: 'base', label: 'The base', detail: 'hemera/context/v1' },
+      {
+        kind: 'file',
+        label: 'AGENTS.md',
+        detail: 'a41f8c2e, 9 128 bytes',
+        at: '21 Sep 22:14',
+      },
+      {
+        kind: 'delivery',
+        label: 'The check that failed',
+        detail: 'session: the failing suite',
+        at: '21 Sep 23:02',
+      },
+    ]}
+    tools={[
+      { name: 'fs.read', bound: '256 KiB, 2 000 lines' },
+      { name: 'commands.run', bound: 'catalogue only, 30 s to first output' },
+    ]}
+    commands={[{ name: 'check', command: 'pnpm check' }]}
+    agents={[
+      {
+        name: 'claude-code',
+        sentence: 'CLAUDE.md and its memories are outside what Hemera reads',
+      },
+    ]}
+  />
+)
+
 interface PageProps {
   /** The plan the column stands beside the thread with, and the files the turn has touched. */
   plan?: PlanEntry[] | undefined
   touched?: TouchedFile[] | undefined
+  /**
+   * What the column holds beside them, handed over already drawn. `null` is the Session the
+   * page has nothing to hand it — no command has run and there is nothing to work from — and
+   * then the column stands on its plan and its files alone.
+   */
+  commands?: ReactNode
+  context?: ReactNode
 }
 
 /**
@@ -232,7 +343,12 @@ interface PageProps {
  * The plan and the files are props, because a Session whose agent has published neither is a
  * state of this page and not a second page (review of #40, defect 3).
  */
-function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
+function Page({
+  plan = PLAN,
+  touched = TOUCHED,
+  commands = COMMANDS,
+  context = CONTEXT,
+}: PageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [agent, setAgent] = useState<string | null>('claude-code')
@@ -324,14 +440,20 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
             />
           </div>
         </div>
-        <SessionSideColumn plan={plan} files={touched} onSelectFile={fn()} />
+        <SessionSideColumn
+          plan={plan}
+          files={touched}
+          onSelectFile={fn()}
+          commands={commands}
+          context={context}
+        />
       </div>
     </TooltipProvider>
   )
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
@@ -363,7 +485,7 @@ export const Complete: Story = {
     await expect(canvas.getByText('2 of 4')).toBeVisible()
     // The column is the state: the plan the agent works to, and the files the turn touched.
     await expect(canvas.getByText('Files')).toBeVisible()
-    await expect(canvas.getByText('src/billing/export.ts')).toBeVisible()
+    await expect(canvas.getAllByText('src/billing/export.ts').length).toBeGreaterThan(0)
     // The change is read in the language of its file, which is what the extension bought. The
     // grammar of that language is a module loaded on demand, so the first diff of a session waits
     // for it: on a cold machine that load is slower than the default patience of a wait.
@@ -373,11 +495,26 @@ export const Complete: Story = {
       },
       { timeout: 10_000 },
     )
+    // A call to one of Hemera's own tools wears the mark, so it is not read as a native call.
+    await expect(canvas.getByText('Hemera')).toBeVisible()
+    await expect(canvas.getByText('fs.read')).toBeVisible()
+    // The command the agent started is a block of the thread, with the address one press away.
+    await expect(canvas.getByText('pnpm dev')).toBeVisible()
+    await expect(
+      canvas.getAllByRole('button', { name: 'http://localhost:5173/' }).length,
+    ).toBeGreaterThan(0)
+    // And the column says what the Session runs and what it works from, on their own tabs.
+    await userEvent.click(canvas.getByRole('tab', { name: 'Commands' }))
+    await expect(canvas.getByText('1 running')).toBeVisible()
+    await userEvent.click(canvas.getByRole('tab', { name: 'Context' }))
+    await expect(canvas.getByText('Hemera provides')).toBeVisible()
+    await userEvent.click(canvas.getByRole('tab', { name: 'Activity' }))
     // The agent is waiting for an answer, and the turn it is in can be stopped.
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
-    // One Stop on the box and one on the strip that says why the box is waiting.
+    // One Stop on the command run, one on the box, and one on the strip that says why the box
+    // is waiting.
     const stops = canvas.getAllByRole('button', { name: 'Stop' })
-    await expect(stops).toHaveLength(2)
+    await expect(stops).toHaveLength(3)
 
     /*
      * What the turn is doing shares the meter's row, at its left end: it is not an entry of the
@@ -410,7 +547,7 @@ export const Complete: Story = {
     await expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
     const pill = canvas.getByRole('combobox', { name: 'Workspace' })
-    await expect(onOneLine(pill, stops[1]!), 'the foot of the composer wrapped').toBe(true)
+    await expect(onOneLine(pill, stops[2]!), 'the foot of the composer wrapped').toBe(true)
 
     /*
      * The thread is the column the composer is written in, to the pixel, on both edges (trial of
@@ -469,14 +606,15 @@ export const Complete: Story = {
 }
 
 /**
- * The same page before the agent has published a plan or touched a file: no column at all.
+ * The same page before the agent has published a plan, touched a file, run a command or been given
+ * anything to work from: no column at all.
  *
  * A column with no section is not drawn (review of #40, defect 3), and the thread keeps the width
  * it had — which is the state a Session is in for its first turns, and the one the empty column
  * used to take a third of a window to say.
  */
 export const NoColumn: Story = {
-  render: () => <Page plan={[]} touched={[]} />,
+  render: () => <Page plan={[]} touched={[]} commands={null} context={null} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.queryByText('2 of 4')).toBeNull()
@@ -485,7 +623,8 @@ export const NoColumn: Story = {
     // drawn the width the column used to take.
     await expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
     await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()
-    // One Stop on the box and one on the strip that says why the box is waiting.
-    await expect(canvas.getAllByRole('button', { name: 'Stop' })).toHaveLength(2)
+    // One Stop on the command run, one on the box, and one on the strip that says why the box
+    // is waiting.
+    await expect(canvas.getAllByRole('button', { name: 'Stop' })).toHaveLength(3)
   },
 }
