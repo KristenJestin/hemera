@@ -27,6 +27,7 @@ export {
   MAX_TITLE_LENGTH,
   NEW_SESSION_TITLE,
   NoActiveProjectError,
+  NoAgentError,
   archivedSessions,
   currentSessions,
   isArchived,

@@ -27,6 +27,7 @@ import {
   EmptyTitleError,
   NEW_SESSION_TITLE,
   NoActiveProjectError,
+  NoAgentError,
   messageBody,
   sessionTitle,
   titleAfterMessage,
@@ -116,10 +117,21 @@ export interface SessionsService {
     projectId: string,
     archived?: boolean | undefined,
   ) => Effect.Effect<Session[], DatabaseError>
+  /**
+   * Makes a Session in a Project, with the agent it will run.
+   *
+   * The agent is not an option: a Session is made with one and keeps it for every turn (design
+   * D5-06), and a Session nothing can answer is what `NoAgentError` refuses. The parameter is
+   * still nullable at the wire because a Session written before the agents existed holds nothing
+   * there; reading one is not making one.
+   */
   readonly create: (
     projectId: string | null,
     provider?: AgentProvider | null,
-  ) => Effect.Effect<Session, DatabaseError | NoActiveProjectError | UnknownProjectError>
+  ) => Effect.Effect<
+    Session,
+    DatabaseError | NoActiveProjectError | NoAgentError | UnknownProjectError
+  >
   readonly rename: (id: string, version: number, title: string) => Effect.Effect<Session, Refusal>
   readonly archive: (id: string, version: number) => Effect.Effect<Session, Refusal>
   readonly restore: (id: string, version: number) => Effect.Effect<Session, Refusal>
@@ -197,6 +209,7 @@ type Refusal =
   | UnknownSessionError
   | EmptyTitleError
   | InvalidCursorError
+  | NoAgentError
 
 /** The date every row of one mutation shares, so an entry and its event agree on when. */
 function now(): string {
@@ -380,6 +393,11 @@ export const sessionsLayer = Layer.effect(
                 .where(eq(projects.id, projectId))
                 .pipe(Effect.mapError(failed('reading the Project')))
               if (found.length === 0) return yield* Effect.fail(new UnknownProjectError(projectId))
+              // And a Session is made with the agent it runs: it is chosen once, in the composer
+              // that starts it, and every turn of that Session runs it (design D5-06, D5-17).
+              // Refused here rather than in the interface, because a Session nothing can answer
+              // is not something a second reader of this service should be able to make either.
+              if (provider === null) return yield* Effect.fail(new NoAgentError())
 
               const id = crypto.randomUUID()
               const at = now()
@@ -389,10 +407,9 @@ export const sessionsLayer = Layer.effect(
                 title: NEW_SESSION_TITLE,
                 titleSource: 'derived',
                 mission: 'free',
-                // A Session is created with no agent unless the caller named one: the user picks
-                // one in the composer, and a Session nothing has talked to in says so by holding
-                // nothing. The create form names one up front, so it is written with the row
-                // rather than by a second mutation a moment later.
+                // With the row rather than by a second mutation a moment later: the choice is
+                // made before the Session exists, in the composer that starts it, and the agent
+                // is what it is written with.
                 provider,
                 model: null,
                 nativeState: 'none',

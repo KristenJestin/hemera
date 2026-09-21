@@ -23,6 +23,7 @@ import type {
   EmptyTitleError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
+  NoAgentError,
 } from '@hemera/core'
 
 import { type AgentOption } from './agents/client.ts'
@@ -276,3 +277,4 @@ export type Refusal =
   | InvalidRepositoryPathError
   | EmptyMessageError
   | EmptyTitleError
+  | NoAgentError

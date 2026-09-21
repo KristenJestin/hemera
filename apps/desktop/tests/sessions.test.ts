@@ -16,7 +16,12 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
-import { NEW_SESSION_TITLE, NoActiveProjectError } from '@hemera/core'
+import {
+  type AgentProvider,
+  NEW_SESSION_TITLE,
+  NoActiveProjectError,
+  NoAgentError,
+} from '@hemera/core'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
@@ -66,11 +71,11 @@ const atlas = Effect.gen(function* () {
   return yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: '/tmp/atlas' })
 })
 
-/** One Session in it, created the way the interface creates one. */
-const sessionIn = (projectId: string) =>
+/** One Session in it, created the way the interface creates one: with the agent it will run. */
+const sessionIn = (projectId: string, provider: AgentProvider = 'claude') =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
-    return yield* sessions.create(projectId)
+    return yield* sessions.create(projectId, provider)
   })
 
 /**
@@ -146,6 +151,25 @@ describe('Aucun Projet actif', () => {
     // The refusal is what the interface shows: a Project invented to have somewhere to put the
     // Session would be a Project the user never asked for.
     expect(await opened()(rowsIn('projects'))).toBe(0)
+  })
+})
+
+describe('Session sans agent', () => {
+  test('a Session cannot start without an agent, and nothing is written about one', async () => {
+    const refused = await opened()(
+      Effect.gen(function* () {
+        const project = yield* atlas
+        const sessions = yield* Sessions
+        return yield* Effect.flip(sessions.create(project.id))
+      }),
+    )
+
+    expect(refused).toBeInstanceOf(NoAgentError)
+    expect(refused.message).toContain('choose one before creating a session')
+    // The refusal is what the interface shows, and the Session it refused does not exist: the
+    // thread of an agentless Session is the user's words with nobody to answer them.
+    expect(await opened()(rowsIn('sessions'))).toBe(0)
+    expect(await opened()(rowsIn('session_entries'))).toBe(0)
   })
 })
 
@@ -608,7 +632,7 @@ describe("L'agent d'une Session", () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const project = yield* atlas
-        const created = yield* sessions.create(project.id)
+        const created = yield* sessions.create(project.id, 'codex')
         const chosen = yield* sessions.chooseAgent(created.id, created.version, {
           provider: 'claude',
           model: 'claude-sonnet-4-5',
@@ -617,9 +641,10 @@ describe("L'agent d'une Session", () => {
       }),
     )
 
-    // A Session nobody has talked to in has no agent, and says so by holding nothing rather
-    // than by naming one it has never started.
-    expect(found.created.provider).toBeNull()
+    // A Session is made with the agent it runs and holds it from the row (design D5-06); the
+    // model is nobody's yet, and says so by holding nothing rather than by naming one the agent
+    // was never asked for.
+    expect(found.created.provider).toBe('codex')
     expect(found.created.model).toBeNull()
     expect(found.chosen.provider).toBe('claude')
     expect(found.chosen.model).toBe('claude-sonnet-4-5')
@@ -643,7 +668,7 @@ describe("L'agent d'une Session", () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const project = yield* atlas
-        const created = yield* sessions.create(project.id)
+        const created = yield* sessions.create(project.id, 'claude')
         // Two windows, both holding the same Session: the second one chooses the agent, and
         // the first one's choice was written against a Session that no longer is that one.
         yield* sessions.chooseAgent(created.id, created.version, {
@@ -678,7 +703,7 @@ describe('Le fil que l’agent écrit', () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const project = yield* atlas
-        const created = yield* sessions.create(project.id)
+        const created = yield* sessions.create(project.id, 'claude')
         yield* sessions.write(created.id, {
           role: 'agent',
           kind: 'tool_call',
@@ -726,7 +751,7 @@ describe('Le fil que l’agent écrit', () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const project = yield* atlas
-        const created = yield* sessions.create(project.id)
+        const created = yield* sessions.create(project.id, 'claude')
         yield* sessions.chooseAgent(created.id, created.version, {
           provider: 'codex',
           model: null,

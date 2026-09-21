@@ -159,6 +159,21 @@ export class NoActiveProjectError extends Error {
   }
 }
 
+/**
+ * A Session was asked for without the agent it would run.
+ *
+ * A Session is made with its agent and keeps it for every turn: an agentless Session is one
+ * nothing can answer, and it used to be made quietly, which is what left a user with a thread
+ * of their own words and no answer at all. Sessions written before the agents existed still
+ * hold nothing there and are still read — this is about making one.
+ */
+export class NoAgentError extends Error {
+  constructor() {
+    super('a session runs an agent: choose one before creating a session')
+    this.name = 'NoAgentError'
+  }
+}
+
 /** The text of a message, refusing what carries nothing. */
 export function messageBody(candidate: string): string {
   const body = candidate.trim()

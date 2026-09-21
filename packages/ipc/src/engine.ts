@@ -365,8 +365,9 @@ export const ENGINE_REQUESTS = {
     // The Project is what the interface has and may not: a refusal says so in a sentence, where
     // a schema that refused `null` would say it in the words of a parser.
     //
-    // The agent is chosen when the Session is made, and null is a Session made without one:
-    // every Session written before the agents existed holds nothing there (design D5-06).
+    // The agent is chosen when the Session is made, and it is not optional: a Session nothing
+    // can answer is refused (NoAgentError). `null` still crosses, because every Session written
+    // before the agents existed holds nothing there and is still read (design D5-06).
     arguments: z.object({
       projectId: z.string().nullable(),
       provider: agentProviderSchema.nullable(),
