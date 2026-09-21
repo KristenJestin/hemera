@@ -226,6 +226,10 @@ or the Effect SQLite client, and `tools/boundaries.ts` refuses it anywhere else.
 process asks the engine by name — `preferences.read`, `preferences.write`, `engine.status`,
 declared in `packages/ipc/src/engine.ts` — and never opens the file itself.
 
+The engine holds the agents as well, under `apps/desktop/src/engine/agents/`: the ACP client, the
+supervisor of the agent processes, what the machine has installed and the adapter of each agent.
+An agent is started, stopped and asked from there, and its thread is written from there.
+
 `data` and `engine` are the names the code uses; `Profile` is the word the interface keeps for
 the same folder, in the settings, in the Journal filter and on the `profile` events the engine
 writes at start-up.
