@@ -36,7 +36,7 @@ These sections are the truth of the lot; the code conforms to them, and if a sec
 
 One task list per phase (0 · UI first, 1 · engine, 2 · wiring, 3 · acceptance), as laid out in [`docs/templates/framing.md`](templates/framing.md), one item per task, each item naming its **verification** ("…; check `pnpm check` green and scenario X"). **An item is ticked only after its verification ran and its output was seen.**
 
-Phase 0 ends with a human gate: the developer agent pushes the branch, opens a **draft pull request** against `dev` and mentions the maintainer; the maintainer validates in Storybook, both themes, with the keyboard, and says so in a comment. The issue stays In progress meanwhile; phase 1 waits for that validation.
+Phase 0 ends with a human gate: the developer agent pushes the branch, opens a **draft pull request** against `dev` whose description already says `Closes #<n>`, and mentions the maintainer by their GitHub login; the maintainer validates in Storybook, both themes, with the keyboard, and says so in a comment. The issue stays In progress meanwhile; phase 1 waits for that validation.
 
 ## 4. The evidence: attachments and comments
 
@@ -44,7 +44,7 @@ The real outputs (`pnpm check`, end-to-end, package, screenshots) are **attached
 
 ## 5. Delivery
 
-Branch `feature/<topic>` from `dev`, Angular commits under the maintainer's identity. At the end of phase 3 the pull request goes from draft to ready: title = a plain Angular subject (semantic-release reads it to decide the version), description ending with `Closes #<n>`. The review happens on the pull request: it carries the state (draft, ready, approved). After acceptance, **squash merge**; `Closes #<n>` closes the issue and the project moves it to Done. One `dev` → `main` merge per version (the milestone) sets the tag and the Release.
+Branch `feature/<topic>` from `dev`, Angular commits under the maintainer's identity. At the end of phase 3 the pull request goes from draft to ready: title = a plain Angular subject (semantic-release reads it to decide the version), description ending with `Closes #<n>` (the `pull-request` check is red without it, and it copies the issue's labels and milestone onto the pull request and asks the maintainer for a review). The review happens on the pull request: it carries the state (draft, ready, approved). After acceptance, **squash merge**; `Closes #<n>` closes the issue and the project moves it to Done. One `dev` → `main` merge per version (the milestone) sets the tag and the Release.
 
 ## 6. The documents
 
