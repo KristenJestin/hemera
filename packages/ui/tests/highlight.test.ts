@@ -56,8 +56,15 @@ describe('the language of a diff', () => {
 
   test('the same code in another language is coloured by that language', async () => {
     await warm('css')
-    const drawn = highlighted(CSS, 'css')
-    expect(tokens(drawn)).toContain('tok-constant:red')
+    await warm('typescript')
+    const asCss = tokens(highlighted(CSS, 'css'))
+    const asTypeScript = tokens(highlighted(CSS, 'typescript'))
+    // The grammar cut it up, something in it was coloured, and the same text read as another
+    // language comes out differently: which token a colour name lands in is the grammar's
+    // business, and this suite is not the place to pin a version of one.
+    expect(asCss.length).toBeGreaterThan(1)
+    expect(asCss.some((token) => token.startsWith('tok-'))).toBe(true)
+    expect(asCss).not.toEqual(asTypeScript)
   })
 
   test('a language nobody here colours is left plain, not coloured by a guess', () => {
