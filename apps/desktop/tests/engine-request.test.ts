@@ -16,6 +16,7 @@ import { NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime } from '#engine/agents/runtime.ts'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import type { Discovery } from '#engine/agents/discovery.ts'
+import { Agents } from '#engine/agents/service.ts'
 import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
@@ -60,6 +61,7 @@ function running<A, E>(
     | SqliteClient
     | AgentRuntime
     | Discovery
+    | Agents
   >,
 ) {
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
@@ -75,6 +77,13 @@ function running<A, E>(
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very
   // same ones: `provideMerge` hands them up rather than hiding them.
   const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  // Nothing here asks the three agents of the machine: their own suite is where that is proved,
+  // and what this one is about is whether a message reaches the use case it names.
+  const listed = Layer.succeed(Agents, {
+    list: () => Effect.succeed([]),
+    check: () => Effect.succeed([]),
+    update: () => Effect.die('nothing in this file updates an agent'),
+  })
   const services: Layer.Layer<
     | Preferences
     | EngineStatus
@@ -83,6 +92,7 @@ function running<A, E>(
     | Sessions
     | AgentRuntime
     | Discovery
+    | Agents
     | Database
     | SqliteClient
   > = Layer.mergeAll(
@@ -90,6 +100,7 @@ function running<A, E>(
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
     journalLayer,
     rows,
+    listed,
     runtimeLayer.pipe(
       Layer.provideMerge(discoveryLayer),
       Layer.provide(rows),

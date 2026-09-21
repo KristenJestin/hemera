@@ -17,8 +17,10 @@ import { Effect, Layer, Scope } from 'effect'
 import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
+import { registryLayer, updaterLayer } from './agents/installer.ts'
 import { AgentNotices, runtimeLayer } from './agents/runtime.ts'
 import type { AgentRuntime, Notice } from './agents/runtime.ts'
+import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
@@ -102,6 +104,7 @@ type EngineServices =
   | Sessions
   | AgentRuntime
   | Discovery
+  | Agents
   | Database
   | SqliteClient
 
@@ -123,11 +126,21 @@ function servicesOf(
     Layer.succeed(StderrSink, { write: (line: string) => Effect.sync(() => log(line)) }),
     noticesTo(port, log),
   )
+  // What the Agents section of the settings asks about: the three agents this machine has, and
+  // the one thing that changes them, which is asked of a registry and of the tool that installed
+  // the command (D5-18). Both of those need to know what the machine is, so they are built over
+  // it, and discovery is built a second time rather than shared: it is three `PATH` lookups with
+  // no state between them.
+  const discovery = discoveryLayer.pipe(Layer.provide(rows), Layer.provide(agents))
+  const sources = Layer.mergeAll(registryLayer, updaterLayer).pipe(Layer.provide(agents))
+  const listed = agentsLayer.pipe(Layer.provide(discovery), Layer.provide(sources))
+
   return Layer.mergeAll(
     preferencesLayer,
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),
     journalLayer,
     rows,
+    listed,
     runtimeLayer.pipe(
       // Discovery is handed up rather than hidden: the settings page asks this process what the
       // machine has, and that question is answered without starting anything.

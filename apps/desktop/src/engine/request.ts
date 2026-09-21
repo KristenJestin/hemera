@@ -26,6 +26,7 @@ import type {
 } from '@hemera/core'
 
 import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
+import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { Discovery } from './agents/discovery.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
@@ -106,7 +107,7 @@ export function answer(
 ): Effect.Effect<
   EngineResponse<EngineRequestName>,
   Refusal,
-  Preferences | EngineStatus | Projects | Journal | Sessions | Discovery | AgentRuntime
+  Preferences | EngineStatus | Projects | Journal | Sessions | Discovery | AgentRuntime | Agents
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -177,18 +178,11 @@ export function answer(
       // Every agent the machine has, as the settings page shows it. `path` is where the command
       // resolved, which is the engine's own business: what crosses is the availability, and
       // whether the agent is signed in is what the agent itself reports when a Session starts it
-      // (D5-17) — this page starts nothing, so it says false rather than guessing.
+      // (D5-17) — this page starts nothing, so it says false rather than guessing. Nobody has
+      // asked a registry here: this list is read off the machine, and `latest` stays null until
+      // the Agents section of the settings is opened and asks for itself (D5-18).
       const found = yield* discovery.list()
-      return {
-        agents: found.map((agent) => ({
-          id: agent.id,
-          label: agent.label,
-          found: agent.found,
-          version: agent.version ?? null,
-          authenticated: agent.authenticated,
-          installHint: agent.installHint,
-        })),
-      }
+      return { agents: found.map((agent) => availabilityOf(agent, null)) }
     }
 
     const runtime = yield* AgentRuntime
@@ -228,6 +222,19 @@ export function answer(
       return { state: report.state, reason: report.reason }
     }
 
+    // What the Agents section asks about the three agents of this machine, and the one thing it
+    // does about the answer (design D5-18). The check is the only use case of this process that
+    // leaves the machine, and the update is the only one that changes what is installed:
+    // neither happens on its own, and both are asked for by somebody pressing something.
+    if (decision.name === 'agents.check') {
+      const agents = yield* Agents
+      return { agents: yield* agents.check() }
+    }
+    if (decision.name === 'agents.update') {
+      const agents = yield* Agents
+      return yield* agents.update(decision.argument.id)
+    }
+
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
   })
@@ -242,6 +249,7 @@ export function answer(
  */
 export type Refusal =
   | AgentRuntimeError
+  | AgentUpdateRefusedError
   | DatabaseError
   | StaleVersionError
   | UnknownProjectError
