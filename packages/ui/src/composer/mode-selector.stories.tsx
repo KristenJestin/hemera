@@ -39,6 +39,7 @@ export const WhatTheAgentReported: Story = {
     await expect(canvas.getByRole('combobox', { name: 'Mode' })).toHaveTextContent(
       'Ask before edits',
     )
+    await expect(canvasElement.querySelector('.size-icon-sm')).not.toBeNull()
   },
 }
 

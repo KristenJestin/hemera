@@ -36,6 +36,8 @@ export const WhatTheAgentAnnounced: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('combobox', { name: 'Effort' })).toHaveTextContent('Medium')
+    // The control wears an icon of the catalogue, so the eye finds it before it reads it.
+    await expect(canvasElement.querySelector('.size-icon-sm')).not.toBeNull()
   },
 }
 

@@ -13,6 +13,7 @@ const meta = {
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },
   args: {
+    agent: 'Claude Code',
     models: [
       { id: 'claude-opus-4-5', name: 'Opus 4.5' },
       { id: 'claude-sonnet-4-5', name: 'Sonnet 4.5' },
@@ -22,6 +23,7 @@ const meta = {
     onValueChange: fn(),
   },
   argTypes: {
+    agent: { control: 'text', description: 'The agent whose models these are.' },
     models: { control: 'object', description: 'What the agent announced, in its own words.' },
     value: { control: 'text', description: 'The model the next turn will use.' },
     onValueChange: { description: 'Called with the id the agent knows, never with its name.' },
@@ -37,6 +39,21 @@ export const WhatTheAgentAnnounced: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('combobox', { name: 'Model' })).toHaveTextContent('Opus 4.5')
+    // An agent the icon catalogue does not carry is drawn as its own initials, not as
+    // somebody else's logo and not as a generic robot.
+    await expect(canvas.getByText('CC')).toBeVisible()
+  },
+}
+
+/** The one agent the catalogue does carry a mark for. */
+export const AnAgentTheCatalogueHas: Story = {
+  args: {
+    agent: 'Codex',
+    models: [{ id: 'gpt-5-codex', name: 'GPT-5 Codex' }],
+    value: 'gpt-5-codex',
+  },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('.size-icon-md')).not.toBeNull()
   },
 }
 

@@ -49,13 +49,21 @@ export const ReadyToSend: Story = {
   },
 }
 
-/** A write in flight draws the square and cannot be pressed: interrupting a write is not this
- * lot's, and a control that looked like it could would be the one lie in the row. */
+/**
+ * A write in flight draws the square, says it is sending, and cannot be pressed: interrupting a
+ * write is not this lot's, and a control that looked like it could would be the one lie in the
+ * row. The button is busy rather than merely disabled — there is a sentence in front of it
+ * either way, and a second press would be a second turn.
+ */
 export const Sending: Story = {
-  args: { sending: true, ready: false },
+  args: { sending: true, ready: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: /Send/ })).toBeDisabled()
+    await expect(canvas.getByRole('button', { name: /Sending/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await expect(canvas.getByRole('status', { name: 'Working' })).toBeVisible()
   },
 }
 

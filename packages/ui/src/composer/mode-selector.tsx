@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { Select } from '../components/select/select.tsx'
+import { IconShield } from '../icons.ts'
 import type { AgentChoice } from './agent-choice.ts'
 
 /**
@@ -34,6 +35,7 @@ export function ModeSelector({
   return (
     <Select
       label="Mode"
+      mark={<IconShield size="sm" />}
       items={modes.map((mode) => ({ value: mode.id, label: mode.name }))}
       value={value}
       onValueChange={onValueChange}

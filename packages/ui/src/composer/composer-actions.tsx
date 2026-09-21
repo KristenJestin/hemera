@@ -54,6 +54,9 @@ export function ComposerActions({
 }: ComposerActionsProps): ReactNode {
   const transition = useTransition(arrival)
   const morphs = sending || running
+  // A write in flight is a wait, and a wait that only took the press away would look like a
+  // control that stopped working. It says what it is doing until the engine answers.
+  const busy = sending && !running
   return (
     <>
       <WorkspacePill
@@ -69,7 +72,8 @@ export function ComposerActions({
         <Button
           variant={running ? 'secondary' : 'primary'}
           size="sm"
-          disabled={running ? false : !ready}
+          state={busy ? 'loading' : 'idle'}
+          disabled={running ? false : busy || !ready}
           onClick={running ? onStop : onSend}
         >
           <span className={MORPH}>
@@ -97,8 +101,8 @@ export function ComposerActions({
               )}
             </AnimatePresence>
           </span>
-          {running ? 'Stop' : action}
-          {running ? null : <Kbd keys="Enter" />}
+          {running ? 'Stop' : busy ? 'Sending' : action}
+          {running || busy ? null : <Kbd keys="Enter" />}
         </Button>
       </span>
     </>

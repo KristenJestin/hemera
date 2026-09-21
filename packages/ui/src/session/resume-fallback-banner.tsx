@@ -17,9 +17,12 @@ import { IconButton } from '../components/button/button.tsx'
  * So the banner names the agent, names the session, and says the bound: what is below it is what
  * Hemera had, not what the agent had.
  */
-const BANNER = 'flex items-start gap-2 rounded-md border border-border bg-muted px-2 py-1.5'
+// The mark sits at the middle of the strip rather than at the top of it: the sentence is two
+// lines at the width this banner is read at, and an icon hanging above them reads as a bullet
+// the sentence has nothing to do with.
+const BANNER = 'flex items-center gap-2 rounded-md border border-border bg-muted px-2 py-1.5'
 
-const MARK = 'flex shrink-0 pt-0.5 text-muted-foreground'
+const MARK = 'flex shrink-0 text-muted-foreground'
 
 const TEXT = 'min-w-0 flex-1 text-xs text-muted-foreground'
 

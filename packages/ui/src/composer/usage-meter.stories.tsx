@@ -4,7 +4,8 @@ import { expect, within } from 'storybook/test'
 import { UsageMeter } from './usage-meter.tsx'
 
 /**
- * What a session has spent, in the two halves it is ever asked about.
+ * What a session has spent, in the two halves it is ever asked about: the window it is filling,
+ * and what the turn cost — the second only when the agent said.
  */
 const meta = {
   title: 'Components/UsageMeter',
@@ -23,13 +24,14 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** Claude reports a cost, so the cost is shown. */
+/** Claude reports a cost, so the cost is shown: one figure for the window, one for the money. */
 export const WithACost: Story = {
   args: { cost: { amount: 0.42, currency: 'USD' } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('12,400 / 200,000 tokens')).toBeVisible()
+    await expect(canvas.getByText('12.4k / 200k')).toBeVisible()
     await expect(canvas.getByText(/0\.42/)).toBeVisible()
+    await expect(canvas.getByLabelText(/12,400 of 200,000 tokens used/)).toBeVisible()
   },
 }
 
@@ -38,7 +40,19 @@ export const WithoutACost: Story = {
   args: { used: 8431, size: 400000 },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('8,431 / 400,000 tokens')).toBeVisible()
-    await expect(canvas.getByText('Cost not provided')).toBeVisible()
+    await expect(canvas.getByText('8.4k / 400k')).toBeVisible()
+    await expect(canvas.getByText('not provided')).toBeVisible()
+    await expect(canvas.queryByText(/[$€£]/)).toBeNull()
+  },
+}
+
+/** A session that has answered nothing yet is a real reading, and it is written as one. */
+export const NothingYet: Story = {
+  args: { used: 0, size: 200000 },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('0 / 200k')).toBeVisible()
+    await expect(canvas.getByText('not provided')).toBeVisible()
+    await expect(canvas.getByLabelText(/0 of 200,000 tokens used, cost not provided/)).toBeVisible()
   },
 }

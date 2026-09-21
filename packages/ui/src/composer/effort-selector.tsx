@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { Select } from '../components/select/select.tsx'
+import { IconBrain } from '../icons.ts'
 import type { AgentChoice } from './agent-choice.ts'
 
 /**
@@ -31,6 +32,7 @@ export function EffortSelector({
   return (
     <Select
       label="Effort"
+      mark={<IconBrain size="sm" />}
       items={efforts.map((effort) => ({ value: effort.id, label: effort.name }))}
       value={value}
       onValueChange={onValueChange}

@@ -25,6 +25,8 @@ import {
   IconAt as TablerAt,
   IconBell as TablerBell,
   IconBellFilled as TablerBellFilled,
+  IconBrain as TablerBrain,
+  IconBrandOpenai as TablerBrandOpenai,
   IconCheck as TablerCheck,
   IconCheckFilled as TablerCheckFilled,
   IconChevronDown as TablerChevronDown,
@@ -62,6 +64,7 @@ import {
   IconPlayerStopFilled as TablerPlayerStopFilled,
   IconPlus as TablerPlus,
   IconPlusFilled as TablerPlusFilled,
+  IconRefresh as TablerRefresh,
   IconRestore as TablerRestore,
   IconPlugConnected as TablerPlugConnected,
   IconRobot as TablerRobot,
@@ -70,6 +73,7 @@ import {
   IconSearchFilled as TablerSearchFilled,
   IconSettings as TablerSettings,
   IconSettingsFilled as TablerSettingsFilled,
+  IconShield as TablerShield,
   IconSun as TablerSun,
   IconSunFilled as TablerSunFilled,
   IconTimelineEvent as TablerTimelineEvent,
@@ -146,6 +150,8 @@ export const IconArchive = catalogued(TablerArchiveFilled, TablerArchive, 'IconA
 export const IconArrowUp = catalogued(TablerArrowUp, TablerArrowUp, 'IconArrowUp')
 export const IconAt = catalogued(TablerAt, TablerAt, 'IconAt')
 export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')
+export const IconBrain = catalogued(TablerBrain, TablerBrain, 'IconBrain')
+export const IconBrandOpenai = catalogued(TablerBrandOpenai, TablerBrandOpenai, 'IconBrandOpenai')
 export const IconCheck = catalogued(TablerCheckFilled, TablerCheck, 'IconCheck')
 export const IconChevronDown = catalogued(
   TablerChevronDownFilled,
@@ -197,6 +203,7 @@ export const IconPlayerStop = catalogued(
 export const IconPlus = catalogued(TablerPlusFilled, TablerPlus, 'IconPlus')
 /* Neither the arrow that brings something back nor the machine that will answer one day has a
    solid twin in Tabler; the outline stands for both weights. */
+export const IconRefresh = catalogued(TablerRefresh, TablerRefresh, 'IconRefresh')
 export const IconRestore = catalogued(TablerRestore, TablerRestore, 'IconRestore')
 export const IconPlugConnected = catalogued(
   TablerPlugConnected,
@@ -207,6 +214,7 @@ export const IconRobot = catalogued(TablerRobot, TablerRobot, 'IconRobot')
 export const IconSparkles = catalogued(TablerSparkles, TablerSparkles, 'IconSparkles')
 export const IconSearch = catalogued(TablerSearchFilled, TablerSearch, 'IconSearch')
 export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'IconSettings')
+export const IconShield = catalogued(TablerShield, TablerShield, 'IconShield')
 export const IconSun = catalogued(TablerSunFilled, TablerSun, 'IconSun')
 export const IconTimelineEvent = catalogued(
   TablerTimelineEventFilled,

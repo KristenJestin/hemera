@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { Select } from '../components/select/select.tsx'
+import { AgentMark } from './agent-mark.tsx'
 import type { AgentChoice } from './agent-choice.ts'
 
 /**
@@ -16,6 +17,8 @@ import type { AgentChoice } from './agent-choice.ts'
  * what the protocol allows and what the thread can be read as.
  */
 export interface ModelSelectorProps {
+  /** The agent whose models these are, as the registry names it. */
+  agent: string
   /** What the agent says it can run; empty when it announced nothing. */
   models: readonly AgentChoice[]
   /** The model the next turn will use. */
@@ -26,6 +29,7 @@ export interface ModelSelectorProps {
 }
 
 export function ModelSelector({
+  agent,
   models,
   value,
   onValueChange,
@@ -35,6 +39,7 @@ export function ModelSelector({
   return (
     <Select
       label="Model"
+      mark={<AgentMark agent={agent} />}
       items={models.map((model) => ({ value: model.id, label: model.name }))}
       value={value}
       onValueChange={onValueChange}

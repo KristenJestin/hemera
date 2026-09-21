@@ -71,6 +71,34 @@ export interface ComposerProps {
   placeholder?: string | undefined
   /** Writes the text, and answers why it could not be written, or nothing when it was. */
   onSend: (text: string) => Promise<string | null>
+  /**
+   * What the agent of the Session is on, drawn in the foot beside the actions (design D17-11).
+   *
+   * The controls are the agent's own — the models it announced, the effort it can think with,
+   * the mode it can be told — and they are handed over already built, because which of them
+   * exists is what the agent answered rather than something this composer could know. A Session
+   * with no agent, and an agent that advertises nothing, hand over nothing: the foot is the row
+   * of a box with nothing set, which is what it is, rather than a row of empty controls.
+   */
+  controls?: ReactNode | undefined
+  /**
+   * Whether a turn is running, which is what the send becomes while it does (design D17-13).
+   *
+   * It is not the same question as `sending`: a write is in flight for as long as the engine
+   * takes to take it, and a turn runs for minutes. A stop offered during a write would be a
+   * stop offered before there is anything to stop.
+   */
+  running?: boolean | undefined
+  /** Cancels the running turn, when there is one. */
+  onStop?: (() => void) | undefined
+  /**
+   * What the turn is waiting on, drawn above the box (design D5-13).
+   *
+   * A permission is the one thing that makes this box a place to read rather than a place to
+   * write, and it is built by whoever knows what is being asked: the strip is handed over
+   * already written, and the composer only gives it the room.
+   */
+  blocked?: ReactNode | undefined
 }
 
 export function Composer({
@@ -87,6 +115,10 @@ export function Composer({
   variant = 'hero',
   placeholder = 'Ask anything, think out loud, or describe what you want to do…',
   onSend,
+  controls,
+  running = false,
+  onStop,
+  blocked,
 }: ComposerProps): ReactNode {
   const box = useRef<ComposerBoxHandle>(null)
   const [matches, setMatches] = useState<string[]>([])
@@ -237,6 +269,7 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2">
+      {blocked}
       <Frame
         animated
         focusable
@@ -258,9 +291,12 @@ export function Composer({
               }}
               ready={ready}
               sending={sending}
+              running={running}
               action={action}
               onSend={() => void send()}
+              onStop={onStop}
             />
+            {controls}
           </FrameFooter>
         }
       >
