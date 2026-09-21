@@ -19,8 +19,7 @@ The states, in the project:
 | Backlog | received, prioritised, not engaged | the maintainer |
 | To frame | retained; the framing assistant writes the Proposal, Design, Spec and Tasks sections in the issue with the maintainer, and ends with the points to decide; the issue stays there until the maintainer has decided | framing assistant, then maintainer |
 | Framed | decided, nothing started: the queue the developer agent picks from | developer agent |
-| In progress | branch open, tasks ticking, UI gate of phase 0; at most three at a time | developer agent |
-| In review | pull request ready, human validation | the maintainer |
+| In progress | branch open, tasks ticking, UI gate of phase 0, pull request in draft then ready and reviewed; at most three at a time | developer agent, then the maintainer on the pull request |
 | Done | pull request merged, or abandonment said in a comment | — |
 
 ## 2. Proposal, Design, Spec: three sections of the issue
@@ -45,7 +44,7 @@ The real outputs (`pnpm check`, end-to-end, package, screenshots) are **attached
 
 ## 5. Delivery
 
-Branch `feature/<topic>` from `dev`, Angular commits under the maintainer's identity. At the end of phase 3 the pull request goes from draft to ready: title = a plain Angular subject (semantic-release reads it to decide the version), description ending with `Closes #<n>`. The issue moves to In review. After acceptance, **squash merge**, the issue closes. One `dev` → `main` merge per version (the milestone) sets the tag and the Release.
+Branch `feature/<topic>` from `dev`, Angular commits under the maintainer's identity. At the end of phase 3 the pull request goes from draft to ready: title = a plain Angular subject (semantic-release reads it to decide the version), description ending with `Closes #<n>`. The review happens on the pull request: it carries the state (draft, ready, approved). After acceptance, **squash merge**; `Closes #<n>` closes the issue and the project moves it to Done. One `dev` → `main` merge per version (the milestone) sets the tag and the Release.
 
 ## 6. The documents
 
