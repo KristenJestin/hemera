@@ -155,7 +155,6 @@ export function recordOpening(version: string) {
  */
 export function openProfile(dataDirectory: string, migrationsFolder: string, version: string) {
   return Effect.gen(function* () {
-    const database = yield* Database
     const carried = carriedMigrations(migrationsFolder)
     const applied = yield* appliedMigrations
     const standing = standingOf(carried, applied)
@@ -173,14 +172,59 @@ export function openProfile(dataDirectory: string, migrationsFolder: string, ver
         yield* backUp(dataDirectory, first)
         standing.backedUp = first
       }
-      yield* applyMigrations(database, { migrationsFolder }).pipe(
-        Effect.mapError((cause) => new MigrationError({ migrations: standing.behind, cause })),
+      yield* migrateWithoutForeignKeys(migrationsFolder).pipe(
+        Effect.mapError(
+          (cause) => new MigrationError({ migrations: standing.behind, cause }),
+        ),
       )
     }
 
     yield* recordOpening(version)
     yield* recordStanding(version, standing)
     return standing
+  })
+}
+
+/**
+ * Applies the migrations with foreign key enforcement off, and checks what they left behind.
+ *
+ * A migration that changes a check rebuilds its table the only way SQLite allows — create the
+ * new one, copy into it, drop the old one, rename — and the table it drops is the parent of rows
+ * that are already in the new one: with enforcement on, that `DROP TABLE sessions` cascades, and
+ * every message of every Session goes with it. The `PRAGMA foreign_keys=OFF` the generated file
+ * carries is ignored, because a migration runs inside a transaction and SQLite refuses that
+ * pragma while one is pending; so it is turned off here, outside, and turned back on whether the
+ * run succeeded or not.
+ *
+ * Turning it back on is not enough to trust the result: `foreign_key_check` is what the pragma
+ * was protecting, run by hand once. A row left without its parent is a profile that is not
+ * opened — the copy taken before the migration is why that is recoverable.
+ */
+function migrateWithoutForeignKeys(migrationsFolder: string) {
+  return Effect.gen(function* () {
+    const client = yield* SqliteClient
+    const database = yield* Database
+    yield* client`PRAGMA foreign_keys = OFF`
+    yield* Effect.gen(function* () {
+      yield* applyMigrations(database, { migrationsFolder })
+      const orphans = yield* client<{ table: string }>`PRAGMA foreign_key_check`
+      if (orphans.length > 0) {
+        return yield* Effect.fail(
+          new Error(
+            `${orphans.length} rows are left without their parent in ${orphans[0]?.table ?? 'a table'}`,
+          ),
+        )
+      }
+    }).pipe(
+      // Built as an Effect rather than a statement, so that turning it back on really runs when
+      // the migration fails: the refusal leaves a profile that is not opened, and the next
+      // attempt to open it must not be running with the checks off.
+      Effect.ensuring(
+        Effect.gen(function* () {
+          yield* client`PRAGMA foreign_keys = ON`
+        }).pipe(Effect.orDie),
+      ),
+    )
   })
 }
 

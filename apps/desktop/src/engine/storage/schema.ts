@@ -18,7 +18,12 @@
 import { sql } from 'drizzle-orm'
 import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
 
-import { PROJECT_TONES } from '@hemera/core'
+import {
+  AGENT_PROVIDERS,
+  NATIVE_STATES,
+  PROJECT_TONES,
+  SESSION_ENTRY_KINDS,
+} from '@hemera/core'
 
 /**
  * What the window wears, one key at a time.
@@ -130,8 +135,8 @@ export const projectRepositories = sqliteTable(
 /** What a title is: proposed from the first message, or chosen by the user (design D4b-03). */
 export const SESSION_TITLE_SOURCES = ['derived', 'user'] as const
 
-/** Who wrote an entry. This lot writes the user's alone: an agent answering is HEM-48. */
-export const SESSION_ENTRY_ROLES = ['user'] as const
+/** Who wrote an entry: the user, the agent working in the Session, or Hemera itself. */
+export const SESSION_ENTRY_ROLES = ['user', 'agent', 'hemera'] as const
 
 /**
  * A Session: the thread of work of a project, and what it is called (design D4b-01, D4b-03).
@@ -152,6 +157,14 @@ export const SESSION_ENTRY_ROLES = ['user'] as const
  *
  * There is no `deleted_at` and no delete: archiving is how a Session ends, and the absence of
  * the operation is the guarantee (design D4b-06).
+ *
+ * The agent columns (design D5-06) are nullable for the same reason `free` has no column: a
+ * Session is created before it is given an agent, and every Session written before the agents
+ * existed has none. `provider` is constrained to the agents Hemera knows how to start, so the
+ * model it names is the model of a real one; `native_session_id` is what makes a Session
+ * durable I — it is the handle the agent itself gave, kept so the next start can ask to resume
+ * — and `native_state` says whether that handle is still worth anything. `cwd` is the directory
+ * the agent was started in, kept because a resumed Session must be resumed where it ran.
  */
 export const sessions = sqliteTable(
   'sessions',
@@ -162,6 +175,11 @@ export const sessions = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     titleSource: text('title_source').notNull(),
+    provider: text('provider'),
+    model: text('model'),
+    nativeSessionId: text('native_session_id'),
+    nativeState: text('native_state').notNull().default('none'),
+    cwd: text('cwd'),
     createdAt: text('created_at').notNull(),
     lastWrittenAt: text('last_written_at').notNull(),
     archivedAt: text('archived_at'),
@@ -171,6 +189,15 @@ export const sessions = sqliteTable(
     check(
       'session_title_source_is_known',
       sql`${table.titleSource} IN (${sql.raw(oneOf(SESSION_TITLE_SOURCES))})`,
+    ),
+    // A Session with no agent is a Session; a Session naming an agent nobody can start is a bug.
+    check(
+      'session_provider_is_known',
+      sql`${table.provider} IS NULL OR ${table.provider} IN (${sql.raw(oneOf(AGENT_PROVIDERS))})`,
+    ),
+    check(
+      'session_native_state_is_known',
+      sql`${table.nativeState} IN (${sql.raw(oneOf(NATIVE_STATES))})`,
     ),
     // The list of a Project is read in one order, and it is this one: the index is the query.
     index('session_by_project').on(table.projectId, table.lastWrittenAt),
@@ -189,8 +216,18 @@ export const sessions = sqliteTable(
  * The body is stored as it was written, trimmed of nothing: what the user sent is what is read
  * back, and the domain is where an empty message is refused.
  *
- * The `role` column holds the user's alone in this lot, and the check says so: a thread with an
- * agent in it is HEM-48's, and a value the check has never heard of would be a migration.
+ * The `role` column holds the user's, the agent's and Hemera's, and the check says which three:
+ * a thread is no longer only what the user typed.
+ *
+ * `kind` and `payload` are what let one table hold everything a thread is made of (design
+ * D5-11): the body stays the line a reader shows and the payload carries the shape its own
+ * block draws, so a diff, a plan and a set of options are rows here rather than tables of their
+ * own. `correlation_id` is how an update finds its row — a tool call that ends, a message that
+ * finishes arriving — and `turn_id` how everything an agent did in one turn is read together.
+ * `state` is where a life goes and is null for what has no life to live, a message.
+ *
+ * `kind` defaults to `message` and `payload` to `{}` so that the rows written before this lot
+ * keep meaning what they meant: a message with no payload is a message.
  */
 export const sessionEntries = sqliteTable(
   'session_entries',
@@ -201,12 +238,21 @@ export const sessionEntries = sqliteTable(
       .references(() => sessions.id, { onDelete: 'cascade' }),
     seq: integer('seq').notNull(),
     role: text('role').notNull(),
+    kind: text('kind').notNull().default('message'),
     body: text('body').notNull(),
+    payload: text('payload').notNull().default('{}'),
+    correlationId: text('correlation_id'),
+    turnId: text('turn_id'),
+    state: text('state'),
     createdAt: text('created_at').notNull(),
   },
   (table) => [
     check('entry_role_is_known', sql`${table.role} IN (${sql.raw(oneOf(SESSION_ENTRY_ROLES))})`),
+    check('entry_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(SESSION_ENTRY_KINDS))})`),
     unique('entry_once_in_session').on(table.sessionId, table.seq),
+    // An update finds the row it updates by what it is about, inside its own session.
+    index('entry_by_correlation').on(table.sessionId, table.correlationId),
+    index('entry_by_turn').on(table.sessionId, table.turnId),
   ],
 )
 

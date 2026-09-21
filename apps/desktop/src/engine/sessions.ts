@@ -15,8 +15,12 @@
  */
 
 import {
+  type AgentProvider,
+  type NativeState,
   type Session as DomainSession,
   type SessionEntry as DomainSessionEntry,
+  type SessionEntryKind,
+  type SessionEntryRole,
   type SessionTitleSource,
   EmptyMessageError,
   EmptyTitleError,
@@ -62,6 +66,31 @@ export interface Written {
   entry: SessionEntry
 }
 
+/** The agent a Session is given, and the model it is asked for. */
+export interface AgentChoice {
+  readonly provider: AgentProvider
+  readonly model: string | null
+}
+
+/** What an agent handed back about its own session, and where it ran (design D5-06). */
+export interface NativeRecord {
+  readonly nativeSessionId: string | null
+  readonly nativeState: NativeState
+  readonly cwd: string | null
+}
+
+/** One entry the engine writes into a thread, on the agent's behalf or its own. */
+export interface ThreadWrite {
+  readonly role: SessionEntryRole
+  readonly kind: SessionEntryKind
+  readonly body: string
+  /** What this kind carries, as the JSON text it is stored as; `{}` when it carries nothing. */
+  readonly payload?: string
+  readonly correlationId?: string | null
+  readonly turnId?: string | null
+  readonly state?: string | null
+}
+
 /**
  * Everything that can be done to a Session, and nothing that cannot (design D4b-01, D4b-06).
  *
@@ -98,6 +127,44 @@ export interface SessionsService {
     before?: number | undefined,
     limit?: number | undefined,
   ) => Effect.Effect<ThreadPage, Refusal | InvalidCursorError>
+  /**
+   * Chooses the agent of a Session, and the model it is asked for.
+   *
+   * The choice is written before the agent is started, and read back from here at the next
+   * start: a Session whose process died is still the Session the user set up, and the engine
+   * cannot ask a renderer that may not be running. A version is taken, because which agent a
+   * Session talks to is a decision a second window can be making at the same time.
+   */
+  readonly chooseAgent: (
+    id: string,
+    version: number,
+    choice: AgentChoice,
+  ) => Effect.Effect<Session, Refusal>
+  /**
+   * Records what the agent itself handed back: the handle of its native session, the directory
+   * it ran in, and how far that handle is still worth anything (design D5-06).
+   *
+   * No version is taken, and this is the one write of a Session that does not bump one: the
+   * engine writes it while the agent is working, and a version the agent keeps raising would
+   * refuse the rename the user is making at that very moment. The fields are the engine's own,
+   * and nothing else writes them.
+   */
+  readonly recordNative: (id: string, native: NativeRecord) => Effect.Effect<Session, Refusal>
+  /**
+   * Writes one entry of the thread the user did not write — what the agent said, called, ran or
+   * asked for (design D5-11).
+   *
+   * The user's own message does not come through here: `append` is the one that refuses an
+   * empty message and proposes the title. This one is told what to write, and its `kind` is
+   * what the block on screen is drawn from.
+   *
+   * When a `correlationId` is given and a row of this Session already carries it, that row is
+   * updated rather than a second one appended: a tool call that was running and has finished is
+   * the same entry in a later state. Everything else is read back as what was written, and the
+   * Session's `last_written_at` says it was worked on — its `version` is not raised, because an
+   * agent writing in a thread changes nothing about what the Session is.
+   */
+  readonly write: (id: string, entry: ThreadWrite) => Effect.Effect<Written, Refusal>
 }
 
 export class Sessions extends Context.Service<Sessions, SessionsService>()('Sessions') {}
@@ -146,6 +213,13 @@ function sessionOf(row: typeof sessions.$inferSelect): Session {
     // SAFETY: the column is constrained by a check to exactly the sources the domain declares,
     // and nothing writes it but this service, which writes one of the two.
     titleSource: row.titleSource as SessionTitleSource,
+    // SAFETY: the same, for the check on `provider`: it admits exactly the agents the domain
+    // declares, and null, which is a Session no agent has been chosen for.
+    provider: row.provider as AgentProvider | null,
+    model: row.model,
+    // SAFETY: the same, for the check on `native_state`: it admits exactly the states the
+    // domain declares.
+    nativeState: row.nativeState as NativeState,
     // This lot writes one kind of Session; a mission is what HEM-48 gives a Session here.
     mission: 'free',
     archivedAt: row.archivedAt === null ? null : Date.parse(row.archivedAt),
@@ -161,9 +235,17 @@ function entryOf(row: typeof sessionEntries.$inferSelect): SessionEntry {
     id: row.id,
     sessionId: row.sessionId,
     seq: row.seq,
-    // SAFETY: the same, for the check on `role`: the user's is the only value it admits.
-    role: 'user',
+    // SAFETY: both columns are constrained by a check to exactly the values the domain
+    // declares, and nothing writes them but this service and the agent runtime beside it.
+    role: row.role as SessionEntryRole,
+    // SAFETY: the same, and for the same reason: `kind` is checked against the kinds of the
+    // domain, and it is what tells a reader which block of the thread this entry is.
+    kind: row.kind as SessionEntryKind,
     body: row.body,
+    payload: row.payload,
+    correlationId: row.correlationId,
+    turnId: row.turnId,
+    state: row.state,
     createdAt: Date.parse(row.createdAt),
   }
 }
@@ -213,6 +295,8 @@ export const sessionsLayer = Layer.effect(
       change: Partial<{
         title: string
         titleSource: SessionTitleSource
+        provider: AgentProvider
+        model: string | null
         lastWrittenAt: string
         archivedAt: string | null
       }>,
@@ -281,6 +365,11 @@ export const sessionsLayer = Layer.effect(
                 title: NEW_SESSION_TITLE,
                 titleSource: 'derived',
                 mission: 'free',
+                // A Session is created with no agent: the user picks one in the composer, and a
+                // Session nothing has talked to in says so by holding nothing.
+                provider: null,
+                model: null,
+                nativeState: 'none',
                 archivedAt: null,
                 createdAt: Date.parse(at),
                 lastWrittenAt: Date.parse(at),
@@ -424,7 +513,12 @@ export const sessionsLayer = Layer.effect(
                 sessionId: id,
                 seq,
                 role: 'user',
+                kind: 'message',
                 body: text,
+                payload: '{}',
+                correlationId: null,
+                turnId: null,
+                state: null,
                 createdAt: Date.parse(at),
               }
               yield* transaction
@@ -434,7 +528,9 @@ export const sessionsLayer = Layer.effect(
                   sessionId: id,
                   seq: entry.seq,
                   role: entry.role,
+                  kind: entry.kind,
                   body: entry.body,
+                  payload: entry.payload,
                   createdAt: at,
                 })
                 .pipe(Effect.mapError(failed('writing the message')))
@@ -457,6 +553,178 @@ export const sessionsLayer = Layer.effect(
                     projectId: after.projectId,
                     sessionId: id,
                     payload: { seq },
+                  },
+                ],
+              } satisfies Mutation<Written>
+            }),
+          ),
+        ),
+
+      chooseAgent: (id, version, choice) =>
+        withDatabase(
+          mutate('choosing the agent of a Session', (transaction) =>
+            Effect.gen(function* () {
+              yield* bump(transaction, id, version, {
+                provider: choice.provider,
+                model: choice.model,
+                lastWrittenAt: now(),
+              })
+              const session = yield* readOne(transaction, id)
+              return {
+                result: session,
+                events: [
+                  {
+                    type: 'session.agent_chosen',
+                    entityKind: 'session',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: session.projectId,
+                    sessionId: id,
+                    payload: { provider: choice.provider, model: choice.model },
+                  },
+                ],
+              } satisfies Mutation<Session>
+            }),
+          ),
+        ),
+
+      recordNative: (id, native) =>
+        withDatabase(
+          mutate('recording the agent of a Session', (transaction) =>
+            Effect.gen(function* () {
+              yield* transaction
+                .update(sessions)
+                .set({
+                  nativeSessionId: native.nativeSessionId,
+                  nativeState: native.nativeState,
+                  cwd: native.cwd,
+                })
+                .where(eq(sessions.id, id))
+                .pipe(Effect.mapError(failed('writing the Session')))
+              const session = yield* readOne(transaction, id)
+              return {
+                result: session,
+                events: [
+                  {
+                    type: 'session.agent_recorded',
+                    entityKind: 'session',
+                    entityId: id,
+                    // The engine did this while the agent was working, not the user.
+                    source: 'system',
+                    author: 'hemera',
+                    projectId: session.projectId,
+                    sessionId: id,
+                    payload: {
+                      nativeState: native.nativeState,
+                      hasNativeSession: native.nativeSessionId !== null,
+                    },
+                  },
+                ],
+              } satisfies Mutation<Session>
+            }),
+          ),
+        ),
+
+      write: (id, entry) =>
+        withDatabase(
+          mutate('writing an entry', (transaction) =>
+            Effect.gen(function* () {
+              const at = now()
+              const held = entry.correlationId ?? null
+              const payload = entry.payload ?? '{}'
+
+              // An update finds its row by what it is about, inside its own session: a tool call
+              // that was running and has finished is one entry in a later state.
+              const already =
+                held === null
+                  ? []
+                  : yield* transaction
+                      .select({ id: sessionEntries.id, seq: sessionEntries.seq })
+                      .from(sessionEntries)
+                      .where(
+                        and(
+                          eq(sessionEntries.sessionId, id),
+                          eq(sessionEntries.correlationId, held),
+                        ),
+                      )
+                      .limit(1)
+                      .pipe(Effect.mapError(failed('reading the thread')))
+              const settled = already.at(0)
+
+              let seq: number
+              if (settled === undefined) {
+                // Asked of the table rather than counted, exactly as a message is: one thread
+                // reads in one order, however many writers it has.
+                const highest = yield* transaction
+                  .select({ seq: sessionEntries.seq })
+                  .from(sessionEntries)
+                  .where(eq(sessionEntries.sessionId, id))
+                  .orderBy(desc(sessionEntries.seq))
+                  .limit(1)
+                  .pipe(Effect.mapError(failed('reading the thread')))
+                seq = (highest.at(0)?.seq ?? 0) + 1
+                yield* transaction
+                  .insert(sessionEntries)
+                  .values({
+                    id: crypto.randomUUID(),
+                    sessionId: id,
+                    seq,
+                    role: entry.role,
+                    kind: entry.kind,
+                    body: entry.body,
+                    payload,
+                    correlationId: held,
+                    turnId: entry.turnId ?? null,
+                    state: entry.state ?? null,
+                    createdAt: at,
+                  })
+                  .pipe(Effect.mapError(failed('writing the entry')))
+              } else {
+                seq = settled.seq
+                yield* transaction
+                  .update(sessionEntries)
+                  .set({
+                    body: entry.body,
+                    payload,
+                    state: entry.state ?? null,
+                    turnId: entry.turnId ?? null,
+                  })
+                  .where(eq(sessionEntries.id, settled.id))
+                  .pipe(Effect.mapError(failed('writing the entry')))
+              }
+
+              // The Session was worked on, which is what its list is ordered by. What it *is*
+              // has not changed, so its version stays where the user's own changes left it.
+              yield* transaction
+                .update(sessions)
+                .set({ lastWrittenAt: at })
+                .where(eq(sessions.id, id))
+                .pipe(Effect.mapError(failed('writing the Session')))
+
+              const session = yield* readOne(transaction, id)
+              const rows = yield* transaction
+                .select()
+                .from(sessionEntries)
+                .where(and(eq(sessionEntries.sessionId, id), eq(sessionEntries.seq, seq)))
+                .limit(1)
+                .pipe(Effect.mapError(failed('reading the thread')))
+              const settledRow = rows[0]
+              if (settledRow === undefined) return yield* Effect.fail(new UnknownSessionError(id))
+
+              return {
+                result: { session, entry: entryOf(settledRow) },
+                events: [
+                  {
+                    type:
+                      settled === undefined ? 'session.entry_written' : 'session.entry_settled',
+                    entityKind: 'session',
+                    entityId: id,
+                    source: 'system',
+                    author: entry.role === 'agent' ? 'agent' : 'hemera',
+                    projectId: session.projectId,
+                    sessionId: id,
+                    payload: { seq, kind: entry.kind, role: entry.role, state: entry.state ?? null },
                   },
                 ],
               } satisfies Mutation<Written>

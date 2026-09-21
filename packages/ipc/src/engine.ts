@@ -180,14 +180,49 @@ export const nothingSchema = z.object({})
  *
  * `titleSource` is handed over rather than only used by the engine because the interface asks
  * the question it answers: a title still `derived` is one the first message may still propose.
+ *
+ * `provider` and `model` cross for the same reason: the window says which agent a Session talks
+ * to and which model it was asked for, and a Session with neither has no agent yet (D5-06).
  */
 export const sessionTitleSourceSchema = z.enum(['derived', 'user'])
+
+/** The agents Hemera knows how to start, as the interface is told them. */
+export const agentProviderSchema = z.enum(['claude', 'codex', 'opencode'])
+
+/** How far a Session is still attached to the agent's own native session (design D5-06). */
+export const nativeStateSchema = z.enum(['none', 'attached', 'lost', 'fallback'])
+
+/** Who wrote an entry: the user, the agent, or Hemera on its own behalf. */
+export const sessionEntryRoleSchema = z.enum(['user', 'agent', 'hemera'])
+
+/**
+ * What an entry is (design D5-11): its `kind` says which block of the thread draws it, and its
+ * `payload` is where that block's own details are — the tool's name and arguments, a diff's
+ * files, a permission's options. `payload` is JSON text rather than a shape of its own here:
+ * the same column holds every kind's details, and each kind validates what it reads.
+ */
+export const sessionEntryKindSchema = z.enum([
+  'message',
+  'thought',
+  'tool_call',
+  'diff',
+  'terminal',
+  'plan',
+  'permission_request',
+  'permission_decision',
+  'usage',
+  'turn',
+  'note',
+])
 
 export const sessionSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   title: z.string(),
   titleSource: sessionTitleSourceSchema,
+  provider: agentProviderSchema.nullable(),
+  model: z.string().nullable(),
+  nativeState: nativeStateSchema,
   archivedAt: z.number().nullable(),
   createdAt: z.number(),
   lastWrittenAt: z.number(),
@@ -204,8 +239,15 @@ export const sessionEntrySchema = z.object({
   sessionId: z.string(),
   /** Its place in the thread, counting from one: what the messages are ordered by. */
   seq: z.number(),
-  role: z.enum(['user']),
+  role: sessionEntryRoleSchema,
+  kind: sessionEntryKindSchema,
   body: z.string(),
+  payload: z.string(),
+  /** What an update of this entry found it by, inside its Session. */
+  correlationId: z.string().nullable(),
+  turnId: z.string().nullable(),
+  /** How far it got, in the vocabulary its own kind defines. */
+  state: z.string().nullable(),
   createdAt: z.number(),
 })
 

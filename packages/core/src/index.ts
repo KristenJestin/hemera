@@ -36,9 +36,17 @@ export {
   titleFromMessage,
 } from './domain/session.ts'
 export type {
+  AgentProvider,
   Mission,
+  NativeState,
   Session,
   SessionEntry,
+  SessionEntryKind,
   SessionEntryRole,
   SessionTitleSource,
+} from './domain/session.ts'
+export {
+  AGENT_PROVIDERS,
+  NATIVE_STATES,
+  SESSION_ENTRY_KINDS,
 } from './domain/session.ts'

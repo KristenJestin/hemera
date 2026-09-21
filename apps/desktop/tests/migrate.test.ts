@@ -19,7 +19,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Exit } from 'effect'
 
 import { dataDirectory } from '#main/channel.ts'
 import {
@@ -50,6 +50,17 @@ const LOT_THREE = '20260916123330_profile_and_preferences'
  * which is the one the previous package wrote.
  */
 const LOT_FOUR_A = '20260918102229_projects_and_journal'
+
+/**
+ * The migration lot 4b shipped, which is what a profile of the version before this one carries.
+ *
+ * One lot behind again, for the same reason: a profile of the users is the one the previous
+ * package wrote, and this lot is the one that has to open it.
+ */
+const LOT_FOUR_B = '20260920001303_sessions_and_entries'
+
+/** The migration this lot adds: the one a profile of lot 4b has never heard of. */
+const AGENTS_MIGRATION = '20260921111531_sessions_with_agents'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -303,8 +314,11 @@ describe('Un profil du lot 4a est migré vers le lot 4b', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.1'))
 
-    // One migration behind, and the copy taken before it is named after it.
-    expect(standing.behind).toEqual([carriedMigrations(SHIPPED).at(-1)?.name])
+    // The migrations this version carries after the one the fixture was opened at: the copy is
+    // named after the first of them, and both are on it.
+    const carried = carriedMigrations(SHIPPED)
+    const from = carried.findIndex((one) => one.name === LOT_FOUR_A)
+    expect(standing.behind).toEqual(carried.slice(from + 1).map((one) => one.name))
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${standing.behind[0]!}.sqlite`])
 
     // The Sessions arrived...
@@ -325,6 +339,122 @@ describe('Un profil du lot 4a est migré vers le lot 4b', () => {
     )
     expect(kept.name).toBe('Atlas')
     expect(kept.sessions).toBe(0)
+  })
+})
+
+describe('Un profil du lot 4b est migré vers le lot 5', () => {
+  test('the migration keeps existing Sessions', async () => {
+    const dataFolder = join(workspace, 'from-lot-four-b')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(LOT_FOUR_B), '0.4.1'))
+
+    // A Session the user had, with a message in it: neither may be lost by this lot.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-20T10:00:00.000Z', '2026-09-20T10:00:00.000Z', 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Fix the parser', 'derived', '2026-09-20T10:00:00.000Z', '2026-09-20T10:01:00.000Z', 1)`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, body, created_at)
+          VALUES ('entry-1', 'session-1', 1, 'user', 'the parser drops the last line', '2026-09-20T10:01:00.000Z')`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+
+    // One migration behind, and the copy taken before it is named after it.
+    expect(standing.behind).toEqual([AGENTS_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${AGENTS_MIGRATION}.sqlite`])
+
+    // The agent columns arrived...
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const column of ['native_session_id', 'native_state', 'entry_kind_is_known']) {
+      expect(schema).toContain(column)
+    }
+
+    // ...and the Session the user had is still there, its thread intact.
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const sessions = yield* sql<{
+          title: string
+          provider: string | null
+          native_state: string
+          native_session_id: string | null
+        }>`SELECT title, provider, native_state, native_session_id FROM sessions WHERE id = 'session-1'`
+        const entries = yield* sql<{
+          seq: number
+          role: string
+          kind: string
+          body: string
+          payload: string
+        }>`SELECT seq, role, kind, body, payload FROM session_entries WHERE session_id = 'session-1'`
+        return { session: sessions[0], entries }
+      }),
+    )
+    expect(kept.session?.title).toBe('Fix the parser')
+    // A Session nothing has talked to in does not acquire an agent by being migrated: the
+    // column stays empty, because Hemera does not know what ran and will not guess.
+    expect(kept.session?.provider).toBeNull()
+    expect(kept.session?.native_session_id).toBeNull()
+    expect(kept.session?.native_state).toBe('none')
+    // The message it held is a message: the default names it, and it carries no payload.
+    expect(kept.entries).toEqual([
+      {
+        seq: 1,
+        role: 'user',
+        kind: 'message',
+        body: 'the parser drops the last line',
+        payload: '{}',
+      },
+    ])
+  })
+
+  test('a Session naming an agent nobody can start, or a kind nobody draws, is refused', async () => {
+    const dataFolder = join(workspace, 'checks')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+
+    // The checks this lot adds are the database's own, so they hold whatever writes: a Session
+    // whose agent Hemera cannot start and an entry of a kind no reader knows are both refused
+    // here rather than drawn as an empty block later.
+    const refusals = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-21T10:00:00.000Z', '2026-09-21T10:00:00.000Z', 1)`
+        const unknownProvider = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, created_at, last_written_at, version)
+              VALUES ('s1', 'atlas', 'T', 'derived', 'gemini', '2026-09-21T10:00:00.000Z', '2026-09-21T10:00:00.000Z', 1)`
+          }),
+        )
+        const unknownState = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO sessions (id, project_id, title, title_source, native_state, created_at, last_written_at, version)
+              VALUES ('s2', 'atlas', 'T', 'derived', 'somewhere', '2026-09-21T10:00:00.000Z', '2026-09-21T10:00:00.000Z', 1)`
+          }),
+        )
+        const unknownKind = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, created_at)
+              VALUES ('e1', 's1', 1, 'agent', 'drawing', 'x', '2026-09-21T10:00:00.000Z')`
+          }),
+        )
+        // And nothing of what was refused is in the database: the check is the reason the row
+        // is not there, whatever the driver's own wording for it is.
+        const written = yield* sql<{ n: number }>`SELECT COUNT(*) AS n FROM sessions`
+        return {
+          refused: [unknownProvider, unknownState, unknownKind].map((exit) => Exit.isFailure(exit)),
+          written: written[0]?.n,
+        }
+      }),
+    )
+
+    expect(refusals.refused).toEqual([true, true, true])
+    expect(refusals.written).toBe(0)
   })
 })
 

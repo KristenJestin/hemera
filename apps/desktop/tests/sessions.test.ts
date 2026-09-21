@@ -481,11 +481,14 @@ describe('Aucune suppression proposée', () => {
     expect(offered.toSorted()).toEqual([
       'append',
       'archive',
+      'chooseAgent',
       'create',
       'list',
       'read',
+      'recordNative',
       'rename',
       'restore',
+      'write',
     ])
   })
 })
@@ -595,5 +598,162 @@ describe('Arrêt brutal', () => {
     expect(page.entries.map((entry) => entry.body)).toEqual([
       'Written, and then the window went away',
     ])
+  })
+})
+
+describe("L'agent d'une Session", () => {
+  test('the agent and the model are shown, and the next start reads them from the Session', async () => {
+    const found = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const created = yield* sessions.create(project.id)
+        const chosen = yield* sessions.chooseAgent(created.id, created.version, {
+          provider: 'claude',
+          model: 'claude-sonnet-4-5',
+        })
+        return { created, chosen }
+      }),
+    )
+
+    // A Session nobody has talked to in has no agent, and says so by holding nothing rather
+    // than by naming one it has never started.
+    expect(found.created.provider).toBeNull()
+    expect(found.created.model).toBeNull()
+    expect(found.chosen.provider).toBe('claude')
+    expect(found.chosen.model).toBe('claude-sonnet-4-5')
+    expect(found.chosen.version).toBe(found.created.version + 1)
+
+    // Which agent a Session talks to is what the engine reads when it starts one, so it has to
+    // outlive the window that chose it: read again, on a second run of the process.
+    const again = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const seen = yield* sessions.list(found.chosen.projectId)
+        return seen[0]
+      }),
+    )
+    expect(again?.provider).toBe('claude')
+    expect(again?.model).toBe('claude-sonnet-4-5')
+  })
+
+  test('a write against a version that has moved on is refused', async () => {
+    const refused = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const created = yield* sessions.create(project.id)
+        // Two windows, both holding the same Session: the second one chooses the agent, and
+        // the first one's choice was written against a Session that no longer is that one.
+        yield* sessions.chooseAgent(created.id, created.version, {
+          provider: 'claude',
+          model: null,
+        })
+        return {
+          projectId: project.id,
+          // The two windows case, said the way the other refusals are.
+          written: yield* Effect.flip(
+            sessions.chooseAgent(created.id, created.version, { provider: 'codex', model: null }),
+          ),
+        }
+      }),
+    )
+
+    expect(refused.written).toBeInstanceOf(StaleVersionError)
+    const kept = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const seen = yield* sessions.list(refused.projectId)
+        return seen.map((session) => session.provider)
+      }),
+    )
+    expect(kept).toEqual(['claude'])
+  })
+})
+
+describe('Le fil que l’agent écrit', () => {
+  test('a tool call is one entry in a later state, not a second entry beside it', async () => {
+    const thread = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const created = yield* sessions.create(project.id)
+        yield* sessions.write(created.id, {
+          role: 'agent',
+          kind: 'tool_call',
+          body: 'Read parser.ts',
+          payload: '{"tool":"read","status":"in_progress"}',
+          correlationId: 'call-1',
+          turnId: 'turn-1',
+          state: 'in_progress',
+        })
+        yield* sessions.write(created.id, {
+          role: 'agent',
+          kind: 'tool_call',
+          body: 'Read parser.ts',
+          payload: '{"tool":"read","status":"completed"}',
+          correlationId: 'call-1',
+          turnId: 'turn-1',
+          state: 'completed',
+        })
+        yield* sessions.write(created.id, {
+          role: 'agent',
+          kind: 'message',
+          body: 'The parser drops the last line.',
+          turnId: 'turn-1',
+        })
+        return yield* sessions.read(created.id)
+      }),
+    )
+
+    // Two writes, one entry: the second found it by what it was about.
+    expect(thread.entries).toHaveLength(2)
+    expect(thread.entries[0]?.kind).toBe('tool_call')
+    expect(thread.entries[0]?.seq).toBe(1)
+    expect(thread.entries[0]?.state).toBe('completed')
+    expect(thread.entries[0]?.payload).toBe('{"tool":"read","status":"completed"}')
+    expect(thread.entries[0]?.role).toBe('agent')
+    // And the message that followed it is the next one in the same thread.
+    expect(thread.entries[1]?.kind).toBe('message')
+    expect(thread.entries[1]?.seq).toBe(2)
+    expect(thread.entries[1]?.payload).toBe('{}')
+    expect(thread.entries[1]?.turnId).toBe('turn-1')
+  })
+
+  test('what the agent handed back is kept with the Session, and Hemera is who wrote it', async () => {
+    const keptNative = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const created = yield* sessions.create(project.id)
+        yield* sessions.chooseAgent(created.id, created.version, {
+          provider: 'codex',
+          model: null,
+        })
+        const attached = yield* sessions.recordNative(created.id, {
+          nativeSessionId: 'native-9',
+          nativeState: 'attached',
+          cwd: '/tmp/atlas',
+        })
+        const lost = yield* sessions.recordNative(created.id, {
+          nativeSessionId: 'native-9',
+          nativeState: 'lost',
+          cwd: '/tmp/atlas',
+        })
+        return { attached, lost }
+      }),
+    )
+
+    // The version is not touched by what the engine writes: a running agent must not be able
+    // to refuse a rename the user is making at the same time.
+    expect(keptNative.attached.version).toBe(keptNative.lost.version)
+    const readBack = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const seen = yield* sessions.list(keptNative.lost.projectId)
+        return seen[0]
+      }),
+    )
+    expect(readBack?.nativeState).toBe('lost')
   })
 })
