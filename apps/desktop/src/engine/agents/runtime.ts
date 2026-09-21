@@ -30,11 +30,11 @@ import {
   type UsageReport,
   connect,
 } from './client.ts'
-import { Discovery, type DiscoveryService } from './discovery.ts'
+import { Discovery } from './discovery.ts'
 import { rebuiltContext } from './resume.ts'
-import { ProcessSupervisor, type ProcessSupervisorService, type SupervisedProcess } from './supervisor.ts'
-import { Projects, type ProjectsService } from '../projects.ts'
-import { Sessions, type NativeRecord, type SessionsService, type ThreadWrite } from '../sessions.ts'
+import { ProcessSupervisor, type SupervisedProcess } from './supervisor.ts'
+import { Projects } from '../projects.ts'
+import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
 
 /** How long an agent is given to answer `session/cancel` before its process tree is stopped. */
 export const CANCEL_GRACE = Duration.seconds(10)
@@ -136,6 +136,19 @@ interface Live {
    * conversation it cannot answer, and a turn is what a prompt is.
    */
   context: string | null
+  /** Why that context had to be rebuilt, in the agent's own terms; null when it did not. */
+  why: string | null
+  /**
+   * What the agent has said that the thread does not hold yet.
+   *
+   * The events of a Session are written by the fiber that drains them rather than by the turn that
+   * asked for them, so the entry that ends a turn would otherwise be written before the message it
+   * ended with — and the thread would show the end of a turn above the words that ended it. It is
+   * counted per Session rather than per turn because a replayed history arrives with no turn at
+   * all: the entries a load updates have to be in the thread before the window is told the Session
+   * is back. Counted when an event is offered, given back when it is written.
+   */
+  pending: number
 }
 
 /** A tool call, as the thread accumulates it: an update carries only what changed. */
@@ -171,22 +184,23 @@ interface Turn {
  * What a refusal of any of the ports is called in a report.
  *
  * The ports say no in their own words — a tagged refusal, a domain error the engine wraps, a
- * spawn that failed — and a report has one place for all of them: the tag when there is one, the
- * message otherwise, never a stack.
+ * spawn that failed — and a report has one place for all of them. What is shown is what the port
+ * said, because the tag alone ("AgentProtocolError") is the name of a kind of refusal and not an
+ * answer to anything; the tag is what is left when there is no message, and never a stack.
  */
 function describe(refusal: {
   readonly _tag?: string
   readonly message?: string
   readonly name?: string
 }): string {
-  return refusal._tag ?? refusal.message ?? refusal.name ?? 'the port refused'
+  return refusal.message ?? refusal._tag ?? refusal.name ?? 'the port refused'
 }
 
 /** A refusal from any of the ports, as the one error this service declares. */
-const attempt = <A, E extends { readonly _tag?: string; readonly message?: string; readonly name?: string }>(
+const attempt = <A, E extends { readonly _tag?: string; readonly message?: string; readonly name?: string }, R>(
   what: string,
-  effect: Effect.Effect<A, E>,
-): Effect.Effect<A, AgentRuntimeError> =>
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, AgentRuntimeError, R> =>
   Effect.mapError(effect, (refusal) => new AgentRuntimeError({ what, cause: describe(refusal) }))
 
 /** A line of the turn entry, as the thread shows it. */
@@ -204,7 +218,9 @@ function chosenName(pending: Pending, optionId: string): string {
   return pending.options.find((option) => option.id === optionId)?.name ?? optionId
 }
 
-export const AgentRuntime = Context.Service<AgentRuntime, AgentRuntimeService>()('AgentRuntime')
+export class AgentRuntime extends Context.Service<AgentRuntime, AgentRuntimeService>()(
+  'AgentRuntime',
+) {}
 
 /**
  * The runtime of the engine, over the ports it needs.
@@ -253,18 +269,6 @@ export const runtimeLayer = Layer.effect(
         body,
         payload: JSON.stringify({ reason }),
         turnId: turn?.id ?? null,
-      })
-
-    /** One tool call of the thread, in the state it is in now. */
-    const writeCall = (sessionId: string, turn: Turn, call: Call) =>
-      write(sessionId, {
-        role: 'agent',
-        kind: 'tool_call',
-        body: call.title,
-        payload: JSON.stringify({ call }),
-        correlationId: `call:${call.title === '' ? turn.id : call.title}`,
-        turnId: turn.id,
-        state: call.status,
       })
 
     /**
@@ -351,6 +355,29 @@ export const runtimeLayer = Layer.effect(
             origin,
           })
         }
+      }).pipe(
+        // Given back whatever came of the write: what the Session waits for is the thread to be as
+        // long as what the agent said, not for every write to have succeeded.
+        Effect.ensuring(
+          Effect.sync(() => {
+            const held = live.get(sessionId)
+            if (held !== undefined) held.pending -= 1
+          }),
+        ),
+      )
+
+    /**
+     * Waits for what the agent said to be in the thread.
+     *
+     * Called before a turn entry is written, and before a Session is reported back: the entries of
+     * a Session are written by the fiber that drains them, and the entry that ends a turn is not
+     * the first thing that turn says.
+     */
+    const drained = (held: Live) =>
+      Effect.gen(function* () {
+        for (let look = 0; look < 10_000 && held.pending > 0; look++) {
+          yield* Effect.yieldNow
+        }
       })
 
     /** The two pipes of a child, as the ACP client takes them. */
@@ -367,6 +394,15 @@ export const runtimeLayer = Layer.effect(
             // leave the handshake waiting forever.
             process.onStdout((line) => {
               controller.enqueue(encoder.encode(`${line}\n`))
+            })
+            // The death of the agent ends what it has to say. A pipe left open for ever is a
+            // turn waiting on a line that will never come, and the turn has to end.
+            void Effect.runPromise(process.exited).then(() => {
+              try {
+                controller.close()
+              } catch {
+                // Already closed, or cancelled with the scope that held it.
+              }
             })
           },
         }),
@@ -386,13 +422,9 @@ export const runtimeLayer = Layer.effect(
       }
     }
 
-    /** Where an agent runs for this Session: where it ran before, or the Project's own path. */
-    const workingDirectory = (
-      session: Session,
-      native: NativeRecord,
-    ): Effect.Effect<string, AgentRuntimeError> =>
+    /** The path of the Project a Session belongs to, which is where its agent is run. */
+    const projectPath = (session: Session): Effect.Effect<string, AgentRuntimeError> =>
       Effect.gen(function* () {
-        if (native.cwd !== null) return native.cwd
         const held = yield* attempt('reading the Project', projects.list())
         const project = held.find((candidate) => candidate.id === session.projectId)
         if (project === undefined) {
@@ -404,6 +436,19 @@ export const runtimeLayer = Layer.effect(
           )
         }
         return project.mainPath
+      })
+
+    /** Where an agent runs for this Session: where it ran before, or the Project's own path. */
+    const workingDirectory = (
+      session: Session,
+      native: NativeRecord,
+    ): Effect.Effect<string, AgentRuntimeError> =>
+      Effect.gen(function* () {
+        const project = yield* projectPath(session)
+        // A directory that is gone is not a place to run an agent in, and a Session does not
+        // stop being one because its folder was moved: the Project's own path takes it in.
+        if (native.cwd !== null && existsSync(native.cwd)) return native.cwd
+        return project
       })
 
     /**
@@ -423,8 +468,12 @@ export const runtimeLayer = Layer.effect(
 
           const turn = turns.get(sessionId)
           const reason = `the agent exited with ${observation.code === null ? `signal ${observation.signal}` : `code ${observation.code}`}`
-          if (turn !== undefined) {
-            turn.closed = null
+          // A turn the runtime closed itself — the grace of a Stop, say — is not told twice: the
+          // death is what the stop asked for, and the turn keeps the reason it was closed with.
+          if (turn !== undefined && turn.closed === null) {
+            // What the agent said before it died is in the thread before the entry that says it
+            // died: the death does not jump the queue of its own words.
+            yield* drained(held)
             yield* note(sessionId, turn, 'The agent stopped running.', reason)
             yield* write(sessionId, {
               role: 'hemera',
@@ -455,7 +504,7 @@ export const runtimeLayer = Layer.effect(
      * none is a refusal the interface shows, and one whose agent this machine does not have is
      * the same refusal naming it (D5-17). Neither is replaced by another agent.
      */
-    const opened = (sessionId: string): Effect.Effect<Live, AgentRuntimeError> =>
+    const opened = (sessionId: string): Effect.Effect<Live, AgentRuntimeError, Scope.Scope> =>
       Effect.gen(function* () {
         const held = live.get(sessionId)
         if (held !== undefined && held.death === null) return held
@@ -486,6 +535,10 @@ export const runtimeLayer = Layer.effect(
             ...pipes(process),
             adapter: resolved.adapter,
             onEvent: (event) => {
+              // Counted before it is offered: the thread is not told the Session is back while one
+              // of its own events is still on its way to it.
+              const held = live.get(sessionId)
+              if (held !== undefined) held.pending += 1
               Queue.offerUnsafe(queue, event)
             },
             onPermission: (question) => Effect.runPromise(ask(sessionId, question)),
@@ -500,6 +553,8 @@ export const runtimeLayer = Layer.effect(
           nativeSessionId: '',
           death: null,
           context: null,
+          why: null,
+          pending: 0,
         }
         live.set(sessionId, started)
         // The entries of a turn are written in the order the agent said them, which is why one
@@ -511,9 +566,28 @@ export const runtimeLayer = Layer.effect(
         )
         yield* watchDeath(sessionId, started)
 
-        const resumed = yield* takeBack(sessionId, started, session, native)
+        const resumed = yield* takeBack(sessionId, started, native)
         if (resumed !== null) return yield* Effect.fail(resumed)
         return started
+      })
+
+    /** Says the Session goes on with the agent it already had, and remembers where it runs. */
+    const attached = (
+      sessionId: string,
+      held: Live,
+      handle: string,
+    ): Effect.Effect<null, never> =>
+      Effect.gen(function* () {
+        held.nativeSessionId = handle
+        yield* attempt(
+          'recording the agent',
+          sessions.recordNative(sessionId, {
+            nativeSessionId: handle,
+            nativeState: 'attached',
+            cwd: held.cwd,
+          }),
+        ).pipe(Effect.ignore)
+        return null
       })
 
     /**
@@ -523,11 +597,13 @@ export const runtimeLayer = Layer.effect(
      * the agent no longer recognises, or whose directory is gone, is opened again and told what
      * was said before (D5-07). A directory that no longer exists is not asked about at all: an
      * agent started in a directory that is gone would fail for a reason the user cannot see.
+     *
+     * The order is the design's: resume native, then load, then the fallback. An agent that
+     * advertises neither capability is not asked twice.
      */
     const takeBack = (
       sessionId: string,
       held: Live,
-      session: Session,
       native: NativeRecord,
     ): Effect.Effect<AgentRuntimeError | null, never> =>
       Effect.gen(function* () {
@@ -537,40 +613,40 @@ export const runtimeLayer = Layer.effect(
             attempt('opening a session', held.connection.open(held.cwd)),
           )
           if (Result.isFailure(openedSession)) return openedSession.failure
-          held.nativeSessionId = openedSession.success
-          yield* attempt(
-            'recording the agent',
-            sessions.recordNative(sessionId, {
-              nativeSessionId: openedSession.success,
-              nativeState: 'attached',
-              cwd: held.cwd,
-            }),
-          ).pipe(Effect.ignore)
-          return null
+          return yield* attached(sessionId, held, openedSession.success)
         }
-
-        if (!existsSync(held.cwd)) {
+        // A Session that ran in a directory that is gone cannot be taken back there: the agent is
+        // asked to carry nothing, and the thread is rebuilt where the Project lives (D5-07).
+        if (native.cwd !== null && !existsSync(native.cwd)) {
           return yield* fallback(
             sessionId,
             held,
-            session,
-            `the directory this Session ran in is gone: ${held.cwd}`,
+            `the directory this Session ran in is gone: ${native.cwd}`,
           )
         }
 
-        const continued = yield* Effect.result(
-          attempt('continuing the session', held.connection.continueSession(handle, held.cwd)),
-        )
-        if (Result.isFailure(continued)) {
-          return yield* fallback(sessionId, held, session, continued.failure.cause)
+        // Native first, then load, then the fallback (D5-07): the agent is asked to carry the
+        // conversation on as it stands, and asked to send it back only if it cannot.
+        if (held.connection.handshake.resumes) {
+          const resumed = yield* Effect.result(
+            attempt('resuming the session', held.connection.resume(handle, held.cwd)),
+          )
+          if (Result.isSuccess(resumed)) return yield* attached(sessionId, held, handle)
         }
 
-        held.nativeSessionId = handle
-        yield* attempt(
-          'recording the agent',
-          sessions.recordNative(sessionId, { nativeSessionId: handle, nativeState: 'attached', cwd: held.cwd }),
-        ).pipe(Effect.ignore)
-        return null
+        if (held.connection.handshake.continues) {
+          const loaded = yield* Effect.result(
+            attempt('loading the session', held.connection.load(handle, held.cwd)),
+          )
+          if (Result.isSuccess(loaded)) return yield* attached(sessionId, held, handle)
+          return yield* fallback(sessionId, held, loaded.failure.cause)
+        }
+
+        return yield* fallback(
+          sessionId,
+          held,
+          'the agent cannot carry its own session',
+        )
       })
 
     /**
@@ -584,7 +660,6 @@ export const runtimeLayer = Layer.effect(
     const fallback = (
       sessionId: string,
       held: Live,
-      session: Session,
       reason: string,
     ): Effect.Effect<AgentRuntimeError | null, never> =>
       Effect.gen(function* () {
@@ -592,11 +667,20 @@ export const runtimeLayer = Layer.effect(
         if (Result.isFailure(page)) return page.failure
 
         const rebuilt = rebuiltContext(page.success.entries)
+        // The Session is opened again where the Project lives: the agent is given the rebuilt
+        // context rather than a session it cannot take back, and the handle of that new session
+        // is what the next run of the application takes back.
+        const openedSession = yield* Effect.result(
+          attempt('opening a session', held.connection.open(held.cwd)),
+        )
+        if (Result.isFailure(openedSession)) return openedSession.failure
+        held.nativeSessionId = openedSession.success
         held.context = rebuilt
+        held.why = reason
         yield* attempt(
           'recording the agent',
           sessions.recordNative(sessionId, {
-            nativeSessionId: null,
+            nativeSessionId: openedSession.success,
             nativeState: 'fallback',
             cwd: held.cwd,
           }),
@@ -729,13 +813,18 @@ export const runtimeLayer = Layer.effect(
                 turnId: turn.id,
               })
             }
-            yield* closeTurn(sessionId, turn, answered.stopReason)
-            return { stopReason: answered.stopReason, usage: answered.usage } satisfies TurnReport
+            yield* drained(held)
+            yield* closeTurn(sessionId, turn, turn.closed ?? answered.stopReason)
+            return {
+              stopReason: turn.closed ?? answered.stopReason,
+              usage: answered.usage,
+            } satisfies TurnReport
           }
 
           // The agent never answered: either the process died under the turn, or Hemera stopped
           // an agent that would not stop. The thread keeps everything it received either way.
           const stopReason = turn.closed ?? (held.death === null ? 'cancelled' : 'interrupted')
+          yield* drained(held)
           yield* closeTurn(sessionId, turn, stopReason)
           return { stopReason, usage: null } satisfies TurnReport
         }).pipe(Effect.ensuring(Effect.sync(() => turns.delete(sessionId))))
@@ -782,6 +871,10 @@ export const runtimeLayer = Layer.effect(
           }).pipe(Effect.ignore)
           yield* Deferred.succeed(pending.answer, { cancelled: true })
         }
+
+        // The user stopped the turn, so the turn is closed as cancelled whatever the agent says
+        // next: an agent that answers `end_turn` after being cancelled has still been stopped.
+        turn.closed = 'cancelled'
 
         if (held === undefined) return
         yield* attempt('cancelling the turn', held.connection.cancel()).pipe(Effect.ignore)
@@ -837,16 +930,22 @@ export const runtimeLayer = Layer.effect(
           turnId: turn.id,
           state: optionId === null ? 'cancelled' : 'decided',
         })
+        const stopped: PermissionAnswer = { cancelled: true }
         yield* Deferred.succeed(
           pending.answer,
-          optionId === null ? { cancelled: true } : { optionId },
+          optionId === null ? stopped : { optionId },
         )
       })
     const resume = (sessionId: string) =>
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
-        if (held.context === null) return { state: 'attached', reason: null } satisfies ResumeReport
-        return { state: 'fallback', reason: 'the agent could not take its session back' } satisfies ResumeReport
+        // What a load streams back is written by the drain fiber like anything else, so the window
+        // is not told the Session is back before its own history is in the thread.
+        yield* drained(held)
+        // The reason the fallback recorded, not a second guess at it: the sentence the interface
+        // shows over the thread is the one the agent's refusal was read as.
+        if (held.why !== null) return { state: 'fallback', reason: held.why } satisfies ResumeReport
+        return { state: 'attached', reason: null } satisfies ResumeReport
       })
 
     const release = (sessionId: string) =>

@@ -49,8 +49,8 @@ import {
 
 /** One thing the agent does during a turn, in the order it does them. */
 export type FakeStep =
-  | { readonly does: 'says'; readonly text: string }
-  | { readonly does: 'thinks'; readonly text: string }
+  | { readonly does: 'says'; readonly text: string; readonly messageId?: string }
+  | { readonly does: 'thinks'; readonly text: string; readonly messageId?: string }
   | {
       readonly does: 'calls'
       readonly call: {
@@ -97,6 +97,13 @@ export interface FakeScript {
   readonly authMethods?: readonly { readonly id: string; readonly name: string }[]
   /** Whether it says it can continue a session it handed back. */
   readonly continues?: boolean
+  /**
+   * Whether it publishes `sessionCapabilities.resume` at `initialize`.
+   *
+   * True unless a test says otherwise: the agents that do not are the ones whose Session has to
+   * be loaded and matched rather than simply resumed.
+   */
+  readonly advertisesResume?: boolean
   /** What it does, in order, on each prompt. */
   readonly steps?: readonly FakeStep[]
   /** What it announces in `session/new`, in the SDK's own shape for a configuration option. */
@@ -166,6 +173,8 @@ export interface FakeAnswers {
   readonly loads: number
   /** How many times the agent was asked to resume one, whether or not it agreed. */
   readonly resumes: number
+  /** How many times the agent was told to cancel, whether or not it listened. */
+  readonly cancels: number
 }
 
 /**
@@ -180,6 +189,7 @@ interface FakeTally {
   prompts: string[]
   loads: number
   resumes: number
+  cancels: number
 }
 
 /** The peer, the script it follows, and the two pipes a client talks to it through. */
@@ -213,16 +223,23 @@ export interface FakeAgent {
 /** The notification one step is, or null when the step is something else entirely. */
 function updateOf(step: FakeStep): SessionUpdate | null {
   switch (step.does) {
-    case 'says':
-      return {
+    case 'says': {
+      const update: Extract<SessionUpdate, { sessionUpdate: 'agent_message_chunk' }> = {
         sessionUpdate: 'agent_message_chunk',
         content: { type: 'text', text: step.text } satisfies ContentBlock,
       }
-    case 'thinks':
-      return {
+      // A chunk that names the message it belongs to is one a thread can match a replay against.
+      if (step.messageId !== undefined) update.messageId = step.messageId
+      return update
+    }
+    case 'thinks': {
+      const update: Extract<SessionUpdate, { sessionUpdate: 'agent_thought_chunk' }> = {
         sessionUpdate: 'agent_thought_chunk',
         content: { type: 'text', text: step.text } satisfies ContentBlock,
       }
+      if (step.messageId !== undefined) update.messageId = step.messageId
+      return update
+    }
     case 'calls': {
       // What the agent does not say is left out rather than sent as nothing: an update carries
       // what changed, and a field set to null would be an update that clears it.
@@ -277,7 +294,14 @@ function promptTextOf(request: PromptRequest): string {
 export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   const fromClient = new TransformStream<Uint8Array, Uint8Array>()
   const toClient = new TransformStream<Uint8Array, Uint8Array>()
-  const answers: FakeTally = { optionIds: [], cancelled: 0, prompts: [], loads: 0, resumes: 0 }
+  const answers: FakeTally = {
+    optionIds: [],
+    cancelled: 0,
+    prompts: [],
+    loads: 0,
+    resumes: 0,
+    cancels: 0,
+  }
 
   let sessionId = script.nativeSessionId ?? 'native-session'
   let cancelled = false
@@ -316,10 +340,12 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       protocolVersion: PROTOCOL_VERSION,
       agentCapabilities: {
         loadSession: script.continues === true,
-        // Advertised always, and whether the answer is an error is the script's: the fallback a
-        // refused resume forces is a path Hemera has to walk, and a capability it never sees is
-        // a path no test can reach.
-        sessionCapabilities: { resume: {} },
+        // Advertised unless the script says otherwise, and whether the answer is an error is the
+        // script's: the fallback a refused resume forces is a path Hemera has to walk, and a
+        // capability it never sees is a path no test can reach. `advertisesResume: false` is that
+        // last path — an agent that can only be loaded, which is what the load-with-dedup step of
+        // D5-07 is for.
+        sessionCapabilities: script.advertisesResume === false ? {} : { resume: {} },
       },
       authMethods: [...(script.authMethods ?? [])],
       agentInfo: { name: 'Fake agent', version: '1.0.0' },
@@ -348,6 +374,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     },
     authenticate: () => undefined,
     cancel: () => {
+      answers.cancels += 1
       // An agent that ignores the cancel is not an agent the protocol allows; it is the one
       // Hemera meets in the wild, and the turn it holds open is what a Stop has to survive.
       if (script.ignoresCancel !== true) cancelled = true

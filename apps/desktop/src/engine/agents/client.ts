@@ -39,7 +39,18 @@ import { type AgentAdapter } from './adapter.ts'
 export class AgentProtocolError extends Data.TaggedError('AgentProtocolError')<{
   readonly what: string
   readonly cause: string
-}> {}
+}> {
+  /**
+   * What the agent said about it, rather than the name of the error.
+   *
+   * The message is what ends up in the thread — "the agent refuses to resume a session" tells the
+   * user something, and `AgentProtocolError` tells them nothing — so the tag names the kind and
+   * this says which one it was.
+   */
+  override get message(): string {
+    return `${this.what}: ${this.cause}`
+  }
+}
 
 /** A tool call, as the thread draws it: one report, updated as the agent goes. */
 export interface ToolCallReport {
@@ -199,8 +210,23 @@ export interface AgentConnection {
   ) => Effect.Effect<readonly AgentOption[], AgentProtocolError>
   /** Opens a session in that directory and answers the handle the agent gave it. */
   readonly open: (workingDirectory: string) => Effect.Effect<string, AgentProtocolError>
-  /** Asks the agent to carry on the session it handed back, streaming its history again. */
-  readonly continueSession: (
+  /**
+   * Asks the agent to carry the session on as it stands, without sending its history back.
+   *
+   * `session/resume`, and the one the design prefers (D5-07): a conversation the agent still
+   * holds does not have to be told again, and nothing arrives to be matched against the thread.
+   */
+  readonly resume: (
+    nativeSessionId: string,
+    workingDirectory: string,
+  ) => Effect.Effect<void, AgentProtocolError>
+  /**
+   * Asks the agent to stream the session's history back, so the thread can be matched to it.
+   *
+   * `session/load`: what it sends is a replay, which is what tells the thread to update the
+   * entries it already has rather than write them a second time (D5-08).
+   */
+  readonly load: (
     nativeSessionId: string,
     workingDirectory: string,
   ) => Effect.Effect<void, AgentProtocolError>
@@ -441,30 +467,35 @@ export function connect(
           return opened.sessionId
         }),
 
-      continueSession: (nativeSessionId, workingDirectory) =>
+      resume: (nativeSessionId, workingDirectory) =>
         Effect.gen(function* () {
-          // `resume` hands the conversation over as it stands; `load` sends it back and every
-          // chunk of it arrives as a replay, which is why only one of the two sets the flag.
-          const resumes = handshake.agentCapabilities?.sessionCapabilities?.resume != null
-          replaying = !resumes
           const answered = yield* Effect.tryPromise({
             try: () =>
-              resumes
-                ? connection.resumeSession({
-                    sessionId: nativeSessionId,
-                    cwd: workingDirectory,
-                    mcpServers: [],
-                  })
-                : connection.loadSession({
-                    sessionId: nativeSessionId,
-                    cwd: workingDirectory,
-                    mcpServers: [],
-                  }),
-            catch: (cause) =>
-              new AgentProtocolError({
-                what: resumes ? 'resumeSession' : 'loadSession',
-                cause: String(cause),
+              connection.resumeSession({
+                sessionId: nativeSessionId,
+                cwd: workingDirectory,
+                mcpServers: [],
               }),
+            catch: (cause) =>
+              new AgentProtocolError({ what: 'resumeSession', cause: String(cause) }),
+          })
+          sessionId = nativeSessionId
+          announced = optionsOf(answered.configOptions)
+        }),
+
+      load: (nativeSessionId, workingDirectory) =>
+        Effect.gen(function* () {
+          // Every chunk a load sends back is a replay: the flag is set for the whole call, so a
+          // notification that arrives while the history is streaming is marked as what it is.
+          replaying = true
+          const answered = yield* Effect.tryPromise({
+            try: () =>
+              connection.loadSession({
+                sessionId: nativeSessionId,
+                cwd: workingDirectory,
+                mcpServers: [],
+              }),
+            catch: (cause) => new AgentProtocolError({ what: 'loadSession', cause: String(cause) }),
           }).pipe(Effect.ensuring(Effect.sync(() => (replaying = false))))
           sessionId = nativeSessionId
           announced = optionsOf(answered.configOptions)

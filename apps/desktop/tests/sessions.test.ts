@@ -484,6 +484,7 @@ describe('Aucune suppression proposée', () => {
       'chooseAgent',
       'create',
       'list',
+      'one',
       'read',
       'recordNative',
       'rename',

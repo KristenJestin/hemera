@@ -205,7 +205,7 @@ describe('Une permission demandée en cours de tour', () => {
   })
 })
 
-describe('Un tour arrêté et une session reprise', () => {
+describe('A stopped turn and a session kept', () => {
   test('a stopped turn is cancelled, and the agent answers that it was', async () => {
     // The turn is held open between two of its steps: Stop can only be tested while the agent
     // is really working, and this is what makes that a fact rather than a hope.
@@ -256,8 +256,8 @@ describe('Un tour arrêté et une session reprise', () => {
     expect(events.map((event) => ('text' in event ? event.text : ''))).toEqual(['starting'])
   })
 
-  test('a continued session is replayed, and what arrives says so', async () => {
-    const { connection, events } = await opened({
+  test('a resumed session sends nothing back, so nothing arrives as a replay', async () => {
+    const { connection, events, fake } = await opened({
       continues: true,
       history: [
         { does: 'says', text: 'the turn you already have' },
@@ -266,8 +266,36 @@ describe('Un tour arrêté et une session reprise', () => {
       steps: [{ does: 'says', text: 'and this one is new' }],
     })
 
-    await Effect.runPromise(connection.continueSession('native-session', '/tmp/atlas'))
+    await Effect.runPromise(connection.resume('native-session', '/tmp/atlas'))
+
+    // `session/resume` hands the conversation over as it stands: the agent still holds it, so
+    // there is no history to match and nothing is asked of it a second time.
+    expect(events).toEqual([])
+    expect(fake.answers.resumes).toBe(1)
+    expect(fake.answers.loads).toBe(0)
+
+    const outcome = await Effect.runPromise(connection.prompt('carry on'))
+
+    expect(outcome.stopReason).toBe('end_turn')
+    expect(events.map((event) => event.replay)).toEqual([false])
+  })
+
+  test('a loaded session is replayed, and what arrives says so', async () => {
+    const { connection, events, fake } = await opened({
+      continues: true,
+      history: [
+        { does: 'says', text: 'the turn you already have' },
+        { does: 'thinks', text: 'and the thought behind it' },
+      ],
+      steps: [{ does: 'says', text: 'and this one is new' }],
+    })
+
+    await Effect.runPromise(connection.load('native-session', '/tmp/atlas'))
+
     expect(events.map((event) => event.replay)).toEqual([true, true])
+    expect(fake.answers.loads).toBe(1)
+    expect(fake.answers.resumes).toBe(0)
+
     const outcome = await Effect.runPromise(connection.prompt('carry on'))
 
     expect(outcome.stopReason).toBe('end_turn')
