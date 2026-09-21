@@ -252,15 +252,18 @@ writes at start-up.
   references only**. Never copy their markup, classes or inline styles. Copying them is a
   rejected change.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
-- Storybook tree, three roots and nothing else: **Components** for the design-system pieces of
-  `packages/ui/src/components` (one entry per component, `Components/<Name>`); **Surfaces** for
-  the assembled screens and panels of a feature folder (`Surfaces/<Feature>`, and
-  `Surfaces/<Feature>/<Part>` when the feature has several); **Shell** for the window frame.
-  A story file sits next to its component, named `<component>.stories.tsx`; one story per state
-  (empty, loading, error, filled, dense), named after the state; the story that shows the whole
-  surface with every piece in place comes first in its file, because it is the one the UI gate
+- Storybook sidebar, five roots in this order and nothing else: **Foundations** (tokens,
+  icons, motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the
+  composed pieces that are not a screen, grouped by family and four families at most
+  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`);
+  **Surfaces**, one entry per screen (`Surfaces/Session`, `Surfaces/Project/Dialog` when a
+  screen has several parts), never one entry per variant; **Shell**, the window frame. The
+  order of the roots and the alphabetical order inside are forced by `storySort` in
+  `.storybook/preview`. A story file sits next to its component, `<name>.stories.tsx`; one
+  story per state, named after the state (`Empty`, `Loading`, `Error`, `Filled`, `Dense`);
+  a surface's first story is `Complete`, everything in place, because it is what the UI gate
   looks at. The skill in `.agents/skills/storybook` says how to write a story; this list says
-  where it goes and what it is called, and it wins when the two differ.
+  where it shows and what it is called, and it wins when the two differ.
 - Storybook badges: a story file the lot **created** wears the `new` tag, one whose component the
   lot **changed** wears `updated`. The badge belongs to the lot that touches the design system
   and not to the component: the first thing such a lot does is take the previous lot's badges
