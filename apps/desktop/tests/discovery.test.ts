@@ -98,8 +98,15 @@ describe('The Agents page tells what is available', () => {
         path: CLAUDE.path,
         version: '0.78.0',
         authenticated: false,
+        installHint: 'npm install -g @agentclientprotocol/claude-agent-acp',
       },
-      { id: 'codex', label: 'Codex', found: false, authenticated: false },
+      {
+        id: 'codex',
+        label: 'Codex',
+        found: false,
+        authenticated: false,
+        installHint: 'npm install -g @agentclientprotocol/codex-acp',
+      },
       {
         id: 'opencode',
         label: 'OpenCode',
@@ -107,6 +114,7 @@ describe('The Agents page tells what is available', () => {
         path: OPENCODE.path,
         version: '1.18.31',
         authenticated: false,
+        installHint: 'npm install -g opencode-ai',
       },
     ])
     // What the page shows for the one that is missing is its adapter's own hint, which is the
@@ -126,6 +134,7 @@ describe('The Agents page tells what is available', () => {
       found: true,
       path: '/home/ana/.local/bin/opencode',
       authenticated: false,
+      installHint: 'npm install -g opencode-ai',
     })
   })
 

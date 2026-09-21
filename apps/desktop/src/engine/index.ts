@@ -12,18 +12,30 @@
 
 import { join } from 'node:path'
 
-import { channelSchema } from '@hemera/ipc'
+import { type EngineEventName, channelSchema } from '@hemera/ipc'
 import { Effect, Layer, Scope } from 'effect'
+import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
+import { AgentNotices, runtimeLayer } from './agents/runtime.ts'
+import type { AgentRuntime, Notice } from './agents/runtime.ts'
+import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
+import type { Discovery } from './agents/discovery.ts'
+import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
 import { openProfile } from './migrate.ts'
 import { journalLayer } from './journal.ts'
+import type { Journal } from './journal.ts'
 import { preferencesLayer } from './preferences.ts'
+import type { Preferences } from './preferences.ts'
 import { projectsLayer } from './projects.ts'
+import type { Projects } from './projects.ts'
 import { type EngineAnswer, type EngineRequest, answer, decideRequest } from './request.ts'
 import { sessionsLayer } from './sessions.ts'
+import type { Sessions } from './sessions.ts'
 import { engineStatusLayer } from './status.ts'
+import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
+import type { Database, SqliteClient } from './storage/database.ts'
 
 /** The file the data folder keeps its database in. */
 export const DATABASE_FILE = 'hemera.sqlite'
@@ -37,20 +49,93 @@ export interface EngineStart {
 }
 
 /**
+ * The window, as the runtime's notices.
+ *
+ * Every entry an agent writes and every change to a Session is pushed to the page as it happens,
+ * on the one channel the preload listens on: the thread is drawn from what arrives rather than
+ * from asking again (D5-12). The four names a change can travel under are the page's, and the
+ * reasons the runtime changes something map onto them here, in the one place that knows the wire.
+ */
+function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.Layer<AgentNotices> {
+  const PUSHED: Record<Notice, EngineEventName> = {
+    permission_requested: 'permission',
+    turn_ended: 'turn',
+    agent_died: 'agent',
+    session_fallback: 'agent',
+  }
+
+  return Layer.succeed(AgentNotices, {
+    wrote: (sessionId, entry) => {
+      try {
+        port.postMessage({ event: 'entry', sessionId, entry })
+      } catch (died) {
+        // The window is gone: the entry is written either way, and a page that is not there to
+        // hear about it is not a reason to fail the turn that wrote it.
+        log(`pushing an entry failed: ${named(died)}`)
+      }
+    },
+    changed: (sessionId, what) => {
+      const event = PUSHED[what]
+      try {
+        port.postMessage({ event, sessionId, entry: null })
+      } catch (died) {
+        log(`pushing ${event} failed: ${named(died)}`)
+      }
+    },
+  })
+}
+
+/**
  * Everything this process is, built once.
  *
  * The database layer is underneath the two services, so both stand on the same open file, and
  * the whole thing lives in the scope this program is run in: when the process ends, the scope
- * closes and the database is let go of.
+ * closes and the database is let go of. The agents are built on top of the same file — a Session
+ * and its thread are rows — and their notices go out on the port the main process handed over.
  */
-function servicesOf(start: EngineStart) {
+/** Everything this process holds once it is built, named so the composition is checked against it. */
+type EngineServices =
+  | Preferences
+  | EngineStatus
+  | Projects
+  | Journal
+  | Sessions
+  | AgentRuntime
+  | Discovery
+  | Database
+  | SqliteClient
+
+function servicesOf(
+  start: EngineStart,
+  port: MessagePortMain,
+  log: (line: string) => void,
+): Layer.Layer<EngineServices> {
   const channel = channelSchema.parse(start.channel)
+  // The rows of a Session and its thread stand on one file, and the runtime is built on the very
+  // same ones: `provideMerge` hands them up rather than hiding them.
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  // The machine the agents are looked for on, the processes they are started as, where their
+  // `stderr` goes, and the window that hears about all of it: everything the runtime needs that
+  // is not a row.
+  const agents = Layer.mergeAll(
+    machineEnvironmentLayer,
+    hostProcessesLayer,
+    Layer.succeed(StderrSink, { write: (line: string) => Effect.sync(() => log(line)) }),
+    noticesTo(port, log),
+  )
   return Layer.mergeAll(
     preferencesLayer,
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),
-    projectsLayer,
     journalLayer,
-    sessionsLayer,
+    rows,
+    runtimeLayer.pipe(
+      // Discovery is handed up rather than hidden: the settings page asks this process what the
+      // machine has, and that question is answered without starting anything.
+      Layer.provideMerge(discoveryLayer),
+      Layer.provide(rows),
+      Layer.provide(processSupervisorLayer),
+      Layer.provide(agents),
+    ),
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
 }
 
@@ -88,7 +173,9 @@ if (process.parentPort !== undefined) {
       Effect.scoped(
         Effect.gen(function* () {
           const scope = yield* Effect.scope
-          const context = yield* Layer.build(servicesOf(start)).pipe(Scope.provide(scope))
+          const context = yield* Layer.build(servicesOf(start, port, log)).pipe(
+            Scope.provide(scope),
+          )
 
           yield* Effect.provide(
             openProfile(start.directory, start.migrations, start.version),

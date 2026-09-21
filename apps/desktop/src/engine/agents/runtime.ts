@@ -15,10 +15,21 @@
  * permission is a `Deferred` the agent's own question blocks on, which is what makes Stop able
  * to answer a question nobody answered.
  */
-import { Context, Data, Deferred, Duration, Effect, Layer, Queue, Result, Scope, Stream } from 'effect'
+import {
+  Context,
+  Data,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Queue,
+  Result,
+  Scope,
+  Stream,
+} from 'effect'
 import { existsSync } from 'node:fs'
 
-import type { AgentProvider, NativeState, Session, SessionEntry } from '@hemera/core'
+import type { AgentProvider, Session, SessionEntry } from '@hemera/core'
 
 import {
   type AgentConnection,
@@ -45,21 +56,35 @@ export class AgentRuntimeError extends Data.TaggedError('AgentRuntimeError')<{
   readonly cause: string
 }> {}
 
+/** How a turn ended: the protocol's own reasons, and the one Hemera adds for a dead agent. */
+export type TurnStopReason =
+  | 'end_turn'
+  | 'max_tokens'
+  | 'max_turn_requests'
+  | 'refusal'
+  | 'cancelled'
+  | 'interrupted'
+
 /** What a turn ended with, and what it cost. */
 export interface TurnReport {
   /**
-   * An ACP stop reason — `end_turn`, `max_tokens`, `refusal`, `cancelled` — or one of Hemera's
-   * own two: `interrupted` when the process died under the turn, `cancelled` when Hemera itself
-   * stopped an agent that would not stop.
+   * An ACP stop reason — `end_turn`, `max_tokens`, `refusal`, `cancelled` — or `interrupted`, the
+   * one Hemera adds for a turn whose agent stopped running under it.
    */
-  readonly stopReason: string
+  readonly stopReason: TurnStopReason
   readonly usage: UsageReport | null
 }
 
 /** What came of asking an agent to carry its own session on (design D5-07). */
 export interface ResumeReport {
-  /** `attached` when the agent took its session back, `fallback` when Hemera rebuilt the context. */
-  readonly state: NativeState
+  /**
+   * `attached` when the agent took its session back, `fallback` when Hemera rebuilt the context.
+   *
+   * Never `lost`: a resume always leaves the Session with an agent that holds something — its own
+   * session, or the thread it was just given. `lost` is what a Session's own record says of an
+   * agent that died, and it is read from there rather than answered by a resume.
+   */
+  readonly state: 'attached' | 'fallback'
   /** Why the fallback was needed, in a sentence the interface shows; null when it was not. */
   readonly reason: string | null
 }
@@ -80,7 +105,10 @@ export interface AgentRuntimeService {
   /** Stops the turn running in this Session, if one is: the user's Stop. */
   readonly stop: (sessionId: string) => Effect.Effect<void>
   /** Answers the permission a Session is waiting on; null is the end of the question. */
-  readonly decide: (sessionId: string, optionId: string | null) => Effect.Effect<void, AgentRuntimeError>
+  readonly decide: (
+    sessionId: string,
+    optionId: string | null,
+  ) => Effect.Effect<void, AgentRuntimeError>
   /** Asks the agent to carry on the session it handed back, or rebuilds the context (D5-07). */
   readonly resume: (sessionId: string) => Effect.Effect<ResumeReport, AgentRuntimeError>
   /** Lets go of an agent nobody is talking to; the next prompt starts it again. */
@@ -89,11 +117,14 @@ export interface AgentRuntimeService {
   readonly alive: Effect.Effect<readonly string[]>
 }
 
+/** What a Session did that the window is told about, and that has no entry of its own. */
+export type Notice = 'permission_requested' | 'turn_ended' | 'agent_died' | 'session_fallback'
+
 /** Where a written entry goes besides the database: the window watching this Session. */
 export interface AgentNoticesService {
   readonly wrote: (sessionId: string, entry: SessionEntry) => void
   /** Something about a Session changed without an entry: a question arrived, a turn ended. */
-  readonly changed: (sessionId: string, what: string) => void
+  readonly changed: (sessionId: string, what: Notice) => void
 }
 
 export class AgentNotices extends Context.Service<AgentNotices, AgentNoticesService>()(
@@ -181,30 +212,41 @@ interface Turn {
 }
 
 /**
- * What a refusal of any of the ports is called in a report.
+ * What any of the ports refuses with, as Effect names it.
  *
- * The ports say no in their own words — a tagged refusal, a domain error the engine wraps, a
- * spawn that failed — and a report has one place for all of them. What is shown is what the port
- * said, because the tag alone ("AgentProtocolError") is the name of a kind of refusal and not an
- * answer to anything; the tag is what is left when there is no message, and never a stack.
+ * The ports say no in their own words — a tagged refusal, a domain error the engine wraps, a spawn
+ * that failed — and a report has one place for all of them. `_tag` is how every Effect error names
+ * itself: the ports are five services with five error types, and what this file needs of all of
+ * them is the fields any of them can carry.
  */
-function describe(refusal: {
+interface Refused {
+  // oxlint-disable-next-line no-underscore-dangle -- Effect's own name for the tag of an error
   readonly _tag?: string
   readonly message?: string
   readonly name?: string
-}): string {
+}
+
+/**
+ * What a refusal is called in a report.
+ *
+ * What is shown is what the port said, because the tag alone ("AgentProtocolError") is the name of
+ * a kind of refusal and not an answer to anything; the tag is what is left when there is no
+ * message, and never a stack.
+ */
+function describe(refusal: Refused): string {
+  // oxlint-disable-next-line no-underscore-dangle -- Effect's own name for the tag of an error
   return refusal.message ?? refusal._tag ?? refusal.name ?? 'the port refused'
 }
 
 /** A refusal from any of the ports, as the one error this service declares. */
-const attempt = <A, E extends { readonly _tag?: string; readonly message?: string; readonly name?: string }, R>(
+const attempt = <A, E extends Refused, R>(
   what: string,
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, AgentRuntimeError, R> =>
   Effect.mapError(effect, (refusal) => new AgentRuntimeError({ what, cause: describe(refusal) }))
 
 /** A line of the turn entry, as the thread shows it. */
-const STOP_TEXT: Record<string, string> = {
+const STOP_TEXT: Record<TurnStopReason, string> = {
   end_turn: 'The agent finished its turn.',
   max_tokens: 'The agent reached its token limit.',
   max_turn_requests: 'The agent reached its request limit.',
@@ -413,8 +455,7 @@ export const runtimeLayer = Layer.effect(
             carry = lines.pop() ?? ''
             for (const line of lines) {
               if (line === '') continue
-              // oxlint-disable-next-line no-await-in-loop -- the lines of one write go down the
-              // child's input in the order they were written, and the next one waits for this.
+              // oxlint-disable-next-line no-await-in-loop -- the lines of one write go down the child's input in the order they were written
               await Effect.runPromise(process.write(line))
             }
           },
@@ -537,8 +578,8 @@ export const runtimeLayer = Layer.effect(
             onEvent: (event) => {
               // Counted before it is offered: the thread is not told the Session is back while one
               // of its own events is still on its way to it.
-              const held = live.get(sessionId)
-              if (held !== undefined) held.pending += 1
+              const current = live.get(sessionId)
+              if (current !== undefined) current.pending += 1
               Queue.offerUnsafe(queue, event)
             },
             onPermission: (question) => Effect.runPromise(ask(sessionId, question)),
@@ -572,11 +613,7 @@ export const runtimeLayer = Layer.effect(
       })
 
     /** Says the Session goes on with the agent it already had, and remembers where it runs. */
-    const attached = (
-      sessionId: string,
-      held: Live,
-      handle: string,
-    ): Effect.Effect<null, never> =>
+    const attached = (sessionId: string, held: Live, handle: string): Effect.Effect<null, never> =>
       Effect.gen(function* () {
         held.nativeSessionId = handle
         yield* attempt(
@@ -642,11 +679,7 @@ export const runtimeLayer = Layer.effect(
           return yield* fallback(sessionId, held, loaded.failure.cause)
         }
 
-        return yield* fallback(
-          sessionId,
-          held,
-          'the agent cannot carry its own session',
-        )
+        return yield* fallback(sessionId, held, 'the agent cannot carry its own session')
       })
 
     /**
@@ -711,7 +744,7 @@ export const runtimeLayer = Layer.effect(
         if (turn === undefined) {
           // A question outside a turn is a question with nothing to block: the protocol has an
           // outcome for a question that ended, and it is the honest answer to this one.
-          return { cancelled: true } as PermissionAnswer
+          return { cancelled: true } satisfies PermissionAnswer
         }
 
         const answer = yield* Deferred.make<PermissionAnswer>()
@@ -742,7 +775,7 @@ export const runtimeLayer = Layer.effect(
       })
 
     /** The turn entry, written once per turn: what it ended with, in the thread's words. */
-    const closeTurn = (sessionId: string, turn: Turn, stopReason: string) =>
+    const closeTurn = (sessionId: string, turn: Turn, stopReason: TurnStopReason) =>
       write(sessionId, {
         role: 'hemera',
         kind: 'turn',
@@ -931,10 +964,7 @@ export const runtimeLayer = Layer.effect(
           state: optionId === null ? 'cancelled' : 'decided',
         })
         const stopped: PermissionAnswer = { cancelled: true }
-        yield* Deferred.succeed(
-          pending.answer,
-          optionId === null ? stopped : { optionId },
-        )
+        yield* Deferred.succeed(pending.answer, optionId === null ? stopped : { optionId })
       })
     const resume = (sessionId: string) =>
       Effect.gen(function* () {

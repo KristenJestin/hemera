@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "61357ab5-dfa1-4911-bff5-61e620b280ad",
-  "prevIds": [
-    "6014baba-1b0a-4ef2-9569-2b213d9f1ca6"
-  ],
+  "prevIds": ["6014baba-1b0a-4ef2-9569-2b213d9f1ca6"],
   "ddl": [
     {
       "name": "app_preferences",
@@ -639,13 +637,9 @@
       "table": "workspaces"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -654,13 +648,9 @@
       "table": "project_repositories"
     },
     {
-      "columns": [
-        "session_id"
-      ],
+      "columns": ["session_id"],
       "tableTo": "sessions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -669,13 +659,9 @@
       "table": "session_entries"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -684,13 +670,9 @@
       "table": "sessions"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -699,72 +681,56 @@
       "table": "workspaces"
     },
     {
-      "columns": [
-        "key"
-      ],
+      "columns": ["key"],
       "nameExplicit": false,
       "name": "app_preferences_pk",
       "table": "app_preferences",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "domain_events_pk",
       "table": "domain_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "profile_pk",
       "table": "profile",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_repositories_pk",
       "table": "project_repositories",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "projects_pk",
       "table": "projects",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "session_entries_pk",
       "table": "session_entries",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "sessions_pk",
       "table": "sessions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "workspaces_pk",
       "table": "workspaces",
@@ -875,30 +841,21 @@
       "table": "sessions"
     },
     {
-      "columns": [
-        "project_id",
-        "relative_path"
-      ],
+      "columns": ["project_id", "relative_path"],
       "nameExplicit": true,
       "name": "repository_once_in_project",
       "entityType": "uniques",
       "table": "project_repositories"
     },
     {
-      "columns": [
-        "session_id",
-        "seq"
-      ],
+      "columns": ["session_id", "seq"],
       "nameExplicit": true,
       "name": "entry_once_in_session",
       "entityType": "uniques",
       "table": "session_entries"
     },
     {
-      "columns": [
-        "project_id",
-        "name"
-      ],
+      "columns": ["project_id", "name"],
       "nameExplicit": true,
       "name": "workspace_name_in_project",
       "entityType": "uniques",

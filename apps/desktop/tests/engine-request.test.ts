@@ -12,6 +12,11 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
+import { NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
+import type { AgentRuntime } from '#engine/agents/runtime.ts'
+import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
+import type { Discovery } from '#engine/agents/discovery.ts'
+import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
@@ -20,6 +25,7 @@ import { answer, decideRequest } from '#engine/request.ts'
 import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
+import type { Database } from '#engine/storage/database.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /**
@@ -46,15 +52,49 @@ function running<A, E>(
   program: Effect.Effect<
     A,
     E,
-    Preferences | EngineStatus | Projects | Journal | Sessions | SqliteClient
+    | Preferences
+    | EngineStatus
+    | Projects
+    | Journal
+    | Sessions
+    | SqliteClient
+    | AgentRuntime
+    | Discovery
   >,
 ) {
-  const services = Layer.mergeAll(
+  // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
+  // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
+  const agents = Layer.mergeAll(
+    Layer.succeed(MachineEnvironment, {
+      locate: () => Effect.succeed('/usr/local/bin/claude-agent-acp'),
+      readVersion: () => Effect.succeed('1.0.0'),
+    }),
+    fakeSupervisor(fakeAgent()),
+    NoNotices,
+  )
+  // The rows of a Session and its thread stand on one file, and the runtime is built on the very
+  // same ones: `provideMerge` hands them up rather than hiding them.
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  const services: Layer.Layer<
+    | Preferences
+    | EngineStatus
+    | Projects
+    | Journal
+    | Sessions
+    | AgentRuntime
+    | Discovery
+    | Database
+    | SqliteClient
+  > = Layer.mergeAll(
     preferencesLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
-    projectsLayer,
     journalLayer,
-    sessionsLayer,
+    rows,
+    runtimeLayer.pipe(
+      Layer.provideMerge(discoveryLayer),
+      Layer.provide(rows),
+      Layer.provide(agents),
+    ),
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
 
   return Effect.runPromise(

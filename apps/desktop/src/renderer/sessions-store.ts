@@ -138,7 +138,9 @@ export async function openSession(sessionId: string): Promise<void> {
  */
 export async function startSession(projectId: string): Promise<Session | null> {
   try {
-    const session = await window.hemera.invoke('sessions.create', { projectId })
+    // A Session is made without an agent: the agent is chosen once it is open, and one that is
+    // not on this machine is a refusal the page shows rather than another agent (D5-17).
+    const session = await window.hemera.invoke('sessions.create', { projectId, provider: null })
     const sessions = await listed(projectId)
     if (shown !== projectId) return session
     replace({ ...state, sessions, refusal: null })

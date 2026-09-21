@@ -178,7 +178,9 @@ describe('Stop ends the turn cleanly', () => {
           (held) => agent.answers.cancels === 1 && held.some((entry) => entry.kind === 'turn'),
         )
         expect(
-          entries.some((entry) => entry.kind === 'message' && (entry.body ?? '').includes('starting')),
+          entries.some(
+            (entry) => entry.kind === 'message' && (entry.body ?? '').includes('starting'),
+          ),
         ).toBe(true)
         expect(entryOf(entries, 'turn').state).toBe('cancelled')
       }),

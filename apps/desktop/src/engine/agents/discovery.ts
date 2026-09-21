@@ -40,6 +40,8 @@ export interface DiscoveredAgent {
    * and the Session that finds out is the one that reports it (D5-17).
    */
   readonly authenticated: boolean
+  /** What to tell someone who does not have this agent yet, in one sentence. */
+  readonly installHint: string
 }
 
 /** An agent and the command that starts it: what a Session needs before it can exist. */
@@ -109,12 +111,25 @@ export const discoveryLayer = Layer.effect(
       Effect.gen(function* () {
         const path = yield* machine.locate(adapter.command)
         if (path === undefined) {
-          return { id: adapter.id, label: adapter.label, found: false, authenticated: false }
+          return {
+            id: adapter.id,
+            label: adapter.label,
+            found: false,
+            authenticated: false,
+            installHint: adapter.installHint,
+          }
         }
         const printed = yield* machine.readVersion(adapter.command)
         const version = printed === undefined ? undefined : adapter.readVersion(printed)
         if (version === undefined) {
-          return { id: adapter.id, label: adapter.label, found: true, path, authenticated: false }
+          return {
+            id: adapter.id,
+            label: adapter.label,
+            found: true,
+            path,
+            authenticated: false,
+            installHint: adapter.installHint,
+          }
         }
         return {
           id: adapter.id,
@@ -123,6 +138,7 @@ export const discoveryLayer = Layer.effect(
           path,
           version,
           authenticated: false,
+          installHint: adapter.installHint,
         }
       })
 

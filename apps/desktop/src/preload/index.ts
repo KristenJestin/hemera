@@ -6,7 +6,14 @@
  * may be called with is decided by the shared channel declaration, on both sides.
  */
 
-import type { Bridge, ChannelArguments, ChannelName, ChannelResponse } from '@hemera/ipc'
+import type {
+  Bridge,
+  ChannelArguments,
+  ChannelName,
+  ChannelResponse,
+  EngineEvent,
+} from '@hemera/ipc'
+import { ENGINE_EVENT_CHANNEL } from '@hemera/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 
 /**
@@ -32,6 +39,22 @@ const bridge: Bridge = {
     } catch (refused) {
       if (!(refused instanceof Error)) throw refused
       throw new Error(refused.message.replace(WRAPPED, ''), { cause: refused })
+    }
+  },
+  /**
+   * Everything the engine pushes, on one subscription.
+   *
+   * The listener is given the event itself and never the Electron event that carried it: the
+   * sender, the channel and the rest of the transport are the preload's business, and a page that
+   * could read them could read what it has no use for. What comes back is the way to stop
+   * listening, which is what a page that closed its Session calls.
+   */
+  on: (listener) => {
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- what Electron hands a listener first, which is the transport and not something this side parses
+    const heard = (_carrier: unknown, event: EngineEvent) => listener(event)
+    ipcRenderer.on(ENGINE_EVENT_CHANNEL, heard)
+    return () => {
+      ipcRenderer.removeListener(ENGINE_EVENT_CHANNEL, heard)
     }
   },
 }

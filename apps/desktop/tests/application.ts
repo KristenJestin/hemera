@@ -12,17 +12,20 @@
 
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { Effect, Fiber, Layer, Scope } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
+import type { Scope } from 'effect'
 import * as TestClock from 'effect/testing/TestClock'
 
 import type { SessionEntry } from '@hemera/core'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import { fakeSupervisor, type FakeAgent, type FakeStep } from '#engine/agents/fake.ts'
-import { AgentRuntime, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
+import { NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
+import type { AgentRuntime } from '#engine/agents/runtime.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
-import { Database, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
+import { databaseLayer } from '#engine/storage/database.ts'
+import type { Database, SqliteClient } from '#engine/storage/database.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -132,15 +135,21 @@ export const waiting = (entries: readonly SessionEntry[]) =>
 /** The one entry of a kind the thread holds, or a failure that says how many it held. */
 export const entryOf = (entries: readonly SessionEntry[], kind: SessionEntry['kind']) => {
   const found = entries.filter((entry) => entry.kind === kind)
-  if (found.length !== 1) {
+  const only = found[0]
+  if (found.length !== 1 || only === undefined) {
     throw new Error(`the thread holds ${found.length} entries of kind ${kind}, not one`)
   }
-  return found[0] as SessionEntry
+  return only
 }
 
 /** The options of a permission request, as the block draws them. */
-export const optionsOf = (entry: SessionEntry) =>
-  (JSON.parse(entry.payload ?? '{}') as { options?: { id: string }[] }).options ?? []
+export const optionsOf = (entry: SessionEntry): readonly { id: string }[] => {
+  // SAFETY: the payload of this kind of entry is what the runtime wrote for it, and what is read
+  // here is the one field it wrote there — a payload of another shape would be a failure of the
+  // suite that made it rather than of this reader.
+  const payload = JSON.parse(entry.payload ?? '{}') as { options?: { id: string }[] }
+  return payload.options ?? []
+}
 
 /** Three options, in the order an agent of its own mind would send them. */
 export const ASKED: Extract<FakeStep, { does: 'asks' }>['call'] = {

@@ -72,6 +72,14 @@ export const stopReasonSchema = z.enum([
   'max_turn_requests',
   'refusal',
   'cancelled',
+  /**
+   * Hemera's own, for a turn whose agent stopped running under it.
+   *
+   * The protocol has no word for it — an agent that dies answers nothing — and a turn that ended
+   * because the process went is not a turn the user stopped, so the page has to be told which of
+   * the two it is showing (design D5-12).
+   */
+  'interrupted',
 ])
 
 export type StopReason = z.infer<typeof stopReasonSchema>

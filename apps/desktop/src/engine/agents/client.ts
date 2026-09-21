@@ -285,9 +285,7 @@ function eventOf(notification: SessionNotification, replay: boolean): AgentEvent
             (location) => location.path,
           ),
           detail: JSON.stringify('content' in update ? (update.content ?? []) : []),
-          contents: ('content' in update ? (update.content ?? []) : []).map(
-            (block) => block.type,
-          ),
+          contents: ('content' in update ? (update.content ?? []) : []).map((block) => block.type),
         },
       }
     }
@@ -446,7 +444,12 @@ export function connect(
             try: () =>
               connection.setSessionConfigOption(
                 chosen?.kind === 'boolean'
-                  ? { sessionId: open, configId: optionId, type: 'boolean', value: value === 'true' }
+                  ? {
+                      sessionId: open,
+                      configId: optionId,
+                      type: 'boolean',
+                      value: value === 'true',
+                    }
                   : { sessionId: open, configId: optionId, value },
               ),
             catch: (cause) =>

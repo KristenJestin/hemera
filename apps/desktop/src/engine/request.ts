@@ -25,6 +25,8 @@ import type {
   InvalidRepositoryPathError,
 } from '@hemera/core'
 
+import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
+import { Discovery } from './agents/discovery.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
 import { Projects, type UnknownProjectError } from './projects.ts'
@@ -104,7 +106,7 @@ export function answer(
 ): Effect.Effect<
   EngineResponse<EngineRequestName>,
   Refusal,
-  Preferences | EngineStatus | Projects | Journal | Sessions
+  Preferences | EngineStatus | Projects | Journal | Sessions | Discovery | AgentRuntime
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -170,6 +172,62 @@ export function answer(
       const { id, version, relativePath } = decision.argument
       return yield* projects.addRepository(id, version, relativePath)
     }
+    if (decision.name === 'agents.list') {
+      const discovery = yield* Discovery
+      // Every agent the machine has, as the settings page shows it. `path` is where the command
+      // resolved, which is the engine's own business: what crosses is the availability, and
+      // whether the agent is signed in is what the agent itself reports when a Session starts it
+      // (D5-17) — this page starts nothing, so it says false rather than guessing.
+      const found = yield* discovery.list()
+      return {
+        agents: found.map((agent) => ({
+          id: agent.id,
+          label: agent.label,
+          found: agent.found,
+          version: agent.version ?? null,
+          authenticated: agent.authenticated,
+          installHint: agent.installHint,
+        })),
+      }
+    }
+
+    const runtime = yield* AgentRuntime
+    if (decision.name === 'agents.options') {
+      const offered = yield* runtime.options(decision.argument.sessionId)
+      // The agent's own vocabulary, in the page's words: the engine holds an option as a value
+      // with a kind, and what crosses is the list of values the agent announced and the one it is
+      // on now, which is what the composer draws (D5-13).
+      return {
+        options: offered.map((option) => ({
+          id: option.id,
+          name: option.name,
+          category: option.category,
+          values: option.values.map((value) => ({ value: value.id, name: value.name })),
+          current: option.value,
+        })),
+      }
+    }
+    if (decision.name === 'agents.setOption') {
+      const { sessionId, optionId, value } = decision.argument
+      return yield* runtime.setOption(sessionId, optionId, value)
+    }
+    if (decision.name === 'agents.prompt') {
+      const { sessionId, text } = decision.argument
+      // What the page is waiting for is why the turn ended; everything else about it reached the
+      // window as it happened, on the engine's own channel (design D5-12).
+      const report = yield* runtime.prompt(sessionId, text)
+      return { stopReason: report.stopReason }
+    }
+    if (decision.name === 'agents.stop') return yield* runtime.stop(decision.argument.sessionId)
+    if (decision.name === 'agents.decide') {
+      const { sessionId, optionId } = decision.argument
+      return yield* runtime.decide(sessionId, optionId)
+    }
+    if (decision.name === 'agents.resume') {
+      const report = yield* runtime.resume(decision.argument.sessionId)
+      return { state: report.state, reason: report.reason }
+    }
+
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
   })
@@ -183,6 +241,7 @@ export function answer(
  * something that happens by writing a service.
  */
 export type Refusal =
+  | AgentRuntimeError
   | DatabaseError
   | StaleVersionError
   | UnknownProjectError

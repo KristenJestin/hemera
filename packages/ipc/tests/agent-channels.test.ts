@@ -250,12 +250,7 @@ describe('No tool is replayed on resume', () => {
 
 describe('Text arrives as a stream', () => {
   test('the four things the engine pushes are the ones declared', () => {
-    expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
-      'agent',
-      'entry',
-      'permission',
-      'turn',
-    ])
+    expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual(['agent', 'entry', 'permission', 'turn'])
   })
 
   test('an entry is pushed with the Session it belongs to', () => {
