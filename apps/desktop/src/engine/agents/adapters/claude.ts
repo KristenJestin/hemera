@@ -26,6 +26,7 @@ export const claude: AgentAdapter = {
   command: 'claude-agent-acp',
   args: [],
   installHint: 'npm install -g @agentclientprotocol/claude-agent-acp',
+  package: '@agentclientprotocol/claude-agent-acp',
   readVersion: versionIn,
   isAuthenticated: (methods) => !methods.some((method) => LOGINS.has(method.id)),
 }

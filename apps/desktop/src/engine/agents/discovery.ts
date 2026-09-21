@@ -3,6 +3,8 @@ import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, extname, join } from 'node:path'
 import { Context, Data, Effect, Layer } from 'effect'
 
+import type { InstallerTool } from '@hemera/ipc'
+
 import { AGENT_PROVIDERS, type AgentAdapter, type AgentProvider } from './adapter.ts'
 import { claude } from './adapters/claude.ts'
 import { codex } from './adapters/codex.ts'
@@ -23,6 +25,47 @@ import { opencode } from './adapters/opencode.ts'
  * `initialize`, which happens when a Session starts, not when this page is read.
  */
 
+/** A path, as one string, whichever separator the machine wrote it with. */
+function asPosix(path: string): string {
+  return path.replaceAll('\\', '/')
+}
+
+/**
+ * The tool that owns a command, read off the path it was resolved to.
+ *
+ * The order is what matters here. A pnpm global directory holds a `node_modules` of its own and
+ * so does a bun install, so the narrower tool has to be recognised before npm — which is the
+ * last answer that is still an answer, because npm's own prefix is a `node_modules` and a
+ * `.bin` like any other. Homebrew comes first for a different reason: its cellar is a place in
+ * the filesystem rather than a package manager's prefix, and no other tool installs there.
+ *
+ * What this cannot place is left as `unknown` on purpose. A command in `/usr/local/bin` may have
+ * been put there by npm's own prefix or by a script the user ran by hand, and the two are not
+ * told apart by the path; guessing would offer an update that fails, which is worse than saying
+ * that Hemera does not know.
+ *
+ * It lives here rather than with the update because it is a question about the machine, not
+ * about the tool: it is the same `PATH` this file already reads, and it is answered without
+ * running anything.
+ */
+export function installerOf(path: string): InstallerTool {
+  const placed = asPosix(path)
+  if (placed.includes('/Cellar/') || placed.includes('/homebrew/')) return 'brew'
+  if (placed.includes('/linuxbrew/')) return 'brew'
+  if (placed.includes('/.bun/') || placed.includes('/bun/install/global/')) return 'bun'
+  if (placed.includes('/pnpm/') || placed.includes('pnpm-global')) return 'pnpm'
+  if (
+    placed.includes('/node_modules/') ||
+    placed.includes('/.npm-global/') ||
+    placed.includes('/nvm/') ||
+    placed.includes('/.nvm/') ||
+    placed.includes('/AppData/Roaming/npm/')
+  ) {
+    return 'npm'
+  }
+  return 'unknown'
+}
+
 /** One agent, as this machine answers for it. */
 export interface DiscoveredAgent {
   readonly id: AgentProvider
@@ -42,6 +85,20 @@ export interface DiscoveredAgent {
   readonly authenticated: boolean
   /** What to tell someone who does not have this agent yet, in one sentence. */
   readonly installHint: string
+  /**
+   * The tool the command was installed with, read off the path it resolved to (D5-18).
+   *
+   * `unknown` when the command was not found, and when it was found somewhere no package
+   * manager owns: an agent Hemera cannot place is one it will not offer to update.
+   */
+  readonly installer: InstallerTool
+  /**
+   * The version the registry of `installer` publishes, or null when nobody asked.
+   *
+   * Always null here: discovery reads the machine and never the network, and the registry is
+   * asked only when the Agents section of the settings is opened (D5-18).
+   */
+  readonly latest: string | null
 }
 
 /** An agent and the command that starts it: what a Session needs before it can exist. */
@@ -82,7 +139,14 @@ export class MachineEnvironment extends Context.Service<
  * `AGENT_PROVIDERS` so that the page and the resolve can never disagree about which agents
  * exist.
  */
-const ADAPTERS: Record<AgentProvider, AgentAdapter> = { claude, codex, opencode }
+/**
+ * The three agents, as this application describes them.
+ *
+ * Exported because the description is what more than discovery needs: the package an update
+ * installs and the hint shown to someone who has none are the adapter's, not the machine's
+ * (design D5-18).
+ */
+export const ADAPTERS: Record<AgentProvider, AgentAdapter> = { claude, codex, opencode }
 
 /** What the Agents page asks of this machine, and what a Session asks before it starts. */
 export interface DiscoveryService {
@@ -117,6 +181,8 @@ export const discoveryLayer = Layer.effect(
             found: false,
             authenticated: false,
             installHint: adapter.installHint,
+            installer: 'unknown',
+            latest: null,
           }
         }
         const printed = yield* machine.readVersion(adapter.command)
@@ -129,6 +195,8 @@ export const discoveryLayer = Layer.effect(
             path,
             authenticated: false,
             installHint: adapter.installHint,
+            installer: installerOf(path),
+            latest: null,
           }
         }
         return {
@@ -139,6 +207,8 @@ export const discoveryLayer = Layer.effect(
           version,
           authenticated: false,
           installHint: adapter.installHint,
+          installer: installerOf(path),
+          latest: null,
         }
       })
 

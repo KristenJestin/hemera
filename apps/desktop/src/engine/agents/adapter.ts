@@ -40,6 +40,15 @@ export interface AgentAdapter {
   readonly args: readonly string[]
   /** What to tell someone who does not have the agent yet. */
   readonly installHint: string
+  /**
+   * The published package the command comes from, as the registry names it (design D5-18).
+   *
+   * It is what an update installs a newer version of, and it is not the command: the command is
+   * what the machine runs, the package is what the machine fetches. The two differ for exactly
+   * one of the three agents — the command is `opencode`, the package is `opencode-ai` — which is
+   * why it is written down rather than read off the command's name.
+   */
+  readonly package: string
   /** The version this agent printed, or `undefined` when the line carries none. */
   readonly readVersion: (output: string) => string | undefined
   /**

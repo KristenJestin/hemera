@@ -25,6 +25,7 @@ export const codex: AgentAdapter = {
   command: 'codex-acp',
   args: [],
   installHint: 'npm install -g @agentclientprotocol/codex-acp',
+  package: '@agentclientprotocol/codex-acp',
   readVersion: versionIn,
   isAuthenticated: (methods) => methods.every((method) => method.id === ALWAYS_OFFERED),
 }

@@ -21,6 +21,7 @@ export const opencode: AgentAdapter = {
   command: 'opencode',
   args: ['acp'],
   installHint: 'npm install -g opencode-ai',
+  package: 'opencode-ai',
   readVersion: versionIn,
   isAuthenticated: (methods) => methods.length === 0,
 }

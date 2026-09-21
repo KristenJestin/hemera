@@ -99,6 +99,10 @@ describe('The Agents page tells what is available', () => {
         version: '0.78.0',
         authenticated: false,
         installHint: 'npm install -g @agentclientprotocol/claude-agent-acp',
+        // `/usr/local/bin` belongs to nobody: a command there was put by a package manager or by
+        // hand, and the path does not tell them apart (D5-18).
+        installer: 'unknown',
+        latest: null,
       },
       {
         id: 'codex',
@@ -106,6 +110,8 @@ describe('The Agents page tells what is available', () => {
         found: false,
         authenticated: false,
         installHint: 'npm install -g @agentclientprotocol/codex-acp',
+        installer: 'unknown',
+        latest: null,
       },
       {
         id: 'opencode',
@@ -115,6 +121,8 @@ describe('The Agents page tells what is available', () => {
         version: '1.18.31',
         authenticated: false,
         installHint: 'npm install -g opencode-ai',
+        installer: 'unknown',
+        latest: null,
       },
     ])
     // What the page shows for the one that is missing is its adapter's own hint, which is the
@@ -135,7 +143,26 @@ describe('The Agents page tells what is available', () => {
       path: '/home/ana/.local/bin/opencode',
       authenticated: false,
       installHint: 'npm install -g opencode-ai',
+      installer: 'unknown',
+      latest: null,
     })
+  })
+
+  test('the tool a command came from is read off where it was found (D5-18)', async () => {
+    const agents = await on(
+      machineOf({ 'claude-agent-acp': { path: '/Users/ana/Library/pnpm/claude-agent-acp' } }),
+      listing,
+    )
+
+    // Read from the path and never from the command's name, which says nothing about where it
+    // came from: `claude-agent-acp` is the same string whichever tool installed it.
+    expect(agents.find((agent) => agent.id === 'claude')).toMatchObject({
+      found: true,
+      installer: 'pnpm',
+    })
+    // Nobody has asked a registry: this is the machine's answer, and the network is asked for
+    // when the Agents section is opened (D5-18).
+    expect(agents.every((agent) => agent.latest === null)).toBe(true)
   })
 
   test('nothing is claimed about signing in, because nothing has been started', async () => {
