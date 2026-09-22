@@ -1,5 +1,5 @@
 import { MotionConfigContext, useReducedMotion } from 'motion/react'
-import type { Easing, Transition } from 'motion/react'
+import type { Easing, TargetAndTransition, Transition } from 'motion/react'
 import { useContext } from 'react'
 
 /**
@@ -93,8 +93,13 @@ export const LABEL_TRAVEL = 8
  */
 export const LABEL_DELAY = 0.08
 
-/** The durations of the theme, in the seconds motion counts in. */
-export const durations = { fast: 0.16, base: 0.26, slow: 0.4 } as const
+/**
+ * The durations of the theme, in the seconds motion counts in.
+ *
+ * `turn` is the long one the stylesheet already spins and breathes on — `--duration-turn` —
+ * and it is written here so that what motion repeats keeps the same beat as what CSS repeats.
+ */
+export const durations = { fast: 0.16, base: 0.26, slow: 0.4, turn: 1.2 } as const
 
 /** The curve the theme's `--ease-calm` draws, for the few transitions that are not a spring. */
 export const easing: Easing = [0.25, 0.8, 0.25, 1]
@@ -165,16 +170,20 @@ export function slide(distance: SlideDistance, direction: SlideDirection = 'forw
 /**
  * The `expand` and `collapse` kinds: a body whose height is its own, growing and folding away.
  *
- * Height and opacity together. The height is what makes room — the page under it moves over
- * rather than being redrawn — and the opacity is what keeps the clipped edge from reading as a
+ * Height and a fade together. The height is what makes room — the page under it moves over
+ * rather than being redrawn — and the fade is what keeps the clipped edge from reading as a
  * line of text cut in half on the way. A tool call's body, a thought, a menu panel whose stage
  * is taller than the last one: all of them are this.
+ *
+ * The fade is a `filter` and not an `opacity`, for the reason the foot of a message gives: the
+ * accessibility check of the catalogue measures a text's contrast through an opacity and
+ * refuses the value it reads mid-flight, while a filter is not part of what it measures.
  *
  * Played on `morph`, which is the spring made for a dimension: it arrives without turning
  * round, and a body that overshot its height would take the whole column below it along.
  */
-export const expand = { height: 'auto', opacity: 1 } as const
-export const collapse = { height: 0, opacity: 0 } as const
+export const expand = { height: 'auto', filter: 'opacity(1)' } as const
+export const collapse = { height: 0, filter: 'opacity(0)' } as const
 
 /**
  * The `push` kind: what a neighbour does when the thing above it grows or folds away.
@@ -185,3 +194,29 @@ export const collapse = { height: 0, opacity: 0 } as const
  * each block ended up and plays the difference.
  */
 export const push: Transition = morph
+
+/**
+ * The `ping` kind: a ring leaving what is running, over and over.
+ *
+ * A dot that is breathing says "this is the state you are waiting on" in opacity alone, which
+ * is read once the eye is already on it. A ring that expands out of the dot and fades is read
+ * from the corner of the eye, which is where a reader watching a thread actually is — and it
+ * costs nothing but a transform and an opacity on an element that is eight pixels wide.
+ *
+ * The two of them are one kind: `ping` is what the ring travels through — out to `PING_REACH`
+ * of its own size while it goes from `PING_OPACITY` to nothing — and `pinging` is the beat it
+ * repeats on, the theme's own `turn`, so the ring leaves on the same beat the dot breathes on
+ * rather than against it.
+ *
+ * A reader asking for less movement is given no ring at all rather than a ring with no time to
+ * travel in: `useTransition` answers `instant`, and what repeats for ever at no duration is a
+ * ring stuck at full size. The component reads that answer and draws nothing.
+ */
+export const PING_REACH = 2.6
+export const PING_OPACITY = 0.45
+export const ping: TargetAndTransition = { scale: [1, PING_REACH], opacity: [PING_OPACITY, 0] }
+export const pinging: Transition = {
+  duration: durations.turn,
+  ease: easing,
+  repeat: Number.POSITIVE_INFINITY,
+}
