@@ -426,11 +426,16 @@ describe('Standard error is handed to the sink and never swallowed', () => {
     await opened(sink)(
       Effect.gen(function* () {
         const child = yield* starting(process.execPath, [writesOnStderr], {})
+        // Both lines, and not only the first: the child writes them back to back, and reading the
+        // sink as soon as one of them arrived is what a busy machine turns into a flake.
         yield* Effect.promise(() =>
-          untilTrue(
-            () => said(sink).some((line) => line.endsWith(': a tool said something')),
-            2_000,
-          ),
+          untilTrue(() => {
+            const lines = said(sink)
+            return (
+              lines.some((line) => line.endsWith(': a tool said something')) &&
+              lines.some((line) => line.endsWith(': and something else'))
+            )
+          }, 2_000),
         )
         yield* child.stop
       }),
