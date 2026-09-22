@@ -269,10 +269,15 @@ function vendored(name: string, viewBox: string, path: string): FunctionComponen
  * The square "o" of the wordmark, kept as the one even-odd path that draws it. The grey block
  * the original sets inside the ring is dropped: it is a second colour, this catalogue draws in
  * one, and the ring is what the mark is recognised by at sixteen pixels.
+ *
+ * The box is the mark's own and not the file's. The ring sits in 128–384 by 96–416 of a
+ * 512-square canvas, so the published viewBox drew it at half the width of an icon slot: beside
+ * a Tabler glyph, which fills its box, it read as the mark of a smaller agent. `64 64 384 384`
+ * is that same 512-square recentred on the ring, at the proportion every other icon is drawn at.
  */
 export const IconBrandOpencode = vendored(
   'IconBrandOpencode',
-  '0 0 512 512',
+  '64 64 384 384',
   'M384 416H128V96H384V416ZM320 160H192V352H320V160Z',
 )
 
