@@ -11,8 +11,32 @@ import { StatusDot, type StatusTone } from './status-dot.tsx'
  * `Done` / `Running` / `Queued` / `Failed` badges of a tool call: five words down one side of a
  * thread is a column of labels that says nothing the reader did not already know, and it steals
  * the eye from the one line that went wrong.
+ *
+ * One of the five moves, and it moves twice: the running dot breathes, and a ring leaves it on
+ * the same beat — the `ping` kind of the preset. The breath is read once the eye is on the dot;
+ * the ring is what is read from the corner of it.
  */
 const STATES: StatusTone[] = ['pending', 'running', 'success', 'failure', 'cancelled']
+
+/**
+ * How far out of the dot a ring has travelled, read off the matrix the browser computed.
+ *
+ * An element that has not been given a transform yet reads `none`, which is a matrix nobody
+ * can build: that is the ring standing exactly where the dot is, which is a spread of one.
+ */
+function spreadOf(ring: Element): number {
+  const written = getComputedStyle(ring).transform
+  return written === 'none' ? 1 : new DOMMatrixReadOnly(written).a
+}
+
+/** The role each state is drawn in, which is the token and never a colour of its own. */
+const TONES: Record<StatusTone, string> = {
+  pending: 'bg-muted-foreground',
+  running: 'bg-warning',
+  success: 'bg-success',
+  failure: 'bg-destructive',
+  cancelled: 'bg-border',
+}
 
 const meta = {
   tags: ['autodocs', 'new'],
@@ -89,6 +113,10 @@ export const States: Story = {
     // Five states, five colours: a state that shared a colour with another would be a state the
     // eye cannot read at all.
     expect(new Set(colours).size).toBe(5)
+    // And each of them is a role of the theme rather than a colour of the component's own.
+    for (const status of STATES) {
+      expect([...canvas.getByRole('img', { name: status }).classList]).toContain(TONES[status])
+    }
     // One of them moves, and it is the one the reader is waiting on.
     expect(getComputedStyle(canvas.getByRole('img', { name: 'running' })).animationName).toBe(
       'breathe',
@@ -96,6 +124,33 @@ export const States: Story = {
     expect(getComputedStyle(canvas.getByRole('img', { name: 'success' })).animationName).toBe(
       'none',
     )
+  },
+}
+
+/**
+ * The one state the reader is waiting on, and the ring that says so from the corner of the eye.
+ *
+ * The ring is drawn behind the dot, exactly its size, and travels out of it: it is the `ping`
+ * kind of the preset — a scale and an opacity, repeating on the theme's own `turn`, which is
+ * the beat the dot breathes on. It is decoration and announces nothing: the dot already carries
+ * the word.
+ */
+export const Running: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => <StatusDot status="running" label="Running" />,
+  play: async ({ canvasElement }) => {
+    const dot = within(canvasElement).getByRole('img', { name: 'Running' })
+    // Behind the dot, so it is the element drawn before it, and it wears the running tone.
+    const ring = dot.previousElementSibling
+    expect(ring, 'the running dot has no ring behind it').not.toBeNull()
+    if (ring === null) return
+    expect([...ring.classList]).toContain('bg-warning')
+    expect(ring).not.toHaveAttribute('aria-label')
+    // It leaves: the ring passes well outside the dot it came from, which a ring standing at
+    // the dot's own size never would.
+    await waitFor(() => {
+      expect(spreadOf(ring)).toBeGreaterThan(1.2)
+    })
   },
 }
 
@@ -118,6 +173,16 @@ export const ReducedMotion: Story = {
         expect(getComputedStyle(dot).animationName).toBe('none')
       })
       expect(getComputedStyle(dot).opacity).toBe('1')
+      // And no ring either: one repeating for ever with no time to travel in would be a ring
+      // parked at full size, which is worse than none. The stylesheet is what takes it out —
+      // the same media query that takes the breath out — so it is read as not drawn rather
+      // than as not there.
+      const ring = dot.previousElementSibling
+      if (ring !== null) {
+        await waitFor(() => {
+          expect(ring).not.toBeVisible()
+        })
+      }
     } finally {
       await restore()
     }
