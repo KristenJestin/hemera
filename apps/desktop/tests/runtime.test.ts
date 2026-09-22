@@ -15,7 +15,7 @@ import { Effect, Fiber, Layer } from 'effect'
 import * as TestClock from 'effect/testing/TestClock'
 
 import { MachineEnvironment } from '#engine/agents/discovery.ts'
-import { fakeAgent } from '#engine/agents/fake.ts'
+import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
 import { AgentRuntime, CANCEL_GRACE } from '#engine/agents/runtime.ts'
 import { Projects } from '#engine/projects.ts'
@@ -26,6 +26,7 @@ import {
   entryOf,
   gated,
   heldInThread,
+  machine,
   optionsOf,
   pause,
   threadOf,
@@ -528,6 +529,70 @@ describe('What an agent offers a Home', () => {
         // stopped, and nothing was left holding the Project's folder open.
         expect(ended).toBe(true)
         expect(agent.starts).toHaveLength(1)
+      }),
+    )
+  })
+
+  test('A probe started again is put back on what was chosen in that composer', async () => {
+    /** An agent whose effort exists only once a model has been picked, as a fresh one starts. */
+    const scripted = () => {
+      let picked = false
+      return fakeAgent({
+        configOptions: [MODEL],
+        onChoice: (choice) => {
+          if (choice.id === 'model') picked = true
+          return picked ? [MODEL, EFFORT] : [MODEL]
+        },
+      })
+    }
+
+    const first = scripted()
+    const second = scripted()
+    const queue = [first, second]
+    let ended = false
+    void first.exited.then(() => {
+      ended = true
+    })
+
+    await application(
+      dataFolder,
+      undefined,
+      machine,
+      // A stopped fake is a dead one, so the second start answers with a second agent — which
+      // is what a probe the pool let go of and a composer still being written in amount to.
+      fakeSupervisorOf(() => queue.shift() ?? second),
+    )(first)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const project = yield* projects.create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: workingDirectory,
+        })
+
+        yield* runtime.offer(project.id, 'claude')
+        yield* runtime.offerSet(project.id, 'claude', 'model', 'opus')
+
+        // Nobody touches that composer for five minutes, and the pool closes its agent.
+        yield* Effect.gen(function* () {
+          for (let look = 0; look < 20; look++) {
+            yield* pause(10)
+            yield* TestClock.adjust(IDLE_AFTER_MS)
+            if (ended) return
+          }
+        })
+        expect(ended).toBe(true)
+
+        // The next choice made in the same composer opens a second agent, and the model that was
+        // picked before is put back on it first: an agent on its defaults would announce no
+        // effort at all, and the effort just chosen would be a choice made on nothing.
+        const after = yield* runtime.offerSet(project.id, 'claude', 'effort', 'high')
+
+        expect(second.starts).toHaveLength(1)
+        expect(second.answers.choices).toEqual(['model=opus', 'effort=high'])
+        expect(after.refusal).toBeNull()
+        expect(after.options.map((option) => option.id)).toEqual(['model', 'effort'])
       }),
     )
   })

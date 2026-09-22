@@ -15,8 +15,13 @@ describe('Renderer sans Node', () => {
   })
 
   it('reaches the main process only through the bridge the preload exposes', async () => {
-    const bridge = await browser.execute(() => window.hemera.invoke instanceof Function)
-    expect(bridge).toBe(true)
+    // Two ways through and no other: a call the page makes, and a subscription to what the
+    // engine pushes without being asked (D5-12).
+    const bridge = await browser.execute(() => ({
+      invoke: typeof window.hemera.invoke,
+      on: typeof window.hemera.on,
+    }))
+    expect(bridge).toEqual({ invoke: 'function', on: 'function' })
   })
 
   it('runs isolated and sandboxed, which is what the page is unable to do', async () => {
@@ -26,10 +31,12 @@ describe('Renderer sans Node', () => {
     const reached = await browser.execute(() => ({
       leaked: ['ipcRenderer', '__dirname', 'Buffer'].filter((name) => name in globalThis),
       // The preload puts one object on the page; a leaked preload scope would put its own.
-      bridgeKeys: Object.keys(window.hemera),
+      // The list is the claim here rather than a snapshot of it: what the page may reach is
+      // exactly the surface the bridge declares, and anything else on that object is a leak.
+      bridgeKeys: Object.keys(window.hemera).toSorted(),
     }))
     expect(reached.leaked).toEqual([])
-    expect(reached.bridgeKeys).toEqual(['invoke'])
+    expect(reached.bridgeKeys).toEqual(['invoke', 'on'])
   })
 })
 

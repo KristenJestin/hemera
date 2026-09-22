@@ -19,6 +19,7 @@ import * as TestClock from 'effect/testing/TestClock'
 import type { SessionEntry } from '@hemera/core'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import { fakeSupervisor, type FakeAgent, type FakeStep } from '#engine/agents/fake.ts'
+import type { ProcessSupervisor } from '#engine/agents/supervisor.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { AgentNotices, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime, Notice } from '#engine/agents/runtime.ts'
@@ -86,6 +87,10 @@ export function application(
   dataFolder: string,
   notices: Layer.Layer<AgentNotices> = NoNotices,
   environment: Layer.Layer<MachineEnvironment> = machine,
+  // The one fake, unless the suite is about an agent that was started twice: a fake that was
+  // stopped is dead, so a suite about a restart hands over its own supervisor and says which
+  // fake each start answers with.
+  supervisor?: Layer.Layer<ProcessSupervisor>,
 ) {
   return (agent: FakeAgent) => {
     // The runtime is built on the very same services the suite reads with — `provideMerge` hands
@@ -99,7 +104,7 @@ export function application(
         ),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
-      Layer.provide(fakeSupervisor(agent)),
+      Layer.provide(supervisor ?? fakeSupervisor(agent)),
       Layer.provide(notices),
       // The pool reads the clock the suite moves, because it is the engine's own clock: five
       // idle minutes are a `TestClock.adjust` here rather than five minutes of waiting (D5-05).

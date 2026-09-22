@@ -576,10 +576,23 @@ function supervisedOf(agent: FakeAgent): SupervisedProcess {
  * test that made it. What this layer never does is start a child.
  */
 export function fakeSupervisor(agent: FakeAgent): Layer.Layer<ProcessSupervisor> {
+  return fakeSupervisorOf(() => agent)
+}
+
+/**
+ * The same supervisor, asked which fake to hand over at every start.
+ *
+ * A fake dies when it is stopped and a dead one cannot speak again, so a suite about what
+ * happens *after* an agent was let go — the probe of a Home the pool closed, and the next
+ * choice made in that composer — needs a second one. It is a suite's own business which,
+ * hence a question rather than a list here.
+ */
+export function fakeSupervisorOf(next: () => FakeAgent): Layer.Layer<ProcessSupervisor> {
   return Layer.succeed(ProcessSupervisor, {
     start: (command) =>
       Effect.acquireRelease(
         Effect.sync(() => {
+          const agent = next()
           // Recorded on the agent itself, so a suite can say what was started — and, which is
           // the point of D5-17, what was not.
           agent.starts.push(command)

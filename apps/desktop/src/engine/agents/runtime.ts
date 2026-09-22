@@ -716,6 +716,19 @@ export const runtimeLayer = Layer.effect(
         const probe: Probe = { process, connection: opened.success }
         probes.set(key, probe)
         yield* pool.held(probeKey(key), letProbeGo(key))
+
+        // What was already chosen in this composer, put back on the session that has just
+        // opened. The pool lets a probe go once nobody has touched that composer for five
+        // minutes, and the next choice made in it opens a second one: a probe that knew nothing
+        // of the model picked before it would announce the options of an agent on its defaults,
+        // and the effort that model publishes would not be among them (D5-13, D5-17).
+        for (const [optionId, value] of chosen.get(key) ?? []) {
+          yield* attempt('choosing an option', probe.connection.setOption(optionId, value)).pipe(
+            // A choice this agent will not take again is not an offer that failed: the composer
+            // is drawn from what the agent announces, which is what it is on.
+            Effect.ignore,
+          )
+        }
         return probe
       })
 
