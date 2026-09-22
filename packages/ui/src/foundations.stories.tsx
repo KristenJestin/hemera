@@ -133,6 +133,84 @@ export const Typography: Story = {
   },
 }
 
+/** A colour of the theme as the browser hands it back, in the three channels of a hex. */
+function channelsOf(colour: string): [number, number, number] {
+  const hex = colour.trim().replace('#', '')
+  return [0, 2, 4].map((at) => Number.parseInt(hex.slice(at, at + 2), 16) / 255) as [
+    number,
+    number,
+    number,
+  ]
+}
+
+/** What WCAG calls the relative luminance of a colour, which is what a ratio is made of. */
+function luminanceOf(colour: string): number {
+  const [red, green, blue] = channelsOf(colour).map((channel) =>
+    channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+  ) as [number, number, number]
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
+/** The contrast of two colours, the way the checker of the catalogue counts it. */
+function contrastOf(one: string, other: string): number {
+  const [light, dark] = [luminanceOf(one), luminanceOf(other)].toSorted((a, b) => b - a) as [
+    number,
+    number,
+  ]
+  return (light + 0.05) / (dark + 0.05)
+}
+
+/** A role of the theme, read off the document the way every component reads it. */
+function roleOf(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name)
+}
+
+/**
+ * What dragging across a text leaves behind (trial of 22 September 2026).
+ *
+ * The selection is made here rather than drawn as a coloured box, because `::selection` is the
+ * one surface of the theme no markup can stand in for: a browser paints it and nothing else
+ * can. The story selects its own paragraph so the reader sees the real thing in whichever
+ * theme the toolbar is on, and the run — which plays the whole catalogue once per theme —
+ * measures the two roles against each other on both.
+ *
+ * It was `--primary-muted` over whatever was underneath, which in the dark theme is a tenth of
+ * a magenta over black and reads as nothing. A selection carries its own two colours now, and
+ * is the one thing in the theme that has to: the text it covers can be any colour the page had.
+ */
+export const Selection: Story = {
+  render: () => (
+    <div className="flex flex-col gap-2">
+      <p data-testid="selected" className="max-w-prose text-base">
+        Drag across this line: selected text keeps its own two colours, so a comment, a command
+        and a line of a diff are all read the same way once they are under the hand.
+      </p>
+      <p className="max-w-prose font-mono text-sm text-muted-foreground">
+        git rebase --onto dev feature/lot-1
+      </p>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const paragraph = within(canvasElement).getByTestId('selected')
+    const range = document.createRange()
+    range.selectNodeContents(paragraph)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    await expect(selection?.toString()).toContain('selected text keeps its own two colours')
+
+    // The two roles are declared, and they answer for themselves: a selection is the one fill of
+    // the theme that cannot know what it is drawn over, so it carries the foreground with it.
+    const background = roleOf('--selection')
+    const foreground = roleOf('--selection-foreground')
+    await expect(background, 'the theme declares no selection fill').not.toBe('')
+    await expect(contrastOf(background, foreground)).toBeGreaterThanOrEqual(4.5)
+    // And it is a colour rather than a wash: a fill the page shows through has no contrast of
+    // its own, which is exactly what the dark theme was left with.
+    await expect(background).toMatch(/^#[0-9a-f]{6}$/i)
+  },
+}
+
 function Pressable() {
   const transition = useTransition()
   const [moved, setMoved] = useState(false)

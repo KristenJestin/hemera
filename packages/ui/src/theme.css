@@ -110,6 +110,15 @@
   --ring: rgba(217, 70, 239, 0.25);
   --overlay: rgba(16, 16, 24, 0.2);
 
+  /* What dragging across a text leaves behind (trial of 22 September 2026).
+     A role of its own, and opaque: selected text is the one place the theme cannot know what it
+     is drawn over, and a fill at a tenth of the primary let the page through — in the dark
+     theme the selection was all but invisible. An opaque fill with a foreground of its own
+     answers for its own contrast whatever the text was before it was selected: a comment, a
+     command, a line of a diff. 9.9:1 here, 8.5:1 in the dark. */
+  --selection: #f0abfc;
+  --selection-foreground: #111118;
+
   --shadow: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.04);
   --shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12);
 }
@@ -179,6 +188,11 @@
   --ring: rgba(232, 121, 249, 0.3);
   --overlay: rgba(0, 0, 0, 0.5);
 
+  /* The same role, and the same rule read the other way: a magenta deep enough to sit on the
+     page's own black and still carry the theme's text on it. */
+  --selection: #6b1f7a;
+  --selection-foreground: #ececf1;
+
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-raised: 0 14px 40px rgba(0, 0, 0, 0.6);
 }
@@ -244,6 +258,8 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-overlay: var(--overlay);
+  --color-selection: var(--selection);
+  --color-selection-foreground: var(--selection-foreground);
 
   --shadow-sm: var(--shadow);
   --shadow-lg: var(--shadow-raised);
@@ -767,8 +783,13 @@
     cursor: not-allowed;
   }
 
+  /* Selected text carries its own two colours, and not a tint laid over whatever was there.
+     `--primary-muted` is a fill made to sit under a badge whose foreground comes with it; under
+     a drag across a paragraph it is a tenth of a colour over an unknown one, which in the dark
+     theme read as nothing at all. */
   ::selection {
-    background-color: var(--color-primary-muted);
+    background-color: var(--color-selection);
+    color: var(--color-selection-foreground);
   }
 }
 
