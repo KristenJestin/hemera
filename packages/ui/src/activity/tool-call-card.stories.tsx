@@ -48,7 +48,7 @@ const meta = {
     status: {
       control: 'inline-radio',
       options: ['pending', 'in_progress', 'completed', 'failed', 'cancelled'],
-      description: 'Where the call is in its life: running and failed are open, and stay open.',
+      description: 'Where the call is in its life: the dot on the row, never the fold.',
     },
     locations: { control: false, description: 'The files the call touched, in the agent’s order.' },
     error: { control: 'text', description: 'What went wrong, when it did.' },
@@ -164,31 +164,41 @@ export const NothingToOpen: Story = {
   },
 }
 
-/** A call in flight: it opens itself, because it is the one the reader is waiting on. */
+/**
+ * A call in flight: folded like every other card (trial of 22 September 2026, evening). The dot
+ * says it is running; what it is doing is the reader's to open, and stays open once they did,
+ * however many times the entry is written again and when the call is done.
+ */
 export const Running: Story = {
   args: { status: 'in_progress', output: undefined },
+  render: (args) => <Rewritten {...args} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
-    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(row, 'a running call opened itself').toHaveAttribute('aria-expanded', 'false')
     // The one dot of the five that moves, because it is the one the reader is waiting on.
     const dot = canvas.getByRole('img', { name: 'Running' })
     await expect(getComputedStyle(dot).animationName).toBe('breathe')
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(canvas.getByRole('button', { name: 'Write more of it' }))
+    await expect(row, 'a rewrite of the entry closed the card').toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    await userEvent.click(canvas.getByRole('button', { name: 'Finish it' }))
+    await expect(row, 'the call ending closed the card').toHaveAttribute('aria-expanded', 'true')
   },
 }
 
 /**
- * A card opened by default still closes (trial of 22 September 2026).
- *
- * The first call of a chat arrives in flight, opens itself, and used to be *held* open: the
- * card was controlled from its status, so the chevron did nothing for as long as the call ran —
- * minutes, for a build — and a failed call could never be folded away at all. Opening itself is
- * where the card starts; the press is the reader's from the first one, and their answer is
- * remembered against the status it was given at, so the entry being written again on every word
- * the agent adds does not undo it.
+ * A card a caller explicitly asked to start open, which nothing in the application does: every
+ * card starts folded, whatever its state (trial of 22 September 2026, evening). `defaultOpen` is
+ * where the card starts and nothing more — it still closes on the first press, and the reader's
+ * answer lives through the entry being written again on every word the agent adds.
  */
 export const OpenedByDefault: Story = {
-  args: { status: 'in_progress', defaultOpen: true, output: undefined },
+  args: { status: 'completed', defaultOpen: true, output: undefined },
   render: (args) => <Rewritten {...args} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -220,12 +230,18 @@ export const OpenedByDefault: Story = {
  */
 function Rewritten(args: ToolCallCardProps): ReactNode {
   const [written, setWritten] = useState(1)
+  const [status, setStatus] = useState(args.status)
   return (
     <div className="flex flex-col items-start gap-2">
-      <ToolCallCard {...args} output={OUTPUT.repeat(written)} />
-      <Button variant="secondary" size="sm" onClick={() => setWritten((was) => was + 1)}>
-        Write more of it
-      </Button>
+      <ToolCallCard {...args} status={status} output={OUTPUT.repeat(written)} />
+      <div className="flex gap-2">
+        <Button variant="secondary" size="sm" onClick={() => setWritten((was) => was + 1)}>
+          Write more of it
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => setStatus('completed')}>
+          Finish it
+        </Button>
+      </div>
     </div>
   )
 }
@@ -253,7 +269,11 @@ export const Expanded: Story = {
   ),
 }
 
-/** A call that failed: it opens itself — an error behind a fold is an error nobody sees. */
+/**
+ * A call that failed: folded like every other card, and a Session reopened on it is not reopened
+ * on its error (trial of 22 September 2026, evening). The red dot says it failed; the reason is
+ * the first thing the body says once the reader opens it.
+ */
 export const Failed: Story = {
   args: {
     title: 'pnpm test --project=repository',
@@ -267,11 +287,13 @@ export const Failed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /pnpm test --project=repository/ })
-    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(row, 'a failed call opened itself').toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.getByRole('img', { name: 'Failed' })).toBeInTheDocument()
+    await expect(canvas.queryByText(/3 tests failed in/)).toBeNull()
+    // Opened by the reader, the error is the first thing read; and put away again.
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText(/3 tests failed in/)).toBeVisible()
-    // Read, and then put away: a failure opens itself and is not a card the reader is locked
-    // out of (trial of 22 September 2026).
     await userEvent.click(row)
     await expect(row, 'a failure cannot be folded away once read').toHaveAttribute(
       'aria-expanded',

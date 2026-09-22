@@ -24,19 +24,16 @@ import { Disclosure } from './disclosure.tsx'
  * done, and the body only when somebody asks: the parameters of a read are noise after the read
  * succeeded, and they are the whole story when it failed.
  *
- * Three states drive it, and the honest one is the middle. A call in flight opens itself,
- * because a call in flight is what the reader is waiting on and the caller is the one who knows
- * it is in flight; a call that failed opens itself too, because an error hidden behind a fold is
- * an error nobody sees. Everything else folds.
+ * Every card starts folded, whatever its state (trial of 22 September 2026, evening). A card
+ * that opened itself for a call in flight or a call that failed was a Session reopened on the
+ * body of a command that had failed an hour ago, and a thread whose shape depended on how its
+ * calls had ended. The state is the dot on the row; the body is the reader's to open. A caller
+ * may still ask for a card to start open, and nothing in the application does.
  *
- * Opening itself is not the same as refusing to close, and the two were one thing until the
- * trial of 22 September 2026: the card was *controlled* open for as long as the call ran or
- * stayed failed, so the chevron of the first call of a chat did nothing for minutes, and a
- * failed call could never be folded away at all. What the card decides is where it starts; the
- * reader's press wins from the moment there is one. The answer is remembered against the status
- * it was given at — a call the reader folded and that then fails is a new fact and opens again —
- * and it is held here rather than inside the fold, so that it survives the entry being written
- * again on every update of the turn, and the row losing and regaining its chevron with it.
+ * What the reader chose is held here rather than inside the fold, so that it survives the entry
+ * being written again on every update of the turn, and the row losing and regaining its chevron
+ * with it — and it is not asked again when the status moves on: a card the reader opened on a
+ * running call is still open when the call is done.
  *
  * What the call is called is drawn in the reading colour of a caption and not of the thread: a
  * column of forty call titles in the colour of what the agent *said* is a column where the
@@ -157,14 +154,13 @@ export interface ToolCallCardProps {
   /**
    * Where the call is in its life.
    *
-   * It is the caller's, and the caller is the only one who knows: a call reported as running
-   * opens itself, and so does one reported as failed. It is also what a press is remembered
-   * against — the status changing asks the card again.
+   * It is the caller's, and the caller is the only one who knows. It is drawn as the dot on the
+   * row and decides nothing about the fold: every card starts folded.
    */
   status: ToolStatus
   /** The files the call touched, in the order the agent named them. */
   locations?: readonly ToolLocation[] | undefined
-  /** What went wrong, when it did — the reason a failed call cannot be folded away. */
+  /** What went wrong, when it did: the first thing the body says once it is opened. */
   error?: string | undefined
   /** What the agent sent: the parameters of the call, in its own words. */
   input?: ReactNode
@@ -174,7 +170,7 @@ export interface ToolCallCardProps {
    * Whether a reader who has not touched it finds it open.
    *
    * Where the card starts, and nothing more: the first press is the reader's, whatever this
-   * said and whatever the status would have opened on its own.
+   * said. Folded unless a caller asks, whatever the status.
    */
   defaultOpen?: boolean | undefined
   /** What a press on the file does: the reader goes there, which the card itself cannot do. */
@@ -204,14 +200,9 @@ export function ToolCallCard({
   className,
 }: ToolCallCardProps): ReactNode {
   const { word, tone } = STATUS[status]
-  // What the reader last said, and the status they said it at. A press is an answer to the card
-  // as it stood: the status moving on is the card being asked again, which is what opens a call
-  // that has just failed under a reader who had folded it away while it ran.
-  const [asked, setAsked] = useState<{ at: ToolStatus; open: boolean } | null>(null)
-  // A call in flight, and a call that failed, open themselves: the two are the states in which
-  // the body is the answer to the question the reader is asking.
-  const forced = status === 'in_progress' || status === 'failed'
-  const shown = asked !== null && asked.at === status ? asked.open : forced || defaultOpen
+  // Where the fold stands: where the caller asked it to start, and then what the reader last
+  // said. The status plays no part in it.
+  const [shown, setShown] = useState(defaultOpen)
   const first = locations?.[0]
   const sectioned = input !== undefined || output !== undefined
   const opens = sectioned || children !== undefined || error !== undefined
@@ -231,7 +222,7 @@ export function ToolCallCard({
           // inside the fold is a state lost the moment the row goes from having nothing to open
           // to having a body — which is what every call does on its first answer.
           open={shown}
-          onOpenChange={(next) => setAsked({ at: status, open: next })}
+          onOpenChange={setShown}
           summary={summary}
         >
           <div className={BODY}>

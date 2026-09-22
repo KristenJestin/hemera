@@ -74,9 +74,8 @@ export interface DisclosureProps {
   /**
    * Whether it is open, when the caller decides instead of the reader.
    *
-   * A tool call that is running is open because a call in flight is what the reader is waiting
-   * on, and it is the caller that knows the call is in flight. Left out, the reader decides and
-   * the block opens on `defaultOpen`.
+   * A tool card holds the reader's answer itself, so that it survives the entry being written
+   * again. Left out, the fold holds it and opens on `defaultOpen`.
    */
   open?: boolean | undefined
   /** Whether it starts open, for a block the reader is expected to want. */

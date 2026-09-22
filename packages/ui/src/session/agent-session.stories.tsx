@@ -178,7 +178,6 @@ const THREAD: ScrollerEntry[] = [
         title="pnpm test --project=repository"
         kind="execute"
         status="failed"
-        defaultOpen
         output={'FAIL src/billing/export.test.ts\n  streams a large export\n'}
         error={
           'src/billing/export.test.ts > streams a large export\n  expected 2 writes, received 1'
