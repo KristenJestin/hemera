@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 
 import type { ConfigOption, Session, SessionEntry } from '@hemera/ipc'
 import {
+  ActivityRow,
   AgentModelMenu,
   BlockedBanner,
   Composer,
@@ -10,7 +11,6 @@ import {
   MessageGroup,
   MessageScroller,
   MessageText,
-  ModeSelector,
   SessionEmpty,
   SessionHeader,
   SessionSideColumn,
@@ -22,7 +22,7 @@ import {
   type ScrollerEntry,
 } from '@hemera/ui'
 
-import type { AgentSessionState } from '../agent-store.ts'
+import { activityOf, type AgentSessionState } from '../agent-store.ts'
 import { effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { whenOf } from '../journal-lines.ts'
@@ -47,6 +47,8 @@ import { whenOf } from '../journal-lines.ts'
 interface Run {
   day: string
   lines: MessageLine[]
+  /** When its first line was written, which is the time the head shows under the hand. */
+  at: number
   /** Its first line as plain text, which is what the scroller remembers the run by. */
   mark: string
   /** Whether the agent said something in the middle of it, which starts a new run after it. */
@@ -66,6 +68,16 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
     ...read.map((entry) => since.get(entry.id) ?? entry),
     ...live.filter((entry) => !known.has(entry.id)),
   ]
+}
+
+/** When a run was written, `HH:MM`, in the one reading the whole window uses. */
+function timeOf(at: number): string {
+  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
+/** The whole date behind that time, for the reader who asks a time three days old which day it is. */
+function dateOf(at: number): string {
+  return new Date(at).toLocaleString('en-GB')
 }
 
 /** `4 messages`, and the singular for the one that has just been written. */
@@ -198,7 +210,7 @@ export function SessionPage({
     const line: MessageLine = { id: entry.id, body: <MessageText body={entry.body} /> }
     const last = runs.at(-1)
     if (last === undefined || last.day !== day || last.broken) {
-      runs.push({ day, lines: [line], mark: entry.body, broken: false })
+      runs.push({ day, lines: [line], at: entry.createdAt, mark: entry.body, broken: false })
       continue
     }
     last.lines.push(line)
@@ -221,7 +233,9 @@ export function SessionPage({
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
     })
-    if (block !== null) byEntry.set(entry.id, { id: entry.id, mark: entry.body, content: block })
+    // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
+    // turn was forty ticks for one question (trial of 22 September 2026).
+    if (block !== null) byEntry.set(entry.id, { id: entry.id, content: block })
   }
 
   const scroller: ScrollerEntry[] = []
@@ -249,6 +263,11 @@ export function SessionPage({
             author="user"
             name="You"
             lines={held?.lines ?? []}
+            // The time of the run, which the head shows under the hand and hides again with it:
+            // a thread read downwards is dated by its separators, and a reader who wonders about
+            // one run wonders about that one (D4b-08).
+            at={held === undefined ? undefined : timeOf(held.at)}
+            atLabel={held === undefined ? undefined : dateOf(held.at)}
             state={last ? writes : undefined}
             error={last ? failure : undefined}
             onRetry={
@@ -269,6 +288,23 @@ export function SessionPage({
     if (held !== undefined) held.broken = true
     const block = byEntry.get(entry.id)
     if (block !== undefined) scroller.push(block)
+  }
+
+  /**
+   * The row that stands at the end of the thread while the turn runs (design D17-04).
+   *
+   * It is the last entry of the scroller and not a band above it: what a turn is doing belongs
+   * where the next block will be written, and it goes when the turn does. No mark — it is not a
+   * place a reader navigates back to.
+   */
+  const activity = activityOf(thread)
+  if (agent.running) {
+    scroller.push({
+      id: 'activity',
+      content: (
+        <ActivityRow state={activity.state} detail={activity.detail} thought={activity.thought} />
+      ),
+    })
   }
 
   // What the agent is on is the agent's own answer, read back after every change: this page
@@ -364,9 +400,10 @@ export function SessionPage({
               <AgentModelMenu
                 agents={agents}
                 agent={session.provider}
-                // The agent of a Session is the one it was made with and cannot be changed: the
-                // stage is drawn because the model below it belongs to an agent, and pressing
-                // the one entry it holds changes nothing.
+                // The agent of a Session is the one it was made with and cannot be changed:
+                // `fixed` takes the agent stage out of the panel altogether, and the panel opens
+                // on the models of the agent that is answering (D17-11).
+                fixed
                 onAgentChange={() => undefined}
                 models={model?.choices ?? []}
                 model={model?.current ?? null}
@@ -378,16 +415,15 @@ export function SessionPage({
                 onEffortChange={(chosen) => {
                   if (effort !== null) onChooseOption(effort.optionId, chosen)
                 }}
+                // The mode is a row of that same panel since the trial of 22 September 2026: it
+                // is one of the four things the agent is set on, and a control of its own beside
+                // the menu was a second control asking about one agent.
+                modes={mode?.choices ?? []}
+                mode={mode?.current ?? null}
+                onModeChange={(chosen) => {
+                  if (mode !== null) onChooseOption(mode.optionId, chosen)
+                }}
               />
-            }
-            mode={
-              mode === null ? undefined : (
-                <ModeSelector
-                  modes={mode.choices}
-                  value={mode.current ?? ''}
-                  onValueChange={(chosen) => onChooseOption(mode.optionId, chosen)}
-                />
-              )
             }
             running={agent.running}
             onStop={onStop}

@@ -1,5 +1,5 @@
-import type { ConfigOption } from '@hemera/ipc'
-import type { AgentChoice, EffortChoice, ModelChoice } from '@hemera/ui'
+import type { ComposerChoice, ConfigOption } from '@hemera/ipc'
+import type { EffortChoice, ModeChoice, ModelChoice } from '@hemera/ui'
 
 /**
  * What an agent announced, read as the one menu reads it (design D5-13, D17-11).
@@ -87,12 +87,32 @@ export function effortStage(options: readonly ConfigOption[]): Stage<EffortChoic
   }
 }
 
-export function modeStage(options: readonly ConfigOption[]): Stage<AgentChoice> | null {
+export function modeStage(options: readonly ConfigOption[]): Stage<ModeChoice> | null {
   const option = optionOf(options, MODE)
   if (option === null) return null
   return {
     optionId: option.id,
-    choices: option.values.map((value) => ({ id: value.value, name: value.name })),
+    choices: option.values.map((value) => ({ id: value.value, label: value.name })),
     current: currentOf(option),
   }
+}
+
+/**
+ * Which agent a Home's composer stands on: the one picked in it, or the one the Project was
+ * left on (design D5-17).
+ *
+ * A pick wins over the preference and never the other way round. The preferences are read while
+ * the window is opening, so the answer can arrive after the Home is on screen — and a preference
+ * landing on a menu the reader is already using would move it under their hand.
+ *
+ * The agent alone is read from it. The model, the effort and the mode of that agent are the
+ * agent's own answer: the engine seeds the agent it starts from this same preference, so what
+ * the menu shows under the agent is what the agent announces it is on, which is what was chosen
+ * in this Project last time.
+ */
+export function openingAgentOf(
+  choice: ComposerChoice | null,
+  picked: string | null,
+): string | null {
+  return picked ?? choice?.provider ?? null
 }

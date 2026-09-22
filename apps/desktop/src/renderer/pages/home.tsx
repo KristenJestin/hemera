@@ -1,20 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 
+import type { ComposerChoice } from '@hemera/ipc'
 import {
   ActivityFrame,
   AgentModelMenu,
   Composer,
   EmptyProject,
   Greeting,
-  ModeSelector,
   SessionsFrame,
   type HomeSession,
   type JournalLine,
   type OfferedAgent,
 } from '@hemera/ui'
 
-import { effortStage, modeStage, modelStage } from '../agent-options.ts'
+import { effortStage, modeStage, modelStage, openingAgentOf } from '../agent-options.ts'
 import type { AgentOffering } from '../agent-store.ts'
 
 /**
@@ -49,6 +49,7 @@ export function HomePage({
   sessions,
   entries,
   agents,
+  choice,
   offeringOf,
   onChooseAgent,
   onChooseOption,
@@ -65,6 +66,16 @@ export function HomePage({
   entries: JournalLine[]
   /** The agents this machine has, as the registry named them. */
   agents: OfferedAgent[]
+  /**
+   * What this Project's composer was left on, as the data folder remembers it (design D5-17).
+   *
+   * The agent alone is read here: the model, the effort and the mode are the agent's own answer,
+   * and the engine seeds the agent it starts from this same preference — so what the menu shows
+   * under the agent is what the agent announces it is on, which is what was chosen last time.
+   * Null while the preferences are still being read, and null for a Project nothing was ever
+   * chosen in.
+   */
+  choice: ComposerChoice | null
   /** What an agent offers this Project: its options, its refusal, and whether it is answering. */
   offeringOf: (agent: string) => AgentOffering
   /** Asks what an agent offers this Project, which is what starts it the first time. */
@@ -99,6 +110,18 @@ export function HomePage({
     setAgent(chosen)
     onChooseAgent(chosen)
   }
+
+  /**
+   * The agent this Project was left on, put back the moment the preference is there.
+   *
+   * Asked for as well as shown: what an agent offers is the engine's answer, and the composer of
+   * a Project reopened on its agent has to have that answer to draw a model under it.
+   */
+  const opening = openingAgentOf(choice, agent)
+  useEffect(() => {
+    if (opening === null || opening === agent) return
+    choose(opening)
+  }, [opening])
 
   /** One of the agent's own options, moved on the agent this composer is being drawn from. */
   const pick = (optionId: string, chosen: string): void => {
@@ -139,19 +162,20 @@ export function HomePage({
             onEffortChange={(chosen) => {
               if (effort !== null) pick(effort.optionId, chosen)
             }}
+            // The mode is the fourth row of the same panel: one agent, one control, and a foot
+            // that does not wrap when a model has a long name (D17-11, D17-14).
+            modes={mode?.choices ?? []}
+            mode={mode?.current ?? null}
+            onModeChange={(chosen) => {
+              if (mode !== null) pick(mode.optionId, chosen)
+            }}
             loading={offering?.loading ?? false}
             refusal={offering?.refusal ?? null}
           />
         }
-        mode={
-          mode === null ? undefined : (
-            <ModeSelector
-              modes={mode.choices}
-              value={mode.current ?? ''}
-              onValueChange={(chosen) => pick(mode.optionId, chosen)}
-            />
-          )
-        }
+        // The Home is where a Spec is made from the question that starts a Session; a Session is
+        // a conversation already under way and offers nothing of the sort (D4b-02).
+        spec
         onSend={async (text) => (agent === null ? NO_AGENT : await onSend(text, agent))}
       />
       {sessions.length === 0 ? (

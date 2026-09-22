@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type {
   AgentAvailability,
   AgentProvider,
+  ComposerChoice,
   EngineStatus,
   MotionMeasure,
   Project,
@@ -295,6 +296,15 @@ export function Application() {
   /** Which Session of which Project was open last, as the preferences remembered it. */
   const [remembered, setRemembered] = useState<Record<string, string> | null>(null)
   /**
+   * What each Project's composer was left on, as the data folder remembers it (design D5-17).
+   *
+   * Read at the start and read again after every choice made in a Home: the engine writes this
+   * preference itself when it is told what an agent offers, so what the window holds is what the
+   * engine wrote rather than a copy this page keeps in parallel. It is what a Home opens on when
+   * the reader comes back to a Project they already chose an agent in.
+   */
+  const [composers, setComposers] = useState<Record<string, ComposerChoice>>({})
+  /**
    * Which agent is being updated, and what its own tool last said about it (design D5-18).
    *
    * The output is kept per agent and never overwritten by the next one: an update is a command
@@ -377,7 +387,10 @@ export function Application() {
     // Session to open: the Session an opening lands on is this answer's and no one else's.
     void window.hemera
       .invoke('preferences.read', {})
-      .then((worn) => setRemembered(worn.activeSessions))
+      .then((worn) => {
+        setRemembered(worn.activeSessions)
+        setComposers(worn.composers)
+      })
       .catch(unanswered('preferences.read'))
     void window.hemera
       .invoke('engine.status', {})
@@ -609,6 +622,20 @@ export function Application() {
     },
     [shell.activeProjectId],
   )
+
+  /**
+   * Reads back what the engine wrote of the composers, after a choice was made in one.
+   *
+   * The engine writes the preference itself when it is asked what an agent offers a Project
+   * (D5-17): this reads that answer rather than keeping a copy of the choice here, so what the
+   * Home opens on when the reader comes back to a Project is what was actually written down.
+   */
+  const readComposers = useCallback(() => {
+    void window.hemera
+      .invoke('preferences.read', {})
+      .then((worn) => setComposers(worn.composers))
+      .catch(unanswered('preferences.read'))
+  }, [])
 
   /**
    * Renames a Session, which the head of the page and the row menu both ask for.
@@ -994,17 +1021,19 @@ export function Application() {
           signedIn: one.authenticated,
           hint: hintOf(one),
         }))}
+        // What this Project's composer was left on, which is what the Home opens on.
+        choice={composers[active.id] ?? null}
         offeringOf={(chosen) => offeringOf(active.id, providerOf(chosen))}
         onChooseAgent={(chosen) => {
           const asked = providerOf(chosen)
-          if (asked !== null) void offerAgent(active.id, asked)
+          if (asked !== null) void offerAgent(active.id, asked).then(readComposers)
         }}
         // A choice made before there is a Session is made on the agent the engine kept running
         // for this composer, and what comes back is what it announces then: the effort of a
         // reasoning model is published by that answer and by nothing else (D5-13, D5-17).
         onChooseOption={(chosen, optionId, value) => {
           const asked = providerOf(chosen)
-          if (asked !== null) void setOffered(active.id, asked, optionId, value)
+          if (asked !== null) void setOffered(active.id, asked, optionId, value).then(readComposers)
         }}
         onOpenSession={goTo}
         onOpenAllSessions={() => setPlace('archived')}
