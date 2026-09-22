@@ -1,0 +1,219 @@
+/**
+ * What each tool is asked with, declared once (design D6-03).
+ *
+ * One declaration serves three readers: the schema handed to the agent so it knows what to send,
+ * the guard that reads what arrived, and the tool itself, which reads fields and not a document
+ * of its own. A tool that took its arguments from somewhere else would be a tool whose contract
+ * is two things that drift.
+ *
+ * The arguments are flat on purpose — a string, a number, a boolean, or nothing at all — because
+ * MCP is what carries them and a nested document is a document nobody validates twice.
+ */
+
+import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, SEARCH_SCAN_BYTES, type ToolName } from '@hemera/core'
+import { z } from 'zod'
+
+/** The arguments of a tool as they arrived: flat, JSON, and not yet read. */
+export type ToolArguments = Readonly<Record<string, string | number | boolean | null>>
+
+/** What an argument was refused with, said so that the agent can send better ones. */
+export type ParsedCall =
+  | { readonly tool: 'fs.read'; readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['fs.read']> }
+  | { readonly tool: 'fs.edit'; readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['fs.edit']> }
+  | { readonly tool: 'fs.write'; readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['fs.write']> }
+  | { readonly tool: 'fs.list'; readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['fs.list']> }
+  | { readonly tool: 'search'; readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['search']> }
+  | {
+      readonly tool: 'commands.list'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['commands.list']>
+    }
+  | {
+      readonly tool: 'commands.run'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['commands.run']>
+    }
+  | {
+      readonly tool: 'commands.output'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['commands.output']>
+    }
+  | {
+      readonly tool: 'commands.stop'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['commands.stop']>
+    }
+  | {
+      readonly tool: 'project.get'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['project.get']>
+    }
+  | {
+      readonly tool: 'session.get'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['session.get']>
+    }
+
+/** The key an idempotency key may be, so that a key is a name and not a document. */
+const KEY = z.string().min(1).max(200)
+
+/**
+ * The arguments of every tool, as the agent is told them and as they are read back.
+ *
+ * A path is always relative to the Workspace root: an absolute path is accepted and judged, but
+ * a relative one is what an agent should send, because it is the one that survives the project
+ * being moved.
+ */
+export const TOOL_ARGUMENTS = {
+  'fs.read': z.object({
+    path: z.string().min(1).describe('the file, relative to the Workspace root'),
+    offset: z.number().int().min(0).optional().describe('the byte to start at; 0 without it'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(READ_PAGE_BYTES)
+      .optional()
+      .describe(`how many bytes at most; ${READ_PAGE_BYTES} without it`),
+  }),
+  'fs.edit': z.object({
+    path: z.string().min(1).describe('the file, relative to the Workspace root'),
+    old: z.string().min(1).describe('the text to replace, which must appear exactly once'),
+    new: z.string().describe('what to replace it with; an empty string deletes it'),
+    key: KEY.optional().describe('an idempotency key, so a retry does not edit twice'),
+  }),
+  'fs.write': z.object({
+    path: z.string().min(1).describe('the file, relative to the Workspace root'),
+    content: z.string().describe('what the whole file becomes; the folders are created'),
+    key: KEY.optional().describe('an idempotency key, so a retry does not write twice'),
+  }),
+  'fs.list': z.object({
+    path: z.string().optional().describe('the folder, relative to the Workspace root'),
+  }),
+  search: z.object({
+    query: z.string().min(1).describe('what to look for, as it is written'),
+    path: z.string().optional().describe('a folder or a file to search in, instead of everything'),
+    cursor: z.string().optional().describe('where to continue from, as the last answer gave it'),
+  }),
+  'commands.list': z.object({}),
+  'commands.run': z.object({
+    name: z.string().min(1).optional().describe('a command of the Project catalogue, by name'),
+    line: z.string().min(1).optional().describe('a one-off command line, instead of a name'),
+    folder: z
+      .string()
+      .optional()
+      .describe('where to run it: a repository of the Project, or a path in the Workspace'),
+    key: KEY.optional().describe('an idempotency key, so a retry does not start it twice'),
+  }),
+  'commands.output': z.object({
+    run: z.string().min(1).optional().describe('which run; the only one running without it'),
+  }),
+  'commands.stop': z.object({
+    run: z.string().min(1).optional().describe('which run; the only one running without it'),
+  }),
+  'project.get': z.object({}),
+  'session.get': z.object({}),
+} as const
+
+/** What each tool is, in the words the agent reads before it asks. */
+export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
+  'fs.read': `Read a file inside the Workspace root. A long file is paginated: one call returns at most ${READ_PAGE_BYTES} bytes, and the answer says which bytes it is and where the next page starts.`,
+  'fs.edit': `Replace a piece of text in a file of the Workspace root. The text must appear exactly once: none, or several, is refused and the refusal says how many were found. Send a key so that a retry after a lost answer does not edit twice.`,
+  'fs.write': `Write a file inside the Workspace root, creating the folders it needs; the whole file becomes what you send. Send a key so that a retry after a lost answer does not write twice.`,
+  'fs.list':
+    'List one level of a folder of the Workspace root: the name, the kind and the size of what it holds.',
+  search: `Search the files of the Workspace root for a piece of text, \`.gitignore\` respected. One call returns at most ${SEARCH_MATCH_LIMIT} matches and scans at most ${SEARCH_SCAN_BYTES} bytes: the answer says which limit stopped it and gives the cursor to continue from.`,
+  'commands.list':
+    "The commands the Project's catalogue holds: name, line, kind, and the folder each runs in.",
+  'commands.run': `Ask for a command of the Project's catalogue to run, by name, or a one-off line. An app command that is already running is handed back rather than started twice. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
+  'commands.output':
+    'What a run has printed, bounded, the address it published, and how it ended if it has.',
+  'commands.stop': 'Stop a run and everything it started.',
+  'project.get':
+    'The Project this Session belongs to: its name, where its Workspace root is, and what it reads from.',
+  'session.get':
+    'This Session: its title, its Project, its agent, and the last entries of its thread.',
+}
+
+/** What one reading of the arguments answered. */
+export type ArgumentsDecision =
+  | { readonly ok: true; readonly call: ParsedCall }
+  | { readonly ok: false; readonly reason: string }
+
+/** Reads what arrived against the schema of one tool. */
+function read<A>(
+  schema: z.ZodType<A>,
+  raw: ToolArguments,
+): { readonly ok: true; readonly value: A } | { readonly ok: false; readonly reason: string } {
+  const parsed = schema.safeParse(raw)
+  if (parsed.success) return { ok: true, value: parsed.data }
+  return {
+    ok: false,
+    reason: parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || 'the arguments'}: ${issue.message}`)
+      .join('; '),
+  }
+}
+
+/** The value when it read, and the sentence to answer with when it did not. */
+function decide<T extends ToolName, A>(
+  tool: T,
+  reading:
+    | { readonly ok: true; readonly value: A }
+    | { readonly ok: false; readonly reason: string },
+): ArgumentsDecision {
+  if (!reading.ok) return { ok: false, reason: reading.reason }
+  // SAFETY: `reading` is the result of the schema this very switch names for `tool`, and the
+  // union below lists exactly the pairs the switch can produce: the tool and its arguments are
+  // read from the same schema, in the same call, one line above.
+  return { ok: true, call: { tool, arguments: reading.value } as ParsedCall }
+}
+
+/**
+ * The arguments of a call, read once.
+ *
+ * Every tool goes through here, so a call whose arguments do not read never reaches a tool: the
+ * first thing a tool does is trust its own fields, and that trust is bought exactly here.
+ */
+export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision {
+  switch (tool) {
+    case 'fs.read':
+      return decide(tool, read(TOOL_ARGUMENTS['fs.read'], raw))
+    case 'fs.edit':
+      return decide(tool, read(TOOL_ARGUMENTS['fs.edit'], raw))
+    case 'fs.write':
+      return decide(tool, read(TOOL_ARGUMENTS['fs.write'], raw))
+    case 'fs.list':
+      return decide(tool, read(TOOL_ARGUMENTS['fs.list'], raw))
+    case 'search':
+      return decide(tool, read(TOOL_ARGUMENTS.search, raw))
+    case 'commands.list':
+      return decide(tool, read(TOOL_ARGUMENTS['commands.list'], raw))
+    case 'commands.run':
+      return decide(tool, read(TOOL_ARGUMENTS['commands.run'], raw))
+    case 'commands.output':
+      return decide(tool, read(TOOL_ARGUMENTS['commands.output'], raw))
+    case 'commands.stop':
+      return decide(tool, read(TOOL_ARGUMENTS['commands.stop'], raw))
+    case 'project.get':
+      return decide(tool, read(TOOL_ARGUMENTS['project.get'], raw))
+    case 'session.get':
+      return decide(tool, read(TOOL_ARGUMENTS['session.get'], raw))
+  }
+}
+
+/**
+ * What an MCP client sent, as the flat arguments a tool is read from.
+ *
+ * The one place where what arrived is trusted: a value the agent sent that is not a string, a
+ * number, a boolean or null is dropped, and a schema that then wants it says so. Nothing here
+ * decides anything — it is the shape, and the reading is `parseCall`'s.
+ */
+export function flatArguments(
+  entries: readonly (readonly [string, string | number | boolean | null | undefined])[],
+) {
+  return Object.fromEntries(carried(entries))
+}
+
+/** The entries that carry a value, which are the ones a tool can be read from. */
+function carried(
+  entries: readonly (readonly [string, string | number | boolean | null | undefined])[],
+): readonly (readonly [string, string | number | boolean | null])[] {
+  return entries.filter(
+    (pair): pair is readonly [string, string | number | boolean | null] => pair[1] !== undefined,
+  )
+}
