@@ -329,3 +329,38 @@ describe('A stopped run ends once', () => {
     expect(seen.ends.map((entry) => entry.type)).toEqual(['command.stopped'])
   })
 })
+
+describe('A run that ended is left as it ended', () => {
+  it('keeps its end and what it printed when its Session is swept afterwards', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const started = yield* commands.run({
+          sessionId: session.sessionId,
+          projectId: session.projectId,
+          commandId: null,
+          name: 'boom',
+          line: FAILS_LOUDLY,
+          kind: 'check',
+          cwd: root,
+          startedBy: 'agent',
+        })
+        // Ended and written: the row says so, which is when the run is no longer held in memory.
+        yield* until(commands.recent(session.sessionId), (rows) => rows[0]?.state === 'failed')
+        yield* commands.stopped(session.sessionId)
+        const journal = yield* Journal
+        const read = yield* journal.read({ projectId: session.projectId })
+        return {
+          read: yield* commands.output(session.sessionId, started.id),
+          stops: read.entries.filter((entry) => entry.type === 'command.stopped'),
+        }
+      }),
+    )
+
+    expect(seen.read.state).toBe('failed')
+    expect(seen.read.exitCode).toBe(3)
+    expect(seen.read.output).toContain('boom')
+    expect(seen.stops).toHaveLength(0)
+  })
+})

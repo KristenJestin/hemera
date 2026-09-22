@@ -47,6 +47,12 @@ const RECENT_RUNS = 8
 /** How much of what a run printed is kept: what is older than this is dropped, and said to be. */
 export const OUTPUT_KEPT_BYTES = 64 * 1024
 
+/**
+ * How long the pipes of a run that ended are still read before its end is written: a process's
+ * exit can be reported before the last of what it printed has been read.
+ */
+const DRAIN_MS = 100
+
 /** How long a run has to die quietly before its tree is taken down. */
 const GRACE_MS = 5_000
 
@@ -580,6 +586,7 @@ export const commandsLayer = Layer.effect(
             record.endedAt = startedAt
             yield* writeRow(id, record, 'command.failed')
             yield* Deferred.succeed(record.ended, undefined)
+            live.delete(id)
             return viewOf(id, record)
           }
 
@@ -593,6 +600,7 @@ export const commandsLayer = Layer.effect(
             record.endedAt = new Date().toISOString()
             yield* writeRow(id, record, 'command.failed')
             yield* Deferred.succeed(record.ended, undefined)
+            live.delete(id)
             return viewOf(id, record)
           }
 
@@ -632,12 +640,16 @@ export const commandsLayer = Layer.effect(
                         : 'stopped'
                   record.exitCode = observation.code
                   record.endedAt = observation.when
+                  yield* Effect.sleep(DRAIN_MS)
                   yield* writeRow(
                     id,
                     record,
                     record.stopping ? 'command.stopped' : 'command.exited',
                   )
                   yield* Deferred.succeed(record.ended, undefined)
+                  // What is left of a run that ended is its row: the memory, and the output it
+                  // holds, is let go of rather than kept for as long as the engine runs.
+                  live.delete(id)
                 }),
               ),
             ),
