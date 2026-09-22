@@ -22,6 +22,7 @@ import {
   Duration,
   Effect,
   Layer,
+  Predicate,
   Queue,
   Result,
   Scope,
@@ -43,7 +44,7 @@ import {
   type WindowReport,
   connect,
 } from './client.ts'
-import { Discovery, type ResolvedAgent } from './discovery.ts'
+import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discovery.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, type SupervisedProcess } from './supervisor.ts'
@@ -113,6 +114,20 @@ export interface ResumeReport {
 export interface AgentOfferRefusal {
   readonly kind: 'not_installed' | 'not_signed_in' | 'failed'
   readonly message: string
+}
+
+/**
+ * Which of the three a resolve refused with, read off the refusal itself.
+ *
+ * The refusal is what looked at the machine — the command on the `PATH`, the login file the
+ * agent wrote — so it is what says which of the three this is. An adapter missing from Hemera's
+ * own installation is not one of the reader's two: it is a broken install, and the composer
+ * shows it as the agent having failed.
+ */
+function refusalKind(refusal: UnusableAgentError): AgentOfferRefusal['kind'] {
+  if (Predicate.isTagged(refusal, 'AgentNotInstalledError')) return 'not_installed'
+  if (Predicate.isTagged(refusal, 'AgentNotSignedInError')) return 'not_signed_in'
+  return 'failed'
 }
 
 /** Where an agent is started, and what it is started with: the supervisor's own two options. */
@@ -686,15 +701,13 @@ export const runtimeLayer = Layer.effect(
         if (held !== undefined) return held
 
         const cwd = yield* mainPathOf(projectId)
-        const standing = yield* discovery.standing(provider)
         const resolved = yield* Effect.result(discovery.resolve(provider))
         if (Result.isFailure(resolved)) {
-          // Which of the three it is, said by the machine rather than guessed from the refusal:
-          // the sentence is the refusal's own, and the kind is what the composer draws with it.
-          if (!standing.found) return offerRefused('not_installed', resolved.failure.message)
-          if (!standing.authenticated)
-            return offerRefused('not_signed_in', resolved.failure.message)
-          return offerRefused('failed', resolved.failure.message)
+          // The refusal itself says which of the three it is — it is the one that read the
+          // machine — and its sentence goes with it. Asking the machine a second time to name
+          // the kind was a second look at a `PATH` that can have changed between the two, and a
+          // kind that disagreed with the sentence beside it.
+          return offerRefused(refusalKind(resolved.failure), resolved.failure.message)
         }
 
         const started = yield* Effect.result(

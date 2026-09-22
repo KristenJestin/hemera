@@ -265,13 +265,6 @@ export interface DiscoveryService {
   /** The three agents, and what this machine can say about each of them. */
   readonly list: () => Effect.Effect<readonly DiscoveredAgent[], never>
   /**
-   * What this machine says about one agent: found or not, signed in or not, and its version.
-   *
-   * The same answer `list` gives for all three, asked of one — which is what the composer of a
-   * Home needs before it offers anything, and what a refusal is written from.
-   */
-  readonly standing: (id: AgentProvider) => Effect.Effect<DiscoveredAgent, never>
-  /**
    * The agent and the command that starts it, or a refusal saying why it cannot be started.
    *
    * Nothing is started here, and nothing is started after a refusal either: an agent this
@@ -348,7 +341,6 @@ export const discoveryLayer = Layer.effect(
       // the difference between one command that will not answer and three of them in a row.
       list: () =>
         Effect.forEach(AGENT_PROVIDERS, (id) => probe(ADAPTERS[id]), { concurrency: 'unbounded' }),
-      standing: (id) => probe(ADAPTERS[id]),
       resolve: (id) =>
         Effect.gen(function* () {
           const adapter = ADAPTERS[id]
