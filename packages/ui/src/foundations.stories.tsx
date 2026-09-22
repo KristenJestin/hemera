@@ -133,31 +133,21 @@ export const Typography: Story = {
   },
 }
 
-/** A colour of the theme as the browser hands it back, in the three channels of a hex. */
-function channelsOf(colour: string): [number, number, number] {
-  const hex = colour.trim().replace('#', '')
-  return [0, 2, 4].map((at) => Number.parseInt(hex.slice(at, at + 2), 16) / 255) as [
-    number,
-    number,
-    number,
-  ]
-}
-
 /** What WCAG calls the relative luminance of a colour, which is what a ratio is made of. */
 function luminanceOf(colour: string): number {
-  const [red, green, blue] = channelsOf(colour).map((channel) =>
-    channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
-  ) as [number, number, number]
-  return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+  const hex = colour.trim().replace('#', '')
+  const channel = (at: number): number => {
+    const value = Number.parseInt(hex.slice(at, at + 2), 16) / 255
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
 }
 
 /** The contrast of two colours, the way the checker of the catalogue counts it. */
 function contrastOf(one: string, other: string): number {
-  const [light, dark] = [luminanceOf(one), luminanceOf(other)].toSorted((a, b) => b - a) as [
-    number,
-    number,
-  ]
-  return (light + 0.05) / (dark + 0.05)
+  const first = luminanceOf(one)
+  const second = luminanceOf(other)
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05)
 }
 
 /** A role of the theme, read off the document the way every component reads it. */
@@ -182,8 +172,8 @@ export const Selection: Story = {
   render: () => (
     <div className="flex flex-col gap-2">
       <p data-testid="selected" className="max-w-prose text-base">
-        Drag across this line: selected text keeps its own two colours, so a comment, a command
-        and a line of a diff are all read the same way once they are under the hand.
+        Drag across this line: selected text keeps its own two colours, so a comment, a command and
+        a line of a diff are all read the same way once they are under the hand.
       </p>
       <p className="max-w-prose font-mono text-sm text-muted-foreground">
         git rebase --onto dev feature/lot-1
