@@ -53,3 +53,39 @@ export {
   SESSION_ENTRY_KINDS,
   SESSION_ENTRY_ORIGINS,
 } from './domain/session.ts'
+export {
+  READ_PAGE_BYTES,
+  SEARCH_MATCH_LIMIT,
+  SEARCH_SCAN_BYTES,
+  TOOL_NAMES,
+  admitTool,
+  offeredTools,
+} from './domain/tools.ts'
+export type {
+  GuardDecision,
+  SearchHit,
+  SearchLimit,
+  SearchResult,
+  ToolName,
+} from './domain/tools.ts'
+export {
+  COMMAND_KINDS,
+  DuplicateCommandNameError,
+  EmptyCommandLineError,
+  EmptyCommandNameError,
+  UnknownCommandKindError,
+  addressIn,
+  commandKind,
+  commandLine,
+  commandName,
+  joinsRunningRun,
+} from './domain/commands.ts'
+export type { Command, CommandKind } from './domain/commands.ts'
+export {
+  AGENTS_FILE,
+  CONTEXT_BASE,
+  CONTEXT_SOURCES,
+  DELIVERY_MARKER,
+  deliveryText,
+} from './domain/context.ts'
+export type { ContextSource } from './domain/context.ts'

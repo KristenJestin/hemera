@@ -74,6 +74,9 @@ export const SESSION_ENTRY_KINDS = [
   'usage',
   'turn',
   'note',
+  'hemera_tool_call',
+  'command_run',
+  'context_delivery',
 ] as const
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number]
