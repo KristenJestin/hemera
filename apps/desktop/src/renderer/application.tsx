@@ -389,7 +389,9 @@ export function Application() {
       .invoke('preferences.read', {})
       .then((worn) => {
         setRemembered(worn.activeSessions)
-        setComposers(worn.composers)
+        // Nothing where an older data folder, or an engine that predates the preference, answers
+        // without it: what a window does then is open on no choice at all, not fall over.
+        setComposers(worn.composers ?? {})
       })
       .catch(unanswered('preferences.read'))
     void window.hemera
@@ -633,7 +635,7 @@ export function Application() {
   const readComposers = useCallback(() => {
     void window.hemera
       .invoke('preferences.read', {})
-      .then((worn) => setComposers(worn.composers))
+      .then((worn) => setComposers(worn.composers ?? {}))
       .catch(unanswered('preferences.read'))
   }, [])
 
