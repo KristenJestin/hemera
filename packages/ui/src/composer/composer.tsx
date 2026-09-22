@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { IconButton } from '../components/button/button.tsx'
 import { Frame, FrameFooter } from '../components/frame/frame.tsx'
@@ -6,7 +6,7 @@ import { IconAt, IconPaperclip } from '../icons.ts'
 import { ComposerActions } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
-import { MentionMenu } from './mention-menu.tsx'
+import { MentionMenu, mentionOptionId } from './mention-menu.tsx'
 import { PromptInput, type PromptShape } from './prompt-input.tsx'
 
 /**
@@ -153,6 +153,10 @@ export function Composer({
   const [refusal, setRefusal] = useState<string | null>(null)
   const [chosen, setChosen] = useState(workspaces[0] ?? 'main')
   const current = workspace ?? chosen
+  // What names the entries of the mention band, so the box can point at the one the arrows are
+  // on: the band takes no focus, and this is the only thing that tells a reader who cannot see
+  // it which file Enter would put in. Two composers on one page are two sets of names.
+  const mentions = useId()
 
   /**
    * Whether there is anything to send, which Enter and the button both ask.
@@ -352,6 +356,7 @@ export function Composer({
               hint={
                 picking === 'attach' ? 'Attach a file of the Project…' : 'A file of the Project…'
               }
+              optionId={mentions}
             />
           }
           tools={
@@ -391,6 +396,13 @@ export function Composer({
             handle={box}
             value={value}
             placeholder={placeholder}
+            // Which file the band is on, while there is a band: the caret never leaves the box,
+            // so the box is what has to name it.
+            activeDescendant={
+              picking !== null && matches[active] !== undefined
+                ? mentionOptionId(mentions, active)
+                : undefined
+            }
             onValueChange={typed}
             onKeyDown={(event) => {
               // The list open over the box reads the arrows and Enter, and says so by taking the

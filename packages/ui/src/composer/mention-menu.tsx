@@ -68,6 +68,19 @@ export interface MentionMenuProps {
   tooMany?: boolean | undefined
   /** What the band at the top says, since the same list is reached two ways. */
   hint?: string | undefined
+  /**
+   * What each entry is named in the page, as `<optionId>-<index>`.
+   *
+   * The caret stays in the box while this list is read, so nothing here is ever focused: the box
+   * names the entry the arrows are on with `aria-activedescendant`, and that name is this. The
+   * two have to be built the same way or the box would be pointing at nothing.
+   */
+  optionId?: string | undefined
+}
+
+/** How an entry of the band is named in the page, for the box that points at it. */
+export function mentionOptionId(optionId: string, index: number): string {
+  return `${optionId}-${index}`
 }
 
 export function MentionMenu({
@@ -78,6 +91,7 @@ export function MentionMenu({
   onChoose,
   tooMany = false,
   hint = 'A file of the Project…',
+  optionId = 'mention',
 }: MentionMenuProps): ReactNode {
   if (!open) return null
   return (
@@ -95,6 +109,7 @@ export function MentionMenu({
           {files.map((file, index) => (
             <button
               key={file}
+              id={mentionOptionId(optionId, index)}
               type="button"
               role="option"
               aria-selected={index === activeIndex}
