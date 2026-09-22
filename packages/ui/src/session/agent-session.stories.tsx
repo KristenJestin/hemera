@@ -409,6 +409,20 @@ export const Complete: Story = {
     await expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
     const pill = canvas.getByRole('combobox', { name: 'Workspace' })
     await expect(onOneLine(pill, stops[1]!), 'the foot of the composer wrapped').toBe(true)
+
+    /*
+     * The thread is the column the composer is written in, to the pixel (trial of 22 September
+     * 2026). The scroller carries no padding across the line any more, so what was said and what
+     * was answered start where the frame starts — and the row above the box, the meter and what
+     * the turn is doing, starts there too. Asked of the boxes the browser laid out, because an
+     * inset of six pixels is invisible in the markup and unmissable on the screen.
+     */
+    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
+    const frame = canvas.getByRole('textbox').closest('.rounded-xl')!
+    const edge = frame.getBoundingClientRect().left
+    await expect(thread.getBoundingClientRect().left, 'the thread left the frame’s edge').toBe(edge)
+    const loader = canvas.getByRole('status', { name: 'Waiting for your permission' })
+    await expect(loader.getBoundingClientRect().left, 'the row above the box is inset').toBe(edge)
     // And what the turn has spent is said above the box, not in the row that would have wrapped.
     await expect(canvas.getByLabelText(/12,400 of 200,000 tokens used/)).toBeVisible()
     await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()

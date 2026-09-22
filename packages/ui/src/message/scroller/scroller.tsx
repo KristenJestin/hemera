@@ -67,9 +67,16 @@ const COLUMN = 'relative flex min-w-0 flex-1 flex-col'
  * in places rather than in a proportion, and a bar ruled down the reading column is chrome over
  * what is being read. It is the rail that is drawn only when it overflows, so the two never
  * disagree about whether there is anything below.
+ *
+ * It carries no padding across the line, and that is the whole of what the thread's width is
+ * (trial of 22 September 2026): a message and an answer sit on the edges of the column the page
+ * gave them, which is the column the composer's frame is drawn on. Six pixels of its own here
+ * meant a thread inset from the box it is written in — two left edges a hand's width apart, down
+ * the middle of the one screen the reader never leaves. Above and below it still breathes: that
+ * is the thread's own rhythm, and nothing is aligned to it.
  */
 const BOX =
-  'scroll-quiet relative flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pt-4 pb-6 outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring'
+  'scroll-quiet relative flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pt-4 pb-6 outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring'
 
 /**
  * The pill's row, which covers the thread without taking it: the row is the full width of the
