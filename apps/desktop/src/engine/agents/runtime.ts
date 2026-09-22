@@ -1180,6 +1180,18 @@ export const runtimeLayer = Layer.effect(
           )
         }
 
+        // The user's own message is written first, and by `append`: the thread shows what was
+        // asked before what was answered, and it is what proposes the Session's title. It is
+        // handed to the window like every other entry, because the page draws the thread from
+        // what arrives: a message written and never announced is one only a second read shows.
+        //
+        // It is written before the agent is started rather than after: a cold start is a process
+        // to spawn, a handshake and a `session/new`, and a window that waited for all three would
+        // show an empty Session for as long as they take. A start that then fails leaves the
+        // message where it was written, and the refusal is what follows it.
+        const asked = yield* attempt('writing the message', sessions.append(sessionId, text))
+        notices.wrote(sessionId, asked.entry)
+
         const held = yield* opened(sessionId)
         const turn: Turn = {
           id: `${sessionId}:${Date.now()}`,
@@ -1189,13 +1201,6 @@ export const runtimeLayer = Layer.effect(
           closed: null,
         }
         turns.set(sessionId, turn)
-
-        // The user's own message is written first, and by `append`: the thread shows what was
-        // asked before what was answered, and it is what proposes the Session's title. It is
-        // handed to the window like every other entry, because the page draws the thread from
-        // what arrives: a message written and never announced is one only a second read shows.
-        const asked = yield* attempt('writing the message', sessions.append(sessionId, text))
-        notices.wrote(sessionId, asked.entry)
 
         const sent = held.context === null ? text : `${held.context}\n\n${text}`
         held.context = null

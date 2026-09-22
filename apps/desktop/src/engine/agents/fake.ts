@@ -586,12 +586,19 @@ export function fakeSupervisor(agent: FakeAgent): Layer.Layer<ProcessSupervisor>
  * happens *after* an agent was let go — the probe of a Home the pool closed, and the next
  * choice made in that composer — needs a second one. It is a suite's own business which,
  * hence a question rather than a list here.
+ *
+ * `before` is awaited at every start, so a suite can hold one open: a start is a spawn, a
+ * handshake and a `session/new`, and what the window shows while those are happening can only be
+ * read while they still are.
  */
-export function fakeSupervisorOf(next: () => FakeAgent): Layer.Layer<ProcessSupervisor> {
+export function fakeSupervisorOf(
+  next: () => FakeAgent,
+  before: () => Promise<void> = () => Promise.resolve(),
+): Layer.Layer<ProcessSupervisor> {
   return Layer.succeed(ProcessSupervisor, {
     start: (command) =>
       Effect.acquireRelease(
-        Effect.sync(() => {
+        Effect.map(Effect.promise(before), () => {
           const agent = next()
           // Recorded on the agent itself, so a suite can say what was started — and, which is
           // the point of D5-17, what was not.

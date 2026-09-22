@@ -25,6 +25,7 @@ import {
   aSession,
   entryOf,
   gated,
+  held as heldGate,
   heldInThread,
   machine,
   optionsOf,
@@ -658,6 +659,52 @@ describe('An agent that cannot be asked', () => {
         // The agent's own name and what to do about it, and no JSON of any refusal's fields.
         expect(offered.refusal?.message).toBe('Codex is installed but not signed in.')
         expect(offered.refusal?.message).not.toContain('{')
+      }),
+    )
+  })
+})
+
+/**
+ * What the thread shows while the agent is still being started (design D5-05, D5-12).
+ *
+ * A cold start is a process to spawn, a handshake and a `session/new`, and a thread that waited
+ * for the three would be empty for as long as they take — showing nothing of the message that was
+ * just sent. The message is written and announced first, and the start happens under it.
+ */
+describe('The user’s message is in the thread before the agent has started', () => {
+  test('it is written and announced while the start is still happening', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'reading it now' }] })
+    const gate = heldGate()
+    const window = watching()
+    const run = application(
+      dataFolder,
+      window.layer,
+      machine,
+      fakeSupervisorOf(
+        () => agent,
+        () => gate.promise,
+      ),
+    )
+
+    await run(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'read the reader'))
+
+        // The supervisor is still behind the gate, so nothing has been started — and the thread
+        // already holds what was typed, and the window has already been told about it.
+        const thread = yield* heldInThread(session.id, (entries) => entries.length > 0)
+        expect(thread.map((entry) => [entry.role, entry.kind, entry.body])).toEqual([
+          ['user', 'message', 'read the reader'],
+        ])
+        expect(agent.starts).toEqual([])
+        expect(window.pushed[0]?.entry?.body).toBe('read the reader')
+
+        gate.carryOn()
+        const report = yield* Fiber.join(running)
+
+        expect(report.stopReason).toBe('end_turn')
       }),
     )
   })
