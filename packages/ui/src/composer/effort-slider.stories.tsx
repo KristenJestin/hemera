@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { MotionConfig } from 'motion/react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import {
@@ -7,21 +8,28 @@ import {
   OPENCODE_EFFORTS,
   SetEffort,
 } from './agent-model-menu-fixtures.tsx'
+import type { EffortChoice } from './agent-model-menu-shared.tsx'
 import { EffortSlider } from './effort-slider.tsx'
 
 /**
- * **Variant 2 of the effort — the vertical slider.** One track, one notch per step, the thumb
- * on the one that is on, and the agent's word for it beside the thumb.
+ * **The effort, as the maintainer kept it on 22 September 2026.** One track, one notch per
+ * level, a short mark beside each of them, the thumb on the level that is on and the agent's
+ * own word for it over the top.
  *
  * Read down, a scale reads as a scale: more at the top, less at the bottom, and the distance
- * between two steps is the distance the thumb travels. It costs the height the row did not
+ * between two levels is the distance the thumb travels. It costs the height the row did not
  * spend and buys back the width the row did — which is the trade the panel is being asked to
  * make, since a panel has height to spare and no width at all.
  *
- * It is one control and not six: it takes the focus once, says where it stands in the agent's
- * own word through `aria-valuetext`, and the arrows walk it with Home and End at the two ends.
- * The thumb travels on `morph`; the word is set where it lands, because a word stretched
- * between two lengths on the way is a word nobody can read mid-flight.
+ * It is a slider and not a row of notches: the track is pressed, dragged and walked with the
+ * keys. The thumb follows the hand while it is held and drops onto the nearest notch when it is
+ * let go, a press anywhere on the track is the nearest notch, and the arrows, the page keys,
+ * Home and End walk it without a pointer at all. It takes the focus once and says where it
+ * stands in the agent's own word through `aria-valuetext`.
+ *
+ * Nothing in the panel moves when the level changes: every word of the scale is drawn in the
+ * same cell of a grid and all but the one that is on are invisible, so the column is as wide as
+ * the longest word whichever one is being shown.
  */
 const meta = {
   tags: ['autodocs', 'new'],
@@ -40,10 +48,63 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/**
+ * A scale whose levels the agent said something about, which is what `Default` needs.
+ *
+ * `Default` is announced as a value like the others and ACP never says which level it maps to,
+ * so it is drawn as its own notch at the foot of the scale with a mark like the others, and
+ * what it means is the agent's own sentence or nothing at all. Two of these carry one and the
+ * rest do not, which is the shape an answer actually comes in.
+ */
+const DESCRIBED: EffortChoice[] = [
+  { id: 'default', label: 'Default', description: 'Whatever the agent starts on' },
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Xhigh' },
+  { id: 'max', label: 'Max', description: 'Everything it has, for as long as it takes' },
+]
+
+/** What the word for the last of them is, which two stories read and one of them types. */
+const EVERYTHING = 'Everything it has, for as long as it takes'
+
+/** What a dispatched pointer carries: one primary pointer, and an event that can be refused. */
+const POINTER = { bubbles: true, cancelable: true, pointerId: 1, isPrimary: true }
+
+/**
+ * One painted frame, twice over: React has answered the event and motion has drawn the answer.
+ *
+ * A pointer dispatched from a story is answered in a state update like any other, and a story
+ * that read the page in the same breath would be reading it before React had touched it.
+ */
+function painted(): Promise<void> {
+  return new Promise((done) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => done()))
+  })
+}
+
+/** Where the middle of an element is, down the window. */
+function middleOf(element: Element | null): number {
+  const box = element!.getBoundingClientRect()
+  return box.top + box.height / 2
+}
+
+/** Where the middle of a notch is, down the window. */
+function notchAt(scale: HTMLElement, id: string): number {
+  return middleOf(scale.querySelector(`[data-step="${id}"]`))
+}
+
+/** A hand on the track: pressed, moved or let go at that height, and the frame it is drawn in. */
+async function hand(track: HTMLElement, what: string, clientY: number): Promise<void> {
+  const box = track.getBoundingClientRect()
+  track.dispatchEvent(new PointerEvent(what, { ...POINTER, clientX: box.left + 2, clientY }))
+  await painted()
+}
+
 /** Every prop as a control, and the answer wired to a page that keeps it. */
 export const Playground: Story = {}
 
-/** Nothing set, something set, three steps instead of six, and the control turned off. */
+/** Nothing set, something set, three levels instead of six, and the control turned off. */
 export const States: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
@@ -69,7 +130,75 @@ export const States: Story = {
   },
 }
 
-/** The arrows walk it, Home and End are its two ends, and the thumb follows. */
+/**
+ * The thumb is dragged: it follows the hand between the notches, and drops onto one when it is
+ * let go.
+ *
+ * Both halves are the point. A thumb that jumped from notch to notch under the hand is a row of
+ * buttons being pressed in turn, and a thumb left between two notches once the hand has gone is
+ * a value nobody can name — so it follows exactly while it is held, and lands exactly when it
+ * is dropped.
+ */
+export const Dragging: Story = {
+  args: { effort: 'high' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+    const track = canvas.getByTestId('effort-scale')
+    const thumb = canvas.getByTestId('effort-thumb')
+
+    // Taken hold of at Medium, which is where the press landed rather than where it was.
+    await hand(track, 'pointerdown', notchAt(scale, 'medium'))
+    await expect(scale).toHaveAttribute('aria-valuetext', 'Medium')
+
+    // Dragged up between High and Xhigh, a little short of Xhigh: the level that is set is the
+    // nearer of the two, and the thumb is where the hand is rather than where that level is.
+    const between = (notchAt(scale, 'high') + notchAt(scale, 'xhigh')) / 2 - 4
+    await hand(track, 'pointermove', between)
+    await expect(scale).toHaveAttribute('aria-valuetext', 'Xhigh')
+    await expect(Math.abs(middleOf(thumb) - between)).toBeLessThan(1)
+    await expect(Math.abs(middleOf(thumb) - notchAt(scale, 'xhigh'))).toBeGreaterThan(1)
+
+    // Let go where it was and not on a notch: the thumb goes to the notch on its own.
+    await hand(track, 'pointerup', between)
+    await expect(args.onEffortChange).toHaveBeenLastCalledWith('xhigh')
+    await waitFor(
+      () => {
+        expect(Math.abs(middleOf(thumb) - notchAt(scale, 'xhigh'))).toBeLessThan(1)
+      },
+      { timeout: 2000 },
+    )
+  },
+}
+
+/**
+ * A press anywhere on the track sets the nearest notch, and a press off every notch is still a
+ * press on the track.
+ *
+ * This is what the control did not do before the pass of 22 September 2026: the notches
+ * answered and the track between them answered nothing, so a reader aiming at a level and
+ * missing it by three pixels was a reader whose press did nothing at all.
+ */
+export const ClickOnTrack: Story = {
+  args: { effort: 'high' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+    const track = canvas.getByTestId('effort-scale')
+
+    // Between Default and Low, four pixels nearer Low, and on neither of their notches.
+    const between = (notchAt(scale, 'default') + notchAt(scale, 'low')) / 2 - 4
+    await hand(track, 'pointerdown', between)
+    await hand(track, 'pointerup', between)
+    await expect(args.onEffortChange).toHaveBeenLastCalledWith('low')
+    await expect(scale).toHaveAttribute('aria-valuetext', 'Low')
+
+    // And the press hands the control the focus, so what a pointer began the keys can finish.
+    await expect(scale).toHaveFocus()
+  },
+}
+
+/** The arrows walk it, the page keys take a third of it, Home and End are its two ends. */
 export const Keyboard: Story = {
   args: { effort: 'medium' },
   play: async ({ canvasElement, args }) => {
@@ -91,6 +220,16 @@ export const Keyboard: Story = {
       expect(scale).toHaveAttribute('aria-valuetext', 'Medium')
     })
 
+    // A page is a third of the scale: two of Claude's six levels, and more than an arrow.
+    await userEvent.keyboard('{PageUp}')
+    await waitFor(() => {
+      expect(scale).toHaveAttribute('aria-valuetext', 'Xhigh')
+    })
+    await userEvent.keyboard('{PageDown}')
+    await waitFor(() => {
+      expect(scale).toHaveAttribute('aria-valuetext', 'Medium')
+    })
+
     await userEvent.keyboard('{End}')
     await waitFor(() => {
       expect(scale).toHaveAttribute('aria-valuetext', 'Max')
@@ -108,23 +247,110 @@ export const Keyboard: Story = {
 }
 
 /**
- * A press on a notch sets it, and it is the scale that answers rather than the notch.
+ * `Default` as its own notch at the foot of the scale, and what the agent said about it.
  *
- * The mark is pressed and not the word beside it: every word is drawn so that the control is as
- * wide as its widest step whatever is on, and the ones that are not on are drawn and not shown.
+ * The agent announces `Default` as a value like the others and ACP never says which level it
+ * maps to. Hemera does not invent one: it is the lowest notch, marked `D` as every level is
+ * marked, and what it means is the agent's own sentence under the name — or nothing at all,
+ * for the levels the agent said nothing about.
  */
-export const Pointed: Story = {
-  play: async ({ canvasElement, args }) => {
+export const WithDefault: Story = {
+  args: { efforts: DESCRIBED, effort: 'default' },
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const scale = canvas.getByRole('slider', { name: 'Effort' })
-    const notch = scale.querySelector('[data-step="default"]')?.firstElementChild
-    await expect(notch ?? null).not.toBeNull()
-    if (notch === null || notch === undefined) return
+    // The marks, and not the words over the track: `Max` is both, and only one of them is a
+    // mark on the scale.
+    const marks = within(canvas.getByTestId('effort-marks'))
 
-    await userEvent.click(notch)
-    await expect(args.onEffortChange).toHaveBeenCalledWith('default')
+    // Its own notch at the foot of the scale: under every other mark, and marked like them.
+    await expect(marks.getByText('D')).toBeVisible()
+    await expect(middleOf(marks.getByText('D'))).toBeGreaterThan(middleOf(marks.getByText('L')))
+    await expect(middleOf(marks.getByText('Max'))).toBeLessThan(middleOf(marks.getByText('XH')))
+
+    // The sentence is the agent's, and it is read as part of where the control stands.
+    await expect(canvas.getByText('Whatever the agent starts on')).toBeVisible()
+    await expect(scale).toHaveAttribute('aria-valuetext', 'Default, Whatever the agent starts on')
+
+    // A level the agent said nothing about is given no sentence rather than an invented one.
+    scale.focus()
+    await userEvent.keyboard('{ArrowUp}')
     await waitFor(() => {
-      expect(scale).toHaveAttribute('aria-valuetext', 'Default')
+      expect(scale).toHaveAttribute('aria-valuetext', 'Low')
     })
+    await expect(canvas.getByText('Whatever the agent starts on')).not.toBeVisible()
+  },
+}
+
+/**
+ * Nothing moves when the level does — measured, and not argued.
+ *
+ * This is the defect the pass of 22 September 2026 was asked to fix: the word over the track is
+ * the level's own, the levels are not the same length, and a column as wide as the word being
+ * shown is a menu that jumps every time the reader walks the scale. The words are stacked in
+ * one cell of a grid, the descriptions in another, and the marks stand in a column of one
+ * width — so the box is the same at both ends of the scale, and so is where it sits.
+ */
+export const NoMovement: Story = {
+  args: { efforts: DESCRIBED, effort: 'default', caption: 'Opus 4.5' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+    const panel = canvasElement.firstElementChild!
+
+    const before = panel.getBoundingClientRect()
+    const stood = scale.getBoundingClientRect()
+
+    scale.focus()
+    // Right across the scale: the longest word to the shortest, a level the agent described to
+    // one it did not, and the first notch to the last.
+    await userEvent.keyboard('{End}')
+    await waitFor(() => {
+      expect(scale).toHaveAttribute('aria-valuetext', `Max, ${EVERYTHING}`)
+    })
+    await painted()
+
+    const after = panel.getBoundingClientRect()
+    await expect(after.width).toBeCloseTo(before.width, 1)
+    await expect(after.height).toBeCloseTo(before.height, 1)
+
+    const stands = scale.getBoundingClientRect()
+    await expect(stands.width).toBeCloseTo(stood.width, 1)
+    await expect(stands.height).toBeCloseTo(stood.height, 1)
+    await expect(stands.left).toBeCloseTo(stood.left, 1)
+    await expect(stands.top).toBeCloseTo(stood.top, 1)
+  },
+}
+
+/**
+ * The same scale for a reader who asked for less movement: the thumb is on its notch, and
+ * nothing carried it there.
+ *
+ * `MotionConfig` is the way the preference is said here rather than the browser's own media
+ * query, for the reason the thread's own fold gives: the query is read once, when a component
+ * mounts, and a story that emulates it afterwards is testing a tree that never heard. What is
+ * proved is the rule — a scale told to move less is not one whose thumb travels quickly, it is
+ * one where the thumb is simply on the level that is set.
+ */
+export const ReducedMotion: Story = {
+  args: { effort: 'default' },
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <MotionConfig reducedMotion="always">
+      <SetEffort {...args} render={(props) => <EffortSlider {...props} />} />
+    </MotionConfig>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+    const thumb = canvas.getByTestId('effort-thumb')
+
+    scale.focus()
+    await userEvent.keyboard('{End}')
+    await painted()
+    // The whole length of the track inside one frame: `morph` would be a tenth of the way up
+    // it, which is the difference this assertion measures.
+    await expect(scale).toHaveAttribute('aria-valuetext', 'Max')
+    await expect(Math.abs(middleOf(thumb) - notchAt(scale, 'max'))).toBeLessThan(1)
   },
 }

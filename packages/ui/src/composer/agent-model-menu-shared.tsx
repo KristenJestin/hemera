@@ -54,6 +54,16 @@ export interface ModelChoice {
 export interface EffortChoice {
   id: string
   label: string
+  /**
+   * What the agent said this level is, where it said anything at all.
+   *
+   * `Default` is the case it exists for: the agent announces it as a value like the others and
+   * ACP says nothing about which level it stands for, so the agent's own sentence is the only
+   * thing that can — and Hemera inventing one would be inventing a level. The options of ACP
+   * carry no description today (`ConfigOption`), so nothing fills it yet: the control draws it
+   * where there is one and draws nothing where there is not.
+   */
+  description?: string | undefined
 }
 
 /** One thing the agent says it may be told to do without asking. */
@@ -226,15 +236,30 @@ export const MODES_DOWN = 'flex shrink-0 flex-col gap-0.5'
 export const MODES_ACROSS = 'grid shrink-0 grid-cols-2 gap-0.5'
 
 /**
- * Where an arrow, Home or End take a scale, and `null` for a key that is none of them.
+ * How far a page key goes: a third of the scale, and never less than an arrow's own step.
+ *
+ * A page has to be more than an arrow and less than End, and a fixed number of steps would be
+ * one or the other depending on how many levels the agent announced — two steps is a page of
+ * Claude's six and the whole of OpenCode's three.
+ */
+function pageOf(last: number): number {
+  return Math.max(1, Math.round(last / 3))
+}
+
+/**
+ * Where an arrow, a page key, Home or End take a scale, and `null` for a key that is none of
+ * them.
  *
  * Shared by the slider and the dial, which are the same scale drawn down and across: up and
- * right go on, down and left come back, Home and End are the two ends of it. One place, so a
- * reader who learned one of them has learned the other.
+ * right go on, down and left come back, the page keys go the same way by more than one, and
+ * Home and End are the two ends of it. One place, so a reader who learned one of them has
+ * learned the other.
  */
 export function steppedBy(key: string, here: number, last: number): number | null {
   if (key === 'ArrowUp' || key === 'ArrowRight') return Math.min(here + 1, last)
   if (key === 'ArrowDown' || key === 'ArrowLeft') return Math.max(here - 1, 0)
+  if (key === 'PageUp') return Math.min(here + pageOf(last), last)
+  if (key === 'PageDown') return Math.max(here - pageOf(last), 0)
   if (key === 'Home') return 0
   if (key === 'End') return last
   return null

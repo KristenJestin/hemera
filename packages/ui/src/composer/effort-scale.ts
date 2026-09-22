@@ -41,9 +41,13 @@ export const MARK_DONE = 'bg-primary'
  * track is the thing the hand has hold of. It brightens under the hand and under the focus, on
  * the theme's own `thumb-motion` — a CSS transition, so a reader asking for less movement is
  * given the end of it and nothing on the way.
+ *
+ * `active` and not only `hover`: a thumb being dragged is held rather than pointed at, and a
+ * halo that went back to its resting strength the moment the hand started moving would say the
+ * control had been let go of.
  */
 export const HALO =
-  'thumb-motion absolute inset-0 rounded-full shadow-halo group-hover:shadow-halo-strong group-focus-visible:shadow-halo-strong'
+  'thumb-motion absolute inset-0 rounded-full shadow-halo group-hover:shadow-halo-strong group-focus-visible:shadow-halo-strong group-active:shadow-halo-strong'
 
 /**
  * The thumb itself: a round surface larger than the track, ringed in the accent so that it
@@ -54,15 +58,63 @@ export const KNOB =
   'thumb-motion relative block size-full rounded-full border-2 border-primary bg-card shadow-sm group-hover:scale-110 group-active:scale-95'
 
 /**
- * How much of the track is behind the reader, as a share of the whole of it.
+ * Where a step sits along the track, between the foot of it and the head: 0 and 1.
  *
  * Measured between the middle of the first mark and the middle of the last, which is where the
  * track itself begins and ends: a fill measured edge to edge would stop short of the last mark
  * at the top of the scale and read as a scale that cannot be filled. A scale of one step is
  * filled or it is not; nothing set at all is empty.
  */
+export function fractionAt(here: number, last: number): number {
+  if (here <= 0) return 0
+  if (last <= 0) return 1
+  return here / last
+}
+
+/** The same place as the length CSS draws it, which is what the fill and the thumb are given. */
+export function share(fraction: number): string {
+  return `${fraction * 100}%`
+}
+
+/** How much of the track is behind the reader, as a share of the whole of it. */
 export function filledTo(here: number, last: number): string {
-  if (here <= 0) return '0%'
-  if (last <= 0) return '100%'
-  return `${(here / last) * 100}%`
+  return share(fractionAt(here, last))
+}
+
+/** How long a level's own word may be before it is worth shortening at all. */
+const SHORT = 3
+
+/**
+ * The short mark every level of a scale is written beside its notch as.
+ *
+ * A vertical scale has no room for the agent's own words down its side, and a scale with no
+ * words at all is six identical dots: the mark is the one letter that says which notch is which
+ * without the panel growing a column of text. It is derived from the label and never chosen
+ * here, because the levels are the agent's and not Hemera's — what `Default` means is the
+ * agent's business, and inventing a word for it is inventing a level.
+ *
+ * The rule is the initials, the label itself when it is short enough to stand as it is, and the
+ * first two letters where two levels would otherwise carry the same letter: Claude's six come
+ * out `D`, `L`, `M`, `H`, `XH` and `Max`. It is a set of marks and not a set of names — two
+ * levels that still collide read the same, and the word above the track is what settles it.
+ */
+export function marksOf(labels: readonly string[]): string[] {
+  const marks: string[] = []
+  for (const label of labels) marks.push(markOf(label, marks))
+  return marks
+}
+
+/** One mark, kept out of the marks already given out. */
+function markOf(label: string, taken: readonly string[]): string {
+  const words = label.split(/[^\p{L}\p{N}]+/u).filter((word) => word !== '')
+  // Two words are two initials: an agent that says "Very high" means both of them.
+  if (words.length > 1) return words.map((word) => word.slice(0, 1).toUpperCase()).join('')
+  const word = words[0] ?? label
+  // `x` in front of a level is a prefix and not a word: `Xhigh` is an extra high, and reads XH.
+  const first = /^x\p{L}/iu.test(word)
+    ? `X${word.slice(1, 2).toUpperCase()}`
+    : word.slice(0, 1).toUpperCase()
+  if (!taken.includes(first)) return first
+  // `Medium` took the M, so `Max` is written out rather than the two of them reading alike.
+  return word.length <= SHORT ? word : word.slice(0, 2)
 }

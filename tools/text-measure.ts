@@ -40,10 +40,16 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
  * is only that the measuring is written down rather than done for us by `layoutId`. It is named
  * here rather than left to a comment so that the day it starts measuring something else, this
  * list is where the argument happens.
+ *
+ * The effort's slider is the separator's case again: a thumb that is dragged has to know where
+ * the hand is along its own track, and the track is the only thing a pointer's position can be
+ * read against. It sizes nothing by what it reads — the track, the notches and the words beside
+ * them are steps of the scale, and the words are kept still by a grid rather than by a measure.
  */
 export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/shell/gutter.tsx',
   'packages/ui/src/shell/tab-mark.tsx',
+  'packages/ui/src/composer/effort-slider.tsx',
 ]
 
 export interface Refusal {
