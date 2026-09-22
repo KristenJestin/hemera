@@ -114,6 +114,64 @@ export function modeStage(options: readonly ConfigOption[]): Stage<ModeChoice> |
 }
 
 /**
+ * The effort each model puts a composer on by itself, which is that model's own default.
+ *
+ * It is not what the agent advises. Claude announces one `recommended` effort for every model —
+ * `Medium`, a generic advice — while the effort it lands on when the model changes is the
+ * model's own: `Xhigh` for Opus, `High` for Fable (probe of 22 September 2026).
+ *
+ * Only while nothing is pinned, though. Once an effort has been chosen, Claude Code pins it and
+ * keeps it across model changes, so the effort it announces after a model change is then the
+ * user's pin and not the model's default (its adapter, `effortPinnedLevel`). A model visited
+ * before the first choice teaches its default and keeps it; a model first visited after it
+ * teaches nothing, and the scale draws no rule for it rather than one where the user clicked.
+ * Read off the announcements and kept nowhere else: nothing of it is persisted.
+ */
+export interface ModelDefaults {
+  /** The effort each model landed on by itself, per model id. */
+  byModel: ReadonlyMap<string, string>
+  /** Whether an effort was chosen in this composer, which it never stops being. */
+  pinned: boolean
+}
+
+/** What a composer knows before the agent has announced anything: no default, nothing pinned. */
+export const NO_DEFAULTS: ModelDefaults = { byModel: new Map(), pinned: false }
+
+/**
+ * What the composer knows of its models' defaults once the agent has answered, from what it
+ * knew before and the option that answer is to — `null` for an answer to no choice at all (an
+ * offer, a Session opened, a list read again).
+ *
+ * - The effort was set: it is pinned from now on, and the answer teaches nothing.
+ * - Something else was set, or nothing, while nothing is pinned: the effort the agent announces
+ *   is where the model it announces puts a composer by itself — that model's default. A model
+ *   that announces no effort teaches nothing.
+ * - Anything at all once pinned: the effort announced is the pin, and teaches nothing.
+ */
+export function modelDefaultsAfter(
+  held: ModelDefaults,
+  options: readonly ConfigOption[],
+  setOptionId: string | null,
+): ModelDefaults {
+  const effort = effortStage(options)
+  if (setOptionId !== null && setOptionId === effort?.optionId) {
+    return held.pinned ? held : { byModel: held.byModel, pinned: true }
+  }
+  if (held.pinned) return held
+  const model = modelStage(options)
+  if (model?.current == null || effort?.current == null) return held
+  if (held.byModel.get(model.current) === effort.current) return held
+  const byModel = new Map(held.byModel)
+  byModel.set(model.current, effort.current)
+  return { byModel, pinned: false }
+}
+
+/** The effort the model on screen defaults to, or null where the composer never learned it. */
+export function effortDefaultOf(held: ModelDefaults, model: string | null): string | null {
+  return model === null ? null : (held.byModel.get(model) ?? null)
+}
+
+/**
  * Which agent a Home's composer stands on: the one picked in it, or the one the Project was
  * left on (design D5-17).
  *

@@ -14,7 +14,14 @@ import {
   type OfferedAgent,
 } from '@hemera/ui'
 
-import { effortStage, modeStage, modelStage, openingAgentOf } from '../agent-options.ts'
+import {
+  effortDefaultOf,
+  effortStage,
+  modeStage,
+  modelStage,
+  NO_DEFAULTS,
+  openingAgentOf,
+} from '../agent-options.ts'
 import type { AgentOffering } from '../agent-store.ts'
 
 /**
@@ -162,6 +169,11 @@ export function HomePage({
             onEffortChange={(chosen) => {
               if (effort !== null) pick(effort.optionId, chosen)
             }}
+            // The level this model puts a Session on by itself, which the scale marks.
+            effortDefault={effortDefaultOf(
+              offering?.modelDefaults ?? NO_DEFAULTS,
+              model?.current ?? null,
+            )}
             // The mode is the fourth row of the same panel: one agent, one control, and a foot
             // that does not wrap when a model has a long name (D17-11, D17-14).
             modes={mode?.choices ?? []}

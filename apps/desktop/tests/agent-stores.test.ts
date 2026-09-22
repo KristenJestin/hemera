@@ -17,14 +17,25 @@ import type {
   Session,
   SessionEntry,
 } from '@hemera/ipc'
-import { effortStage, modelStage, openingAgentOf } from '#renderer/agent-options.ts'
+import {
+  effortDefaultOf,
+  effortStage,
+  modeStage,
+  modelStage,
+  NO_DEFAULTS,
+  openingAgentOf,
+} from '#renderer/agent-options.ts'
 import {
   activityOf,
   agentOf,
+  carryModelDefaults,
+  chooseOption,
   forgetAgentRefusal,
   listenToAgents,
+  modelDefaultsOf,
   offerAgent,
   offeringOf,
+  readOptions,
   say,
   setOffered,
 } from '#renderer/agent-store.ts'
@@ -173,6 +184,7 @@ describe("Le choix fait avant la Session s'applique sur le sondage", () => {
       options: [],
       refusal: 'Sign in with `claude login`.',
       loading: false,
+      modelDefaults: NO_DEFAULTS,
     })
     // Asked once per agent and Project: the engine starts the agent to be told.
     await offerAgent('atlas', 'claude')
@@ -514,5 +526,124 @@ describe('Ce que l’agent dit de ses valeurs arrive jusqu’au menu', () => {
       { id: 'low', label: 'low', description: undefined, recommended: undefined },
       { id: 'high', label: 'high', description: undefined, recommended: undefined },
     ])
+  })
+})
+
+/** What Claude announces on a model, with the effort it is on: none at all for Haiku. */
+function claudeOn(model: string, effort: string | null): ConfigOption[] {
+  const models = option('model', ['fable', 'opus', 'sonnet', 'haiku'], model)
+  if (effort === null) return [models]
+  return [models, option('effort', ['low', 'medium', 'high', 'xhigh', 'max'], effort)]
+}
+
+/** The default a Home's composer learned for a model, or null where it learned none. */
+function homeDefault(projectId: string, model: string): string | null {
+  return effortDefaultOf(offeringOf(projectId, 'claude').modelDefaults, model)
+}
+
+/** And the one a Session learned. */
+function sessionDefault(sessionId: string, model: string): string | null {
+  return effortDefaultOf(modelDefaultsOf(sessionId), model)
+}
+
+describe('La règle du curseur marque le défaut du modèle', () => {
+  test("The model's own default effort is the one the agent lands on when the model changes", async () => {
+    // The Home: the first offer is what the agent started on, Fable at High (probe of
+    // 22 September 2026), and a model set is answered with the effort the new model lands on.
+    answers.set('agents.offer', offer(claudeOn('fable', 'high')))
+    await offerAgent('vega', 'claude')
+    expect(homeDefault('vega', 'fable')).toBe('high')
+
+    answers.set('agents.offerSet', offer(claudeOn('opus', 'xhigh')))
+    await setOffered('vega', 'claude', 'model', 'opus')
+    expect(homeDefault('vega', 'opus')).toBe('xhigh')
+    expect(homeDefault('vega', 'fable')).toBe('high')
+
+    // A model that announces no effort has no default to mark.
+    answers.set('agents.offerSet', offer(claudeOn('haiku', null)))
+    await setOffered('vega', 'claude', 'model', 'haiku')
+    expect(homeDefault('vega', 'haiku')).toBeNull()
+
+    // The Session: the same reading, off the list read back after the option is set.
+    answers.set('agents.options', { options: claudeOn('fable', 'high') })
+    await readOptions('session-9')
+    expect(sessionDefault('session-9', 'fable')).toBe('high')
+
+    answers.set('agents.setOption', {})
+    answers.set('agents.options', { options: claudeOn('sonnet', 'xhigh') })
+    await chooseOption('session-9', 'model', 'sonnet')
+    expect(sessionDefault('session-9', 'sonnet')).toBe('xhigh')
+  })
+
+  test("Moving the effort does not move the model's default", async () => {
+    answers.set('agents.offer', offer(claudeOn('fable', 'high')))
+    await offerAgent('orion', 'claude')
+    answers.set('agents.offerSet', offer(claudeOn('fable', 'max')))
+    await setOffered('orion', 'claude', 'effort', 'max')
+    expect(homeDefault('orion', 'fable')).toBe('high')
+
+    answers.set('agents.options', { options: claudeOn('opus', 'xhigh') })
+    await readOptions('session-10')
+    answers.set('agents.setOption', {})
+    answers.set('agents.options', { options: claudeOn('opus', 'low') })
+    await chooseOption('session-10', 'effort', 'low')
+    expect(sessionDefault('session-10', 'opus')).toBe('xhigh')
+    // And a list read again for no choice at all leaves it where it was.
+    await readOptions('session-10')
+    expect(sessionDefault('session-10', 'opus')).toBe('xhigh')
+  })
+
+  test("A pinned effort does not become a model's default", async () => {
+    // Claude Code keeps an effort the user chose across model changes (its `effortPinnedLevel`):
+    // Opus, first visited after Low was pinned, is announced on Low — which is the pin, not Opus.
+    answers.set('agents.offer', offer(claudeOn('fable', 'high')))
+    await offerAgent('lyra', 'claude')
+    answers.set('agents.offerSet', offer(claudeOn('fable', 'low')))
+    await setOffered('lyra', 'claude', 'effort', 'low')
+    answers.set('agents.offerSet', offer(claudeOn('opus', 'low')))
+    await setOffered('lyra', 'claude', 'model', 'opus')
+    expect(homeDefault('lyra', 'opus')).toBeNull()
+
+    // A Session made from that Home starts pinned: its first announcement is the pin the engine
+    // carried over, and it teaches nothing either.
+    carryModelDefaults('lyra', 'claude', 'session-11')
+    answers.set('agents.options', { options: claudeOn('sonnet', 'low') })
+    await readOptions('session-11')
+    expect(sessionDefault('session-11', 'sonnet')).toBeNull()
+    expect(sessionDefault('session-11', 'fable')).toBe('high')
+  })
+
+  test('A model visited before pinning keeps its default after pinning', async () => {
+    answers.set('agents.options', { options: claudeOn('fable', 'high') })
+    await readOptions('session-12')
+    answers.set('agents.setOption', {})
+    answers.set('agents.options', { options: claudeOn('opus', 'xhigh') })
+    await chooseOption('session-12', 'model', 'opus')
+
+    // Max is pinned on Opus, and Fable is announced on Max when it comes back: Fable keeps High.
+    answers.set('agents.options', { options: claudeOn('opus', 'max') })
+    await chooseOption('session-12', 'effort', 'max')
+    answers.set('agents.options', { options: claudeOn('fable', 'max') })
+    await chooseOption('session-12', 'model', 'fable')
+    expect(sessionDefault('session-12', 'fable')).toBe('high')
+    expect(sessionDefault('session-12', 'opus')).toBe('xhigh')
+  })
+
+  test('an option of a category the menu does not know is skipped', () => {
+    // Claude's `fast` switch on Opus: an on/off option, announced first, under a word of its own.
+    const fast: ConfigOption = {
+      id: 'fast',
+      name: 'Fast mode',
+      category: 'fast',
+      values: [],
+      current: 'false',
+    }
+    const announced = [fast, ...claudeOn('opus', 'xhigh'), option('mode', ['plan'], 'plan')]
+
+    expect(modelStage(announced)?.optionId).toBe('model')
+    expect(effortStage(announced)?.optionId).toBe('effort')
+    expect(modeStage(announced)?.optionId).toBe('mode')
+    // Alone, it is none of the three: no stage, so no row in the menu.
+    expect([modelStage([fast]), effortStage([fast]), modeStage([fast])]).toEqual([null, null, null])
   })
 })

@@ -23,7 +23,13 @@ import {
 } from '@hemera/ui'
 
 import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
-import { effortStage, modeStage, modelStage } from '../agent-options.ts'
+import {
+  effortDefaultOf,
+  effortStage,
+  modeStage,
+  modelStage,
+  type ModelDefaults,
+} from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { whenOf } from '../journal-lines.ts'
 
@@ -120,6 +126,8 @@ export interface SessionPageProps {
   agents: OfferedAgent[]
   /** What the agent of this Session offers, as its own handshake answered. */
   options: readonly ConfigOption[]
+  /** What this Session learned of its models' own default efforts. */
+  modelDefaults: ModelDefaults
   onWrite: (body: string) => Promise<string | null>
   /**
    * Says something to the agent, which writes the user's own message itself.
@@ -157,6 +165,7 @@ export function SessionPage({
   agent,
   agents,
   options,
+  modelDefaults,
   onWrite,
   onSay,
   onStop,
@@ -444,6 +453,8 @@ export function SessionPage({
                 onEffortChange={(chosen) => {
                   if (effort !== null) onChooseOption(effort.optionId, chosen)
                 }}
+                // The level this model puts the Session on by itself, which the scale marks.
+                effortDefault={effortDefaultOf(modelDefaults, model?.current ?? null)}
                 // The mode is a row of that same panel since the trial of 22 September 2026: it
                 // is one of the four things the agent is set on, and a control of its own beside
                 // the menu was a second control asking about one agent.
