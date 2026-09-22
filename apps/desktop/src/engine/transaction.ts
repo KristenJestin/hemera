@@ -36,12 +36,16 @@ export class StaleVersionError extends Data.TaggedError('StaleVersionError')<{
    * this one says what happened and what to do about it.
    */
   override get message(): string {
-    return `This ${NAMED[this.entity] ?? this.entity} changed elsewhere; reopen it and try again.`
+    return `This ${named(this.entity)} changed elsewhere; reopen it and try again.`
   }
 }
 
 /** What the interface calls each of the entities a version is taken of. */
-const NAMED: Readonly<Record<string, string>> = { session: 'Session', project: 'Project' }
+function named(entity: string): string {
+  if (entity === 'session') return 'Session'
+  if (entity === 'project') return 'Project'
+  return entity
+}
 
 /** What a mutation hands back: what the caller asked for, and what the journal is to say. */
 export interface Mutation<A> {
