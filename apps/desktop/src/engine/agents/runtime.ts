@@ -437,6 +437,22 @@ export const runtimeLayer = Layer.effect(
 
     const live = new Map<string, Live>()
     const turns = new Map<string, Turn>()
+    /**
+     * The turns asked for whose agent is still being started.
+     *
+     * A cold start is a spawn, a handshake and a `session/new`, and the window shows the Stop
+     * from the moment the message is written: a Stop pressed then is kept here, and the turn it
+     * was pressed on is closed as cancelled instead of being sent.
+     */
+    const starting = new Map<string, Turn>()
+    /**
+     * What a load replayed so far, per Session and per message it named.
+     *
+     * A replay arrives outside any turn, in chunks like a live answer: the chunks of one message
+     * are accumulated here so that the entry they update ends up holding the whole message
+     * rather than the last few words of it.
+     */
+    const replayed = new Map<string, Map<string, string>>()
 
     /** One entry written for an agent, and the window told about it. */
     const write = (sessionId: string, entry: ThreadWrite) =>
@@ -454,6 +470,38 @@ export const runtimeLayer = Layer.effect(
         body,
         payload: JSON.stringify({ reason }),
         turnId: turn?.id ?? null,
+      })
+
+    /** What a load has replayed of this Session so far, made the first time it is asked. */
+    const replayedOf = (sessionId: string): Map<string, string> => {
+      const held = replayed.get(sessionId)
+      if (held !== undefined) return held
+      const made = new Map<string, string>()
+      replayed.set(sessionId, made)
+      return made
+    }
+
+    /**
+     * Closes every call of a turn that never finished.
+     *
+     * A turn that was stopped or whose agent died sends no more updates, and a call left
+     * `in_progress` is a spinner the thread would turn for ever.
+     */
+    const closeCalls = (sessionId: string, turn: Turn) =>
+      Effect.gen(function* () {
+        for (const [id, call] of turn.calls) {
+          if (call.status === 'completed' || call.status === 'failed') continue
+          call.status = 'cancelled'
+          yield* write(sessionId, {
+            role: 'agent',
+            kind: 'tool_call',
+            body: call.title,
+            payload: JSON.stringify({ call }),
+            correlationId: `call:${id}`,
+            turnId: turn.id,
+            state: 'cancelled',
+          }).pipe(Effect.ignore)
+        }
       })
 
     /**
@@ -480,8 +528,13 @@ export const runtimeLayer = Layer.effect(
             event.messageId === null
               ? `turn:${turn?.id ?? 'none'}:${kind}`
               : `${event.messageId}:${kind}`
-          const said = `${turn?.said.get(key) ?? ''}${event.text}`
-          turn?.said.set(key, said)
+          // A replayed message the agent named is accumulated like a live one: without it every
+          // chunk would overwrite the entry it matches with nothing but itself.
+          const heard =
+            turn?.said ??
+            (event.replay && event.messageId !== null ? replayedOf(sessionId) : undefined)
+          const said = `${heard?.get(key) ?? ''}${event.text}`
+          heard?.set(key, said)
           yield* write(sessionId, {
             role: 'agent',
             kind,
@@ -1006,6 +1059,24 @@ export const runtimeLayer = Layer.effect(
             // What the agent said before it died is in the thread before the entry that says it
             // died: the death does not jump the queue of its own words.
             yield* drained(held)
+            // A question the agent was asking when it died will never be answered, and a call it
+            // was running will never finish: both are closed here, or the thread would go on
+            // asking and spinning for as long as the Session lasts.
+            const pending = turn.permission
+            if (pending !== null) {
+              turn.permission = null
+              yield* write(sessionId, {
+                role: 'agent',
+                kind: 'permission_request',
+                body: pending.body,
+                payload: pending.payload,
+                correlationId: `perm:${pending.toolCallId}`,
+                turnId: turn.id,
+                state: 'cancelled',
+              }).pipe(Effect.ignore)
+              yield* Deferred.succeed(pending.answer, { cancelled: true })
+            }
+            yield* closeCalls(sessionId, turn)
             yield* note(sessionId, turn, 'The agent stopped running.', reason)
             yield* write(sessionId, {
               role: 'hemera',
@@ -1017,14 +1088,18 @@ export const runtimeLayer = Layer.effect(
               state: 'interrupted',
             })
           }
-          yield* attempt(
-            'recording the agent',
-            sessions.recordNative(sessionId, {
-              nativeSessionId: held.nativeSessionId,
-              nativeState: 'lost',
-              cwd: held.cwd,
-            }),
-          ).pipe(Effect.ignore)
+          // An agent that died before it held a session of its own has no handle to lose, and
+          // writing its empty one would erase the handle the Session had before it was started.
+          if (held.nativeSessionId !== '') {
+            yield* attempt(
+              'recording the agent',
+              sessions.recordNative(sessionId, {
+                nativeSessionId: held.nativeSessionId,
+                nativeState: 'lost',
+                cwd: held.cwd,
+              }),
+            ).pipe(Effect.ignore)
+          }
           notices.changed(sessionId, 'agent_died')
         }),
       )
@@ -1037,7 +1112,7 @@ export const runtimeLayer = Layer.effect(
      * shows, as is one whose agent this machine does not have (D5-17). Neither is replaced by
      * another agent.
      */
-    const opened = (sessionId: string): Effect.Effect<Live, AgentRuntimeError, Scope.Scope> =>
+    const openAgent = (sessionId: string): Effect.Effect<Live, AgentRuntimeError, Scope.Scope> =>
       Effect.gen(function* () {
         // The Session that a composer's choices start is opened on them, whether or not that
         // composer was drawn in this run of the application (D5-17).
@@ -1094,6 +1169,7 @@ export const runtimeLayer = Layer.effect(
           pending: 0,
         }
         live.set(sessionId, started)
+        replayed.delete(sessionId)
         // The entries of a turn are written in the order the agent said them, which is why one
         // fiber drains one Session's queue rather than each event being written where it lands.
         yield* Effect.forkScoped(
@@ -1105,7 +1181,15 @@ export const runtimeLayer = Layer.effect(
 
         const fresh = native.nativeSessionId === null || native.nativeState === 'none'
         const resumed = yield* takeBack(sessionId, started, native)
-        if (resumed !== null) return yield* Effect.fail(resumed)
+        if (resumed !== null) {
+          // An agent that holds no session is not one to hand the next call: it would be
+          // answered as running and refuse every prompt. It is let go, and the next call
+          // starts it again.
+          if (live.get(sessionId) === started) live.delete(sessionId)
+          yield* Queue.shutdown(queue).pipe(Effect.ignore)
+          yield* attempt('stopping the agent', process.stop).pipe(Effect.ignore)
+          return yield* Effect.fail(resumed)
+        }
 
         // A Session opened for the first time starts on the choices its composer made before it
         // existed: the model and the mode were picked on the Home's probe, and the session the
@@ -1121,6 +1205,31 @@ export const runtimeLayer = Layer.effect(
         }
         return started
       })
+
+    /**
+     * The agent of a Session kept in the pool's book, and noted as used just now (D5-05).
+     *
+     * A Session's agent is let go once nobody has talked to it for the pool's idle time, exactly
+     * as a Home's probe is; `release` itself refuses while a turn is running. It is written into
+     * the book again on every use, because a sweep that found it busy has already struck it out.
+     */
+    const kept = (sessionId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        yield* pool.held(sessionId, release(sessionId))
+        yield* pool.used(sessionId)
+      })
+
+    /**
+     * The agent of a Session, started once however many ask at the same time.
+     *
+     * Opening a Session reads what its agent offers while its first message is being sent: both
+     * ask for the agent before either has started it, and without the gate each would start one —
+     * the second taking the first's place, and the first left running with nobody to stop it.
+     */
+    const opened = (sessionId: string): Effect.Effect<Live, AgentRuntimeError, Scope.Scope> =>
+      gateOf(`session:${sessionId}`)
+        .withPermits(1)(openAgent(sessionId))
+        .pipe(Effect.tap(() => kept(sessionId)))
 
     /** Says the Session goes on with the agent it already had, and remembers where it runs. */
     const attached = (sessionId: string, held: Live, handle: string): Effect.Effect<null, never> =>
@@ -1316,7 +1425,7 @@ export const runtimeLayer = Layer.effect(
 
     const prompt = (sessionId: string, text: string) =>
       Effect.gen(function* () {
-        if (turns.has(sessionId)) {
+        if (turns.has(sessionId) || starting.has(sessionId)) {
           return yield* Effect.fail(
             new AgentRuntimeError({
               what: 'prompting',
@@ -1325,6 +1434,29 @@ export const runtimeLayer = Layer.effect(
           )
         }
 
+        // Held from here, before anything is awaited: a second prompt is refused rather than
+        // raced, and a Stop pressed while the agent is still being started has a turn to close.
+        const turn: Turn = {
+          id: `${sessionId}:${Date.now()}`,
+          said: new Map(),
+          calls: new Map(),
+          permission: null,
+          closed: null,
+        }
+        starting.set(sessionId, turn)
+
+        return yield* announcedTurn(sessionId, text, turn).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (starting.get(sessionId) === turn) starting.delete(sessionId)
+            }),
+          ),
+        )
+      })
+
+    /** The turn itself, once it is the one this Session is running. */
+    const announcedTurn = (sessionId: string, text: string, turn: Turn) =>
+      Effect.gen(function* () {
         // The user's own message is written first, and by `append`: the thread shows what was
         // asked before what was answered, and it is what proposes the Session's title. It is
         // handed to the window like every other entry, because the page draws the thread from
@@ -1346,12 +1478,12 @@ export const runtimeLayer = Layer.effect(
 
         return yield* Effect.gen(function* () {
           const held = yield* opened(sessionId)
-          const turn: Turn = {
-            id: `${sessionId}:${Date.now()}`,
-            said: new Map(),
-            calls: new Map(),
-            permission: null,
-            closed: null,
+          starting.delete(sessionId)
+          // Stopped while the agent was being started: nothing is sent, and the turn ends the way
+          // a Stop ends one.
+          if (turn.closed !== null) {
+            yield* closeTurn(sessionId, turn, turn.closed)
+            return { stopReason: turn.closed, usage: null } satisfies TurnReport
           }
           turns.set(sessionId, turn)
 
@@ -1403,7 +1535,16 @@ export const runtimeLayer = Layer.effect(
             yield* drained(held)
             yield* closeTurn(sessionId, turn, stopReason)
             return { stopReason, usage: null } satisfies TurnReport
-          }).pipe(Effect.ensuring(Effect.sync(() => turns.delete(sessionId))))
+          }).pipe(
+            Effect.ensuring(
+              Effect.gen(function* () {
+                turns.delete(sessionId)
+                // The idle time is counted from the end of the turn, not from its start: a sweep
+                // that ran during a long turn found it busy and struck it out of the book.
+                if (live.has(sessionId)) yield* kept(sessionId)
+              }),
+            ),
+          )
 
           return report
         }).pipe(Effect.ensuring(Effect.sync(() => notices.changed(sessionId, 'turn_ended'))))
@@ -1422,7 +1563,13 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         const held = live.get(sessionId)
         const turn = turns.get(sessionId)
-        if (turn === undefined) return
+        if (turn === undefined) {
+          // A turn whose agent is still being started has sent nothing to cancel: it is marked,
+          // and the prompt closes it as cancelled instead of sending it.
+          const early = starting.get(sessionId)
+          if (early !== undefined) early.closed = 'cancelled'
+          return
+        }
 
         const pending = turn.permission
         if (pending !== null) {
@@ -1453,21 +1600,8 @@ export const runtimeLayer = Layer.effect(
         turn.closed = 'cancelled'
 
         // A call that was still running when the turn was stopped never finished, and the
-        // protocol has no word for it: an agent that is cancelled stops sending updates, and a
-        // call left `in_progress` is a spinner the thread would turn for ever.
-        for (const [id, call] of turn.calls) {
-          if (call.status === 'completed' || call.status === 'failed') continue
-          call.status = 'cancelled'
-          yield* write(sessionId, {
-            role: 'agent',
-            kind: 'tool_call',
-            body: call.title,
-            payload: JSON.stringify({ call }),
-            correlationId: `call:${id}`,
-            turnId: turn.id,
-            state: 'cancelled',
-          }).pipe(Effect.ignore)
-        }
+        // protocol has no word for it: an agent that is cancelled stops sending updates.
+        yield* closeCalls(sessionId, turn)
 
         if (held === undefined) return
         yield* attempt('cancelling the turn', held.connection.cancel()).pipe(Effect.ignore)
@@ -1543,10 +1677,11 @@ export const runtimeLayer = Layer.effect(
         const turn = turns.get(sessionId)
         // A turn is work in progress and a permission is a question the user is answering: an
         // agent that is doing either is not idle, whatever the clock says.
-        if (turn !== undefined) return
+        if (turn !== undefined || starting.has(sessionId)) return
         const held = live.get(sessionId)
         if (held === undefined) return
         live.delete(sessionId)
+        replayed.delete(sessionId)
         // The queue ending is what ends the fiber draining it: nothing keeps reading a Session
         // nobody is talking to.
         yield* Queue.shutdown(held.queue).pipe(Effect.ignore)
