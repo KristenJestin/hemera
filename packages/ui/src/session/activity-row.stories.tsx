@@ -10,7 +10,8 @@ import { ActivityRow } from './activity-row.tsx'
  * Four states, one row. A turn writes nothing for minutes at a time, and a thread that said
  * nothing while it ran was a thread the reader could not tell from a dead one. Each state is a
  * story, because each of them is a different promise: thinking and writing are work in flight,
- * running names the command it is on, and waiting is the turn stopped and asking.
+ * running names the command it is on, and waiting is the turn stopped and asking. Three more
+ * say how the turn ended, and stay until the next message: done, stopped, failed.
  */
 const THOUGHT = `The join on invoice_lines is the cost, not the formatting. Streaming will not fix
 it on its own, so the query goes first and the loop after.`
@@ -24,7 +25,7 @@ const meta = {
   argTypes: {
     state: {
       control: 'inline-radio',
-      options: ['thinking', 'running', 'waiting', 'streaming'],
+      options: ['thinking', 'running', 'waiting', 'streaming', 'done', 'stopped', 'failed'],
       description: 'What the turn is doing, as the engine reports it.',
     },
     detail: {
@@ -32,6 +33,10 @@ const meta = {
       description: 'What it is doing it to: the title of the tool call. Only `running` has one.',
     },
     thought: { control: 'text', description: 'The thought arriving now, which the chevron opens.' },
+    elapsedMs: {
+      control: 'number',
+      description: 'How long the turn took, in milliseconds. Only `done` says it.',
+    },
     className: { table: { disable: true } },
   },
 } satisfies Meta<typeof ActivityRow>
@@ -85,6 +90,41 @@ export const Streaming: Story = {
 }
 
 /**
+ * Done: the turn is over, and the row says so quietly, with how long it took. No indicator —
+ * nothing is in flight — and the success dot in its place.
+ */
+export const Done: Story = {
+  args: { state: 'done', elapsedMs: 12_400 },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Done in 12 s')).toBeVisible()
+    // Nothing is working any more, so nothing says it is.
+    await expect(canvas.queryByRole('status')).toBeNull()
+    await expect(canvas.queryByRole('button')).toBeNull()
+  },
+}
+
+/** Stopped: the reader stopped the turn, and the row says so without a figure. */
+export const Stopped: Story = {
+  args: { state: 'stopped', elapsedMs: 40_000 },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Stopped')).toBeVisible()
+    await expect(canvas.queryByRole('status')).toBeNull()
+  },
+}
+
+/** Failed: the agent went away under the turn. */
+export const Failed: Story = {
+  args: { state: 'failed' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Failed')).toBeVisible()
+    await expect(canvas.queryByRole('status')).toBeNull()
+  },
+}
+
+/**
  * The thought arriving now, one press away.
  *
  * Only the thought that is arriving: the thoughts already in the thread are blocks of their own
@@ -105,7 +145,7 @@ export const WithAThought: Story = {
   },
 }
 
-/** The four states in one column, which is the only way to check that four read as four. */
+/** The seven states in one column, which is the only way to check that seven read as seven. */
 export const States: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
@@ -114,11 +154,22 @@ export const States: Story = {
       <ActivityRow state="running" detail="cat recap.md" />
       <ActivityRow state="waiting" />
       <ActivityRow state="streaming" />
+      <ActivityRow state="done" elapsedMs={72_000} />
+      <ActivityRow state="stopped" />
+      <ActivityRow state="failed" />
     </div>
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const said = ['Thinking…', 'Running cat recap.md', 'Waiting for your permission', 'Writing…']
+    const said = [
+      'Thinking…',
+      'Running cat recap.md',
+      'Waiting for your permission',
+      'Writing…',
+      'Done in 1 min 12 s',
+      'Stopped',
+      'Failed',
+    ]
     await Promise.all(said.map(async (one) => expect(canvas.getByText(one)).toBeVisible()))
   },
 }

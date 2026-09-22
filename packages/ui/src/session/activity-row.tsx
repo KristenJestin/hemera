@@ -3,6 +3,7 @@ import { type ReactNode, useState } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
 import { Loading } from '../components/loading/loading.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 
 /**
  * What the turn is doing right now, at the end of the thread (design D17-04, D17-13).
@@ -20,8 +21,11 @@ import { Loading } from '../components/loading/loading.tsx'
  * things at once: that the agent was answering from the reader's side of the column, and that
  * the thread had grown by a block every time the turn changed its mind.
  *
- * It is drawn for the whole of a turn — thinking, running a tool, writing — and not at all when
- * the Session is idle. The page is what knows: it draws the row while the turn runs.
+ * It is drawn for the whole of a turn — thinking, running a tool, writing — and it stays once the
+ * turn is over, as a quiet line that says how it ended: "Done in 12 s", "Stopped", "Failed"
+ * (trial of 22 September 2026). A row that vanished the moment the turn ended left the reader
+ * wondering whether it had ended or died; the quiet line answers that, and goes when the next
+ * message is sent. The page is what knows which of the two to draw.
  *
  * Collapsed it is one line: "Thinking…", "Running cat recap.md", "Waiting for your permission",
  * "Writing…". The chevron opens the thought that is arriving *now*, and only that one: the
@@ -38,7 +42,8 @@ import { Loading } from '../components/loading/loading.tsx'
  * No dot beside the indicator: the indicator already says that something is in flight, and two
  * marks of the same fact on one line is one of them saying nothing. The indicator is the design
  * system's own, which stands still under reduced motion — nothing here writes a movement of its
- * own.
+ * own. A turn that has ended has nothing in flight, so it takes the dot in the indicator's place:
+ * the mark the thread already uses for where a piece of work stands, settled and still.
  */
 
 /**
@@ -61,8 +66,18 @@ const LABEL = 'truncate'
 /** The thought arriving now, under the line that announced it. */
 const THOUGHT = 'max-w-3xl text-sm whitespace-pre-wrap text-muted-foreground'
 
-/** The four things a turn is doing between one block of the thread and the next. */
-export type ActivityState = 'thinking' | 'running' | 'waiting' | 'streaming'
+/**
+ * The four things a turn is doing between one block of the thread and the next, and the three
+ * ways it can have ended.
+ */
+export type ActivityState =
+  | 'thinking'
+  | 'running'
+  | 'waiting'
+  | 'streaming'
+  | 'done'
+  | 'stopped'
+  | 'failed'
 
 /** What each of them is called, before the detail the caller may add to one of them. */
 const SAID: Record<ActivityState, string> = {
@@ -70,6 +85,32 @@ const SAID: Record<ActivityState, string> = {
   running: 'Running',
   waiting: 'Waiting for your permission',
   streaming: 'Writing…',
+  done: 'Done',
+  stopped: 'Stopped',
+  failed: 'Failed',
+}
+
+/** The dot an ended turn is drawn with; a turn still in flight draws the indicator instead. */
+const ENDED: Partial<Record<ActivityState, StatusTone>> = {
+  done: 'success',
+  stopped: 'cancelled',
+  failed: 'failure',
+}
+
+/** How long a turn took, in the words a reader glances at: `12 s`, `2 min 5 s`. */
+function lasted(elapsedMs: number): string {
+  const seconds = Math.max(0, Math.round(elapsedMs / 1000))
+  if (seconds < 60) return `${String(seconds)} s`
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  return rest === 0 ? `${String(minutes)} min` : `${String(minutes)} min ${String(rest)} s`
+}
+
+/** The line the row reads, from its state and whatever the caller gave it to name. */
+function sayOf(state: ActivityState, detail?: string, elapsedMs?: number): string {
+  if (state === 'running' && detail !== undefined) return `${SAID[state]} ${detail}`
+  if (state === 'done' && elapsedMs !== undefined) return `${SAID[state]} in ${lasted(elapsedMs)}`
+  return SAID[state]
 }
 
 export interface ActivityRowProps {
@@ -84,17 +125,34 @@ export interface ActivityRowProps {
   detail?: string | undefined
   /** The thought arriving now, which is what the chevron opens. */
   thought?: string | undefined
+  /**
+   * How long the turn took, from the message that started it to the entry that ended it.
+   *
+   * Only `done` says it: a turn that was stopped or failed took however long it took, and the
+   * figure is not what the reader wants from it.
+   */
+  elapsedMs?: number | undefined
   /** Where the row sits; never how it looks. */
   className?: string | undefined
 }
 
-export function ActivityRow({ state, detail, thought, className }: ActivityRowProps): ReactNode {
+export function ActivityRow({
+  state,
+  detail,
+  thought,
+  elapsedMs,
+  className,
+}: ActivityRowProps): ReactNode {
   const [open, setOpen] = useState(false)
-  const said =
-    state === 'running' && detail !== undefined ? `${SAID[state]} ${detail}` : SAID[state]
+  const said = sayOf(state, detail, elapsedMs)
+  const ended = ENDED[state]
   const line = (
     <span className={SUMMARY}>
-      <Loading size="sm" label={said} />
+      {ended === undefined ? (
+        <Loading size="sm" label={said} />
+      ) : (
+        <StatusDot status={ended} size="sm" />
+      )}
       <span className={LABEL}>{said}</span>
     </span>
   )
