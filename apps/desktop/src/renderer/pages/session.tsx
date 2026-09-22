@@ -366,15 +366,23 @@ export function SessionPage({
             archiveDisabled={thread.length === 0}
           />
         </div>
-        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
-          {thread.length === 0 ? (
-            loaded ? (
-              <SessionEmpty />
-            ) : null
-          ) : (
-            <MessageScroller label="The thread of this Session" entries={scroller} />
-          )}
-        </div>
+        {/*
+          The thread is given the whole width under the head, and lays its own column on the one
+          the head and the composer are laid on: a wheel anywhere beside the thread scrolls it
+          (trial of 22 September 2026, evening). An empty Session has nothing to scroll, and its
+          sentence stands in the column like everything else.
+        */}
+        {thread.length === 0 ? (
+          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
+            {loaded ? <SessionEmpty /> : null}
+          </div>
+        ) : (
+          <MessageScroller
+            className="flex-1"
+            label="The thread of this Session"
+            entries={scroller}
+          />
+        )}
         {/*
           What the turn has spent stands above the box rather than in its foot: the foot is the
           Workspace and the send alone, and a figure read at a glance is a figure that must not be
