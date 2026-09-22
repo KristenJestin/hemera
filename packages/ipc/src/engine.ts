@@ -526,11 +526,16 @@ function pushedEvent<const Event extends string>(event: Event) {
  * What the engine pushes while a Session is being worked on, one schema per name (design D5-12).
  *
  * The engine writes these as they happen rather than when they are asked for: an entry was
- * written, a turn ended, a permission is being asked for, or the agent itself changed. One
- * schema per name, so that whoever sends one is held to the name it sends.
+ * written, a turn began or ended, a permission is being asked for, or the agent itself changed.
+ * One schema per name, so that whoever sends one is held to the name it sends.
+ *
+ * A turn's start and its end are two names and not one: the page turns something on when a turn
+ * begins and off when it ends, and one name for both would be a page that cannot tell which of
+ * the two it has just been told (design D5-12).
  */
 export const ENGINE_EVENTS = {
   entry: pushedEvent('entry'),
+  turn_start: pushedEvent('turn_start'),
   turn: pushedEvent('turn'),
   permission: pushedEvent('permission'),
   agent: pushedEvent('agent'),
@@ -538,7 +543,7 @@ export const ENGINE_EVENTS = {
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the four names it carries. */
+/** One pushed message, of whichever of the five names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

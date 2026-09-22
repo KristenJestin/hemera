@@ -56,13 +56,13 @@ export interface EngineStart {
  *
  * Every entry an agent writes and every change to a Session is pushed to the page as it happens,
  * on the one channel the preload listens on: the thread is drawn from what arrives rather than
- * from asking again (D5-12). The four names a change can travel under are the page's, and the
+ * from asking again (D5-12). The five names a change can travel under are the page's, and the
  * reasons the runtime changes something map onto them here, in the one place that knows the wire.
  */
 function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.Layer<AgentNotices> {
   const PUSHED: Record<Notice, EngineEventName> = {
     permission_requested: 'permission',
-    turn_started: 'turn',
+    turn_started: 'turn_start',
     turn_ended: 'turn',
     agent_died: 'agent',
     session_fallback: 'agent',

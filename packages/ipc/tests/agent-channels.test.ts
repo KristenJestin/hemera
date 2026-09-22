@@ -265,8 +265,14 @@ describe('No tool is replayed on resume', () => {
 })
 
 describe('Text arrives as a stream', () => {
-  test('the four things the engine pushes are the ones declared', () => {
-    expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual(['agent', 'entry', 'permission', 'turn'])
+  test('the five things the engine pushes are the ones declared', () => {
+    expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
+      'agent',
+      'entry',
+      'permission',
+      'turn',
+      'turn_start',
+    ])
   })
 
   test('an entry is pushed with the Session it belongs to', () => {
@@ -280,6 +286,22 @@ describe('Text arrives as a stream', () => {
     expect(
       ENGINE_EVENTS.turn.safeParse({ event: 'turn', sessionId: 'session-1', entry: null }).success,
     ).toBe(true)
+  })
+
+  test('a turn that began is pushed under a name of its own', () => {
+    // Two names and not one: the page shows a turn as running from the first of them and stops
+    // at the second, and a single name would leave it guessing which it had just received.
+    expect(
+      ENGINE_EVENTS.turn_start.safeParse({
+        event: 'turn_start',
+        sessionId: 'session-1',
+        entry: null,
+      }).success,
+    ).toBe(true)
+    expect(
+      ENGINE_EVENTS.turn.safeParse({ event: 'turn_start', sessionId: 'session-1', entry: null })
+        .success,
+    ).toBe(false)
   })
 
   test('a message that names an event the engine does not push is refused', () => {
