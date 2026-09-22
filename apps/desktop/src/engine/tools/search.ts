@@ -76,7 +76,9 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
    * Recursive rather than a loop, because the step reads from the filesystem and the repository
    * refuses the loop that awaits inside itself. What the recursion costs is nothing next to what
    * the order buys: the same file is read in the same place on every call, which is the whole
-   * reason a cursor can name a position at all.
+   * reason a cursor can name a position at all — and, when the cursor's own file is gone (deleted,
+   * renamed, or now `.gitignore`d), the reason the first file past its path in this same order can
+   * stand in for it instead of the call reporting nothing left to find.
    */
   const scan = async (at: number): Promise<void> => {
     if (stoppedBy !== null || at >= files.length) return
@@ -84,7 +86,7 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
     if (file === undefined) return
     const rel = relative(request.root, file).split(sep).join('/')
     if (!resumed) {
-      if (rel !== resumePath) {
+      if (resumePath !== null && rel !== resumePath && !after(rel, resumePath)) {
         await scan(at + 1)
         return
       }
@@ -129,6 +131,25 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
     scanned,
     cursor: stoppedBy === null ? null : stoppedAt,
   }
+}
+
+/**
+ * Whether `rel` comes after `cursorPath` in the walk's own order.
+ *
+ * The walk sorts a folder's entries by plain `<` on their name and recurses depth first, so two
+ * paths compare the same way: segment by segment, the first pair that differs decides, and a
+ * path that is a prefix of the other — a folder above what is inside it — comes before it.
+ */
+function after(rel: string, cursorPath: string): boolean {
+  const relSegments = rel.split('/')
+  const cursorSegments = cursorPath.split('/')
+  const length = Math.min(relSegments.length, cursorSegments.length)
+  for (let index = 0; index < length; index += 1) {
+    const relSegment = relSegments[index] ?? ''
+    const cursorSegment = cursorSegments[index] ?? ''
+    if (relSegment !== cursorSegment) return relSegment > cursorSegment
+  }
+  return relSegments.length > cursorSegments.length
 }
 
 /**
