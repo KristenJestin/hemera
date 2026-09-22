@@ -30,6 +30,11 @@ import { EffortSlider } from './effort-slider.tsx'
  * Nothing in the panel moves when the level changes: every word of the scale is drawn in the
  * same cell of a grid and all but the one that is on are invisible, so the column is as wide as
  * the longest word whichever one is being shown.
+ *
+ * **It is drawn three ways** since the pass of 22 September 2026, and `look` is which one:
+ * `instrument`, `minimal` and `card`. The three are the same control — same props, same role,
+ * same `aria-valuetext`, same drag, same keys, same geometry — and every story below that does
+ * not name a look is the one that ships, the instrument.
  */
 const meta = {
   tags: ['autodocs', 'new'],
@@ -42,7 +47,14 @@ const meta = {
     effort: 'high',
     onEffortChange: fn(),
   },
-  argTypes: EFFORT_ARG_TYPES,
+  argTypes: {
+    ...EFFORT_ARG_TYPES,
+    look: {
+      control: 'inline-radio',
+      options: ['instrument', 'minimal', 'card'],
+      description: 'Which of the three drawings of the same scale is on.',
+    },
+  },
 } satisfies Meta<typeof EffortSlider>
 
 export default meta
@@ -352,5 +364,104 @@ export const ReducedMotion: Story = {
     // it, which is the difference this assertion measures.
     await expect(scale).toHaveAttribute('aria-valuetext', 'Max')
     await expect(Math.abs(middleOf(thumb) - notchAt(scale, 'max'))).toBeLessThan(1)
+  },
+}
+
+/**
+ * **The instrument**, which is what ships: the track sunk into a pill-shaped well a surface
+ * below the panel, dots that light up in the accent as they are passed, a twenty-pixel thumb
+ * with a domed core and two layers of halo — a wide, blurred glow under a crisp ring — and the
+ * level's short mark in a chip that travels beside it.
+ *
+ * The well is the whole of why it reads as one crafted piece rather than as a form control: a
+ * track drawn on the panel is a line somebody put there, and a track sunk into a groove is a
+ * part of something. The chip is what a gauge has and a form control does not — the scale down
+ * the side says what the levels are, the chip says where the needle is.
+ */
+export const Instrument: Story = {
+  args: { efforts: DESCRIBED, effort: 'high', caption: 'Opus 4.5' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+    await expect(scale).toHaveAttribute('data-look', 'instrument')
+
+    // The well is the look's own piece: no other draws one.
+    await expect(canvas.getByTestId('effort-well')).toBeVisible()
+    // And the chip travels with the thumb, carrying the short mark of the level that is on.
+    const chip = canvas.getByTestId('effort-chip')
+    await expect(chip).toHaveTextContent('H')
+    await expect(
+      Math.abs(middleOf(chip) - middleOf(canvas.getByTestId('effort-thumb'))),
+    ).toBeLessThan(1)
+
+    // It is the largest of the three thumbs: twenty pixels, one step of the theme's scale.
+    await expect(canvas.getByTestId('effort-knob').getBoundingClientRect().width).toBeCloseTo(20, 0)
+
+    // The mark follows the level rather than the other way round.
+    scale.focus()
+    await userEvent.keyboard('{End}')
+    await waitFor(() => {
+      expect(chip).toHaveTextContent('Max')
+    })
+  },
+}
+
+/**
+ * **The minimal**, where the drawing is the room around it: a hairline track two pixels wide,
+ * notches at two, a fourteen-pixel thumb, the level's name in one weight and nothing else.
+ *
+ * No marks down the side, no sentence under the name, no well. What is left has to be spaced
+ * and aligned exactly or there is nothing there to carry it — which is the point of keeping it
+ * beside the other two.
+ */
+export const Minimal: Story = {
+  args: { look: 'minimal', efforts: DESCRIBED, effort: 'high' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+    await expect(scale).toHaveAttribute('data-look', 'minimal')
+
+    // Nothing but the scale and the word: no column of marks, no well, no chip.
+    await expect(canvas.queryByTestId('effort-marks')).toBeNull()
+    await expect(canvas.queryByTestId('effort-well')).toBeNull()
+    await expect(canvas.queryByTestId('effort-chip')).toBeNull()
+    // Nor the agent's sentence, which this look has no line for.
+    await expect(canvas.queryByText('Whatever the agent starts on')).toBeNull()
+
+    // The smallest of the three thumbs: fourteen pixels, and the scale's own step for it.
+    await expect(canvas.getByTestId('effort-knob').getBoundingClientRect().width).toBeCloseTo(14, 0)
+    // The word is still the agent's, and still the value.
+    await expect(canvas.getByText('High')).toBeVisible()
+  },
+}
+
+/**
+ * **The card**, which is the shape the maintainer brought back from another application: a bolt
+ * at the top left, the level in the accent with a chevron after it, the model under it in the
+ * quiet colour, and the scale under that — the whole of it on a card that lifts by one step of
+ * the shadow scale when the hand comes over it.
+ *
+ * It is the only look that says the model beside the level rather than under the control, which
+ * is what makes it read as one object: a thing that knows what it is set to and what it is set
+ * for. It costs a card's worth of room, which is the trade.
+ */
+export const Card: Story = {
+  args: { look: 'card', effort: 'high', caption: 'Opus 4.5' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+    await expect(scale).toHaveAttribute('data-look', 'card')
+
+    // The header is the look's own piece: the bolt, the level and the model on one line each.
+    const head = canvas.getByTestId('effort-head')
+    await expect(head).toBeVisible()
+    await expect(within(head).getByText('High')).toBeVisible()
+    await expect(within(head).getByText('Opus 4.5')).toBeVisible()
+    // The bolt and the chevron are drawn, and both are marks rather than anything to read.
+    await expect(head.querySelectorAll('svg')).toHaveLength(2)
+
+    // The model is said once: the caption under the control belongs to the other two looks.
+    await expect(canvas.getAllByText('Opus 4.5')).toHaveLength(1)
+    await expect(canvas.queryByTestId('effort-marks')).toBeNull()
   },
 }

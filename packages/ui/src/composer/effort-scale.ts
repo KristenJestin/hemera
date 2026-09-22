@@ -50,6 +50,18 @@ export const HALO =
   'thumb-motion absolute inset-0 rounded-full shadow-halo group-hover:shadow-halo-strong group-focus-visible:shadow-halo-strong group-active:shadow-halo-strong'
 
 /**
+ * The wide, blurred layer under that ring: the light the thumb throws on the surface it sits
+ * on, which is what makes a thumb read as lit rather than as drawn (pass of 22 September 2026).
+ *
+ * A second element and not a second shadow on the first, so the two layers can be given to a
+ * look one at a time: the minimal slider wears the ring alone, and the two that are meant to
+ * feel like instruments wear both. It strengthens under the same three states the ring does,
+ * because a halo whose two halves answered the hand differently would read as two halos.
+ */
+export const GLOW =
+  'thumb-motion absolute inset-0 rounded-full shadow-halo-glow group-hover:shadow-halo-glow-strong group-focus-visible:shadow-halo-glow-strong group-active:shadow-halo-glow-strong'
+
+/**
  * The thumb itself: a round surface larger than the track, ringed in the accent so that it
  * reads as part of the scale rather than as a bead dropped on it. It grows a little under the
  * hand and presses in under the finger.
