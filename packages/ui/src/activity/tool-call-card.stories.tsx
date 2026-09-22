@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../components/button/button.tsx'
 import { DiffBlock } from './diff-block.tsx'
@@ -65,6 +65,34 @@ const meta = {
 export default meta
 
 type Story = StoryObj<typeof meta>
+
+/**
+ * The fold closing, which is the fold opening played backwards (trial of 22 September 2026).
+ *
+ * The maintainer saw the body disappear the instant the row was pressed, while opening it took
+ * its time. Two things did that: the body carried no `exit` at all, and Base UI's `Collapsible`
+ * took it out of the page the frame the state changed, so there was nothing left for an exit to
+ * play on. The body is the `collapse` kind of the preset now, held in the page by
+ * `AnimatePresence` for exactly as long as the fold lasts.
+ */
+export const AFoldClosing: Story = {
+  args: { defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    await expect(canvas.getByText('Input')).toBeVisible()
+
+    await userEvent.click(row)
+    // Mid-exit: the row already says it is closed, and the body is still in the page folding
+    // away. A body that vanished under the press would fail here.
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await expect(canvas.getByText('Input')).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(canvas.queryByText('Input')).toBeNull()
+    })
+  },
+}
 
 /** The state the other stories are read against: a call that is done, and folded. */
 export const CompletedFolded: Story = {

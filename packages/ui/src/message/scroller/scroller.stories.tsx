@@ -617,38 +617,52 @@ function underTheFold(canvasElement: HTMLElement) {
   return { block, carried: block.parentElement! }
 }
 
+/** Where a block sat, frame by frame, for as long as a fold takes to open. */
+function travelOf(block: HTMLElement, frames: number): Promise<number[]> {
+  const seen: number[] = []
+  return new Promise((settle) => {
+    const look = (): void => {
+      seen.push(block.getBoundingClientRect().top)
+      if (seen.length >= frames) settle(seen)
+      else requestAnimationFrame(look)
+    }
+    look()
+  })
+}
+
 /**
  * A fold opening pushes what is under it instead of teleporting it (trial of 22 September 2026).
  *
- * Every block of the thread is a layout element of one group: motion measures where each of them
- * ended up once the card opened and plays the difference as a transform, so the answer under the
- * call travels to its new place rather than being drawn there between two frames. Nothing of a
- * block's own size is animated — a paragraph stretching under the eye reading it is the one
- * thing a growing thread must not do.
+ * The room under the row is what grows — the `expand` kind, on the spring made for a dimension —
+ * and the block under the call is pushed down by it, a frame at a time, the way a page actually
+ * moves. It used to be a transform: the body was laid out at its full height at once and motion
+ * carried the blocks below it to their new places, because D0-06 forbade animating a height.
+ * The height is the movement now, so what is read is the journey itself rather than the
+ * projection that stood in for it.
+ *
+ * Read over the frames rather than at one moment: what a jump looks like is a block that was in
+ * its old place and then in its new one with nothing in between, and the only way to refuse
+ * that is to find the in between.
  */
 export const AFoldOpening: Story = {
   args: { entries: FOLDS },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const { block, carried } = underTheFold(canvasElement)
+    const { block } = underTheFold(canvasElement)
     const before = block.getBoundingClientRect().top
-    // At rest, nothing is being carried anywhere.
-    await expect(getComputedStyle(carried).transform).toBe('none')
 
     await userEvent.click(canvas.getByRole('button', { name: /Read src\/billing\/export\.ts/ }))
 
-    // Caught in flight: the block is somewhere between where it was and where it is going, and
-    // a transform is what is holding it there.
-    await waitFor(() => {
-      expect(getComputedStyle(carried).transform, 'the thread jumped instead of moving').not.toBe(
-        'none',
-      )
-    })
-    // And it arrives: the transform is spent, and the block is lower than it was.
-    await waitFor(() => {
-      expect(getComputedStyle(carried).transform).toBe('none')
-    })
-    await expect(block.getBoundingClientRect().top).toBeGreaterThan(before)
+    const travel = await travelOf(block, 40)
+    const arrived = travel.at(-1)!
+    // It ends lower than it began: the fold made room above it.
+    await expect(arrived).toBeGreaterThan(before)
+    // And it was caught on the way: at least one frame has it neither where it was nor where it
+    // was going, which is the whole difference between travelling and being redrawn.
+    await expect(
+      travel.some((top) => top > before + 1 && top < arrived - 1),
+      'the thread jumped instead of moving',
+    ).toBe(true)
   },
 }
 

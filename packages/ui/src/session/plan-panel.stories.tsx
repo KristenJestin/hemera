@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { PlanPanel, type PlanEntry } from './plan-panel.tsx'
 
@@ -36,6 +36,34 @@ const meta = {
 export default meta
 
 type Story = StoryObj<typeof meta>
+
+/**
+ * The fold closing, which is the fold opening played backwards (trial of 22 September 2026).
+ *
+ * The maintainer saw the steps disappear the instant the line was pressed, while opening them
+ * took its time. Two things did that: the body carried no `exit` at all, and Base UI's
+ * `Collapsible` took it out of the page the frame the state changed, so there was nothing left
+ * for an exit to play on. The body is the `collapse` kind of the preset now, held in the page
+ * by `AnimatePresence` for exactly as long as the fold lasts.
+ */
+export const AFoldClosing: Story = {
+  args: { defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const summary = canvas.getByRole('button', { name: /Plan/ })
+    await expect(canvas.getByText('Hand the lot to the gate')).toBeVisible()
+
+    await userEvent.click(summary)
+    // Mid-exit: the line already says it is closed, and the steps are still in the page folding
+    // away. A body that vanished under the press would fail here.
+    await expect(summary).toHaveAttribute('aria-expanded', 'false')
+    await expect(canvas.getByText('Hand the lot to the gate')).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(canvas.queryByText('Hand the lot to the gate')).toBeNull()
+    })
+  },
+}
 
 /** A plan being worked to: the count, the step in hand, and the steps behind a press. */
 export const BeingWorkedTo: Story = {

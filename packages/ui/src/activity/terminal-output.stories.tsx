@@ -61,6 +61,44 @@ export const Released: Story = {
     await expect(row).toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.getByText('Released')).toBeVisible()
     await userEvent.click(row)
-    await expect(canvas.getByText(/\[39\] packages\/ui\/src\/session\/session\.tsx/)).toBeVisible()
+    // Waited out rather than read the frame the press landed: the body unfolds from no height
+    // at all, and nothing of it is visible until the room under the row has been made.
+    await waitFor(() => {
+      expect(canvas.getByText(/\[39\] packages\/ui\/src\/session\/session\.tsx/)).toBeVisible()
+    })
+  },
+}
+
+/**
+ * The fold closing, which is the fold opening played backwards (trial of 22 September 2026).
+ *
+ * The maintainer saw the output disappear the instant the row was pressed, while opening it
+ * took its time. Two things did that: the body carried no `exit` at all, and Base UI's
+ * `Collapsible` took it out of the page the frame the state changed, so there was nothing left
+ * for an exit to play on. It is the `collapse` kind of the preset now, held in the page by
+ * `AnimatePresence` for exactly as long as the fold lasts — so what is asserted is that the
+ * output is still there mid-flight, and gone once the fold is over.
+ */
+export const AFoldClosing: Story = {
+  args: { released: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /pnpm check/ })
+    const written = /\[39\] packages\/ui\/src\/session\/session\.tsx/
+
+    await userEvent.click(row)
+    await waitFor(() => {
+      expect(canvas.getByText(written)).toBeVisible()
+    })
+
+    await userEvent.click(row)
+    // Mid-exit: the row already says it is closed, and the output is still in the page folding
+    // away. A body that vanished under the press would fail here.
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await expect(canvas.getByText(written)).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(canvas.queryByText(written)).toBeNull()
+    })
   },
 }
