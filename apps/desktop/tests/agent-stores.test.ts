@@ -304,8 +304,8 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
 
     // A second turn asked in the same Session reads its own half of the thread and no further
     // back: it is thinking, and not waiting on a question nobody can answer any more.
-    const asked: SessionEntry = { ...entry('e5', 'user', 'Try again'), turnId: null }
-    expect(activityOf([...dead, asked])).toEqual({ state: 'thinking', thought: undefined })
+    const again: SessionEntry = { ...entry('e5', 'user', 'Try again'), turnId: null }
+    expect(activityOf([...dead, again])).toEqual({ state: 'thinking', thought: undefined })
   })
 })
 
