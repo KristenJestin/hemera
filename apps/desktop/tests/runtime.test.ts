@@ -27,6 +27,7 @@ import {
   pause,
   threadOf,
   waiting,
+  watching,
 } from './application.ts'
 
 let dataFolder: string
@@ -335,6 +336,42 @@ describe('The context window of a turn', () => {
         expect(payload.used).toBeNull()
         expect(payload.size).toBeNull()
         expect(payload.cost).toBeNull()
+      }),
+    )
+  })
+})
+
+/**
+ * What the window is told while a turn runs (design D5-12).
+ *
+ * The page draws the thread from what the engine pushes, so every entry a turn writes has to be
+ * announced — the user's own message first of all, because it is the one the composer just sent
+ * and the one the thread shows above everything the agent answers.
+ */
+describe('What the window is told of a turn', () => {
+  test('A user message reaches the window as an entry', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'reading it now' }] })
+    const window = watching()
+
+    await application(dataFolder, window.layer)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'read the reader')
+
+        const said = window.pushed.filter(
+          (push) => push.entry?.role === 'user' && push.entry.kind === 'message',
+        )
+        // The same event and the same shape as an agent's entry: one entry, of this Session,
+        // carrying what was typed.
+        expect(said.map((push) => push.entry?.body)).toEqual(['read the reader'])
+        expect(said.every((push) => push.sessionId === session.id)).toBe(true)
+
+        // And it arrives before the agent's first word, which is the order the thread reads in.
+        const message = window.pushed.findIndex((push) => push.entry?.role === 'user')
+        const answer = window.pushed.findIndex((push) => push.entry?.role === 'agent')
+        expect(message).toBeGreaterThanOrEqual(0)
+        expect(message).toBeLessThan(answer)
       }),
     )
   })

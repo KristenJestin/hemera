@@ -19,8 +19,8 @@ import * as TestClock from 'effect/testing/TestClock'
 import type { SessionEntry } from '@hemera/core'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import { fakeSupervisor, type FakeAgent, type FakeStep } from '#engine/agents/fake.ts'
-import { NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
-import type { AgentRuntime } from '#engine/agents/runtime.ts'
+import { AgentNotices, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
+import type { AgentRuntime, Notice } from '#engine/agents/runtime.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
@@ -43,8 +43,37 @@ export const machine = Layer.succeed(MachineEnvironment, {
   holds: () => Effect.succeed(false),
 })
 
+/** One push the engine made, as the window would have received it. */
+export interface Pushed {
+  readonly sessionId: string
+  readonly entry: SessionEntry | null
+  readonly what: Notice | null
+}
+
+/**
+ * The window, as a suite reads it: everything the runtime pushed, in the order it pushed it.
+ *
+ * `NoNotices` is what a suite that only reads the thread needs; this is what a suite about the
+ * page needs, because an entry the window is never told about is one it can only draw by asking
+ * for the thread again, and a turn does not work that way (D5-12).
+ */
+export function watching() {
+  const pushed: Pushed[] = []
+  return {
+    pushed,
+    layer: Layer.succeed(AgentNotices, {
+      wrote: (sessionId: string, entry: SessionEntry) => {
+        pushed.push({ sessionId, entry, what: null })
+      },
+      changed: (sessionId: string, what: Notice) => {
+        pushed.push({ sessionId, entry: null, what })
+      },
+    }),
+  }
+}
+
 /** A run of the application over one scripted agent, on one data folder. */
-export function application(dataFolder: string) {
+export function application(dataFolder: string, notices: Layer.Layer<AgentNotices> = NoNotices) {
   return (agent: FakeAgent) => {
     // The runtime is built on the very same services the suite reads with — `provideMerge` hands
     // them up rather than hiding them, so one database is opened and one thread is written.
@@ -58,7 +87,7 @@ export function application(dataFolder: string) {
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(machine))),
       Layer.provide(fakeSupervisor(agent)),
-      Layer.provide(NoNotices),
+      Layer.provide(notices),
       Layer.provideMerge(TestClock.layer()),
     )
     return <A, E>(

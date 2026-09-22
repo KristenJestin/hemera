@@ -916,8 +916,11 @@ export const runtimeLayer = Layer.effect(
         turns.set(sessionId, turn)
 
         // The user's own message is written first, and by `append`: the thread shows what was
-        // asked before what was answered, and it is what proposes the Session's title.
-        yield* attempt('writing the message', sessions.append(sessionId, text))
+        // asked before what was answered, and it is what proposes the Session's title. It is
+        // handed to the window like every other entry, because the page draws the thread from
+        // what arrives: a message written and never announced is one only a second read shows.
+        const asked = yield* attempt('writing the message', sessions.append(sessionId, text))
+        notices.wrote(sessionId, asked.entry)
 
         const sent = held.context === null ? text : `${held.context}\n\n${text}`
         held.context = null
