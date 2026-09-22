@@ -248,6 +248,9 @@ export const sessionEntryKindSchema = z.enum([
   'usage',
   'turn',
   'note',
+  'hemera_tool_call',
+  'command_run',
+  'context_delivery',
 ])
 
 /**
