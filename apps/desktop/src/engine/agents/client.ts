@@ -34,6 +34,7 @@ import {
   type SessionConfigSelectOptions,
 } from '@agentclientprotocol/sdk'
 import { Data, Effect } from 'effect'
+import { z } from 'zod'
 
 import { type AgentAdapter } from './adapter.ts'
 
@@ -214,7 +215,22 @@ export interface AgentOption {
   readonly category: string | null
   readonly kind: 'select' | 'boolean'
   readonly value: string
-  readonly values: readonly { readonly id: string; readonly name: string }[]
+  readonly values: readonly AgentOptionValue[]
+}
+
+/**
+ * One value an option accepts, in the agent's own words (decision of 22 September 2026).
+ *
+ * `description` is the sentence the agent wrote about that value and nothing Hemera composed;
+ * `recommended` is the value the agent itself named as the one it advises, read out of the
+ * announcement's `_meta` here so that nothing above this file has to know an extension
+ * namespace exists.
+ */
+export interface AgentOptionValue {
+  readonly id: string
+  readonly name: string
+  readonly description?: string | undefined
+  readonly recommended?: boolean | undefined
 }
 
 /** A permission the agent is waiting for, as a question with the answers it offers. */
@@ -422,16 +438,44 @@ function eventOf(notification: SessionNotification, replay: boolean): AgentEvent
  * ACP lets an agent group its values; the composer draws one flat list per option, so a group
  * is a heading the window does not need and its values are what it has.
  */
-function choicesOf(options: SessionConfigSelectOptions): readonly {
-  readonly id: string
-  readonly name: string
-}[] {
-  return options.flatMap((choice) =>
-    'value' in choice
-      ? [{ id: choice.value, name: choice.name }]
-      : choice.options.map((nested) => ({ id: nested.value, name: nested.name })),
-  )
+function choicesOf(
+  options: SessionConfigSelectOptions,
+  recommended: string | null,
+): readonly AgentOptionValue[] {
+  const flat = options.flatMap((choice) => ('value' in choice ? [choice] : choice.options))
+  return flat.map((choice) => ({
+    id: choice.value,
+    name: choice.name,
+    // The agent's own sentence about the value, and nothing where it wrote none: `Default`
+    // is announced as a value like any other and this is the only thing that says what it is.
+    description: choice.description ?? undefined,
+    // Marked on the value the agent named, so that nothing above reads an extension namespace.
+    recommended: choice.value === recommended ? true : undefined,
+  }))
 }
+
+/**
+ * The value an agent named as the one it recommends, or null when it named none.
+ *
+ * It travels under the AIR extension of ACP — `_meta.jetbrains.air.recommendedValue`, at
+ * version 1 of that extension — which is what both the Claude adapter and the Codex one write
+ * it with. Read with a parser rather than by hand because this is wire data: an agent that
+ * writes something else there is an agent that named nothing, not one that breaks the read.
+ */
+function recommendedOf(meta: SessionConfigOption['_meta']): string | null {
+  const read = airRecommendation.safeParse(meta)
+  return read.success ? read.data.jetbrains.air.recommendedValue : null
+}
+
+/** The version of that extension the adapters write, and the one this file agrees to read. */
+const AIR_EXTENSION_VERSION = 1
+
+/** The one shape of `_meta` this file knows how to read, and the whole of what it takes from it. */
+const airRecommendation = z.object({
+  jetbrains: z.object({
+    air: z.object({ version: z.literal(AIR_EXTENSION_VERSION), recommendedValue: z.string() }),
+  }),
+})
 
 /** What an agent lets a Session choose, in Hemera's words. */
 function optionsOf(
@@ -443,7 +487,11 @@ function optionsOf(
     category: option.category ?? null,
     kind: option.type === 'boolean' ? ('boolean' as const) : ('select' as const),
     value: option.type === 'boolean' ? String(option.currentValue) : option.currentValue,
-    values: option.type === 'boolean' ? [] : choicesOf(option.options),
+    values:
+      option.type === 'boolean'
+        ? []
+        : // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+          choicesOf(option.options, recommendedOf(option._meta)),
   }))
 }
 

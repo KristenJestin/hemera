@@ -168,6 +168,45 @@ describe('The options are the agent’s', () => {
     ).toBe(false)
   })
 
+  test('An option value keeps the description the agent gave', () => {
+    const read = configOptionSchema.safeParse({
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      values: [
+        { value: 'default', name: 'Default', description: 'Opus 4.5 · 1M context' },
+        { value: 'claude-opus-4-5', name: 'Opus 4.5' },
+      ],
+      current: 'default',
+    })
+
+    expect(read.success).toBe(true)
+    // The agent's own sentence about the value, and nothing at all where it wrote none.
+    expect(read.data?.values[0]?.description).toBe('Opus 4.5 · 1M context')
+    expect(read.data?.values[1]?.description).toBeUndefined()
+  })
+
+  test("The recommended value is marked from the agent's meta", () => {
+    const read = configOptionSchema.safeParse({
+      id: 'effort',
+      name: 'Effort',
+      category: 'thought_level',
+      values: [
+        { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium', recommended: true },
+      ],
+      current: 'medium',
+    })
+
+    expect(read.success).toBe(true)
+    // A derived word and never the agent's raw metadata: what crosses is `recommended`, on the
+    // one value the agent named, and nothing of the extension namespace it named it in.
+    expect(read.data?.values[1]?.recommended).toBe(true)
+    expect(read.data?.values[0]?.recommended).toBeUndefined()
+    // And it is a word about a value, not a value of its own: nothing else came with it.
+    expect(Object.keys(read.data?.values[1] ?? {})).toEqual(['value', 'name', 'recommended'])
+  })
+
   test('an option is set with the value the agent offered', () => {
     const setOption = ENGINE_REQUESTS['agents.setOption'].arguments
 

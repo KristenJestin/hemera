@@ -70,6 +70,80 @@ describe('Ce que l’agent annonce de lui-même', () => {
   })
 })
 
+describe('Ce que l’agent dit de ses propres valeurs', () => {
+  test('An option value keeps the description the agent gave', async () => {
+    const { connection } = await opened({
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'opus',
+          options: [
+            { value: 'opus', name: 'Opus 4.5', description: 'Opus 4.5 · 1M context' },
+            { value: 'sonnet', name: 'Sonnet 4.5' },
+          ],
+        },
+      ],
+    })
+    await Effect.runPromise(connection.open('/tmp/atlas'))
+
+    const values = connection.options()[0]?.values ?? []
+    // The agent's own sentence, kept: it is the only thing that can say what a value stands for.
+    expect(values[0]?.description).toBe('Opus 4.5 · 1M context')
+    // And nothing invented for the value it said nothing about.
+    expect(values[1]?.description).toBeUndefined()
+  })
+
+  test("The recommended value is marked from the agent's meta", async () => {
+    const { connection } = await opened({
+      configOptions: [
+        {
+          id: 'effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'medium',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+          // The AIR extension of ACP, which is what both adapters name a recommendation with.
+          _meta: { jetbrains: { air: { version: 1, recommendedValue: 'medium' } } },
+        },
+      ],
+    })
+    await Effect.runPromise(connection.open('/tmp/atlas'))
+
+    const values = connection.options()[0]?.values ?? []
+    expect(values.map((value) => value.recommended)).toEqual([undefined, true, undefined])
+  })
+
+  test('an agent that names no recommendation has none of its values marked', async () => {
+    const { connection } = await opened({
+      configOptions: [
+        {
+          id: 'effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'low',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+    })
+    await Effect.runPromise(connection.open('/tmp/atlas'))
+
+    const values = connection.options()[0]?.values ?? []
+    expect(values.every((value) => value.recommended === undefined)).toBe(true)
+  })
+})
+
 describe('Un tour en cours', () => {
   test('text and thoughts arrive while the turn runs', async () => {
     const { connection, events } = await opened({

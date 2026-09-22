@@ -50,7 +50,12 @@ function announced(options: readonly AgentOption[]) {
     id: option.id,
     name: option.name,
     category: option.category,
-    values: option.values.map((value) => ({ value: value.id, name: value.name })),
+    values: option.values.map((value) => ({
+      value: value.id,
+      name: value.name,
+      description: value.description,
+      recommended: value.recommended,
+    })),
     current: option.value,
   }))
 }

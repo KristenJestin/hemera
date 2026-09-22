@@ -91,12 +91,35 @@ export type AgentUpdate = z.infer<typeof agentUpdateSchema>
  * the mode it can be put in — and Hemera draws them as they come rather than holding a list of
  * its own. `category` is the agent's word for what an option is for, and null when it says
  * none: a list of the words Hemera knows would be a list of the agents it has tried.
+ *
+ * A value carries two things beside its name, and both are the agent's own (decision of
+ * 22 September 2026). `description` is the sentence the agent wrote about that value, which is
+ * the only thing that can say what a value like `Default` stands for — the window draws it where
+ * there is one and draws nothing where there is not. `recommended` is the value the agent itself
+ * named as the one it advises, resolved by the engine out of the announcement's `_meta`: it is
+ * derived and never the raw metadata, because a page reading an agent's extension namespace
+ * would be a page tied to the agents that write it.
+ *
+ * Both are absent rather than null where the agent said nothing, which is the one place this
+ * wire allows it: they are not facts about the option but words the agent may or may not have
+ * added to it, and a page that never received them draws what one told there are none draws.
  */
 export const configOptionSchema = z.object({
   id: z.string(),
   name: z.string(),
   category: z.string().nullable(),
-  values: z.readonly(z.array(z.object({ value: z.string(), name: z.string() }))),
+  values: z.readonly(
+    z.array(
+      z.object({
+        value: z.string(),
+        name: z.string(),
+        /** What the agent said this value is, where it said anything about it at all. */
+        description: z.string().optional(),
+        /** Whether the agent named this value as the one it recommends. */
+        recommended: z.boolean().optional(),
+      }),
+    ),
+  ),
   /** Which of the values the agent is on now, so the page shows it rather than guesses it. */
   current: z.string(),
 })
