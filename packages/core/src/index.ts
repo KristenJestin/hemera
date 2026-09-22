@@ -57,6 +57,7 @@ export {
   READ_PAGE_BYTES,
   SEARCH_MATCH_LIMIT,
   SEARCH_SCAN_BYTES,
+  SEARCH_SKIPS_LISTED,
   TOOL_NAMES,
   admitTool,
   offeredTools,
@@ -66,6 +67,7 @@ export type {
   SearchHit,
   SearchLimit,
   SearchResult,
+  SearchSkip,
   ToolName,
 } from './domain/tools.ts'
 export {

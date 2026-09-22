@@ -55,6 +55,15 @@ export interface SearchHit {
   readonly text: string
 }
 
+/** How many of the files a search passed over it names; the rest are counted. */
+export const SEARCH_SKIPS_LISTED = 20
+
+/** A file a search did not read, and why: what looks binary, or what could not be read. */
+export interface SearchSkip {
+  readonly path: string
+  readonly reason: 'binary' | 'unreadable'
+}
+
 /** Which of the two limits stopped a search, and null when neither did. */
 export type SearchLimit = 'matches' | 'scanned'
 
@@ -65,6 +74,10 @@ export interface SearchResult {
   readonly scanned: number
   /** Where to continue from, and null when there is nothing left to read. */
   readonly cursor: string | null
+  /** The first files it passed over, at most `SEARCH_SKIPS_LISTED`, said rather than hidden. */
+  readonly skipped: readonly SearchSkip[]
+  /** How many files it passed over in all. */
+  readonly skippedCount: number
 }
 
 /**

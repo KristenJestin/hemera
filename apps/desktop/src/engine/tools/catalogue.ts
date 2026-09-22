@@ -171,7 +171,17 @@ function describeSearch(result: SearchResult, query: string): string {
       ? `no match for "${query}" in ${result.scanned} bytes scanned`
       : `${result.hits.length} match(es) for "${query}" in ${result.scanned} bytes scanned`
   const stop = stoppedSentence(result)
-  return [head, stop, ...lines].join('\n')
+  // What the search passed over is said, so a match the agent expected and did not get has a
+  // reason under it rather than a silence.
+  const passed =
+    result.skippedCount === 0
+      ? []
+      : [
+          `${result.skippedCount} file(s) not searched: ${result.skipped
+            .map((one) => `${one.path} (${one.reason})`)
+            .join(', ')}${result.skippedCount > result.skipped.length ? ', …' : ''}`,
+        ]
+  return [head, stop, ...passed, ...lines].join('\n')
 }
 
 /**
