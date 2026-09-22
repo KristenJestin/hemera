@@ -33,11 +33,11 @@ const PROVIDED = [
 ] as const
 
 const TOOLS = [
-  { name: 'fs.read', bound: '256 KiB, 2 000 lines' },
-  { name: 'fs.write', bound: 'inside the Workspace root, 1 MiB' },
-  { name: 'fs.edit', bound: 'unique match, 1 000 lines' },
+  { name: 'fs_read', bound: '256 KiB, 2 000 lines' },
+  { name: 'fs_write', bound: 'inside the Workspace root, 1 MiB' },
+  { name: 'fs_edit', bound: 'unique match, 1 000 lines' },
   { name: 'search', bound: '200 matches, 1 MiB' },
-  { name: 'commands.run', bound: 'catalogue only, 30 s to first output' },
+  { name: 'commands_run', bound: 'catalogue only, 30 s to first output' },
 ]
 
 const COMMANDS = [
@@ -89,7 +89,7 @@ export const Empty: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Nothing has gone in yet.')).toBeVisible()
-    await expect(canvas.getByText('fs.read')).toBeVisible()
+    await expect(canvas.getByText('fs_read')).toBeVisible()
   },
 }
 
@@ -100,7 +100,7 @@ export const NoCommand: Story = {
     const canvas = within(canvasElement)
     // The tools are lent whatever the catalogue holds; the catalogue itself shows no command
     // rather than inventing one to fill the gap.
-    await expect(canvas.getByText('fs.read')).toBeVisible()
+    await expect(canvas.getByText('fs_read')).toBeVisible()
     await expect(canvas.queryByText('pnpm check')).toBeNull()
     await expect(canvas.queryByText('pnpm dev')).toBeNull()
   },

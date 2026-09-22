@@ -1,7 +1,7 @@
 /**
  * The capabilities Hemera lends an agent, and the limits it lends them with (D6-03, D6-04).
  *
- * The names are the interface's: an agent asks for `fs.read`, and what it is asked with is a
+ * The names are the interface's: an agent asks for `fs_read`, and what it is asked with is a
  * bounded argument, never a command line of its own. The four sizes below are part of the
  * contract and not of the implementation — the tool description carries them, every result
  * repeats them, and a reader that never saw this file still learns from one call that a read is
@@ -24,22 +24,22 @@ import type { Mission } from './session.ts'
  * and a name that carried one of those prefixes would be a name that is wrong on two agents.
  */
 export const TOOL_NAMES = [
-  'fs.read',
-  'fs.edit',
-  'fs.write',
-  'fs.list',
+  'fs_read',
+  'fs_edit',
+  'fs_write',
+  'fs_list',
   'search',
-  'commands.list',
-  'commands.run',
-  'commands.output',
-  'commands.stop',
-  'project.get',
-  'session.get',
+  'commands_list',
+  'commands_run',
+  'commands_output',
+  'commands_stop',
+  'project_get',
+  'session_get',
 ] as const
 
 export type ToolName = (typeof TOOL_NAMES)[number]
 
-/** The most `fs.read` hands back in one call, and the page a long file is read in. */
+/** The most `fs_read` hands back in one call, and the page a long file is read in. */
 export const READ_PAGE_BYTES = 256 * 1024
 
 /** How many matches a search may return before it stops and says so. */

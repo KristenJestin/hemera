@@ -198,6 +198,6 @@ describe('the tools of the Session', () => {
     )
 
     expect(seen.status).not.toBe(401)
-    expect(seen.body).toContain('fs.read')
+    expect(seen.body).toContain('fs_read')
   })
 })

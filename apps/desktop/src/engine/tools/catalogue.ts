@@ -43,7 +43,7 @@ import { searchIn } from './search.ts'
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
 const ARGUMENTS_KEPT = 400
 
-/** How many entries of the thread `session.get` hands back. */
+/** How many entries of the thread `session_get` hands back. */
 const THREAD_TAIL = 20
 
 /** How many answered keys are held against a retry before the oldest are let go of. */
@@ -153,7 +153,7 @@ const answered = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A | undefine
     }),
   )
 
-/** One line of a folder, as `fs.list` shows it. */
+/** One line of a folder, as `fs_list` shows it. */
 function describeEntry(name: string, kind: 'folder' | 'file' | 'other', size: number): string {
   if (kind === 'folder') return `${name}/`
   return `${name}  ${kind}  ${size}`
@@ -419,7 +419,7 @@ export const toolCatalogueLayer: Layer.Layer<
     ): Effect.Effect<Answer> =>
       Effect.gen(function* () {
         switch (call.tool) {
-          case 'fs.read': {
+          case 'fs_read': {
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const page = yield* attempt<Page>(() =>
@@ -455,7 +455,7 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
 
-          case 'fs.write': {
+          case 'fs_write': {
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const written = yield* attempt(() =>
@@ -475,7 +475,7 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
 
-          case 'fs.edit': {
+          case 'fs_edit': {
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const current = yield* attempt(() => readFile(settled.path, 'utf8'))
@@ -502,7 +502,7 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
 
-          case 'fs.list': {
+          case 'fs_list': {
             const named = call.arguments.path ?? '.'
             const settled = yield* allowed(asked, root, named)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
@@ -563,7 +563,7 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
 
-          case 'commands.list': {
+          case 'commands_list': {
             const listed = yield* answered(commands.list(projectId))
             if (listed === undefined) {
               return failed("could not read the Project's commands", 'the commands did not read')
@@ -580,12 +580,12 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
 
-          case 'commands.run': {
+          case 'commands_run': {
             const named = call.arguments.name
             const line = call.arguments.line
             if (named === undefined && line === undefined) {
               return failed(
-                'commands.run was given neither a name nor a line',
+                'commands_run was given neither a name nor a line',
                 'give a `name` of the catalogue, or a `line` to run',
               )
             }
@@ -635,10 +635,10 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
 
-          case 'commands.output': {
+          case 'commands_output': {
             const chosen = yield* chooseRun(asked, call.arguments.run ?? null, true)
             if (chosen === null) {
-              return failed('no run of this Session to read', 'start one with commands.run')
+              return failed('no run of this Session to read', 'start one with commands_run')
             }
             const read = yield* answered(commands.output(asked.sessionId, chosen))
             if (read === undefined) {
@@ -662,7 +662,7 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
 
-          case 'commands.stop': {
+          case 'commands_stop': {
             const chosen = yield* chooseRun(asked, call.arguments.run ?? null)
             if (chosen === null) {
               return failed('no run of this Session is running', 'nothing to stop')
@@ -680,7 +680,7 @@ export const toolCatalogueLayer: Layer.Layer<
             )
           }
 
-          case 'project.get': {
+          case 'project_get': {
             const lines = [
               `project: ${projectName} (${projectId})`,
               `root: ${root}`,
@@ -691,7 +691,7 @@ export const toolCatalogueLayer: Layer.Layer<
             return completed(`read the Project ${projectName}`, lines.join('\n'))
           }
 
-          case 'session.get': {
+          case 'session_get': {
             const thread = yield* answered(sessions.read(asked.sessionId, undefined, THREAD_TAIL))
             if (thread === undefined) {
               return failed('the thread did not read', 'this Session has no thread to read')

@@ -340,7 +340,7 @@ function suggestionsOf(folders: readonly RepositoryLine[]): Suggestion[] {
  * is everything else. What each one is allowed to do is the same: it runs inside the Workspace.
  *
  * An empty catalogue is a Project whose Sessions run no command, and the card says that rather
- * than showing an empty box: a reader who sees "no command" knows why the agent's `commands.run`
+ * than showing an empty box: a reader who sees "no command" knows why the agent's `commands_run`
  * was refused, which is the answer they came for.
  */
 export interface CommandLine {

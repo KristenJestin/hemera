@@ -74,7 +74,7 @@ const meta = {
             at: '21 Sep 23:02',
           },
         ]}
-        tools={[{ name: 'fs.read', bound: '256 KiB, 2 000 lines' }]}
+        tools={[{ name: 'fs_read', bound: '256 KiB, 2 000 lines' }]}
         commands={[{ name: 'check', command: 'pnpm check' }]}
         agents={[{ name: 'opencode', sentence: 'its own plugins are read by it, not by Hemera' }]}
       />

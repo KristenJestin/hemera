@@ -1,7 +1,7 @@
 /**
  * The commands of a Project, and the processes they become (design D6-11, D6-12).
  *
- * One service answers both callers — the agent through `commands.run` and the user through the
+ * One service answers both callers — the agent through `commands_run` and the user through the
  * Project's settings — because a command is one thing with one catalogue and one set of runs. A
  * run belongs to the Session that asked for it, so the Commands panel of a Session shows what
  * that Session did and not what the user did in another window.
@@ -153,7 +153,7 @@ export interface CommandsService {
   /**
    * The last runs of a Session, newest first, ended ones included.
    *
-   * The panel draws them, and `commands.output` answers from them when the agent reads the run
+   * The panel draws them, and `commands_output` answers from them when the agent reads the run
    * it just started: a `check` or a `utility` ends on its own, and its exit code and its output
    * are what the agent came for.
    */

@@ -10,7 +10,7 @@ import { CommandRun, type CommandRunProps } from '../activity/command-run.tsx'
  * The commands of a Session, in one place (design D6-12).
  *
  * Every command Hemera runs for a Session is watched from here, whoever started it: the agent
- * through `commands.run`, or the reader on the last line of the panel. That is the point of the
+ * through `commands_run`, or the reader on the last line of the panel. That is the point of the
  * panel — a server the agent started is a process the reader can see, read and stop without
  * asking the agent anything, and the address it published is one press away.
  *

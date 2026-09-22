@@ -348,7 +348,7 @@ export const CommandCatalogue: Story = {
 
 /**
  * Scenario « Catalogue vide » of `specs/agent-tools/spec.md`: no command, and the page says why
- * the agent's `commands.run` would be refused.
+ * the agent's `commands_run` would be refused.
  */
 export const NoCommandDeclared: Story = {
   args: { commands: [] },

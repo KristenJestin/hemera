@@ -160,7 +160,7 @@ const THREAD: ScrollerEntry[] = [
     id: 'hemera-read',
     content: (
       <HemeraToolCall
-        tool="fs.read"
+        tool="fs_read"
         status="completed"
         summary="1 842 lines, 61 KiB"
         arguments={[
@@ -309,8 +309,8 @@ const CONTEXT = (
       },
     ]}
     tools={[
-      { name: 'fs.read', bound: '256 KiB, 2 000 lines' },
-      { name: 'commands.run', bound: 'catalogue only, 30 s to first output' },
+      { name: 'fs_read', bound: '256 KiB, 2 000 lines' },
+      { name: 'commands_run', bound: 'catalogue only, 30 s to first output' },
     ]}
     commands={[{ name: 'check', command: 'pnpm check' }]}
     agents={[
@@ -497,7 +497,7 @@ export const Complete: Story = {
     )
     // A call to one of Hemera's own tools wears the mark, so it is not read as a native call.
     await expect(canvas.getByText('Hemera')).toBeVisible()
-    await expect(canvas.getByText('fs.read')).toBeVisible()
+    await expect(canvas.getByText('fs_read')).toBeVisible()
     // The command the agent started is a block of the thread, with the address one press away.
     await expect(canvas.getByText('pnpm dev')).toBeVisible()
     await expect(

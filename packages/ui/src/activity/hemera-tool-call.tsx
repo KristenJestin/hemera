@@ -86,7 +86,7 @@ export interface HemeraToolProvenance {
 }
 
 export interface HemeraToolCallProps {
-  /** The tool, as the catalogue names it: `fs.read`, `search`, `commands.run`. */
+  /** The tool, as the catalogue names it: `fs_read`, `search`, `commands_run`. */
   tool: string
   status: HemeraToolStatus
   /** What the call returned, in one line. */

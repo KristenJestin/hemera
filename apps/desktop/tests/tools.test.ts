@@ -196,6 +196,14 @@ const fileInRoot = (name: string, content: string) => {
   return path
 }
 
+describe('every tool name is one the model APIs accept', () => {
+  it('is letters, digits, underscores or hyphens, 64 characters at most, and no dot', () => {
+    // The Anthropic and OpenAI APIs refuse a tool name outside this pattern, and an agent hands
+    // the model `mcp__hemera__<name>` or `hemera_<name>`: a dot would reach it and be refused.
+    for (const name of TOOL_NAMES) expect(name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/)
+  })
+})
+
 describe('a read inside the Workspace root', () => {
   it('returns the content, and the call is an entry of the thread and a line of the Journal', async () => {
     fileInRoot('notes.md', 'the answer is 42\n')
@@ -205,7 +213,7 @@ describe('a read inside the Workspace root', () => {
         const session = yield* opened
         const answer = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.read',
+          tool: 'fs_read',
           arguments: { path: 'notes.md' },
         })
         return {
@@ -237,10 +245,10 @@ describe('a tool the Session was not offered', () => {
     const seen = await engine(human)(
       Effect.gen(function* () {
         const session = yield* opened
-        const offered = TOOL_NAMES.filter((name) => name !== 'fs.write')
+        const offered = TOOL_NAMES.filter((name) => name !== 'fs_write')
         const answer = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.write',
+          tool: 'fs_write',
           arguments: { path: 'kept.md', content: 'written anyway' },
           offered,
         })
@@ -282,13 +290,13 @@ describe('the same write twice', () => {
         const session = yield* opened
         const first = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.write',
+          tool: 'fs_write',
           arguments: { path: 'once.txt', content: 'first' },
           key: 'write-1',
         })
         const second = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.write',
+          tool: 'fs_write',
           arguments: { path: 'once.txt', content: 'second' },
           key: 'write-1',
         })
@@ -312,17 +320,17 @@ describe('an edit whose old text is not unique', () => {
         const session = yield* opened
         const twice = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.edit',
+          tool: 'fs_edit',
           arguments: { path: 'twice.txt', old: 'same', new: 'changed' },
         })
         const none = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.edit',
+          tool: 'fs_edit',
           arguments: { path: 'twice.txt', old: 'absent', new: 'changed' },
         })
         const once = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.edit',
+          tool: 'fs_edit',
           arguments: { path: 'twice.txt', old: 'other', new: 'changed' },
         })
         return { twice, none, once }
@@ -348,12 +356,12 @@ describe('a file larger than one page', () => {
         const session = yield* opened
         const first = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.read',
+          tool: 'fs_read',
           arguments: { path: 'long.txt' },
         })
         const second = yield* calling({
           sessionId: session.sessionId,
-          tool: 'fs.read',
+          tool: 'fs_read',
           arguments: { path: 'long.txt', offset: READ_PAGE_BYTES },
         })
         return { first, second }
@@ -410,26 +418,26 @@ describe('the commands of a Project', () => {
         )
         const listed = yield* calling({
           sessionId: session.sessionId,
-          tool: 'commands.list',
+          tool: 'commands_list',
           arguments: {},
         })
         const ran = yield* calling({
           sessionId: session.sessionId,
-          tool: 'commands.run',
+          tool: 'commands_run',
           arguments: { name: 'dev' },
         })
         // A `check` or a `utility` ends on its own: the agent reads it once it has ended, which
         // is the whole reason its exit code is kept.
         let outcome = yield* calling({
           sessionId: session.sessionId,
-          tool: 'commands.output',
+          tool: 'commands_output',
           arguments: {},
         })
         for (let tries = 0; tries < 50 && outcome.text.includes('still running'); tries += 1) {
           yield* Effect.sleep('50 millis')
           outcome = yield* calling({
             sessionId: session.sessionId,
-            tool: 'commands.output',
+            tool: 'commands_output',
             arguments: {},
           })
         }
@@ -454,7 +462,7 @@ describe('a one-off command naming a folder outside the root', () => {
         const session = yield* opened
         const answer = yield* calling({
           sessionId: session.sessionId,
-          tool: 'commands.run',
+          tool: 'commands_run',
           arguments: { line: 'node -e "console.log(1)"', folder: '../elsewhere' },
         })
         const commands = yield* Commands

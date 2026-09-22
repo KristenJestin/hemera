@@ -23,7 +23,7 @@ const meta = {
   component: HemeraToolCall,
   parameters: { layout: 'padded' },
   args: {
-    tool: 'fs.read',
+    tool: 'fs_read',
     status: 'completed',
     summary: '4 812 bytes read from src/billing/export.ts, 1 of 1 page.',
     arguments: [
@@ -63,7 +63,7 @@ export const ReadFolded: Story = {
     const canvas = within(canvasElement)
     // The mark is the whole difference from a native call, so it is read on the line.
     await expect(canvas.getByText('Hemera')).toBeVisible()
-    await expect(canvas.getByText('fs.read')).toBeVisible()
+    await expect(canvas.getByText('fs_read')).toBeVisible()
     const row = canvas.getByRole('button', { name: /fs\.read/ })
     await expect(row).toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.getByText('src/billing/export.ts')).toBeVisible()
@@ -86,7 +86,7 @@ export const ReadOpen: Story = {
 /** A write: one effect, and the idempotency key it was asked under. */
 export const Written: Story = {
   args: {
-    tool: 'fs.write',
+    tool: 'fs_write',
     summary: 'src/billing/export.test.ts written, 1 204 bytes.',
     arguments: [
       { label: 'path', value: 'src/billing/export.test.ts' },
@@ -106,7 +106,7 @@ export const Written: Story = {
 /** An edit: the unique text it replaced, and the file it left behind. */
 export const Edited: Story = {
   args: {
-    tool: 'fs.edit',
+    tool: 'fs_edit',
     summary: '1 occurrence replaced in src/billing/export.ts.',
     arguments: [
       { label: 'path', value: 'src/billing/export.ts' },
@@ -147,10 +147,10 @@ export const SearchTruncated: Story = {
 /** A call Hemera refused: nothing ran, and the reason is on the line, not behind a fold. */
 export const Refused: Story = {
   args: {
-    tool: 'fs.write',
+    tool: 'fs_write',
     status: 'refused',
-    summary: 'No effect: the Session does not offer fs.write.',
-    error: 'The guard refused this call: fs.write is not in the set of this Session.',
+    summary: 'No effect: the Session does not offer fs_write.',
+    error: 'The guard refused this call: fs_write is not in the set of this Session.',
     arguments: [{ label: 'path', value: '/etc/hosts' }],
     paths: [],
   },
@@ -171,7 +171,7 @@ export const Refused: Story = {
 /** A write outside the Workspace root: it is waiting for the reader, and it says so. */
 export const WaitingForYou: Story = {
   args: {
-    tool: 'fs.write',
+    tool: 'fs_write',
     status: 'pending',
     summary: 'Held: the permission block of this turn is asking the reader.',
     arguments: [{ label: 'path', value: '/home/someone/notes.md' }],
@@ -194,17 +194,17 @@ export const EveryTool: Story = {
     <div className="flex flex-col gap-1">
       {(
         [
-          ['fs.read', 'Reading src/billing/export.ts'],
-          ['fs.write', 'Writing src/billing/export.test.ts'],
-          ['fs.edit', 'Editing src/billing/export.ts'],
-          ['fs.list', 'Listing src/billing'],
+          ['fs_read', 'Reading src/billing/export.ts'],
+          ['fs_write', 'Writing src/billing/export.test.ts'],
+          ['fs_edit', 'Editing src/billing/export.ts'],
+          ['fs_list', 'Listing src/billing'],
           ['search', 'Searching for exportInvoices'],
-          ['commands.list', 'Reading the catalogue'],
-          ['commands.run', 'Running check'],
-          ['commands.output', 'Reading the output of check'],
-          ['commands.stop', 'Stopping check'],
-          ['project.get', 'Reading the Project'],
-          ['session.get', 'Reading this Session'],
+          ['commands_list', 'Reading the catalogue'],
+          ['commands_run', 'Running check'],
+          ['commands_output', 'Reading the output of check'],
+          ['commands_stop', 'Stopping check'],
+          ['project_get', 'Reading the Project'],
+          ['session_get', 'Reading this Session'],
         ] as const
       ).map(([tool, summary]) => (
         <HemeraToolCall

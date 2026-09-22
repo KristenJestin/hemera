@@ -45,7 +45,7 @@ describe('A read inside the Workspace goes through on its own', () => {
       'agent',
       'Read 42 lines of src/index.ts',
       JSON.stringify({
-        tool: 'fs.read',
+        tool: 'fs_read',
         state: 'completed',
         caller: 'a1b2c3d4e5f6',
         paths: ['src/index.ts'],
@@ -53,7 +53,7 @@ describe('A read inside the Workspace goes through on its own', () => {
       }),
     )
     const drawn = hemeraToolCallOf(entry)
-    expect(drawn?.tool).toBe('fs.read')
+    expect(drawn?.tool).toBe('fs_read')
     expect(drawn?.summary).toBe('Read 42 lines of src/index.ts')
     expect(drawn?.status).toBe('completed')
     expect(drawn?.arguments).toEqual([{ label: 'path', value: 'src/index.ts' }])
@@ -70,7 +70,7 @@ describe('A read inside the Workspace goes through on its own', () => {
       'agent',
       'Wrote src/index.ts',
       JSON.stringify({
-        tool: 'fs.write',
+        tool: 'fs_write',
         state: 'completed',
         caller: 'a1b2c3d4e5f6',
         paths: ['src/index.ts'],
@@ -84,7 +84,7 @@ describe('A read inside the Workspace goes through on its own', () => {
   })
 
   test('a hemera_tool_call entry whose payload does not parse is left out', () => {
-    const entry = entryOf('hemera_tool_call', 'agent', 'Read a file', '{"tool":"fs.read"}')
+    const entry = entryOf('hemera_tool_call', 'agent', 'Read a file', '{"tool":"fs_read"}')
     expect(hemeraToolCallOf(entry)).toBeNull()
   })
 })
