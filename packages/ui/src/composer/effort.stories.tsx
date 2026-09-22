@@ -18,6 +18,11 @@ import { EffortControl } from './effort.tsx'
  * untouched, which is what makes them three candidates rather than three views of one state.
  * The question is how much of the panel each of them spends, and how much of the scale a reader
  * can hold in their head after looking at it once.
+ *
+ * **The maintainer kept the slider on 22 September 2026**, and it is the one that was worked on
+ * afterwards: dragged, pressed anywhere along its track, and still whatever the level is. The
+ * row and the dial stay here as what it was chosen against, and the word is still an argument
+ * of the panels — so any of the three can be drawn while the change is being read.
  */
 const meta = {
   tags: ['autodocs', 'new'],
@@ -84,7 +89,7 @@ export const SideBySide: Story = {
   render: () => (
     <div className="flex items-start gap-6">
       <Candidate name="1 · Row" said="Every step written out." variant="row" />
-      <Candidate name="2 · Slider" said="The scale read down a track." variant="slider" />
+      <Candidate name="2 · Slider" said="Kept: the scale read down a track." variant="slider" />
       <Candidate name="3 · Dial" said="The scale read across, said in full." variant="dial" />
     </div>
   ),

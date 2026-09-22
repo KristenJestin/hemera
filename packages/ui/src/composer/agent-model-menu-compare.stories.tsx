@@ -169,6 +169,11 @@ const COMBINATIONS: { effort: EffortVariant; mode: ModeVariant }[] = [
  *
  * The application keeps the defaults — `AgentModelMenu` is the stages with the row and the
  * list — and pointing it at anything else is one line of `agent-model-menu.tsx`.
+ *
+ * The maintainer kept the stages, the mode list and the effort's **slider** on 22 September
+ * 2026, and the slider is still an option here rather than the default: the day the panel is to
+ * open on it, `effortVariant = 'row'` becomes `effortVariant = 'slider'` in the signature of
+ * `AgentModelMenuStages`, and nothing else moves.
  */
 export const Variants: Story = {
   parameters: { controls: { disable: true } },
