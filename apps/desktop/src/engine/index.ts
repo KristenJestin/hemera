@@ -18,6 +18,7 @@ import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
+import { clockLayer, poolLayer } from './agents/pool.ts'
 import { AgentNotices, runtimeLayer } from './agents/runtime.ts'
 import type { AgentRuntime, Notice } from './agents/runtime.ts'
 import { type Agents, agentsLayer } from './agents/service.ts'
@@ -147,6 +148,9 @@ function servicesOf(
       Layer.provideMerge(discoveryLayer),
       Layer.provide(rows),
       Layer.provide(processSupervisorLayer),
+      // The book of what is running, on the engine's own clock: it is what closes the agent a
+      // Home's composer started once nobody is looking at that composer any more (D5-05).
+      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provide(agents),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))

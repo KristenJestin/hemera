@@ -7,9 +7,10 @@ import { type AgentAdapter, versionIn } from '../adapter.ts'
  *
  * The agent is `claude`: the command Claude Code's own documentation tells a reader to install
  * and to sign in with, and the only command the Agents page ever names. Claude Code speaks no
- * ACP itself, and what exposes it is `claude-agent-acp` — a package of Hemera's, spawned by the
- * supervisor, never shown and never asked of the reader
- * (`docs/technical/acp-providers-2026-09.md` §2).
+ * ACP itself, and what exposes it is `@agentclientprotocol/claude-agent-acp` — a dependency of
+ * this application, resolved from Hemera's own `node_modules`, spawned by the supervisor, never
+ * installed, never shown and never asked of the reader
+ * (`docs/technical/acp-providers-2026-09.md` §2, D5-21).
  *
  * The command looked for on the `PATH` is the agent's own, and it is not what starts a Session:
  * the adapter runs the Claude Code it carries in its own `@anthropic-ai/claude-agent-sdk`
@@ -46,7 +47,7 @@ export const claude: AgentAdapter = {
     join(env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'), '.credentials.json'),
   ],
   package: '@anthropic-ai/claude-code',
-  acp: { command: 'claude-agent-acp', args: [] },
+  acp: { from: 'bundled', package: '@agentclientprotocol/claude-agent-acp', args: [] },
   readVersion: versionIn,
   isAuthenticated: (methods) => !methods.some((method) => LOGINS.has(method.id)),
 }

@@ -20,7 +20,9 @@ import type { AgentProvider } from '#engine/agents/adapter.ts'
 import { codex } from '#engine/agents/adapters/codex.ts'
 import { opencode } from '#engine/agents/adapters/opencode.ts'
 import {
+  AgentAdapterMissingError,
   AgentNotInstalledError,
+  AgentNotSignedInError,
   Discovery,
   MachineEnvironment,
   discoveryLayer,
@@ -43,7 +45,15 @@ interface Machine {
   readonly asked: readonly string[]
   /** Every path discovery looked for a login at, in the order it looked. */
   readonly logins: readonly string[]
+  /** Every package of Hemera's own whose executable was asked for, in the order it was asked. */
+  readonly resolved: readonly string[]
 }
+
+/** The Node such a machine runs, which is what an adapter of Hemera's is run by. */
+const NODE = '/usr/bin/node'
+
+/** Where a scripted machine keeps the packages this application depends on. */
+const MODULES = '/opt/hemera/node_modules'
 
 /**
  * A machine that has exactly the commands and the login files it is given.
@@ -56,15 +66,24 @@ interface Machine {
 function machineOf(
   installed: Readonly<Record<string, Installed>>,
   logins: readonly string[] = [],
+  carried: readonly string[] = CARRIED,
 ): Machine {
   const asked: string[] = []
   const sought: string[] = []
+  const resolved: string[] = []
   const layer = Layer.succeed(MachineEnvironment, {
     home: HOME,
-    env: {},
+    env: { PATH: '/usr/local/bin' },
+    node: NODE,
     locate: (command: string) => {
       asked.push(command)
       return Effect.succeed(installed[command]?.path)
+    },
+    bundled: (packageName: string) => {
+      resolved.push(packageName)
+      return Effect.succeed(
+        carried.includes(packageName) ? join(MODULES, packageName, 'dist', 'index.js') : undefined,
+      )
     },
     readVersion: (command: string) => {
       asked.push(`${command} --version`)
@@ -75,8 +94,14 @@ function machineOf(
       return Effect.succeed(paths.some((path) => logins.includes(path)))
     },
   })
-  return { layer, asked, logins: sought }
+  return { layer, asked, logins: sought, resolved }
 }
+
+/** The adapters this application carries, which a machine has because Hemera does (D5-21). */
+const CARRIED: readonly string[] = [
+  '@agentclientprotocol/claude-agent-acp',
+  '@agentclientprotocol/codex-acp',
+]
 
 /** The three agents' own commands, and the lines they really print, as far as they matter here. */
 const CLAUDE = { path: '/usr/local/bin/claude', version: '2.0.31 (Claude Code)' }
@@ -263,42 +288,112 @@ describe('A missing agent cannot be picked', () => {
   })
 
   test('no other agent is offered in its place, and none other is even looked for', async () => {
-    const machine = machineOf({
-      claude: CLAUDE,
-      'claude-agent-acp': { path: '/usr/local/bin/claude-agent-acp' },
-    })
+    const machine = machineOf({ claude: CLAUDE }, [join(HOME, '.claude', '.credentials.json')])
 
     const failure = await on(machine, Effect.flip(resolving('codex')))
 
     expect(failure.id).toBe('codex')
-    // Claude Code is on this machine, adapter and all; a client that falls back to what is there
-    // would have looked it up, and the point of D5-17 is that it does not.
-    expect(machine.asked).toEqual(['codex-acp'])
+    // Claude Code is on this machine and signed in; a client that falls back to what is there
+    // would have looked it up, and the point of D5-17 is that it does not. What was asked about
+    // is Codex's own command, and nothing else.
+    expect(machine.asked).toEqual(['codex'])
+    // And no adapter was reached for: there is no agent to expose.
+    expect(machine.resolved).toEqual([])
   })
 
   test('an agent that is there resolves to itself and to the command that starts it', async () => {
-    const machine = machineOf({ opencode: OPENCODE })
+    const machine = machineOf({ opencode: OPENCODE }, [
+      join(HOME, '.local', 'share', 'opencode', 'auth.json'),
+    ])
 
     const resolved = await on(machine, resolving('opencode'))
 
+    // OpenCode speaks ACP itself, so what starts it is its own command with its own subcommand.
     expect(resolved.adapter).toBe(opencode)
-    expect(resolved.adapter.acp.command).toBe('opencode')
-    expect(resolved.adapter.acp.args).toEqual(['acp'])
+    expect(resolved.source).toBe('agent')
+    expect(resolved.command).toBe(OPENCODE.path)
+    expect(resolved.args).toEqual(['acp'])
     expect(resolved.path).toBe(OPENCODE.path)
+    // Nothing of Hemera's own was resolved for it: there is no adapter in the way.
+    expect(machine.resolved).toEqual([])
   })
 
-  test('what a session starts is the command Hemera runs, not the one the reader installed', async () => {
-    const machine = machineOf({
-      claude: CLAUDE,
-      'claude-agent-acp': { path: '/usr/local/bin/claude-agent-acp' },
-    })
+  test('A bundled adapter is found without PATH', async () => {
+    // Claude Code is installed and signed in; `claude-agent-acp` is nowhere on the `PATH`,
+    // because it is never installed by the reader — it is a dependency of this application.
+    const machine = machineOf({ claude: CLAUDE }, [join(HOME, '.claude', '.credentials.json')])
 
     const resolved = await on(machine, resolving('claude'))
 
-    // Claude Code speaks no ACP itself, so what a Session starts is the command Hemera carries,
-    // and the agent's own command is only what the reader has (D5-21).
-    expect(resolved.path).toBe('/usr/local/bin/claude-agent-acp')
-    expect(machine.asked).toEqual(['claude-agent-acp'])
+    expect(resolved.source).toBe('bundled')
+    expect(machine.resolved).toEqual(['@agentclientprotocol/claude-agent-acp'])
+    expect(resolved.path).toBe(
+      join(MODULES, '@agentclientprotocol/claude-agent-acp', 'dist', 'index.js'),
+    )
+    // Run by the Node this process is already running, told to be Node rather than a window,
+    // and given the reader's own environment, which is where the agent's own login is read from.
+    expect(resolved.command).toBe(NODE)
+    expect(resolved.args).toEqual([resolved.path])
+    expect(resolved.env?.ELECTRON_RUN_AS_NODE).toBe('1')
+    expect(resolved.env?.PATH).toBe('/usr/local/bin')
+    // The `PATH` was asked about the agent and never about the adapter (D5-21).
+    expect(machine.asked.some((one) => one.includes('-acp'))).toBe(false)
+  })
+
+  test('what a session starts is the command Hemera runs, not the one the reader installed', async () => {
+    const machine = machineOf({ claude: CLAUDE, codex: CODEX }, [
+      join(HOME, '.claude', '.credentials.json'),
+      join(HOME, '.codex', 'auth.json'),
+    ])
+
+    const claudeAgent = await on(machine, resolving('claude'))
+    const codexAgent = await on(machine, resolving('codex'))
+
+    // Neither Claude Code nor Codex speaks ACP itself, so what a Session starts is the adapter
+    // Hemera carries, and the agent's own command is only what the reader has (D5-21).
+    expect(claudeAgent.path).toBe(
+      join(MODULES, '@agentclientprotocol/claude-agent-acp', 'dist', 'index.js'),
+    )
+    expect(codexAgent.path).toBe(
+      join(MODULES, '@agentclientprotocol/codex-acp', 'dist', 'index.js'),
+    )
+  })
+
+  test('an agent nobody signed in is refused, and its adapter is never reached for', async () => {
+    const machine = machineOf({ claude: CLAUDE })
+
+    const failure = await on(machine, Effect.flip(resolving('claude')))
+
+    expect(failure).toBeInstanceOf(AgentNotSignedInError)
+    expect(failure.message).toBe('Claude Code is installed but not signed in.')
+    expect(machine.resolved).toEqual([])
+  })
+
+  test('an installation of Hemera without its adapter says so, and does not blame the agent', async () => {
+    const machine = machineOf({ claude: CLAUDE }, [join(HOME, '.claude', '.credentials.json')], [])
+
+    const failure = await on(machine, Effect.flip(resolving('claude')))
+
+    expect(failure).toBeInstanceOf(AgentAdapterMissingError)
+    expect(failure.message).toContain('this installation of Hemera is missing')
+  })
+
+  test('the two adapters this application depends on are where it says they are', async () => {
+    // The real resolution, out of this repository's own `node_modules`: the packages are
+    // dependencies of `@hemera/desktop`, so their executables are there to be run.
+    const found = await Effect.runPromise(
+      Effect.gen(function* () {
+        const environment = yield* MachineEnvironment
+        return yield* Effect.forEach(
+          ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp'],
+          (packageName) => environment.bundled(packageName),
+        )
+      }).pipe(Effect.provide(machineEnvironmentLayer)),
+    )
+
+    expect(found.every((path) => path !== undefined)).toBe(true)
+    expect(found[0]).toContain('claude-agent-acp')
+    expect(found[1]).toContain('codex-acp')
   })
 })
 

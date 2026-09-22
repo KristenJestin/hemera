@@ -7,8 +7,9 @@ import { type AgentAdapter, versionIn } from '../adapter.ts'
  *
  * The agent is `codex`: the command OpenAI's own documentation tells a reader to install and to
  * sign in with, and the only command the Agents page ever names. Codex speaks no ACP itself, and
- * what exposes it is `codex-acp` — a package of Hemera's, spawned by the supervisor, never shown
- * and never asked of the reader (`docs/technical/acp-providers-2026-09.md` §3).
+ * what exposes it is `@agentclientprotocol/codex-acp` — a dependency of this application,
+ * resolved from Hemera's own `node_modules`, spawned by the supervisor, never installed, never
+ * shown and never asked of the reader (`docs/technical/acp-providers-2026-09.md` §3, D5-21).
  *
  * As with Claude Code, the command on the `PATH` is not what starts a Session: the adapter runs
  * the Codex it carries in its own `@openai/codex` dependency. The login is what a machine must
@@ -41,7 +42,7 @@ export const codex: AgentAdapter = {
   loginHint: 'codex login',
   loginFiles: (home, env) => [join(env.CODEX_HOME ?? join(home, '.codex'), 'auth.json')],
   package: '@openai/codex',
-  acp: { command: 'codex-acp', args: [] },
+  acp: { from: 'bundled', package: '@agentclientprotocol/codex-acp', args: [] },
   readVersion: versionIn,
   isAuthenticated: (methods) => methods.every((method) => method.id === ALWAYS_OFFERED),
 }

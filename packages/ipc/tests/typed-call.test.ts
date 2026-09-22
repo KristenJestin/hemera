@@ -92,6 +92,7 @@ describe('Appel typé nominal', () => {
       // The agents, relayed to the engine the same way.
       'agents.list',
       'agents.offer',
+      'agents.offerSet',
       'agents.options',
       'agents.setOption',
       'agents.prompt',
@@ -162,6 +163,7 @@ describe('Cas d’usage nommés du process dédié', () => {
       'sessions.read',
       'agents.list',
       'agents.offer',
+      'agents.offerSet',
       'agents.options',
       'agents.setOption',
       'agents.prompt',

@@ -214,10 +214,20 @@ export function answer(
     }
     if (decision.name === 'agents.offer') {
       // What an agent offers a Project that no Session holds yet (D5-17): the Home's composer
-      // has the agent to choose and its own controls before anything is written.
+      // has the agent to choose and its own controls before anything is written. An agent that
+      // cannot be asked answers a refusal beside an empty list, because "this machine does not
+      // have it" and "it offers nothing" are not the same page (D5-21).
       const { projectId, provider } = decision.argument
-      const offered = yield* runtime.offer(projectId, provider)
-      return { options: announced(offered) }
+      const report = yield* runtime.offer(projectId, provider)
+      return { options: announced(report.options), refusal: report.refusal }
+    }
+    if (decision.name === 'agents.offerSet') {
+      // The choice made in that composer, on the session the offer opened: what comes back is
+      // what the agent announces now, which is the only place an option it publishes after a
+      // choice ever appears (D5-13).
+      const { projectId, provider, optionId, value } = decision.argument
+      const report = yield* runtime.offerSet(projectId, provider, optionId, value)
+      return { options: announced(report.options), refusal: report.refusal }
     }
     if (decision.name === 'agents.setOption') {
       const { sessionId, optionId, value } = decision.argument

@@ -21,6 +21,8 @@
     "e2e": "wdio run wdio.conf.ts"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.79.0",
+    "@agentclientprotocol/codex-acp": "1.12.0",
     "@agentclientprotocol/sdk": "1.4.0",
     "@effect/sql-sqlite-node": "4.0.0-rc.112",
     "@hemera/core": "workspace:*",

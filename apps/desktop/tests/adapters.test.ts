@@ -46,11 +46,19 @@ describe('An adapter is one agent, described', () => {
 
   test('the command that exposes an agent as an ACP one belongs to Hemera, not to the reader', () => {
     // Claude Code and Codex speak no ACP themselves: what a Session starts is the package Hemera
-    // runs on their behalf, which the page never shows and the reader never installs. OpenCode is
-    // the one agent that starts itself as one (D5-21).
-    expect(claude.acp).toEqual({ command: 'claude-agent-acp', args: [] })
-    expect(codex.acp).toEqual({ command: 'codex-acp', args: [] })
-    expect(opencode.acp).toEqual({ command: 'opencode', args: ['acp'] })
+    // depends on and resolves out of its own `node_modules`, which the page never shows and the
+    // reader never installs. OpenCode is the one agent that starts itself as one (D5-21).
+    expect(claude.acp).toEqual({
+      from: 'bundled',
+      package: '@agentclientprotocol/claude-agent-acp',
+      args: [],
+    })
+    expect(codex.acp).toEqual({
+      from: 'bundled',
+      package: '@agentclientprotocol/codex-acp',
+      args: [],
+    })
+    expect(opencode.acp).toEqual({ from: 'agent', command: 'opencode', args: ['acp'] })
   })
 
   test('each one says how to install the agent, and never the adapter Hemera runs (D5-21)', () => {

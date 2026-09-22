@@ -17,6 +17,7 @@ import { Agents, agentsLayer } from '#engine/agents/service.ts'
 function machineWith(found: readonly DiscoveredAgent[]): Layer.Layer<Discovery> {
   return Layer.succeed(Discovery, {
     list: () => Effect.succeed(found),
+    standing: () => Effect.die('nothing in this file asks about one agent'),
     resolve: () => Effect.die('nothing in this file resolves an agent'),
   })
 }

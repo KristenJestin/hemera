@@ -1,8 +1,10 @@
 import { exec, execFile } from 'node:child_process'
-import { accessSync, constants, existsSync, readdirSync, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { delimiter, extname, join } from 'node:path'
+import { delimiter, dirname, extname, join } from 'node:path'
 import { Context, Data, Effect, Layer } from 'effect'
+import { z } from 'zod'
 
 import type { InstallerTool } from '@hemera/ipc'
 
@@ -30,6 +32,13 @@ import { opencode } from './adapters/opencode.ts'
  * for: being signed in is the one bit of it this page shows, and the file belongs to the reader
  * (D5-21). What the word really is, the agent says when a Session asks it to `initialize`; this
  * is what can be said before one starts.
+ *
+ * What it never looks for on the `PATH` is an adapter. Two of the three agents speak no ACP, and
+ * the packages that expose them are dependencies of this application: `resolve` takes their
+ * executable out of Hemera's own `node_modules` and runs it with the Node this process is
+ * already running, so nothing about them is ever installed by, shown to, or asked of the reader
+ * (D5-21). And it refuses before it resolves: an agent this machine does not have and an agent
+ * nobody signed in are both answered as themselves, rather than by a process started to find out.
  */
 
 /** A path, as one string, whichever separator the machine wrote it with. */
@@ -73,6 +82,23 @@ export function installerOf(path: string): InstallerTool {
   return 'unknown'
 }
 
+/**
+ * The environment a child is given: every variable of this machine that has a value.
+ *
+ * `process.env` carries keys whose value is `undefined`, and what a spawn takes is a map of
+ * strings: a key with nothing behind it would be a variable set to the word "undefined".
+ */
+export type ChildEnvironment = Record<string, string>
+
+/** This machine's own environment, with the variables that carry nothing left out. */
+function definedIn(env: Environment) {
+  const kept: ChildEnvironment = {}
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined) kept[name] = value
+  }
+  return kept
+}
+
 /** One agent, as this machine answers for it. */
 export interface DiscoveredAgent {
   readonly id: AgentProvider
@@ -112,9 +138,23 @@ export interface DiscoveredAgent {
   readonly latest: string | null
 }
 
-/** An agent and the command that starts it: what a Session needs before it can exist. */
+/**
+ * An agent and the command that starts it: what a Session needs before it can exist.
+ *
+ * `source` says where the ACP command came from, which is the whole of D5-21 in one field:
+ * `bundled` is an adapter Hemera depends on and resolves out of its own `node_modules`, run by
+ * the Node this process is already running; `agent` is the reader's own command on their own
+ * `PATH`. `command` and `args` are what the supervisor is handed either way, and `env` is what
+ * the child needs beyond the environment it inherits — nothing, for an agent that is its own
+ * command.
+ */
 export interface ResolvedAgent {
   readonly adapter: AgentAdapter
+  readonly source: AgentAdapter['acp']['from']
+  readonly command: string
+  readonly args: readonly string[]
+  readonly env?: ChildEnvironment
+  /** Where what is started resolved: the adapter's executable, or the agent's own command. */
   readonly path: string
 }
 
@@ -135,6 +175,31 @@ export class AgentNotInstalledError extends Data.TaggedError('AgentNotInstalledE
 }
 
 /**
+ * Raised when the agent is there and nobody has signed it in (D5-21).
+ *
+ * Refused before anything is started, because an agent that is not signed in answers a prompt
+ * with a sign-in it wants the user to go through in a terminal: starting it would be a process
+ * opened on a folder to be told what the login file already said.
+ */
+export class AgentNotSignedInError extends Data.TaggedError('AgentNotSignedInError')<{
+  readonly id: AgentProvider
+}> {
+  override get message(): string {
+    return `${ADAPTERS[this.id].label} is installed but not signed in.`
+  }
+}
+
+/** Raised when the adapter this application carries is not where its own package should be. */
+export class AgentAdapterMissingError extends Data.TaggedError('AgentAdapterMissingError')<{
+  readonly id: AgentProvider
+  readonly package: string
+}> {
+  override get message(): string {
+    return `${ADAPTERS[this.id].label} cannot be started: this installation of Hemera is missing ${this.package}.`
+  }
+}
+
+/**
  * What discovery asks of the machine: where a command is, what it answers, and what the reader's
  * own home and environment say about a login.
  *
@@ -147,6 +212,17 @@ export class AgentNotInstalledError extends Data.TaggedError('AgentNotInstalledE
 export interface MachineEnvironmentService {
   /** Where a command resolves on the `PATH`, or `undefined` when it is not on it. */
   readonly locate: (command: string) => Effect.Effect<string | undefined>
+  /**
+   * Where the executable of one of Hemera's own packages is, or `undefined` when it is not there.
+   *
+   * The `PATH` has nothing to do with it: an adapter is a dependency of this application, and
+   * what answers is the `node_modules` this process was loaded from (D5-21). `undefined` is an
+   * installation of Hemera that is missing a package it declares, which is a broken install and
+   * not a machine without an agent.
+   */
+  readonly bundled: (packageName: string) => Effect.Effect<string | undefined>
+  /** The Node this process is running, which is what runs an adapter's executable. */
+  readonly node: string
   /** What the command answers to `--version`, or `undefined` when it does not answer. */
   readonly readVersion: (command: string) => Effect.Effect<string | undefined>
   /** The home directory an agent's own paths are read against. */
@@ -178,12 +254,31 @@ export class MachineEnvironment extends Context.Service<
  */
 export const ADAPTERS: Record<AgentProvider, AgentAdapter> = { claude, codex, opencode }
 
+/** Everything a resolve can refuse with: a machine without the agent, or without its login. */
+export type UnusableAgentError =
+  | AgentNotInstalledError
+  | AgentNotSignedInError
+  | AgentAdapterMissingError
+
 /** What the Agents page asks of this machine, and what a Session asks before it starts. */
 export interface DiscoveryService {
   /** The three agents, and what this machine can say about each of them. */
   readonly list: () => Effect.Effect<readonly DiscoveredAgent[], never>
-  /** The agent and the command that starts it, or a refusal naming the agent that is missing. */
-  readonly resolve: (id: AgentProvider) => Effect.Effect<ResolvedAgent, AgentNotInstalledError>
+  /**
+   * What this machine says about one agent: found or not, signed in or not, and its version.
+   *
+   * The same answer `list` gives for all three, asked of one — which is what the composer of a
+   * Home needs before it offers anything, and what a refusal is written from.
+   */
+  readonly standing: (id: AgentProvider) => Effect.Effect<DiscoveredAgent, never>
+  /**
+   * The agent and the command that starts it, or a refusal saying why it cannot be started.
+   *
+   * Nothing is started here, and nothing is started after a refusal either: an agent this
+   * machine does not have and an agent nobody signed in are both refused before a process
+   * exists (D5-17, D5-21).
+   */
+  readonly resolve: (id: AgentProvider) => Effect.Effect<ResolvedAgent, UnusableAgentError>
 }
 
 export class Discovery extends Context.Service<Discovery, DiscoveryService>()('Discovery') {}
@@ -253,15 +348,51 @@ export const discoveryLayer = Layer.effect(
       // the difference between one command that will not answer and three of them in a row.
       list: () =>
         Effect.forEach(AGENT_PROVIDERS, (id) => probe(ADAPTERS[id]), { concurrency: 'unbounded' }),
+      standing: (id) => probe(ADAPTERS[id]),
       resolve: (id) =>
         Effect.gen(function* () {
           const adapter = ADAPTERS[id]
-          // What a Session starts is the ACP command, which is Hemera's own and may not be the
-          // one the reader installed (D5-21). An adapter nobody has is an agent this machine
-          // cannot start either, and the refusal names the agent rather than the package.
-          const path = yield* machine.locate(adapter.acp.command)
-          if (path === undefined) return yield* Effect.fail(new AgentNotInstalledError({ id }))
-          return { adapter, path }
+          // The machine is asked about the agent, never about the adapter: whether the reader
+          // has the agent and has signed it in is what decides if there is anything to start,
+          // and both are refused here rather than by a process that would be started to find
+          // out (D5-17, D5-21).
+          const found = yield* probe(adapter)
+          if (!found.found) return yield* Effect.fail(new AgentNotInstalledError({ id }))
+          if (!found.authenticated) return yield* Effect.fail(new AgentNotSignedInError({ id }))
+
+          const acp = adapter.acp
+          if (acp.from === 'agent') {
+            // The agent speaks the protocol itself: what starts it is its own command with its
+            // own subcommand, which is the command the reader installed.
+            const path = yield* machine.locate(acp.command)
+            if (path === undefined) return yield* Effect.fail(new AgentNotInstalledError({ id }))
+            return {
+              adapter,
+              source: acp.from,
+              command: path,
+              args: acp.args,
+              path,
+            } satisfies ResolvedAgent
+          }
+
+          // The adapter is Hemera's own dependency: it is resolved out of this application's
+          // `node_modules` and run by the Node this process is already running, so no reader
+          // ever installs it and no `PATH` decides whether an agent works (D5-21).
+          const executable = yield* machine.bundled(acp.package)
+          if (executable === undefined) {
+            return yield* Effect.fail(new AgentAdapterMissingError({ id, package: acp.package }))
+          }
+          return {
+            adapter,
+            source: acp.from,
+            command: machine.node,
+            args: [executable, ...acp.args],
+            // Electron's own binary runs a script only when it is told to be Node; the rest of
+            // the environment is the reader's, because the adapter reads the agent's own login
+            // out of it.
+            env: { ...definedIn(machine.env), ELECTRON_RUN_AS_NODE: '1' },
+            path: executable,
+          } satisfies ResolvedAgent
         }),
     } satisfies DiscoveryService
   }),
@@ -334,6 +465,52 @@ function locate(command: string): string | undefined {
   return undefined
 }
 
+/**
+ * The file a package declares as its executable, read out of its own manifest.
+ *
+ * `bin` is one shape or two in npm's manifest — a path, or a name for each path — and the
+ * question here is the same either way: which file to run. It is parsed rather than narrowed,
+ * at the boundary where the manifest arrives, and a package that declares neither answers
+ * nothing.
+ */
+const manifestSchema = z.object({
+  bin: z
+    .union([
+      z.string(),
+      // A package that names its executables takes the first: the two adapters this application
+      // depends on declare exactly one each, under their own name.
+      z.record(z.string(), z.string()).transform((named) => Object.values(named)[0]),
+    ])
+    .optional(),
+})
+
+/**
+ * The executable one of Hemera's own packages declares, resolved from Hemera's `node_modules`.
+ *
+ * `require.resolve` of the package's manifest is what finds the package, wherever the
+ * installation put it — a pnpm store, an `asar` unpacked beside the application — and the `bin`
+ * that manifest declares is what is run. The `PATH` is not consulted and nothing is installed:
+ * an adapter is a dependency of this application, and the reader never has one (D5-21).
+ *
+ * `undefined` is an installation missing a package it declares, which is a broken install rather
+ * than a machine without an agent, and it is refused as itself.
+ */
+function executableOf(packageName: string): string | undefined {
+  try {
+    const require = createRequire(import.meta.url)
+    const manifestPath = require.resolve(`${packageName}/package.json`)
+    const manifest = manifestSchema.safeParse(JSON.parse(readFileSync(manifestPath, 'utf8')))
+    const declared = manifest.success ? manifest.data.bin : undefined
+    if (declared === undefined) return undefined
+    const executable = join(dirname(manifestPath), declared)
+    return existsSync(executable) ? executable : undefined
+  } catch {
+    // A package that is not there answers nothing: `resolve` throws for a module it cannot find,
+    // and this is the one place that is an answer rather than a failure.
+    return undefined
+  }
+}
+
 /** The name one directory holds for a candidate, spelled as the file system spells it. */
 function spelledIn(directory: string, shim: string): string | undefined {
   try {
@@ -380,7 +557,9 @@ function versionOf(command: string, signal: AbortSignal): Promise<string | undef
 export const machineEnvironmentLayer = Layer.succeed(MachineEnvironment, {
   home: homedir(),
   env: process.env,
+  node: process.execPath,
   locate: (command) => Effect.sync(() => locate(command)),
+  bundled: (packageName) => Effect.sync(() => executableOf(packageName)),
   readVersion: (command) => Effect.promise((signal) => versionOf(command, signal)),
   holds: (paths) => Effect.sync(() => paths.some((path) => existsSync(path))),
 })

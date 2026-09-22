@@ -11,11 +11,14 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Fiber } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
 import * as TestClock from 'effect/testing/TestClock'
 
+import { MachineEnvironment } from '#engine/agents/discovery.ts'
 import { fakeAgent } from '#engine/agents/fake.ts'
+import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
 import { AgentRuntime, CANCEL_GRACE } from '#engine/agents/runtime.ts'
+import { Projects } from '#engine/projects.ts'
 import {
   ASKED,
   application,
@@ -412,6 +415,185 @@ describe('One message id over two kinds', () => {
         // finds its own row.
         expect(thought.correlationId).toBe('msg-1:thought')
         expect(answer.correlationId).toBe('msg-1:message')
+      }),
+    )
+  })
+})
+
+/**
+ * What an agent offers a Project's Home, before any Session holds it (design D5-17, D5-21).
+ *
+ * The composer of a Home chooses an agent and what that agent offers before there is a Session
+ * to ask, so the engine starts the agent, opens a session on the Project and keeps it: an option
+ * an agent only publishes once another one has been chosen is announced by the session where the
+ * choice was made, and by nothing else. An agent that cannot be asked is a refusal with a
+ * sentence, never an empty list — and never a process either.
+ */
+describe('What an agent offers a Home', () => {
+  /** The two options of an agent whose effort only exists once a model has been chosen. */
+  const MODEL = {
+    id: 'model',
+    type: 'select' as const,
+    name: 'Model',
+    category: 'model' as const,
+    currentValue: 'sonnet',
+    options: [
+      { value: 'sonnet', name: 'Sonnet' },
+      { value: 'opus', name: 'Opus' },
+    ],
+  }
+  const EFFORT = {
+    id: 'effort',
+    type: 'select' as const,
+    name: 'Effort',
+    category: 'thought_level' as const,
+    currentValue: 'medium',
+    options: [
+      { value: 'medium', name: 'Medium' },
+      { value: 'high', name: 'High' },
+    ],
+  }
+
+  test('Choosing a model on Home reveals the effort the agent announces', async () => {
+    const agent = fakeAgent({
+      configOptions: [MODEL],
+      // The agent publishes the effort of the model that was picked, which is the only place
+      // that option ever appears: it is not in the list the session opened with.
+      onChoice: (choice) => (choice.id === 'model' ? [MODEL, EFFORT] : [MODEL]),
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const project = yield* projects.create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: workingDirectory,
+        })
+
+        const first = yield* runtime.offer(project.id, 'claude')
+        expect(first.refusal).toBeNull()
+        expect(first.options.map((option) => option.id)).toEqual(['model'])
+
+        const after = yield* runtime.offerSet(project.id, 'claude', 'model', 'opus')
+
+        // The effort the agent announced in answer to the choice, which no second start was
+        // needed to hear: the probe session is the one the choice was made in.
+        expect(after.refusal).toBeNull()
+        expect(after.options.map((option) => option.id)).toEqual(['model', 'effort'])
+        expect(agent.answers.choices).toEqual(['model=opus'])
+        expect(agent.starts).toHaveLength(1)
+
+        // And asking again answers what the agent announced last, not the list it opened with.
+        const again = yield* runtime.offer(project.id, 'claude')
+        expect(again.options.map((option) => option.id)).toEqual(['model', 'effort'])
+        expect(agent.starts).toHaveLength(1)
+      }),
+    )
+  })
+
+  test('A probe closes after the pool’s idle time', async () => {
+    const agent = fakeAgent({ configOptions: [MODEL] })
+    let ended = false
+    void agent.exited.then(() => {
+      ended = true
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const project = yield* projects.create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: workingDirectory,
+        })
+
+        yield* runtime.offer(project.id, 'claude')
+        expect(agent.starts).toHaveLength(1)
+        expect(ended).toBe(false)
+
+        // The pool's clock is the engine's, and the engine's is the suite's: five idle minutes
+        // pass here rather than being waited out.
+        yield* Effect.gen(function* () {
+          for (let look = 0; look < 20; look++) {
+            yield* pause(10)
+            yield* TestClock.adjust(IDLE_AFTER_MS)
+            if (ended) return
+          }
+        })
+
+        // The process is gone, and it went because it had been idle: nothing asked for it to be
+        // stopped, and nothing was left holding the Project's folder open.
+        expect(ended).toBe(true)
+        expect(agent.starts).toHaveLength(1)
+      }),
+    )
+  })
+})
+
+/**
+ * An agent that cannot be asked at all (design D5-17, D5-21).
+ *
+ * Both are read off the machine before anything is started: the command the reader installed, and
+ * the login their agent wrote. Neither is a process, and neither is another agent put in its
+ * place.
+ */
+describe('An agent that cannot be asked', () => {
+  /** A machine that has every command and has signed none of them in. */
+  const signedOut = Layer.succeed(MachineEnvironment, {
+    home: '/home/ana',
+    env: {},
+    node: '/usr/bin/node',
+    locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
+    bundled: (packageName: string) => Effect.succeed(join('/opt/hemera', packageName, 'index.js')),
+    readVersion: () => Effect.succeed('1.0.0'),
+    holds: () => Effect.succeed(false),
+  })
+
+  test('An agent not signed in is refused before any process starts', async () => {
+    const agent = fakeAgent({ configOptions: [] })
+
+    await application(dataFolder, undefined, signedOut)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const project = yield* projects.create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: workingDirectory,
+        })
+
+        const offered = yield* runtime.offer(project.id, 'claude')
+
+        expect(offered.options).toEqual([])
+        expect(offered.refusal?.kind).toBe('not_signed_in')
+        // Nothing was started: the login file said so, and a process would have been a folder
+        // opened to be told the same thing.
+        expect(agent.starts).toEqual([])
+      }),
+    )
+  })
+
+  test('The refusal of an offer is a sentence', async () => {
+    const agent = fakeAgent({ configOptions: [] })
+
+    await application(dataFolder, undefined, signedOut)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const project = yield* projects.create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: workingDirectory,
+        })
+
+        const offered = yield* runtime.offer(project.id, 'codex')
+
+        // The agent's own name and what to do about it, and no JSON of any refusal's fields.
+        expect(offered.refusal?.message).toBe('Codex is installed but not signed in.')
+        expect(offered.refusal?.message).not.toContain('{')
       }),
     )
   })

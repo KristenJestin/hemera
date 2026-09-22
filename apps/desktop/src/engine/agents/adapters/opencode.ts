@@ -30,7 +30,7 @@ export const opencode: AgentAdapter = {
     join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'opencode', 'auth.json'),
   ],
   package: 'opencode-ai',
-  acp: { command: 'opencode', args: ['acp'] },
+  acp: { from: 'agent', command: 'opencode', args: ['acp'] },
   readVersion: versionIn,
   isAuthenticated: (methods) => methods.length === 0,
 }

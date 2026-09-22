@@ -122,6 +122,18 @@ export interface FakeScript {
   /** What it announces in `session/new`, in the SDK's own shape for a configuration option. */
   readonly configOptions?: readonly SessionConfigOption[]
   /**
+   * What it announces once one of its options has been chosen (design D5-13).
+   *
+   * The protocol answers a choice with the whole set of options as they stand, which is the only
+   * place an option that exists because of that choice ever appears — the effort of a reasoning
+   * model, published once the model is picked. A script that says nothing here announces the
+   * same list it opened with.
+   */
+  readonly onChoice?: (choice: {
+    readonly id: string
+    readonly value: string
+  }) => readonly SessionConfigOption[]
+  /**
    * What `session/load` streams back, as the protocol asks it to.
    *
    * A resumed session is not replayed by `session/resume`, so this is the load's alone.
@@ -188,6 +200,8 @@ export interface FakeAnswers {
   readonly resumes: number
   /** How many times the agent was told to cancel, whether or not it listened. */
   readonly cancels: number
+  /** Every option it was put on, as , in the order it was told. */
+  readonly choices: string[]
 }
 
 /**
@@ -203,6 +217,7 @@ interface FakeTally {
   loads: number
   resumes: number
   cancels: number
+  choices: string[]
 }
 
 /** The peer, the script it follows, and the two pipes a client talks to it through. */
@@ -227,6 +242,14 @@ export interface FakeAgent {
    */
   readonly input: WritableStream<Uint8Array>
   readonly output: ReadableStream<Uint8Array>
+  /**
+   * Every command the supervisor was asked to start for this agent, in the order it was asked.
+   *
+   * Read by a suite about what is *not* started: an agent this machine does not have and an
+   * agent nobody signed in are refused before a process exists (D5-17, D5-21), and an empty
+   * list is what says so.
+   */
+  readonly starts: string[]
   /** Ends the agent now, as a process that died on the spot does. */
   readonly die: () => void
   /** The death of the agent, which resolves once and only once. */
@@ -323,9 +346,13 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     loads: 0,
     resumes: 0,
     cancels: 0,
+    choices: [],
   }
 
   let sessionId = script.nativeSessionId ?? 'native-session'
+  // What it announces now, which a choice replaces: the protocol answers a choice with the whole
+  // set of options as they stand, and this is that set.
+  let announced: SessionConfigOption[] = [...(script.configOptions ?? [])]
   let cancelled = false
   let dead = false
   let connection: AgentSideConnection | null = null
@@ -376,8 +403,17 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       const opened: NewSessionResponse = { sessionId }
       // Left out when the script named none, for the reason a tool call leaves out what it does
       // not say: an agent that announces no options is not an agent that announces zero.
-      if (script.configOptions !== undefined) opened.configOptions = [...script.configOptions]
+      if (script.configOptions !== undefined) opened.configOptions = [...announced]
       return opened
+    },
+    setSessionConfigOption: (request) => {
+      answers.choices.push(`${request.configId}=${String(request.value)}`)
+      // The whole set as it stands, which is what the protocol answers with: a script that says
+      // what a choice reveals says it here, and one that says nothing announces the same list.
+      if (script.onChoice !== undefined) {
+        announced = [...script.onChoice({ id: request.configId, value: String(request.value) })]
+      }
+      return { configOptions: [...announced] }
     },
     loadSession: async (request: LoadSessionRequest): Promise<void> => {
       answers.loads += 1
@@ -449,6 +485,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     streams: { input: toClient.readable, output: fromClient.writable },
     input: fromClient.writable,
     output: toClient.readable,
+    starts: [],
     die,
     exited,
   }
@@ -540,9 +577,14 @@ function supervisedOf(agent: FakeAgent): SupervisedProcess {
  */
 export function fakeSupervisor(agent: FakeAgent): Layer.Layer<ProcessSupervisor> {
   return Layer.succeed(ProcessSupervisor, {
-    start: () =>
+    start: (command) =>
       Effect.acquireRelease(
-        Effect.sync(() => supervisedOf(agent)),
+        Effect.sync(() => {
+          // Recorded on the agent itself, so a suite can say what was started — and, which is
+          // the point of D5-17, what was not.
+          agent.starts.push(command)
+          return supervisedOf(agent)
+        }),
         (process) => process.stop,
       ),
   } satisfies ProcessSupervisorService)

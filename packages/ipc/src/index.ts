@@ -68,6 +68,8 @@ export type {
 } from './engine.ts'
 export {
   agentAvailabilitySchema,
+  agentOfferRefusalSchema,
+  agentOfferSchema,
   agentProviderSchema,
   agentUpdateSchema,
   configOptionSchema,
@@ -77,6 +79,8 @@ export {
 } from './agents.ts'
 export type {
   AgentAvailability,
+  AgentOffer,
+  AgentOfferRefusal,
   AgentProvider,
   AgentUpdate,
   ConfigOption,

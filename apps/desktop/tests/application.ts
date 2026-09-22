@@ -19,6 +19,7 @@ import * as TestClock from 'effect/testing/TestClock'
 import type { SessionEntry } from '@hemera/core'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import { fakeSupervisor, type FakeAgent, type FakeStep } from '#engine/agents/fake.ts'
+import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { AgentNotices, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime, Notice } from '#engine/agents/runtime.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -32,15 +33,23 @@ const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /** The version the shipped migrations are opened with, as the application opens them. */
 const VERSION = '0.4.0'
 
-/** A machine that has every agent, at a path nothing has to be installed at. */
+/**
+ * A machine that has every agent, signed in, at a path nothing has to be installed at.
+ *
+ * Signed in because a Session runs an agent that is: an agent nobody signed in is refused before
+ * a process is started (D5-21), and what these suites are about is the turn. The adapters answer
+ * from a `node_modules` this machine pretends to have, which is where a real one would find them
+ * — never the `PATH`.
+ */
 export const machine = Layer.succeed(MachineEnvironment, {
   home: '/home/ana',
   env: {},
+  node: '/usr/bin/node',
   locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
+  bundled: (packageName: string) =>
+    Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
   readVersion: () => Effect.succeed('1.0.0'),
-  // Nothing is signed in on this machine: what a suite of the application is about is the turn,
-  // and no turn here depends on a login file being there (D5-21).
-  holds: () => Effect.succeed(false),
+  holds: () => Effect.succeed(true),
 })
 
 /** One push the engine made, as the window would have received it. */
@@ -73,7 +82,11 @@ export function watching() {
 }
 
 /** A run of the application over one scripted agent, on one data folder. */
-export function application(dataFolder: string, notices: Layer.Layer<AgentNotices> = NoNotices) {
+export function application(
+  dataFolder: string,
+  notices: Layer.Layer<AgentNotices> = NoNotices,
+  environment: Layer.Layer<MachineEnvironment> = machine,
+) {
   return (agent: FakeAgent) => {
     // The runtime is built on the very same services the suite reads with — `provideMerge` hands
     // them up rather than hiding them, so one database is opened and one thread is written.
@@ -85,9 +98,12 @@ export function application(dataFolder: string, notices: Layer.Layer<AgentNotice
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
         ),
       ),
-      Layer.provide(discoveryLayer.pipe(Layer.provide(machine))),
+      Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(fakeSupervisor(agent)),
       Layer.provide(notices),
+      // The pool reads the clock the suite moves, because it is the engine's own clock: five
+      // idle minutes are a `TestClock.adjust` here rather than five minutes of waiting (D5-05).
+      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(TestClock.layer()),
     )
     return <A, E>(

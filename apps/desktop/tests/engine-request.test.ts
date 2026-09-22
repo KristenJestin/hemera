@@ -18,6 +18,7 @@ import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import type { Discovery } from '#engine/agents/discovery.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
+import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
@@ -70,7 +71,9 @@ function running<A, E>(
     Layer.succeed(MachineEnvironment, {
       home: '/home/ana',
       env: {},
-      locate: () => Effect.succeed('/usr/local/bin/claude-agent-acp'),
+      node: '/usr/bin/node',
+      locate: () => Effect.succeed('/usr/local/bin/claude'),
+      bundled: () => Effect.succeed('/opt/hemera/node_modules/adapter/dist/index.js'),
       readVersion: () => Effect.succeed('1.0.0'),
       holds: () => Effect.succeed(true),
     }),
@@ -107,6 +110,7 @@ function running<A, E>(
     runtimeLayer.pipe(
       Layer.provideMerge(discoveryLayer),
       Layer.provide(rows),
+      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provide(agents),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))

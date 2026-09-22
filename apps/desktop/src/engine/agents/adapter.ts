@@ -17,10 +17,12 @@
  * in `acp`, spawned by the supervisor, never shown and never asked of the reader (D5-21). The
  * Agents page speaks of Claude Code, Codex and OpenCode, and of nothing else.
  *
- * Nothing about an agent is embedded here. Neither the agent nor its adapter is a dependency of
- * this application yet, and both commands — the reader's and Hemera's — are looked for on the
- * `PATH` the user already has (issue decision 93). An agent that is not installed is not
- * installed, and no other one takes its place (D5-17).
+ * The agent itself is never embedded: it is the command the reader installed and signed in, and
+ * it is looked for on the `PATH` they already have (issue decision 93). The **adapter** is the
+ * opposite — it is a dependency of this application, resolved out of Hemera's own
+ * `node_modules`, because asking a reader to install `claude-agent-acp` is asking them to
+ * install Hemera's plumbing (D5-21). An agent that is not installed is not installed, and no
+ * other one takes its place (D5-17).
  */
 
 import { AGENT_PROVIDERS, type AgentProvider } from '@hemera/core'
@@ -78,10 +80,10 @@ export interface AgentAdapter {
   /**
    * How Hemera starts this agent as an agent, which is its own business and never the reader's.
    *
-   * Two of the three speak no ACP themselves, and what exposes them is a package of Hemera's:
-   * spawned by the supervisor, shown to nobody, asked of the reader never (D5-21). One of the
-   * three is the agent's own command with a subcommand, and the same field carries it. What this
-   * is not is something the Agents page may name.
+   * Two of the three speak no ACP themselves, and what exposes them is a package Hemera depends
+   * on: resolved from its own `node_modules`, spawned by the supervisor, shown to nobody, asked
+   * of the reader never (D5-21). The third is the agent's own command with a subcommand, and
+   * `from` is which of the two this is. What this is not is something the Agents page may name.
    */
   readonly acp: AcpProcess
   /** The version this agent printed, or `undefined` when the line carries none. */
@@ -100,13 +102,32 @@ export interface AgentAdapter {
   ) => boolean
 }
 
-/** A command that speaks ACP, and the arguments that make it start as one. */
-export interface AcpProcess {
-  /** The command Hemera spawns for this agent, out of its own dependencies. */
-  readonly command: string
-  /** What starts it as an ACP agent, over standard input and standard output. */
-  readonly args: readonly string[]
-}
+/**
+ * What speaks ACP for this agent, and where that command comes from (D5-21).
+ *
+ * The two cases are the two kinds of agent Hemera supports, and they are written apart because
+ * they are found in different places. `bundled` is an adapter that is a dependency of this
+ * application: the package is in Hemera's own `node_modules`, its executable is resolved from
+ * there and run by the Node this process is already running, and the reader never installs it,
+ * never sees it and is never asked for it. `agent` is an agent that speaks the protocol itself:
+ * the command is the reader's own, on the `PATH` they already have, with the subcommand that
+ * starts it as an agent.
+ */
+export type AcpProcess =
+  | {
+      readonly from: 'bundled'
+      /** The published package of the adapter, as Hemera depends on it. */
+      readonly package: string
+      /** What starts it as an ACP agent, after the executable of that package. */
+      readonly args: readonly string[]
+    }
+  | {
+      readonly from: 'agent'
+      /** The agent's own command, looked for on the `PATH` the reader has. */
+      readonly command: string
+      /** What starts it as an ACP agent, over standard input and standard output. */
+      readonly args: readonly string[]
+    }
 
 /** The home and the environment an agent's own paths are read against. */
 export type Environment = Readonly<Record<string, string | undefined>>

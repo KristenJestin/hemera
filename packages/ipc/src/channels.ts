@@ -88,6 +88,7 @@ export const CHANNELS = {
   'agents.list': ENGINE_REQUESTS['agents.list'],
   'agents.options': ENGINE_REQUESTS['agents.options'],
   'agents.offer': ENGINE_REQUESTS['agents.offer'],
+  'agents.offerSet': ENGINE_REQUESTS['agents.offerSet'],
   'agents.setOption': ENGINE_REQUESTS['agents.setOption'],
   'agents.prompt': ENGINE_REQUESTS['agents.prompt'],
   'agents.stop': ENGINE_REQUESTS['agents.stop'],

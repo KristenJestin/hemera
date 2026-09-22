@@ -42,7 +42,8 @@ import {
   type WindowReport,
   connect,
 } from './client.ts'
-import { Discovery } from './discovery.ts'
+import { Discovery, type ResolvedAgent } from './discovery.ts'
+import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, type SupervisedProcess } from './supervisor.ts'
 import { Projects } from '../projects.ts'
@@ -100,6 +101,31 @@ export interface ResumeReport {
   readonly reason: string | null
 }
 
+/**
+ * Why an agent has nothing to offer, in the words the composer shows (design D5-17, D5-21).
+ *
+ * Three refusals and not one, because they are three different things to be told: the agent is
+ * not on this machine, it is there and nobody signed it in, or it was started and would not
+ * speak. Each carries the sentence the page shows; none of them is an empty list, which is what
+ * an agent that offers no options at all answers.
+ */
+export interface AgentOfferRefusal {
+  readonly kind: 'not_installed' | 'not_signed_in' | 'failed'
+  readonly message: string
+}
+
+/** Where an agent is started, and what it is started with: the supervisor's own two options. */
+interface AgentStartOptions {
+  cwd: string
+  env?: Record<string, string>
+}
+
+/** What an agent offers a Home, or why it offers nothing. */
+export interface AgentOfferReport {
+  readonly options: readonly AgentOption[]
+  readonly refusal: AgentOfferRefusal | null
+}
+
 /** What the engine can ask of an agent, on behalf of a window. */
 export interface AgentRuntimeService {
   /** Starts the Session's agent if it is not running, and answers what it announced. */
@@ -113,11 +139,28 @@ export interface AgentRuntimeService {
    * a Session to ask: what an agent offers is said by the agent itself, and asking it is what
    * this does. Nothing is written and no Session is made — what it answers is what the Session
    * made from that choice will offer.
+   *
+   * An agent that cannot be asked answers a refusal rather than an empty list: a machine without
+   * that agent, a machine nobody signed it in on, and an agent that would not speak are three
+   * different things and the composer says which one it is showing (D5-17, D5-21).
    */
   readonly offer: (
     projectId: string,
     provider: AgentProvider,
-  ) => Effect.Effect<readonly AgentOption[], AgentRuntimeError>
+  ) => Effect.Effect<AgentOfferReport, AgentRuntimeError>
+  /**
+   * Puts the agent of a Home's composer on one of its own options, before a Session exists.
+   *
+   * The probe session `offer` opened is where the choice is made, and what comes back is what
+   * the agent announces now: an option it only publishes once another one has been chosen — the
+   * effort a model unlocks — is announced by that answer and by nothing else (D5-13, D5-17).
+   */
+  readonly offerSet: (
+    projectId: string,
+    provider: AgentProvider,
+    optionId: string,
+    value: string,
+  ) => Effect.Effect<AgentOfferReport, AgentRuntimeError>
   readonly setOption: (
     sessionId: string,
     optionId: string,
@@ -309,6 +352,7 @@ export const runtimeLayer = Layer.effect(
     const discovery = yield* Discovery
     const supervisor = yield* ProcessSupervisor
     const notices = yield* AgentNotices
+    const pool = yield* Pool
 
     /**
      * The scope the engine gave this layer: the lifetime every fiber and process here lives in.
@@ -542,43 +586,116 @@ export const runtimeLayer = Layer.effect(
         return project
       })
 
+    /** What the supervisor is told to start, with only what the resolve named. */
+    const startOptions = (resolved: ResolvedAgent, cwd: string) => {
+      // Built in statements rather than by spreading a conditional empty object, the way the
+      // supervisor builds what it hands the host: an env that is not there is not a property.
+      const options: AgentStartOptions = { cwd }
+      if (resolved.env !== undefined) options.env = resolved.env
+      return options
+    }
+
     /**
-     * What each agent announced for a Project, for as long as the engine runs.
+     * What each agent announced for a Project, until a choice in the composer changes it.
      *
-     * Nothing about the answer depends on a Session: the same agent in the same Project offers
-     * the same models, and asking again would start a second process to be told the same thing.
-     * Picking one agent, another, and the first again therefore costs one start.
+     * Nothing about the answer depends on a Session — the same agent in the same Project offers
+     * the same models — so it is kept rather than asked for again on every render. A choice
+     * replaces it with what the agent announced in answer to that choice, because an option an
+     * agent only publishes once another one is set is not in the list it opened with (D5-13).
      */
     const offered = new Map<string, readonly AgentOption[]>()
 
     /**
-     * What an agent offers a Project, before any Session holds it (D5-17).
+     * The session a Home's composer is being drawn from: the agent, and the session it opened.
      *
-     * It starts the agent, opens a session on the Project and lets it go: what an agent offers is
-     * said by the agent, and this is how the Home knows what to put in its composer before there
-     * is a Session to ask. Nothing is written, the process is stopped whatever happens, and the
-     * Session the choice starts runs an agent of its own.
+     * Kept rather than stopped (D5-05): an option the agent publishes only after another one is
+     * chosen is announced by the session where the choice was made, and a probe stopped the
+     * moment it answered would have to be started again to be asked — which is a second process
+     * and a second `session/new` for every selector the reader touches. The pool's idle timer is
+     * what closes it, exactly as it closes the agent of a Session nobody is talking to.
      */
-    const offer = (projectId: string, provider: AgentProvider) =>
+    interface Probe {
+      readonly process: SupervisedProcess
+      readonly connection: AgentConnection
+    }
+
+    const probes = new Map<string, Probe>()
+
+    /**
+     * What was chosen in a Home's composer, per Project and agent.
+     *
+     * It outlives the probe that recorded it: the Session that choice starts is opened with the
+     * model and the mode the reader picked before it existed (D5-17), and the probe is only how
+     * the agent was asked.
+     */
+    const chosen = new Map<string, Map<string, string>>()
+
+    /** How the pool names a probe, so a Session and a Home's agent are never the same entry. */
+    const probeKey = (key: string) => `probe:${key}`
+
+    /** Lets a probe go: the process stops and what it announced is asked again next time. */
+    const letProbeGo = (key: string) =>
+      Effect.gen(function* () {
+        const held = probes.get(key)
+        if (held === undefined) return
+        probes.delete(key)
+        offered.delete(key)
+        yield* attempt('stopping the agent', held.process.stop).pipe(Effect.ignore)
+      })
+
+    /** A refusal of an offer, in the sentence the refusal itself carries. */
+    const offerRefused = (kind: AgentOfferRefusal['kind'], message: string): AgentOfferReport => ({
+      options: [],
+      refusal: { kind, message },
+    })
+
+    /**
+     * The probe of one Project and one agent, started if there is none.
+     *
+     * The agent is resolved first and refused first: an agent this machine does not have and an
+     * agent nobody signed in are answered before a process exists (D5-17, D5-21).
+     */
+    const probeOf = (
+      projectId: string,
+      provider: AgentProvider,
+    ): Effect.Effect<Probe | AgentOfferReport, AgentRuntimeError, Scope.Scope> =>
       Effect.gen(function* () {
         const key = `${projectId}:${provider}`
-        const known = offered.get(key)
-        if (known !== undefined) return known
+        const held = probes.get(key)
+        if (held !== undefined) return held
 
         const cwd = yield* mainPathOf(projectId)
-        const resolved = yield* attempt('finding the agent', discovery.resolve(provider))
-        const process = yield* attempt(
-          'starting the agent',
-          supervisor.start(resolved.adapter.acp.command, resolved.adapter.acp.args, { cwd }),
-        )
+        const standing = yield* discovery.standing(provider)
+        const resolved = yield* Effect.result(discovery.resolve(provider))
+        if (Result.isFailure(resolved)) {
+          // Which of the three it is, said by the machine rather than guessed from the refusal:
+          // the sentence is the refusal's own, and the kind is what the composer draws with it.
+          if (!standing.found) return offerRefused('not_installed', resolved.failure.message)
+          if (!standing.authenticated)
+            return offerRefused('not_signed_in', resolved.failure.message)
+          return offerRefused('failed', resolved.failure.message)
+        }
 
-        const announced = yield* Effect.ensuring(
+        const started = yield* Effect.result(
+          attempt(
+            'starting the agent',
+            supervisor.start(
+              resolved.success.command,
+              resolved.success.args,
+              startOptions(resolved.success, cwd),
+            ),
+          ),
+        )
+        if (Result.isFailure(started)) return offerRefused('failed', started.failure.message)
+        const process = started.success
+
+        const opened = yield* Effect.result(
           Effect.gen(function* () {
             const connection = yield* attempt(
               'speaking to the agent',
               connect({
                 ...pipes(process),
-                adapter: resolved.adapter,
+                adapter: resolved.success.adapter,
                 // Nobody is in the session this probe opens: what it reports has nowhere to go,
                 // and a question asked there is cancelled rather than put to a window.
                 onEvent: () => undefined,
@@ -586,15 +703,85 @@ export const runtimeLayer = Layer.effect(
               }),
             )
             yield* attempt('opening a session', connection.open(cwd))
-            return connection.options()
+            return connection
           }),
-          // An agent kept for what it announced would be a process holding a folder open for a
-          // window that may never pick it, so it goes as soon as it has answered.
-          attempt('stopping the agent', process.stop).pipe(Effect.ignore),
         )
+        if (Result.isFailure(opened)) {
+          // An agent that would not speak is not left running: it holds a folder open for a
+          // composer that has just been told it has nothing to offer.
+          yield* attempt('stopping the agent', process.stop).pipe(Effect.ignore)
+          return offerRefused('failed', opened.failure.message)
+        }
 
+        const probe: Probe = { process, connection: opened.success }
+        probes.set(key, probe)
+        yield* pool.held(probeKey(key), letProbeGo(key))
+        return probe
+      })
+
+    /** A probe, or the refusal to make one: what `probeOf` answered, told apart. */
+    const isProbe = (answered: Probe | AgentOfferReport): answered is Probe =>
+      'connection' in answered
+
+    /**
+     * What an agent offers a Project, before any Session holds it (D5-17).
+     *
+     * It starts the agent, opens a session on the Project and keeps it: what an agent offers is
+     * said by the agent, and the composer goes on asking the same session as choices are made in
+     * it. Nothing is written and no Session is made — what it answers is what the Session made
+     * from that choice will offer.
+     */
+    const offer = (
+      projectId: string,
+      provider: AgentProvider,
+    ): Effect.Effect<AgentOfferReport, AgentRuntimeError, Scope.Scope> =>
+      Effect.gen(function* () {
+        const key = `${projectId}:${provider}`
+        const known = offered.get(key)
+        if (known !== undefined) {
+          // A composer being read is a probe in use, whatever the clock says.
+          yield* pool.used(probeKey(key))
+          return { options: known, refusal: null }
+        }
+
+        const answered = yield* probeOf(projectId, provider)
+        if (!isProbe(answered)) return answered
+        const announced = answered.connection.options()
         offered.set(key, announced)
-        return announced
+        return { options: announced, refusal: null }
+      })
+
+    /**
+     * Puts the agent of a Home's composer on one of its own options (D5-13, D5-17).
+     *
+     * The choice is made on the probe session and the answer is what the agent announces now:
+     * an option that only exists once a model has been picked — the effort of a reasoning model
+     * — is published by that answer, which is why the list is replaced rather than merged into.
+     */
+    const offerSet = (
+      projectId: string,
+      provider: AgentProvider,
+      optionId: string,
+      value: string,
+    ): Effect.Effect<AgentOfferReport, AgentRuntimeError, Scope.Scope> =>
+      Effect.gen(function* () {
+        const key = `${projectId}:${provider}`
+        const answered = yield* probeOf(projectId, provider)
+        if (!isProbe(answered)) return answered
+
+        const set = yield* Effect.result(
+          attempt('choosing an option', answered.connection.setOption(optionId, value)),
+        )
+        if (Result.isFailure(set)) return offerRefused('failed', set.failure.message)
+
+        // What the reader chose, kept for the Session this composer will start, and what the
+        // agent announced in answer to it, kept for the composer that is still being drawn.
+        const held = chosen.get(key) ?? new Map<string, string>()
+        held.set(optionId, value)
+        chosen.set(key, held)
+        offered.set(key, set.success)
+        yield* pool.used(probeKey(key))
+        return { options: set.success, refusal: null }
       })
 
     /**
@@ -672,7 +859,7 @@ export const runtimeLayer = Layer.effect(
         const cwd = yield* workingDirectory(session, native)
         const process = yield* attempt(
           'starting the agent',
-          supervisor.start(resolved.adapter.acp.command, resolved.adapter.acp.args, { cwd }),
+          supervisor.start(resolved.command, resolved.args, startOptions(resolved, cwd)),
         )
 
         const queue = yield* Queue.unbounded<AgentEvent>()
@@ -714,8 +901,22 @@ export const runtimeLayer = Layer.effect(
         )
         yield* watchDeath(sessionId, started)
 
+        const fresh = native.nativeSessionId === null || native.nativeState === 'none'
         const resumed = yield* takeBack(sessionId, started, native)
         if (resumed !== null) return yield* Effect.fail(resumed)
+
+        // A Session opened for the first time starts on the choices its composer made before it
+        // existed: the model and the mode were picked on the Home's probe, and the session the
+        // agent has just opened knows nothing of them until it is told (D5-17).
+        if (fresh) {
+          for (const [optionId, value] of chosen.get(`${session.projectId}:${provider}`) ?? []) {
+            yield* attempt('choosing an option', connection.setOption(optionId, value)).pipe(
+              // A choice the agent will not take is not a Session that cannot start: it opens on
+              // what the agent is on, and the composer shows what that is.
+              Effect.ignore,
+            )
+          }
+        }
         return started
       })
 
@@ -1121,6 +1322,22 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
+     * The pool's own timer, for as long as the engine runs (D5-05).
+     *
+     * The pool says which agents have been idle long enough; something has to ask it. One fiber
+     * of this layer does, on the clock the engine was given, which is what closes the probe a
+     * Home's composer opened once nobody is looking at that composer any more.
+     */
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        for (;;) {
+          yield* Effect.sleep(SWEEP_EVERY)
+          yield* pool.sweep
+        }
+      }),
+    )
+
+    /**
      * What the engine sees.
      *
      * Each method is handed this layer's scope and each says what it returns: what starts a
@@ -1130,6 +1347,8 @@ export const runtimeLayer = Layer.effect(
       start: (sessionId) => owned(start(sessionId)),
       options: (sessionId) => owned(options(sessionId)),
       offer: (projectId, provider) => owned(offer(projectId, provider)),
+      offerSet: (projectId, provider, optionId, value) =>
+        owned(offerSet(projectId, provider, optionId, value)),
       setOption: (sessionId, optionId, value) => owned(setOption(sessionId, optionId, value)),
       prompt: (sessionId, text) => owned(prompt(sessionId, text)),
       stop: (sessionId) => owned(stop(sessionId)),

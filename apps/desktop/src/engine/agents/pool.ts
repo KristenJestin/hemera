@@ -13,10 +13,19 @@
  * advances five minutes in a millisecond and reads what the sweep did, rather than waiting.
  */
 
-import { Context, Data, Effect, Layer } from 'effect'
+import { Clock as EffectClock, Context, Data, Duration, Effect, Layer } from 'effect'
 
 /** How long an agent may sit unused before it is let go of. */
 export const IDLE_AFTER_MS = 5 * 60 * 1000
+
+/**
+ * How often the book is read for agents that have gone idle.
+ *
+ * The pool answers which ones are idle; something has to ask, and this is how often the engine
+ * does. A minute, because five is the deadline and a sweep that only ran every five would let an
+ * agent sit for ten.
+ */
+export const SWEEP_EVERY = Duration.minutes(1)
 
 /** The time, as the pool reads it: a port, so that a suite can move it. */
 export interface ClockService {
@@ -25,8 +34,14 @@ export interface ClockService {
 
 export class Clock extends Context.Service<Clock, ClockService>()('PoolClock') {}
 
-/** The clock of a running engine. */
-export const clockLayer = Layer.succeed(Clock, { now: Effect.sync(() => Date.now()) })
+/**
+ * The clock of a running engine, which is the clock the engine itself runs on.
+ *
+ * Effect's own, rather than `Date.now()`: everything else in this process sleeps and waits on
+ * that clock, and a suite that moves it moves what the pool reads with it — the alternative
+ * being a sweep that fires on a test clock and then finds nothing idle on the wall clock.
+ */
+export const clockLayer = Layer.succeed(Clock, { now: EffectClock.currentTimeMillis })
 
 /** Something about a Session's agent that the pool refuses to do. */
 export class UnknownHeldAgentError extends Data.TaggedError('UnknownHeldAgentError')<{

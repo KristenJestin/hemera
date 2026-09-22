@@ -16,6 +16,7 @@ import { z } from 'zod'
 
 import {
   agentAvailabilitySchema,
+  agentOfferSchema,
   agentProviderSchema,
   agentUpdateSchema,
   configOptionSchema,
@@ -412,9 +413,24 @@ export const ENGINE_REQUESTS = {
   'agents.offer': {
     // Asked before a Session exists: the composer of a Project's Home chooses an agent and what
     // that agent offers, and the Session it starts keeps that agent (design D5-17). Nothing is
-    // written by the question, and the answer is the same list `agents.options` would give.
+    // written by the question, and the options are the same list `agents.options` would give —
+    // with the refusal beside them, because an agent this machine does not have and an agent
+    // nobody signed in are two things a composer has to be able to say (D5-21).
     arguments: z.object({ projectId: z.string(), provider: agentProviderSchema }),
-    response: z.object({ options: z.readonly(z.array(configOptionSchema)) }),
+    response: agentOfferSchema,
+  },
+  'agents.offerSet': {
+    // The same session, put on one of the agent's own options: an option an agent only publishes
+    // once another has been chosen — the effort of a reasoning model — is announced in the answer
+    // to that choice and nowhere else, so the composer asks here and draws what comes back
+    // (design D5-13, D5-17). The choice is kept for the Session this composer will start.
+    arguments: z.object({
+      projectId: z.string(),
+      provider: agentProviderSchema,
+      optionId: z.string(),
+      value: z.string(),
+    }),
+    response: agentOfferSchema,
   },
   'agents.setOption': {
     arguments: z.object({ sessionId: z.string(), optionId: z.string(), value: z.string() }),

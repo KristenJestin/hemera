@@ -104,6 +104,36 @@ export const configOptionSchema = z.object({
 export type ConfigOption = z.infer<typeof configOptionSchema>
 
 /**
+ * Why an agent has nothing to offer a Home's composer (design D5-17, D5-21).
+ *
+ * Three refusals rather than an empty list, because they are three different things to be told
+ * and two of them have something the reader can do about them: the agent is not installed on
+ * this machine, it is installed and nobody has signed it in, or it was started and would not
+ * speak. `message` is the sentence the composer shows, written by the engine for a reader; the
+ * `kind` is what the page draws it as. An agent that offers no options at all is not a refusal:
+ * it answers an empty list and no refusal.
+ */
+export const agentOfferRefusalSchema = z.object({
+  kind: z.enum(['not_installed', 'not_signed_in', 'failed']),
+  message: z.string(),
+})
+
+export type AgentOfferRefusal = z.infer<typeof agentOfferRefusalSchema>
+
+/**
+ * What an agent offers before a Session holds it, or why it offers nothing.
+ *
+ * Both fields always cross, because a page cannot read a field it was not sent: the options are
+ * empty when there is a refusal, and the refusal is null when there is not.
+ */
+export const agentOfferSchema = z.object({
+  options: z.readonly(z.array(configOptionSchema)),
+  refusal: agentOfferRefusalSchema.nullable(),
+})
+
+export type AgentOffer = z.infer<typeof agentOfferSchema>
+
+/**
  * How a turn ended, in the words of the protocol the agents speak (design D5-13).
  *
  * A turn is answered when it is over and not when it starts, and what it answers is why it
