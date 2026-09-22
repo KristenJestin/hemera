@@ -1,8 +1,8 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import {
   IconActivity,
   IconArrowUp,
@@ -30,13 +30,27 @@ import { Disclosure } from './disclosure.tsx'
  * failed is open too, and stays open — an error hidden behind a fold is an error nobody sees,
  * and a turn that went wrong is exactly when the details matter. Everything else folds.
  *
+ * What the call is called is drawn in the reading colour of a caption and not of the thread: a
+ * column of forty call titles in the colour of what the agent *said* is a column where the
+ * answer and the plumbing weigh the same. A command keeps the mono face, because a command is
+ * read character by character and not as words.
+ *
+ * Where it stands is a dot, and no longer a word. `Done` under `Done` under `Done` said nothing
+ * the reader did not already know and stole the eye from the one line that had gone wrong; the
+ * colour says the same five things in the width of a dot, and the word is kept for whatever
+ * reads the page.
+ *
+ * A call with nothing behind it — no input, no output, no body of its own and no error — does
+ * not fold at all: no chevron, no press, nothing to open. A control that opens onto nothing is
+ * a control that lied about having something there.
+ *
  * The file a call touched is a press at the end of the row rather than the title itself: the
  * title is the fold, a control cannot live inside a control, and a link inside a button is a
  * link the keyboard walks over and a screen reader never announces. The row still folds
  * anywhere the pointer lands on it.
  */
 
-/** How a call is read at a glance: the kind is the mark, the status is the word. */
+/** How a call is read at a glance: the kind is the mark, the status is the colour of the dot. */
 const MARKS: Record<ToolKind, ReactNode> = {
   read: <IconFileText size="sm" aria-hidden="true" />,
   edit: <IconPencil size="sm" aria-hidden="true" />,
@@ -51,11 +65,13 @@ const MARKS: Record<ToolKind, ReactNode> = {
   other: <IconActivity size="sm" aria-hidden="true" />,
 }
 
-const STATUS: Record<ToolStatus, { word: string; tone: NonNullable<BadgeProps['tone']> }> = {
-  pending: { word: 'Queued', tone: 'neutral' },
-  in_progress: { word: 'Running', tone: 'info' },
+/** Where a call stands, in the word the dot is announced by and the tone it is drawn in. */
+const STATUS: Record<ToolStatus, { word: string; tone: StatusTone }> = {
+  pending: { word: 'Queued', tone: 'pending' },
+  in_progress: { word: 'Running', tone: 'running' },
   completed: { word: 'Done', tone: 'success' },
-  failed: { word: 'Failed', tone: 'destructive' },
+  failed: { word: 'Failed', tone: 'failure' },
+  cancelled: { word: 'Cancelled', tone: 'cancelled' },
 }
 
 /** The row: the fold, and the file it touched at its end. */
@@ -67,13 +83,34 @@ const FOLDING = 'min-w-0 flex-1'
 /** The line that is read: the mark of the kind, the title, and what the call is doing. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
-const TITLE = 'truncate text-foreground'
+/** A row that does not fold, drawn exactly where the one that folds would have been. */
+const FLAT = 'flex w-full items-center gap-2 px-1 py-0.5 text-left text-sm'
+
+const TITLE = 'truncate text-muted-foreground'
+
+/** A command is read character by character, so it keeps the mono face it was written in. */
+const COMMAND = 'truncate font-mono text-muted-foreground'
 
 /** What the call returned, quieter than the line above it. */
-const BODY = 'text-sm text-muted-foreground'
+const BODY = 'flex flex-col gap-2 text-sm text-muted-foreground'
 
 /** A failure keeps the colour of a failure, in the body it opened for it. */
-const ERROR = 'mb-1 text-sm text-destructive-muted-foreground'
+const ERROR = 'text-sm text-destructive-muted-foreground'
+
+/** What a labelled half of the body is called: the quietest line the card has. */
+const SECTION_HEAD = 'text-xs font-medium tracking-wide text-muted-foreground uppercase'
+
+/**
+ * What was sent, and what came back: the agent's own text, in the agent's own shape.
+ *
+ * Mono, because both of them are values rather than prose, and scrolling rather than growing: a
+ * command that answered two thousand lines is a thread nobody can scroll past otherwise.
+ */
+const SECTION_BODY =
+  'scroll-quiet max-h-40 overflow-auto rounded-md bg-muted px-2 py-1.5 font-mono text-xs break-words whitespace-pre-wrap'
+
+/** What is drawn where an answer would be, when there was none. */
+const NOTHING = 'italic'
 
 /** The kind ACP names for a tool call, which is what says how it is read. */
 export type ToolKind =
@@ -87,8 +124,14 @@ export type ToolKind =
   | 'fetch'
   | 'other'
 
-/** Where a call is in its life, which is what says whether it folds. */
-export type ToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
+/**
+ * Where a call is in its life, which is what says whether it folds.
+ *
+ * `cancelled` is a call that never finished because the turn it belonged to was stopped. It is
+ * not a failure — nothing went wrong — and it is not done either, so it is neither of the two
+ * the thread used to make it choose between.
+ */
+export type ToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
 
 /** A file the call touched, and where in it the call landed. */
 export interface ToolLocation {
@@ -114,11 +157,15 @@ export interface ToolCallCardProps {
   locations?: readonly ToolLocation[] | undefined
   /** What went wrong, when it did — the reason a failed call cannot be folded away. */
   error?: string | undefined
+  /** What the agent sent: the parameters of the call, in its own words. */
+  input?: ReactNode
+  /** What came back. Absent beside an input, the section says so rather than vanishing. */
+  output?: ReactNode
   /** Whether a reader who has not touched it finds it open. */
   defaultOpen?: boolean | undefined
   /** What a press on the file does: the reader goes there, which the card itself cannot do. */
   onOpenLocation?: ((location: ToolLocation) => void) | undefined
-  /** What the call returned: text, a diff, a console, handed over already drawn. */
+  /** What the call returned in a shape of its own: a diff, a console, handed over already drawn. */
   children?: ReactNode
   /** Where the card sits; never how it looks. */
   className?: string | undefined
@@ -135,6 +182,8 @@ export function ToolCallCard({
   status,
   locations,
   error,
+  input,
+  output,
   defaultOpen = false,
   onOpenLocation,
   children,
@@ -145,30 +194,63 @@ export function ToolCallCard({
   // are the states in which the body is the answer to the question the reader is asking.
   const forced = status === 'in_progress' || status === 'failed'
   const first = locations?.[0]
+  const sectioned = input !== undefined || output !== undefined
+  const opens = sectioned || children !== undefined || error !== undefined
+  const summary = (
+    <span className={SUMMARY}>
+      <span className="flex shrink-0 text-muted-foreground">{MARKS[kind]}</span>
+      <span className={kind === 'execute' ? COMMAND : TITLE}>{title}</span>
+      <StatusDot status={tone} size="sm" label={word} />
+    </span>
+  )
   return (
     <div className={cn(ROW, className)}>
-      <Disclosure
-        className={FOLDING}
-        // Left uncontrolled once the call is done: `undefined` hands the fold back to the
-        // reader, which is what makes a finished call foldable at all.
-        open={forced ? true : undefined}
-        defaultOpen={defaultOpen}
-        summary={
-          <span className={SUMMARY}>
-            <span className="flex shrink-0 text-muted-foreground">{MARKS[kind]}</span>
-            <span className={TITLE}>{title}</span>
-            <Badge tone={tone}>{word}</Badge>
-          </span>
-        }
-      >
-        {error !== undefined && <p className={ERROR}>{error}</p>}
-        <div className={BODY}>{children}</div>
-      </Disclosure>
+      {opens ? (
+        <Disclosure
+          className={FOLDING}
+          // Left uncontrolled once the call is done: `undefined` hands the fold back to the
+          // reader, which is what makes a finished call foldable at all.
+          open={forced ? true : undefined}
+          defaultOpen={defaultOpen}
+          summary={summary}
+        >
+          <div className={BODY}>
+            {error !== undefined && <p className={ERROR}>{error}</p>}
+            {sectioned && (
+              <>
+                <Section head="Input" body={input} />
+                <Section head="Output" body={output} />
+              </>
+            )}
+            {children}
+          </div>
+        </Disclosure>
+      ) : (
+        <span className={cn(FOLDING, FLAT)}>{summary}</span>
+      )}
       {first !== undefined && onOpenLocation !== undefined && (
         <Button variant="link" size="sm" className="shrink-0" onClick={() => onOpenLocation(first)}>
           {at(first)}
         </Button>
       )}
+    </div>
+  )
+}
+
+/**
+ * One labelled half of the body: what was sent, or what came back.
+ *
+ * An empty half is drawn and says so rather than being left out: a card showing an `Input` and
+ * no `Output` reads as a call still running, and the one thing a finished call has to be able to
+ * say is that it answered nothing at all.
+ */
+function Section({ head, body }: { head: string; body: ReactNode }): ReactNode {
+  return (
+    <div className="flex flex-col gap-1">
+      <p className={SECTION_HEAD}>{head}</p>
+      <div className={SECTION_BODY}>
+        {body === undefined ? <span className={NOTHING}>Nothing was returned.</span> : body}
+      </div>
     </div>
   )
 }
