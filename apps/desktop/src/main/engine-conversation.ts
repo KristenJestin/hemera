@@ -19,6 +19,16 @@ import type { EngineAnswer, EngineRequest } from '../engine/request.ts'
 export const PATIENCE = Duration.seconds(5)
 
 /**
+ * The use cases that answer when the work is over, not when it is taken.
+ *
+ * A prompt lasts as long as the agent's turn: minutes, sometimes more. Reporting its silence at
+ * five seconds is what made every turn look abandoned once it outlived the patience — the window
+ * heard a timeout, the engine went on working. These wait as long as it takes; the turn's own
+ * end is what the engine pushes as an event, and a dead process is still `EngineGone`.
+ */
+export const UNHURRIED: ReadonlySet<EngineRequestName> = new Set(['agents.prompt'])
+
+/**
  * The use case a failure happened on, carried under a name of its own.
  *
  * Not `name`: an Effect error is an `Error`, whose `name` is the tag the class declares, and a
@@ -120,11 +130,16 @@ export function engineConversation(
         return Effect.sync(() => waiting.delete(id))
       })
 
-      return asked.pipe(
-        Effect.timeoutOrElse({
-          duration: patience,
-          orElse: () => Effect.fail(new EngineTimeout({ useCase: name })),
-        }),
+      const bounded = UNHURRIED.has(name)
+        ? asked
+        : asked.pipe(
+            Effect.timeoutOrElse({
+              duration: patience,
+              orElse: () => Effect.fail(new EngineTimeout({ useCase: name })),
+            }),
+          )
+
+      return bounded.pipe(
         Effect.flatMap((answer) =>
           answer.ok
             ? // SAFETY: the answer of the use case `name`, whose response type is

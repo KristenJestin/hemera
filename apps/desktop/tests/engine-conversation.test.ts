@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test } from 'vite-plus/test'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Option } from 'effect'
 
 import type { EngineAnswer, EngineRequest } from '#engine/request.ts'
 import type { EngineEvent } from '@hemera/ipc'
@@ -117,6 +117,20 @@ describe('Un process dédié muet est une erreur, pas une attente', () => {
     // And it says which of the four it is, rather than answering the use case twice over:
     // a field called `name` on an `Error` takes the tag its own class declares away.
     expect(failed.name).toBe('EngineTimeout')
+  })
+
+  test('a prompt is not hurried: the turn lasts as long as it lasts', async () => {
+    const silent = engineConversation(port(null), alive, Duration.millis(30))
+
+    // Four times the patience and still waiting, which is the point: no timeout named the use
+    // case, and only the guard of this test ended the wait.
+    const outcome = await Effect.runPromise(
+      silent
+        .ask('agents.prompt', { sessionId: 'session-1', text: 'go' })
+        .pipe(Effect.timeoutOption(Duration.millis(120))),
+    )
+
+    expect(Option.isNone(outcome)).toBe(true)
   })
 
   test('the wait is the one it was given, not one that goes on until something happens', async () => {
