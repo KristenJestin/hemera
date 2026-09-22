@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { IconBrandOpenai, IconBrandOpencode } from '../icons.ts'
+import { IconBrandClaude, IconBrandOpenai, IconBrandOpencode } from '../icons.ts'
 
 /**
  * The mark of the agent a control belongs to (design D17-11).
@@ -36,6 +36,10 @@ const MARKS = [
   {
     ids: ['opencode'],
     draw: (className: string | undefined) => <IconBrandOpencode size="md" className={className} />,
+  },
+  {
+    ids: ['claude', 'claude-code', 'anthropic'],
+    draw: (className: string | undefined) => <IconBrandClaude size="md" className={className} />,
   },
 ] as const
 

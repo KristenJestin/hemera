@@ -21,19 +21,18 @@ a reproduction, not a redesign: the outline is the one the owner publishes.
 - **Note**: the MIT licence covers the file, not the trademark. The mark is used here to name
   OpenCode inside a control that chooses it, which is nominative use and not branding of Hemera.
 
-## Claude Code — **not vendored**
+## Claude — `IconBrandClaude`
 
-Anthropic's Claude mark is deliberately absent, and `AgentMark` draws the `CC` monogram for
-Claude Code instead.
-
-Anthropic's Claude Code terms say: "You can accurately say, in plain text, that your product has
-Claude Code preinstalled or that it runs Claude Code. But you can't use the Claude Code or
-Anthropic names or logos as part of your own product, feature, or company name, in your own
-logo, or in a way that suggests Anthropic built, endorses, or is partnered with your product.
-Any other use of Anthropic's names or logos is governed by our Trademark Guidelines and requires
-our written permission."
-(<https://code.claude.com/docs/en/legal-and-compliance>, read 22 September 2026.)
-
-Copying the mark into this repository and shipping it inside the application is "any other use".
-It needs Anthropic's written permission, which this lot does not have, so the monogram stays
-until somebody obtains one.
+- **Source**: `icons/claude.svg` of Simple Icons 16.32.0 (<https://simpleicons.org/?q=claude>,
+  <https://github.com/simple-icons/simple-icons>).
+- **Licence of the artwork**: CC0 1.0 Universal. Simple Icons releases its SVG paths into the
+  public domain; the path is copied as published, in `currentColor`.
+- **The mark itself** is a trademark of Anthropic, PBC. It is drawn here to identify the Claude
+  Code agent inside the control that chooses it, next to the marks of the other agents: a
+  nominative use that names what a Session runs on. It is not part of Hemera's own name or logo,
+  and nothing here suggests that Anthropic built, endorses or is partnered with Hemera.
+- **Decision**: the maintainer's, 22 September 2026, after reading Anthropic's Claude Code
+  terms (<https://code.claude.com/docs/en/legal-and-compliance>), which allow saying in plain
+  text that a product runs Claude Code and reserve the logo for other uses. Identifying the
+  agent by its mark was judged to be that plain statement, made with a picture. Should Anthropic
+  ask for its removal, `AgentMark` falls back to the `CC` monogram by deleting one entry.
