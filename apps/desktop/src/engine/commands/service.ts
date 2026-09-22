@@ -18,7 +18,8 @@
  * The output is read as it arrives and never awaited: `run` answers with what there is when it
  * is asked, which is what lets a dev server that never exits still be usable. The row of a run
  * is written when it starts and rewritten when it ends, so a panel reopened after a restart
- * reads what was run and how it ended.
+ * reads what was run and how it ended — and the Session's thread gets that same run as one
+ * entry that changes state, because a run shows in the panel and in the thread (D6-12).
  */
 
 import {
@@ -35,6 +36,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { Context, Effect, Exit, Layer, Scope } from 'effect'
 
 import { ProcessSupervisor } from '../agents/supervisor.ts'
+import { Sessions } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
 import { type RunState, commandRuns, projectCommands, sessions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
@@ -171,6 +173,8 @@ interface Live {
   readonly line: string
   readonly kind: CommandKind
   readonly cwd: string
+  /** Who asked for it: the agent through its tool, or the user through the panel. */
+  readonly startedBy: 'agent' | 'user'
   readonly startedAt: string
   state: RunState
   pid: number | null
@@ -195,6 +199,9 @@ export const commandsLayer = Layer.effect(
   Effect.gen(function* () {
     const database = yield* Database
     const supervisor = yield* ProcessSupervisor
+    // Named for what it is used for here, because `sessions` is already the table of rows this
+    // service joins on: what a run writes is one entry of the Session's thread.
+    const thread = yield* Sessions
     /** The engine's own scope: everything started here dies when the engine does. */
     const scope = yield* Effect.scope
     const live = new Map<string, Live>()
@@ -271,7 +278,43 @@ export const commandsLayer = Layer.effect(
       joined: false,
     })
 
-    /** The row of a run, written as it starts and rewritten when it ends. */
+    /**
+     * The entry a run is in the thread: a run shows in the panel and in the thread (D6-12).
+     *
+     * One entry per run and not one per transition — the `correlationId` is the run itself, so
+     * the write that says it ended updates the row that said it had started, and the thread
+     * keeps one block that changes state rather than a log of the same command four times.
+     *
+     * A write that fails is a Session that went away while its command was running: the run is
+     * unaffected, because what it printed and how it ended are its row's, not the thread's.
+     */
+    const writeEntry = (id: string, one: Live) =>
+      thread
+        .write(one.sessionId, {
+          role: 'hemera',
+          kind: 'command_run',
+          body: one.name,
+          payload: JSON.stringify({
+            runId: id,
+            name: one.name,
+            line: one.line,
+            kind: one.kind,
+            state: one.state,
+            cwd: one.cwd,
+            url: one.url,
+            exitCode: one.exitCode,
+            startedBy: one.startedBy,
+            // A one-off is a line the agent wrote rather than a command of the catalogue, and
+            // the block says so: what is not in the catalogue cannot be run again by name.
+            oneOff: one.commandId === null,
+          }),
+          correlationId: `run:${id}`,
+          turnId: null,
+          state: one.state,
+        })
+        .pipe(Effect.catch(() => Effect.void))
+
+    /** The row of a run and its entry in the thread, written as it starts and when it ends. */
     const writeRow = (id: string, one: Live, type: string) =>
       withDatabase(
         mutate('recording a run', (transaction) =>
@@ -291,7 +334,7 @@ export const commandsLayer = Layer.effect(
               output: one.kept,
               outputBytes: one.kept.length + one.dropped,
               truncated: one.dropped > 0 ? 1 : 0,
-              startedBy: 'agent',
+              startedBy: one.startedBy,
               startedAt: one.startedAt,
               endedAt: one.endedAt,
             }
@@ -329,7 +372,7 @@ export const commandsLayer = Layer.effect(
             }
           }),
         ),
-      )
+      ).pipe(Effect.tap(() => writeEntry(id, one)))
 
     return {
       list: (projectId) =>
@@ -460,8 +503,12 @@ export const commandsLayer = Layer.effect(
 
       run: (asked) =>
         Effect.gen(function* () {
+          // A run belongs to the Session that asked for it, so the one handed back is one of this
+          // Session's: a run of another Session's is a run this one could neither read nor stop,
+          // because both are asked with the Session the run belongs to.
           const already = [...live.entries()].find(
             ([, one]) =>
+              one.sessionId === asked.sessionId &&
               one.projectId === asked.projectId &&
               one.name === asked.name &&
               one.state === 'running',
@@ -483,6 +530,7 @@ export const commandsLayer = Layer.effect(
             line: asked.line,
             kind: asked.kind,
             cwd: asked.cwd,
+            startedBy: asked.startedBy,
             startedAt,
             state: 'running',
             pid: null,
@@ -522,7 +570,10 @@ export const commandsLayer = Layer.effect(
           const process = spawned.value
           record.pid = process.pid ?? null
           record.stop = process.stop
-          process.onStdout((one) => {
+          // One buffer for both streams, in the order the lines arrived: a tool that fails says
+          // why on its standard error — `tsc`, `vitest`, `cargo` — and an output that kept only
+          // the standard one would be an exit code with no reason under it (D6-12).
+          const keep = (one: string) => {
             const text = one.endsWith('\n') ? one : `${one}\n`
             record.kept += text
             if (record.kept.length > OUTPUT_KEPT_BYTES) {
@@ -532,7 +583,9 @@ export const commandsLayer = Layer.effect(
             }
             const found = addressIn(record.kept)
             if (found !== null) record.url = found
-          })
+          }
+          process.onStdout(keep)
+          process.onStderr(keep)
 
           // The death is watched in the engine's scope: a run is stopped by a quit as much as by
           // a `stop`, and either way the row is rewritten with how it ended.
