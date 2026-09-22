@@ -193,6 +193,7 @@ const RELAYED = [
   'agents.list',
   'agents.options',
   'agents.offer',
+  'agents.offerSet',
   'agents.setOption',
   'agents.prompt',
   'agents.stop',
