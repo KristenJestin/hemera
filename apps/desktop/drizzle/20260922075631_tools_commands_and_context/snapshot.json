@@ -1144,6 +1144,32 @@
     {
       "columns": [
         {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "kind",
+          "isExpression": false
+        },
+        {
+          "value": "path",
+          "isExpression": false
+        },
+        {
+          "value": "fingerprint",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"context_deliveries\".\"kind\" <> 'instructions'",
+      "origin": "manual",
+      "name": "delivery_once_per_change",
+      "entityType": "indexes",
+      "table": "context_deliveries"
+    },
+    {
+      "columns": [
+        {
           "value": "project_id",
           "isExpression": false
         },
@@ -1244,13 +1270,6 @@
       "name": "session_by_project",
       "entityType": "indexes",
       "table": "sessions"
-    },
-    {
-      "columns": ["session_id", "kind", "path", "fingerprint"],
-      "nameExplicit": true,
-      "name": "delivery_once_per_change",
-      "entityType": "uniques",
-      "table": "context_deliveries"
     },
     {
       "columns": ["project_id", "name"],

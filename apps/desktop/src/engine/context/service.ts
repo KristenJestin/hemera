@@ -8,9 +8,9 @@
  * would be a second injection of a text the agent already has.
  *
  * A change during a Session is not a prompt either. It waits, and is handed over between two
- * turns as its own text carrying the marker that says who wrote it, recorded once per
- * fingerprint, so the same text is never delivered twice to the same Session — the table's own
- * unique index is what enforces that rather than this service remembering to.
+ * turns as its own text carrying the marker that says who wrote it. What decides whether there is
+ * a change is the last text the agent was given: a file edited and then put back is a change
+ * each time, and a file that reads as it was last given is none.
  *
  * Nothing here watches the filesystem. The safe point is the caller's, and `pending` reads the
  * file then, which is the only moment the answer is worth anything. The entry a delivery makes
@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTS_FILE, CONTEXT_BASE, deliveryText } from '@hemera/core'
-import { eq } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Context as EffectContext, Effect, Layer } from 'effect'
 
 import { Projects, UnknownProjectError } from '../projects.ts'
@@ -215,11 +215,34 @@ export const contextLayer = Layer.effect(
       )
 
     /**
+     * The fingerprint of the instructions a Session was last given, read natively or delivered.
+     *
+     * The last one and not any one: a file edited A, B, then A again has changed back, and the
+     * agent holds B until it is told. Rows of one moment are told apart by their insertion order.
+     */
+    const lastGiven = (sessionId: string): Effect.Effect<string | null, DatabaseError> =>
+      withDatabase(
+        database
+          .select({ fingerprint: contextDeliveries.fingerprint })
+          .from(contextDeliveries)
+          .where(
+            and(
+              eq(contextDeliveries.sessionId, sessionId),
+              eq(contextDeliveries.path, AGENTS_FILE),
+              inArray(contextDeliveries.kind, ['native', 'instructions']),
+            ),
+          )
+          .orderBy(desc(contextDeliveries.deliveredAt), desc(sql`rowid`))
+          .limit(1)
+          .pipe(Effect.mapError(failed('reading the last instructions given'))),
+      ).pipe(Effect.map((rows) => rows[0]?.fingerprint ?? null))
+
+    /**
      * Records one thing given to a Session, and says whether it is new.
      *
-     * A row that is already there is not written a second time: the unique index over the
-     * Session, the kind, the path and the fingerprint is the rule, and a delivery that returns
-     * null here is a delivery the agent already has.
+     * A base or a native file already recorded is not written a second time: the unique index
+     * over the Session, the kind, the path and the fingerprint is the rule for those two, and
+     * null here is something the agent already has. A delivery is always written.
      */
     const record = (
       sessionId: string,
@@ -277,13 +300,9 @@ export const contextLayer = Layer.effect(
         const root = yield* rootOf(sessionId)
         const instructions = yield* instructionsOf(root)
         if (instructions === null) return null
-        const given = yield* rowsOf(sessionId)
-        // The fingerprint recorded at the start counts as given, whatever the kind: the agent
-        // read that text itself, and a file that reads again as it did is not a change.
-        const same = given.some(
-          (one) => one.path === AGENTS_FILE && one.fingerprint === instructions.fingerprint,
-        )
-        if (same) return null
+        // What the agent holds is what it was last given, read at the start or delivered since:
+        // a file that reads as that is not a change, and one that reads as anything else is.
+        if ((yield* lastGiven(sessionId)) === instructions.fingerprint) return null
         return {
           path: AGENTS_FILE,
           fingerprint: instructions.fingerprint,

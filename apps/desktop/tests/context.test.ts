@@ -140,7 +140,7 @@ describe('what a Session is provided', () => {
     expect(seen.provided.length).toEqual(3)
   })
 
-  it('says nothing when the file reads again as what was given', async () => {
+  it('says nothing when the file reads as what was last given', async () => {
     instructions('Be brief.\n')
 
     const seen = await given(
@@ -148,16 +148,42 @@ describe('what a Session is provided', () => {
         const { sessionId } = yield* opened
         const context = yield* Context
         yield* context.start(sessionId)
+        const unchanged = yield* context.pending(sessionId)
         instructions('Be brief, and say why.\n')
         yield* context.deliver(sessionId)
-        instructions('Be brief.\n')
-        const waiting = yield* context.pending(sessionId)
-        const again = yield* context.deliver(sessionId)
-        return { waiting, again }
+        const delivered = yield* context.pending(sessionId)
+        return { unchanged, delivered }
       }),
     )
 
-    expect(seen.waiting).toBeNull()
-    expect(seen.again).toBeNull()
+    expect(seen.unchanged).toBeNull()
+    expect(seen.delivered).toBeNull()
+  })
+
+  it('hands over a file put back as it was, and changed again, each time', async () => {
+    const A = 'Be brief.\n'
+    const B = 'Be brief, and say why.\n'
+    instructions(A)
+
+    const seen = await given(
+      Effect.gen(function* () {
+        const { sessionId } = yield* opened
+        const context = yield* Context
+        yield* context.start(sessionId)
+        const handed: (string | null)[] = []
+        for (const text of [B, A, B]) {
+          instructions(text)
+          const delivered = yield* context.deliver(sessionId)
+          handed.push(delivered === null ? null : delivered.text)
+        }
+        return { handed, provided: yield* context.provided(sessionId) }
+      }),
+    )
+
+    // The agent held A, then B, then A: each change back is a change it has to be told about.
+    expect(seen.handed.map((text) => text?.includes(DELIVERY_MARKER))).toEqual([true, true, true])
+    expect(seen.handed[1]).toContain('Be brief.')
+    expect(seen.handed[1]).not.toContain('say why')
+    expect(seen.provided.filter((one) => one.kind === 'instructions')).toHaveLength(3)
   })
 })

@@ -16,7 +16,15 @@
  */
 
 import { sql } from 'drizzle-orm'
-import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  text,
+  unique,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core'
 
 import {
   AGENT_PROVIDERS,
@@ -367,9 +375,10 @@ export const commandRuns = sqliteTable(
  * agent itself, with its fingerprint, which is why the view can say it was read natively rather
  * than sent. `instructions` is a change of that file delivered between two turns.
  *
- * The fingerprint is what makes a delivery identifiable and repeatable: the same text is never
- * delivered twice to the same Session, and the unique index is what enforces it rather than the
- * code remembering to.
+ * The fingerprint is what makes a delivery identifiable. The base and the natively read file are
+ * recorded once per Session and fingerprint, which the unique index enforces. A delivery is not
+ * held to that: a file edited A, then B, then back to A is delivered each time it changes, and
+ * what decides that is the last fingerprint given, not every one ever given.
  */
 export const contextDeliveries = sqliteTable(
   'context_deliveries',
@@ -389,12 +398,9 @@ export const contextDeliveries = sqliteTable(
       'delivery_kind_is_known',
       sql`${table.kind} IN (${sql.raw(oneOf(CONTEXT_DELIVERY_KINDS))})`,
     ),
-    unique('delivery_once_per_change').on(
-      table.sessionId,
-      table.kind,
-      table.path,
-      table.fingerprint,
-    ),
+    uniqueIndex('delivery_once_per_change')
+      .on(table.sessionId, table.kind, table.path, table.fingerprint)
+      .where(sql`${table.kind} <> 'instructions'`),
   ],
 )
 

@@ -713,13 +713,14 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
               VALUES ('d1', 'session-1', 'rumour', '', 'abc', '2026-09-22T10:00:00.000Z')`
           }),
         )
-        // The same delivery twice is one row: what the fingerprint is for.
+        // The same file read natively twice is one row: what the fingerprint is for. A delivery
+        // is not held to it — a file put back as it was is delivered again (D6-08).
         yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
-          VALUES ('d2', 'session-1', 'instructions', 'AGENTS.md', 'abc', '2026-09-22T10:00:00.000Z')`
+          VALUES ('d2', 'session-1', 'native', 'AGENTS.md', 'abc', '2026-09-22T10:00:00.000Z')`
         const twice = yield* Effect.exit(
           Effect.gen(function* () {
             yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
-              VALUES ('d3', 'session-1', 'instructions', 'AGENTS.md', 'abc', '2026-09-22T10:01:00.000Z')`
+              VALUES ('d3', 'session-1', 'native', 'AGENTS.md', 'abc', '2026-09-22T10:01:00.000Z')`
           }),
         )
         return {

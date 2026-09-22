@@ -30,7 +30,6 @@ CREATE TABLE `context_deliveries` (
 	`fingerprint` text NOT NULL,
 	`delivered_at` text NOT NULL,
 	CONSTRAINT `fk_context_deliveries_session_id_sessions_id_fk` FOREIGN KEY (`session_id`) REFERENCES `sessions`(`id`) ON DELETE CASCADE,
-	CONSTRAINT `delivery_once_per_change` UNIQUE(`session_id`,`kind`,`path`,`fingerprint`),
 	CONSTRAINT "delivery_kind_is_known" CHECK("kind" IN ('base', 'native', 'instructions'))
 );
 --> statement-breakpoint
@@ -75,4 +74,5 @@ ALTER TABLE `__new_session_entries` RENAME TO `session_entries`;--> statement-br
 PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE INDEX `entry_by_correlation` ON `session_entries` (`session_id`,`correlation_id`);--> statement-breakpoint
 CREATE INDEX `entry_by_turn` ON `session_entries` (`session_id`,`turn_id`);--> statement-breakpoint
-CREATE INDEX `run_by_session` ON `command_runs` (`session_id`,`started_at`);
+CREATE INDEX `run_by_session` ON `command_runs` (`session_id`,`started_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `delivery_once_per_change` ON `context_deliveries` (`session_id`,`kind`,`path`,`fingerprint`) WHERE "context_deliveries"."kind" <> 'instructions';
