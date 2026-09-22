@@ -43,6 +43,9 @@ import { arrival, collapse, expand, instant, morph, useTransition } from '../mot
 const TRIGGER =
   'flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm outline-none select-none focus-ring hover:bg-accent'
 
+/** The line when there is nothing to open: the trigger's own box, with none of its answers. */
+const FLAT = 'flex w-full items-center gap-2 px-1 py-0.5 text-sm'
+
 /** The mark of the fold, at the end of the row where the eye ends up rather than where it starts. */
 const CHEVRON = 'ml-auto flex shrink-0 items-center justify-center text-muted-foreground'
 
@@ -59,8 +62,15 @@ const BODY = 'pt-1 pb-0.5 pl-8'
 export interface DisclosureProps {
   /** The line read while the body is closed, handed over already drawn. */
   summary: ReactNode
-  /** What the block holds; drawn only while it is open. */
-  children: ReactNode
+  /**
+   * What the block holds; drawn only while it is open.
+   *
+   * Left out, there is nothing to open: the line is then the row itself, with no chevron and
+   * nothing to press, because a control that opens onto nothing is a control that lied about
+   * what it had. The fold is drawn either way, so a block that gains a body arrives into the one
+   * it was already wearing rather than into a second one built beside it.
+   */
+  children?: ReactNode | undefined
   /**
    * Whether it is open, when the caller decides instead of the reader.
    *
@@ -109,49 +119,58 @@ export function Disclosure({
       transition={transition}
       className={cn('w-full', className)}
     >
-      <button
-        type="button"
-        className={TRIGGER}
-        aria-expanded={shown}
-        // Named only while it is there: a reference that resolves to nothing is a broken one,
-        // and the body is taken out of the page once it has finished folding.
-        aria-controls={shown ? body : undefined}
-        // A controlled block is the caller's answer: the reader's press is reported and the
-        // shown state stays whatever the caller said.
-        onClick={() => {
-          setAsked(!shown)
-          onOpenChange?.(!shown)
-        }}
-      >
-        {summary}
-        <motion.span
-          aria-hidden="true"
-          className={CHEVRON}
-          animate={{ rotate: shown ? 180 : 0 }}
-          transition={transition}
-        >
-          <IconChevronDown size="sm" />
-        </motion.span>
-      </button>
-      {/*
-        The room under the row, which is what opens and what closes. `AnimatePresence` is the
-        whole of the fix of 22 September 2026: without it the body is taken out of the page the
-        frame the state changes, and there is nothing left to play the opening backwards on.
-      */}
-      <AnimatePresence initial={false}>
-        {shown && (
-          <motion.div
-            id={body}
-            className={ROOM}
-            initial={collapse}
-            animate={expand}
-            exit={collapse}
-            transition={folding}
+      {children === undefined ? (
+        // Nothing to open, so nothing to press: the line is the row, drawn in the same fold a
+        // block with a body wears.
+        <span className={FLAT}>{summary}</span>
+      ) : (
+        <>
+          <button
+            type="button"
+            className={TRIGGER}
+            aria-expanded={shown}
+            // Named only while it is there: a reference that resolves to nothing is a broken one,
+            // and the body is taken out of the page once it has finished folding.
+            aria-controls={shown ? body : undefined}
+            // A controlled block is the caller's answer: the reader's press is reported and the
+            // shown state stays whatever the caller said.
+            onClick={() => {
+              setAsked(!shown)
+              onOpenChange?.(!shown)
+            }}
           >
-            <div className={BODY}>{children}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {summary}
+            <motion.span
+              aria-hidden="true"
+              className={CHEVRON}
+              animate={{ rotate: shown ? 180 : 0 }}
+              transition={transition}
+            >
+              <IconChevronDown size="sm" />
+            </motion.span>
+          </button>
+          {/*
+            The room under the row, which is what opens and what closes. `AnimatePresence` is
+            the whole of the fix of 22 September 2026: without it the body is taken out of the
+            page the frame the state changes, and there is nothing left to play the opening
+            backwards on.
+          */}
+          <AnimatePresence initial={false}>
+            {shown && (
+              <motion.div
+                id={body}
+                className={ROOM}
+                initial={collapse}
+                animate={expand}
+                exit={collapse}
+                transition={folding}
+              >
+                <div className={BODY}>{children}</div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>
+      )}
     </motion.div>
   )
 }

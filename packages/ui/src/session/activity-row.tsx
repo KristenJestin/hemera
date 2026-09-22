@@ -31,14 +31,24 @@ import { Loading } from '../components/loading/loading.tsx'
  * A row with nothing to open does not open at all. Waiting for a permission is not a thought,
  * and a chevron over an empty body is a chevron that lies.
  *
+ * It is drawn in one tree whatever it has to open: the fold is the same element from the first
+ * render on, and a thought arriving while the reader is looking at the row arrives inside it
+ * rather than in a second fold built beside the first.
+ *
  * No dot beside the indicator: the indicator already says that something is in flight, and two
  * marks of the same fact on one line is one of them saying nothing. The indicator is the design
  * system's own, which stands still under reduced motion — nothing here writes a movement of its
  * own.
  */
 
-/** The row: at the start of the line, and as wide as what it holds rather than as the column. */
-const ROW = 'flex min-w-0 items-center'
+/**
+ * The row: at the start of the line, and as wide as what it holds rather than as the column.
+ *
+ * It is pulled back by the padding the fold carries on its own line, so what is read starts on
+ * the column's edge whether or not there is a thought to open — the fold is one tree, and a row
+ * that was inset by four pixels only when it had nothing to say is a row that moves.
+ */
+const ROW = '-ml-1 flex min-w-0 items-center'
 
 /** The fold itself, which is as wide as what it holds rather than as wide as the thread. */
 const FOLD = 'w-auto'
@@ -89,13 +99,10 @@ export function ActivityRow({ state, detail, thought, className }: ActivityRowPr
     </span>
   )
 
-  if (thought === undefined) {
-    return <div className={cn(ROW, className)}>{line}</div>
-  }
   return (
     <div className={cn(ROW, className)}>
       <Disclosure className={FOLD} open={open} onOpenChange={setOpen} summary={line}>
-        <p className={THOUGHT}>{thought}</p>
+        {thought === undefined ? undefined : <p className={THOUGHT}>{thought}</p>}
       </Disclosure>
     </div>
   )
