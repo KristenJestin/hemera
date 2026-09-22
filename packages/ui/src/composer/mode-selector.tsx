@@ -33,8 +33,15 @@ const MARKS = [
 /** What a mode nothing above recognised is drawn as: a setting of the agent, and no more. */
 const UNKNOWN = <IconSettings size="sm" />
 
-/** The mark of one mode, read off the name the agent gave it. */
-function markOf(name: string): ReactNode {
+/**
+ * The mark of one mode, read off the name the agent gave it.
+ *
+ * Exported because the mode is set in two places since the trial of 22 September 2026 — this
+ * selector, which the catalogue still shows, and the row inside `AgentModelMenu`, which is where
+ * the composer sets it — and a mode wearing a shield in one and a gear in the other would be two
+ * controls disagreeing about what the agent said.
+ */
+export function modeMark(name: string): ReactNode {
   const asked = name.toLowerCase()
   const found = MARKS.find((mark) => mark.words.some((word) => asked.includes(word)))
   return found?.icon ?? UNKNOWN
@@ -63,11 +70,11 @@ export function ModeSelector({
       label="Mode"
       // The trigger wears the mark of the mode it is showing, not the mark of the control: what
       // is chosen is what the eye reads off it without opening anything.
-      mark={current === undefined ? UNKNOWN : markOf(current.name)}
+      mark={current === undefined ? UNKNOWN : modeMark(current.name)}
       items={modes.map((mode) => ({
         value: mode.id,
         label: mode.name,
-        icon: markOf(mode.name),
+        icon: modeMark(mode.name),
       }))}
       value={value}
       onValueChange={onValueChange}

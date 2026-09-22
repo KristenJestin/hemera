@@ -18,14 +18,16 @@ export { WorkspacePill, type WorkspacePillProps } from './workspace-pill.tsx'
 /**
  * What the Session runs on, asked and set in one place (design D17-11, D17-14).
  *
- * `AgentModelMenu` is the agent, its model and its effort behind one trigger; `ModeSelector` is
- * what the agent may do without asking, which is a different question and stays its own
- * control. `AgentChoice` is the shape an agent advertises anything in.
+ * `AgentModelMenu` is the agent, its model, its effort and its mode behind one trigger — four
+ * answers about one agent, and one panel to give them in. `ModeSelector` is the mode on its own,
+ * kept for the catalogue and for a page that sets nothing else; the composer no longer draws it
+ * beside the menu. `AgentChoice` is the shape an agent advertises anything in.
  */
 export {
   AgentModelMenu,
   type AgentModelMenuProps,
   type EffortChoice,
+  type ModeChoice,
   type ModelChoice,
   type OfferedAgent,
 } from './agent-model-menu.tsx'

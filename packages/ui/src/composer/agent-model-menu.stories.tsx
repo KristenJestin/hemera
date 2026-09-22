@@ -6,6 +6,7 @@ import {
   AgentModelMenu,
   type AgentModelMenuProps,
   type EffortChoice,
+  type ModeChoice,
   type ModelChoice,
   type OfferedAgent,
 } from './agent-model-menu.tsx'
@@ -65,6 +66,13 @@ const EFFORTS: EffortChoice[] = [
   { id: 'high', label: 'High' },
 ]
 
+/** What an agent says it may be told to do without asking, in its own words. */
+const MODES: ModeChoice[] = [
+  { id: 'ask', label: 'Ask before edits' },
+  { id: 'acceptEdits', label: 'Accept edits' },
+  { id: 'plan', label: 'Plan only' },
+]
+
 /**
  * The menu holds nothing: what is chosen belongs to the page, which is what the engine answers
  * to. The story plays that page, so every control of the panel is a real prop of the component.
@@ -73,14 +81,17 @@ function Controlled({
   agent,
   model,
   effort,
+  mode,
   onAgentChange,
   onModelChange,
   onEffortChange,
+  onModeChange,
   ...rest
 }: AgentModelMenuProps) {
   const [picked, setPicked] = useState(agent)
   const [run, setRun] = useState(model)
   const [thinking, setThinking] = useState(effort)
+  const [allowed, setAllowed] = useState(mode)
   return (
     <div className="flex justify-end p-6">
       <AgentModelMenu
@@ -88,10 +99,11 @@ function Controlled({
         agent={picked}
         onAgentChange={(id) => {
           setPicked(id)
-          // The model and the effort belong to the agent that announced them: carrying one
-          // across would ask an agent for a model it never published.
+          // The model, the effort and the mode belong to the agent that announced them:
+          // carrying one across would ask an agent for a model it never published.
           setRun(null)
           setThinking(null)
+          setAllowed(null)
           onAgentChange(id)
         }}
         model={run}
@@ -104,9 +116,28 @@ function Controlled({
           setThinking(id)
           onEffortChange(id)
         }}
+        mode={allowed}
+        onModeChange={(id) => {
+          setAllowed(id)
+          onModeChange(id)
+        }}
       />
     </div>
   )
+}
+
+/**
+ * The box the panel is drawn in, read off the panel itself.
+ *
+ * The one fact this component is judged on since the trial of 22 September 2026: the panel is
+ * the same size while it is waiting and once it has answered, so it never grows past the top of
+ * the window and is never flipped to the other side under the hand that opened it.
+ */
+function panelBox(): DOMRect {
+  const panel = document.querySelector('[role="dialog"]')
+  expect(panel, 'the panel is not open').not.toBeNull()
+  // SAFETY: a popup of this design system is a dialog element, and `querySelector` answers one.
+  return (panel as HTMLElement).getBoundingClientRect()
 }
 
 const meta = {
@@ -122,9 +153,12 @@ const meta = {
     model: null,
     efforts: [],
     effort: null,
+    modes: [],
+    mode: null,
     onAgentChange: fn(),
     onModelChange: fn(),
     onEffortChange: fn(),
+    onModeChange: fn(),
   },
   argTypes: {
     agents: { control: 'object', description: 'The agents the engine offered, in its order.' },
@@ -133,6 +167,12 @@ const meta = {
     model: { control: 'text', description: 'The model the next turn will use.' },
     efforts: { control: 'object', description: 'What the agent says it can think with.' },
     effort: { control: 'text', description: 'The effort the next turn will run at.' },
+    modes: { control: 'object', description: 'What the agent says it may be told to do.' },
+    mode: { control: 'text', description: 'What the next turn may do without asking.' },
+    fixed: {
+      control: 'boolean',
+      description: 'Whether the agent is the Session’s own and cannot be changed.',
+    },
     loading: { control: 'boolean', description: "Whether the agent's options are being read." },
     refusal: {
       control: 'text',
@@ -142,6 +182,7 @@ const meta = {
     onAgentChange: { action: 'agent chosen', description: 'Called with the id, never the name.' },
     onModelChange: { action: 'model chosen' },
     onEffortChange: { action: 'effort chosen' },
+    onModeChange: { action: 'mode chosen' },
   },
 } satisfies Meta<typeof AgentModelMenu>
 
@@ -282,11 +323,102 @@ export const Efforts: Story = {
 }
 
 /**
- * The agent's options being read: the trigger says so where it stands, and the panel says what
- * it is waiting for instead of showing an empty list.
+ * The mode, as a second row under the effort, with the agent's own marks on it.
  *
- * An empty list while the answer is in flight is a list saying the agent announced nothing,
- * which is a different fact and one that would send a reader to another agent.
+ * It used to be a selector of its own beside this trigger, which made two controls asking about
+ * one agent in a row that must not wrap. It is the same question as the effort — what the next
+ * turn is allowed to do — so it is a row of the same panel, and the trigger reads the whole
+ * answer at once.
+ */
+export const Modes: Story = {
+  args: {
+    agent: 'opencode',
+    models: OPENCODE_MODELS,
+    model: 'zen/deepseek-v4-1-flash',
+    efforts: EFFORTS,
+    effort: 'low',
+    modes: MODES,
+    mode: null,
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash · Low/ }))
+
+    const row = await screen.findByRole('group', { name: 'Mode' })
+    const offered = within(row).getAllByRole('button')
+    await expect(offered).toHaveLength(3)
+    // Each mode wears the mark its own words earned: asking is a shield, editing a pencil,
+    // planning a page. A row where every entry wore the same icon is a row read on its words.
+    await expect(row.querySelectorAll('svg')).toHaveLength(3)
+    // It is its own row, under the effort and never beside it.
+    const effort = screen.getByRole('group', { name: 'Effort' })
+    await expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      effort.getBoundingClientRect().bottom,
+    )
+
+    await userEvent.click(offered[2]!)
+    await expect(args.onModeChange).toHaveBeenCalledWith('plan')
+    // And the trigger reads all four answers, in the order a reader asks them.
+    await waitFor(() => {
+      expect(
+        canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash · Low · Plan only/ }),
+      ).toBeVisible()
+    })
+  },
+}
+
+/**
+ * The agent of a Session, which is the agent it was made with: no stage to leave it by.
+ *
+ * A Session runs one agent from end to end. The panel opens on that agent's models, the line
+ * naming it is a line and not a press, and there is no way back to a list of agents — offering a
+ * choice that would be refused after the fact is worse than not offering it.
+ */
+export const Fixed: Story = {
+  args: {
+    agent: 'claude-code',
+    models: CLAUDE_MODELS,
+    model: 'claude-sonnet-4-5',
+    efforts: EFFORTS,
+    effort: 'high',
+    modes: MODES,
+    mode: 'acceptEdits',
+    fixed: true,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Sonnet 4\.5 · High · Accept edits/ }))
+
+    // Straight onto the models, with no stage before them.
+    await expect(
+      await screen.findByRole('listbox', { name: 'Models of this agent' }),
+    ).toBeInTheDocument()
+    await expect(screen.queryByRole('listbox', { name: 'Agents' })).toBeNull()
+    // The agent is named and cannot be left: no "Change", no back arrow, nothing to press.
+    // Waited out rather than read the moment it exists: the panel comes down from its trigger in
+    // opacity, and nothing drawn halfway through that is visible yet.
+    await waitFor(() => {
+      expect(screen.getByText('Claude Code')).toBeVisible()
+    })
+    await expect(screen.queryByText('Change')).toBeNull()
+    await expect(screen.queryByRole('button', { name: /Claude Code/ })).toBeNull()
+  },
+}
+
+/**
+ * The agent's options being read: the trigger says so where it stands, and the panel is already
+ * the panel it will be.
+ *
+ * This is the one fact the component is judged on. The panel used to show a single line —
+ * "Reading what this agent offers…" — and then swap it for a search field, a list and two rows,
+ * which made it grow upwards out of a composer at the foot of a window until the positioner gave
+ * up and flipped it to the other side, under the hand that had just opened it. One height and
+ * one width, for every stage and every state: the field is there while the answer is coming, the
+ * list area holds the indicator instead of the models, and nothing moves when they land.
+ *
+ * An empty list while the answer is in flight would still be wrong for its own reason: it is a
+ * list saying the agent announced nothing, which is a different fact and one that would send a
+ * reader off to another agent.
  */
 export const Loading: Story = {
   args: { agent: 'claude-code', models: [], loading: true },
@@ -304,11 +436,85 @@ export const Loading: Story = {
     await waitFor(() => {
       expect(screen.getByText(/Reading what this agent offers/)).toBeVisible()
     })
+    // The field is drawn while the answer is coming, because the panel is one shape.
+    const field = screen.getByRole('combobox', { name: 'Search the models of this agent' })
     // No list at all, so the field points at nothing rather than at an id nothing answers.
     await expect(screen.queryByRole('listbox', { name: 'Models of this agent' })).toBeNull()
-    await expect(
-      screen.getByRole('combobox', { name: 'Search the models of this agent' }),
-    ).toHaveAttribute('aria-expanded', 'false')
+    await expect(field).toHaveAttribute('aria-expanded', 'false')
+  },
+}
+
+/**
+ * The same panel waiting and answered, side by side: the one box, measured twice.
+ *
+ * Two menus on one row, the same agent, one still reading and one with everything the agent
+ * announced — four models, three efforts and three modes. Each is opened in turn and its popup
+ * measured: the height and the width are the same to the pixel, which is what stops the panel
+ * growing past the top of the window and being flipped under the reader's hand.
+ */
+export const SameSizeWhileLoading: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <div className="flex items-center justify-center gap-6 p-6">
+      <AgentModelMenu
+        agents={AGENTS}
+        agent="opencode"
+        onAgentChange={fn()}
+        models={[]}
+        model={null}
+        onModelChange={fn()}
+        efforts={[]}
+        effort={null}
+        onEffortChange={fn()}
+        modes={[]}
+        mode={null}
+        onModeChange={fn()}
+        loading
+      />
+      <AgentModelMenu
+        agents={AGENTS}
+        agent="opencode"
+        onAgentChange={fn()}
+        models={OPENCODE_MODELS}
+        model="zen/kimi-k2"
+        onModelChange={fn()}
+        efforts={EFFORTS}
+        effort="high"
+        onEffortChange={fn()}
+        modes={MODES}
+        mode="plan"
+        onModeChange={fn()}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const [waiting, answered] = canvas.getAllByRole('button')
+
+    await userEvent.click(waiting!)
+    await waitFor(() => {
+      expect(screen.getByText(/Reading what this agent offers/)).toBeVisible()
+    })
+    const reading = panelBox()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    await userEvent.click(answered!)
+    await waitFor(() => {
+      expect(screen.getByRole('listbox', { name: 'Models of this agent' })).toBeVisible()
+    })
+    const loaded = panelBox()
+
+    // The whole point, to the pixel: what the agent answered changes what is inside the panel
+    // and nothing about the panel.
+    expect(loaded.height).toBeCloseTo(reading.height, 1)
+    expect(loaded.width).toBeCloseTo(reading.width, 1)
+    // And the models scroll inside it rather than making it taller: eleven rows of choices in
+    // the room four fit in.
+    const list = screen.getByRole('listbox', { name: 'Models of this agent' })
+    expect(list.getBoundingClientRect().bottom).toBeLessThanOrEqual(loaded.bottom + 1)
   },
 }
 

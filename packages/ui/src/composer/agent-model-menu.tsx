@@ -7,20 +7,29 @@ import { Popover } from '../components/popover/popover.tsx'
 import { IconCheck, IconChevronLeft, IconSearch } from '../icons.ts'
 import { AgentMark } from './agent-mark.tsx'
 import { nameOfCurrent } from './current-name.ts'
+import { modeMark } from './mode-selector.tsx'
 
 /**
- * One control for the agent, its model and its effort (design D17-11, D17-14).
+ * One control for the agent, its model, its effort and its mode (design D17-11, D17-14).
  *
- * Three questions that only make sense in that order — which agent, then which of the models
- * *that* agent announced, then how hard it should think — used to be three selectors side by
- * side in the foot of the composer, and a fourth for the agent at the far end of the row. They
- * wrapped onto a second line as soon as a model had a long name, and the box grew a band the
- * moment an agent was picked: the frame changed height while it was being read. One trigger, one
- * panel, and the panel is where the depth goes.
+ * Four questions that only make sense in that order — which agent, then which of the models
+ * *that* agent announced, then how hard it should think and what it may do without asking — used
+ * to be four selectors side by side in the foot of the composer. They wrapped onto a second line
+ * as soon as a model had a long name, and the box grew a band the moment an agent was picked:
+ * the frame changed height while it was being read. One trigger, one panel, and the panel is
+ * where the depth goes.
  *
  * The trigger says what is set, in the order a reader asks it: the agent's mark, the model's
- * name, the effort behind a middle dot. Nothing is set yet, so it says what to do instead —
- * "Choose an agent" — because the model of an agent nobody picked is not a question.
+ * name, the effort and the mode behind middle dots. Nothing is set yet, so it says what to do
+ * instead — "Choose an agent" — because the model of an agent nobody picked is not a question.
+ *
+ * **The panel is one size, always.** The same width and the same height on the agent stage and
+ * on the model stage, while the options are being read, when nothing matches, and when the
+ * engine refused; what changes is only what scrolls inside it. It opens upwards out of the foot
+ * of a window, so a panel that grew as its answer arrived would push past the top of the screen
+ * and be flipped to the other side under the hand that opened it — which is what it did, and
+ * what the trial of 22 September 2026 refused. The loading state is the panel it will be: the
+ * same search field, the same list area, with the indicator standing in it.
  *
  * The panel does not take the focus when it opens: what opened it is the trigger, and the
  * trigger is where the focus goes back to when it closes. The search field of the model stage
@@ -30,14 +39,27 @@ import { nameOfCurrent } from './current-name.ts'
  *
  * Changing the agent clears the model and the effort: a model id belongs to the agent that
  * announced it, and carrying one across would ask an agent for a model it never published.
+ *
+ * A Session runs the agent it was made with, and `fixed` is that fact: no agent stage at all, no
+ * way back to one, and the panel opens on the models. Offering to change an agent a Session
+ * cannot change is offering something that would be refused after the fact.
  */
-const PANEL = 'flex w-menu flex-col gap-2'
+
+/** One height and one width, whatever is inside: the whole point of the panel. */
+const PANEL = 'flex h-menu-panel w-menu flex-col gap-2'
 
 const HEAD = 'px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase'
 
-const NOTE = 'rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground'
+const NOTE = 'shrink-0 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground'
 
-const LIST = 'scroll-quiet flex max-h-64 flex-col gap-0.5 overflow-y-auto'
+/**
+ * The part that scrolls, which is the only part that may change size.
+ *
+ * `flex-1` and `min-h-0`: it takes whatever the rows above and below it left, and a flex child
+ * allowed to shrink below its own content is what makes a scroller of it rather than a column
+ * that pushes the panel taller.
+ */
+const LIST = 'scroll-quiet flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto'
 
 const ITEM =
   'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-ring hover:bg-accent aria-disabled:opacity-50 aria-disabled:hover:bg-transparent'
@@ -58,27 +80,30 @@ const GROUP = 'flex flex-col gap-0.5'
 
 /** The way back to the agents, which carries the agent it is leaving so the eye keeps its place. */
 const BACK =
-  'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-ring hover:bg-accent'
+  'flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-ring hover:bg-accent'
+
+/** The agent of a Session that cannot change it: the same line, with nothing to press. */
+const HELD = 'flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm'
 
 /** The search field: the panel's own line, so it carries no box of its own. */
-const SEARCH = 'flex items-center gap-2 rounded-md border border-input bg-muted px-2'
+const SEARCH = 'flex shrink-0 items-center gap-2 rounded-md border border-input bg-muted px-2'
 
 const QUERY =
   'min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground'
 
-const EMPTY = 'px-2 py-3 text-xs text-muted-foreground'
+/** What stands in the list area when there is no list: the indicator, or a word, centred in it. */
+const INSTEAD =
+  'flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-2 text-center text-xs text-muted-foreground'
 
-const WAITING = 'flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground'
-
-/** The effort, as one row of a few: a scale is read across, not down a list. */
-const SEGMENT = 'flex items-center gap-1 rounded-md border border-border bg-muted p-0.5'
+/** A scale read across and not down a list: the effort, and the mode under it. */
+const SEGMENT = 'flex shrink-0 items-center gap-1 rounded-md border border-border bg-muted p-0.5'
 
 const SEGMENT_ITEM =
-  'flex-1 rounded-sm px-2 py-1 text-xs text-muted-foreground outline-none focus-ring hover:bg-accent'
+  'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground outline-none focus-ring hover:bg-accent'
 
 const SEGMENT_ON = 'bg-card text-foreground shadow-sm'
 
-/** What the trigger puts between the model and the effort. */
+/** What the trigger puts between one answer and the next. */
 const SEPARATOR = ' · '
 
 /** One agent on offer, as the engine offered it. */
@@ -109,6 +134,12 @@ export interface EffortChoice {
   label: string
 }
 
+/** One thing the agent says it may be told to do without asking. */
+export interface ModeChoice {
+  id: string
+  label: string
+}
+
 export interface AgentModelMenuProps {
   /** The agents the engine offered, in the order it offered them. */
   agents: OfferedAgent[]
@@ -122,6 +153,17 @@ export interface AgentModelMenuProps {
   efforts: EffortChoice[]
   effort: string | null
   onEffortChange: (id: string) => void
+  /** The modes of the chosen agent; empty when it announced none, and then no row at all. */
+  modes: ModeChoice[]
+  mode: string | null
+  onModeChange: (id: string) => void
+  /**
+   * Whether the agent is the Session's own and cannot be changed.
+   *
+   * A Session runs the agent it was made with: there is no agent stage, no way back to one, and
+   * the panel opens on the models.
+   */
+  fixed?: boolean | undefined
   /** Whether the agent's options are being read. */
   loading?: boolean | undefined
   /** A sentence from the engine when the agent could not be offered. */
@@ -144,13 +186,17 @@ export function AgentModelMenu({
   efforts,
   effort,
   onEffortChange,
+  modes,
+  mode,
+  onModeChange,
+  fixed = false,
   loading = false,
   refusal = null,
   disabled = false,
   className,
 }: AgentModelMenuProps): ReactNode {
   const [open, setOpen] = useState(false)
-  const [stage, setStage] = useState<Stage>('agent')
+  const [stage, setStage] = useState<Stage>(fixed ? 'model' : 'agent')
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -160,6 +206,7 @@ export function AgentModelMenu({
   const chosen = agents.find((one) => one.id === agent) ?? null
   const modelLabel = nameOfCurrent(models, model)
   const effortLabel = nameOfCurrent(efforts, effort)
+  const modeLabel = nameOfCurrent(modes, mode)
 
   const asked = query.trim().toLowerCase()
   const matching = models.filter((one) => asked === '' || one.label.toLowerCase().includes(asked))
@@ -175,6 +222,8 @@ export function AgentModelMenu({
    * the options are being read, and when nothing matches, the field points at nothing.
    */
   const listed = !loading && matching.length > 0
+  /** The stage the panel is on: a Session's agent leaves it only one to be on. */
+  const shown: Stage = fixed ? 'model' : stage
 
   /** Closes the panel and hands the focus back to what opened it. */
   const close = () => {
@@ -198,7 +247,7 @@ export function AgentModelMenu({
       open={open}
       onOpenChange={(next) => {
         if (next) {
-          setStage(agent === null ? 'agent' : 'model')
+          setStage(fixed || agent !== null ? 'model' : 'agent')
           setQuery('')
           setActive(0)
           setOpen(true)
@@ -207,11 +256,11 @@ export function AgentModelMenu({
       side="top"
       align="end"
       keepFocus
-      label="Agent, model and effort"
+      label="Agent, model, effort and mode"
       trigger={
         <Button ref={trigger} variant="ghost" size="sm" disabled={disabled} className={className}>
-          {chosen !== null && <AgentMark agent={chosen.name} />}
-          {triggerLabel(chosen, modelLabel, effortLabel)}
+          {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
+          {triggerLabel(chosen, modelLabel, effortLabel, modeLabel)}
           {loading && <Loading size="sm" label="Reading what the agent offers" />}
         </Button>
       }
@@ -223,7 +272,7 @@ export function AgentModelMenu({
           </p>
         )}
 
-        {stage === 'agent' ? (
+        {shown === 'agent' ? (
           <>
             <p className={HEAD}>Agent</p>
             <div className={LIST} role="listbox" aria-label="Agents">
@@ -247,7 +296,7 @@ export function AgentModelMenu({
                       if (offered) takeAgent(one)
                     }}
                   >
-                    <AgentMark agent={one.name} />
+                    <AgentMark agent={one.name} agentId={one.id} />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate">{one.name}</span>
                       {said !== null && <span className={STATE}>{said}</span>}
@@ -262,13 +311,21 @@ export function AgentModelMenu({
           <>
             {/* The agent stays in sight while its models are read, and pressing it is the way
                 back: a panel that swapped its whole content with no way out would be a dead end
-                for anyone who picked the wrong agent. */}
-            <button type="button" className={BACK} onClick={() => setStage('agent')}>
-              <IconChevronLeft size="sm" />
-              {chosen !== null && <AgentMark agent={chosen.name} />}
-              <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
-              <span className={STATE}>Change</span>
-            </button>
+                for anyone who picked the wrong agent. A Session's agent cannot be changed, so
+                the same line is drawn and there is nothing on it to press. */}
+            {fixed ? (
+              <p className={HELD}>
+                {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
+                <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
+              </p>
+            ) : (
+              <button type="button" className={BACK} onClick={() => setStage('agent')}>
+                <IconChevronLeft size="sm" />
+                {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
+                <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
+                <span className={STATE}>Change</span>
+              </button>
+            )}
 
             <div className={SEARCH}>
               <IconSearch size="sm" className="shrink-0 text-muted-foreground" />
@@ -276,7 +333,11 @@ export function AgentModelMenu({
                   the panel is opened by the trigger and hands the focus back to it on the way
                   out. `autoFocus` and not an effect of our own — the popup is mounted a render
                   after the panel is told to open, so an effect keyed on "open" runs while there
-                  is still nothing to focus. */}
+                  is still nothing to focus.
+
+                  Drawn while the options are being read as well as after them, because the
+                  panel is one shape: a field that appeared when the answer landed would be the
+                  panel changing under the hand that opened it. */}
               <input
                 ref={field}
                 autoFocus
@@ -326,13 +387,16 @@ export function AgentModelMenu({
               />
             </div>
 
+            {/* The list area, which is the one part of the panel that changes: the models, the
+                indicator while they are being read, or the word that says none matched. It takes
+                the same room in all three. */}
             {loading ? (
-              <p className={WAITING}>
-                <Loading size="sm" label="Reading what the agent offers" />
+              <p className={INSTEAD}>
+                <Loading size="md" label="Reading what the agent offers" />
                 Reading what this agent offers…
               </p>
             ) : matching.length === 0 ? (
-              <p className={EMPTY}>No model of this agent matches.</p>
+              <p className={INSTEAD}>No model of this agent matches.</p>
             ) : (
               <div className={LIST} id={list} role="listbox" aria-label="Models of this agent">
                 {sections.map((section) => (
@@ -349,8 +413,10 @@ export function AgentModelMenu({
               </div>
             )}
 
-            {/* The effort is the agent's own scale, so an agent that announced none is given no
-                row at all rather than an empty one. */}
+            {/* The effort and the mode are the agent's own scales, so an agent that announced
+                neither is given no row rather than an empty one. Rows and not lists: a handful
+                of steps read across is a scale, and a scale down a menu is a list of unrelated
+                things. */}
             {efforts.length > 0 && (
               <div className={SEGMENT} role="group" aria-label="Effort">
                 {efforts.map((one) => (
@@ -362,6 +428,25 @@ export function AgentModelMenu({
                     onClick={() => onEffortChange(one.id)}
                   >
                     {one.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {modes.length > 0 && (
+              <div className={SEGMENT} role="group" aria-label="Mode">
+                {modes.map((one) => (
+                  <button
+                    key={one.id}
+                    type="button"
+                    aria-pressed={one.id === mode}
+                    className={cn(SEGMENT_ITEM, one.id === mode && SEGMENT_ON)}
+                    onClick={() => onModeChange(one.id)}
+                  >
+                    {/* The mark is read off the words the agent used, exactly as the selector
+                        reads them: asking, editing, planning, and a setting for the rest. */}
+                    {modeMark(one.label)}
+                    <span className="truncate">{one.label}</span>
                   </button>
                 ))}
               </div>
@@ -378,11 +463,12 @@ function triggerLabel(
   chosen: OfferedAgent | null,
   modelLabel: string | undefined,
   effortLabel: string | undefined,
+  modeLabel: string | undefined,
 ): string {
   if (chosen === null) return 'Choose an agent'
-  if (modelLabel === undefined) return chosen.name
-  if (effortLabel === undefined) return modelLabel
-  return `${modelLabel}${SEPARATOR}${effortLabel}`
+  const said = [modelLabel, effortLabel, modeLabel].filter((one) => one !== undefined)
+  if (said.length === 0) return chosen.name
+  return said.join(SEPARATOR)
 }
 
 /**
