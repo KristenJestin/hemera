@@ -37,6 +37,7 @@ import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { ToolCatalogue, toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import type { ToolArguments } from '#engine/tools/arguments.ts'
 import type { ToolOutcome } from '#engine/tools/catalogue.ts'
+import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
 
@@ -102,6 +103,7 @@ type Engine =
   | Commands
   | Journal
   | ToolCatalogue
+  | ToolAccess
   | ToolPermissions
   | Database
   | SqliteClient
@@ -120,6 +122,7 @@ function engine(human: Human) {
   )
   const services: Layer.Layer<Engine> = toolCatalogueLayer.pipe(
     Layer.provideMerge(journalLayer),
+    Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(
@@ -149,6 +152,9 @@ const opened = Effect.gen(function* () {
   const sessions = yield* Sessions
   const project = yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: root })
   const session = yield* sessions.create(project.id, 'claude')
+  // An agent holds the Session's token, as it does once `session/new` has answered.
+  const access = yield* ToolAccess
+  yield* access.granted(session.id, 'agent-1', 'free')
   return { projectId: project.id, sessionId: session.id }
 })
 
@@ -794,5 +800,49 @@ describe('A catalogue command inside the root runs on its own', () => {
     expect(human.asked).toHaveLength(0)
     expect(seen.answer.ok).toBe(true)
     expect(seen.recent).toHaveLength(1)
+  })
+})
+
+describe('A run asked for before its Session ended', () => {
+  it('does not start once the Session has ended, even if the human then allows it', async () => {
+    // The Session ends while the human is being asked: its token is revoked and its runs are
+    // swept, as the runtime does when the agent goes, and only then does the human answer.
+    let ending: Effect.Effect<void> = Effect.void
+    const asked: OutsideRequest[] = []
+    const human: Human = {
+      asked,
+      service: {
+        askOutside: (question) =>
+          Effect.gen(function* () {
+            asked.push(question)
+            yield* ending
+            return 'allowed' as const
+          }),
+        answer: () => Effect.succeed(false),
+        waiting: () => Effect.succeed(null),
+      },
+    }
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const access = yield* ToolAccess
+        const commands = yield* Commands
+        ending = Effect.gen(function* () {
+          yield* access.revoked(session.sessionId)
+          yield* commands.stopped(session.sessionId).pipe(Effect.ignore)
+        })
+        const answer = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'node -e setInterval(()=>{},1000)', key: 'late-1' },
+        })
+        return { answer, recent: yield* commands.recent(session.sessionId) }
+      }),
+    )
+
+    expect(asked).toHaveLength(1)
+    expect(seen.answer.ok).toBe(false)
+    expect(seen.answer.summary).toContain('ended')
+    expect(seen.recent).toHaveLength(0)
   })
 })

@@ -35,6 +35,7 @@ import { Projects } from '../projects.ts'
 import { Sessions } from '../sessions.ts'
 import { Database } from '../storage/database.ts'
 import { mutate } from '../transaction.ts'
+import { ToolAccess } from './access.ts'
 import { type ToolArguments, type ParsedCall, parseCall } from './arguments.ts'
 import { type RefusedPathError, resolveInside } from './paths.ts'
 import { ToolPermissions } from './permissions.ts'
@@ -182,7 +183,7 @@ function describeSearch(result: SearchResult, query: string): string {
 export const toolCatalogueLayer: Layer.Layer<
   ToolCatalogue,
   never,
-  Projects | Sessions | Commands | ToolPermissions | Database
+  Projects | Sessions | Commands | ToolAccess | ToolPermissions | Database
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -191,6 +192,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const commands = yield* Commands
     const permissions = yield* ToolPermissions
     const database = yield* Database
+    const access = yield* ToolAccess
 
     /**
      * The answers already given, per Session and by tool and key, so a retry is answered and not
@@ -688,6 +690,15 @@ export const toolCatalogueLayer: Layer.Layer<
                     )
                   })
             if (!inside.allowed) return failed(inside.reason, inside.reason)
+            // Asked again right before the start: a call admitted while the Session was alive can
+            // reach this point after the Session ended — the human took their time — and a run
+            // started now would come after the sweep that stops a Session's runs, and outlive it.
+            if (!(yield* access.live(asked.sessionId))) {
+              return failed(
+                'the Session ended before the command started',
+                'this Session no longer has an agent, so nothing was started',
+              )
+            }
             const started = yield* answered(
               commands.run({
                 sessionId: asked.sessionId,
