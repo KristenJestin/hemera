@@ -314,24 +314,55 @@ export const toolCatalogueLayer: Layer.Layer<
     const refused = (asked: ToolCall, made: Made, reason: string) =>
       settle(asked, made, { ok: false, summary: reason, text: reason, paths: [] }, 'refused')
 
+    /**
+     * Where a path leads, judged against the root without asking anyone: inside, outside at a
+     * resolved place, or not a place at all.
+     */
+    const placeOf = (root: string, named: string) =>
+      Effect.promise(() =>
+        resolveInside(root, named).then(
+          (path) => ({ inside: true as const, path }),
+          (refusal: RefusedPathError) =>
+            refusal.why === 'unreadable'
+              ? { inside: null, reason: refusal.message }
+              : // What the human is shown is where the path leads, not how the agent spelled it:
+                // `..` and a link are resolved, so the question is about the place, not the text.
+                { inside: false as const, path: refusal.resolved },
+        ),
+      )
+
     /** Where a tool may act: inside the root, or wherever the human has just allowed. */
     const allowed = (asked: ToolCall, root: string, named: string) =>
       Effect.gen(function* () {
-        const settled = yield* Effect.promise(() =>
-          resolveInside(root, named).then(
-            (path) => ({ inside: true as const, path }),
-            (refusal: RefusedPathError) => ({ inside: false as const, refusal }),
-          ),
+        const place = yield* placeOf(root, named)
+        if (place.inside === null) return { allowed: false as const, reason: place.reason }
+        if (place.inside) return { allowed: true as const, path: place.path }
+        return yield* askHuman(
+          asked,
+          root,
+          named,
+          place.path,
+          `${asked.tool} asks to act outside the Workspace: ${place.path}`,
+          null,
         )
-        if (settled.inside) return { allowed: true as const, path: settled.path }
-        if (settled.refusal.why === 'unreadable') {
-          return { allowed: false as const, reason: settled.refusal.message }
-        }
-        // What the human is shown is where the path leads, not how the agent spelled it: `..`
-        // and a link are resolved, so the question is about the place and not about the text.
-        const where = settled.refusal.resolved
+      })
+
+    /**
+     * The permission block of D5-09, asked about one place, and the human's answer.
+     *
+     * `line` is the command line a one-off run would start, and null for every other question:
+     * the block shows it, because a line is what the human is deciding on.
+     */
+    const askHuman = (
+      asked: ToolCall,
+      root: string,
+      named: string,
+      where: string,
+      body: string,
+      line: string | null,
+    ) =>
+      Effect.gen(function* () {
         const id = crypto.randomUUID()
-        const body = `${asked.tool} asks to act outside the Workspace: ${where}`
         // The block the window already draws for an agent's own permission is the one this is
         // read by: the same two options every time, because the question is always the same one
         // and nothing about it is remembered (D6-05). The request and the decision are two rows
@@ -349,6 +380,7 @@ export const toolCatalogueLayer: Layer.Layer<
                 named,
                 resolved: where,
                 root,
+                line,
               }),
               correlationId: `perm:${id}`,
               state,
@@ -387,7 +419,10 @@ export const toolCatalogueLayer: Layer.Layer<
         if (answer === 'refused') {
           return {
             allowed: false as const,
-            reason: `the user refused: ${where} is outside ${root}`,
+            reason:
+              line === null
+                ? `the user refused: ${where} is outside ${root}`
+                : `the user refused to run ${line} in ${where}`,
           }
         }
         // What was allowed is the place the human was shown, and that is where the tool acts.
@@ -626,10 +661,32 @@ export const toolCatalogueLayer: Layer.Layer<
               )
             }
             const where = call.arguments.folder ?? entry?.folder ?? null
+            const folder = where === null || where === '' || where === '.' ? '.' : where
+            // A catalogue command is the user's own line, and inside the root it runs on its own.
+            // A one-off is a line the agent wrote: whatever folder it names, the human sees the
+            // line and decides before anything runs (D5-09) — one question, not one per rule.
             const inside =
-              where === null || where === '' || where === '.'
-                ? { allowed: true as const, path: root }
-                : yield* allowed(asked, root, where)
+              entry !== undefined
+                ? folder === '.'
+                  ? { allowed: true as const, path: root }
+                  : yield* allowed(asked, root, folder)
+                : yield* Effect.gen(function* () {
+                    const place = yield* placeOf(root, folder)
+                    if (place.inside === null) {
+                      return { allowed: false as const, reason: place.reason }
+                    }
+                    const oneOff = line ?? ''
+                    return yield* askHuman(
+                      asked,
+                      root,
+                      folder,
+                      place.path,
+                      place.inside
+                        ? `commands_run asks to run ${oneOff} in ${place.path}`
+                        : `commands_run asks to run ${oneOff} outside the Workspace, in ${place.path}`,
+                      oneOff,
+                    )
+                  })
             if (!inside.allowed) return failed(inside.reason, inside.reason)
             const started = yield* answered(
               commands.run({

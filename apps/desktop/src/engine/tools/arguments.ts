@@ -124,7 +124,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   search: `Search the files of the Workspace root for a piece of text, \`.gitignore\` respected. One call returns at most ${SEARCH_MATCH_LIMIT} matches and scans at most ${SEARCH_SCAN_BYTES} bytes: the answer says which limit stopped it and gives the cursor to continue from.`,
   commands_list:
     "The commands the Project's catalogue holds: name, line, kind, and the folder each runs in.",
-  commands_run: `Ask for a command of the Project's catalogue to run, by name, or a one-off line. An app command that is already running is handed back rather than started twice. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
+  commands_run: `Ask for a command of the Project's catalogue to run, by name, or a one-off line, which the user is asked to allow before it runs. An app command that is already running is handed back rather than started twice. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
   commands_output:
     'What a run has printed, bounded, the address it published, and how it ended if it has.',
   commands_stop: 'Stop a run and everything it started.',

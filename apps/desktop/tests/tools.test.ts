@@ -714,3 +714,85 @@ describe('the answers a Session keeps against a retry', () => {
     expect(readFileSync(join(root, 'kept', 'oldest.txt'), 'utf8')).toBe('second')
   })
 })
+
+describe('A one-off command asks the human before it runs', () => {
+  it('shows the line in a permission block, and starts nothing when the human refuses', async () => {
+    const human = humanSaying('refused')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const answer = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'node -e console.log(1)', key: 'one-off-1' },
+        })
+        const commands = yield* Commands
+        return {
+          answer,
+          running: yield* commands.running(session.sessionId),
+          recent: yield* commands.recent(session.sessionId),
+          entries: yield* threadEntries(session.sessionId),
+        }
+      }),
+    )
+
+    expect(human.asked).toHaveLength(1)
+    const block = seen.entries.find((entry) => entry.kind === 'permission_request')
+    expect(block?.body).toContain('node -e console.log(1)')
+    expect(seen.answer.ok).toBe(false)
+    expect(seen.running).toHaveLength(0)
+    expect(seen.recent).toHaveLength(0)
+  })
+
+  it('runs the line once the human allows it', async () => {
+    const human = humanSaying('allowed')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const answer = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'node -e console.log(1)', key: 'one-off-2' },
+        })
+        const commands = yield* Commands
+        return { answer, recent: yield* commands.recent(session.sessionId) }
+      }),
+    )
+
+    expect(human.asked).toHaveLength(1)
+    expect(seen.answer.ok).toBe(true)
+    expect(seen.recent).toHaveLength(1)
+  })
+})
+
+describe('A catalogue command inside the root runs on its own', () => {
+  it('starts without a question to the human', async () => {
+    const human = humanSaying()
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        yield* commands.save(
+          {
+            projectId: session.projectId,
+            name: 'hello',
+            line: 'node -e console.log(1)',
+            kind: 'utility',
+            folder: null,
+          },
+          false,
+        )
+        const answer = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { name: 'hello', key: 'cat-1' },
+        })
+        return { answer, recent: yield* commands.recent(session.sessionId) }
+      }),
+    )
+
+    expect(human.asked).toHaveLength(0)
+    expect(seen.answer.ok).toBe(true)
+    expect(seen.recent).toHaveLength(1)
+  })
+})
