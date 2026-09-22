@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Deferred, Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
+import { z } from 'zod'
 
 import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, TOOL_NAMES, type ToolName } from '@hemera/core'
 
@@ -151,6 +152,12 @@ const opened = Effect.gen(function* () {
   return { projectId: project.id, sessionId: session.id }
 })
 
+/** The key an agent sent among its arguments, read as the server reads it: a string, or none. */
+const keySent = (sent: ToolArguments) => {
+  const read = z.object({ key: z.string().min(1) }).safeParse(sent)
+  return read.success ? read.data.key : null
+}
+
 /** One call of one tool, as the server hands it over once the token has been read. */
 const calling = (asked: {
   readonly sessionId: string
@@ -167,7 +174,7 @@ const calling = (asked: {
       // The key travels in the arguments, as an agent sends it, and beside them, as the server
       // hands it over once it has read it.
       arguments: asked.key === undefined ? asked.arguments : { ...asked.arguments, key: asked.key },
-      key: asked.key ?? (typeof asked.arguments.key === 'string' ? asked.arguments.key : null),
+      key: asked.key ?? keySent(asked.arguments),
       offered: asked.offered ?? TOOL_NAMES,
       caller: 'a1b2c3d4e5f6',
     })
