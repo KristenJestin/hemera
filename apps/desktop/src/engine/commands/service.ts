@@ -36,12 +36,7 @@ import { Context, Effect, Exit, Layer, Scope } from 'effect'
 
 import { ProcessSupervisor } from '../agents/supervisor.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
-import {
-  type RunState,
-  commandRuns,
-  projectCommands,
-  sessions,
-} from '../storage/schema.ts'
+import { type RunState, commandRuns, projectCommands, sessions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 
 /** How many runs `recent` hands back: what a panel draws, oldest ones out of sight. */
