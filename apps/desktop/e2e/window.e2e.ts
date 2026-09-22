@@ -4,7 +4,13 @@
  * Each suite is named after the scenario of `specs/desktop-foundation/spec.md` it covers.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { browser, expect } from '@wdio/globals'
+
+import { addProject } from './hand.ts'
 
 describe('Renderer sans Node', () => {
   it('has no require, no Node process and no Electron module in the page', async () => {
@@ -88,6 +94,12 @@ describe("Ouverture sous Windows à l'échelle 150 %", () => {
   })
 
   it('marks a drag region the page does not lose to its controls', async () => {
+    // A Project first: before the first one the bar is the mark and nothing else — no tab, no
+    // bell and no fold — so a window without one has no control in its strip to keep out of the
+    // drag region. The claim is about a bar that carries something.
+    const sources = mkdtempSync(join(tmpdir(), 'hemera-e2e-window-'))
+    await addProject('Atlas', sources)
+
     const regions = await browser.execute(() => {
       const strip = document.querySelector('header')
       // The controls of lot 2 live in the bar itself; lot 0's witness panel is a story now.
@@ -99,6 +111,8 @@ describe("Ouverture sous Windows à l'échelle 150 %", () => {
     })
     expect(regions.strip).toBe('drag')
     expect(regions.control).toBe('no-drag')
+
+    rmSync(sources, { recursive: true, force: true })
   })
 })
 
