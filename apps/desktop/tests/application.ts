@@ -130,14 +130,7 @@ export function application(
       | TestClock.TestClock
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
-      Layer.provide(
-        Layer.mergeAll(
-          server,
-          contextLayer,
-          commandsLayer,
-          toolPermissionsLayer,
-        ),
-      ),
+      Layer.provide(Layer.mergeAll(server, contextLayer, commandsLayer, toolPermissionsLayer)),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, sessionsLayer, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
