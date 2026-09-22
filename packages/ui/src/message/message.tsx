@@ -173,15 +173,50 @@ export interface MessageHeaderProps {
   author: MessageAuthor
   /** The name said once, at the head of the group. */
   name: string
-  /** When the group was written, already written for the platform. */
+  /** When the group was written, `HH:MM`, already written for the platform. */
   at?: string | undefined
+  /** The whole date behind it, for a reader who asks a time three days old which day it is. */
+  atLabel?: string | undefined
+  /**
+   * Whether the hand or the keyboard is on the group this head belongs to.
+   *
+   * The time is the quiet half of a head. A thread read downwards does not need forty timestamps
+   * down its side — the day separators are what say when — and a reader who wonders about one
+   * line wonders about that line. So it arrives under the hand and leaves with it, exactly as
+   * the foot does, and it is in the page the whole time for whatever reads it out.
+   */
+  shown?: boolean | undefined
 }
 
-export function MessageHeader({ author, name, at }: MessageHeaderProps): ReactNode {
+/**
+ * The head of a group: who wrote it, and — for the hand that stops on it — when.
+ *
+ * The time fades rather than appears, and the fade is a `filter` and not an `opacity`, for the
+ * same reason the foot's is: the accessibility check of the catalogue measures a text's contrast
+ * through an opacity and refuses what it reads mid-flight, while a filter is not part of what it
+ * measures. The words keep their contrast the whole way.
+ */
+export function MessageHeader({
+  author,
+  name,
+  at,
+  atLabel,
+  shown = false,
+}: MessageHeaderProps): ReactNode {
+  const transition = useTransition(press)
   return (
     <p className={cn(HEAD, author === 'user' && 'flex-row-reverse')}>
       <span className="font-medium text-foreground">{name}</span>
-      {at !== undefined && <span>{at}</span>}
+      {at !== undefined && (
+        <motion.span
+          title={atLabel}
+          animate={shown ? IN_PLACE : AWAY}
+          initial={AWAY}
+          transition={transition}
+        >
+          {at}
+        </motion.span>
+      )}
     </p>
   )
 }
@@ -279,8 +314,10 @@ export interface MessageGroupProps {
   /** The messages of the group, in the order they were written. */
   lines: MessageLine[]
   tone?: MessageTone | undefined
-  /** When the group started, already written for the platform. */
+  /** When the group started, `HH:MM`, already written for the platform. */
   at?: string | undefined
+  /** The whole date behind that time, for the reader who asks which day it was. */
+  atLabel?: string | undefined
   /** Where the last line stands with the Profile. */
   state?: MessageState | undefined
   error?: string | undefined
@@ -295,6 +332,7 @@ export function MessageGroup({
   lines,
   tone = 'soft',
   at,
+  atLabel,
   state,
   error,
   onRetry,
@@ -325,7 +363,9 @@ export function MessageGroup({
       onFocus={() => setUnderTheHand(true)}
       onBlur={() => setUnderTheHand(false)}
     >
-      {!note && <MessageHeader author={author} name={name} at={at} />}
+      {!note && (
+        <MessageHeader author={author} name={name} at={at} atLabel={atLabel} shown={underTheHand} />
+      )}
       {lines.map((line, index) => (
         <MessageRow
           key={line.id}
@@ -337,7 +377,12 @@ export function MessageGroup({
           {line.body}
         </MessageRow>
       ))}
-      {/* Held during its own exit, so a foot that goes away leaves the way it arrived. */}
+      {/* Held during its own exit, so a foot that goes away leaves the way it arrived — which is
+          why the foot is mounted by this condition rather than returning null from inside: a
+          child that is always there is a child `AnimatePresence` has nothing to play out.
+          The affordance itself is not the foot's alone any more: every group answers the hand,
+          with its time in the head above (`MessageHeader`), and the foot adds what the Profile
+          had to say wherever the caller passed a state. */}
       <AnimatePresence>
         {!note && state !== undefined && (
           <MessageFooter
@@ -383,10 +428,23 @@ export function MessageDaySeparator({ day }: { day: string }): ReactNode {
  * marker that pretended otherwise would be the simulated reply the spec forbids (D4b-09). The
  * agent's own marker arrives with HEM-48, in the same place and the same words.
  */
-export function LiveMarker({ children }: { children: ReactNode }): ReactNode {
+export function LiveMarker({
+  mark,
+  children,
+}: {
+  /**
+   * The dot at the head of the line, when it says something other than "nothing is coming".
+   *
+   * The green dot is the thread's own state and the default. A turn that is running is a
+   * different fact about the same place — it is coming, and here is what it is doing — and the
+   * row that says so hands over the dot that carries it (`ActivityRow`).
+   */
+  mark?: ReactNode
+  children: ReactNode
+}): ReactNode {
   return (
     <p className="flex items-center justify-end gap-1.5 px-10 text-xs text-muted-foreground">
-      <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+      {mark ?? <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />}
       {children}
     </p>
   )

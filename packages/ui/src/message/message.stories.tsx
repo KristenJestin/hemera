@@ -31,6 +31,7 @@ const meta = {
     author: 'user',
     name: 'You',
     at: '14:02',
+    atLabel: 'Tuesday 22 September 2026 at 14:02',
     state: 'saved',
     lines: [{ id: 'one', body: 'Invoices should export with HT and TTC amounts per line.' }],
   },
@@ -41,7 +42,11 @@ const meta = {
     name: { control: 'text', description: 'Said once, over the group.' },
     at: {
       control: 'text',
-      description: 'Already written for the platform; the component formats nothing.',
+      description: 'HH:MM, already written for the platform; the component formats nothing.',
+    },
+    atLabel: {
+      control: 'text',
+      description: 'The whole date behind that time, for the reader who asks which day it was.',
     },
     lines: {
       control: false,
@@ -66,7 +71,15 @@ function liftOf(foot: HTMLElement): number {
   return drawn === 'none' ? 0 : new DOMMatrixReadOnly(drawn).m42
 }
 
-/** One message from the user, saved. The simplest thing a thread can hold. */
+/**
+ * One message from the user, saved. The simplest thing a thread can hold.
+ *
+ * And the two quiet halves of a group, which are the same answer at either end of it: the time
+ * in the head and the state under the foot are away until the hand or the keyboard asks for
+ * them. A thread read downwards does not carry forty timestamps down its side — the day
+ * separators are what say when — and a reader who wonders about one line wonders about that
+ * line.
+ */
 export const Playground: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -75,13 +88,19 @@ export const Playground: Story = {
     // The state of a kept group is the quiet half of a thread: it is away until the hand or the
     // keyboard asks for it, which is what stops a column of messages from carrying a line each.
     const foot = canvas.getByText('Saved').closest('p')!
+    const time = canvas.getByText('14:02')
     expect(getComputedStyle(foot).filter).toBe('opacity(0)')
+    expect(getComputedStyle(time).filter).toBe('opacity(0)')
+    // The whole date is there to be asked for, on the time it belongs to.
+    expect(time).toHaveAttribute('title', 'Tuesday 22 September 2026 at 14:02')
     // Away is not only a fade: the line also sits a few pixels up, which is the part the eye
     // reads as arriving. The hand is put on the group by its own event rather than by a pointer,
     // because this harness aims one wherever the story's geometry allows.
     expect(liftOf(foot)).toBeLessThan(0)
     fireEvent.pointerOver(group)
     await waitFor(() => expect(getComputedStyle(foot).filter).toBe('opacity(1)'))
+    // Both ends of the group answer the same hand.
+    await waitFor(() => expect(getComputedStyle(time).filter).toBe('opacity(1)'))
     // In place, and it stays there: the foot has settled rather than jumped.
     expect(liftOf(foot)).toBe(0)
   },
@@ -395,6 +414,16 @@ export const Conversation: Story = {
     expect(place('Yes — and the client number on every line.').left).toBeGreaterThan(
       place('The billing page is then the only entry point.').left,
     )
+
+    // Every group answers the hand, and not only the last one: the time of the group the reader
+    // is on arrives, and the times of the groups they are not on stay away. Before the trial of
+    // 22 September 2026 a group the caller had passed no state to had no affordance at all.
+    const first = canvas.getByText('14:02')
+    const middle = canvas.getByText('14:03')
+    expect(getComputedStyle(first).filter).toBe('opacity(0)')
+    fireEvent.pointerOver(canvas.getByRole('group', { name: 'Messages from Agent' }))
+    await waitFor(() => expect(getComputedStyle(middle).filter).toBe('opacity(1)'))
+    expect(getComputedStyle(first).filter).toBe('opacity(0)')
   },
 }
 
