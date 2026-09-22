@@ -3,23 +3,26 @@ import type { ReactNode } from 'react'
 
 import type { ConfigOption, Session, SessionEntry } from '@hemera/ipc'
 import {
+  AgentModelMenu,
   BlockedBanner,
   Composer,
   MessageDaySeparator,
   MessageGroup,
   MessageScroller,
   MessageText,
+  ModeSelector,
   SessionEmpty,
   SessionHeader,
   SessionSideColumn,
   type MessageLine,
   type MessageState,
+  type OfferedAgent,
   type PermissionOption,
   type ScrollerEntry,
 } from '@hemera/ui'
 
 import type { AgentSessionState } from '../agent-store.ts'
-import { controlsOf } from '../agent-controls.tsx'
+import { effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, waitingOf } from '../agent-blocks.tsx'
 import { whenOf } from '../journal-lines.ts'
 
@@ -91,6 +94,14 @@ export interface SessionPageProps {
   refusal: string | null
   /** What the engine has pushed for this Session since it was opened. */
   agent: AgentSessionState
+  /**
+   * The agent this Session runs, as the menu lists it: one, and never another.
+   *
+   * A Session keeps the agent it was made with (D5-06), so the first stage of the menu is a
+   * list of one that is already chosen — it is there because the model and the effort below it
+   * belong to that agent, and reading which agent answers is half of reading them.
+   */
+  agents: OfferedAgent[]
   /** What the agent of this Session offers, as its own handshake answered. */
   options: readonly ConfigOption[]
   onWrite: (body: string) => Promise<string | null>
@@ -128,6 +139,7 @@ export function SessionPage({
   editing,
   refusal,
   agent,
+  agents,
   options,
   onWrite,
   onSay,
@@ -260,16 +272,13 @@ export function SessionPage({
 
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).
-  const controls = controlsOf(
-    session.provider ?? '',
-    options,
-    (option) => option.current ?? '',
-    onChooseOption,
-  )
+  const model = modelStage(options)
+  const effort = effortStage(options)
+  const mode = modeStage(options)
 
   // What the column beside the thread would hold: the plan the agent last published and the files
   // the turn has touched. Both are states rather than events, and they are read here because the
-  // composer's own counter and the column are two readings of the same turn.
+  // meter above the box and the column are two readings of the same turn.
   const plan = planOf(thread)
   const touched = touchedOf(thread)
 
@@ -297,11 +306,6 @@ export function SessionPage({
             // regret: the archive is where threads go.
             archiveDisabled={thread.length === 0}
           />
-          {refusal !== null && (
-            <p role="alert" className="text-sm text-muted-foreground">
-              {refusal}
-            </p>
-          )}
         </div>
         <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
           {thread.length === 0 ? (
@@ -328,7 +332,40 @@ export function SessionPage({
                 : `Say something to ${session.provider}…`
             }
             onSend={write}
-            controls={controls}
+            // The last act's refusal rides the control it is about instead of a paragraph over
+            // the thread, which moved everything under it the moment it appeared: a thread that
+            // could not be read and an agent that is no longer there are both reasons not to
+            // send, and the sentence is there to be asked for on the send itself (D4b-02).
+            sendDisabledReason={refusal ?? undefined}
+            agentMenu={
+              <AgentModelMenu
+                agents={agents}
+                agent={session.provider}
+                // The agent of a Session is the one it was made with and cannot be changed: the
+                // stage is drawn because the model below it belongs to an agent, and pressing
+                // the one entry it holds changes nothing.
+                onAgentChange={() => undefined}
+                models={model?.choices ?? []}
+                model={model?.current ?? null}
+                onModelChange={(chosen) => {
+                  if (model !== null) onChooseOption(model.optionId, chosen)
+                }}
+                efforts={effort?.choices ?? []}
+                effort={effort?.current ?? null}
+                onEffortChange={(chosen) => {
+                  if (effort !== null) onChooseOption(effort.optionId, chosen)
+                }}
+              />
+            }
+            mode={
+              mode === null ? undefined : (
+                <ModeSelector
+                  modes={mode.choices}
+                  value={mode.current ?? ''}
+                  onValueChange={(chosen) => onChooseOption(mode.optionId, chosen)}
+                />
+              )
+            }
             running={agent.running}
             onStop={onStop}
             blocked={

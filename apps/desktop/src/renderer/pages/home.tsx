@@ -1,23 +1,24 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 
-import type { AgentProvider, ConfigOption } from '@hemera/ipc'
 import {
   ActivityFrame,
-  AgentSelector,
+  AgentModelMenu,
   Composer,
   EmptyProject,
   Greeting,
+  ModeSelector,
   SessionsFrame,
   type HomeSession,
   type JournalLine,
   type OfferedAgent,
 } from '@hemera/ui'
 
-import { controlsOf } from '../agent-controls.tsx'
+import { effortStage, modeStage, modelStage } from '../agent-options.ts'
+import type { AgentOffering } from '../agent-store.ts'
 
 /**
- * The Home of the active Project (design D4-07, D4b-02, D5-17).
+ * The Home of the active Project (design D4-07, D4b-02, D5-17, D17-11).
  *
  * The page is the assembly: the greeting, the composer, the last Sessions of the Project, the
  * last entries of the Journal. None of that is a component, because none of it is drawn anywhere
@@ -27,16 +28,21 @@ import { controlsOf } from '../agent-controls.tsx'
  * caller's: from here a message makes a Session, and a Session is made with the agent it will run
  * — so the agent is chosen before the first word is written, and what it offers is chosen with
  * it. Nothing is written before there is somebody to answer: the action stays off until an agent
- * is picked, and says so where the box is.
+ * is picked, and says so on the control that would send.
  *
- * The choices are held here rather than asked of the engine: there is no Session yet to ask, and
- * what the user picked is a decision about the Session being made — the caller starts it with
- * that agent and hands the choices to it as it starts.
+ * The agent, its model and its effort are one menu asking one question at a time, and what the
+ * agent is on is the agent's own answer: every choice is handed to the engine, which sets it on
+ * the agent and answers with what it announces then — which is the only way the effort of a
+ * reasoning model ever appears (D5-13). Nothing about those choices is remembered here and
+ * nothing is handed over again when the Session starts: the engine keeps them for it.
  */
 const PAGE = 'mx-auto flex max-w-3xl flex-col gap-6 px-6 py-10'
 
 /** How many entries the Activity frame carries, which the prototype settled at four. */
 const ACTIVITY_ENTRIES = 4
+
+/** Why the first word cannot be written yet, said on the control that would send it. */
+const NO_AGENT = 'Choose an agent first'
 
 export function HomePage({
   projectName,
@@ -45,6 +51,7 @@ export function HomePage({
   agents,
   offeringOf,
   onChooseAgent,
+  onChooseOption,
   onOpenSession,
   onOpenAllSessions,
   onOpenJournal,
@@ -57,57 +64,51 @@ export function HomePage({
   sessions: HomeSession[]
   entries: JournalLine[]
   /** The agents this machine has, as the registry named them. */
-  agents: readonly OfferedAgent<AgentProvider>[]
-  /** What an agent offers this Project, or nothing while the engine is being told. */
-  offeringOf: (provider: AgentProvider) => readonly ConfigOption[]
+  agents: OfferedAgent[]
+  /** What an agent offers this Project: its options, its refusal, and whether it is answering. */
+  offeringOf: (agent: string) => AgentOffering
   /** Asks what an agent offers this Project, which is what starts it the first time. */
-  onChooseAgent: (provider: AgentProvider) => void
+  onChooseAgent: (agent: string) => void
+  /** Sets one of that agent's own options, and takes back what it announces then. */
+  onChooseOption: (agent: string, optionId: string, value: string) => void
   onOpenSession: (id: string) => void
   onOpenAllSessions: () => void
   onOpenJournal: () => void
   onSearchFiles: (query: string) => Promise<string[]>
   onPickFiles: () => Promise<string[]>
-  /** Starts the Session with the chosen agent and these choices, and says what to write. */
-  onSend: (
-    text: string,
-    agent: AgentProvider,
-    choices: ReadonlyMap<string, string>,
-  ) => Promise<string | null>
+  /** Starts the Session with the chosen agent, and says what to write in it. */
+  onSend: (text: string, agent: string) => Promise<string | null>
 }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
-  const [agent, setAgent] = useState<AgentProvider | null>(null)
-  const [choices, setChoices] = useState<ReadonlyMap<string, string>>(new Map())
-  const options = agent === null ? [] : offeringOf(agent)
+  const [agent, setAgent] = useState<string | null>(null)
+  const offering = agent === null ? null : offeringOf(agent)
+  const options = offering?.options ?? []
+  const model = modelStage(options)
+  const effort = effortStage(options)
+  const mode = modeStage(options)
 
   /**
    * Picks the agent the Session will run.
    *
-   * What an agent offers is its own answer, and the choices made against one agent are not
-   * choices about the next: picking another one clears them, and the engine is asked what the
-   * new one offers — once, whatever is picked afterwards.
+   * What an agent offers is its own answer, and what was chosen against one agent is not a choice
+   * about the next: the engine is asked what the new one offers, and the menu is drawn from that
+   * answer alone.
    */
-  const choose = (provider: AgentProvider): void => {
-    setAgent(provider)
-    setChoices(new Map())
-    onChooseAgent(provider)
+  const choose = (chosen: string): void => {
+    setAgent(chosen)
+    onChooseAgent(chosen)
   }
 
-  /** Keeps one of the agent's own choices, to be handed over when the Session is made. */
+  /** One of the agent's own options, moved on the agent this composer is being drawn from. */
   const pick = (optionId: string, chosen: string): void => {
-    const next = new Map(choices)
-    next.set(optionId, chosen)
-    setChoices(next)
+    if (agent === null) return
+    onChooseOption(agent, optionId, chosen)
   }
 
-  // The reason the first word cannot be written yet, and it is not a refusal: nothing was lost,
-  // and nothing is waiting on an answer — the choice above the box is.
-  const missing =
-    agent !== null
-      ? undefined
-      : agents.some((one) => one.available)
-        ? 'Choose an agent: a Session is made with the one it runs.'
-        : 'No agent on this machine yet. The Settings name the one to install.'
+  // The reason the send is off, which is not a refusal while no agent is picked: nothing was
+  // lost and nothing is waiting on an answer — the menu at the end of the box is.
+  const reason = agent === null ? NO_AGENT : (offering?.refusal ?? undefined)
 
   return (
     <div className={PAGE}>
@@ -122,23 +123,36 @@ export function HomePage({
         onFilesChange={setFiles}
         onSearchFiles={onSearchFiles}
         onPickFiles={onPickFiles}
-        missing={missing}
-        controls={
-          <>
-            <AgentSelector agents={agents} value={agent} onValueChange={choose} />
-            {agent === null
-              ? null
-              : controlsOf(
-                  agent,
-                  options,
-                  (option) => choices.get(option.id) ?? option.current ?? '',
-                  pick,
-                )}
-          </>
+        sendDisabledReason={reason}
+        agentMenu={
+          <AgentModelMenu
+            agents={agents}
+            agent={agent}
+            onAgentChange={choose}
+            models={model?.choices ?? []}
+            model={model?.current ?? null}
+            onModelChange={(chosen) => {
+              if (model !== null) pick(model.optionId, chosen)
+            }}
+            efforts={effort?.choices ?? []}
+            effort={effort?.current ?? null}
+            onEffortChange={(chosen) => {
+              if (effort !== null) pick(effort.optionId, chosen)
+            }}
+            loading={offering?.loading ?? false}
+            refusal={offering?.refusal ?? null}
+          />
         }
-        onSend={async (text) =>
-          agent === null ? (missing ?? '') : await onSend(text, agent, choices)
+        mode={
+          mode === null ? undefined : (
+            <ModeSelector
+              modes={mode.choices}
+              value={mode.current ?? ''}
+              onValueChange={(chosen) => pick(mode.optionId, chosen)}
+            />
+          )
         }
+        onSend={async (text) => (agent === null ? NO_AGENT : await onSend(text, agent))}
       />
       {sessions.length === 0 ? (
         <EmptyProject projectName={projectName} onOpenJournal={onOpenJournal} />

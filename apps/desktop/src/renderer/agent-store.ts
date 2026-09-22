@@ -1,5 +1,6 @@
 import type {
   AgentAvailability,
+  AgentOffer,
   AgentProvider,
   AgentUpdate,
   ConfigOption,
@@ -38,6 +39,23 @@ export interface AgentSessionState {
 /** What a Session nothing has happened in yet holds. */
 const QUIET: AgentSessionState = { entries: [], running: false, stopReason: null }
 
+/**
+ * What one agent offers one Project before a Session holds it (design D5-17, D5-21).
+ *
+ * The three cross together because the composer draws all three: the options the agent
+ * announced, the sentence the engine refused with — this machine does not have the agent,
+ * nobody signed it in, it would not speak — and whether the question is still in flight, which
+ * is what the menu says while the agent is being started.
+ */
+export interface AgentOffering {
+  options: readonly ConfigOption[]
+  refusal: string | null
+  loading: boolean
+}
+
+/** What an agent nobody has asked yet offers: nothing, for no reason, and not being asked. */
+const UNASKED: AgentOffering = { options: [], refusal: null, loading: false }
+
 export interface AgentState {
   /** What has been pushed, per Session, since it was last read. */
   sessions: ReadonlyMap<string, AgentSessionState>
@@ -50,7 +68,7 @@ export interface AgentState {
    * does this agent offer this folder — has the same answer either way: it is asked once per
    * agent and Project, and the Session made from that choice offers its own.
    */
-  offerings: ReadonlyMap<string, readonly ConfigOption[]>
+  offerings: ReadonlyMap<string, AgentOffering>
   /** What this machine has, as `agents.list` and `agents.check` answered. */
   agents: readonly AgentAvailability[]
   /** Whether that list is the one a registry answered, which is the settings' own question. */
@@ -194,9 +212,25 @@ export async function readOptions(sessionId: string): Promise<void> {
 export function offeringOf(
   projectId: string | null,
   provider: AgentProvider | null,
-): readonly ConfigOption[] {
-  if (projectId === null || provider === null) return []
-  return state.offerings.get(`${projectId}:${provider}`) ?? []
+): AgentOffering {
+  if (projectId === null || provider === null) return UNASKED
+  return state.offerings.get(`${projectId}:${provider}`) ?? UNASKED
+}
+
+/** What one agent offers one Project, kept against the two of them and nothing else. */
+function offering(key: string, next: AgentOffering): void {
+  const offerings = new Map(state.offerings)
+  offerings.set(key, next)
+  replace({ ...state, offerings })
+}
+
+/** The offer an answer carries: what the agent announced, or the sentence it was refused with. */
+function offered(answer: AgentOffer): AgentOffering {
+  return {
+    options: answer.options,
+    refusal: answer.refusal === null ? null : answer.refusal.message,
+    loading: false,
+  }
 }
 
 /**
@@ -204,18 +238,47 @@ export function offeringOf(
  *
  * Asked when an agent is picked in the Home's composer, and never again for that Project: the
  * engine starts the agent to be told, so the answer is kept rather than asked for on every
- * render. A refusal leaves the composer with nothing to choose and the reason on screen.
+ * render. A refusal leaves the composer with nothing to choose and the reason on screen, in the
+ * engine's own sentence — this machine does not have the agent, or nobody has signed it in.
  */
 export async function offerAgent(projectId: string, provider: AgentProvider): Promise<void> {
   const key = `${projectId}:${provider}`
   if (state.offerings.has(key)) return
+  offering(key, { ...UNASKED, loading: true })
   try {
-    const answered = await window.hemera.invoke('agents.offer', { projectId, provider })
-    const offerings = new Map(state.offerings)
-    offerings.set(key, answered.options)
-    replace({ ...state, offerings, refusal: null })
+    offering(key, offered(await window.hemera.invoke('agents.offer', { projectId, provider })))
   } catch (cause) {
-    replace({ ...state, refusal: message(cause) })
+    offering(key, { options: [], refusal: message(cause), loading: false })
+  }
+}
+
+/**
+ * Puts that agent on one of its own options, while the composer is still being written in.
+ *
+ * The list is replaced by what comes back rather than patched: an option the agent only
+ * publishes once another one has been chosen — the effort of a reasoning model — is announced in
+ * the answer to that choice and nowhere else (D5-13). The engine keeps the choice for the
+ * Session this composer will start, so nothing here has to hand it over again.
+ */
+export async function setOffered(
+  projectId: string,
+  provider: AgentProvider,
+  optionId: string,
+  value: string,
+): Promise<void> {
+  const key = `${projectId}:${provider}`
+  const held = state.offerings.get(key) ?? UNASKED
+  offering(key, { ...held, loading: true })
+  try {
+    const answer = await window.hemera.invoke('agents.offerSet', {
+      projectId,
+      provider,
+      optionId,
+      value,
+    })
+    offering(key, offered(answer))
+  } catch (cause) {
+    offering(key, { ...held, refusal: message(cause), loading: false })
   }
 }
 

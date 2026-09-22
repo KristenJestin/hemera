@@ -16,7 +16,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
-import type { EngineStatus, MotionMeasure, Project, Session } from '@hemera/ipc'
+import type {
+  AgentAvailability,
+  AgentProvider,
+  EngineStatus,
+  MotionMeasure,
+  Project,
+  Session,
+} from '@hemera/ipc'
 import {
   CommandPalette,
   EMPTY_DRAFT,
@@ -30,6 +37,7 @@ import {
   type CommandGroup,
   type HomeSession,
   type JournalFilter,
+  type OfferedAgent,
   type ProfileFacts,
   type ProjectDraft,
   type RepositoryLine,
@@ -66,6 +74,7 @@ import {
   optionsOf,
   readOptions,
   say,
+  setOffered,
   stopTurn,
   subscribeToAgent,
   updateAgent,
@@ -213,6 +222,33 @@ async function checkFolder(path: string): Promise<string | null> {
   return found.ok ? null : found.reason
 }
 
+/**
+ * What is said about an agent that cannot be picked, in the engine's own words (design D5-21).
+ *
+ * The way out of it and not the state alone: the menu can say "not installed" by itself, and
+ * what it cannot say is the command that installs this agent or signs it in — which is the one
+ * thing the reader can do about either.
+ */
+function hintOf(agent: AgentAvailability): string | undefined {
+  if (!agent.found) return agent.installHint
+  if (!agent.authenticated) return agent.loginHint
+  return undefined
+}
+
+/**
+ * The agent a Session runs, as its composer's menu lists it (design D5-06, D17-11).
+ *
+ * One, already chosen and never changed: a Session keeps the agent it was made with, and the
+ * menu lists it because the model and the effort under it belong to that agent. A Session made
+ * before the agents existed has none, and the menu then says so where the name would be.
+ */
+function runsOn(session: Session, known: readonly AgentAvailability[]): OfferedAgent[] {
+  const provider = session.provider
+  if (provider === null) return []
+  const found = known.find((one) => one.id === provider)
+  return [{ id: provider, name: found?.label ?? provider, available: true, signedIn: true }]
+}
+
 /** Where the window is looking, beyond the entries the sidebar itself lists. */
 type Place = 'entry' | 'settings' | 'archived'
 
@@ -239,6 +275,11 @@ export function Application() {
   // What the agents are doing, per Session: a turn is not a fact about the window, and a window
   // that heard only about the Session on screen would lose the one behind it (design D5-12).
   const agents = useSyncExternalStore(subscribeToAgent, agentSnapshot, agentSnapshot)
+  // What a page holds is a name, and what the channels take is one of the agents the engine
+  // knows: resolved among them here rather than asserted at each call, so a name that answers to
+  // none of them asks for nothing at all.
+  const providerOf = (id: string): AgentProvider | null =>
+    agents.agents.find((one) => one.id === id)?.id ?? null
 
   const [place, setPlace] = useState<Place>('entry')
   const [commanding, setCommanding] = useState(false)
@@ -884,6 +925,7 @@ export function Application() {
           editing={naming === open.id}
           refusal={sessions.refusal}
           agent={agentOf(open.id)}
+          agents={runsOn(open, agents.agents)}
           options={optionsOf(open.id)}
           onWrite={async (body) => await writeInto(open.id, body)}
           onSay={(text) => void say(open.id, text)}
@@ -923,9 +965,21 @@ export function Application() {
           id: one.id,
           name: one.label,
           available: one.found,
+          signedIn: one.authenticated,
+          hint: hintOf(one),
         }))}
-        offeringOf={(chosen) => offeringOf(active.id, chosen)}
-        onChooseAgent={(chosen) => void offerAgent(active.id, chosen)}
+        offeringOf={(chosen) => offeringOf(active.id, providerOf(chosen))}
+        onChooseAgent={(chosen) => {
+          const asked = providerOf(chosen)
+          if (asked !== null) void offerAgent(active.id, asked)
+        }}
+        // A choice made before there is a Session is made on the agent the engine kept running
+        // for this composer, and what comes back is what it announces then: the effort of a
+        // reasoning model is published by that answer and by nothing else (D5-13, D5-17).
+        onChooseOption={(chosen, optionId, value) => {
+          const asked = providerOf(chosen)
+          if (asked !== null) void setOffered(active.id, asked, optionId, value)
+        }}
         onOpenSession={goTo}
         onOpenAllSessions={() => setPlace('archived')}
         onOpenJournal={() => goTo(JOURNAL_ENTRY)}
@@ -943,19 +997,13 @@ export function Application() {
             : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
         }
         // What the greeting promises: the first message makes the Session, and the Session is
-        // made with the agent chosen above the box. What was chosen with it is handed over before
-        // the first word, so the turn that answers runs on the model and the mode the user picked
-        // rather than on the agent's own defaults (D5-17). A refusal is the sentence the composer
-        // shows, and no Session is made when the one it would run was refused.
-        onSend={async (text, agent, choices) => {
-          const made = await startSession(active.id, agent)
+        // made with the agent chosen at the end of the box. What was chosen with it is not handed
+        // over again — the engine kept those choices against this Project and this agent, and the
+        // Session it opens is opened on them (D5-17). An agent the engine does not know is
+        // refused by the engine rather than by a sentence written here.
+        onSend={async (text, chosen) => {
+          const made = await startSession(active.id, providerOf(chosen))
           if (made === null) return sessionsSnapshot().refusal
-          // Each of them answers on its own, and all of them are over before the window moves:
-          // the Session page asks the agent what it is on the moment it opens, and a setting
-          // still in flight there would have that answer say what the agent was on before.
-          await Promise.all(
-            [...choices].map(([optionId, value]) => chooseOption(made.id, optionId, value)),
-          )
           goTo(made.id)
           // The thread is read before the agent is spoken to: the message the engine writes as
           // part of the prompt then lands on a thread that is already on screen (D5-11).
