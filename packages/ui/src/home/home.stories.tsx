@@ -5,6 +5,7 @@ import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 import { onOneLine } from '../../.storybook/one-line.ts'
 import {
   AgentModelMenu,
+  type ModeChoice,
   type EffortChoice,
   type ModelChoice,
   type OfferedAgent,
@@ -89,14 +90,24 @@ const EFFORTS: EffortChoice[] = [
   { id: 'high', label: 'High' },
 ]
 
+/** What the agent says it may be told to do without asking, in its own words. */
+const MODES: ModeChoice[] = [
+  { id: 'ask', label: 'Ask before edits' },
+  { id: 'acceptEdits', label: 'Accept edits' },
+  { id: 'plan', label: 'Plan only' },
+]
+
 /**
  * The box a Session is started from, as the Home hands it over (design D4b-02, D17-14).
  *
  * The Home is where an agent is chosen, because a Session is made with the agent it will run:
  * nothing has been picked yet, so the send is off and says why on itself. There is no paragraph
  * above the box any more — it moved the whole frame down the moment it appeared — and the agent,
- * its model and its effort are one control at the end of the box's own row, where they cannot
- * wrap onto a line the frame would have to grow for.
+ * its model, its effort and its mode are one control at the end of the box's own row, where they
+ * cannot wrap onto a line the frame would have to grow for.
+ *
+ * The Home is also the one place `New Spec` is drawn: a Spec is made from the question that
+ * starts a Session, so the Session's own composer is handed no `spec` at all.
  */
 function Writing(): ReactNode {
   const [value, setValue] = useState('')
@@ -104,6 +115,7 @@ function Writing(): ReactNode {
   const [agent, setAgent] = useState<string | null>(null)
   const [model, setModel] = useState<string | null>(null)
   const [effort, setEffort] = useState<string | null>(null)
+  const [mode, setMode] = useState<string | null>(null)
   return (
     <Composer
       value={value}
@@ -113,6 +125,7 @@ function Writing(): ReactNode {
       onSearchFiles={() => Promise.resolve([])}
       onSend={() => Promise.resolve(null)}
       sendDisabledReason={agent === null ? 'Choose an agent first' : undefined}
+      spec
       agentMenu={
         <AgentModelMenu
           agents={AGENTS}
@@ -121,6 +134,7 @@ function Writing(): ReactNode {
             setAgent(id)
             setModel(null)
             setEffort(null)
+            setMode(null)
           }}
           models={agent === null ? [] : MODELS}
           model={model}
@@ -128,6 +142,9 @@ function Writing(): ReactNode {
           efforts={agent === null ? [] : EFFORTS}
           effort={effort}
           onEffortChange={setEffort}
+          modes={agent === null ? [] : MODES}
+          mode={mode}
+          onModeChange={setMode}
         />
       }
     />

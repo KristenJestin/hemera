@@ -87,6 +87,9 @@ const CATALOGUE: Catalogued[] = [
   { name: 'List', folder: 'list', keyboard: true },
   { name: 'Timeline', folder: 'timeline', keyboard: false },
   { name: 'ToneSwatches', folder: 'tone-swatches', keyboard: true },
+  // HEM-17: where a piece of work stands, said as a dot. A thing to read and not a thing to
+  // operate, so there is no keyboard story to ask of it.
+  { name: 'StatusDot', folder: 'status-dot', keyboard: false },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */
@@ -104,7 +107,9 @@ const SURFACES = {
   // Session as a surface. One folder per domain and not per screen, as the lot asks.
   message: ['message'],
   'message/scroller': ['scroller'],
-  session: ['session', 'session-page'],
+  // `activity-row` is a block of a Session and not an entry of its own, so it is walked for its
+  // documentation and its controls and left out of the three stories a surface entry owes.
+  session: ['session', 'session-page', 'activity-row'],
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
@@ -338,6 +343,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // `EffortSelector` went with it.
       'AgentModelMenu',
       'ModeSelector',
+      // The row that stands at the end of the thread while a turn runs, built on the live
+      // marker the thread already had.
+      'ActivityRow',
       'UsageMeter',
       'BlockedBanner',
       'AgentsSection',

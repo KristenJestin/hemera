@@ -23,6 +23,12 @@ export {
   type SelectProps,
 } from './components/select/select.tsx'
 export { Loading, type LoadingProps } from './components/loading/loading.tsx'
+/** Where a piece of work stands, said as a dot: a tool call, a turn, a row of a list. */
+export {
+  StatusDot,
+  type StatusDotProps,
+  type StatusTone,
+} from './components/status-dot/status-dot.tsx'
 export {
   Tooltip,
   TooltipProvider,
@@ -270,6 +276,7 @@ export {
   type AgentModelMenuProps,
   type BlockedBannerProps,
   type EffortChoice,
+  type ModeChoice,
   type ModeSelectorProps,
   type ModelChoice,
   type OfferedAgent,
@@ -300,6 +307,8 @@ export {
   type TouchedFile,
 } from './session/session-side-column.tsx'
 export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
+/** What the turn is doing right now, at the end of the thread while it runs. */
+export { ActivityRow, type ActivityRowProps, type ActivityState } from './session/activity-row.tsx'
 export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,

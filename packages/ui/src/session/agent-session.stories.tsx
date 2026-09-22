@@ -13,16 +13,17 @@ import { BlockedBanner } from '../composer/blocked-banner.tsx'
 import {
   AgentModelMenu,
   type EffortChoice,
+  type ModeChoice,
   type ModelChoice,
   type OfferedAgent,
 } from '../composer/agent-model-menu.tsx'
 import { Composer } from '../composer/composer.tsx'
-import { ModeSelector } from '../composer/mode-selector.tsx'
 import { UsageMeter } from '../composer/usage-meter.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageDaySeparator, MessageGroup } from '../message/message.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
+import { ActivityRow } from './activity-row.tsx'
 import type { PlanEntry } from './plan-panel.tsx'
 import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
 import { SessionHeader } from './session.tsx'
@@ -91,12 +92,18 @@ const EFFORTS: EffortChoice[] = [
   { id: 'high', label: 'High' },
 ]
 
-const MODES = [
-  { id: 'plan', name: 'Plan' },
-  { id: 'acceptEdits', name: 'Accept edits' },
+const MODES: ModeChoice[] = [
+  { id: 'plan', label: 'Plan' },
+  { id: 'acceptEdits', label: 'Accept edits' },
 ]
 
-/** The thread, in the order it was written. */
+/**
+ * The thread, in the order it was written.
+ *
+ * Only the user's own messages carry a `mark`: the rail is how a reader finds their way back to
+ * something *they* asked, and a tick for every block an agent reported was forty ticks for one
+ * question. Everything else is read by scrolling through it, which is how it arrived.
+ */
 const THREAD: ScrollerEntry[] = [
   { id: 'day', day: true as const, content: <MessageDaySeparator day="Today" /> },
   {
@@ -107,6 +114,8 @@ const THREAD: ScrollerEntry[] = [
         author="user"
         name="You"
         at="14:02"
+        atLabel="Today at 14:02"
+        state="saved"
         lines={[
           {
             id: 'ask-1',
@@ -118,14 +127,12 @@ const THREAD: ScrollerEntry[] = [
   },
   {
     id: 'answer',
-    mark: 'The export builds the whole file in memory',
     content: (
       <AgentText text="The export reads every row and builds the whole file in memory before writing a byte. I will stream it instead: one row read, one row written." />
     ),
   },
   {
     id: 'thought',
-    mark: 'Where the time goes',
     content: (
       <ThoughtBlock seconds={12}>
         <AgentText text="The formatting is not the cost — the join on `invoice_lines` is. Streaming will not fix it on its own, so I will look at the query before I touch the loop." />
@@ -134,26 +141,25 @@ const THREAD: ScrollerEntry[] = [
   },
   {
     id: 'read',
-    mark: 'Read src/billing/export.ts',
     content: (
       <ToolCallCard
         title="Read src/billing/export.ts"
         kind="read"
         status="completed"
         locations={[{ path: 'src/billing/export.ts', line: 42 }]}
+        input={'path: src/billing/export.ts\noffset: 20\nlimit: 40'}
+        output={BEFORE}
       />
     ),
   },
   {
     id: 'change',
-    mark: 'Edited src/billing/export.ts',
     content: (
       <DiffBlock path="src/billing/export.ts" oldText={BEFORE} newText={AFTER} defaultOpen />
     ),
   },
   {
     id: 'run',
-    mark: 'Run the export on a fixture',
     content: (
       <TerminalOutput
         terminalId="build"
@@ -167,13 +173,13 @@ const THREAD: ScrollerEntry[] = [
   },
   {
     id: 'failed',
-    mark: 'Run pnpm test --project=repository',
     content: (
       <ToolCallCard
-        title="Run pnpm test --project=repository"
+        title="pnpm test --project=repository"
         kind="execute"
         status="failed"
         defaultOpen
+        output={'FAIL src/billing/export.test.ts\n  streams a large export\n'}
         error={
           'src/billing/export.test.ts > streams a large export\n  expected 2 writes, received 1'
         }
@@ -181,8 +187,11 @@ const THREAD: ScrollerEntry[] = [
     ),
   },
   {
+    id: 'cancelled',
+    content: <ToolCallCard title="pnpm build" kind="execute" status="cancelled" input="cwd: ." />,
+  },
+  {
     id: 'permission',
-    mark: 'The agent is asking to run the suite',
     content: (
       <PermissionRequest
         toolName="Bash"
@@ -202,13 +211,17 @@ const THREAD: ScrollerEntry[] = [
   },
   {
     id: 'decision',
-    mark: 'Allowed once',
     content: <DecisionSummary answer="Allowed once" at="14:07" />,
   },
   {
     id: 'stopped',
-    mark: 'The turn was stopped',
     content: <StoppedTurn doing="Running the billing suite" at="14:09" />,
+  },
+  // The row that stands at the end of the thread for as long as the turn runs. It is what the
+  // reader watches between one block and the next, and it goes when the turn does.
+  {
+    id: 'live',
+    content: <ActivityRow state="waiting" />,
   },
 ]
 
@@ -232,7 +245,7 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
   const [agent, setAgent] = useState<string | null>('claude-code')
   const [model, setModel] = useState<string | null>('claude-sonnet-4-5')
   const [effort, setEffort] = useState<string | null>('high')
-  const [mode, setMode] = useState('acceptEdits')
+  const [mode, setMode] = useState<string | null>('acceptEdits')
   return (
     <TooltipProvider>
       {/*
@@ -284,15 +297,19 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
               running
               onStop={fn()}
               blocked={<BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />}
-              mode={<ModeSelector modes={MODES} value={mode} onValueChange={setMode} />}
               agentMenu={
+                // A Session runs the agent it was made with, so the panel opens on that agent's
+                // models and offers no way back to a list of agents. No `spec` either: a Spec
+                // is made from the question that starts a Session, on the Home.
                 <AgentModelMenu
+                  fixed
                   agents={AGENTS}
                   agent={agent}
                   onAgentChange={(id) => {
                     setAgent(id)
                     setModel(null)
                     setEffort(null)
+                    setMode(null)
                   }}
                   models={MODELS}
                   model={model}
@@ -300,6 +317,9 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
                   efforts={EFFORTS}
                   effort={effort}
                   onEffortChange={setEffort}
+                  modes={MODES}
+                  mode={mode}
+                  onModeChange={setMode}
                 />
               }
             />
@@ -324,10 +344,15 @@ type Story = StoryObj<typeof meta>
 
 /**
  * Everything the lot draws, in one page: the reader's turn, the agent's answer, what it thought,
- * what it read and ran, the change it made, the console it opened, the plan it is working to,
- * the permission it is waiting on and the answer it was given, a turn that was stopped, and the
- * box with the agent, its model and its effort behind one control, the mode beside it, and what
- * the turn has cost said above the whole thing.
+ * what it read and ran with what came back of it, the change it made, the console it opened, the
+ * plan it is working to, the permission it is waiting on and the answer it was given, a call the
+ * reader stopped, a turn that was stopped, the row that says what the turn is doing now, and the
+ * box with the agent, its model, its effort and its mode behind one control, with what the turn
+ * has cost said above the whole thing.
+ *
+ * As the trial of 22 September 2026 settled it: the rail marks the reader's own messages and
+ * nothing else, the states of a call are dots rather than badges, a time appears under the hand,
+ * the mode is a row of the agent panel, and the Session's foot offers no Spec.
  *
  * The first story of the entry, and the one the UI gate reads on `Surfaces/Session`.
  */
@@ -355,16 +380,27 @@ export const Complete: Story = {
     const stops = canvas.getAllByRole('button', { name: 'Stop' })
     await expect(stops).toHaveLength(2)
 
+    // The row that stands at the end of the thread while the turn runs, which is what says the
+    // Session is alive between one block and the next.
+    await expect(canvas.getByText('Waiting for your permission')).toBeVisible()
+    // The states of a call are dots and not badges: the word is announced, never drawn.
+    await expect(canvas.getByRole('img', { name: 'Cancelled' })).toBeInTheDocument()
+    await expect(canvas.queryByText('Failed')).toBeNull()
+    // And the rail marks the reader's own message and nothing else: one question asked, one
+    // mark to come back to.
+    await expect(canvas.getAllByRole('button', { name: /forty thousand rows/ })).toHaveLength(1)
+
     /*
-     * The foot of the page, as the trial of 22 September 2026 settled it: the agent, its model
-     * and its effort are one control at the end of the box's own row, the mode is beside it, and
-     * the frame's foot is the Workspace and the two buttons alone. Nothing wraps — which is the
-     * whole point, and the only way to ask it is of the boxes the browser laid out.
+     * The foot of the page, as the trial of 22 September 2026 settled it: the agent, its model,
+     * its effort and its mode are one control at the end of the box's own row, and the frame's
+     * foot is the Workspace and the send alone — no Spec in a Session. Nothing wraps, which is
+     * the whole point, and the only way to ask it is of the boxes the browser laid out.
      */
-    const menu = canvas.getByRole('button', { name: /Sonnet 4\.5 · High/ })
+    const menu = canvas.getByRole('button', { name: /Sonnet 4\.5 · High · Accept edits/ })
     const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
     await expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
-    await expect(onOneLine(at, canvas.getByRole('combobox', { name: 'Mode' }))).toBe(true)
+    await expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
     const pill = canvas.getByRole('combobox', { name: 'Workspace' })
     await expect(onOneLine(pill, stops[1]!), 'the foot of the composer wrapped').toBe(true)
     // And what the turn has spent is said above the box, not in the row that would have wrapped.
