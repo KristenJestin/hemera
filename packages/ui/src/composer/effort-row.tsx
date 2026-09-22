@@ -1,7 +1,14 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { type EffortProps, SEGMENT, SEGMENT_ITEM, SEGMENT_ON } from './agent-model-menu-shared.tsx'
+import {
+  type EffortProps,
+  levelSaid,
+  SEGMENT,
+  SEGMENT_ITEM,
+  SEGMENT_ON,
+} from './agent-model-menu-shared.tsx'
+import { ADVISED_DOT } from './effort-scale.ts'
 
 /**
  * The effort as one row of steps — variant 1 of three (trial of 22 September 2026).
@@ -24,9 +31,15 @@ export function EffortRow({ efforts, effort, onEffortChange, disabled }: EffortP
           type="button"
           disabled={disabled}
           aria-pressed={one.id === effort}
+          // The step is four characters wide at six levels: what the agent said about it, and
+          // whether it is the one it advises, are said to whoever reads the page rather than
+          // written into a button that has no room for them.
+          aria-label={levelSaid(one)}
           className={cn(SEGMENT_ITEM, one.id === effort && SEGMENT_ON)}
           onClick={() => onEffortChange(one.id)}
         >
+          {/* And drawn as the dot the two scales mark the same level with. */}
+          {one.recommended === true && <span aria-hidden="true" className={ADVISED_DOT} />}
           {one.label}
         </button>
       ))}

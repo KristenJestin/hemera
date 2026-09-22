@@ -180,6 +180,30 @@ export interface AgentModelMenuVariantProps extends AgentModelMenuProps {
 /** What the trigger puts between one answer and the next. */
 const SEPARATOR = ' · '
 
+/**
+ * What a value the agent advises is called, in one place so the four controls that say it agree.
+ *
+ * The agent's recommendation replaces the `Default` entry it used to be announced as, so this
+ * word stands exactly where that entry stood — beside the value it named, and never as a value
+ * of its own (decision of 22 September 2026).
+ */
+export const ADVISED_SAID = 'recommended'
+
+/** The same word as a line of its own beside a level's name, which is how a scale writes it. */
+export const ADVISED_BESIDE = ` ${SEPARATOR.trim()} ${ADVISED_SAID}`
+
+/**
+ * What a scale says it stands on: the agent's word for the level, its sentence, and whether it
+ * is the one the agent advises — read as one phrase by whoever cannot see the marks.
+ */
+export function levelSaid(level: EffortChoice | undefined): string {
+  if (level === undefined) return 'Not set'
+  const said = [level.label]
+  if (level.description !== undefined) said.push(level.description)
+  if (level.recommended === true) said.push(ADVISED_SAID)
+  return said.join(', ')
+}
+
 /** A head of a column or of a group, which names what is under it and is never read as a row. */
 export const HEAD = 'px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase'
 
@@ -614,6 +638,9 @@ export function ModelGroup({
       onClick={() => onChoose(one)}
     >
       <span className="min-w-0 flex-1 truncate">{one.label}</span>
+      {/* The model the agent itself advises, said beside it and quietly: it is the one the
+          `Default` entry used to stand for, and it is a word about this row rather than a row. */}
+      {one.recommended === true && <span className={STATE}>{ADVISED_SAID}</span>}
       {one.id === chosen && <IconCheck size="sm" />}
     </button>
   ))

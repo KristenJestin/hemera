@@ -80,6 +80,25 @@ const DESCRIBED: EffortChoice[] = [
 /** What the word for the last of them is, which two stories read and one of them types. */
 const EVERYTHING = 'Everything it has, for as long as it takes'
 
+/**
+ * The same scale once the agent has said which level its `Default` stood for.
+ *
+ * The other half of the rule of 22 September 2026, and never the same half twice: the entry is
+ * gone and the level it named carries the mark instead. Five notches rather than six, `Medium`
+ * ringed on the track, dotted beside its short mark, and named as the recommendation in the
+ * word over the top.
+ */
+const RECOMMENDED: EffortChoice[] = [
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium', description: 'Whatever the agent starts on', recommended: true },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Xhigh' },
+  { id: 'max', label: 'Max', description: EVERYTHING },
+]
+
+/** What a level the agent advises is written as, wherever it is written in words. */
+const ADVISED = /recommended/
+
 /** What a dispatched pointer carries: one primary pointer, and an event that can be refused. */
 const POINTER = { bubbles: true, cancelable: true, pointerId: 1, isPrimary: true }
 
@@ -259,12 +278,91 @@ export const Keyboard: Story = {
 }
 
 /**
+ * **The level the agent advises**, which is what `Default` becomes once the agent says what it
+ * stood for (decision of 22 September 2026).
+ *
+ * There is no `Default` notch here at all: the agent named the level its default resolves to,
+ * so the entry is gone and `Medium` wears the mark in its place — ringed on the track, dotted
+ * beside its short mark, and named in the word over the top and in `aria-valuetext`. The one
+ * thing a scale must never show is both, because a `Default` standing beside the level it names
+ * offers the same thing twice under two names.
+ *
+ * It is pre-selected, and that is the agent's doing rather than this control's: what the scale
+ * stands on is what was handed to it.
+ */
+export const WithRecommended: Story = {
+  args: { efforts: RECOMMENDED, effort: 'medium' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+
+    // The entry is gone, and what it stood for is what the scale is on.
+    await expect(canvas.queryByText('Default')).toBeNull()
+    await expect(scale).toHaveAttribute('aria-valuemax', '4')
+    await expect(scale).toHaveAttribute(
+      'aria-valuetext',
+      'Medium, Whatever the agent starts on, recommended',
+    )
+
+    // Said in words beside the level's own name, quietly, because the name is what is set.
+    await expect(canvas.getByText(ADVISED)).toBeVisible()
+    // And once: a scale that marked two levels would be a scale marking nothing.
+    await expect(canvas.getAllByText(ADVISED)).toHaveLength(1)
+
+    // The mark travels with the level rather than with the thumb: walking off Medium leaves it
+    // where it is, because it is the agent's recommendation and not where the reader stands.
+    scale.focus()
+    await userEvent.keyboard('{End}')
+    await waitFor(() => {
+      expect(scale).toHaveAttribute('aria-valuetext', `Max, ${EVERYTHING}`)
+    })
+    await expect(canvas.getAllByText(ADVISED)).toHaveLength(1)
+  },
+}
+
+/**
+ * Neither list holds both: a `Default` entry, or a level marked as recommended.
+ *
+ * The two halves of the rule side by side, measured rather than argued. On the left the agent
+ * said nothing, so `Default` stands at the foot of the scale and no level is marked; on the
+ * right it said which level its default was, so that level is marked and there is no `Default`
+ * at all. A scale showing both would be offering the same level twice under two names, which is
+ * exactly what the decision of 22 September 2026 refuses.
+ */
+export const NeverBoth: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <div className="flex items-start gap-8">
+      <EffortSlider efforts={DESCRIBED} effort="default" onEffortChange={fn()} />
+      <EffortSlider efforts={RECOMMENDED} effort="medium" onEffortChange={fn()} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scales = canvas.getAllByRole('slider', { name: 'Effort' })
+    await expect(scales).toHaveLength(2)
+
+    const held = scales.map((scale) => ({
+      stands: within(scale).queryAllByText('Default').length,
+      named: within(scale).queryAllByText(ADVISED).length,
+    }))
+    // One or the other, and exactly one of the two: never both, and never neither.
+    await expect(held.map((one) => one.stands > 0 && one.named > 0)).toEqual([false, false])
+    await expect(held.map((one) => one.stands + one.named > 0)).toEqual([true, true])
+
+    await expect(within(scales[0]!).getByText('Default')).toBeInTheDocument()
+    await expect(within(scales[1]!).getByText(ADVISED)).toBeInTheDocument()
+  },
+}
+
+/**
  * `Default` as its own notch at the foot of the scale, and what the agent said about it.
  *
- * The agent announces `Default` as a value like the others and ACP never says which level it
- * maps to. Hemera does not invent one: it is the lowest notch, marked `D` as every level is
- * marked, and what it means is the agent's own sentence under the name — or nothing at all,
- * for the levels the agent said nothing about.
+ * The unresolved case, and the only one that draws this entry at all: the agent announced
+ * `Default` as a value like the others and said nothing about which level it maps to. Hemera
+ * does not invent one — it is the lowest notch, marked `D` as every level is marked, and what
+ * it means is the agent's own sentence under the name, or nothing at all for the levels the
+ * agent said nothing about. Nothing is marked as recommended here, because nothing was named.
  */
 export const WithDefault: Story = {
   args: { efforts: DESCRIBED, effort: 'default' },
@@ -274,6 +372,9 @@ export const WithDefault: Story = {
     // The marks, and not the words over the track: `Max` is both, and only one of them is a
     // mark on the scale.
     const marks = within(canvas.getByTestId('effort-marks'))
+
+    // Nothing named, nothing marked: the entry stands for itself and no level wears the ring.
+    await expect(canvas.queryByText(ADVISED)).toBeNull()
 
     // Its own notch at the foot of the scale: under every other mark, and marked like them.
     await expect(marks.getByText('D')).toBeVisible()

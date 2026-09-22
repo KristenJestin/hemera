@@ -5,8 +5,25 @@ import { useRef, useState } from 'react'
 
 import { IconBolt, IconChevronRight } from '../icons.ts'
 import { instant, morph, useTransition } from '../motion.ts'
-import { type EffortChoice, type EffortProps, steppedBy } from './agent-model-menu-shared.tsx'
-import { FILLED, GLOW, HALO, MARK_DONE, TRACK, fractionAt, marksOf, share } from './effort-scale.ts'
+import {
+  ADVISED_BESIDE,
+  type EffortProps,
+  levelSaid,
+  steppedBy,
+} from './agent-model-menu-shared.tsx'
+import {
+  ADVISED,
+  ADVISED_DOT,
+  ADVISED_WORD,
+  FILLED,
+  GLOW,
+  HALO,
+  MARK_DONE,
+  TRACK,
+  fractionAt,
+  marksOf,
+  share,
+} from './effort-scale.ts'
 
 /**
  * The effort as a vertical slider — the control the maintainer kept on 22 September 2026.
@@ -152,7 +169,7 @@ const MARKS = 'flex flex-col-reverse justify-between gap-2'
  * and one width for all of them, so the track sits in the same place whatever is on.
  */
 const MARK_WORD =
-  'flex h-4 w-8 shrink-0 items-center justify-end text-xs tabular-nums text-muted-foreground'
+  'flex h-4 w-8 shrink-0 items-center justify-end gap-1 text-xs tabular-nums text-muted-foreground'
 
 /** The mark of a level behind the reader, in the accent the fill beside it is drawn in. */
 const MARK_WORD_DONE = 'text-primary'
@@ -308,13 +325,6 @@ function letGo(element: Element, pointerId: number): void {
   if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId)
 }
 
-/** What the control says it is on: the agent's word for the level, and its own word about it. */
-function saying(level: EffortChoice | undefined): string {
-  if (level === undefined) return 'Not set'
-  if (level.description === undefined) return level.label
-  return `${level.label}, ${level.description}`
-}
-
 export function EffortSlider({
   efforts,
   effort,
@@ -380,6 +390,9 @@ export function EffortSlider({
       {efforts.map((one) => (
         <span key={one.id} className={cn(LAID, className, one.id !== effort && UNSHOWN)}>
           {one.label}
+          {/* The level the agent advises, said beside its name and quietly: it is what the
+               `Default` entry used to stand for, and never an entry of its own. */}
+          {one.recommended === true && <span className={ADVISED_WORD}>{ADVISED_BESIDE}</span>}
         </span>
       ))}
       {/* Nothing set yet: the control says what it is for, in the room the words leave. */}
@@ -400,7 +413,7 @@ export function EffortSlider({
       aria-valuemin={0}
       aria-valuemax={last}
       aria-valuenow={here === -1 ? 0 : here}
-      aria-valuetext={saying(current)}
+      aria-valuetext={levelSaid(current)}
       aria-disabled={disabled === true ? true : undefined}
       tabIndex={disabled === true ? -1 : 0}
       data-look={look}
@@ -469,6 +482,7 @@ export function EffortSlider({
           <span data-testid="effort-marks" className={MARKS}>
             {efforts.map((one, index) => (
               <span key={one.id} className={cn(MARK_WORD, index <= here && MARK_WORD_DONE)}>
+                {one.recommended === true && <span className={ADVISED_DOT} />}
                 {marks[index]}
               </span>
             ))}
@@ -489,7 +503,14 @@ export function EffortSlider({
           </span>
           {efforts.map((one, index) => (
             <span key={one.id} data-step={one.id} className={CELL}>
-              <span className={cn(DOT, drawn.dot, index <= here && drawn.dotDone)} />
+              <span
+                className={cn(
+                  DOT,
+                  drawn.dot,
+                  index <= here && drawn.dotDone,
+                  one.recommended === true && ADVISED,
+                )}
+              />
             </span>
           ))}
           <span ref={rail} className={RAIL}>

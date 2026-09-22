@@ -5,8 +5,25 @@ import { useId } from 'react'
 
 import { IconChevronDown } from '../icons.ts'
 import { morph, useTransition } from '../motion.ts'
-import { type EffortProps, stepUnder, steppedBy } from './agent-model-menu-shared.tsx'
-import { FILLED, HALO, KNOB, MARK, MARK_DONE, SCALE, TRACK, filledTo } from './effort-scale.ts'
+import {
+  ADVISED_BESIDE,
+  type EffortProps,
+  levelSaid,
+  stepUnder,
+  steppedBy,
+} from './agent-model-menu-shared.tsx'
+import {
+  ADVISED,
+  ADVISED_WORD,
+  FILLED,
+  HALO,
+  KNOB,
+  MARK,
+  MARK_DONE,
+  SCALE,
+  TRACK,
+  filledTo,
+} from './effort-scale.ts'
 
 /**
  * The effort as a horizontal dial — variant 3 of three, and the maintainer's reference.
@@ -80,7 +97,7 @@ export function EffortDial({
       aria-valuemin={0}
       aria-valuemax={last}
       aria-valuenow={here === -1 ? 0 : here}
-      aria-valuetext={current?.label ?? 'Not set'}
+      aria-valuetext={levelSaid(current)}
       aria-disabled={disabled === true ? true : undefined}
       tabIndex={disabled === true ? -1 : 0}
       className={FRAME}
@@ -100,6 +117,9 @@ export function EffortDial({
     >
       <span className={LEVEL}>
         {current?.label ?? 'Effort'}
+        {/* The level the agent advises, beside its name and quietly: it is what the
+            `Default` entry used to stand for, and never an entry of its own. */}
+        {current?.recommended === true && <span className={ADVISED_WORD}>{ADVISED_BESIDE}</span>}
         <span aria-hidden="true" className={AFFORDANCE}>
           <IconChevronDown size="sm" />
         </span>
@@ -116,7 +136,9 @@ export function EffortDial({
         </span>
         {efforts.map((one, index) => (
           <span key={one.id} data-step={one.id} className={CELL}>
-            <span className={cn(MARK, index <= here && MARK_DONE)} />
+            <span
+              className={cn(MARK, index <= here && MARK_DONE, one.recommended === true && ADVISED)}
+            />
             {one.id === effort && (
               <motion.span layoutId={thumb} transition={transition} className={THUMB}>
                 <span className={HALO} />

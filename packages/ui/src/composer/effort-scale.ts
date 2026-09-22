@@ -37,6 +37,22 @@ export const MARK = 'relative size-1 rounded-full bg-border'
 export const MARK_DONE = 'bg-primary'
 
 /**
+ * The notch of the level the agent advises: the same dot, ringed in the accent.
+ *
+ * A ring rather than a colour, because the colour of a notch already says whether it is behind
+ * the reader or ahead of them — the ring is a second thing said about the same dot and stays
+ * legible on both sides of the thumb. It marks the level the agent itself named and nothing
+ * Hemera chose: where no level is named, no notch wears it.
+ */
+export const ADVISED = 'ring-1 ring-primary'
+
+/** The same thing said beside the short mark of that level, where a look has a column of them. */
+export const ADVISED_DOT = 'size-1 shrink-0 rounded-full bg-primary'
+
+/** And in words, beside the level's own name: quiet, because the name is what is being set. */
+export const ADVISED_WORD = 'text-muted-foreground'
+
+/**
  * The halo: the accent bleeding out of the thumb, which is what says the round thing on the
  * track is the thing the hand has hold of. It brightens under the hand and under the focus, on
  * the theme's own `thumb-motion` — a CSS transition, so a reader asking for less movement is

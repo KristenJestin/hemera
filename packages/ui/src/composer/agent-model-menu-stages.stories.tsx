@@ -12,7 +12,18 @@ import {
   panelBox,
   sameBox,
 } from './agent-model-menu-fixtures.tsx'
+import type { ModelChoice } from './agent-model-menu-shared.tsx'
 import { AgentModelMenuStages } from './agent-model-menu-stages.tsx'
+
+/**
+ * The models of an agent that named the one it advises, which is what its `Default` became.
+ *
+ * The same five, with one of them carrying the agent's own recommendation and no `Default` row
+ * anywhere: the two never stand in the same list.
+ */
+const ADVISED_MODELS: ModelChoice[] = CLAUDE_MODELS.map((one) =>
+  one.id === 'opus-4-5' ? { id: one.id, label: one.label, recommended: true } : one,
+)
 
 /**
  * **Variant A — the stages.** One list at a time: the agents, then the models of the one that
@@ -338,6 +349,38 @@ export const ManyModels: Story = {
 
     await userEvent.keyboard('{Enter}')
     await expect(args.onModelChange).toHaveBeenCalledWith('opencode-zen-kimi-k2-thinking')
+  },
+}
+
+/**
+ * **The model the agent advises**, which is what its `Default` row becomes once it says what
+ * that row stood for (decision of 22 September 2026).
+ *
+ * There is no `Default` in this list. The agent named the model its default resolves to, so the
+ * row is gone and `Opus 4.5` is named as the recommendation in its place — one quiet word at
+ * the end of its line, which is a word about that model rather than a model of its own. A list
+ * holding both would be offering the same model twice under two names.
+ */
+export const WithRecommended: Story = {
+  args: {
+    agent: 'claude-code',
+    models: ADVISED_MODELS,
+    efforts: CLAUDE_EFFORTS,
+    modes: CLAUDE_MODES,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Claude Code/ }))
+
+    const list = await screen.findByRole('listbox', { name: 'Models of this agent' })
+    // Never both: the row the agent resolved is gone, and only the model it named is marked.
+    await expect(within(list).queryByRole('option', { name: /Default/ })).toBeNull()
+    // Waited out rather than read the moment it exists: the panel comes down from its trigger
+    // in opacity, and nothing drawn halfway through that is visible yet.
+    await waitFor(() => {
+      expect(within(list).getByRole('option', { name: 'Opus 4.5 recommended' })).toBeVisible()
+    })
+    await expect(within(list).getAllByText('recommended')).toHaveLength(1)
   },
 }
 
