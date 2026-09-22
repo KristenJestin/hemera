@@ -55,7 +55,7 @@ const PANEL = 'flex h-menu-panel w-menu-panel flex-col gap-2'
 const COLUMNS = 'flex min-h-0 flex-1 gap-2'
 
 /** The agents, which are a shorter list than the models and are given the narrower column. */
-const LEFT = 'flex w-2/5 min-w-0 flex-col gap-2'
+const LEFT = 'flex w-menu-agents min-w-0 flex-col gap-2'
 
 /** The room the models cross in, which clips the column on its way out. */
 const RIGHT = 'relative min-w-0 flex-1 border-l border-border pl-2'

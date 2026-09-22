@@ -59,6 +59,12 @@ describe('Mesure de texte interdite', () => {
     expect(refusalsOf('apps/desktop/tests/shell.test.ts', source)).toEqual([])
   })
 
+  test('the fixtures a story is shown may measure too, being the story itself', () => {
+    const source = 'expect(panel.getBoundingClientRect().height).toBe(384)'
+    expect(refusalsOf('packages/ui/src/composer/agent-model-menu-fixtures.tsx', source)).toEqual([])
+    expect(refusalsOf('packages/ui/src/composer/agent-model-menu.tsx', source)).not.toEqual([])
+  })
+
   test('the separator may ask where a pointer is, and nothing else may', () => {
     const source = 'const box = node.getBoundingClientRect()'
     expect(refusalsOf(MEASURE_EXCEPTIONS[0]!, source)).toEqual([])

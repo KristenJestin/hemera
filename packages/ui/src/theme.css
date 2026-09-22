@@ -310,6 +310,13 @@
      a window that is not maximised. */
   --spacing-menu-panel: 24rem;
 
+  /* How wide the agents stand in the two-column agent panel, out of the `menu-panel` width.
+     A fraction of the parent is not a step of anything — it moves with whatever is around it,
+     and the column beside it was left to take the remainder. Written down instead: wide enough
+     for a mark, an agent's name and the word beside it, narrow enough to leave the models the
+     larger half, which is the list that scrolls. */
+  --spacing-menu-agents: 9.5rem;
+
   /* The prototype draws its icons at eighteen, with sixteen for the small ones and twenty-two
      for the few that stand alone. The first pass of lot 4 sat a step under all three, which is
      what made every control read as slightly unfinished: an icon beside a word has to weigh as
