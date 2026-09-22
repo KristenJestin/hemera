@@ -1,8 +1,10 @@
 import type { SessionEntry } from '@hemera/ipc'
 import {
   AgentText,
+  CommandRun,
   DecisionSummary,
   DiffBlock,
+  HemeraToolCall,
   MessageGroup,
   PermissionRequest,
   StoppedTurn,
@@ -20,6 +22,8 @@ import {
 } from '@hemera/ui'
 import type { ReactNode } from 'react'
 import { z } from 'zod'
+
+import { commandRunOf, contextDeliveryOf, hemeraToolCallOf } from './agent-tool-payloads.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -384,6 +388,26 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   if (entry.kind === 'note') {
     return (
       <MessageGroup author="hemera" name="Hemera" lines={[{ id: entry.id, body: entry.body }]} />
+    )
+  }
+
+  if (entry.kind === 'hemera_tool_call') {
+    const drawn = hemeraToolCallOf(entry)
+    if (drawn === null) return null
+    return <HemeraToolCall {...drawn} />
+  }
+
+  if (entry.kind === 'command_run') {
+    const drawn = commandRunOf(entry)
+    if (drawn === null) return null
+    return <CommandRun {...drawn} output="" />
+  }
+
+  if (entry.kind === 'context_delivery') {
+    const drawn = contextDeliveryOf(entry)
+    if (drawn === null) return null
+    return (
+      <MessageGroup author="hemera" name="Hemera" lines={[{ id: drawn.id, body: drawn.body }]} />
     )
   }
 
