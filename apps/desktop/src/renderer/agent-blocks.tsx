@@ -211,6 +211,10 @@ function textOf(blocks: readonly z.infer<typeof blockSchema>[]): Bounded | null 
  *
  * What was cut is said under what is left, rather than left to be guessed at: a reader looking
  * at the last line of a log has to know whether it is the last line of the log.
+ *
+ * In characters, because that is what the engine counted: `length` is the length of the string
+ * the agent sent, and the same text is anywhere between one and four bytes a character once it
+ * is written down. A number called bytes that is not one is worse than no number.
  */
 function boundedNode(bounded: Bounded | null): ReactNode {
   if (bounded === null) return undefined
@@ -218,7 +222,9 @@ function boundedNode(bounded: Bounded | null): ReactNode {
     <>
       {bounded.text}
       {bounded.truncated && (
-        <p className="mt-1 text-muted-foreground">{`Truncated, ${String(bounded.length)} bytes.`}</p>
+        <p className="mt-1 text-muted-foreground">
+          {`Truncated; ${String(bounded.length)} characters in all.`}
+        </p>
       )}
     </>
   )
