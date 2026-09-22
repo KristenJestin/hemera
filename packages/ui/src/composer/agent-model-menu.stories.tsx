@@ -11,6 +11,7 @@ import {
   CLAUDE_MODES,
   Controlled,
   cutShort,
+  OPUS_EFFORTS,
   panelBox,
   sameBox,
 } from './agent-model-menu-fixtures.tsx'
@@ -86,6 +87,12 @@ function travelOf(rail: Element, frames: number): Promise<number[]> {
     }
     look()
   })
+}
+
+/** The level the rule across the scale stands at, or `null` when there is no rule at all. */
+function ruleOf(effort: HTMLElement): string | null {
+  const rule = within(effort).queryByTestId('effort-rule')
+  return rule?.closest('[data-step]')?.getAttribute('data-step') ?? null
 }
 
 /** Every prop as a control, and the four answers wired to a page that behaves like the engine. */
@@ -392,6 +399,52 @@ export const Recommended: Story = {
     await expect(within(effort).getAllByTestId('effort-rule')).toHaveLength(1)
     await expect(effort).toHaveAttribute('aria-valuetext', 'Medium, recommended')
     await expect(within(effort).queryByText('Default')).toBeNull()
+  },
+}
+
+/**
+ * **The rule follows the model**: the level an agent advises is said per value and per model,
+ * so a model change is a new announcement, and the rule moves to the level the new model
+ * advises — or leaves the scale when the new one advises none (the trial of 22 September 2026).
+ *
+ * The page answers like the engine: `Sonnet 4.5` advises `Medium`, `Opus 4.5` advises
+ * `Xhigh`, and `Sonnet 3.7` announces three levels and advises nothing. And the thumb is on
+ * its notch the moment the panel opens, which is the other half of that trial.
+ */
+export const RuleFollowsTheModel: Story = {
+  args: { agent: 'claude-code', model: 'sonnet-4-5', effort: 'xhigh' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Sonnet 4\.5 · Xhigh/ }))
+
+    const effort = await screen.findByRole('slider', { name: 'Effort' })
+    const list = await screen.findByRole('listbox', { name: 'Models of this agent' })
+    await expect(ruleOf(effort)).toBe('medium')
+    // On its notch as soon as it is drawn, in a panel that has only just been laid out.
+    const thumb = within(effort).getByTestId('effort-thumb').getBoundingClientRect()
+    const notch = effort.querySelector('[data-step="xhigh"]')!.getBoundingClientRect()
+    await expect(
+      Math.abs(thumb.top + thumb.height / 2 - (notch.top + notch.height / 2)),
+    ).toBeLessThan(1)
+
+    await userEvent.click(within(list).getByRole('option', { name: /Opus 4\.5/ }))
+    await waitFor(() => {
+      expect(ruleOf(effort)).toBe(OPUS_EFFORTS.find((one) => one.recommended === true)?.id)
+    })
+    await expect(within(effort).getAllByTestId('effort-rule')).toHaveLength(1)
+    await expect(effort).toHaveAttribute('aria-valuetext', 'Xhigh, recommended')
+
+    // A model that advises nothing: the rule leaves the scale rather than staying where it was.
+    await userEvent.click(within(list).getByRole('option', { name: /Sonnet 3\.7/ }))
+    await waitFor(() => {
+      expect(ruleOf(effort)).toBeNull()
+    })
+
+    // And back: the rule is the new model's, not a memory of the first.
+    await userEvent.click(within(list).getByRole('option', { name: /Sonnet 4\.5/ }))
+    await waitFor(() => {
+      expect(ruleOf(effort)).toBe('medium')
+    })
   },
 }
 

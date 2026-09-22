@@ -91,6 +91,21 @@ export const CLAUDE_EFFORTS: EffortChoice[] = [
 ]
 
 /**
+ * What Claude Code announces once `Opus 4.5` is the model: the same five levels, and a
+ * different one advised. The level an agent advises is said per value and per model, so a model
+ * change is a new announcement and the rule across the scale moves with it.
+ */
+export const OPUS_EFFORTS: EffortChoice[] = CLAUDE_EFFORTS.map(({ id, label }) =>
+  id === 'xhigh' ? { id, label, recommended: true } : { id, label },
+)
+
+/**
+ * And what it announces for `Sonnet 3.7`: three levels and none of them advised, which is the
+ * model the rule has to leave the scale for.
+ */
+export const SONNET_3_7_EFFORTS = scale(['Low', 'Medium', 'High'])
+
+/**
  * And the announcement nobody could resolve: `Default` as a value like the others, and no level
  * named. It is the one case the scale draws no notch for, and the thumb waits at the foot of
  * the track until a level is chosen.
@@ -172,10 +187,20 @@ export interface Offer {
 
 const NOTHING: Offer = { models: [], efforts: [], modes: [] }
 
-/** What an agent announced, or nothing at all for one that never answered. */
-export function offerOf(agent: string | null): Offer {
+/**
+ * The levels Claude Code announces on a model, which is an answer of that model and not of the
+ * agent: the engine hands the options over again every time the model is set.
+ */
+function claudeEffortsOn(model: string | null): EffortChoice[] {
+  if (model === 'opus-4-5') return OPUS_EFFORTS
+  if (model === 'sonnet-3-7') return SONNET_3_7_EFFORTS
+  return CLAUDE_EFFORTS
+}
+
+/** What an agent announced on that model, or nothing at all for one that never answered. */
+export function offerOf(agent: string | null, model: string | null = null): Offer {
   if (agent === 'claude-code') {
-    return { models: CLAUDE_MODELS, efforts: CLAUDE_EFFORTS, modes: CLAUDE_MODES }
+    return { models: CLAUDE_MODELS, efforts: claudeEffortsOn(model), modes: CLAUDE_MODES }
   }
   if (agent === 'codex') return { models: CODEX_MODELS, efforts: [], modes: CODEX_MODES }
   if (agent === 'opencode') {
@@ -189,8 +214,8 @@ export function offerOf(agent: string | null): Offer {
  *
  * The menu holds nothing: what is chosen belongs to the page, and the page is what the engine
  * answers to. This one answers like the engine — pick an agent and that agent's models, efforts
- * and modes are what the panel is handed next — so a story is walked end to end rather than
- * posed. A story that pins its own models wins over it, which is how `Loading`, `ManyModels`
+ * and modes are what the panel is handed next, and pick a model and the efforts that model
+ * announces are — so a story is walked end to end rather than posed. A story that pins its own models wins over it, which is how `Loading`, `ManyModels`
  * and `Refusal` say what they are about.
  *
  * Changing the agent clears the model, the effort and the mode: a model id belongs to the agent
@@ -213,7 +238,7 @@ export function Controlled({
   const [thinking, setThinking] = useState(effort)
   const [allowed, setAllowed] = useState(mode)
 
-  const offer = offerOf(picked)
+  const offer = offerOf(picked, run)
   return (
     <div className="flex justify-end p-6">
       {render({
