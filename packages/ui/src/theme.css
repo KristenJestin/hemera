@@ -121,6 +121,15 @@
 
   --shadow: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.04);
   --shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12);
+
+  /* The soft ring a thumb sits in: what says a round surface on a track is the thing the hand
+     has hold of, and not a dot drawn on it. The primary, at a fraction of itself, so the halo
+     is the accent bleeding out of the thumb rather than a second colour; `strong` is the same
+     ring under the hand and under the focus, which is how the control answers being touched
+     without moving anything anybody is reading. It is the one shadow of the theme that carries
+     a hue: everything else here is the page's own shade of black. */
+  --halo: 0 0 0 3px rgba(192, 38, 211, 0.16);
+  --halo-strong: 0 0 0 5px rgba(192, 38, 211, 0.26);
 }
 
 /* ---- Roles, dark ---- */
@@ -195,6 +204,12 @@
 
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-raised: 0 14px 40px rgba(0, 0, 0, 0.6);
+
+  /* The dark theme's primary is the lighter of the two, and a halo drawn at the light theme's
+     strength on this background reads as a smudge rather than a ring: it is given less of
+     itself, and the hue it is given is the one the page actually uses. */
+  --halo: 0 0 0 3px rgba(232, 121, 249, 0.2);
+  --halo-strong: 0 0 0 5px rgba(232, 121, 249, 0.32);
 }
 
 /* ---- The Tailwind theme reads the roles, never the raw values ---- */
@@ -263,6 +278,8 @@
 
   --shadow-sm: var(--shadow);
   --shadow-lg: var(--shadow-raised);
+  --shadow-halo: var(--halo);
+  --shadow-halo-strong: var(--halo-strong);
 }
 
 /* ---- The scales, the same under both themes ---- */
@@ -310,12 +327,29 @@
      a window that is not maximised. */
   --spacing-menu-panel: 24rem;
 
+  /* How wide the two-column agent panel stands since the trial of 22 September 2026, and how
+     tall with it. The composer is the frame the panel opens out of, and a panel narrower than
+     the box it belongs to reads as the menu of something else: this is that column's width, so
+     the panel and the composer share one edge. The height goes with the width — the room a
+     wider panel buys is room for the list to be read in, and a list four rows tall in a panel
+     twice as wide is a panel that got wider for nothing. Still one box whatever stage it is
+     on, and still short enough to open upwards above a composer in a window that is not
+     maximised. */
+  --spacing-menu-wide: 40rem;
+  --spacing-menu-tall: 30rem;
+
   /* How wide the agents stand in the two-column agent panel, out of the `menu-panel` width.
      A fraction of the parent is not a step of anything — it moves with whatever is around it,
      and the column beside it was left to take the remainder. Written down instead: wide enough
      for a mark, an agent's name and the word beside it, narrow enough to leave the models the
      larger half, which is the list that scrolls. */
   --spacing-menu-agents: 9.5rem;
+
+  /* How thick the track of a scale is drawn — the effort's slider and its dial. Thin enough to
+     read as a line the thumb runs along rather than as a bar, and thick enough that the part of
+     it that is filled is read as filled at a glance. A named step, because two tracks of two
+     thicknesses in one panel is two controls that look like they came from two systems. */
+  --spacing-track: 0.375rem;
 
   /* The prototype draws its icons at eighteen, with sixteen for the small ones and twenty-two
      for the few that stand alone. The first pass of lot 4 sat a step under all three, which is
@@ -734,6 +768,20 @@
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   /* A system asking for less movement gets the popup where it ends, and nothing on the way. */
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* What the thumb of a scale does under the hand and under the focus: the halo around it
+   brightens and the thumb itself grows a little, which is the whole of how a control answers
+   being touched without moving what is being read. `scale` and not `transform`: Tailwind 4
+   writes its scale utility as the individual property, and naming `transform` here would both
+   miss it and fight the layout animation motion plays on the same element. */
+@utility thumb-motion {
+  transition-property: box-shadow, scale;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {
     transition-property: none;
   }
