@@ -592,10 +592,24 @@
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
   scrollbar-gutter: stable;
-  /* The content is a sheet of its own, set in from the window on three sides. */
-  margin: 0 0.5rem 0.5rem 0;
+  /* The content is a sheet of its own, set in from the window on three sides. The fourth is the
+     sidebar's: the panel and the separator beside it are what stands between the sheet and the
+     window, so the sheet asks for nothing there — unless it is told it is alone. */
+  margin: 0 0.5rem 0.5rem var(--content-inset-left, 0px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+}
+
+/* The content with nothing beside it, which is the window before a Project (design D4-06).
+   No sidebar and no separator means nothing stands between the sheet and the window on that
+   side, and a sheet set in on three sides only reads as a panel the window cut off rather than
+   as the one surface everything is read on. Set in on the fourth as it is on the second, so the
+   frame closes and the two sides of the page are the same.
+   The inset travels as a custom property rather than as a second margin rule: a margin written
+   twice is decided by whichever of the two utilities the build happens to order last, and where
+   the content sits is not a question a sort order should answer. */
+@utility content-area-alone {
+  --content-inset-left: 0.5rem;
 }
 
 /* The strip of tabs runs a pixel past the bottom of the bar (design D2-02).

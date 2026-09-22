@@ -125,7 +125,7 @@ function Harness({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Shell/Shell',
   component: Harness,
   parameters: { layout: 'fullscreen' },
@@ -346,9 +346,10 @@ export const ManyProjects: Story = {
 /**
  * Scenario « Aucun Projet au démarrage » of `specs/project-workspaces/spec.md`.
  *
- * What the shell is before anything has been created: the mark, the fold, and the page. No tab
- * to press, no sidebar to list Sessions that do not exist, and no bell for events nobody has
- * made yet — and the keystroke that opens the command still belongs to the application.
+ * What the shell is before anything has been created: the mark, and the page. No tab to press,
+ * no sidebar to list Sessions that do not exist, no bell for events nobody has made yet, and no
+ * fold, because there is nothing to fold — the keystroke that opens the command still belongs
+ * to the application, and the one that folded the sidebar has nothing left to reach.
  */
 export const NoProjectYet: Story = {
   args: { projects: [], sessions: [] },
@@ -359,16 +360,26 @@ export const NoProjectYet: Story = {
     expect(canvas.queryByRole('navigation', { name: 'Projects' })).toBeNull()
     expect(canvas.queryByRole('button', { name: 'Notifications' })).toBeNull()
 
-    // The mark and the fold are what is left of the bar, and the page has the rest.
+    // The mark is what is left of the bar, and the page has the rest.
     expect(canvas.getByText('Hemera')).toBeInTheDocument()
-    expect(canvas.getByRole('button', { name: 'Collapse the sidebar' })).toBeInTheDocument()
-    // The page takes the room the sidebar would have had, which is what "no sidebar" means
-    // here: it starts at the edge of the window, with nothing between the two. Its own width is
-    // not the window's — the content is a sheet set in on three sides — so the claim is made
-    // where it can be made exactly, on the side the sidebar would have been.
-    const content = canvas.getByRole('main')
-    const root = canvasElement.querySelector('.shell-root')!
-    expect(content.getBoundingClientRect().left).toBeCloseTo(root.getBoundingClientRect().left, 0)
+    // The fold is not drawn at all, at either label it could wear: it folds the sidebar, and
+    // there is no sidebar. Neither is anything else in the bar an `IconButton`.
+    expect(canvas.queryByRole('button', { name: 'Collapse the sidebar' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: 'Expand the sidebar' })).toBeNull()
+
+    // And the keystroke it advertised reaches nothing either: the window is what it was.
+    await userEvent.keyboard('{Control>}b{/Control}')
+    expect(canvas.queryByRole('complementary')).toBeNull()
+    expect(canvas.queryByRole('separator', { name: 'Sidebar width' })).toBeNull()
+
+    // The page is framed on all four sides. The left edge is normally the sidebar's and the
+    // separator's; with neither of them drawn the sheet carries it itself, set in and drawn
+    // exactly as the right one is, so the two sides of the window read the same.
+    const frame = getComputedStyle(canvas.getByRole('main'))
+    expect(frame.marginLeft).toBe(frame.marginRight)
+    expect(frame.borderLeftWidth).toBe(frame.borderRightWidth)
+    expect(frame.borderTopLeftRadius).toBe(frame.borderTopRightRadius)
+    expect(frame.borderBottomLeftRadius).toBe(frame.borderBottomRightRadius)
   },
 }
 
