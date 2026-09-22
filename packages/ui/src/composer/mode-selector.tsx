@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { Select } from '../components/select/select.tsx'
-import { IconShield } from '../icons.ts'
+import { IconFileText, IconPencil, IconSettings, IconShield } from '../icons.ts'
 import type { AgentChoice } from './agent-choice.ts'
 
 /**
@@ -14,7 +14,32 @@ import type { AgentChoice } from './agent-choice.ts'
  *
  * Changing the mode is a request, not an order. The next `current_mode_update` is what the
  * control shows, so a mode the agent refused to take is not drawn as taken.
+ *
+ * Each mode carries a mark of its own. One shield over the whole list said "this control is
+ * about permissions" three times over and never which of the three was chosen: a list where
+ * every row wears the same icon is a list read on its words alone, and the trigger with it.
+ * What an agent calls its modes is the agent's business, so the mark is read off the words —
+ * asking, editing, planning — and anything the list does not recognise is drawn as a setting
+ * rather than guessed at.
  */
+const MARKS = [
+  // "Ask before edits" is both an asking mode and an editing one; asking is what it is, so it
+  // is looked for first.
+  { words: ['ask'], icon: <IconShield size="sm" /> },
+  { words: ['accept', 'edit', 'build'], icon: <IconPencil size="sm" /> },
+  { words: ['plan'], icon: <IconFileText size="sm" /> },
+] as const
+
+/** What a mode nothing above recognised is drawn as: a setting of the agent, and no more. */
+const UNKNOWN = <IconSettings size="sm" />
+
+/** The mark of one mode, read off the name the agent gave it. */
+function markOf(name: string): ReactNode {
+  const asked = name.toLowerCase()
+  const found = MARKS.find((mark) => mark.words.some((word) => asked.includes(word)))
+  return found?.icon ?? UNKNOWN
+}
+
 export interface ModeSelectorProps {
   /** What the agent says it can be told; empty when it announced nothing. */
   modes: readonly AgentChoice[]
@@ -32,16 +57,17 @@ export function ModeSelector({
   className,
 }: ModeSelectorProps): ReactNode {
   if (modes.length === 0) return null
+  const current = modes.find((mode) => mode.id === value)
   return (
     <Select
       label="Mode"
-      mark={<IconShield size="sm" />}
-      // The mark is on the value and on every mode of the list: an option carrying nothing would
-      // read as something other than the control it belongs to.
+      // The trigger wears the mark of the mode it is showing, not the mark of the control: what
+      // is chosen is what the eye reads off it without opening anything.
+      mark={current === undefined ? UNKNOWN : markOf(current.name)}
       items={modes.map((mode) => ({
         value: mode.id,
         label: mode.name,
-        icon: <IconShield size="sm" />,
+        icon: markOf(mode.name),
       }))}
       value={value}
       onValueChange={onValueChange}

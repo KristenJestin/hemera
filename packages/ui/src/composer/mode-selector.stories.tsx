@@ -32,14 +32,36 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The mode the agent is in, as the agent said it. */
+/**
+ * The mode the agent is in, as the agent said it — and the mark of *that* mode on the trigger.
+ *
+ * One shield over the whole list said "this control is about permissions" three times over and
+ * never which of the three was chosen. The trigger wears the mark of what is set, so the mode
+ * is read off it without opening anything.
+ */
 export const WhatTheAgentReported: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('combobox', { name: 'Mode' })).toHaveTextContent(
-      'Ask before edits',
-    )
-    await expect(canvasElement.querySelector('.size-icon-sm')).not.toBeNull()
+    const trigger = canvas.getByRole('combobox', { name: 'Mode' })
+    await expect(trigger).toHaveTextContent('Ask before edits')
+    await expect(trigger.querySelector('.size-icon-sm')).not.toBeNull()
+
+    // The mark of the mode and not of the control: asking is a shield, and the shield is what
+    // the chevron beside it is not.
+    const marks = trigger.querySelectorAll('svg')
+    await expect(marks).toHaveLength(2)
+    await expect(marks[0]!.innerHTML).not.toBe(marks[1]!.innerHTML)
+  },
+}
+
+/** A mode the catalogue has no word for is drawn as a setting of the agent, not guessed at. */
+export const AModeNobodyKnows: Story = {
+  args: { modes: [{ id: 'yolo', name: 'Bypass everything' }], value: 'yolo' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const trigger = canvas.getByRole('combobox', { name: 'Mode' })
+    await expect(trigger).toHaveTextContent('Bypass everything')
+    await expect(trigger.querySelector('svg')).not.toBeNull()
   },
 }
 
@@ -60,8 +82,12 @@ export const AskingForAnotherMode: Story = {
     await userEvent.click(canvas.getByRole('combobox', { name: 'Mode' }))
     const choices = await screen.findAllByRole('option')
     await expect(choices).toHaveLength(3)
-    // Every mode of the list wears the mark of the control, not only the chosen one.
-    await expect(choices.map((choice) => choice.querySelector('.size-icon-sm'))).not.toContain(null)
+    // Every mode wears a mark of its own, and no two of them are the same: asking is a shield,
+    // editing a pencil, planning a sheet. Compared as drawings rather than by class name —
+    // what the catalogue calls an icon is its business, what it draws is the reader's.
+    const marks = choices.map((choice) => choice.querySelector('svg')?.innerHTML)
+    await expect(marks).not.toContain(undefined)
+    await expect(new Set(marks).size).toBe(3)
     await userEvent.click(await screen.findByRole('option', { name: 'Plan only' }))
     await expect(args.onValueChange).toHaveBeenCalledWith('plan')
     await expect(canvas.getByRole('combobox', { name: 'Mode' })).toHaveTextContent(
