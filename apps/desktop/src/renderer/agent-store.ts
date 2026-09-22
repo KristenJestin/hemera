@@ -9,6 +9,7 @@ import type {
   SessionEntry,
   StopReason,
 } from '@hemera/ipc'
+import type { ActivityState } from '@hemera/ui'
 
 /**
  * What the agents of this window are doing (design D5-12, D5-13, D5-17).
@@ -112,6 +113,82 @@ export function agentOf(sessionId: string | null): AgentSessionState {
   return state.sessions.get(sessionId) ?? QUIET
 }
 
+/**
+ * What a running turn is doing, as the row at the end of the thread says it (design D17-04).
+ *
+ * Read off the thread rather than pushed: the engine says what happened, and what is happening
+ * is the last thing it said. An entry is written again with more of it while the agent writes,
+ * so the end of the thread is where the turn is — and a rule read here is a rule that holds for
+ * a Session reopened mid-turn as well as for one watched from the first word.
+ */
+export interface Activity {
+  state: ActivityState
+  /** What is being run, when a tool call is: its title, as the agent wrote it. */
+  detail?: string | undefined
+  /** The thought arriving now, which is the last one of the turn that is running. */
+  thought?: string | undefined
+}
+
+/** How far a call got, in the two words that mean it has not finished (ipc, `ToolCallStatus`). */
+const UNFINISHED = ['pending', 'in_progress']
+
+/**
+ * What the turn running in this thread is doing, in the order the four states answer.
+ *
+ * A permission first, because a turn waiting on the reader is not working whatever else the
+ * thread holds; then the call it is running, because that is the one thing worth naming; then
+ * the answer being written; and thinking for everything else, which is what an agent between
+ * two blocks is doing.
+ */
+export function activityOf(entries: readonly SessionEntry[]): Activity {
+  const last = entries.at(-1)
+  const thought = thoughtOf(entries, last?.turnId ?? null)
+
+  if (waiting(entries)) return { state: 'waiting', thought }
+
+  const call = [...entries].reverse().find((entry) => entry.kind === 'tool_call')
+  if (call !== undefined && UNFINISHED.includes(call.state ?? '')) {
+    return { state: 'running', detail: call.body, thought }
+  }
+
+  // A message has no state of its own while it is being written: the engine writes the same
+  // entry again with more in it, and a turn is running, so the last word of the thread is a word
+  // being written. One that says where it stands is believed over that.
+  if (
+    last !== undefined &&
+    last.kind === 'message' &&
+    last.role === 'agent' &&
+    (last.state === null || last.state === 'in_progress')
+  ) {
+    return { state: 'streaming', thought }
+  }
+
+  return { state: 'thinking', thought }
+}
+
+/** Whether the agent is waiting on an answer: a request with no decision written after it. */
+function waiting(entries: readonly SessionEntry[]): boolean {
+  for (let at = entries.length - 1; at >= 0; at -= 1) {
+    const entry = entries[at]
+    if (entry === undefined) continue
+    if (entry.kind === 'permission_decision') return false
+    if (entry.kind === 'permission_request') return true
+  }
+  return false
+}
+
+/** The last thought of the turn that is running, which is the one the row opens onto. */
+function thoughtOf(entries: readonly SessionEntry[], turnId: string | null): string | undefined {
+  for (let at = entries.length - 1; at >= 0; at -= 1) {
+    const entry = entries[at]
+    if (entry === undefined || entry.kind !== 'thought') continue
+    // The thoughts of the turn before this one are blocks of the thread and stay there: a row
+    // that opened onto one of them would be showing the last turn's reasoning as this one's.
+    return entry.turnId === turnId ? entry.body : undefined
+  }
+  return undefined
+}
+
 /** What the agent of a Session offers, which is nothing until its handshake has answered. */
 export function optionsOf(sessionId: string | null): readonly ConfigOption[] {
   if (sessionId === null) return []
@@ -172,11 +249,16 @@ export function listenToAgents(): () => void {
       changed(event.sessionId, { entries: withEntry(held.entries, event.entry) })
       return
     }
-    // The three others carry no entry of their own, and none of them is dropped for that. A turn
-    // that ended ended because the entry saying so was written just before it, a permission is
-    // the request entry that arrived with it — both of those came in as entries — and an agent
-    // that died or a Session that fell back to the thread is read in the thread itself. What is
-    // left to keep is the one thing no entry says: that a turn is over.
+    // The others carry no entry of their own, and none of them is dropped for that. A permission
+    // is the request entry that arrived with it, and an agent that died or a Session that fell
+    // back to the thread is read in the thread itself. What is left to keep is the one thing no
+    // entry says: whether a turn is running.
+    //
+    // Both ends of a turn are heard, because they are two facts. `turn_start` arrives the moment
+    // the user's message is written, before the agent has been given anything to do: the row at
+    // the end of the thread and the stop in the composer stand from then, and not from the first
+    // word that comes back (design D5-12).
+    if (event.event === 'turn_start') changed(event.sessionId, { running: true })
     if (event.event === 'turn') changed(event.sessionId, { running: false })
   })
   return () => {
