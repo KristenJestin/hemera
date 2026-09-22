@@ -16,7 +16,7 @@ import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Deferred, Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
 
 import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, TOOL_NAMES, type ToolName } from '@hemera/core'
@@ -164,8 +164,10 @@ const calling = (asked: {
     const outcome: ToolOutcome = yield* catalogue.call({
       sessionId: asked.sessionId,
       tool: asked.tool,
-      arguments: asked.arguments,
-      key: asked.key ?? null,
+      // The key travels in the arguments, as an agent sends it, and beside them, as the server
+      // hands it over once it has read it.
+      arguments: asked.key === undefined ? asked.arguments : { ...asked.arguments, key: asked.key },
+      key: asked.key ?? (typeof asked.arguments.key === 'string' ? asked.arguments.key : null),
       offered: asked.offered ?? TOOL_NAMES,
       caller: 'a1b2c3d4e5f6',
     })
@@ -321,17 +323,20 @@ describe('an edit whose old text is not unique', () => {
         const twice = yield* calling({
           sessionId: session.sessionId,
           tool: 'fs_edit',
-          arguments: { path: 'twice.txt', old: 'same', new: 'changed' },
+          arguments: { path: 'twice.txt', old: 'same', new: 'changed', key: 'edit-1' },
+          key: 'edit-1',
         })
         const none = yield* calling({
           sessionId: session.sessionId,
           tool: 'fs_edit',
-          arguments: { path: 'twice.txt', old: 'absent', new: 'changed' },
+          arguments: { path: 'twice.txt', old: 'absent', new: 'changed', key: 'edit-2' },
+          key: 'edit-2',
         })
         const once = yield* calling({
           sessionId: session.sessionId,
           tool: 'fs_edit',
-          arguments: { path: 'twice.txt', old: 'other', new: 'changed' },
+          arguments: { path: 'twice.txt', old: 'other', new: 'changed', key: 'edit-3' },
+          key: 'edit-3',
         })
         return { twice, none, once }
       }),
@@ -495,7 +500,8 @@ describe('the commands of a Project', () => {
         const ran = yield* calling({
           sessionId: session.sessionId,
           tool: 'commands_run',
-          arguments: { name: 'dev' },
+          arguments: { name: 'dev', key: 'run-1' },
+          key: 'run-1',
         })
         // A `check` or a `utility` ends on its own: the agent reads it once it has ended, which
         // is the whole reason its exit code is kept.
@@ -534,7 +540,8 @@ describe('a one-off command naming a folder outside the root', () => {
         const answer = yield* calling({
           sessionId: session.sessionId,
           tool: 'commands_run',
-          arguments: { line: 'node -e "console.log(1)"', folder: '../elsewhere' },
+          arguments: { line: 'node -e "console.log(1)"', folder: '../elsewhere', key: 'run-2' },
+          key: 'run-2',
         })
         const commands = yield* Commands
         const running = yield* commands.running(session.sessionId)
@@ -610,5 +617,67 @@ describe('an edit whose old and new texts are the same', () => {
     expect(seen.ok).toBe(false)
     expect(seen.summary).toContain('changes nothing')
     expect(readFileSync(join(root, 'same.txt'), 'utf8')).toBe('unchanged\n')
+  })
+})
+
+describe('the same write twice at the same time', () => {
+  it('runs once: the second call waits for the first and is answered what it was', async () => {
+    const decision = Deferred.makeUnsafe<OutsideAnswer>()
+    const asked: OutsideRequest[] = []
+    const human: Human = {
+      asked,
+      service: {
+        askOutside: (question) =>
+          Effect.gen(function* () {
+            asked.push(question)
+            return yield* Deferred.await(decision)
+          }),
+        answer: () => Effect.succeed(false),
+        waiting: () => Effect.succeed(null),
+      },
+    }
+    const outside = join(folder, 'shared.txt')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const write = (content: string) =>
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: outside, content },
+            key: 'same-key',
+          })
+        // The first call waits on the human; the retry arrives while it does.
+        const first = yield* Effect.forkChild(write('first'))
+        yield* Effect.sleep('50 millis')
+        const second = yield* Effect.forkChild(write('second'))
+        yield* Effect.sleep('50 millis')
+        Deferred.doneUnsafe(decision, Effect.succeed<OutsideAnswer>('allowed'))
+        return { first: yield* Fiber.join(first), second: yield* Fiber.join(second) }
+      }),
+    )
+
+    expect(asked).toHaveLength(1)
+    expect(seen.first.repeated).toBe(false)
+    expect(seen.second.repeated).toBe(true)
+    expect(readFileSync(outside, 'utf8')).toBe('first')
+  })
+})
+
+describe('a write without an idempotency key', () => {
+  it('is refused before anything is written', async () => {
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'keyless.txt', content: 'no key' },
+        })
+      }),
+    )
+
+    expect(seen.state).toBe('refused')
+    expect(seen.summary).toContain('key')
   })
 })

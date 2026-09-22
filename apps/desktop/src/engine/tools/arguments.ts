@@ -48,7 +48,12 @@ export type ParsedCall =
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['session_get']>
     }
 
-/** The key an idempotency key may be, so that a key is a name and not a document. */
+/**
+ * The key an idempotency key may be, so that a key is a name and not a document.
+ *
+ * Every write, edit and run carries one (D6-03): a lost answer and a second call look the same
+ * from where the agent stands, and without a key the second one would act twice.
+ */
 const KEY = z.string().min(1).max(200)
 
 /**
@@ -74,12 +79,12 @@ export const TOOL_ARGUMENTS = {
     path: z.string().min(1).describe('the file, relative to the Workspace root'),
     old: z.string().min(1).describe('the text to replace, which must appear exactly once'),
     new: z.string().describe('what to replace it with; an empty string deletes it'),
-    key: KEY.optional().describe('an idempotency key, so a retry does not edit twice'),
+    key: KEY.describe('an idempotency key, so a retry does not edit twice'),
   }),
   fs_write: z.object({
     path: z.string().min(1).describe('the file, relative to the Workspace root'),
     content: z.string().describe('what the whole file becomes; the folders are created'),
-    key: KEY.optional().describe('an idempotency key, so a retry does not write twice'),
+    key: KEY.describe('an idempotency key, so a retry does not write twice'),
   }),
   fs_list: z.object({
     path: z.string().optional().describe('the folder, relative to the Workspace root'),
@@ -97,7 +102,7 @@ export const TOOL_ARGUMENTS = {
       .string()
       .optional()
       .describe('where to run it: a repository of the Project, or a path in the Workspace'),
-    key: KEY.optional().describe('an idempotency key, so a retry does not start it twice'),
+    key: KEY.describe('an idempotency key, so a retry does not start it twice'),
   }),
   commands_output: z.object({
     run: z.string().min(1).optional().describe('which run; the only one running without it'),

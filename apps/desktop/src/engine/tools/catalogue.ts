@@ -26,7 +26,7 @@ import {
   type ToolName,
   admitTool,
 } from '@hemera/core'
-import { Context, Effect, Layer } from 'effect'
+import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 
@@ -47,8 +47,8 @@ const ARGUMENTS_KEPT = 400
 /** How many entries of the thread `session_get` hands back. */
 const THREAD_TAIL = 20
 
-/** How many answered keys are held against a retry before the oldest are let go of. */
-const KEYS_KEPT = 200
+/** How many answered keys a Session keeps against a retry, the least recently asked let go of first. */
+const KEYS_KEPT = 256
 
 /**
  * The two answers a path outside the Workspace can be given, as the block draws them.
@@ -192,23 +192,48 @@ export const toolCatalogueLayer: Layer.Layer<
     const permissions = yield* ToolPermissions
     const database = yield* Database
 
-    /** The answers already given for a key, so a retry is answered and not repeated. */
-    const done = new Map<string, ToolOutcome>()
+    /**
+     * The answers already given, per Session and by tool and key, so a retry is answered and not
+     * repeated. A Session's map is ordered by use: a hit moves its key to the end, and the first
+     * key is the one let go of when the Session holds more than `KEYS_KEPT`.
+     */
+    const done = new Map<string, Map<string, ToolOutcome>>()
 
     /**
-     * Keeps one answer against its key, and lets go of the oldest when there are too many.
+     * The calls running under a key, reserved before they run.
+     *
+     * A retry can arrive while the first call is still running — waiting on the human, or on a
+     * command that is starting — and a key only remembered once the call settled would let both
+     * run. The second call waits on the first and is answered what the first one was.
+     */
+    const inFlight = new Map<string, Deferred.Deferred<ToolOutcome>>()
+
+    /** The answer a key was given in this Session, moved to the end as the most recently asked. */
+    const answeredBefore = (sessionId: string, slot: string): ToolOutcome | undefined => {
+      const kept = done.get(sessionId)
+      const outcome = kept?.get(slot)
+      if (kept === undefined || outcome === undefined) return undefined
+      kept.delete(slot)
+      kept.set(slot, outcome)
+      return outcome
+    }
+
+    /**
+     * Keeps one answer against its key, and lets go of the least recently asked past the bound.
      *
      * A retry happens seconds after the answer it lost, so what is worth holding is the recent
-     * past: an engine that ran for a day would otherwise be holding every write of every Session
-     * it ever served, texts and all.
+     * past: a Session that ran for a day would otherwise be holding every write it ever made,
+     * texts and all.
      */
-    const remember = (key: string, outcome: ToolOutcome) => {
-      done.set(key, outcome)
-      while (done.size > KEYS_KEPT) {
-        const oldest = done.keys().next()
-        if (oldest.done === true) break
-        done.delete(oldest.value)
+    const remember = (sessionId: string, slot: string, outcome: ToolOutcome) => {
+      const kept = done.get(sessionId) ?? new Map<string, ToolOutcome>()
+      kept.delete(slot)
+      kept.set(slot, outcome)
+      for (const oldest of kept.keys()) {
+        if (kept.size <= KEYS_KEPT) break
+        kept.delete(oldest)
       }
+      done.set(sessionId, kept)
     }
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
@@ -281,13 +306,6 @@ export const toolCatalogueLayer: Layer.Layer<
           paths: answer.paths,
           repeated: false,
           range: answer.range ?? null,
-        }
-        // Only what happened is remembered. A key is there so that a retry after a lost answer
-        // does not write twice, and a call that wrote nothing — a refusal, a read that failed —
-        // wrote nothing to protect: answering it from memory would refuse the corrected call
-        // that comes back under the same key for ever.
-        if (asked.key !== null && state === 'completed') {
-          remember(`${asked.sessionId}|${asked.tool}|${asked.key}`, outcome)
         }
         return outcome
       })
@@ -775,31 +793,54 @@ export const toolCatalogueLayer: Layer.Layer<
             )
           }
 
-          const key = asked.key === null ? null : `${asked.sessionId}|${named}|${asked.key}`
-          if (key !== null) {
-            const earlier = done.get(key)
-            if (earlier !== undefined) return { ...earlier, repeated: true }
-          }
-
           // Measured around the tool itself, question to the human included: what the Journal
           // says a call took is how long the agent waited for it.
-          const began = Date.now()
-          const answer = yield* perform(
-            asked,
-            root,
-            project.id,
-            project.name,
-            project.repositories,
-            parsed.call,
+          const run = Effect.gen(function* () {
+            const began = Date.now()
+            const answer = yield* perform(
+              asked,
+              root,
+              project.id,
+              project.name,
+              project.repositories,
+              parsed.call,
+            )
+            // A tool has no error channel on purpose: everything a tool can be told no by is
+            // answered as a value, and what would remain is a defect the engine should hear about.
+            return yield* settle(
+              asked,
+              { ...made, milliseconds: Date.now() - began },
+              answer,
+              answer.ok ? 'completed' : 'failed',
+            )
+          })
+          if (asked.key === null) return yield* run
+
+          const slot = `${named}|${asked.key}`
+          const earlier = answeredBefore(asked.sessionId, slot)
+          if (earlier !== undefined) return { ...earlier, repeated: true }
+          const reservation = `${asked.sessionId}|${slot}`
+          const running = inFlight.get(reservation)
+          if (running !== undefined) {
+            const first = yield* Deferred.await(running)
+            return { ...first, repeated: true }
+          }
+          const reserved = Deferred.makeUnsafe<ToolOutcome>()
+          inFlight.set(reservation, reserved)
+          const outcome = yield* run.pipe(
+            Effect.onExit((exit) =>
+              Effect.gen(function* () {
+                inFlight.delete(reservation)
+                yield* Deferred.done(reserved, exit)
+              }),
+            ),
           )
-          // A tool has no error channel on purpose: everything a tool can be told no by is
-          // answered as a value, and what would remain is a defect the engine should hear about.
-          return yield* settle(
-            asked,
-            { ...made, milliseconds: Date.now() - began },
-            answer,
-            answer.ok ? 'completed' : 'failed',
-          )
+          // Only what happened is remembered. A key is there so that a retry after a lost answer
+          // does not write twice, and a call that wrote nothing — a refusal, a read that failed —
+          // wrote nothing to protect: answering it from memory would refuse the corrected call
+          // that comes back under the same key for ever.
+          if (outcome.state === 'completed') remember(asked.sessionId, slot, outcome)
+          return outcome
         }),
     }
   }),
