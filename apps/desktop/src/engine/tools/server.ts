@@ -81,20 +81,15 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
       const catalogue = yield* ToolCatalogue
 
       /**
-       * The grants this server has resolved, by the digest a request carries after that.
+       * The tools, as one MCP server built for one request and for the grant that request carried.
        *
-       * The factory below is handed a request and not the grant it was resolved from, and it is
-       * synchronous: this is how the two meet, and it is a map of digests and never of tokens.
+       * The handler asks for a fresh server per request and connects it to that request's own
+       * transport: a server kept and handed to a second request would be connected a second time,
+       * and the answer of a call still waiting — on the human, on a command — would go to the
+       * transport of the call that came after it. Building one is registering eleven tools, which
+       * is nothing next to the call itself.
        */
-      const resolved = new Map<string, AccessGrant>()
-
-      /** One MCP server per grant, built on first use and kept for the engine's life. */
-      const servers = new Map<string, McpServer>()
-
-      const serverFor = (grant: AccessGrant | null): McpServer => {
-        const id = grant?.id ?? 'none'
-        const kept = servers.get(id)
-        if (kept !== undefined) return kept
+      const serverFor = (grant: AccessGrant): McpServer => {
         const server = new McpServer({ name: 'hemera', version: '1.0.0' })
         for (const tool of TOOL_NAMES) {
           server.registerTool(
@@ -104,12 +99,12 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
               const argumentsRead = flatArguments(Object.entries(argumentsSent ?? {}))
               const outcome = await Effect.runPromise(
                 catalogue.call({
-                  sessionId: grant?.sessionId ?? '',
+                  sessionId: grant.sessionId,
                   tool,
                   arguments: argumentsRead,
                   key: keyIn(argumentsRead),
-                  offered: grant?.offered ?? [],
-                  caller: grant?.id ?? 'none',
+                  offered: grant.offered,
+                  caller: grant.id,
                 }),
               )
               return {
@@ -119,13 +114,23 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
             },
           )
         }
-        servers.set(id, server)
         return server
       }
 
-      const mcp = createMcpHandler((context) =>
-        serverFor(resolved.get(context.authInfo?.clientId ?? '') ?? null),
-      )
+      /**
+       * The server of one request, for the grant the door resolved for it.
+       *
+       * The door hands the digest over as the caller's identity, and the grant is read back from it
+       * here rather than from a map of this file's: a grant revoked between the two is served a
+       * server with no tools, so a call that raced the end of its Session is answered "no such
+       * tool" rather than served on behalf of nobody.
+       */
+      const mcp = createMcpHandler(async (context) => {
+        const grant = await Effect.runPromise(access.byId(context.authInfo?.clientId ?? ''))
+        return grant === null
+          ? new McpServer({ name: 'hemera', version: '1.0.0' })
+          : serverFor(grant)
+      })
 
       /**
        * The fetch door: the token is read, the grant behind it is looked up, and only then does
@@ -147,7 +152,6 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
               headers: { 'content-type': 'application/json' },
             })
           }
-          resolved.set(grant.id, grant)
           // The digest stands where the token would: the agent's own name for itself is not the
           // secret it was handed, and the tools are told the caller, not the credential.
           return mcp.fetch(request, {

@@ -8,11 +8,11 @@
  * a port the system picked.
  */
 
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Deferred, Effect, Layer } from 'effect'
 import type { Scope } from 'effect'
 
 import {
@@ -28,7 +28,7 @@ import { databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer, type ToolCatalogue } from '#engine/tools/catalogue.ts'
-import { ToolPermissions } from '#engine/tools/permissions.ts'
+import { ToolPermissions, type ToolPermissionsService } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
@@ -48,10 +48,43 @@ afterEach(() => {
 })
 
 /** A human who is never asked anything: nothing here leaves the root. */
-const noQuestions = {
+const noQuestions: ToolPermissionsService = {
   askOutside: () => Effect.succeed<'refused'>('refused'),
   answer: () => Effect.succeed(false),
   waiting: () => Effect.succeed(null),
+}
+
+/**
+ * A human who is asked, and answers when the suite says so: what keeps a call waiting on the
+ * question while another call of the same Session is answered.
+ */
+function humanHolding() {
+  const decision = Deferred.makeUnsafe<'allowed' | 'refused'>()
+  let asked: () => void = () => undefined
+  const questioned = new Promise<void>((resolve) => {
+    asked = resolve
+  })
+  const service: ToolPermissionsService = {
+    askOutside: () =>
+      Effect.gen(function* () {
+        asked()
+        return yield* Deferred.await(decision)
+      }),
+    answer: () => Effect.succeed(false),
+    waiting: () => Effect.succeed(null),
+  }
+  return {
+    service,
+    asked: questioned,
+    answer: (answer: 'allowed' | 'refused') => {
+      Deferred.doneUnsafe(decision, Effect.succeed(answer))
+    },
+  }
+}
+
+/** A file inside the root, written by the suite rather than by a tool. */
+function fileInRoot(name: string, content: string) {
+  writeFileSync(join(root, name), content)
 }
 
 type Engine =
@@ -66,7 +99,7 @@ type Engine =
   | SqliteClient
 
 /** The engine with its tools served, over one database in the suite's folder. */
-function engine() {
+function engine(permissions: ToolPermissionsService = noQuestions) {
   const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
@@ -74,7 +107,7 @@ function engine() {
   const services: Layer.Layer<Engine> = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
     Layer.provideMerge(toolAccessLayer),
-    Layer.provideMerge(Layer.succeed(ToolPermissions, noQuestions)),
+    Layer.provideMerge(Layer.succeed(ToolPermissions, permissions)),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(
       Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
@@ -124,6 +157,32 @@ const listed = (server: { readonly forAgent: (token: string) => string }) =>
     )
     const body = yield* Effect.promise(() => response.text())
     return { status: response.status, body }
+  })
+
+/** One `tools/call`, sent the way an agent sends it: the address, and the token as a bearer. */
+const toolCall = (
+  server: { readonly forAgent: (token: string) => string },
+  token: string,
+  id: number,
+  name: string,
+  sent: Record<string, string>,
+) =>
+  Effect.promise(async () => {
+    const response = await fetch(server.forAgent(token), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'tools/call',
+        params: { name, arguments: sent },
+      }),
+    })
+    return { status: response.status, body: await response.text() }
   })
 
 describe('an address without a token', () => {
@@ -199,5 +258,35 @@ describe('the tools of the Session', () => {
 
     expect(seen.status).not.toBe(401)
     expect(seen.body).toContain('fs_read')
+  })
+})
+
+describe('two calls of one Session at the same time', () => {
+  it('are each answered on their own request, one of them waiting on the human', async () => {
+    fileInRoot('inside.md', 'inside the root\n')
+    const human = humanHolding()
+    const seen = await engine(human.service)(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const held = yield* aSessionWithAToken
+        const token = held.granted.token
+        // The first call leaves the root and waits on the human; the second is answered while
+        // the first is still waiting, on the request that asked it and on no other.
+        const outside = Effect.runPromise(
+          toolCall(server, token, 1, 'fs_read', { path: join(folder, 'elsewhere.md') }),
+        )
+        yield* Effect.promise(() => human.asked)
+        const inside = yield* toolCall(server, token, 2, 'fs_read', { path: 'inside.md' })
+        human.answer('refused')
+        return { inside, outside: yield* Effect.promise(() => outside) }
+      }),
+    )
+
+    expect(seen.inside.status).toBe(200)
+    expect(seen.inside.body).toContain('"id":2')
+    expect(seen.inside.body).toContain('inside the root')
+    expect(seen.outside.status).toBe(200)
+    expect(seen.outside.body).toContain('"id":1')
+    expect(seen.outside.body).toContain('the user refused')
   })
 })
