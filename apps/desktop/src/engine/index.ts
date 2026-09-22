@@ -153,22 +153,26 @@ function servicesOf(
 }
 
 /**
- * What a refusal or a failure is called on the wire: what it says, or what it carries.
+ * What a refusal or a failure is called on the wire: the sentence it carries.
  *
- * A refusal of the domain is an `Error` with a sentence someone wrote for a reader — "the
- * repository location "../elsewhere" is refused: it resolves outside the workspace root" —
- * and that sentence is what the interface shows under the field. An Effect error has a tag
- * and a few fields and no message at all, so the same `${name}: ${message}` would cross the
- * port as `DatabaseError: ` and the reason would be lost. Which is why there are two: the
- * sentence when there is one, the fields when there is not. A cause that is an `Error` is
- * named beside them either way, because an `Error` serialises to nothing.
+ * A refusal is something a reader is shown — "the repository location "../elsewhere" is refused:
+ * it resolves outside the workspace root" — and every refusal of this process has one: the
+ * refusals of the domain are `Error`s written that way, and the tagged errors of the engine each
+ * declare a `message` of their own for exactly this crossing. What is never sent is the fields
+ * of an error as JSON: `StaleVersionError {"entity":"session","expected":1}` says nothing to
+ * whoever pressed the button, and a page cannot show it. A failure with nothing to say is named
+ * by its own name and no more; a cause that is an `Error` is named beside it, because an `Error`
+ * serialises to nothing.
  */
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a failure is whatever was raised; naming it is the last thing done with it
-function named(error: unknown): string {
+export function named(error: unknown): string {
   if (!(error instanceof Error)) return String(error)
-  const because = error.cause === undefined ? '' : ` caused by ${String(error.cause)}`
+  const cause = error.cause === undefined ? '' : String(error.cause)
+  // A cause the sentence already names is not named a second time: the tagged errors of the
+  // engine carry the reason inside their own message, and `Error.cause` is the same reason.
+  const because = cause === '' || error.message.includes(cause) ? '' : ` caused by ${cause}`
   if (error.message !== '') return `${error.message}${because}`
-  return `${error.name} ${JSON.stringify(error) ?? '{}'}${because}`
+  return `${error.name}${because}`
 }
 
 if (process.parentPort !== undefined) {

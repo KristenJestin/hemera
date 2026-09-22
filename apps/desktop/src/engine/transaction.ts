@@ -27,7 +27,21 @@ export class StaleVersionError extends Data.TaggedError('StaleVersionError')<{
   readonly entity: string
   readonly id: string
   readonly expected: number
-}> {}
+}> {
+  /**
+   * What whoever asked is told, rather than the fields the refusal carries.
+   *
+   * An Effect error has a tag and no message of its own, and the tag is what would cross to the
+   * window: `StaleVersionError {"entity":"session"…}` is not a sentence anybody can act on, and
+   * this one says what happened and what to do about it.
+   */
+  override get message(): string {
+    return `This ${NAMED[this.entity] ?? this.entity} changed elsewhere; reopen it and try again.`
+  }
+}
+
+/** What the interface calls each of the entities a version is taken of. */
+const NAMED: Readonly<Record<string, string>> = { session: 'Session', project: 'Project' }
 
 /** What a mutation hands back: what the caller asked for, and what the journal is to say. */
 export interface Mutation<A> {

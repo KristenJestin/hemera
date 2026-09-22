@@ -31,7 +31,12 @@ import type { Scope } from 'effect'
 export class AgentSpawnError extends Data.TaggedError('AgentSpawnError')<{
   readonly command: string
   readonly cause: string
-}> {}
+}> {
+  /** A sentence for the note a Session writes when its agent could not be run (D5-17). */
+  override get message(): string {
+    return `The agent could not be started (${this.command}): ${this.cause}`
+  }
+}
 
 /** How a supervised process ended, and when it was seen to. */
 export interface ExitObservation {

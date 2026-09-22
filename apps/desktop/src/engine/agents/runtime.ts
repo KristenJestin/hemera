@@ -55,7 +55,17 @@ export const CANCEL_GRACE = Duration.seconds(10)
 export class AgentRuntimeError extends Data.TaggedError('AgentRuntimeError')<{
   readonly what: string
   readonly cause: string
-}> {}
+}> {
+  /**
+   * What the window shows: the step and what refused it.
+   *
+   * A tagged error has no message, and a refusal that crosses the port without one crosses as
+   * its own fields — which is a shape and not an answer. This is the sentence.
+   */
+  override get message(): string {
+    return `${this.what}: ${this.cause}`
+  }
+}
 
 /** How a turn ended: the protocol's own reasons, and the one Hemera adds for a dead agent. */
 export type TurnStopReason =

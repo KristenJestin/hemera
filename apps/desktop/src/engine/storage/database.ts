@@ -24,7 +24,18 @@ export { SqliteClient }
 export class DatabaseError extends Data.TaggedError('DatabaseError')<{
   readonly doing: string
   readonly cause: unknown
-}> {}
+}> {
+  /**
+   * What the window is told: what Hemera was doing, and what the driver said about it.
+   *
+   * An Effect error carries fields and no message, and the fields are what would cross the port
+   * as JSON. What a reader can do something with is the sentence, so the sentence is what a
+   * refusal of this kind carries.
+   */
+  override get message(): string {
+    return `The data folder refused while ${this.doing}: ${String(this.cause)}`
+  }
+}
 
 /** What a query is written against: the schema of the data folder, relations and all. */
 export type EngineDatabase = EffectSQLiteNodeDatabase<typeof relations>

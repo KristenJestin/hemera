@@ -31,7 +31,12 @@ export const clockLayer = Layer.succeed(Clock, { now: Effect.sync(() => Date.now
 /** Something about a Session's agent that the pool refuses to do. */
 export class UnknownHeldAgentError extends Data.TaggedError('UnknownHeldAgentError')<{
   readonly sessionId: string
-}> {}
+}> {
+  /** A sentence, because a tag and a field are what a refusal crosses the port as otherwise. */
+  override get message(): string {
+    return 'No agent is running for this Session.'
+  }
+}
 
 /** One live agent, as the pool knows it. */
 interface Entry {

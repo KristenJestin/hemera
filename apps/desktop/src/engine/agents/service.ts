@@ -33,7 +33,12 @@ import { AgentRegistry, AgentUpdater } from './installer.ts'
  */
 export class AgentUpdateRefusedError extends Data.TaggedError('AgentUpdateRefusedError')<{
   readonly reason: string
-}> {}
+}> {
+  /** The reason itself: it was written for whoever pressed the button, and it is the message. */
+  override get message(): string {
+    return this.reason
+  }
+}
 
 export interface AgentsService {
   /** The three agents as this machine answers for them, with nothing read over the network. */

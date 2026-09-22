@@ -121,7 +121,18 @@ export interface ResolvedAgent {
 /** Raised when a Session is asked for an agent this machine does not have. */
 export class AgentNotInstalledError extends Data.TaggedError('AgentNotInstalledError')<{
   readonly id: AgentProvider
-}> {}
+}> {
+  /**
+   * What the window is told, in the agent's own name.
+   *
+   * A tagged error carries a field and no message, and a refusal without one crosses the port as
+   * its own JSON. The agent is named as its documentation names it, never the package Hemera
+   * spawns on its behalf (D5-21).
+   */
+  override get message(): string {
+    return `${ADAPTERS[this.id].label} is not installed on this machine.`
+  }
+}
 
 /**
  * What discovery asks of the machine: where a command is, what it answers, and what the reader's
