@@ -12,9 +12,9 @@ import { IconBrandClaude, IconBrandOpenai, IconBrandOpencode } from '../icons.ts
  *
  * An agent the catalogue has no mark for is written as its own initials rather than handed
  * another agent's mark or a generic robot: a mark that means "some agent" says less than two
- * letters that mean "this one". Claude Code is one of those, on purpose and not for want of
- * looking — Anthropic's mark may not be redistributed without its written permission, and
- * `packages/ui/LICENSES.md` says so in full.
+ * letters that mean "this one". Where a mark came from and what allows it to be drawn here is
+ * written in `packages/ui/LICENSES.md`, one section per mark: the marks vendored in `icons.ts`
+ * are redistributable artwork used to name the agent a control chooses, and nothing more.
  *
  * Nothing is fetched. A mark that had to leave the machine to be drawn would be a request made
  * to paint a button, and a window that opens offline would open with holes in it.
