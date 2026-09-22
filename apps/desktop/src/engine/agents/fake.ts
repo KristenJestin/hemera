@@ -212,6 +212,13 @@ export interface FakeAnswers {
   readonly cancels: number
   /** Every option it was put on, as , in the order it was told. */
   readonly choices: string[]
+  /**
+   * What the client advertised of itself at `initialize`, as the JSON it sent.
+   *
+   * Kept whole rather than read into fields: an extension a client advertises is a namespace
+   * this peer knows nothing about, and a fake that parsed it would be a second reader of it.
+   */
+  readonly advertised: string[]
 }
 
 /**
@@ -228,6 +235,7 @@ interface FakeTally {
   resumes: number
   cancels: number
   choices: string[]
+  advertised: string[]
 }
 
 /** The peer, the script it follows, and the two pipes a client talks to it through. */
@@ -365,6 +373,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     resumes: 0,
     cancels: 0,
     choices: [],
+    advertised: [],
   }
 
   let sessionId = script.nativeSessionId ?? 'native-session'
@@ -403,20 +412,25 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   }
 
   const agent: AcpAgent = {
-    initialize: () => ({
-      protocolVersion: PROTOCOL_VERSION,
-      agentCapabilities: {
-        loadSession: script.continues === true,
-        // Advertised unless the script says otherwise, and whether the answer is an error is the
-        // script's: the fallback a refused resume forces is a path Hemera has to walk, and a
-        // capability it never sees is a path no test can reach. `advertisesResume: false` is that
-        // last path — an agent that can only be loaded, which is what the load-with-dedup step of
-        // D5-07 is for.
-        sessionCapabilities: script.advertisesResume === false ? {} : { resume: {} },
-      },
-      authMethods: [...(script.authMethods ?? [])],
-      agentInfo: { name: 'Fake agent', version: '1.0.0' },
-    }),
+    initialize: (request) => {
+      // What the client said about itself, kept as it arrived: this is how a suite proves that
+      // an extension Hemera advertises really reached the agent that reads it.
+      answers.advertised.push(JSON.stringify(request.clientCapabilities))
+      return {
+        protocolVersion: PROTOCOL_VERSION,
+        agentCapabilities: {
+          loadSession: script.continues === true,
+          // Advertised unless the script says otherwise, and whether the answer is an error is the
+          // script's: the fallback a refused resume forces is a path Hemera has to walk, and a
+          // capability it never sees is a path no test can reach. `advertisesResume: false` is that
+          // last path — an agent that can only be loaded, which is what the load-with-dedup step of
+          // D5-07 is for.
+          sessionCapabilities: script.advertisesResume === false ? {} : { resume: {} },
+        },
+        authMethods: [...(script.authMethods ?? [])],
+        agentInfo: { name: 'Fake agent', version: '1.0.0' },
+      }
+    },
     newSession: () => {
       const opened: NewSessionResponse = { sessionId }
       // Left out when the script named none, for the reason a tool call leaves out what it does

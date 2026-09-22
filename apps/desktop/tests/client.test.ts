@@ -25,6 +25,9 @@ import { type FakeBehaviour, fakeAgent } from './fake-agent.ts'
 /** The answer given to every question, unless a suite asks for another one. */
 const ALLOWED: PermissionAnswer = { optionId: 'allow-once' }
 
+/** The one capability of the AIR extension Hemera advertises, spelled as the adapters read it. */
+const RECOMMENDED = 'recommendedValue'
+
 /** A connection to a scripted agent, and everything that was said to it or by it. */
 async function opened(
   behaviour: FakeBehaviour,
@@ -141,6 +144,145 @@ describe('Ce que l’agent dit de ses propres valeurs', () => {
 
     const values = connection.options()[0]?.values ?? []
     expect(values.every((value) => value.recommended === undefined)).toBe(true)
+  })
+})
+
+describe('Le « Default » d’un agent est le sien ou n’est pas', () => {
+  test('the client asks the agent to resolve its own default', async () => {
+    const { fake } = await opened({})
+    // The AIR extension of ACP, advertised at `initialize`: it is what the Claude adapter reads
+    // as `useRecommendedValue`, and what makes it leave its `Default` rows out altogether.
+    expect(fake.answers.advertised).toHaveLength(1)
+    expect(fake.answers.advertised[0]).toContain(
+      JSON.stringify({ jetbrains: { air: { version: 1, capabilities: [RECOMMENDED] } } }).slice(
+        1,
+        -1,
+      ),
+    )
+  })
+
+  test('Default disappears when the agent names the level it stands for', async () => {
+    // What an effort looks like when the agent says which level its `Default` is: the level is
+    // named in `_meta`, and the entry itself is then a second way of saying the same thing.
+    const effort = await opened({
+      configOptions: [
+        {
+          id: 'effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+          _meta: { jetbrains: { air: { version: 1, recommendedValue: 'medium' } } },
+        },
+      ],
+    })
+    await Effect.runPromise(effort.connection.open('/tmp/atlas'))
+
+    const level = effort.connection.options()[0]
+    expect(level?.values.map((value) => value.id)).toEqual(['low', 'medium', 'high'])
+    // And the Session is put on the level it stood for rather than left on a value that is gone.
+    expect(level?.value).toBe('medium')
+    expect(level?.values.find((value) => value.id === 'medium')?.recommended).toBe(true)
+
+    // A model says it the other way: the name of the model it resolved to, in its description.
+    const model = await opened({
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default', description: 'Opus 4.5 · 1M context' },
+            { value: 'opus-4-5', name: 'Opus 4.5' },
+            { value: 'opus-4', name: 'Opus 4' },
+          ],
+        },
+      ],
+    })
+    await Effect.runPromise(model.connection.open('/tmp/atlas'))
+
+    const models = model.connection.options()[0]
+    // `Opus 4.5` and not `Opus 4`: the longer name the sentence spells out is the one it names.
+    expect(models?.values.map((value) => value.id)).toEqual(['opus-4-5', 'opus-4'])
+    expect(models?.value).toBe('opus-4-5')
+    expect(models?.values[0]?.recommended).toBe(true)
+  })
+
+  test('Default stays when the agent does not say', async () => {
+    const { connection } = await opened({
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'opus-4-5', name: 'Opus 4.5' },
+          ],
+        },
+      ],
+    })
+    await Effect.runPromise(connection.open('/tmp/atlas'))
+
+    const option = connection.options()[0]
+    // No meta, no sentence: the entry stays at the head and nothing is guessed for it.
+    expect(option?.values.map((value) => value.id)).toEqual(['default', 'opus-4-5'])
+    expect(option?.value).toBe('default')
+    expect(option?.values.every((value) => value.recommended === undefined)).toBe(true)
+  })
+
+  test('Default is never a second value beside the one it names', async () => {
+    // Said twice over — in the meta and in the sentence — and said about a list that is offered
+    // again after every choice, which is the path a Session really walks.
+    const { connection } = await opened({
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default', description: 'Opus 4.5' },
+            { value: 'opus-4-5', name: 'Opus 4.5' },
+          ],
+          _meta: { jetbrains: { air: { version: 1, recommendedValue: 'opus-4-5' } } },
+        },
+      ],
+      onChoice: () => [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default', description: 'Opus 4.5' },
+            { value: 'opus-4-5', name: 'Opus 4.5' },
+          ],
+        },
+      ],
+    })
+    await Effect.runPromise(connection.open('/tmp/atlas'))
+    const after = await Effect.runPromise(connection.setOption('model', 'opus-4-5'))
+
+    for (const option of [connection.options()[0], after[0]]) {
+      const named = option?.values.some((value) => value.recommended === true) ?? false
+      const stands = option?.values.some((value) => value.id === 'default') ?? false
+      // One or the other, never the two: a list holding both offers the same thing twice.
+      expect(named && stands).toBe(false)
+      expect(option?.values.map((value) => value.id)).toEqual(['opus-4-5'])
+    }
   })
 })
 

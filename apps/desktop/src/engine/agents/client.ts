@@ -470,6 +470,30 @@ function recommendedOf(meta: SessionConfigOption['_meta']): string | null {
 /** The version of that extension the adapters write, and the one this file agrees to read. */
 const AIR_EXTENSION_VERSION = 1
 
+/** The capability of that extension Hemera draws: a value the agent says it recommends. */
+const AIR_RECOMMENDED_VALUE = 'recommendedValue'
+
+/**
+ * What Hemera says about itself at `initialize`, beside the protocol's own capabilities.
+ *
+ * Advertising this is what asks an agent to resolve its own `Default` rather than announce one
+ * (decision of 22 September 2026). It is read at `initialize` and not at `session/new`: the
+ * adapters decide how to present an option from the capabilities the client sent when the
+ * connection opened, and every session of that connection is announced the same way after it.
+ *
+ * On the Claude adapter it is exactly the `useRecommendedValue` presentation flag: the `Default`
+ * rows of the effort and of the model are left out of the announcement, the resolved model and
+ * the recommended effort are what the session is on, and the value each of them stands for
+ * arrives named in `_meta`. Codex names a recommendation whether or not this is sent, and
+ * announces no `Default` either way. An agent that has never heard of the extension ignores an
+ * unknown `_meta` key, which is what the protocol reserves it for.
+ */
+const CLIENT_META = {
+  jetbrains: {
+    air: { version: AIR_EXTENSION_VERSION, capabilities: [AIR_RECOMMENDED_VALUE] },
+  },
+}
+
 /** The one shape of `_meta` this file knows how to read, and the whole of what it takes from it. */
 const airRecommendation = z.object({
   jetbrains: z.object({
@@ -477,22 +501,102 @@ const airRecommendation = z.object({
   }),
 })
 
+/** The value an agent announces as its own stand-in, whose meaning it may or may not give. */
+const DEFAULT_VALUE = 'default'
+
+/**
+ * The value a `Default` entry stands for, where the agent said which one it is.
+ *
+ * Two ways of saying it, and neither of them is a guess. The agent may name a recommended value
+ * in its `_meta`, which is the one it falls back to; or it may write the name of that value in
+ * `Default`'s own description — "Opus 4.5 · 1M context", which is the resolved model spelled
+ * out. A value whose name is written there is that value; a longer name wins over a shorter one
+ * it contains, so `Opus 4.5` is not read as `Opus 4`.
+ */
+function namedByDefault(values: readonly AgentOptionValue[]): AgentOptionValue | null {
+  const others = values.filter((value) => value.id !== DEFAULT_VALUE)
+  const recommended = others.find((value) => value.recommended === true)
+  if (recommended !== undefined) return recommended
+
+  const said = values.find((value) => value.id === DEFAULT_VALUE)?.description?.trim() ?? ''
+  if (said === '') return null
+  const spelled = said.toLowerCase()
+  const exact = others.find(
+    (value) => value.name.toLowerCase() === spelled || value.id.toLowerCase() === spelled,
+  )
+  if (exact !== undefined) return exact
+  const written = others.filter((value) => spelled.includes(value.name.toLowerCase()))
+  return written.reduce<AgentOptionValue | null>(
+    (longest, value) =>
+      longest === null || value.name.length > longest.name.length ? value : longest,
+    null,
+  )
+}
+
+/**
+ * The `Default` entry, resolved into the value it stands for — or left exactly as it came.
+ *
+ * The maintainer's rule of 22 September 2026, and the whole of it: when the agent says which
+ * value `Default` stands for, the entry disappears and the value it names is marked as the
+ * recommended one and becomes what the Session is on; when the agent does not say, `Default`
+ * stays as its own entry and nothing is guessed. Never both — a list holding a `Default` beside
+ * the value it names offers the same thing twice under two names.
+ *
+ * This is the fallback and not the first line: the client advertises that it draws a
+ * recommendation, so the Claude adapter stops announcing the entry at all. An agent that
+ * announces one anyway is one this has to answer for.
+ */
+function resolvedDefault(values: readonly AgentOptionValue[], current: string) {
+  if (!values.some((value) => value.id === DEFAULT_VALUE)) return { values, current }
+  const named = namedByDefault(values)
+  if (named === null) return { values, current }
+
+  const kept: AgentOptionValue[] = []
+  for (const value of values) {
+    if (value.id === DEFAULT_VALUE) continue
+    if (value.id !== named.id) kept.push(value)
+    else {
+      kept.push({
+        id: value.id,
+        name: value.name,
+        description: value.description,
+        recommended: true,
+      })
+    }
+  }
+  return { values: kept, current: current === DEFAULT_VALUE ? named.id : current }
+}
+
 /** What an agent lets a Session choose, in Hemera's words. */
 function optionsOf(
   announced: readonly SessionConfigOption[] | null | undefined,
 ): readonly AgentOption[] {
-  return (announced ?? []).map((option) => ({
-    id: option.id,
-    name: option.name,
-    category: option.category ?? null,
-    kind: option.type === 'boolean' ? ('boolean' as const) : ('select' as const),
-    value: option.type === 'boolean' ? String(option.currentValue) : option.currentValue,
-    values:
-      option.type === 'boolean'
-        ? []
-        : // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
-          choicesOf(option.options, recommendedOf(option._meta)),
-  }))
+  return (announced ?? []).map((option) => {
+    const category = option.category ?? null
+    if (option.type === 'boolean') {
+      return {
+        id: option.id,
+        name: option.name,
+        category,
+        kind: 'boolean' as const,
+        value: String(option.currentValue),
+        values: [],
+      }
+    }
+    const resolved = resolvedDefault(
+      // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+      choicesOf(option.options, recommendedOf(option._meta)),
+      option.currentValue,
+    )
+    return {
+      id: option.id,
+      name: option.name,
+      category,
+      kind: 'select' as const,
+      value: resolved.current,
+      values: resolved.values,
+    }
+  })
 }
 
 /** What a finished turn used, or null when the agent accounted for nothing. */
@@ -568,9 +672,10 @@ export function connect(
       try: () =>
         connection.initialize({
           protocolVersion: PROTOCOL_VERSION,
-          // Hemera advertises no capability of its own in this lot: the agent does its own
-          // reading, writing and running, and none of it is routed back through this window.
-          clientCapabilities: {},
+          // Hemera advertises no capability of the protocol proper in this lot: the agent does
+          // its own reading, writing and running, and none of it is routed back through this
+          // window. What it does advertise is the one extension it draws — see CLIENT_META.
+          clientCapabilities: { _meta: CLIENT_META },
           clientInfo: { name: 'Hemera', version: '0.0.0' },
         }),
       catch: (cause) => new AgentProtocolError({ what: 'initialize', cause: String(cause) }),
