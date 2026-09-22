@@ -27,8 +27,10 @@ import { EffortSlider } from './effort-slider.tsx'
  * Home and End walk it without a pointer at all. It takes the focus once and says where it
  * stands in the agent's own word through `aria-valuetext`.
  *
- * The level the agent advises is a thin accent rule laid across the track at its notch, never a
- * value of its own, and it is where the scale opens. An agent that announced a `Default` nobody
+ * The level the model puts a Session on by itself — its own default, handed over as
+ * `defaultId` — is a thin accent rule laid across the track at its notch, never a value of its
+ * own, and it is where the scale opens. What the agent *advises* draws nothing: Claude advises
+ * `Medium` for every model, which says nothing about any of them. An agent that announced a `Default` nobody
  * could resolve gets no notch for it at all: the real levels are the scale, and the thumb waits
  * at the foot of it with `Default` written above until a level is chosen.
  */
@@ -49,8 +51,8 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** What a level the agent advises is written as, wherever it is written in words. */
-const ADVISED = /recommended/
+/** What the model's default is written as beside its level's name. */
+const DEFAULTED = /· default/
 
 /** What the agent said its highest level is, which two stories read. */
 const EVERYTHING = 'Everything it has, for as long as it takes'
@@ -83,7 +85,7 @@ function notchAt(scale: HTMLElement, id: string): number {
 
 /**
  * The three things drawn at one level stand at one height, to the pixel: the thumb, the notch's
- * own dot (or the rule, where the agent advises that level) and the level's mark.
+ * own dot (or the rule, where that level is the model's default) and the level's mark.
  */
 function standTogether(scale: HTMLElement, id: string): void {
   const thumb = middleOf(within(scale).getByTestId('effort-thumb'))
@@ -103,10 +105,10 @@ async function hand(track: HTMLElement, what: string, clientY: number): Promise<
 /**
  * Every prop as a control, and the answer wired to a page that keeps it.
  *
- * Claude Code's five levels, with the one it advises ruled across the track: press it, drag it,
- * walk it with the keys, and hand it another agent's scale from the controls.
+ * Claude Code's five levels on Opus, with the model's default ruled across the track: press it,
+ * drag it, walk it with the keys, and hand it another agent's scale from the controls.
  */
-export const Playground: Story = {}
+export const Playground: Story = { args: { defaultId: 'xhigh' } }
 
 /**
  * The thumb is dragged: it follows the hand between the notches, and drops onto one when it is
@@ -212,7 +214,7 @@ export const ClickOnTrack: Story = {
     await hand(track, 'pointerdown', between)
     await hand(track, 'pointerup', between)
     await expect(args.onEffortChange).toHaveBeenLastCalledWith('medium')
-    await expect(scale).toHaveAttribute('aria-valuetext', 'Medium, recommended')
+    await expect(scale).toHaveAttribute('aria-valuetext', 'Medium')
 
     // And the press hands the control the focus, so what a pointer began the keys can finish.
     await expect(scale).toHaveFocus()
@@ -268,26 +270,28 @@ export const Keyboard: Story = {
 }
 
 /**
- * **The level the agent advises, and the `Default` nobody could resolve** — the two halves of
- * the rule of 22 September 2026, side by side, and never the same half twice.
+ * **The model's own default, and the `Default` nobody could resolve**, side by side.
  *
- * On the left the agent said which level its default stands for: there is no `Default` entry at
- * all, a thin accent rule is laid across the track at `Medium`, the word `recommended` stands
- * beside that level's name while it is the one showing, and the scale opens on it although
- * nothing has been set — because that is what the next turn would run at.
+ * On the left the scale is on Opus, which puts a Session on `Xhigh` by itself: there is no
+ * `Default` entry at all, a thin accent rule is laid across the track at `Xhigh`, the word
+ * `default` stands beside that level's name while it is the one showing, and the scale opens on
+ * it although nothing has been set — because that is what the next turn would run at. `Medium`
+ * is the level the agent *advises*, for every model alike, and it draws nothing (probe of
+ * 22 September 2026).
  *
  * On the right the agent said nothing, and nothing is invented: `Default` is not drawn as a
  * notch, because a scale cannot place a level whose meaning nobody knows. The five real levels
  * are the scale, the thumb waits at the foot of the track, and the word above it reads
  * `Default` with the agent's own sentence under it until a level is chosen.
  */
-export const Recommended: Story = {
+export const DefaultOfTheModel: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <div className="flex items-start gap-8">
       <SetEffort
         efforts={CLAUDE_EFFORTS}
         effort={null}
+        defaultId="xhigh"
         onEffortChange={fn()}
         render={(props) => <EffortSlider {...props} />}
       />
@@ -303,21 +307,25 @@ export const Recommended: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const [advised, unresolved] = canvas.getAllByRole('slider', { name: 'Effort' })
+    const [defaulted, unresolved] = canvas.getAllByRole('slider', { name: 'Effort' })
 
-    // The rule is drawn once, on the level the agent named, and nowhere on the scale that has
-    // no recommendation: never both halves of the rule at once.
-    await expect(within(advised!).getAllByTestId('effort-rule')).toHaveLength(1)
-    await expect(within(advised!).getByText(ADVISED)).toBeVisible()
+    // The rule is drawn once, on the model's default and not on the level advised, and nowhere
+    // on the scale whose default nobody knows.
+    await expect(within(defaulted!).getAllByTestId('effort-rule')).toHaveLength(1)
+    await expect(
+      defaulted!.querySelector('[data-step="xhigh"] [data-testid="effort-rule"]'),
+    ).not.toBeNull()
+    await expect(within(defaulted!).getByText(DEFAULTED)).toBeVisible()
+    await expect(within(defaulted!).queryByText(/recommended/)).toBeNull()
     await expect(within(unresolved!).queryByTestId('effort-rule')).toBeNull()
-    await expect(within(unresolved!).queryByText(ADVISED)).toBeNull()
+    await expect(within(unresolved!).queryByText(DEFAULTED)).toBeNull()
 
-    // Nothing set, and the scale opens on the level the agent advises rather than at the foot.
-    await expect(advised).toHaveAttribute('aria-valuetext', 'Medium, recommended')
-    await expect(advised).toHaveAttribute('aria-valuenow', '1')
-    const thumb = within(advised!).getByTestId('effort-thumb')
+    // Nothing set, and the scale opens on the model's default rather than at the foot.
+    await expect(defaulted).toHaveAttribute('aria-valuetext', 'Xhigh, default')
+    await expect(defaulted).toHaveAttribute('aria-valuenow', '3')
+    const thumb = within(defaulted!).getByTestId('effort-thumb')
     await waitFor(() => {
-      expect(Math.abs(middleOf(thumb) - notchAt(advised!, 'medium'))).toBeLessThan(1)
+      expect(Math.abs(middleOf(thumb) - notchAt(defaulted!, 'xhigh'))).toBeLessThan(1)
     })
 
     // And the unresolved `Default`: five notches, none of them its own, the thumb at the foot

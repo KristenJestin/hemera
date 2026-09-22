@@ -131,6 +131,7 @@ export function AgentModelMenu({
   efforts,
   effort,
   onEffortChange,
+  effortDefault = null,
   modes,
   mode,
   onModeChange,
@@ -268,6 +269,7 @@ export function AgentModelMenu({
                       efforts={efforts}
                       effort={effort}
                       onEffortChange={onEffortChange}
+                      defaultId={effortDefault}
                     />
                     <ModeList modes={modes} mode={mode} onModeChange={onModeChange} />
                   </div>

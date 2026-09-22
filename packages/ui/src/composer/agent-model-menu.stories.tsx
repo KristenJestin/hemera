@@ -11,7 +11,6 @@ import {
   CLAUDE_MODES,
   Controlled,
   cutShort,
-  OPUS_EFFORTS,
   panelBox,
   sameBox,
 } from './agent-model-menu-fixtures.tsx'
@@ -363,25 +362,26 @@ export const Modes: Story = {
 }
 
 /**
- * **What the agent itself advises**, in the list and on the scale, which is what its `Default`
- * entries became once it said what they stood for (decision of 22 September 2026).
+ * **The model's own default**, on the scale, beside what the agent advises in the list.
  *
  * There is no `Default` anywhere here. The agent named the model its default resolves to, so
- * that row is gone and `Opus 4.5` carries one quiet word at the end of its line instead; it
- * named the level too, so the scale has no notch for it and a thin accent rule is laid across
- * the track at `Medium`, which is where the slider opens. A list or a scale holding both would
- * be offering the same thing twice under two names.
+ * that row is gone and `Opus 4.5` carries one quiet word at the end of its line instead. The
+ * scale is another matter: the level the agent *advises* is `Medium` for every model, a generic
+ * word the scale draws nothing for, while the level the model puts a Session on by itself is its
+ * own — `High` for Fable — and that is what the thin accent rule across the track marks, where
+ * the slider opens, and what `default` is said beside (probe of 22 September 2026).
  */
-export const Recommended: Story = {
+export const DefaultOfTheModel: Story = {
   args: {
     agent: 'claude-code',
+    model: 'fable',
     models: ADVISED_MODELS,
     efforts: CLAUDE_EFFORTS,
     modes: CLAUDE_MODES,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /Claude Code/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /Fable/ }))
 
     const list = await screen.findByRole('listbox', { name: 'Models of this agent' })
     // Never both: the row the agent resolved is gone, and only the model it named is marked.
@@ -393,58 +393,91 @@ export const Recommended: Story = {
     })
     await expect(within(list).getAllByText('recommended')).toHaveLength(1)
 
-    // And the same thing said about the scale: one rule across the track, at the level the
-    // agent named, which is the level the slider opens on although nothing has been set.
+    // One rule across the track, at the model's own default rather than at the level advised,
+    // which is the level the slider opens on although nothing has been set.
     const effort = screen.getByRole('slider', { name: 'Effort' })
     await expect(within(effort).getAllByTestId('effort-rule')).toHaveLength(1)
-    await expect(effort).toHaveAttribute('aria-valuetext', 'Medium, recommended')
-    await expect(within(effort).queryByText('Default')).toBeNull()
+    await expect(ruleOf(effort)).toBe('high')
+    await expect(effort).toHaveAttribute('aria-valuetext', 'High, default')
+    // "High · default" over the track: the word beside the level's own name.
+    await expect(within(effort).getByText('· default').parentElement).toHaveTextContent(
+      'High · default',
+    )
+    await expect(within(effort).getByText('· default')).toBeVisible()
+    await expect(within(effort).queryByText(/recommended/)).toBeNull()
   },
 }
 
 /**
- * **The rule follows the model**: the level an agent advises is said per value and per model,
- * so a model change is a new announcement, and the rule moves to the level the new model
- * advises — or leaves the scale when the new one advises none (the trial of 22 September 2026).
+ * **The rule follows the model**: each model puts a Session on a level of its own, so a model
+ * change moves the effort onto the new model's default and the rule with it — or takes the
+ * scale away with a model that announces no effort at all (probe of 22 September 2026).
  *
- * The page answers like the engine: `Sonnet 4.5` advises `Medium`, `Opus 4.5` advises
- * `Xhigh`, and `Sonnet 3.7` announces three levels and advises nothing. And the thumb is on
- * its notch the moment the panel opens, which is the other half of that trial.
+ * The page answers like the engine, with the values the real adapter gave: `Fable` lands on
+ * `High`, `Opus 4.5` on `Xhigh`, and `Haiku 4.5` announces no effort. Once an effort is chosen
+ * the agent keeps it across models, so the rule never goes where the reader clicked: a model
+ * seen before keeps the default it showed, and one first seen after shows none. And the thumb
+ * is on its notch the moment the panel opens, which is the trial of 22 September 2026.
  */
 export const RuleFollowsTheModel: Story = {
-  args: { agent: 'claude-code', model: 'sonnet-4-5', effort: 'xhigh' },
+  args: { agent: 'claude-code', model: 'fable', effort: 'high' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /Sonnet 4\.5 · Xhigh/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /Fable · High/ }))
 
-    const effort = await screen.findByRole('slider', { name: 'Effort' })
     const list = await screen.findByRole('listbox', { name: 'Models of this agent' })
-    await expect(ruleOf(effort)).toBe('medium')
+    const effort = await screen.findByRole('slider', { name: 'Effort' })
+    await expect(ruleOf(effort)).toBe('high')
+    await expect(effort).toHaveAttribute('aria-valuetext', 'High, default')
     // On its notch as soon as it is drawn, in a panel that has only just been laid out.
     const thumb = within(effort).getByTestId('effort-thumb').getBoundingClientRect()
-    const notch = effort.querySelector('[data-step="xhigh"]')!.getBoundingClientRect()
+    const notch = effort.querySelector('[data-step="high"]')!.getBoundingClientRect()
     await expect(
       Math.abs(thumb.top + thumb.height / 2 - (notch.top + notch.height / 2)),
     ).toBeLessThan(1)
 
+    // Opus: the agent lands on Xhigh by itself, and the rule is there with it.
     await userEvent.click(within(list).getByRole('option', { name: /Opus 4\.5/ }))
     await waitFor(() => {
-      expect(ruleOf(effort)).toBe(OPUS_EFFORTS.find((one) => one.recommended === true)?.id)
+      expect(ruleOf(effort)).toBe('xhigh')
     })
     await expect(within(effort).getAllByTestId('effort-rule')).toHaveLength(1)
-    await expect(effort).toHaveAttribute('aria-valuetext', 'Xhigh, recommended')
+    await expect(effort).toHaveAttribute('aria-valuetext', 'Xhigh, default')
 
-    // A model that advises nothing: the rule leaves the scale rather than staying where it was.
-    await userEvent.click(within(list).getByRole('option', { name: /Sonnet 3\.7/ }))
+    // Haiku announces no effort: no scale at all, rather than one left standing.
+    await userEvent.click(within(list).getByRole('option', { name: /Haiku 4\.5/ }))
     await waitFor(() => {
-      expect(ruleOf(effort)).toBeNull()
+      expect(screen.queryByRole('slider', { name: 'Effort' })).toBeNull()
     })
 
-    // And back: the rule is the new model's, not a memory of the first.
+    // And back to Fable: the rule is the new model's, not a memory of the one before.
+    await userEvent.click(within(list).getByRole('option', { name: /Fable/ }))
+    const again = await screen.findByRole('slider', { name: 'Effort' })
+    await waitFor(() => {
+      expect(ruleOf(again)).toBe('high')
+    })
+
+    // Low is chosen: the thumb goes there and the rule stays on Fable's own default.
+    again.focus()
+    await userEvent.keyboard('{Home}')
+    await waitFor(() => {
+      expect(again).toHaveAttribute('aria-valuetext', 'Low')
+    })
+    await expect(ruleOf(again)).toBe('high')
+
+    // Opus again, seen before the choice: the effort stays Low, the rule is Opus's Xhigh.
+    await userEvent.click(within(list).getByRole('option', { name: /Opus 4\.5/ }))
+    await waitFor(() => {
+      expect(ruleOf(again)).toBe('xhigh')
+    })
+    await expect(again).toHaveAttribute('aria-valuetext', 'Low')
+
+    // Sonnet 4.5, first seen after it: the agent is on the pin, and no rule claims otherwise.
     await userEvent.click(within(list).getByRole('option', { name: /Sonnet 4\.5/ }))
     await waitFor(() => {
-      expect(ruleOf(effort)).toBe('medium')
+      expect(ruleOf(again)).toBeNull()
     })
+    await expect(again).toHaveAttribute('aria-valuetext', 'Low')
   },
 }
 
@@ -502,13 +535,17 @@ export const Walkthrough: Story = {
     await waitFor(() => {
       expect(document.activeElement).toBe(field)
     })
-    await userEvent.type(field, 'haiku')
+    await userEvent.type(field, 'fable')
     await userEvent.keyboard('{Enter}')
-    await expect(args.onModelChange).toHaveBeenCalledWith('haiku-4-5')
+    await expect(args.onModelChange).toHaveBeenCalledWith('fable')
     await expect(document.activeElement).toBe(field)
 
-    // The effort, as the agent's own scale, walked to the top of it.
+    // The effort, as the agent's own scale: on Fable's own default once the model is set, as
+    // the real agent lands it, and then walked to the top of it.
     const effort = await screen.findByRole('slider', { name: 'Effort' })
+    await waitFor(() => {
+      expect(effort).toHaveAttribute('aria-valuetext', 'High, default')
+    })
     effort.focus()
     await userEvent.keyboard('{End}')
     await expect(args.onEffortChange).toHaveBeenCalledWith('max')
@@ -542,7 +579,7 @@ export const Walkthrough: Story = {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull()
     })
-    await expect(canvas.getByRole('button', { name: /Haiku 4\.5 · Max · Plan only/ })).toHaveFocus()
+    await expect(canvas.getByRole('button', { name: /Fable · Max · Plan only/ })).toHaveFocus()
   },
 }
 

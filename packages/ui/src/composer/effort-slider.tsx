@@ -5,7 +5,7 @@ import { useRef, useState } from 'react'
 
 import { instant, morph, useTransition } from '../motion.ts'
 import {
-  ADVISED_BESIDE,
+  DEFAULT_BESIDE,
   type EffortChoice,
   type EffortProps,
   levelSaid,
@@ -43,13 +43,16 @@ import {
  * ends. The notches are marks and answer the pointer through the scale itself, because a notch
  * that took the focus would be a second control inside a control that already has a role.
  *
- * **What the agent advises is a rule across the track**, at that level's notch, and never a
- * notch of its own (decision of 22 September 2026). A thin accent line laid across the scale is
- * read the way the red line on a dial is read — this is where it is meant to sit — without
- * offering a value of its own; the word `recommended` is said beside the level's own name while
+ * **The model's own default is a rule across the track**, at that level's notch, and never a
+ * notch of its own (decision of 22 September 2026). It is the level the model puts a Session on
+ * by itself — `Xhigh` for Opus, `High` for Fable — handed over as `defaultId`, and it moves when
+ * the model does; what the agent *advises* (`recommended`) is one generic level for every model
+ * and draws nothing here (probe of 22 September 2026). A thin accent line laid across the scale
+ * is read the way the red line on a dial is read — this is where it sits by itself — without
+ * offering a value of its own; the word `default` is said beside the level's own name while
  * that level is the one standing, and in `aria-valuetext` for whoever cannot see the line. It
- * is also where the scale opens: handed nothing at all, it rests on the level the agent
- * advises, because that is what the next turn would run at.
+ * is also where the scale opens: handed nothing at all, it rests on the model's default,
+ * because that is what the next turn would run at.
  *
  * **`Default` is not a notch.** An agent that never said which level its `Default` stands for
  * leaves it announced as a value like any other, and a scale cannot place a level whose meaning
@@ -112,10 +115,10 @@ const SAID = 'text-center text-xs text-balance text-muted-foreground'
 const UNSHOWN = 'invisible'
 
 /**
- * And the word beside a level's name when the agent advises it: quiet, because the name is what
- * is being set and this is a thing said about it.
+ * And the word beside a level's name when it is the model's default: quiet, because the name is
+ * what is being set and this is a thing said about it.
  */
-const ADVISED_WORD = 'text-muted-foreground'
+const DEFAULT_WORD = 'text-muted-foreground'
 
 /** The scale under the hand: the cursor says the thumb is being held rather than aimed at. */
 const HELD = 'cursor-grabbing'
@@ -193,7 +196,7 @@ const DOT = 'relative size-1 rounded-full bg-input'
 const DOT_DONE = 'bg-primary-foreground'
 
 /**
- * The level the agent advises: a rule drawn across the track at its notch.
+ * The level the model defaults to: a rule drawn across the track at its notch.
  *
  * Wider than the notch it replaces and than the track it crosses, so it reads as a line laid
  * over the scale rather than as a fat dot — which is the whole difference between a mark and a
@@ -361,6 +364,7 @@ export function EffortSlider({
   efforts,
   effort,
   onEffortChange,
+  defaultId = null,
   disabled,
 }: EffortProps): ReactNode {
   const frame = useRef<HTMLDivElement>(null)
@@ -383,13 +387,13 @@ export function EffortSlider({
   const here = levels.findIndex((one) => one.id === effort)
   /** The level whose word is over the track: what is set, `Default` included. */
   const shown: EffortChoice | undefined = efforts.find((one) => one.id === effort)
-  /** The level the agent advises, which is where the scale opens and where the rule is drawn. */
-  const advised = levels.findIndex((one) => one.recommended === true)
+  /** The model's default, which is where the scale opens and where the rule is drawn. */
+  const defaulted = levels.findIndex((one) => one.id === defaultId)
   /**
-   * Which notch the thumb rests on: the level that is set, the advised one while nothing is,
-   * and the foot of the track for an unresolved `Default` or an agent that advises nothing.
+   * Which notch the thumb rests on: the level that is set, the model's default while nothing
+   * is, and the foot of the track for an unresolved `Default` or a default nobody knows.
    */
-  const standing = here === -1 && shown === undefined ? advised : here
+  const standing = here === -1 && shown === undefined ? defaulted : here
   /** And what the scale reads as, which is the level that is set or the one it opened on. */
   const said: EffortChoice | undefined = shown ?? levels[standing]
   const marks = marksOf(levels.map((one) => one.label))
@@ -439,7 +443,7 @@ export function EffortSlider({
       aria-valuemin={0}
       aria-valuemax={last}
       aria-valuenow={standing === -1 ? 0 : standing}
-      aria-valuetext={levelSaid(said)}
+      aria-valuetext={levelSaid(said, defaultId)}
       aria-disabled={disabled === true ? true : undefined}
       tabIndex={disabled === true ? -1 : 0}
       className={FRAME}
@@ -459,12 +463,12 @@ export function EffortSlider({
         {efforts.map((one) => (
           <span key={one.id} className={cn(LAID, LEVEL, one.id !== said?.id && UNSHOWN)}>
             {one.label}
-            {/* The level the agent advises, said beside its name and quietly: it is what the
-                `Default` entry used to stand for, and never an entry of its own. */}
-            {one.recommended === true && <span className={ADVISED_WORD}>{ADVISED_BESIDE}</span>}
+            {/* The model's default, said beside its name and quietly: a thing said about the
+                level, never an entry of its own. */}
+            {one.id === defaultId && <span className={DEFAULT_WORD}>{DEFAULT_BESIDE}</span>}
           </span>
         ))}
-        {/* Nothing set and nothing advised: the control says what it is for, in the room the
+        {/* Nothing set and no default known: the control says what it is for, in the room the
             words leave. */}
         <span className={cn(LAID, LEVEL, said !== undefined && UNSHOWN)}>Effort</span>
       </span>
@@ -518,7 +522,7 @@ export function EffortSlider({
               {marks[index]}
             </span>
             <span data-step={one.id} className={CELL}>
-              {one.recommended === true ? (
+              {one.id === defaultId ? (
                 <span data-testid="effort-rule" className={RULE} />
               ) : (
                 <span className={cn(DOT, index <= standing && DOT_DONE)} />
