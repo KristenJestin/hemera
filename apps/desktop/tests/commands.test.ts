@@ -292,3 +292,40 @@ describe('A run is written in the Journal under whoever started it', () => {
     expect(byName('agent')?.author).toBe('mcp')
   })
 })
+
+describe('A stopped run ends once', () => {
+  it('ends stopped, with one event for its end, however the platform reports the death', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const started = yield* commands.run({
+          sessionId: session.sessionId,
+          projectId: session.projectId,
+          commandId: null,
+          name: 'server',
+          line: PUBLISHES_AN_ADDRESS,
+          kind: 'app',
+          cwd: root,
+          startedBy: 'user',
+        })
+        const ended = yield* commands.stop(session.sessionId, started.id)
+        // Anything the watcher would still write arrives now, not after the suite has read.
+        yield* Effect.sleep('200 millis')
+        const journal = yield* Journal
+        const read = yield* journal.read({ projectId: session.projectId })
+        return {
+          ended,
+          row: (yield* commands.recent(session.sessionId))[0],
+          ends: read.entries.filter(
+            (entry) => entry.type.startsWith('command.') && entry.type !== 'command.started',
+          ),
+        }
+      }),
+    )
+
+    expect(seen.ended.state).toBe('stopped')
+    expect(seen.row?.state).toBe('stopped')
+    expect(seen.ends.map((entry) => entry.type)).toEqual(['command.stopped'])
+  })
+})

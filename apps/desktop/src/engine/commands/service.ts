@@ -33,7 +33,7 @@ import {
   joinsRunningRun,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
-import { Context, Effect, Exit, Layer, Scope } from 'effect'
+import { Context, Deferred, Effect, Exit, Layer, Scope } from 'effect'
 
 import { ProcessSupervisor } from '../agents/supervisor.ts'
 import { Sessions } from '../sessions.ts'
@@ -184,6 +184,14 @@ interface Live {
   dropped: number
   endedAt: string | null
   stop: Effect.Effect<void>
+  /**
+   * Whether Hemera asked it to stop. The watcher reads it when the process ends, so a run that
+   * was stopped ends `stopped` however the platform reports the death — `taskkill` exits 1 —
+   * and the end is written once, by the watcher, never by the stop racing it.
+   */
+  stopping: boolean
+  /** Completed once the end of the run has been written: what a stop waits for. */
+  readonly ended: Deferred.Deferred<void>
 }
 
 /**
@@ -376,6 +384,21 @@ export const commandsLayer = Layer.effect(
         ),
       ).pipe(Effect.tap(() => writeEntry(id, one)))
 
+    /**
+     * Stops a run and waits for its end to be written.
+     *
+     * The stop does not write the end itself: it says it asked, and the watcher that sees the
+     * process die writes `stopped` once. A run that has already ended is left as it ended.
+     */
+    const stopRun = (record: Live) =>
+      Effect.gen(function* () {
+        if (record.state === 'running') {
+          record.stopping = true
+          yield* record.stop
+        }
+        yield* Deferred.await(record.ended)
+      })
+
     return {
       list: (projectId) =>
         database
@@ -542,6 +565,8 @@ export const commandsLayer = Layer.effect(
             dropped: 0,
             endedAt: null,
             stop: Effect.void,
+            stopping: false,
+            ended: Deferred.makeUnsafe<void>(),
           }
           live.set(id, record)
 
@@ -554,6 +579,7 @@ export const commandsLayer = Layer.effect(
             record.kept = `Hemera has nothing to run: the line of ${asked.name} is empty`
             record.endedAt = startedAt
             yield* writeRow(id, record, 'command.failed')
+            yield* Deferred.succeed(record.ended, undefined)
             return viewOf(id, record)
           }
 
@@ -566,6 +592,7 @@ export const commandsLayer = Layer.effect(
             record.kept = `the command could not be started: ${asked.line}`
             record.endedAt = new Date().toISOString()
             yield* writeRow(id, record, 'command.failed')
+            yield* Deferred.succeed(record.ended, undefined)
             return viewOf(id, record)
           }
 
@@ -590,25 +617,34 @@ export const commandsLayer = Layer.effect(
           process.onStderr(keep)
 
           // The death is watched in the engine's scope: a run is stopped by a quit as much as by
-          // a `stop`, and either way the row is rewritten with how it ended.
+          // a `stop`, and either way the row is rewritten with how it ended — here and only here,
+          // so a stop and an exit that race each other still make one end and one event.
           yield* watching(
             process.exited.pipe(
               Effect.flatMap((observation) =>
                 Effect.gen(function* () {
-                  record.state =
-                    observation.code === 0
+                  record.state = record.stopping
+                    ? 'stopped'
+                    : observation.code === 0
                       ? 'exited'
                       : observation.signal === null
                         ? 'failed'
                         : 'stopped'
                   record.exitCode = observation.code
                   record.endedAt = observation.when
-                  yield* writeRow(id, record, 'command.exited')
+                  yield* writeRow(
+                    id,
+                    record,
+                    record.stopping ? 'command.stopped' : 'command.exited',
+                  )
+                  yield* Deferred.succeed(record.ended, undefined)
                 }),
               ),
             ),
           )
 
+          // Asked to stop while it was starting: the stop found nothing to end, so it ends now.
+          if (record.stopping) yield* process.stop
           yield* writeRow(id, record, 'command.started')
           return viewOf(id, record)
         }),
@@ -636,10 +672,7 @@ export const commandsLayer = Layer.effect(
           if (record === undefined || record.sessionId !== sessionId) {
             return yield* Effect.fail(new UnknownRunError(runId))
           }
-          yield* record.stop
-          record.state = 'stopped'
-          record.endedAt = new Date().toISOString()
-          yield* writeRow(runId, record, 'command.stopped')
+          yield* stopRun(record)
           return viewOf(runId, record)
         }),
 
@@ -668,10 +701,7 @@ export const commandsLayer = Layer.effect(
         Effect.gen(function* () {
           for (const [id, record] of [...live.entries()]) {
             if (sessionId !== undefined && record.sessionId !== sessionId) continue
-            yield* record.stop
-            record.state = 'stopped'
-            record.endedAt = new Date().toISOString()
-            yield* writeRow(id, record, 'command.stopped')
+            yield* stopRun(record)
             live.delete(id)
           }
         }),
