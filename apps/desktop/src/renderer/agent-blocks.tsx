@@ -471,6 +471,9 @@ export function waitingOf(entries: readonly SessionEntry[]): SessionEntry | null
     if (entry === undefined) continue
     if (entry.kind === 'permission_decision') return null
     if (entry.kind === 'permission_request') {
+      // A question the engine closed — answered, stopped, or left by an agent that died — is not
+      // one the agent is waiting on, whatever follows it.
+      if (entry.state !== 'pending') return null
       for (let after = at + 1; after < entries.length; after += 1) {
         const later = entries[after]
         if (later === undefined || later.kind !== 'permission_decision') continue

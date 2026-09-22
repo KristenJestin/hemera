@@ -980,7 +980,9 @@ export function Application() {
           loaded={sessions.open === open.id && sessions.loaded}
           now={Date.now()}
           editing={naming === open.id}
-          refusal={sessions.refusal}
+          // A prompt, a Stop or a decision the engine refused is said here too: the composer does
+          // not wait for a turn, and a refusal nobody draws is a message that just goes unanswered.
+          refusal={sessions.refusal ?? agents.refusal}
           agent={agentOf(open.id)}
           agents={runsOn(open, agents.agents)}
           options={optionsOf(open.id)}
