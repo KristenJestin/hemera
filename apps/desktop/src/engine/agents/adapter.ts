@@ -107,19 +107,30 @@ export interface AgentAdapter {
  *
  * The two cases are the two kinds of agent Hemera supports, and they are written apart because
  * they are found in different places. `bundled` is an adapter that is a dependency of this
- * application: the package is in Hemera's own `node_modules`, its executable is resolved from
- * there and run by the Node this process is already running, and the reader never installs it,
- * never sees it and is never asked for it. `agent` is an agent that speaks the protocol itself:
- * the command is the reader's own, on the `PATH` they already have, with the subcommand that
- * starts it as an agent.
+ * application: the package is carried with it, its entry module is resolved from what the
+ * installation carries, it is forked as a Node script of its own, and the reader never installs
+ * it, never sees it and is never asked for it. `agent` is an agent that speaks the protocol
+ * itself: the command is the reader's own, on the `PATH` they already have, with the subcommand
+ * that starts it as an agent.
  */
 export type AcpProcess =
   | {
       readonly from: 'bundled'
       /** The published package of the adapter, as Hemera depends on it. */
       readonly package: string
-      /** What starts it as an ACP agent, after the executable of that package. */
+      /** What starts it as an ACP agent, after the entry module of that package. */
       readonly args: readonly string[]
+      /**
+       * The environment variable that tells the adapter which agent to run (D5-21).
+       *
+       * An adapter left to itself runs the agent it carries in an optional dependency of its own
+       * — a native binary of a few hundred megabytes per platform — and Hemera ships none of
+       * them: the agent is the one the reader installed and signed in, and this is the variable
+       * the adapter reads to be told where it is. `CLAUDE_CODE_EXECUTABLE` for Claude Code,
+       * `CODEX_PATH` for Codex; each is the adapter's own, read at its start, and each makes the
+       * platform binary unnecessary rather than merely unused.
+       */
+      readonly agentVariable: string
     }
   | {
       readonly from: 'agent'

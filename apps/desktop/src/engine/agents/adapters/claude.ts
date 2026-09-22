@@ -8,17 +8,16 @@ import { type AgentAdapter, versionIn } from '../adapter.ts'
  * The agent is `claude`: the command Claude Code's own documentation tells a reader to install
  * and to sign in with, and the only command the Agents page ever names. Claude Code speaks no
  * ACP itself, and what exposes it is `@agentclientprotocol/claude-agent-acp` — a dependency of
- * this application, resolved from Hemera's own `node_modules`, spawned by the supervisor, never
- * installed, never shown and never asked of the reader
- * (`docs/technical/acp-providers-2026-09.md` §2, D5-21).
+ * this application, carried with it, forked by the supervisor, never installed, never shown and
+ * never asked of the reader (`docs/technical/acp-providers-2026-09.md` §2, D5-21).
  *
- * The command looked for on the `PATH` is the agent's own, and it is not what starts a Session:
- * the adapter runs the Claude Code it carries in its own `@anthropic-ai/claude-agent-sdk`
- * dependency, whose platform package holds the agent as a binary of its own (214 MB on
- * darwin-arm64, 230 MB on linux-arm64), overridable only through `CLAUDE_CODE_EXECUTABLE`, and
- * it never looks at the `PATH`. What a machine must have for Claude Code to be usable is
- * therefore the login and not this command, which is why the Agents page shows the login first
- * and the command second, as the place where a reader's own CLI is or is not.
+ * The command looked for on the `PATH` is the agent's own, and it *is* what a Session ends up
+ * talking to: left to itself the adapter would run the Claude Code carried in its own
+ * `@anthropic-ai/claude-agent-sdk` dependency, whose platform package holds the agent as a
+ * binary of a few hundred megabytes (223 MB on win32-x64), and Hemera ships none of those. The
+ * adapter reads `CLAUDE_CODE_EXECUTABLE` before anything else, so it is handed the `claude` this
+ * machine has, and a Session runs the agent the reader installed and signed in
+ * (`dist/acp-agent.js`, `claudeCliPath`).
  *
  * Where that login lives is the agent's own choice: `.credentials.json` inside the directory
  * `CLAUDE_CONFIG_DIR` names, `~/.claude` when it is not set. On macOS the Keychain holds it and
@@ -47,7 +46,12 @@ export const claude: AgentAdapter = {
     join(env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'), '.credentials.json'),
   ],
   package: '@anthropic-ai/claude-code',
-  acp: { from: 'bundled', package: '@agentclientprotocol/claude-agent-acp', args: [] },
+  acp: {
+    from: 'bundled',
+    package: '@agentclientprotocol/claude-agent-acp',
+    args: [],
+    agentVariable: 'CLAUDE_CODE_EXECUTABLE',
+  },
   readVersion: versionIn,
   isAuthenticated: (methods) => !methods.some((method) => LOGINS.has(method.id)),
 }

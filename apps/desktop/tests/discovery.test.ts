@@ -49,9 +49,6 @@ interface Machine {
   readonly resolved: readonly string[]
 }
 
-/** The Node such a machine runs, which is what an adapter of Hemera's is run by. */
-const NODE = '/usr/bin/node'
-
 /** Where a scripted machine keeps the packages this application depends on. */
 const MODULES = '/opt/hemera/node_modules'
 
@@ -74,7 +71,6 @@ function machineOf(
   const layer = Layer.succeed(MachineEnvironment, {
     home: HOME,
     env: { PATH: '/usr/local/bin' },
-    node: NODE,
     locate: (command: string) => {
       asked.push(command)
       return Effect.succeed(installed[command]?.path)
@@ -330,14 +326,32 @@ describe('A missing agent cannot be picked', () => {
     expect(resolved.path).toBe(
       join(MODULES, '@agentclientprotocol/claude-agent-acp', 'dist', 'index.js'),
     )
-    // Run by the Node this process is already running, told to be Node rather than a window,
-    // and given the reader's own environment, which is where the agent's own login is read from.
-    expect(resolved.command).toBe(NODE)
-    expect(resolved.args).toEqual([resolved.path])
-    expect(resolved.env?.ELECTRON_RUN_AS_NODE).toBe('1')
+    // What is started is the adapter's own entry module, handed to the supervisor as the script
+    // it is: nothing here names a Node, because a package of this application has none to name
+    // and the fuse that would make Electron one is off.
+    expect(resolved.command).toBe(resolved.path)
+    expect(resolved.args).toEqual([])
+    expect(resolved.env?.ELECTRON_RUN_AS_NODE).toBeUndefined()
+    // And the reader's own environment goes with it, because the agent's login is read from it.
     expect(resolved.env?.PATH).toBe('/usr/local/bin')
     // The `PATH` was asked about the agent and never about the adapter (D5-21).
     expect(machine.asked.some((one) => one.includes('-acp'))).toBe(false)
+  })
+
+  test('The Claude adapter is told which Claude Code to run', async () => {
+    const machine = machineOf({ claude: CLAUDE, codex: CODEX }, [
+      join(HOME, '.claude', '.credentials.json'),
+      join(HOME, '.codex', 'auth.json'),
+    ])
+
+    const claudeAgent = await on(machine, resolving('claude'))
+    const codexAgent = await on(machine, resolving('codex'))
+
+    // The adapters carry an optional dependency each that *is* the agent, as a platform binary of
+    // a few hundred megabytes, and this application ships neither: each adapter reads one
+    // variable to be told which agent to run instead, and it is the reader's own command (D5-21).
+    expect(claudeAgent.env?.CLAUDE_CODE_EXECUTABLE).toBe(CLAUDE.path)
+    expect(codexAgent.env?.CODEX_PATH).toBe(CODEX.path)
   })
 
   test('what a session starts is the command Hemera runs, not the one the reader installed', async () => {

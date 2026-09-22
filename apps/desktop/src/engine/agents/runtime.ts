@@ -130,10 +130,12 @@ function refusalKind(refusal: UnusableAgentError): AgentOfferRefusal['kind'] {
   return 'failed'
 }
 
-/** Where an agent is started, and what it is started with: the supervisor's own two options. */
+/** Where an agent is started, what it is started with, and what kind of thing it is. */
 interface AgentStartOptions {
   cwd: string
   env?: Record<string, string>
+  /** A bundled adapter is a Node script and is forked as one; an agent's own command is spawned. */
+  script?: boolean
 }
 
 /** What an agent offers a Home, or why it offers nothing. */
@@ -608,6 +610,7 @@ export const runtimeLayer = Layer.effect(
       // supervisor builds what it hands the host: an env that is not there is not a property.
       const options: AgentStartOptions = { cwd }
       if (resolved.env !== undefined) options.env = resolved.env
+      if (resolved.source === 'bundled') options.script = true
       return options
     }
 

@@ -4,12 +4,17 @@
  * The fork is named, so the engine shows up as `engine` in Electron's own process list and
  * in a task manager. What is said over the channel, and what a silence means, is
  * `engine-conversation.ts`; this file is the Electron half and nothing else.
+ *
+ * The one other thing the main process does for the engine is fork the bundled ACP adapters it
+ * asks for: they are Node scripts, and `utilityProcess` is a main-process API (`adapter-host.ts`,
+ * D5-21). Nothing of what an agent says passes through here.
  */
 
 import { join } from 'node:path'
 
 import { MessageChannelMain, app, utilityProcess } from 'electron/main'
 
+import { serveAdapters } from './adapter-host.ts'
 import { type ApplicationIdentity } from './channel.ts'
 import { diagnostic } from './diagnostic.ts'
 import { type EngineConversation, engineConversation } from './engine-conversation.ts'
@@ -46,6 +51,10 @@ export function startEngine(
     diagnostic(`the process that holds the database ended with ${String(code)}; quitting`)
     app.quit()
   })
+
+  // Wired before the engine is handed its channel, so that an adapter asked for on the first
+  // turn finds somebody listening.
+  serveAdapters(started, main)
 
   const channel = new MessageChannelMain()
   started.postMessage(

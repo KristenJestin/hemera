@@ -17,6 +17,11 @@
  * without anyone remembering to: the engine's scope is the one scope, and when it closes — on a
  * quit, on a crash, on a restart — the finalizer below stops every child it ever started.
  *
+ * Two things can be started and one policy covers both: an agent's own command, spawned here,
+ * and a bundled adapter, which is a Node script and cannot be — the fuse that would make Electron
+ * a Node interpreter is off, so the main process forks it as a utility process and hands back a
+ * pid and a port (`adapter-process.ts`, D5-21). Everything below that seam is the same.
+ *
  * What the child writes on standard error is not swallowed. A program that fails says so
  * there, and a run of lines nobody read is a failure nobody can account for; so those lines are
  * handed to a sink, which the engine points at the diagnostic log. Nothing in here prints.
@@ -26,6 +31,8 @@ import { execFile, spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { Context, Data, Deferred, Duration, Effect, Layer, Option, Ref } from 'effect'
 import type { Scope } from 'effect'
+
+import { forkedScript } from './adapter-process.ts'
 
 /** A command that could not be started at all: the program, and why it would not run. */
 export class AgentSpawnError extends Data.TaggedError('AgentSpawnError')<{
@@ -110,6 +117,16 @@ export type Signal = 'SIGTERM' | 'SIGKILL' | 'SIGINT'
 export interface HostProcessOptions {
   /** Whether the child is its own process group (POSIX) or its own console (Windows). */
   detached: boolean
+  /**
+   * What is being started: a program of the machine, or a Node script this application carries.
+   *
+   * The two are started by different things, for one reason: a package of this application has no
+   * Node to run a script with — `process.execPath` is Electron, and the `runAsNode` fuse is off so
+   * that a packaged application cannot be talked into being a Node interpreter. So a bundled
+   * adapter is forked as a utility process by the main process (D5-21), while an agent's own
+   * command is spawned here as it always was.
+   */
+  runtime: 'command' | 'script'
   cwd?: string
   env?: Record<string, string>
 }
@@ -192,13 +209,17 @@ export class HostProcesses extends Context.Service<HostProcesses, HostProcessesS
  */
 export const hostProcessesLayer = Layer.succeed(HostProcesses, {
   start: (command, args, options) => {
+    if (options.runtime === 'script') return forkedScript(command, args, options)
+    const { runtime: _runtime, ...spawnOptions } = options
     const child: ChildProcess = spawn(command, [...args], {
-      ...options,
+      ...spawnOptions,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     })
     return {
-      pid: child.pid,
+      get pid() {
+        return child.pid
+      },
       write: (line) => child.stdin?.write(line) ?? false,
       end: () => child.stdin?.end(),
       signal: (signal) => {
@@ -237,14 +258,23 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
     // descendant goes with it, which is the same promise the Linux group makes. A `taskkill`
     // that fails — a tree that is already gone — is not a failure of stopping: what the caller
     // asked for is that nothing be alive afterwards, and nothing is.
-    Effect.promise(
-      () =>
-        new Promise<void>((resolve) => {
-          execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {
-            resolve()
-          })
-        }),
-    ),
+    //
+    // A utility process is a tree on Windows and a lone pid on POSIX: it is not started in a
+    // group of its own, so what is left there is the pid itself. The graceful stop is what
+    // takes an adapter's own children with it — closing its input ends the conversation and the
+    // adapter disposes of the agent it started — and this is the escalation after that failed.
+    process.platform === 'win32'
+      ? Effect.promise(
+          () =>
+            new Promise<void>((resolve) => {
+              execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {
+                resolve()
+              })
+            }),
+        )
+      : Effect.sync(() => {
+          process.kill(pid, 'SIGKILL')
+        }).pipe(Effect.catchCause(() => Effect.void)),
 })
 
 export interface ProcessSupervisorService {
@@ -264,6 +294,14 @@ export interface ProcessSupervisorService {
       readonly env?: Record<string, string>
       /** How long a graceful stop is given before the tree is taken down. 3000 ms by default. */
       readonly graceMilliseconds?: number
+      /**
+       * Whether what is named is a Node script this application carries rather than a command.
+       *
+       * The two bundled adapters are scripts, and nothing in this process can run one: the fuse
+       * that would make Electron a Node interpreter is off, so they are forked as utility
+       * processes by the main process (D5-21). An agent's own command is spawned as it was.
+       */
+      readonly script?: boolean
     },
   ) => Effect.Effect<SupervisedProcess, AgentSpawnError, Scope.Scope>
 }
@@ -291,10 +329,11 @@ const DEFAULT_GRACE_MS = 3_000
  */
 function hostOptionsOf(
   grouped: boolean,
+  runtime: HostProcessOptions['runtime'],
   cwd: string | undefined,
   env: Record<string, string> | undefined,
 ): HostProcessOptions {
-  const settings: HostProcessOptions = { detached: grouped }
+  const settings: HostProcessOptions = { detached: grouped, runtime }
   if (cwd !== undefined) settings.cwd = cwd
   if (env !== undefined) settings.env = env
   return settings
@@ -311,13 +350,13 @@ type Lifecycle = 'running' | 'exiting' | 'exited'
 /** One running child, and everything the supervisor knows about it. */
 interface Child {
   /**
-   * Where the child is, or `undefined` while it is still only a command.
+   * The child itself, which is also where its pid is read from rather than kept.
    *
-   * A program this machine does not have never becomes a process, so its pid is what is missing
-   * — and the listeners below are attached before that is known, because the news of a command
-   * that cannot run arrives on the first turn of the loop.
+   * Read through and not copied: a program this machine does not have never becomes a process
+   * and has no pid at all, and a bundled adapter is a process the main process forks, so its
+   * pid arrives after the start was answered. The listeners below are attached before either is
+   * known, because the news of a command that cannot run arrives on the first turn of the loop.
    */
-  readonly pid: number | undefined
   readonly process: HostProcess
   readonly lifecycle: Ref.Ref<Lifecycle>
   /** The death, kept so that a second reader is answered exactly what the first one was. */
@@ -370,13 +409,13 @@ export const processSupervisorLayer = Layer.effect(
      */
     const takeTreeDown = (child: Child): Effect.Effect<void> =>
       Effect.gen(function* () {
-        if (child.pid === undefined) return
+        if (child.process.pid === undefined) return
         if (child.grouped) {
           yield* signalQuietly(child, 'SIGKILL')
           return
         }
         if (!(yield* Ref.get(child.spawned))) return
-        yield* host.killTree(child.pid)
+        yield* host.killTree(child.process.pid)
       })
 
     /**
@@ -438,14 +477,14 @@ export const processSupervisorLayer = Layer.effect(
           if (!first) return
           yield* sink.write(
             failure === null
-              ? `${String(child.pid)} ended with ${String(code ?? signal)}`
-              : `${String(child.pid)} could not be started: ${failure.cause}`,
+              ? `${String(child.process.pid)} ended with ${String(code ?? signal)}`
+              : `${String(child.process.pid)} could not be started: ${failure.cause}`,
           )
         })
 
     /** The child as the engine sees it: the two stops, its input, and its observed death. */
     const supervised = (child: Child): SupervisedProcess => ({
-      pid: child.pid,
+      pid: child.process.pid,
       // A refused spawn is a death as much as an end is: what a caller waits for is the news,
       // and a caller that awaited a death that can never come would be waiting forever.
       exited: Effect.orDie(Deferred.await(child.observation)),
@@ -453,7 +492,9 @@ export const processSupervisorLayer = Layer.effect(
         Effect.gen(function* () {
           const written = yield* Effect.sync(() => child.process.write(lineOf(line)))
           if (!written) {
-            yield* sink.write(`${String(child.pid)} could not be written to: the pipe is closed`)
+            yield* sink.write(
+              `${String(child.process.pid)} could not be written to: the pipe is closed`,
+            )
           }
         }),
       closeInput: Effect.sync(child.process.end),
@@ -475,6 +516,7 @@ export const processSupervisorLayer = Layer.effect(
         readonly cwd?: string
         readonly env?: Record<string, string>
         readonly graceMilliseconds?: number
+        readonly script?: boolean
       },
     ): Effect.Effect<SupervisedProcess, AgentSpawnError, Scope.Scope> =>
       Effect.acquireRelease(
@@ -484,16 +526,22 @@ export const processSupervisorLayer = Layer.effect(
           const observation = yield* Deferred.make<ExitObservation, AgentSpawnError>()
           const answer = yield* Deferred.make<void, AgentSpawnError>()
           const grace = Duration.millis(options.graceMilliseconds ?? DEFAULT_GRACE_MS)
-          const grouped = process.platform !== 'win32'
+          // A utility process is not started in a group of its own, so a script is never a group
+          // whatever the platform; an agent's own command is one everywhere but Windows.
+          const grouped = process.platform !== 'win32' && options.script !== true
 
           const started = host.start(
             command,
             args,
-            hostOptionsOf(grouped, options.cwd, options.env),
+            hostOptionsOf(
+              grouped,
+              options.script === true ? 'script' : 'command',
+              options.cwd,
+              options.env,
+            ),
           )
 
           const child: Child = {
-            pid: started.pid,
             process: started,
             lifecycle,
             observation,
@@ -534,7 +582,7 @@ export const processSupervisorLayer = Layer.effect(
           // nowhere. The pid is a fact by then, so what is missing it is a spawn that never
           // answered — which the listener above has already named, and this only covers.
           yield* Deferred.await(answer)
-          if (child.pid === undefined) {
+          if (child.process.pid === undefined) {
             return yield* Effect.fail(
               new AgentSpawnError({ command, cause: 'the command did not become a process' }),
             )

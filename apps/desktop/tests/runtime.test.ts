@@ -610,7 +610,6 @@ describe('An agent that cannot be asked', () => {
   const signedOut = Layer.succeed(MachineEnvironment, {
     home: '/home/ana',
     env: {},
-    node: '/usr/bin/node',
     locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
     bundled: (packageName: string) => Effect.succeed(join('/opt/hemera', packageName, 'index.js')),
     readVersion: () => Effect.succeed('1.0.0'),

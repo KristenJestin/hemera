@@ -45,7 +45,6 @@ const VERSION = '0.4.0'
 export const machine = Layer.succeed(MachineEnvironment, {
   home: '/home/ana',
   env: {},
-  node: '/usr/bin/node',
   locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
   bundled: (packageName: string) =>
     Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),

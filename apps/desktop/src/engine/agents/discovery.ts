@@ -34,10 +34,12 @@ import { opencode } from './adapters/opencode.ts'
  * is what can be said before one starts.
  *
  * What it never looks for on the `PATH` is an adapter. Two of the three agents speak no ACP, and
- * the packages that expose them are dependencies of this application: `resolve` takes their
- * executable out of Hemera's own `node_modules` and runs it with the Node this process is
- * already running, so nothing about them is ever installed by, shown to, or asked of the reader
- * (D5-21). And it refuses before it resolves: an agent this machine does not have and an agent
+ * the packages that expose them are dependencies of this application: `resolve` takes their entry
+ * module out of what the installation carries and hands it to the supervisor to be forked as a
+ * Node script, so nothing about them is ever installed by, shown to, or asked of the reader
+ * (D5-21). Which agent such an adapter then runs is named to it in its own environment, because
+ * an adapter left to itself would run a platform binary of its own that Hemera does not ship.
+ * And it refuses before it resolves: an agent this machine does not have and an agent
  * nobody signed in are both answered as themselves, rather than by a process started to find out.
  */
 
@@ -142,11 +144,11 @@ export interface DiscoveredAgent {
  * An agent and the command that starts it: what a Session needs before it can exist.
  *
  * `source` says where the ACP command came from, which is the whole of D5-21 in one field:
- * `bundled` is an adapter Hemera depends on and resolves out of its own `node_modules`, run by
- * the Node this process is already running; `agent` is the reader's own command on their own
- * `PATH`. `command` and `args` are what the supervisor is handed either way, and `env` is what
- * the child needs beyond the environment it inherits — nothing, for an agent that is its own
- * command.
+ * `bundled` is an adapter Hemera depends on and carries, whose entry module is forked as a Node
+ * script; `agent` is the reader's own command on their own `PATH`. `command` and `args` are what
+ * the supervisor is handed either way, and `env` is what the child needs beyond the environment
+ * it inherits — nothing, for an agent that is its own command, and the agent's own path for an
+ * adapter that has to be told which one to run.
  */
 export interface ResolvedAgent {
   readonly adapter: AgentAdapter
@@ -216,13 +218,12 @@ export interface MachineEnvironmentService {
    * Where the executable of one of Hemera's own packages is, or `undefined` when it is not there.
    *
    * The `PATH` has nothing to do with it: an adapter is a dependency of this application, and
-   * what answers is the `node_modules` this process was loaded from (D5-21). `undefined` is an
-   * installation of Hemera that is missing a package it declares, which is a broken install and
-   * not a machine without an agent.
+   * what answers is what the installation carries — the resources folder of a package, the
+   * `node_modules` of a development run (D5-21). `undefined` is an installation of Hemera that
+   * is missing a package it declares, which is a broken install and not a machine without an
+   * agent.
    */
   readonly bundled: (packageName: string) => Effect.Effect<string | undefined>
-  /** The Node this process is running, which is what runs an adapter's executable. */
-  readonly node: string
   /** What the command answers to `--version`, or `undefined` when it does not answer. */
   readonly readVersion: (command: string) => Effect.Effect<string | undefined>
   /** The home directory an agent's own paths are read against. */
@@ -367,9 +368,9 @@ export const discoveryLayer = Layer.effect(
             } satisfies ResolvedAgent
           }
 
-          // The adapter is Hemera's own dependency: it is resolved out of this application's
-          // `node_modules` and run by the Node this process is already running, so no reader
-          // ever installs it and no `PATH` decides whether an agent works (D5-21).
+          // The adapter is Hemera's own dependency: it is resolved out of what this installation
+          // carries and forked as a Node script of its own, so no reader ever installs it and no
+          // `PATH` decides whether an agent works (D5-21).
           const executable = yield* machine.bundled(acp.package)
           if (executable === undefined) {
             return yield* Effect.fail(new AgentAdapterMissingError({ id, package: acp.package }))
@@ -377,12 +378,17 @@ export const discoveryLayer = Layer.effect(
           return {
             adapter,
             source: acp.from,
-            command: machine.node,
-            args: [executable, ...acp.args],
-            // Electron's own binary runs a script only when it is told to be Node; the rest of
-            // the environment is the reader's, because the adapter reads the agent's own login
-            // out of it.
-            env: { ...definedIn(machine.env), ELECTRON_RUN_AS_NODE: '1' },
+            command: executable,
+            args: [...acp.args],
+            // Which agent the adapter is to run is named to it by the variable it reads for
+            // exactly that: an adapter told nothing goes looking for the platform binary of its
+            // own optional dependency, which this application does not ship (D5-21). The path is
+            // the one `probe` just found on the `PATH`, and the rest of the environment is the
+            // reader's, because the adapter reads the agent's own login out of it.
+            env: {
+              ...definedIn(machine.env),
+              [acp.agentVariable]: found.path ?? adapter.command,
+            },
             path: executable,
           } satisfies ResolvedAgent
         }),
@@ -476,21 +482,41 @@ const manifestSchema = z.object({
     .optional(),
 })
 
+/** Where a package of this application is carried inside a package of it, unpacked. */
+export const ADAPTERS_FOLDER = 'adapters'
+
 /**
- * The executable one of Hemera's own packages declares, resolved from Hemera's `node_modules`.
+ * The manifest of one of Hemera's own packages, wherever this installation carries it.
  *
- * `require.resolve` of the package's manifest is what finds the package, wherever the
- * installation put it — a pnpm store, an `asar` unpacked beside the application — and the `bin`
- * that manifest declares is what is run. The `PATH` is not consulted and nothing is installed:
- * an adapter is a dependency of this application, and the reader never has one (D5-21).
+ * Two installations and two places. A package built by `electron-builder` carries the adapters
+ * under its resources folder, outside the `asar` — a Node script has to be a file on disk to be
+ * forked — and that folder is looked at first, because it is the one that exists there. A
+ * development run has neither, and `require.resolve` answers out of the `node_modules` this
+ * module was loaded from. The `PATH` is consulted in neither case and nothing is installed: an
+ * adapter is a dependency of this application, and the reader never has one (D5-21).
+ */
+function manifestOf(packageName: string): string | undefined {
+  // Electron declares it as a string; a suite runs this file on plain Node, where there is no
+  // such folder and no such property, so it is read as what it is rather than as what it says.
+  const resources: string | undefined = process.resourcesPath
+  if (resources !== undefined) {
+    const carried = join(resources, ADAPTERS_FOLDER, 'node_modules', packageName, 'package.json')
+    if (existsSync(carried)) return carried
+  }
+  return createRequire(import.meta.url).resolve(`${packageName}/package.json`)
+}
+
+/**
+ * The executable one of Hemera's own packages declares, out of what this installation carries.
  *
- * `undefined` is an installation missing a package it declares, which is a broken install rather
- * than a machine without an agent, and it is refused as itself.
+ * The `bin` its manifest declares is what is forked, and the manifest is found by the rule
+ * above. `undefined` is an installation missing a package it declares, which is a broken install
+ * rather than a machine without an agent, and it is refused as itself.
  */
 function executableOf(packageName: string): string | undefined {
   try {
-    const require = createRequire(import.meta.url)
-    const manifestPath = require.resolve(`${packageName}/package.json`)
+    const manifestPath = manifestOf(packageName)
+    if (manifestPath === undefined) return undefined
     const manifest = manifestSchema.safeParse(JSON.parse(readFileSync(manifestPath, 'utf8')))
     const declared = manifest.success ? manifest.data.bin : undefined
     if (declared === undefined) return undefined
@@ -549,7 +575,6 @@ function versionOf(command: string, signal: AbortSignal): Promise<string | undef
 export const machineEnvironmentLayer = Layer.succeed(MachineEnvironment, {
   home: homedir(),
   env: process.env,
-  node: process.execPath,
   locate: (command) => Effect.sync(() => locate(command)),
   bundled: (packageName) => Effect.sync(() => executableOf(packageName)),
   readVersion: (command) => Effect.promise((signal) => versionOf(command, signal)),

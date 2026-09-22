@@ -71,7 +71,6 @@ function running<A, E>(
     Layer.succeed(MachineEnvironment, {
       home: '/home/ana',
       env: {},
-      node: '/usr/bin/node',
       locate: () => Effect.succeed('/usr/local/bin/claude'),
       bundled: () => Effect.succeed('/opt/hemera/node_modules/adapter/dist/index.js'),
       readVersion: () => Effect.succeed('1.0.0'),
