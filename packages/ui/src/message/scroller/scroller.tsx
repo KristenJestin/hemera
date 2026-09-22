@@ -76,7 +76,17 @@ const COLUMN = 'relative flex min-w-0 flex-1 flex-col'
  * is the thread's own rhythm, and nothing is aligned to it.
  */
 const BOX =
-  'scroll-quiet relative flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pt-4 pb-6 outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring'
+  'scroll-quiet relative flex min-h-0 flex-1 flex-col overflow-y-auto outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring'
+
+/**
+ * The column of blocks inside it, which is what is measured.
+ *
+ * A box of its own and not the classes of the one above: a scroll container keeps the same box
+ * however much is written into it, so the only thing a `ResizeObserver` can be told to watch is
+ * the content. The thread's own rhythm — the room between two blocks, and the air at either end
+ * — lives here with it.
+ */
+const LIST = 'flex flex-col gap-5 pt-4 pb-6'
 
 /**
  * The pill's row, which covers the thread without taking it: the row is the full width of the
@@ -182,6 +192,10 @@ export interface MessageScrollerProps {
 
 export function MessageScroller({ label, entries, className }: MessageScrollerProps): ReactNode {
   const box = useRef<HTMLDivElement>(null)
+  // What is written, as one box: the column of blocks inside the thing that scrolls. It is
+  // there to be measured — a scroll container's own box never changes when its content grows,
+  // and the content's does.
+  const list = useRef<HTMLDivElement>(null)
   // Where each entry of the thread is, by index, and `null` for the ones the rail steps over.
   // Read off the elements themselves, which is a place in a column already laid out and not a
   // size taken off a string: `offsetTop` and a scroll position are the same axis, and the two
@@ -190,9 +204,18 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   const [active, setActive] = useState(-1)
   const [overflowing, setOverflowing] = useState(false)
   const [atEdge, setAtEdge] = useState(true)
-  // The same answer, where an effect can read it without waiting for a render: whether the
-  // reader was at the live edge is what decides whether a message arriving takes them with it.
-  const wasAtEdge = useRef(true)
+  /**
+   * Whether the thread is following what is being written into it.
+   *
+   * It is the reader's own answer and nothing else's: it is set by a scroll — theirs, or the one
+   * the pill makes — and it is never set by a measurement. That is the whole of the fix of the
+   * trial of 22 September 2026: a text streaming in makes the column taller without moving the
+   * scroll, which *measures* as having left the live edge, and a column that read its own
+   * growing as the reader walking away stopped following after the first word.
+   */
+  const pinned = useRef(true)
+  /** Where the thread was scrolled to last, which is how a scroll upwards is told from any other. */
+  const lastTop = useRef(0)
   const transition = useTransition(arrival)
   // `useTransition` hands back this very object for a reader who asked for less movement, and a
   // scroll that glides is movement: the end of the thread is worth arriving at, not travelling
@@ -220,43 +243,62 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     setActive(edge ? seen : mark)
     setOverflowing(node.scrollHeight - node.clientHeight > OVERFLOW)
     setAtEdge(edge)
-    wasAtEdge.current = edge
   }, [])
+
+  /**
+   * A scroll, which is the one thing that says whether the reader is following the thread.
+   *
+   * What lets go of the thread is going *up*, and not being far from the edge: a scroll event
+   * arrives a frame after the position changed, and by then a text that is streaming has already
+   * written another line — so a thread that read "far from the edge" as "the reader left" let go
+   * of itself while it was following. Going up is the reader and nobody else. Coming back to the
+   * edge takes them with it again, whichever of the two ways there they used.
+   */
+  const scrolled = useCallback(() => {
+    const node = box.current
+    if (node !== null) {
+      if (node.scrollTop < lastTop.current) pinned.current = false
+      if (node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE) pinned.current = true
+      lastTop.current = node.scrollTop
+    }
+    look()
+  }, [look])
 
   // Bound once, and not once per render: this runs while the reader scrolls, and the answers it
   // keeps up with change for two reasons — the scroller being resized, and the thread growing
   // under it. The same two watchers as the strip of tabs, for the same two reasons.
   useEffect(() => {
     const node = box.current
-    if (node === null) return
+    const written = list.current
+    if (node === null || written === null) return
     // A Session opens on what was written last. Arriving at the top of a conversation and having
     // to find its end is the one thing a thread read from the bottom cannot ask for.
     node.scrollTop = node.scrollHeight
+    lastTop.current = node.scrollTop
     look()
     const sized = new ResizeObserver(look)
     sized.observe(node)
-    const grown = new MutationObserver(look)
-    grown.observe(node, { childList: true, subtree: true, characterData: true })
+    /**
+     * The thread getting taller, which is not the same event as the thread getting an entry.
+     *
+     * An answer arrives into the entry that is already there — the engine writes the same entry
+     * again, with more of it — so a thread following its stream by counting entries followed
+     * the first word of an answer and then stood still for the rest of it. What is watched is
+     * the height of what is written, and a reader who is following is taken along with it.
+     */
+    const grown = new ResizeObserver(() => {
+      if (pinned.current && box.current !== null) {
+        box.current.scrollTop = box.current.scrollHeight
+        lastTop.current = box.current.scrollTop
+      }
+      look()
+    })
+    grown.observe(written)
     return () => {
       sized.disconnect()
       grown.disconnect()
     }
   }, [look])
-
-  /**
-   * A message arriving in a thread the reader is at the end of takes them with it.
-   *
-   * Only then: someone who scrolled up to check something is reading, and a column that jumped
-   * under them would take them off the line they were on — that reader has the pill instead. The
-   * mount is the other half of the same rule, and it is the one above: a Session opens on what
-   * was written last.
-   */
-  useEffect(() => {
-    const node = box.current
-    if (node === null || !wasAtEdge.current) return
-    node.scrollTop = node.scrollHeight
-    look()
-  }, [entries.length, look])
 
   const goToLatest = (): void => {
     const node = box.current
@@ -286,10 +328,11 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
           tabIndex={0}
           role="log"
           aria-label={label}
-          onScroll={look}
+          onScroll={scrolled}
           className={BOX}
         >
-          {/*
+          <div ref={list} className={LIST}>
+            {/*
             A fold opening takes the thread below it with it, and takes it *smoothly* (trial of
             22 September 2026). Every block is its own layout element and the group is what makes
             them one movement: motion measures where each of them ended up and plays the
@@ -305,23 +348,24 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
             journey given no time is still a journey the machinery sets up, and `false` is the
             block simply being where it belongs.
           */}
-          <LayoutGroup>
-            {entries.map((entry, index) => (
-              <motion.div
-                key={entry.id}
-                layout={still ? false : 'position'}
-                transition={transition}
-                ref={(node) => {
-                  // A day registers as nothing, and so does an entry that asked for no mark: the
-                  // rail counts what it drew and only what it drew, so the walk above lands on
-                  // the same index the rail drew its marks with.
-                  anchors.current[index] = isMarked(entry) ? node : null
-                }}
-              >
-                {entry.content}
-              </motion.div>
-            ))}
-          </LayoutGroup>
+            <LayoutGroup>
+              {entries.map((entry, index) => (
+                <motion.div
+                  key={entry.id}
+                  layout={still ? false : 'position'}
+                  transition={transition}
+                  ref={(node) => {
+                    // A day registers as nothing, and so does an entry that asked for no mark: the
+                    // rail counts what it drew and only what it drew, so the walk above lands on
+                    // the same index the rail drew its marks with.
+                    anchors.current[index] = isMarked(entry) ? node : null
+                  }}
+                >
+                  {entry.content}
+                </motion.div>
+              ))}
+            </LayoutGroup>
+          </div>
         </motion.div>
         {!atEdge && (
           <div className={PILL_ROW}>

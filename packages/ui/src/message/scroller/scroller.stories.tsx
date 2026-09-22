@@ -1,5 +1,5 @@
 import type { Decorator, Meta, StoryObj } from '@storybook/react-vite'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { MotionConfig } from 'motion/react'
@@ -693,6 +693,92 @@ export const AFoldWithoutMotion: Story = {
       },
       { timeout: 200, interval: 10 },
     )
+  },
+}
+
+/** A word of an answer still arriving, repeated as many times as the agent has written. */
+const WORDS = 'The export builds the whole file in memory before it writes a byte. '
+
+/**
+ * A thread whose last entry is being written into, which is what an answer arriving is.
+ *
+ * The engine does not add an entry per word: it writes the same entry again with more of it, so
+ * the thread grows taller without the list ever growing longer. The button is the agent typing.
+ */
+function Streaming(): ReactNode {
+  const [written, setWritten] = useState(1)
+  const entries: ScrollerEntry[] = [
+    ...THREAD,
+    {
+      id: 'answer-arriving',
+      content: <p data-testid="arriving">{WORDS.repeat(written)}</p>,
+    },
+  ]
+  return (
+    <div className="flex h-screen flex-col gap-2 p-6">
+      <div className="min-h-0 flex-1">
+        <MessageScroller label="the thread of CSV invoice export" entries={entries} />
+      </div>
+      <button type="button" onClick={() => setWritten((was) => was + 8)}>
+        Write another line
+      </button>
+    </div>
+  )
+}
+
+/** How far the last thing written is from the bottom of what is on screen, in pixels. */
+function fromTheEdge(thread: HTMLElement): number {
+  return thread.scrollHeight - thread.scrollTop - thread.clientHeight
+}
+
+/**
+ * A thread the reader is at the end of follows the answer as it is written (trial of
+ * 22 September 2026).
+ *
+ * The thread used to follow what arrived by counting entries, and an answer is not an entry
+ * arriving: it is the last one being written again, with more of it. So the column grew and the
+ * scroll stayed where it was — the reader watched the first line of an answer and read the rest
+ * of it by scrolling down after the fact. What is watched is the height of what is written.
+ *
+ * And it is the reader's own scroll that decides: someone who went up to check something is
+ * reading, and the thread lets go of them until they come back.
+ */
+export const AnAnswerArriving: Story = {
+  render: () => <Streaming />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thread = canvas.getByRole('log', { name: /CSV invoice export/ })
+    const write = canvas.getByRole('button', { name: 'Write another line' })
+
+    // A Session opens on what was written last, which is where this starts.
+    await waitFor(() => {
+      expect(fromTheEdge(thread)).toBeLessThanOrEqual(56)
+    })
+
+    await userEvent.click(write)
+    await userEvent.click(write)
+    await waitFor(() => {
+      expect(canvas.getByTestId('arriving').textContent!.length).toBeGreaterThan(WORDS.length * 16)
+    })
+    await waitFor(() => {
+      expect(
+        fromTheEdge(thread),
+        'the thread stopped following what was written',
+      ).toBeLessThanOrEqual(56)
+    })
+
+    // The reader goes up to read something again: the thread lets go, and what arrives after
+    // that leaves them exactly where they were.
+    thread.scrollTop = 0
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: 'Latest' })).toBeInTheDocument()
+    })
+    const held = thread.scrollTop
+    await userEvent.click(write)
+    await waitFor(() => {
+      expect(canvas.getByTestId('arriving').textContent!.length).toBeGreaterThan(WORDS.length * 24)
+    })
+    await expect(thread.scrollTop, 'the thread moved under a reader who had gone up').toBe(held)
   },
 }
 
