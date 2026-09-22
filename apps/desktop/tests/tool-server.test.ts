@@ -350,3 +350,29 @@ describe('the token of a Session', () => {
     expect(seen.answer.body).toContain('fs_read')
   })
 })
+
+describe('a request from a web page', () => {
+  it('is refused by its origin before its token is read', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const held = yield* aSessionWithAToken
+        const response = yield* Effect.promise(() =>
+          fetch(`${server.origin}/mcp`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              authorization: `Bearer ${held.granted.token}`,
+              origin: 'https://elsewhere.example',
+            },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+          }),
+        )
+        return { status: response.status }
+      }),
+    )
+
+    expect(seen.status).toBe(403)
+  })
+})

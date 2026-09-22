@@ -34,6 +34,7 @@ import {
   type NodeIncomingMessageLike,
   type NodeServerResponseLike,
   localhostHostValidation,
+  localhostOriginValidation,
   toNodeHandler,
 } from '@modelcontextprotocol/node'
 import { Context, Effect, Layer } from 'effect'
@@ -177,10 +178,14 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
 
       const nodeHandler = toNodeHandler(door)
       // A browser on this machine is not an agent, and the loopback interface is not private
-      // from everything else that runs here: the host header is what says who is asking.
+      // from everything else that runs here (D6-01). The host header refuses a name rebound onto
+      // the loopback address; the origin header refuses a page of another site that posts here —
+      // an agent sends no origin, and a request with none goes through.
       const allowedHost = localhostHostValidation()
+      const allowedOrigin = localhostOriginValidation()
       const listener: Server = createServer((request, response) => {
         if (!allowedHost(request, response)) return
+        if (!allowedOrigin(request, response)) return
         void nodeHandler(asNodeRequest(request), asNodeResponse(response))
       })
 
