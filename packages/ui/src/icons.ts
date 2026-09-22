@@ -25,6 +25,8 @@ import {
   IconAt as TablerAt,
   IconBell as TablerBell,
   IconBellFilled as TablerBellFilled,
+  IconBolt as TablerBolt,
+  IconBoltFilled as TablerBoltFilled,
   IconBrain as TablerBrain,
   IconBrandOpenai as TablerBrandOpenai,
   IconCheck as TablerCheck,
@@ -152,6 +154,10 @@ export const IconArchive = catalogued(TablerArchiveFilled, TablerArchive, 'IconA
 export const IconArrowUp = catalogued(TablerArrowUp, TablerArrowUp, 'IconArrowUp')
 export const IconAt = catalogued(TablerAt, TablerAt, 'IconAt')
 export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')
+/* The flash of effort: what the composer marks the level an agent is asked to think at with.
+   Solid as well as outlined, because a bolt is a shape and not a contour — at sixteen pixels
+   the outlined one is a zigzag of hairlines and the filled one is a bolt. */
+export const IconBolt = catalogued(TablerBoltFilled, TablerBolt, 'IconBolt')
 export const IconBrain = catalogued(TablerBrain, TablerBrain, 'IconBrain')
 export const IconBrandOpenai = catalogued(TablerBrandOpenai, TablerBrandOpenai, 'IconBrandOpenai')
 export const IconCheck = catalogued(TablerCheckFilled, TablerCheck, 'IconCheck')

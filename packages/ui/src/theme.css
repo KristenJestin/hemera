@@ -130,6 +130,23 @@
      a hue: everything else here is the page's own shade of black. */
   --halo: 0 0 0 3px rgba(192, 38, 211, 0.16);
   --halo-strong: 0 0 0 5px rgba(192, 38, 211, 0.26);
+
+  /* The second layer of that halo: the light the thumb throws, rather than the ring it sits in
+     (trial of 22 September 2026). A ring alone says where the thumb ends; a blurred glow under
+     that ring says the thumb is lit, which is the difference between an instrument and a dot
+     drawn on a line. Blurred and spread where `--halo` is spread alone, so the two layers never
+     draw the same edge twice. */
+  --halo-glow: 0 0 10px 1px rgba(192, 38, 211, 0.18);
+  --halo-glow-strong: 0 0 16px 3px rgba(192, 38, 211, 0.3);
+
+  /* What lights the core of a thumb: a highlight along its top edge and a shade along its
+     bottom, both inside it, so a round surface reads as domed rather than as a flat disc. It is
+     drawn inside because the halo already owns everything outside the thumb. */
+  --knob: inset 0 1px 1px rgba(255, 255, 255, 0.9), inset 0 -1px 2px rgba(16, 16, 24, 0.08);
+
+  /* The groove a track is sunk into, which is the well of the instrument look: an inner shadow
+     and a hairline rim, in the page's own black. A hole in a surface has no hue of its own. */
+  --well: inset 0 1px 3px rgba(16, 16, 24, 0.1), inset 0 0 0 1px rgba(16, 16, 24, 0.05);
 }
 
 /* ---- Roles, dark ---- */
@@ -210,6 +227,17 @@
      itself, and the hue it is given is the one the page actually uses. */
   --halo: 0 0 0 3px rgba(232, 121, 249, 0.2);
   --halo-strong: 0 0 0 5px rgba(232, 121, 249, 0.32);
+
+  /* The glow reads the other way round from the ring: on the page's own black there is room for
+     it, and a thumb that threw no light on a dark panel is a thumb nothing says is lit. */
+  --halo-glow: 0 0 12px 2px rgba(232, 121, 249, 0.26);
+  --halo-glow-strong: 0 0 20px 4px rgba(232, 121, 249, 0.42);
+
+  /* The same dome, lit by what there is: a dark theme has no white to catch on the top edge, so
+     the highlight is a fraction of one and the shade below it is the black it already sits on. */
+  --knob: inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.6);
+
+  --well: inset 0 1px 3px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 /* ---- The Tailwind theme reads the roles, never the raw values ---- */
@@ -280,6 +308,8 @@
   --shadow-lg: var(--shadow-raised);
   --shadow-halo: var(--halo);
   --shadow-halo-strong: var(--halo-strong);
+  --shadow-halo-glow: var(--halo-glow);
+  --shadow-halo-glow-strong: var(--halo-glow-strong);
 }
 
 /* ---- The scales, the same under both themes ---- */
@@ -350,6 +380,20 @@
      it that is filled is read as filled at a glance. A named step, because two tracks of two
      thicknesses in one panel is two controls that look like they came from two systems. */
   --spacing-track: 0.375rem;
+
+  /* And how thin it is drawn where the whole point is that it is barely there, which is the
+     minimal look's hairline. Two pixels: the thinnest a rounded track can be and still read as
+     a filled length rather than as a coloured line. A step and not a number, for the reason the
+     step above it is one — two hairlines of two thicknesses are two design systems again. */
+  --spacing-track-hair: 0.125rem;
+
+  /* How wide the thumb of a scale is drawn, one step per look (trial of 22 September 2026).
+     Tailwind's own multiplication has no step between sixteen and twenty-four, and the three
+     looks want fourteen, sixteen and twenty. Written down here they are three steps the scale
+     check knows the whole list of, and a fourth look cannot invent a fourth size in silence. */
+  --spacing-thumb-sm: 0.875rem;
+  --spacing-thumb-md: 1rem;
+  --spacing-thumb-lg: 1.25rem;
 
   /* The prototype draws its icons at eighteen, with sixteen for the small ones and twenty-two
      for the few that stand alone. The first pass of lot 4 sat a step under all three, which is
@@ -781,6 +825,34 @@
 @utility thumb-motion {
   transition-property: box-shadow, scale;
   transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* The two shadows a scale is built out of that are drawn inside what wears them: the groove a
+   track is sunk into, and the dome that lights a thumb's core. They are utilities rather than
+   steps of the shadow scale because a `shadow-*` utility named anything but a size is read as a
+   colour — by Tailwind's own grammar and so by the design-system lint — and neither of these is
+   a colour. What they carry is still the theme's: the value is a token, declared once per
+   theme, and this is the door it comes through. */
+@utility track-well {
+  box-shadow: var(--well);
+}
+
+@utility thumb-dome {
+  box-shadow: var(--knob);
+}
+
+/* What a surface does when the hand comes over it: it lifts by one step of the shadow scale.
+   A card that answers the hand with a shadow and nothing else says "this is one thing, and it
+   is the one you are pointing at" without moving a single word inside it. Named here rather
+   than written at the call site, so that the duration and the curve stay the theme's — and so
+   that a reader asking for less movement is handed the lifted card and nothing on the way. */
+@utility lift-motion {
+  transition-property: box-shadow;
+  transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {
     transition-property: none;
