@@ -169,7 +169,7 @@ export class NoActiveProjectError extends Error {
  */
 export class NoAgentError extends Error {
   constructor() {
-    super('a session runs an agent: choose one before creating a session')
+    super('Choose an agent first.')
     this.name = 'NoAgentError'
   }
 }

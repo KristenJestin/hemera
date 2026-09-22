@@ -165,7 +165,7 @@ describe('Session sans agent', () => {
     )
 
     expect(refused).toBeInstanceOf(NoAgentError)
-    expect(refused.message).toContain('choose one before creating a session')
+    expect(refused.message).toBe('Choose an agent first.')
     // The refusal is what the interface shows, and the Session it refused does not exist: the
     // thread of an agentless Session is the user's words with nobody to answer them.
     expect(await opened()(rowsIn('sessions'))).toBe(0)
