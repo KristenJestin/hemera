@@ -23,6 +23,12 @@ export {
   type SelectProps,
 } from './components/select/select.tsx'
 export { Loading, type LoadingProps } from './components/loading/loading.tsx'
+/** Where a piece of work stands, said as a dot: a tool call, a turn, a row of a list. */
+export {
+  StatusDot,
+  type StatusDotProps,
+  type StatusTone,
+} from './components/status-dot/status-dot.tsx'
 export {
   Tooltip,
   TooltipProvider,
@@ -119,15 +125,21 @@ export {
  * The `Start chat` of the Home and the `Send` of a Session are one control: the word on it is
  * the page's, and the write is `onSend`, which answers with the reason it could not be written.
  */
-export { Composer, type ComposerProps } from './composer/composer.tsx'
-export { PromptInput, type PromptInputProps, type PromptShape } from './composer/prompt-input.tsx'
-export { ComposerActions, type ComposerActionsProps } from './composer/composer-actions.tsx'
 export {
+  Composer,
+  ComposerActions,
   ComposerAttachments,
+  MentionMenu,
+  PromptInput,
+  WorkspacePill,
+  type ComposerActionsProps,
   type ComposerAttachmentsProps,
-} from './composer/composer-attachments.tsx'
-export { MentionMenu, type MentionMenuProps } from './composer/mention-menu.tsx'
-export { WorkspacePill } from './composer/workspace-pill.tsx'
+  type ComposerProps,
+  type MentionMenuProps,
+  type PromptInputProps,
+  type PromptShape,
+  type WorkspacePillProps,
+} from './composer/index.ts'
 
 /** The Journal: what happened, in the order it happened. */
 export {
@@ -189,6 +201,8 @@ export {
   type MessageHeaderProps,
   type MessageRowProps,
 } from './message/message.tsx'
+/** What an agent says, drawn from the Markdown that is still arriving. */
+export { AgentText } from './message/agent-text.tsx'
 export { MessageText } from './message/message-text.tsx'
 export {
   type MessageAuthor,
@@ -220,3 +234,82 @@ export {
   type ArchivedSessionsProps,
   type SessionHeaderProps,
 } from './session/session.tsx'
+
+/** A turn with an agent, drawn as it happens: what it thought, what it called, what it ran, and
+ * what it changed. These are the blocks the thread of a Session with an agent is made of. */
+export { Disclosure, type DisclosureProps } from './activity/disclosure.tsx'
+export { ThoughtBlock, type ThoughtBlockProps } from './activity/thought-block.tsx'
+export {
+  ToolCallCard,
+  type ToolCallCardProps,
+  type ToolKind,
+  type ToolLocation,
+  type ToolStatus,
+} from './activity/tool-call-card.tsx'
+export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
+export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
+
+/** The gate a turn stops at, and the one line the answer leaves behind. */
+export {
+  PermissionRequest,
+  type PermissionOption,
+  type PermissionOptionKind,
+  type PermissionParameter,
+  type PermissionRequestProps,
+} from './approval/permission-request.tsx'
+export { DecisionSummary, type DecisionSummaryProps } from './approval/decision-summary.tsx'
+
+/**
+ * What an agent advertises, what the reader sets, and what the session has spent.
+ *
+ * The agent, its model and its effort are one control — `AgentModelMenu` — because they are one
+ * question asked in three steps, and three selectors in the foot of the composer was three
+ * controls wrapping onto a second line. What the agent may do without asking is a different
+ * question and stays a control of its own.
+ */
+export {
+  AgentModelMenu,
+  BlockedBanner,
+  ModeSelector,
+  UsageMeter,
+  type AgentChoice,
+  type AgentModelMenuProps,
+  type BlockedBannerProps,
+  type EffortChoice,
+  type ModeChoice,
+  type ModeSelectorProps,
+  type ModelChoice,
+  type OfferedAgent,
+  type UsageCost,
+  type UsageMeterProps,
+} from './composer/index.ts'
+
+/** The agents this machine has, with what it can say about each. */
+export {
+  AgentsSection,
+  type AgentOnTheMachine,
+  type AgentStanding,
+  type AgentsSectionProps,
+} from './settings/agents-section.tsx'
+
+/** What a Session says about itself beside its thread: its plan, its files, a turn that was
+ * stopped, and a thread that was rebuilt rather than resumed. */
+export {
+  PlanPanel,
+  type PlanEntry,
+  type PlanPanelProps,
+  type PlanPriority,
+  type PlanStatus,
+} from './session/plan-panel.tsx'
+export {
+  SessionSideColumn,
+  type SessionSideColumnProps,
+  type TouchedFile,
+} from './session/session-side-column.tsx'
+export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
+/** What the turn is doing right now, at the end of the thread while it runs. */
+export { ActivityRow, type ActivityRowProps, type ActivityState } from './session/activity-row.tsx'
+export {
+  ResumeFallbackBanner,
+  type ResumeFallbackBannerProps,
+} from './session/resume-fallback-banner.tsx'

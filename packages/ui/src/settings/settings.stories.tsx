@@ -49,6 +49,49 @@ function Controlled({ theme, archived, onThemeChange, onRestore, ...rest }: Sett
   )
 }
 
+/** What this machine has, as `agents.check` answered when the section was opened (D5-18). */
+const AGENTS: SettingsProps['agents'] = {
+  agents: [
+    {
+      id: 'claude',
+      name: 'Claude Code',
+      found: true,
+      version: '2.0.31',
+      authenticated: true,
+      installHint: 'npm i -g @anthropic-ai/claude-code',
+      loginHint: 'claude auth login',
+      installer: 'npm',
+      latest: '2.0.35',
+    },
+    {
+      id: 'codex',
+      name: 'Codex',
+      found: true,
+      version: '0.9.4',
+      authenticated: false,
+      installHint: 'npm i -g @openai/codex',
+      loginHint: 'codex login',
+      installer: 'pnpm',
+      latest: '0.9.4',
+    },
+    {
+      id: 'opencode',
+      name: 'OpenCode',
+      found: false,
+      version: null,
+      authenticated: false,
+      installHint: 'npm i -g opencode-ai',
+      loginHint: 'opencode auth login',
+      installer: 'unknown',
+      latest: null,
+    },
+  ],
+  checked: true,
+  updating: null,
+  output: {},
+  onUpdate: fn(),
+}
+
 const meta = {
   tags: ['autodocs'],
   title: 'Surfaces/Settings',
@@ -59,6 +102,7 @@ const meta = {
     subtitle: 'Hemera Beta 0.4.0-beta.3 · channel beta',
     theme: 'dark',
     facts: FACTS,
+    agents: AGENTS,
     archived: ARCHIVED,
     onThemeChange: fn(),
     onOpenFolder: fn(),
@@ -67,6 +111,7 @@ const meta = {
   },
   argTypes: {
     subtitle: { control: 'text', description: 'The product, its version and its channel.' },
+    agents: { control: 'object', description: 'What this machine has, and its one press.' },
     theme: {
       control: 'inline-radio',
       options: ['system', 'light', 'dark'],
@@ -154,13 +199,20 @@ export const RestoringAProject: Story = {
     args.onRestore.mockClear()
     const canvas = within(canvasElement)
 
-    const lines = canvas.getAllByRole('listitem')
+    // The page lists other things too — the agents of this machine, among them — so what is
+    // restored is read off the rows that carry the press.
+    const lines = canvas
+      .getAllByRole('listitem')
+      .filter((row) => within(row).queryByRole('button', { name: 'Restore' }) !== null)
     expect(lines).toHaveLength(2)
     await userEvent.click(within(lines[0]!).getByRole('button', { name: 'Restore' }))
     expect(args.onRestore).toHaveBeenCalledWith('ml')
     // It leaves the list it was restored from.
     await waitFor(() => {
-      expect(canvas.getAllByRole('listitem')).toHaveLength(1)
+      const left = canvas
+        .getAllByRole('listitem')
+        .filter((row) => within(row).queryByRole('button', { name: 'Restore' }) !== null)
+      expect(left).toHaveLength(1)
     })
   },
 }

@@ -110,8 +110,43 @@
   --ring: rgba(217, 70, 239, 0.25);
   --overlay: rgba(16, 16, 24, 0.2);
 
+  /* What dragging across a text leaves behind (trial of 22 September 2026).
+     A role of its own, and opaque: selected text is the one place the theme cannot know what it
+     is drawn over, and a fill at a tenth of the primary let the page through — in the dark
+     theme the selection was all but invisible. An opaque fill with a foreground of its own
+     answers for its own contrast whatever the text was before it was selected: a comment, a
+     command, a line of a diff. 9.9:1 here, 8.5:1 in the dark. */
+  --selection: #f0abfc;
+  --selection-foreground: #111118;
+
   --shadow: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.04);
   --shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12);
+
+  /* The soft ring a thumb sits in: what says a round surface on a track is the thing the hand
+     has hold of, and not a dot drawn on it. The primary, at a fraction of itself, so the halo
+     is the accent bleeding out of the thumb rather than a second colour; `strong` is the same
+     ring under the hand and under the focus, which is how the control answers being touched
+     without moving anything anybody is reading. It is the one shadow of the theme that carries
+     a hue: everything else here is the page's own shade of black. */
+  --halo: 0 0 0 3px rgba(192, 38, 211, 0.16);
+  --halo-strong: 0 0 0 5px rgba(192, 38, 211, 0.26);
+
+  /* The second layer of that halo: the light the thumb throws, rather than the ring it sits in
+     (trial of 22 September 2026). A ring alone says where the thumb ends; a blurred glow under
+     that ring says the thumb is lit, which is the difference between an instrument and a dot
+     drawn on a line. Blurred and spread where `--halo` is spread alone, so the two layers never
+     draw the same edge twice. */
+  --halo-glow: 0 0 10px 1px rgba(192, 38, 211, 0.18);
+  --halo-glow-strong: 0 0 16px 3px rgba(192, 38, 211, 0.3);
+
+  /* What lights the core of a thumb: a highlight along its top edge and a shade along its
+     bottom, both inside it, so a round surface reads as domed rather than as a flat disc. It is
+     drawn inside because the halo already owns everything outside the thumb. */
+  --knob: inset 0 1px 1px rgba(255, 255, 255, 0.9), inset 0 -1px 2px rgba(16, 16, 24, 0.08);
+
+  /* The groove a track is sunk into, which is the well of the instrument look: an inner shadow
+     and a hairline rim, in the page's own black. A hole in a surface has no hue of its own. */
+  --well: inset 0 1px 3px rgba(16, 16, 24, 0.1), inset 0 0 0 1px rgba(16, 16, 24, 0.05);
 }
 
 /* ---- Roles, dark ---- */
@@ -179,8 +214,30 @@
   --ring: rgba(232, 121, 249, 0.3);
   --overlay: rgba(0, 0, 0, 0.5);
 
+  /* The same role, and the same rule read the other way: a magenta deep enough to sit on the
+     page's own black and still carry the theme's text on it. */
+  --selection: #6b1f7a;
+  --selection-foreground: #ececf1;
+
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-raised: 0 14px 40px rgba(0, 0, 0, 0.6);
+
+  /* The dark theme's primary is the lighter of the two, and a halo drawn at the light theme's
+     strength on this background reads as a smudge rather than a ring: it is given less of
+     itself, and the hue it is given is the one the page actually uses. */
+  --halo: 0 0 0 3px rgba(232, 121, 249, 0.2);
+  --halo-strong: 0 0 0 5px rgba(232, 121, 249, 0.32);
+
+  /* The glow reads the other way round from the ring: on the page's own black there is room for
+     it, and a thumb that threw no light on a dark panel is a thumb nothing says is lit. */
+  --halo-glow: 0 0 12px 2px rgba(232, 121, 249, 0.26);
+  --halo-glow-strong: 0 0 20px 4px rgba(232, 121, 249, 0.42);
+
+  /* The same dome, lit by what there is: a dark theme has no white to catch on the top edge, so
+     the highlight is a fraction of one and the shade below it is the black it already sits on. */
+  --knob: inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.6);
+
+  --well: inset 0 1px 3px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 /* ---- The Tailwind theme reads the roles, never the raw values ---- */
@@ -244,6 +301,8 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-overlay: var(--overlay);
+  --color-selection: var(--selection);
+  --color-selection-foreground: var(--selection-foreground);
 
   --shadow-sm: var(--shadow);
   --shadow-lg: var(--shadow-raised);
@@ -285,6 +344,39 @@
   /* How wide a floating list is drawn: the mention menu, and whatever else offers paths. Wide
      enough for a path to be read, narrow enough not to cover the box it belongs to. */
   --spacing-menu: 20rem;
+
+  /* How tall the agent panel is drawn, whatever stage it is on and whatever it is waiting for.
+     One height for the loading state, the list, the empty answer and a refusal alike: the panel
+     opens upwards out of the composer, so a body that grew would push it past the top of the
+     window and make the positioner flip it to the other side under the reader's hand. Tall
+     enough for the models on one side and the effort above the modes on the other, short enough
+     to sit above a composer in a window that is not maximised. */
+  --spacing-menu-panel: 26rem;
+
+  /* And how wide, since the maintainer kept the two-column model stage on 22 September 2026:
+     the models are searched on one side and what is set about them stands on the other, and
+     both have to be read without a name being cut short. Narrow enough to stay a menu of the
+     composer rather than a window of its own. */
+  --spacing-menu-wide: 26rem;
+
+  /* How wide that second column stands, out of the panel's own width. A fraction of the parent
+     is not a step of anything — it moves with whatever is around it, and the column beside it
+     was left to take the remainder. Written down instead: wide enough for the effort's marks
+     beside its track and for "Bypass permissions" read whole, narrow enough to leave the models
+     the larger half, which is the list that scrolls. */
+  --spacing-menu-side: 11.5rem;
+
+  /* How thick the track of the effort's scale is drawn. Thin enough to read as a line the thumb
+     runs along rather than as a bar, and thick enough that the part of it that is filled is
+     read as filled at a glance. A named step, because two tracks of two thicknesses in one
+     panel is two controls that look like they came from two systems. */
+  --spacing-track: 0.375rem;
+
+  /* How wide the thumb of that scale is drawn. Tailwind's own multiplication has no step
+     between sixteen and twenty-four, and a thumb that is to be taken hold of wants twenty.
+     Written down here it is a step the scale check knows, and a second control cannot invent a
+     size of its own in silence. */
+  --spacing-thumb-lg: 1.25rem;
 
   /* The prototype draws its icons at eighteen, with sixteen for the small ones and twenty-two
      for the few that stand alone. The first pass of lot 4 sat a step under all three, which is
@@ -350,9 +442,21 @@
   --duration-turn: 1200ms;
   --animate-turn: turn var(--duration-turn) linear infinite;
 
+  /* The breath of a dot that says something is running (design D17-04). One turn of the loading
+     indicator long, because the two are read side by side in a thread, and two rhythms beating
+     against each other are what make a page look nervous. It moves nothing but the opacity —
+     the dot keeps its place, its size and its colour, and only the pixels come and go. */
+  --animate-breathe: breathe var(--duration-turn) var(--ease-calm) infinite;
+
   @keyframes turn {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  @keyframes breathe {
+    50% {
+      opacity: 0.35;
     }
   }
 }
@@ -592,10 +696,24 @@
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
   scrollbar-gutter: stable;
-  /* The content is a sheet of its own, set in from the window on three sides. */
-  margin: 0 0.5rem 0.5rem 0;
+  /* The content is a sheet of its own, set in from the window on three sides. The fourth is the
+     sidebar's: the panel and the separator beside it are what stands between the sheet and the
+     window, so the sheet asks for nothing there — unless it is told it is alone. */
+  margin: 0 0.5rem 0.5rem var(--content-inset-left, 0px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+}
+
+/* The content with nothing beside it, which is the window before a Project (design D4-06).
+   No sidebar and no separator means nothing stands between the sheet and the window on that
+   side, and a sheet set in on three sides only reads as a panel the window cut off rather than
+   as the one surface everything is read on. Set in on the fourth as it is on the second, so the
+   frame closes and the two sides of the page are the same.
+   The inset travels as a custom property rather than as a second margin rule: a margin written
+   twice is decided by whichever of the two utilities the build happens to order last, and where
+   the content sits is not a question a sort order should answer. */
+@utility content-area-alone {
+  --content-inset-left: 0.5rem;
 }
 
 /* The strip of tabs runs a pixel past the bottom of the bar (design D2-02).
@@ -682,6 +800,56 @@
   }
 }
 
+/* What the thumb of a scale does under the hand and under the focus: the halo around it
+   brightens and the thumb itself grows a little, which is the whole of how a control answers
+   being touched without moving what is being read. `scale` and not `transform`: Tailwind 4
+   writes its scale utility as the individual property, and naming `transform` here would both
+   miss it and fight the layout animation motion plays on the same element. */
+@utility thumb-motion {
+  transition-property: box-shadow, scale;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* The two shadows a scale is built out of that are drawn inside what wears them: the groove a
+   track is sunk into, and the dome that lights a thumb's core. They are utilities rather than
+   steps of the shadow scale because a `shadow-*` utility named anything but a size is read as a
+   colour — by Tailwind's own grammar and so by the design-system lint — and neither of these is
+   a colour. What they carry is still the theme's: the value is a token, declared once per
+   theme, and this is the door it comes through. */
+@utility track-well {
+  box-shadow: var(--well);
+}
+
+/* And the two the thumb of that scale is lit by: the ring it sits in, and the glow it throws on
+   the surface under it, each at its resting strength and at the one it answers the hand with.
+   Utilities for the reason the well is one — a `shadow-*` utility named anything but a size is
+   read as a colour, by Tailwind's grammar and so by the design-system lint — and four of them
+   rather than two, because the halo is given to a state at a time: `halo group-hover:halo-strong`
+   is the ring brightening under the hand, and the glow is the same sentence one layer down. */
+@utility halo {
+  box-shadow: var(--halo);
+}
+
+@utility halo-strong {
+  box-shadow: var(--halo-strong);
+}
+
+@utility halo-glow {
+  box-shadow: var(--halo-glow);
+}
+
+@utility halo-glow-strong {
+  box-shadow: var(--halo-glow-strong);
+}
+
+@utility thumb-dome {
+  box-shadow: var(--knob);
+}
+
 /* What a chevron does while the list it opens is open: it turns over, so the control says
    which way it is facing rather than leaving the eye to check the list. A rotation is a
    transform, which is what a compositor carries on its own. */
@@ -733,7 +901,68 @@
     cursor: not-allowed;
   }
 
+  /* Selected text carries its own two colours, and not a tint laid over whatever was there.
+     `--primary-muted` is a fill made to sit under a badge whose foreground comes with it; under
+     a drag across a paragraph it is a tenth of a colour over an unknown one, which in the dark
+     theme read as nothing at all. */
   ::selection {
-    background-color: var(--color-primary-muted);
+    background-color: var(--color-selection);
+    color: var(--color-selection-foreground);
   }
+}
+
+/* ---- What a diff is coloured with (design D17-13) ----
+
+   The highlighter names a role per token and writes it as a variable — `var(--shiki-token-keyword)`
+   — and the block below is the only place a role meets a colour, exactly as every other colour of
+   the interface. Nothing in a component knows that a keyword is magenta; the classes below are
+   what a token wears, and the role's variable is set on the diff's own box so that what a diff is
+   coloured with cannot leak into the rest of the window. The names are the ones shiki's own
+   css-variables theme uses: swap the colour without touching the highlighter, or the highlighter
+   without touching a colour. */
+.code-diff {
+  --shiki-foreground: var(--foreground);
+  --shiki-background: transparent;
+  --shiki-token-comment: var(--muted-foreground);
+  --shiki-token-constant: var(--info-muted-foreground);
+  --shiki-token-keyword: var(--primary-strong);
+  --shiki-token-string: var(--success-muted-foreground);
+  --shiki-token-function: var(--mission-define-muted-foreground);
+  --shiki-token-parameter: var(--mission-build-muted-foreground);
+  --shiki-token-punctuation: var(--muted-foreground);
+  --shiki-token-link: var(--info-muted-foreground);
+}
+
+.tok-comment {
+  color: var(--shiki-token-comment);
+  font-style: italic;
+}
+
+.tok-constant {
+  color: var(--shiki-token-constant);
+}
+
+.tok-keyword {
+  color: var(--shiki-token-keyword);
+}
+
+.tok-string {
+  color: var(--shiki-token-string);
+}
+
+.tok-function {
+  color: var(--shiki-token-function);
+}
+
+.tok-parameter {
+  color: var(--shiki-token-parameter);
+}
+
+.tok-punctuation {
+  color: var(--shiki-token-punctuation);
+}
+
+.tok-link {
+  color: var(--shiki-token-link);
+  text-decoration: underline;
 }

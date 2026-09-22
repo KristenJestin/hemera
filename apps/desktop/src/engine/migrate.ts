@@ -46,13 +46,31 @@ export interface Standing {
 export class ProfileAheadError extends Data.TaggedError('ProfileAheadError')<{
   readonly writtenByVersion: string | null
   readonly migrations: string[]
-}> {}
+}> {
+  /**
+   * What the reader is told, and what the start diagnostic carries.
+   *
+   * A tagged error has no message of its own, and `named` in the engine's entry point is what
+   * writes this one down: without a sentence the line would say `ProfileAheadError` and nothing
+   * about the version that wrote the folder, which is the one thing to act on.
+   */
+  override get message(): string {
+    const by =
+      this.writtenByVersion === null ? 'a newer version' : `version ${this.writtenByVersion}`
+    return `This data folder was written by ${by} of Hemera and cannot be opened by this one.`
+  }
+}
 
 /** A migration was refused by the database, which is therefore as it was before. */
 export class MigrationError extends Data.TaggedError('MigrationError')<{
   readonly migrations: string[]
   readonly cause: unknown
-}> {}
+}> {
+  /** The migration that was refused and what refused it: the line a start failure is read by. */
+  override get message(): string {
+    return `The data folder could not be migrated (${this.migrations.join(', ')}): ${String(this.cause)}`
+  }
+}
 
 /** The migrations this application carries, read from the folder it ships them in. */
 export function carriedMigrations(migrationsFolder: string): Migration[] {
@@ -155,7 +173,6 @@ export function recordOpening(version: string) {
  */
 export function openProfile(dataDirectory: string, migrationsFolder: string, version: string) {
   return Effect.gen(function* () {
-    const database = yield* Database
     const carried = carriedMigrations(migrationsFolder)
     const applied = yield* appliedMigrations
     const standing = standingOf(carried, applied)
@@ -173,7 +190,7 @@ export function openProfile(dataDirectory: string, migrationsFolder: string, ver
         yield* backUp(dataDirectory, first)
         standing.backedUp = first
       }
-      yield* applyMigrations(database, { migrationsFolder }).pipe(
+      yield* migrateWithoutForeignKeys(migrationsFolder).pipe(
         Effect.mapError((cause) => new MigrationError({ migrations: standing.behind, cause })),
       )
     }
@@ -181,6 +198,49 @@ export function openProfile(dataDirectory: string, migrationsFolder: string, ver
     yield* recordOpening(version)
     yield* recordStanding(version, standing)
     return standing
+  })
+}
+
+/**
+ * Applies the migrations with foreign key enforcement off, and checks what they left behind.
+ *
+ * A migration that changes a check rebuilds its table the only way SQLite allows — create the
+ * new one, copy into it, drop the old one, rename — and the table it drops is the parent of rows
+ * that are already in the new one: with enforcement on, that `DROP TABLE sessions` cascades, and
+ * every message of every Session goes with it. The `PRAGMA foreign_keys=OFF` the generated file
+ * carries is ignored, because a migration runs inside a transaction and SQLite refuses that
+ * pragma while one is pending; so it is turned off here, outside, and turned back on whether the
+ * run succeeded or not.
+ *
+ * Turning it back on is not enough to trust the result: `foreign_key_check` is what the pragma
+ * was protecting, run by hand once. A row left without its parent is a profile that is not
+ * opened — the copy taken before the migration is why that is recoverable.
+ */
+function migrateWithoutForeignKeys(migrationsFolder: string) {
+  return Effect.gen(function* () {
+    const client = yield* SqliteClient
+    const database = yield* Database
+    yield* client`PRAGMA foreign_keys = OFF`
+    yield* Effect.gen(function* () {
+      yield* applyMigrations(database, { migrationsFolder })
+      const orphans = yield* client<{ table: string }>`PRAGMA foreign_key_check`
+      if (orphans.length > 0) {
+        return yield* Effect.fail(
+          new Error(
+            `${orphans.length} rows are left without their parent in ${orphans[0]?.table ?? 'a table'}`,
+          ),
+        )
+      }
+    }).pipe(
+      // Built as an Effect rather than a statement, so that turning it back on really runs when
+      // the migration fails: the refusal leaves a profile that is not opened, and the next
+      // attempt to open it must not be running with the checks off.
+      Effect.ensuring(
+        Effect.gen(function* () {
+          yield* client`PRAGMA foreign_keys = ON`
+        }).pipe(Effect.orDie),
+      ),
+    )
   })
 }
 

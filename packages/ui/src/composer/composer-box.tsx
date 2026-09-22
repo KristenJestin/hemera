@@ -95,6 +95,15 @@ export interface ComposerBoxProps {
   placeholder: string
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void
   handle: RefObject<ComposerBoxHandle | null>
+  /**
+   * The id of the entry a list beside the box would choose, while one is open.
+   *
+   * The mention band is a list the caret never leaves the box for: the arrows and Enter are read
+   * here, and nothing in that band is ever focused. `aria-activedescendant` is the one thing
+   * that says so to whatever reads the page — without it the band is a list on screen and
+   * silence in the ear, which is what it became when it stopped being a popover of its own.
+   */
+  activeDescendant?: string | undefined
 }
 
 export function ComposerBox({
@@ -103,6 +112,7 @@ export function ComposerBox({
   placeholder,
   onKeyDown,
   handle,
+  activeDescendant,
 }: ComposerBoxProps): ReactNode {
   const box = useRef<HTMLDivElement>(null)
   const marks = useRef<HTMLDivElement>(null)
@@ -206,6 +216,7 @@ export function ComposerBox({
         contentEditable
         suppressContentEditableWarning
         aria-multiline="true"
+        aria-activedescendant={activeDescendant}
         aria-label={placeholder}
         data-placeholder={placeholder}
         data-empty={value === '' ? 'true' : 'false'}

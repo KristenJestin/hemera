@@ -12,6 +12,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
+import { NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
+import type { AgentRuntime } from '#engine/agents/runtime.ts'
+import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
+import type { Discovery } from '#engine/agents/discovery.ts'
+import { Agents } from '#engine/agents/service.ts'
+import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
+import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
@@ -20,6 +27,7 @@ import { answer, decideRequest } from '#engine/request.ts'
 import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
+import type { Database } from '#engine/storage/database.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /**
@@ -46,15 +54,65 @@ function running<A, E>(
   program: Effect.Effect<
     A,
     E,
-    Preferences | EngineStatus | Projects | Journal | Sessions | SqliteClient
+    | Preferences
+    | EngineStatus
+    | Projects
+    | Journal
+    | Sessions
+    | SqliteClient
+    | AgentRuntime
+    | Discovery
+    | Agents
   >,
 ) {
-  const services = Layer.mergeAll(
+  // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
+  // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
+  const agents = Layer.mergeAll(
+    Layer.succeed(MachineEnvironment, {
+      home: '/home/ana',
+      env: {},
+      locate: () => Effect.succeed('/usr/local/bin/claude'),
+      bundled: () => Effect.succeed('/opt/hemera/node_modules/adapter/dist/index.js'),
+      readVersion: () => Effect.succeed('1.0.0'),
+      holds: () => Effect.succeed(true),
+    }),
+    fakeSupervisor(fakeAgent()),
+    NoNotices,
+  )
+  // The rows of a Session and its thread stand on one file, and the runtime is built on the very
+  // same ones: `provideMerge` hands them up rather than hiding them.
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  // Nothing here asks the three agents of the machine: their own suite is where that is proved,
+  // and what this one is about is whether a message reaches the use case it names.
+  const listed = Layer.succeed(Agents, {
+    list: () => Effect.succeed([]),
+    check: () => Effect.succeed([]),
+    update: () => Effect.die('nothing in this file updates an agent'),
+  })
+  const services: Layer.Layer<
+    | Preferences
+    | EngineStatus
+    | Projects
+    | Journal
+    | Sessions
+    | AgentRuntime
+    | Discovery
+    | Agents
+    | Database
+    | SqliteClient
+  > = Layer.mergeAll(
     preferencesLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
-    projectsLayer,
     journalLayer,
-    sessionsLayer,
+    rows,
+    listed,
+    runtimeLayer.pipe(
+      Layer.provideMerge(discoveryLayer),
+      Layer.provide(rows),
+      Layer.provide(preferencesLayer),
+      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
+      Layer.provide(agents),
+    ),
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
 
   return Effect.runPromise(
@@ -148,6 +206,7 @@ describe('Un message conforme est traité', () => {
       sidebar: { collapsed: false, width: null },
       activeProjectId: null,
       activeSessions: {},
+      composers: {},
     })
   })
 })

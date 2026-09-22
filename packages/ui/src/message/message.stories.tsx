@@ -4,6 +4,7 @@ import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/tes
 
 import { Button } from '../components/button/button.tsx'
 import { IconSparkles } from '../icons.ts'
+import { AgentText } from './agent-text.tsx'
 import { MessageText } from './message-text.tsx'
 import { LiveMarker, MessageDaySeparator, MessageGroup, MessageRow } from './message.tsx'
 import type { MessageLine, MessageState } from './model.ts'
@@ -15,20 +16,22 @@ import type { MessageLine, MessageState } from './model.ts'
  * the right, and Hemera's own notes are lines without a surface. Nothing here answers: the
  * thread is what the user wrote, and the last thing written is the last thing shown.
  *
- * The agent of `Conversation` and of `ARealThread` is a fixture and not a reply: `agent` is a
- * value of the model this lot never produces, and the catalogue shows it because a component
- * that can draw three authors is a component whose three authors have been looked at. HEM-48
- * is what makes one.
+ * The agent of `Conversation` and of `ARealThread` is a fixture and not a reply — nothing in
+ * this catalogue answers — but the author itself is drawn, and `AgentAnswer` is what it looks
+ * like: an agent writes Markdown and writes it while thinking, so its lines are drawn from the
+ * text as it arrives (`AgentText`) while what the user wrote is drawn as it was typed. A thread
+ * that drew the two the same way would show the syntax of an answer instead of the answer.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
-  title: 'Components/Message',
+  tags: ['autodocs', 'updated'],
+  title: 'Blocks/Message/Message',
   component: MessageGroup,
   parameters: { layout: 'padded' },
   args: {
     author: 'user',
     name: 'You',
     at: '14:02',
+    atLabel: 'Tuesday 22 September 2026 at 14:02',
     state: 'saved',
     lines: [{ id: 'one', body: 'Invoices should export with HT and TTC amounts per line.' }],
   },
@@ -39,7 +42,11 @@ const meta = {
     name: { control: 'text', description: 'Said once, over the group.' },
     at: {
       control: 'text',
-      description: 'Already written for the platform; the component formats nothing.',
+      description: 'HH:MM, already written for the platform; the component formats nothing.',
+    },
+    atLabel: {
+      control: 'text',
+      description: 'The whole date behind that time, for the reader who asks which day it was.',
     },
     lines: {
       control: false,
@@ -64,7 +71,15 @@ function liftOf(foot: HTMLElement): number {
   return drawn === 'none' ? 0 : new DOMMatrixReadOnly(drawn).m42
 }
 
-/** One message from the user, saved. The simplest thing a thread can hold. */
+/**
+ * One message from the user, saved. The simplest thing a thread can hold.
+ *
+ * And the two quiet halves of a group, which are the same answer at either end of it: the time
+ * in the head and the state under the foot are away until the hand or the keyboard asks for
+ * them. A thread read downwards does not carry forty timestamps down its side — the day
+ * separators are what say when — and a reader who wonders about one line wonders about that
+ * line.
+ */
 export const Playground: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -73,13 +88,19 @@ export const Playground: Story = {
     // The state of a kept group is the quiet half of a thread: it is away until the hand or the
     // keyboard asks for it, which is what stops a column of messages from carrying a line each.
     const foot = canvas.getByText('Saved').closest('p')!
+    const time = canvas.getByText('14:02')
     expect(getComputedStyle(foot).filter).toBe('opacity(0)')
+    expect(getComputedStyle(time).filter).toBe('opacity(0)')
+    // The whole date is there to be asked for, on the time it belongs to.
+    expect(time).toHaveAttribute('title', 'Tuesday 22 September 2026 at 14:02')
     // Away is not only a fade: the line also sits a few pixels up, which is the part the eye
     // reads as arriving. The hand is put on the group by its own event rather than by a pointer,
     // because this harness aims one wherever the story's geometry allows.
     expect(liftOf(foot)).toBeLessThan(0)
     fireEvent.pointerOver(group)
     await waitFor(() => expect(getComputedStyle(foot).filter).toBe('opacity(1)'))
+    // Both ends of the group answer the same hand.
+    await waitFor(() => expect(getComputedStyle(time).filter).toBe('opacity(1)'))
     // In place, and it stays there: the foot has settled rather than jumped.
     expect(liftOf(foot)).toBe(0)
   },
@@ -393,6 +414,16 @@ export const Conversation: Story = {
     expect(place('Yes — and the client number on every line.').left).toBeGreaterThan(
       place('The billing page is then the only entry point.').left,
     )
+
+    // Every group answers the hand, and not only the last one: the time of the group the reader
+    // is on arrives, and the times of the groups they are not on stay away. Before the trial of
+    // 22 September 2026 a group the caller had passed no state to had no affordance at all.
+    const first = canvas.getByText('14:02')
+    const middle = canvas.getByText('14:03')
+    expect(getComputedStyle(first).filter).toBe('opacity(0)')
+    fireEvent.pointerOver(canvas.getByRole('group', { name: 'Messages from Agent' }))
+    await waitFor(() => expect(getComputedStyle(middle).filter).toBe('opacity(1)'))
+    expect(getComputedStyle(first).filter).toBe('opacity(0)')
   },
 }
 
@@ -616,5 +647,84 @@ export const AFileHandedOver: Story = {
     expect(name?.scrollWidth ?? 0).toBeGreaterThan(name?.clientWidth ?? 0)
     const narrow = canvasElement.firstElementChild
     expect(narrow?.scrollWidth ?? 0).toBeLessThanOrEqual((narrow?.clientWidth ?? 0) + 1)
+  },
+}
+
+/**
+ * What an agent answered, under the question that was asked of it.
+ *
+ * The two bodies of a thread side by side, because they are drawn differently on purpose. What
+ * the user wrote is what they typed: a star in a message is a star, and the line breaks they put
+ * in are the line breaks they meant. An agent answers in Markdown and answers while writing, so
+ * its text is reparsed as it arrives and what is read is the answer so far rather than the syntax
+ * of it (D5-14). `AgentText` is the whole of that difference, and this is the story that holds
+ * the two apart: the same punctuation, drawn two ways.
+ */
+export const AgentAnswer: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <div className="flex w-full flex-col gap-3">
+      <MessageGroup
+        author="user"
+        name="You"
+        at="14:02"
+        state="saved"
+        lines={[
+          {
+            id: 'asked',
+            body: (
+              <MessageText body="Why does a January run export December, and why is the sheet empty *sometimes*?" />
+            ),
+          },
+        ]}
+      />
+      <MessageGroup
+        author="agent"
+        name="Claude Code"
+        at="14:02"
+        lines={[
+          {
+            id: 'answered',
+            body: (
+              <AgentText
+                text={`Two things, and they are the same thing twice.
+
+The month comes from \`query.get('month')\`, which is the *previous* month:
+
+- A run in January exports December.
+- The file is written before the totals are checked.`}
+              />
+            ),
+          },
+        ]}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const fromAgent = canvasElement.querySelector('[aria-label="Messages from Claude Code"]')!
+    const fromUser = canvasElement.querySelector('[aria-label="Messages from You"]')!
+
+    // The two voices are not on the same side: an answer begins at the left edge of the thread
+    // and a question ends against the right one, which is what `items-end` on the group of the
+    // user does. The group itself is a full-width block, so what is measured is the body inside
+    // it — the same measurement the file makes of a line that has to sit under a sentence.
+    const asked = canvas.getByText(/empty \*sometimes\*/).getBoundingClientRect()
+    const answered = canvas
+      .getByText(/Two things, and they are the same thing twice/)
+      .getBoundingClientRect()
+    expect(answered.left).toBeLessThan(asked.left)
+
+    // The answer is Markdown: a list of two items, code in a sentence, and an emphasis.
+    expect(fromAgent.querySelectorAll('li')).toHaveLength(2)
+    expect(fromAgent.querySelector('code')?.textContent).toBe("query.get('month')")
+    expect(fromAgent.querySelector('em')?.textContent).toBe('previous')
+
+    // And what the user wrote is not: a star in a message is a star, and no part of a message
+    // is an element a parser made. The same punctuation, and the one place where the two
+    // bodies of a thread could be confused for each other.
+    expect(fromUser.querySelector('em')).toBeNull()
+    expect(fromUser.querySelectorAll('code, li')).toHaveLength(0)
+    expect(canvas.getByText(/empty \*sometimes\*/)).toBeInTheDocument()
   },
 }

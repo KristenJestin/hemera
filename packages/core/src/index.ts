@@ -27,6 +27,7 @@ export {
   MAX_TITLE_LENGTH,
   NEW_SESSION_TITLE,
   NoActiveProjectError,
+  NoAgentError,
   archivedSessions,
   currentSessions,
   isArchived,
@@ -36,9 +37,19 @@ export {
   titleFromMessage,
 } from './domain/session.ts'
 export type {
+  AgentProvider,
   Mission,
+  NativeState,
   Session,
   SessionEntry,
+  SessionEntryKind,
   SessionEntryRole,
+  SessionEntryOrigin,
   SessionTitleSource,
+} from './domain/session.ts'
+export {
+  AGENT_PROVIDERS,
+  NATIVE_STATES,
+  SESSION_ENTRY_KINDS,
+  SESSION_ENTRY_ORIGINS,
 } from './domain/session.ts'

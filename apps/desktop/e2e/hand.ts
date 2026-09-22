@@ -12,10 +12,13 @@ import { browser, expect } from '@wdio/globals'
 /** Presses whatever the page shows under this name, and says so when there is nothing there. */
 export async function press(name: string): Promise<void> {
   // Matched on what the button contains rather than on what it is exactly: a tab carries the
-  // count of what nobody has seen, and the archive button carries the name of the Project.
+  // count of what nobody has seen, and the archive button carries the name of what it puts away
+  // — `Archive Invoice export` — so a label is read by what it starts with.
   const pressed = await browser.execute((label: string) => {
     const button = [...document.querySelectorAll('button')].find(
-      (one) => (one.textContent ?? '').includes(label) || one.getAttribute('aria-label') === label,
+      (one) =>
+        (one.textContent ?? '').includes(label) ||
+        (one.getAttribute('aria-label') ?? '').startsWith(label),
     )
     if (button === undefined) return false
     button.click()
@@ -144,6 +147,17 @@ export async function shows(text: string): Promise<boolean> {
 }
 
 /**
+ * What the sidebar says, which is where a Session is named and not the thread it draws.
+ *
+ * A name is in two places at once — the sidebar lists the Session under it and the page heads the
+ * thread with it — so a suite reading the whole page cannot tell which of the two it saw. The
+ * sidebar is the one that says how a Session is listed.
+ */
+export async function sidebar(): Promise<string> {
+  return await browser.execute(() => document.querySelector('aside')?.textContent ?? '')
+}
+
+/**
  * What the bar lists, in the order it lists them.
  *
  * Read as "does a tab say this", because a tab says more than a name: its tone is a dot and
@@ -183,4 +197,44 @@ export async function addProject(name: string, folder: string): Promise<void> {
   await fill('Folder of the main Workspace', folder)
   await press('Create Project')
   await browser.pause(600)
+}
+
+/**
+ * What the control of this name is: whether it can be pressed, and what it says about that.
+ *
+ * `press` is a hand on a button that works; this is the question asked of one that does not. A
+ * control that is off for a reason says the reason on itself — the send of a Home with no agent
+ * picked is exactly that — and reading it back is how a suite proves the reason was given rather
+ * than that nothing happened.
+ */
+export async function control(
+  name: string,
+): Promise<{ readonly off: boolean; readonly said: string } | null> {
+  return await browser.execute((label: string) => {
+    const button = [...document.querySelectorAll('button')].find(
+      (one) => (one.textContent ?? '').includes(label) || one.getAttribute('aria-label') === label,
+    )
+    if (button === undefined) return null
+    return {
+      // Either one is the control being off: a button that refuses the press, and one that tells
+      // whatever reads the page that it does.
+      off: button.disabled || button.getAttribute('aria-disabled') === 'true',
+      said: button.getAttribute('title') ?? '',
+    }
+  }, name)
+}
+
+/**
+ * Waits until the page holds this text, and says so when it never does.
+ *
+ * An agent answers when it answers: a turn is a process being started, a handshake and a stream,
+ * and a pause long enough for the slowest of them would be a pause every other suite pays for.
+ * What a suite waits on is the text itself.
+ */
+export async function awaits(text: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(async () => await shows(text), {
+    timeout: within,
+    interval: 200,
+    timeoutMsg: `the page never showed "${text}"`,
+  })
 }

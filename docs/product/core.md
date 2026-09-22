@@ -594,6 +594,13 @@ The Session combines three generic elements:
 - the context of the mission and of the possible Spec;
 - a working surface suited to the current activity.
 
+The chat is the agent's own thread: each message, thought, tool call, diff and permission request
+is one typed entry, in the order it arrived, persisted in the Profile and projected into the
+Journal. The composer carries what the agent says it can do — its models, its reasoning effort, its
+permission modes — and, beside them, what the turn used: the reading the agent gave of its context
+window, with "not provided" for whatever it did not announce. Hemera divides by no window an agent
+never named.
+
 The views surrounding the main surface are closable and mutually exclusive:
 the user opens only one at a time. A working surface can display, as
 needed, a Spec, tasks, a prototype, a diff, a review or a document.

@@ -12,18 +12,33 @@
 
 import { join } from 'node:path'
 
-import { channelSchema } from '@hemera/ipc'
+import { type EngineEventName, channelSchema } from '@hemera/ipc'
 import { Effect, Layer, Scope } from 'effect'
+import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
+import { registryLayer, updaterLayer } from './agents/installer.ts'
+import { clockLayer, poolLayer } from './agents/pool.ts'
+import { AgentNotices, runtimeLayer } from './agents/runtime.ts'
+import type { AgentRuntime, Notice } from './agents/runtime.ts'
+import { type Agents, agentsLayer } from './agents/service.ts'
+import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
+import type { Discovery } from './agents/discovery.ts'
+import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
 import { openProfile } from './migrate.ts'
 import { journalLayer } from './journal.ts'
+import type { Journal } from './journal.ts'
 import { preferencesLayer } from './preferences.ts'
+import type { Preferences } from './preferences.ts'
 import { projectsLayer } from './projects.ts'
+import type { Projects } from './projects.ts'
 import { type EngineAnswer, type EngineRequest, answer, decideRequest } from './request.ts'
 import { sessionsLayer } from './sessions.ts'
+import type { Sessions } from './sessions.ts'
 import { engineStatusLayer } from './status.ts'
+import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
+import type { Database, SqliteClient } from './storage/database.ts'
 
 /** The file the data folder keeps its database in. */
 export const DATABASE_FILE = 'hemera.sqlite'
@@ -37,40 +52,135 @@ export interface EngineStart {
 }
 
 /**
+ * The window, as the runtime's notices.
+ *
+ * Every entry an agent writes and every change to a Session is pushed to the page as it happens,
+ * on the one channel the preload listens on: the thread is drawn from what arrives rather than
+ * from asking again (D5-12). The five names a change can travel under are the page's, and the
+ * reasons the runtime changes something map onto them here, in the one place that knows the wire.
+ */
+function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.Layer<AgentNotices> {
+  const PUSHED: Record<Notice, EngineEventName> = {
+    permission_requested: 'permission',
+    turn_started: 'turn_start',
+    turn_ended: 'turn',
+    agent_died: 'agent',
+    session_fallback: 'agent',
+  }
+
+  return Layer.succeed(AgentNotices, {
+    wrote: (sessionId, entry) => {
+      try {
+        port.postMessage({ event: 'entry', sessionId, entry })
+      } catch (died) {
+        // The window is gone: the entry is written either way, and a page that is not there to
+        // hear about it is not a reason to fail the turn that wrote it.
+        log(`pushing an entry failed: ${named(died)}`)
+      }
+    },
+    changed: (sessionId, what) => {
+      const event = PUSHED[what]
+      try {
+        port.postMessage({ event, sessionId, entry: null })
+      } catch (died) {
+        log(`pushing ${event} failed: ${named(died)}`)
+      }
+    },
+  })
+}
+
+/**
  * Everything this process is, built once.
  *
  * The database layer is underneath the two services, so both stand on the same open file, and
  * the whole thing lives in the scope this program is run in: when the process ends, the scope
- * closes and the database is let go of.
+ * closes and the database is let go of. The agents are built on top of the same file — a Session
+ * and its thread are rows — and their notices go out on the port the main process handed over.
  */
-function servicesOf(start: EngineStart) {
+/** Everything this process holds once it is built, named so the composition is checked against it. */
+type EngineServices =
+  | Preferences
+  | EngineStatus
+  | Projects
+  | Journal
+  | Sessions
+  | AgentRuntime
+  | Discovery
+  | Agents
+  | Database
+  | SqliteClient
+
+function servicesOf(
+  start: EngineStart,
+  port: MessagePortMain,
+  log: (line: string) => void,
+): Layer.Layer<EngineServices> {
   const channel = channelSchema.parse(start.channel)
+  // The rows of a Session and its thread stand on one file, and the runtime is built on the very
+  // same ones: `provideMerge` hands them up rather than hiding them.
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  // The machine the agents are looked for on, the processes they are started as, where their
+  // `stderr` goes, and the window that hears about all of it: everything the runtime needs that
+  // is not a row.
+  const agents = Layer.mergeAll(
+    machineEnvironmentLayer,
+    hostProcessesLayer,
+    Layer.succeed(StderrSink, { write: (line: string) => Effect.sync(() => log(line)) }),
+    noticesTo(port, log),
+  )
+  // What the Agents section of the settings asks about: the three agents this machine has, and
+  // the one thing that changes them, which is asked of a registry and of the tool that installed
+  // the command (D5-18). Both of those need to know what the machine is, so they are built over
+  // it, and discovery is built a second time rather than shared: it is three `PATH` lookups with
+  // no state between them.
+  const discovery = discoveryLayer.pipe(Layer.provide(rows), Layer.provide(agents))
+  const sources = Layer.mergeAll(registryLayer, updaterLayer).pipe(Layer.provide(agents))
+  const listed = agentsLayer.pipe(Layer.provide(discovery), Layer.provide(sources))
+
   return Layer.mergeAll(
     preferencesLayer,
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),
-    projectsLayer,
     journalLayer,
-    sessionsLayer,
+    rows,
+    listed,
+    runtimeLayer.pipe(
+      // Discovery is handed up rather than hidden: the settings page asks this process what the
+      // machine has, and that question is answered without starting anything.
+      Layer.provideMerge(discoveryLayer),
+      Layer.provide(rows),
+      // What each Project's composer was left on: the runtime seeds the Home's choices from it
+      // at start and writes them back as they are made (D5-17).
+      Layer.provide(preferencesLayer),
+      Layer.provide(processSupervisorLayer),
+      // The book of what is running, on the engine's own clock: it is what closes the agent a
+      // Home's composer started once nobody is looking at that composer any more (D5-05).
+      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
+      Layer.provide(agents),
+    ),
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
 }
 
 /**
- * What a refusal or a failure is called on the wire: what it says, or what it carries.
+ * What a refusal or a failure is called on the wire: the sentence it carries.
  *
- * A refusal of the domain is an `Error` with a sentence someone wrote for a reader — "the
- * repository location "../elsewhere" is refused: it resolves outside the workspace root" —
- * and that sentence is what the interface shows under the field. An Effect error has a tag
- * and a few fields and no message at all, so the same `${name}: ${message}` would cross the
- * port as `DatabaseError: ` and the reason would be lost. Which is why there are two: the
- * sentence when there is one, the fields when there is not. A cause that is an `Error` is
- * named beside them either way, because an `Error` serialises to nothing.
+ * A refusal is something a reader is shown — "the repository location "../elsewhere" is refused:
+ * it resolves outside the workspace root" — and every refusal of this process has one: the
+ * refusals of the domain are `Error`s written that way, and the tagged errors of the engine each
+ * declare a `message` of their own for exactly this crossing. What is never sent is the fields
+ * of an error as JSON: `StaleVersionError {"entity":"session","expected":1}` says nothing to
+ * whoever pressed the button, and a page cannot show it. A failure with nothing to say is named
+ * by its own name and no more; a cause that is an `Error` is named beside it, because an `Error`
+ * serialises to nothing.
  */
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a failure is whatever was raised; naming it is the last thing done with it
-function named(error: unknown): string {
+export function named(error: unknown): string {
   if (!(error instanceof Error)) return String(error)
-  const because = error.cause === undefined ? '' : ` caused by ${String(error.cause)}`
+  const cause = error.cause === undefined ? '' : String(error.cause)
+  // A cause the sentence already names is not named a second time: the tagged errors of the
+  // engine carry the reason inside their own message, and `Error.cause` is the same reason.
+  const because = cause === '' || error.message.includes(cause) ? '' : ` caused by ${cause}`
   if (error.message !== '') return `${error.message}${because}`
-  return `${error.name} ${JSON.stringify(error) ?? '{}'}${because}`
+  return `${error.name}${because}`
 }
 
 if (process.parentPort !== undefined) {
@@ -88,7 +198,9 @@ if (process.parentPort !== undefined) {
       Effect.scoped(
         Effect.gen(function* () {
           const scope = yield* Effect.scope
-          const context = yield* Layer.build(servicesOf(start)).pipe(Scope.provide(scope))
+          const context = yield* Layer.build(servicesOf(start, port, log)).pipe(
+            Scope.provide(scope),
+          )
 
           yield* Effect.provide(
             openProfile(start.directory, start.migrations, start.version),

@@ -1,5 +1,5 @@
 import { MotionConfigContext, useReducedMotion } from 'motion/react'
-import type { Easing, Transition } from 'motion/react'
+import type { Easing, TargetAndTransition, Transition } from 'motion/react'
 import { useContext } from 'react'
 
 /**
@@ -93,8 +93,13 @@ export const LABEL_TRAVEL = 8
  */
 export const LABEL_DELAY = 0.08
 
-/** The durations of the theme, in the seconds motion counts in. */
-export const durations = { fast: 0.16, base: 0.26, slow: 0.4 } as const
+/**
+ * The durations of the theme, in the seconds motion counts in.
+ *
+ * `turn` is the long one the stylesheet already spins and breathes on — `--duration-turn` —
+ * and it is written here so that what motion repeats keeps the same beat as what CSS repeats.
+ */
+export const durations = { fast: 0.16, base: 0.26, slow: 0.4, turn: 1.2 } as const
 
 /** The curve the theme's `--ease-calm` draws, for the few transitions that are not a spring. */
 export const easing: Easing = [0.25, 0.8, 0.25, 1]
@@ -118,4 +123,100 @@ export function useTransition(preset: Transition = arrival): Transition {
   const system = useReducedMotion()
   if (reducedMotion === 'always') return instant
   return system === true ? instant : preset
+}
+
+/**
+ * Which way a surface is travelling, from the reader's side: on into the next thing, or back
+ * to where they came from. The same kind plays both, mirrored, so a panel never comes back the
+ * way it went.
+ */
+export type SlideDirection = 'forward' | 'backward'
+
+/**
+ * How far a slide goes, and the two answers a surface ever needs.
+ *
+ * `stage` is a swap: one surface leaves by its own width and the next arrives from the other
+ * side, so what is read is a replacement — the agent stage of the model menu giving way to the
+ * models. `nudge` is the same movement kept short, for a surface that is being replaced *in
+ * place* while the frame around it does not move at all: the models column of the two-column
+ * menu changing agent. A nudge as long as a swap reads as the whole panel sliding; a swap as
+ * short as a nudge reads as a list that was there all along.
+ */
+export const SLIDE = { stage: '100%', nudge: '12%' } as const
+
+/** Which of the two distances a slide is drawn at. */
+export type SlideDistance = keyof typeof SLIDE
+
+/** Where a sliding surface comes in from, and where the one it replaces goes out to. */
+export interface Slide {
+  enter: string
+  leave: string
+}
+
+/**
+ * The `slide` kind: a surface arriving from one side while the one it replaces leaves by the
+ * other, at one of the two distances and in one of the two directions.
+ *
+ * The timing is not its own — a slide is something putting itself in place, so it is played on
+ * `arrival` like everything else that does. Only the geometry lives here, which is the whole
+ * reason it is a kind and not a pair of constants in whichever component needed it first.
+ */
+export function slide(distance: SlideDistance, direction: SlideDirection = 'forward'): Slide {
+  const away = SLIDE[distance]
+  const back = `-${away}`
+  return direction === 'forward' ? { enter: away, leave: back } : { enter: back, leave: away }
+}
+
+/**
+ * The `expand` and `collapse` kinds: a body whose height is its own, growing and folding away.
+ *
+ * Height and a fade together. The height is what makes room — the page under it moves over
+ * rather than being redrawn — and the fade is what keeps the clipped edge from reading as a
+ * line of text cut in half on the way. A tool call's body, a thought, a menu panel whose stage
+ * is taller than the last one: all of them are this.
+ *
+ * The fade is a `filter` and not an `opacity`, for the reason the foot of a message gives: the
+ * accessibility check of the catalogue measures a text's contrast through an opacity and
+ * refuses the value it reads mid-flight, while a filter is not part of what it measures.
+ *
+ * Played on `morph`, which is the spring made for a dimension: it arrives without turning
+ * round, and a body that overshot its height would take the whole column below it along.
+ */
+export const expand = { height: 'auto', filter: 'opacity(1)' } as const
+export const collapse = { height: 0, filter: 'opacity(0)' } as const
+
+/**
+ * The `push` kind: what a neighbour does when the thing above it grows or folds away.
+ *
+ * The same spring the growth itself is played on, deliberately and by name rather than by
+ * reaching for `morph` at the call site — because the one thing a push must never do is arrive
+ * on a different beat from what pushed it. Read it on `layout`, where motion measures where
+ * each block ended up and plays the difference.
+ */
+export const push: Transition = morph
+
+/**
+ * The `ping` kind: a ring leaving what is running, over and over.
+ *
+ * A dot that is breathing says "this is the state you are waiting on" in opacity alone, which
+ * is read once the eye is already on it. A ring that expands out of the dot and fades is read
+ * from the corner of the eye, which is where a reader watching a thread actually is — and it
+ * costs nothing but a transform and an opacity on an element that is eight pixels wide.
+ *
+ * The two of them are one kind: `ping` is what the ring travels through — out to `PING_REACH`
+ * of its own size while it goes from `PING_OPACITY` to nothing — and `pinging` is the beat it
+ * repeats on, the theme's own `turn`, so the ring leaves on the same beat the dot breathes on
+ * rather than against it.
+ *
+ * A reader asking for less movement is given no ring at all rather than a ring with no time to
+ * travel in: `useTransition` answers `instant`, and what repeats for ever at no duration is a
+ * ring stuck at full size. The component reads that answer and draws nothing.
+ */
+export const PING_REACH = 2.6
+export const PING_OPACITY = 0.45
+export const ping: TargetAndTransition = { scale: [1, PING_REACH], opacity: [PING_OPACITY, 0] }
+export const pinging: Transition = {
+  duration: durations.turn,
+  ease: easing,
+  repeat: Number.POSITIVE_INFINITY,
 }

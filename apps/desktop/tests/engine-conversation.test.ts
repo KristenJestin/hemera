@@ -7,9 +7,10 @@
  */
 
 import { describe, expect, test } from 'vite-plus/test'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Option } from 'effect'
 
 import type { EngineAnswer, EngineRequest } from '#engine/request.ts'
+import type { EngineEvent } from '@hemera/ipc'
 import {
   EngineGone,
   EngineRefused,
@@ -20,7 +21,7 @@ import {
 
 /** A port that answers each message the way the test says, or never answers at all. */
 function port(reply: ((request: EngineRequest) => EngineAnswer) | null): EnginePort {
-  const listeners: ((event: { data: EngineAnswer }) => void)[] = []
+  const listeners: ((event: { data: EngineAnswer | EngineEvent }) => void)[] = []
   return {
     postMessage: (request) => {
       if (reply === null) return
@@ -31,6 +32,26 @@ function port(reply: ((request: EngineRequest) => EngineAnswer) | null): EngineP
     },
     on: (_event, listener) => listeners.push(listener),
     start: () => undefined,
+  }
+}
+
+/** A port a test pushes events through, the way the engine pushes them on its own. */
+interface Pushing {
+  readonly port: EnginePort
+  readonly push: (event: EngineEvent) => void
+}
+
+function pushing(): Pushing {
+  const listeners: ((event: { data: EngineAnswer | EngineEvent }) => void)[] = []
+  return {
+    port: {
+      postMessage: () => undefined,
+      on: (_event, listener) => listeners.push(listener),
+      start: () => undefined,
+    },
+    push: (event) => {
+      for (const listener of listeners) listener({ data: event })
+    },
   }
 }
 
@@ -46,6 +67,7 @@ describe('Un message conforme est traité', () => {
         sidebar: { collapsed: true, width: null },
         activeProjectId: null,
         activeSessions: {},
+        composers: {},
       },
     }))
     const conversation = engineConversation(answering, alive)
@@ -55,6 +77,7 @@ describe('Un message conforme est traité', () => {
       sidebar: { collapsed: true, width: null },
       activeProjectId: null,
       activeSessions: {},
+      composers: {},
     })
   })
 
@@ -67,6 +90,7 @@ describe('Un message conforme est traité', () => {
         sidebar: { collapsed: false, width: null },
         activeProjectId: null,
         activeSessions: {},
+        composers: {},
       },
     }))
     const conversation = engineConversation(answering, alive)
@@ -93,6 +117,20 @@ describe('Un process dédié muet est une erreur, pas une attente', () => {
     // And it says which of the four it is, rather than answering the use case twice over:
     // a field called `name` on an `Error` takes the tag its own class declares away.
     expect(failed.name).toBe('EngineTimeout')
+  })
+
+  test('a prompt is not hurried: the turn lasts as long as it lasts', async () => {
+    const silent = engineConversation(port(null), alive, Duration.millis(30))
+
+    // Four times the patience and still waiting, which is the point: no timeout named the use
+    // case, and only the guard of this test ended the wait.
+    const outcome = await Effect.runPromise(
+      silent
+        .ask('agents.prompt', { sessionId: 'session-1', text: 'go' })
+        .pipe(Effect.timeoutOption(Duration.millis(120))),
+    )
+
+    expect(Option.isNone(outcome)).toBe(true)
   })
 
   test('the wait is the one it was given, not one that goes on until something happens', async () => {
@@ -131,5 +169,21 @@ describe('Un message non conforme est refusé sans effet', () => {
     expect(failed).toBeInstanceOf(EngineRefused)
     // Carried as the message, because it is the sentence the page shows to whoever asked.
     if (failed instanceof EngineRefused) expect(failed.message).toContain('theme')
+  })
+})
+
+describe('What the engine pushes on its own is heard', () => {
+  test('an event the engine pushes reaches whoever is listening, and is not taken for an answer', () => {
+    const { port: pushingPort, push } = pushing()
+    const conversation = engineConversation(pushingPort, alive)
+    const heard: EngineEvent[] = []
+    conversation.hear((event) => heard.push(event))
+
+    // No identifier: it is not an answer to anything, and the page is the one it is for.
+    push({ event: 'turn', sessionId: 'session-1', entry: null })
+    push({ event: 'permission', sessionId: 'session-1', entry: null })
+
+    expect(heard.map((event) => event.event)).toEqual(['turn', 'permission'])
+    expect(heard.every((event) => event.sessionId === 'session-1')).toBe(true)
   })
 })

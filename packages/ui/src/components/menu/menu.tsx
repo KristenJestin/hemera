@@ -2,7 +2,7 @@ import { Menu as BaseMenu } from '@base-ui/react/menu'
 import { type ReactNode, useRef } from 'react'
 
 import { useOverlayContainer } from '../../overlay.ts'
-import { Button } from '../button/button.tsx'
+import { Button, IconButton } from '../button/button.tsx'
 import { Kbd } from '../kbd/kbd.tsx'
 
 /**
@@ -39,8 +39,18 @@ export interface MenuItem {
 }
 
 export interface MenuProps {
-  /** What the trigger says. */
+  /** What the trigger says, and what it is called when it says nothing. */
   label: string
+  /**
+   * The trigger, when it is not the label: one icon of the catalogue and no word at all.
+   *
+   * A menu of two commands at the top of a page is a `…` and not two buttons (review of #40,
+   * defect 4), and the icon is passed rather than named here because the catalogue is the
+   * design system's and this component does not choose which mark a caller means. The label
+   * stays the control's name, so the trigger is announced as `Rename or archive this Session`
+   * while it is drawn as an ellipsis.
+   */
+  icon?: ReactNode | undefined
   /** Groups of commands; a separator is drawn between two groups. */
   groups: MenuItem[][]
   disabled?: boolean | undefined
@@ -48,7 +58,7 @@ export interface MenuProps {
   className?: string | undefined
 }
 
-export function Menu({ label, groups, disabled, className }: MenuProps) {
+export function Menu({ label, icon, groups, disabled, className }: MenuProps) {
   const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
   return (
@@ -56,9 +66,24 @@ export function Menu({ label, groups, disabled, className }: MenuProps) {
       <span ref={anchor} className="inline-flex">
         <BaseMenu.Trigger
           disabled={disabled === true}
-          render={<Button variant="secondary" className={className} />}
+          render={
+            icon === undefined ? (
+              // The label is the trigger's own words, and they are the control's name.
+              <Button variant="secondary" className={className} />
+            ) : (
+              // An icon trigger says nothing, so the label is carried as the accessible name
+              // instead: the button is drawn as an ellipsis and announced as what it opens.
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={icon}
+                aria-label={label}
+                className={className}
+              />
+            )
+          }
         >
-          {label}
+          {icon === undefined ? label : null}
         </BaseMenu.Trigger>
       </span>
       <BaseMenu.Portal container={container}>

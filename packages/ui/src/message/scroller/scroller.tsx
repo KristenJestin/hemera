@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { motion } from 'motion/react'
+import { LayoutGroup, motion } from 'motion/react'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -47,14 +47,22 @@ const OVERFLOW = 1
  */
 const WIDTH = { rest: 1, near: 1.5, active: 2 } as const
 
-/** The row of the thread and its rail. The rail does not scroll with what it maps. */
-const FRAME = 'flex h-full min-h-0 gap-3'
-
-/** The thread's own column, which the pill floats over — centred on the thread, not the page. */
-const COLUMN = 'relative flex min-w-0 flex-1 flex-col'
+/**
+ * The whole of the room the page gives the thread, which the rail and the pill stand in.
+ *
+ * It is as wide as the content area and not as wide as the thread (trial of 22 September 2026,
+ * evening): the rail stands at its right edge, in the gutter beside the thread's column, and the
+ * pill floats over its middle — which is the middle of the column, since the column is centred
+ * in it. Neither takes anything of the column's width.
+ */
+const FRAME = 'relative flex h-full min-h-0 min-w-0 flex-col'
 
 /**
- * The one thing that scrolls.
+ * The one thing that scrolls, and it is the whole width of the frame.
+ *
+ * A wheel turned beside the thread scrolls the thread (trial of 22 September 2026, evening): a
+ * box as narrow as the column was a thread that answered the wheel over the text and ignored it
+ * a hand's width to either side of it, in a page where nothing else scrolls.
  *
  * A tab stop, because a region that scrolls and cannot be reached by the keyboard is a region
  * some readers cannot get to at all. It wears the theme's outline rather than the design
@@ -67,18 +75,46 @@ const COLUMN = 'relative flex min-w-0 flex-1 flex-col'
  * in places rather than in a proportion, and a bar ruled down the reading column is chrome over
  * what is being read. It is the rail that is drawn only when it overflows, so the two never
  * disagree about whether there is anything below.
+ *
+ * It carries no padding of its own: the column inside it is what sets the thread in, and a box
+ * that padded as well would put the thread a second inset away from the composer's frame.
  */
 const BOX =
-  'scroll-quiet relative flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pt-4 pb-6 outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring'
+  'scroll-quiet relative flex min-h-0 flex-1 flex-col overflow-y-auto outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring'
+
+/**
+ * The column of blocks inside it, which is what is measured.
+ *
+ * A box of its own and not the classes of the one above: a scroll container keeps the same box
+ * however much is written into it, so the only thing a `ResizeObserver` can be told to watch is
+ * the content. The thread's own rhythm — the room between two blocks, and the air at either end
+ * — lives here with it.
+ *
+ * It is the page's reading column, the one the head and the composer of a Session are laid on:
+ * centred, three extra-large widths at most, and set in by the same six on either side. The
+ * thread is that column to the pixel, left edge and right edge, because a message ending past
+ * the frame it was written in is the one misalignment the reader sees on every line of it.
+ */
+const LIST = 'mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 pt-4 pb-6'
 
 /**
  * The pill's row, which covers the thread without taking it: the row is the full width of the
- * column and lets every press through it, and only the pill itself answers one.
+ * frame — whose middle is the column's — and lets every press through it, and only the pill
+ * itself answers one.
  */
 const PILL_ROW = 'pointer-events-none absolute inset-x-0 bottom-4 flex justify-center'
 
 /** The rail: a column of marks, as tall as what it holds and never as tall as the thread. */
 const RAIL = 'flex shrink-0 flex-col items-center gap-1 pt-3'
+
+/**
+ * Where the scroller stands its rail: at the right edge of the frame, not beside the column.
+ *
+ * Counted inside the column, the rail took its own width and a gap out of the thread's, and the
+ * thread ended short of the composer under it (trial of 22 September 2026, evening). Out here it
+ * is in the gutter the column leaves, and the column is the composer's.
+ */
+const RAIL_PLACE = 'absolute top-0 right-1'
 
 /**
  * A mark is drawn as a line, and pressed as a square.
@@ -98,20 +134,26 @@ const TICK = 'group flex h-3 w-4 shrink-0 items-center justify-center outline-no
 const BAR = 'block h-0.5 w-1.5 rounded-full'
 
 /**
- * A message of the thread, and the mark the rail draws for it.
+ * An entry of the thread, and the mark the rail draws for it when it asks for one.
  */
 export interface ScrollerMessage {
   /** What identifies the entry, for React and for what a press on a mark goes to. */
   id: string
   /**
-   * The beginning of what was written, already written for the platform.
+   * The beginning of what was written, already written for the platform — or nothing.
    *
    * It is what the rail says when the pointer rests on a mark, and what a screen reader reads
    * when the keyboard lands on one: a mark has nothing of its own to say, and the only thing
    * worth saying about it is where it goes. The two are the same words on purpose — what the
    * eye is shown and what is announced are one answer, not two of different lengths.
+   *
+   * Left out, the entry draws no mark at all and the rail's reading position steps over it, as
+   * it steps over a day. That is the opt-in the trial of 22 September 2026 asked for: a rail
+   * that ticked every block of a turn was forty ticks for one question, and the marks a reader
+   * navigates a Session by are what *they* wrote. Everything the agent answered is read by
+   * scrolling through it, which is how it was written.
    */
-  mark: string
+  mark?: string | undefined
   /** What the thread draws there, handed over already drawn. */
   content: ReactNode
   /** A message is never a day; the two are told apart by this and by nothing else. */
@@ -136,9 +178,16 @@ export interface ScrollerDay {
 
 export type ScrollerEntry = ScrollerDay | ScrollerMessage
 
-/** Whether an entry is a message, which is the only kind of entry the rail draws a mark for. */
-function isMessage(entry: ScrollerEntry): entry is ScrollerMessage {
-  return entry.day !== true
+/**
+ * Whether the rail draws a mark for an entry, which is the one question the rail asks of it.
+ *
+ * A day never does, and an entry that named no mark never does either. The same answer decides
+ * the anchor the reading position is counted off and the tick that is drawn, so the two cannot
+ * come apart: a rail whose active index counted one list and drew another would point at the
+ * wrong message every time an unmarked entry went past.
+ */
+function isMarked(entry: ScrollerEntry): entry is ScrollerMessage & { mark: string } {
+  return entry.day !== true && entry.mark !== undefined
 }
 
 /** How wide a mark is drawn: the one being read, the two beside it, and all the others. */
@@ -162,6 +211,10 @@ export interface MessageScrollerProps {
 
 export function MessageScroller({ label, entries, className }: MessageScrollerProps): ReactNode {
   const box = useRef<HTMLDivElement>(null)
+  // What is written, as one box: the column of blocks inside the thing that scrolls. It is
+  // there to be measured — a scroll container's own box never changes when its content grows,
+  // and the content's does.
+  const list = useRef<HTMLDivElement>(null)
   // Where each entry of the thread is, by index, and `null` for the ones the rail steps over.
   // Read off the elements themselves, which is a place in a column already laid out and not a
   // size taken off a string: `offsetTop` and a scroll position are the same axis, and the two
@@ -170,9 +223,18 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   const [active, setActive] = useState(-1)
   const [overflowing, setOverflowing] = useState(false)
   const [atEdge, setAtEdge] = useState(true)
-  // The same answer, where an effect can read it without waiting for a render: whether the
-  // reader was at the live edge is what decides whether a message arriving takes them with it.
-  const wasAtEdge = useRef(true)
+  /**
+   * Whether the thread is following what is being written into it.
+   *
+   * It is the reader's own answer and nothing else's: it is set by a scroll — theirs, or the one
+   * the pill makes — and it is never set by a measurement. That is the whole of the fix of the
+   * trial of 22 September 2026: a text streaming in makes the column taller without moving the
+   * scroll, which *measures* as having left the live edge, and a column that read its own
+   * growing as the reader walking away stopped following after the first word.
+   */
+  const pinned = useRef(true)
+  /** Where the thread was scrolled to last, which is how a scroll upwards is told from any other. */
+  const lastTop = useRef(0)
   const transition = useTransition(arrival)
   // `useTransition` hands back this very object for a reader who asked for less movement, and a
   // scroll that glides is movement: the end of the thread is worth arriving at, not travelling
@@ -200,43 +262,62 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     setActive(edge ? seen : mark)
     setOverflowing(node.scrollHeight - node.clientHeight > OVERFLOW)
     setAtEdge(edge)
-    wasAtEdge.current = edge
   }, [])
+
+  /**
+   * A scroll, which is the one thing that says whether the reader is following the thread.
+   *
+   * What lets go of the thread is going *up*, and not being far from the edge: a scroll event
+   * arrives a frame after the position changed, and by then a text that is streaming has already
+   * written another line — so a thread that read "far from the edge" as "the reader left" let go
+   * of itself while it was following. Going up is the reader and nobody else. Coming back to the
+   * edge takes them with it again, whichever of the two ways there they used.
+   */
+  const scrolled = useCallback(() => {
+    const node = box.current
+    if (node !== null) {
+      if (node.scrollTop < lastTop.current) pinned.current = false
+      if (node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE) pinned.current = true
+      lastTop.current = node.scrollTop
+    }
+    look()
+  }, [look])
 
   // Bound once, and not once per render: this runs while the reader scrolls, and the answers it
   // keeps up with change for two reasons — the scroller being resized, and the thread growing
   // under it. The same two watchers as the strip of tabs, for the same two reasons.
   useEffect(() => {
     const node = box.current
-    if (node === null) return
+    const written = list.current
+    if (node === null || written === null) return
     // A Session opens on what was written last. Arriving at the top of a conversation and having
     // to find its end is the one thing a thread read from the bottom cannot ask for.
     node.scrollTop = node.scrollHeight
+    lastTop.current = node.scrollTop
     look()
     const sized = new ResizeObserver(look)
     sized.observe(node)
-    const grown = new MutationObserver(look)
-    grown.observe(node, { childList: true, subtree: true, characterData: true })
+    /**
+     * The thread getting taller, which is not the same event as the thread getting an entry.
+     *
+     * An answer arrives into the entry that is already there — the engine writes the same entry
+     * again, with more of it — so a thread following its stream by counting entries followed
+     * the first word of an answer and then stood still for the rest of it. What is watched is
+     * the height of what is written, and a reader who is following is taken along with it.
+     */
+    const grown = new ResizeObserver(() => {
+      if (pinned.current && box.current !== null) {
+        box.current.scrollTop = box.current.scrollHeight
+        lastTop.current = box.current.scrollTop
+      }
+      look()
+    })
+    grown.observe(written)
     return () => {
       sized.disconnect()
       grown.disconnect()
     }
   }, [look])
-
-  /**
-   * A message arriving in a thread the reader is at the end of takes them with it.
-   *
-   * Only then: someone who scrolled up to check something is reading, and a column that jumped
-   * under them would take them off the line they were on — that reader has the pill instead. The
-   * mount is the other half of the same rule, and it is the one above: a Session opens on what
-   * was written last.
-   */
-  useEffect(() => {
-    const node = box.current
-    if (node === null || !wasAtEdge.current) return
-    node.scrollTop = node.scrollHeight
-    look()
-  }, [entries.length, look])
 
   const goToLatest = (): void => {
     const node = box.current
@@ -249,38 +330,75 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     node?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
   }
 
-  const marks = entries.filter(isMessage).map((entry) => ({ id: entry.id, label: entry.mark }))
+  const marks = entries.filter(isMarked).map((entry) => ({ id: entry.id, label: entry.mark }))
 
   return (
     <div className={cn(FRAME, className)}>
-      <div className={COLUMN}>
-        <div ref={box} tabIndex={0} role="log" aria-label={label} onScroll={look} className={BOX}>
-          {entries.map((entry, index) => (
-            <div
-              key={entry.id}
-              ref={(node) => {
-                // A day registers as nothing: the rail counts messages and only messages, so
-                // the walk above lands on the same index the rail drew its marks with.
-                anchors.current[index] = entry.day === true ? null : node
-              }}
-            >
-              {entry.content}
-            </div>
-          ))}
+      {/*
+        `layoutScroll` because this is the thing that scrolls: motion measures a block against
+        the viewport, and a measurement taken in a column that has been scrolled by eight
+        hundred pixels is eight hundred pixels wrong. It is the one prop that tells it to read
+        the offset.
+      */}
+      <motion.div
+        ref={box}
+        layoutScroll
+        tabIndex={0}
+        role="log"
+        aria-label={label}
+        onScroll={scrolled}
+        className={BOX}
+      >
+        <div ref={list} className={LIST}>
+          {/*
+          A fold opening takes the thread below it with it, and takes it *smoothly* (trial of
+          22 September 2026). Every block is its own layout element and the group is what makes
+          them one movement: motion measures where each of them ended up and plays the
+          difference as a transform, so a tool card unfolding pushes the blocks under it
+          instead of the column being redrawn somewhere else between two frames.
+
+          `position` and not the whole box, which is what keeps a growing entry out of it: an
+          answer arriving word by word changes its own height on nearly every frame, and a
+          block whose *size* was animated would be a paragraph stretching under the eye that
+          is reading it. Where a block starts is what travels; what it holds never does.
+
+          And for a reader who asked for less movement it is not a layout element at all: a
+          journey given no time is still a journey the machinery sets up, and `false` is the
+          block simply being where it belongs.
+          */}
+          <LayoutGroup>
+            {entries.map((entry, index) => (
+              <motion.div
+                key={entry.id}
+                layout={still ? false : 'position'}
+                transition={transition}
+                ref={(node) => {
+                  // A day registers as nothing, and so does an entry that asked for no mark: the
+                  // rail counts what it drew and only what it drew, so the walk above lands on
+                  // the same index the rail drew its marks with.
+                  anchors.current[index] = isMarked(entry) ? node : null
+                }}
+              >
+                {entry.content}
+              </motion.div>
+            ))}
+          </LayoutGroup>
         </div>
-        {!atEdge && (
-          <div className={PILL_ROW}>
-            <LatestPill onGoToLatest={goToLatest} />
-          </div>
-        )}
-      </div>
+      </motion.div>
+      {!atEdge && (
+        <div className={PILL_ROW}>
+          <LatestPill onGoToLatest={goToLatest} />
+        </div>
+      )}
       {overflowing && (
-        <NavigationRail
-          label={`Marks of ${label}`}
-          marks={marks}
-          active={active}
-          onSelect={goToMark}
-        />
+        <div className={RAIL_PLACE}>
+          <NavigationRail
+            label={`Marks of ${label}`}
+            marks={marks}
+            active={active}
+            onSelect={goToMark}
+          />
+        </div>
       )}
     </div>
   )

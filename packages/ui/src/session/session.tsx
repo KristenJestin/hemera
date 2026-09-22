@@ -6,8 +6,9 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
+import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconArchive, IconMessages, IconPencil, IconRestore } from '../icons.ts'
+import { IconArchive, IconDots, IconMessages, IconPencil, IconRestore } from '../icons.ts'
 import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
 
 /**
@@ -26,17 +27,27 @@ import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../mot
  */
 
 /** What the head of a Session says, and what it offers to do with it. */
-const HEAD = 'flex items-start gap-3'
+const HEAD = 'flex items-center gap-3'
 
-/** The title and what is said under it, which is one column and takes the room left. */
-const COLUMN = 'flex min-w-0 flex-col gap-1'
+/** The title and where the Session lives, on one line, taking the room the menu leaves. */
+const COLUMN = 'flex min-w-0 flex-1 items-baseline gap-3'
 
-const TITLE = 'text-2xl font-medium'
+/** The title, which truncates rather than pushing the directory and the menu out of the line. */
+const TITLE = 'min-w-0 truncate text-2xl font-medium'
 
-/** The line under the title: the kind of work, the Project, and what the Session holds. */
-const SUB = 'flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground'
+/**
+ * The title as a control, which is what opens Rename.
+ *
+ * It is drawn as the title it is and not as a button beside it: the words are already on the
+ * line, and the hand that wants the name changed is on them. The pencil inside the menu says the
+ * same thing for whoever reads the menu before touching anything.
+ */
+const TITLE_ACTION = 'focus-ring -mx-1 min-w-0 truncate rounded-md px-1 text-left hover:bg-accent'
 
-/** The actions of the head, at the end of the line rather than under it. */
+/** Where the Session lives: the Project it belongs to, and what it holds. */
+const SUB = 'min-w-0 truncate text-sm text-muted-foreground'
+
+/** The commands of the head, at the end of the line rather than under it. */
 const ACTIONS = 'ml-auto flex shrink-0 items-center gap-2'
 
 /** The field and the words that say how it ends, on the line the title was on. */
@@ -102,13 +113,18 @@ export interface SessionHeaderProps {
 }
 
 /**
- * The head of a Session: what it is called, where it lives, and the two things that can be
- * done to it.
+ * The head of a Session: what it is called, where it lives, and what can be done to it.
  *
- * The title is the page's first line and the only editable one, so it is edited where it
- * stands — a dialog over the page to change a line of it would hide the thread being named.
- * The two controls sit at the end of the same line rather than under it, because the head is
- * read once and the thread below is what the page is for.
+ * One line (review of #40, defect 4): the title, the directory it lives in, and the commands at
+ * the end of the same line. The title is the page's first line and the only editable one, so it
+ * is edited where it stands — a dialog over the page to change a line of it would hide the thread
+ * being named — and the title is itself the control that opens the field, because that is where
+ * the hand already is.
+ *
+ * Rename and Archive sit behind one `…` menu instead of standing open at the end of the line: two
+ * words at the top of every thread are two words to read on the way to the content, and a command
+ * that opens on purpose is read once. Nothing is deleted by Archive, so it does not ask twice —
+ * it is a command in the menu, and the thread is still in the sidebar when it goes.
  *
  * Nothing here carries an outer margin: where the head sits in the page is the page's, and a
  * component that spaced itself would be a component that could not be moved.
@@ -124,42 +140,57 @@ export function SessionHeader({
   onArchive,
   archiveDisabled = false,
 }: SessionHeaderProps): ReactNode {
-  const rename = useRef<HTMLButtonElement>(null)
+  const titleControl = useRef<HTMLButtonElement>(null)
   const wasEditing = useRef(false)
   // Where the keyboard goes when the field closes. It goes back to the control that opened it
   // and not to the top of the page: a field that takes the caret and then drops it on `<body>`
   // is a page the keyboard has to walk again from its first control. On a new Session the page
   // opened the field itself, and the answer is the same — the head is where the title is.
   useEffect(() => {
-    if (wasEditing.current && !editing) rename.current?.focus()
+    if (wasEditing.current && !editing) titleControl.current?.focus()
     wasEditing.current = editing
   }, [editing])
+  // What the menu holds, in the order it is read. While the title is being typed there is no
+  // Rename to offer: the field is the renaming, and a command that opened the same field a second
+  // time would be a command that does nothing.
+  const commands: MenuItem[] = []
+  if (!editing && onStartEditing !== undefined) {
+    commands.push({ label: 'Rename', icon: <IconPencil size="sm" />, onSelect: onStartEditing })
+  }
+  if (onArchive !== undefined) {
+    commands.push({
+      label: 'Archive',
+      icon: <IconArchive size="sm" />,
+      disabled: archiveDisabled,
+      onSelect: onArchive,
+    })
+  }
   return (
     <div className={HEAD}>
       <div className={COLUMN}>
         {editing ? (
           <TitleField initial={title} onCommit={onRename} onCancel={onCancelEditing} />
         ) : (
-          <h1 className={TITLE}>{title}</h1>
+          <h1 className={TITLE}>
+            {onStartEditing === undefined ? (
+              title
+            ) : (
+              <button
+                type="button"
+                ref={titleControl}
+                className={TITLE_ACTION}
+                onClick={onStartEditing}
+              >
+                {title}
+              </button>
+            )}
+          </h1>
         )}
-        <p className={SUB}>
-          <span>{`${projectName} · ${meta}`}</span>
-        </p>
+        <p className={SUB}>{`${projectName} · ${meta}`}</p>
       </div>
       <div className={ACTIONS}>
-        {/* While the title is being typed, Rename is the field itself: a control that opened
-            the same field a second time would be a control that does nothing. */}
-        {!editing && onStartEditing !== undefined && (
-          <Button ref={rename} variant="ghost" size="sm" onClick={onStartEditing}>
-            <IconPencil size="sm" />
-            Rename
-          </Button>
-        )}
-        {onArchive !== undefined && (
-          <Button variant="ghost" size="sm" disabled={archiveDisabled} onClick={onArchive}>
-            <IconArchive size="sm" />
-            Archive
-          </Button>
+        {commands.length > 0 && (
+          <Menu label={`Commands for ${title}`} icon={<IconDots size="sm" />} groups={[commands]} />
         )}
       </div>
     </div>

@@ -9,8 +9,12 @@
  * instead, and this check is what keeps it that way.
  *
  * Tests and stories are exempt: measuring is exactly what a test does to find out whether the
- * theme produced the size it claimed. The sidebar's separator is exempt too, by name — what it
- * reads is where the pointer is, which is not text and is not a layout.
+ * theme produced the size it claimed. So is a `*-fixtures.tsx` beside them — a story's own
+ * machine, split out of the story file only so that several stories can be shown the same one.
+ * An assertion does not stop being an assertion for having moved one file over, and what the
+ * agent panel's fixtures measure is whether the panel is still the box the theme said it was.
+ * The sidebar's separator is exempt too, by name — what it reads is where the pointer is,
+ * which is not text and is not a layout.
  *
  *   node tools/text-measure.ts
  */
@@ -36,10 +40,16 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
  * is only that the measuring is written down rather than done for us by `layoutId`. It is named
  * here rather than left to a comment so that the day it starts measuring something else, this
  * list is where the argument happens.
+ *
+ * The effort's slider is the separator's case again: a thumb that is dragged has to know where
+ * the hand is along its own track, and the track is the only thing a pointer's position can be
+ * read against. It sizes nothing by what it reads — the track, the notches and the words beside
+ * them are steps of the scale, and the words are kept still by a grid rather than by a measure.
  */
 export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/shell/gutter.tsx',
   'packages/ui/src/shell/tab-mark.tsx',
+  'packages/ui/src/composer/effort-slider.tsx',
 ]
 
 export interface Refusal {
@@ -51,7 +61,10 @@ export interface Refusal {
 /** Whether a file is one of the places measuring is the point rather than the mistake. */
 function exempt(file: string): boolean {
   return (
-    /\.test\.tsx?$/.test(file) || /\.stories\.tsx$/.test(file) || MEASURE_EXCEPTIONS.includes(file)
+    /\.test\.tsx?$/.test(file) ||
+    /\.stories\.tsx$/.test(file) ||
+    /-fixtures\.tsx$/.test(file) ||
+    MEASURE_EXCEPTIONS.includes(file)
   )
 }
 

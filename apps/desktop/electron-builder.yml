@@ -18,12 +18,28 @@ files:
   - dist/**
   - drizzle/**
   - package.json
-  # The native accelerator `msgpackr` reaches for, which `effect` pulls in and which it does
-  # without: the bundles carry msgpackr's own JavaScript, nothing in them loads this, and a
-  # package of this application carries no native module. electron-builder would otherwise
-  # unpack it beside the archive for being one.
-  - '!node_modules/@msgpackr-extract/**'
-  - '!node_modules/msgpackr-extract/**'
+  # And none of the development tree. electron-builder collects the production `node_modules` of
+  # its own accord, whatever this list says, and what it collects from here is every platform
+  # binary the dependency graph mentions: the agents themselves, as `@anthropic-ai`'s and
+  # `@openai`'s own packages, 250 MB of programs the reader already has installed and signed in
+  # (D5-21) — and `msgpackr`'s native accelerator, which nothing in the bundles loads. The four
+  # bundles carry their own JavaScript and import nothing but `node:` and `electron`, so a
+  # package of this application needs no `node_modules` at all.
+  - '!node_modules/**/*'
+
+# The two ACP adapters, which are Node scripts this application depends on and the reader never
+# installs (D5-21). They travel outside the archive because a script has to be a file on disk for
+# `utilityProcess.fork` to run it, and they are the folder `tools/package-desktop.ts` builds
+# rather than this repository's own `node_modules`: pnpm's tree leads to the platform binaries
+# above, and a package must carry none of them. The engine looks for them here, and falls back to
+# `node_modules` in a development run.
+#
+# The `node_modules` is named on both sides on purpose: electron-builder refuses to copy an entry
+# called `node_modules` at the root of a fileset, whatever the pattern, so what is handed over is
+# the folder itself rather than the one above it.
+extraResources:
+  - from: adapters/node_modules
+    to: adapters/node_modules
 
 # The 55 locales Chromium ships weigh 47 MB unpacked and the application speaks one language.
 # The folder is emptied through this option and never by hand: an empty locales folder is a

@@ -6,9 +6,23 @@
  * the process that holds the database refuses anything it has not declared, so a request no
  * one wrote down cannot be sent by accident. Nothing here knows about Electron or a port: this
  * is the declaration both ends read, not the wire between them.
+ *
+ * The same process also pushes what happens while a Session is being worked on. That is not a
+ * use case — nothing asks for it and nothing waits for it — and it is declared at the end of
+ * this file (design D5-12).
  */
 
 import { z } from 'zod'
+
+import {
+  agentAvailabilitySchema,
+  agentOfferSchema,
+  agentProviderSchema,
+  agentUpdateSchema,
+  configOptionSchema,
+  resumeStateSchema,
+  stopReasonSchema,
+} from './agents.ts'
 
 /**
  * Which build this is, and therefore which data folder it opens.
@@ -61,11 +75,33 @@ export const activeProjectSchema = z.string().nullable()
  */
 export const activeSessionsSchema = z.record(z.string(), z.string())
 
+/**
+ * What each Project's composer was left on, remembered between two starts (design D5-17).
+ *
+ * One entry per Project: the agent that was last asked there, and the choices made on it — the
+ * model, the effort, the mode, under the identifiers that agent publishes them with. A Home
+ * opens on what it was left on rather than on the agent's defaults, and a Project's choices are
+ * that Project's: two Projects on two agents are two composers.
+ *
+ * The values are whatever the agent announced, so nothing here is an enumeration of Hemera's:
+ * an option an agent adds is remembered the day it adds it, and one it no longer takes is a
+ * choice it refuses, which leaves the composer showing what the agent is really on.
+ */
+export const composerChoiceSchema = z.object({
+  provider: z.string(),
+  options: z.record(z.string(), z.string()),
+})
+
+export type ComposerChoice = z.infer<typeof composerChoiceSchema>
+
+export const composersSchema = z.record(z.string(), composerChoiceSchema)
+
 export const displayPreferencesSchema = z.object({
   theme: themePreferenceSchema,
   sidebar: sidebarPreferenceSchema,
   activeProjectId: activeProjectSchema,
   activeSessions: activeSessionsSchema,
+  composers: composersSchema,
 })
 
 export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
@@ -76,6 +112,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   sidebar: { collapsed: false, width: null },
   activeProjectId: null,
   activeSessions: {},
+  composers: {},
 }
 
 /** A change to what the window wears: what is absent is what the user did not touch. */
@@ -84,6 +121,7 @@ export const displayPreferencesChangeSchema = z.object({
   sidebar: sidebarPreferenceSchema.optional(),
   activeProjectId: activeProjectSchema.optional(),
   activeSessions: activeSessionsSchema.optional(),
+  composers: composersSchema.optional(),
 })
 
 export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>
@@ -180,14 +218,57 @@ export const nothingSchema = z.object({})
  *
  * `titleSource` is handed over rather than only used by the engine because the interface asks
  * the question it answers: a title still `derived` is one the first message may still propose.
+ *
+ * `provider` and `model` cross for the same reason: the window says which agent a Session talks
+ * to and which model it was asked for, and a Session with neither has no agent yet (D5-06).
  */
 export const sessionTitleSourceSchema = z.enum(['derived', 'user'])
+
+/** How far a Session is still attached to the agent's own native session (design D5-06). */
+export const nativeStateSchema = z.enum(['none', 'attached', 'lost', 'fallback'])
+
+/** Who wrote an entry: the user, the agent, or Hemera on its own behalf. */
+export const sessionEntryRoleSchema = z.enum(['user', 'agent', 'hemera'])
+
+/**
+ * What an entry is (design D5-11): its `kind` says which block of the thread draws it, and its
+ * `payload` is where that block's own details are — the tool's name and arguments, a diff's
+ * files, a permission's options. `payload` is JSON text rather than a shape of its own here:
+ * the same column holds every kind's details, and each kind validates what it reads.
+ */
+export const sessionEntryKindSchema = z.enum([
+  'message',
+  'thought',
+  'tool_call',
+  'diff',
+  'terminal',
+  'plan',
+  'permission_request',
+  'permission_decision',
+  'usage',
+  'turn',
+  'note',
+])
+
+/**
+ * How an entry came to be in the thread: written as it happened, or written from what the agent
+ * replayed when a Session came back to its own native session (design D5-08, D5-11).
+ *
+ * It is what tells a tool call that is running from one that ran before the window was opened:
+ * a resumed thread holds both, and only one of them is happening now.
+ */
+export const sessionEntryOriginSchema = z.enum(['live', 'replay'])
+
+export type SessionEntryOrigin = z.infer<typeof sessionEntryOriginSchema>
 
 export const sessionSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   title: z.string(),
   titleSource: sessionTitleSourceSchema,
+  provider: agentProviderSchema.nullable(),
+  model: z.string().nullable(),
+  nativeState: nativeStateSchema,
   archivedAt: z.number().nullable(),
   createdAt: z.number(),
   lastWrittenAt: z.number(),
@@ -204,8 +285,17 @@ export const sessionEntrySchema = z.object({
   sessionId: z.string(),
   /** Its place in the thread, counting from one: what the messages are ordered by. */
   seq: z.number(),
-  role: z.enum(['user']),
+  role: sessionEntryRoleSchema,
+  kind: sessionEntryKindSchema,
   body: z.string(),
+  payload: z.string(),
+  /** What an update of this entry found it by, inside its Session. */
+  correlationId: z.string().nullable(),
+  turnId: z.string().nullable(),
+  /** How far it got, in the vocabulary its own kind defines. */
+  state: z.string().nullable(),
+  /** Whether it was written as it happened, or from what the agent replayed (design D5-08). */
+  origin: sessionEntryOriginSchema,
   createdAt: z.number(),
 })
 
@@ -299,7 +389,14 @@ export const ENGINE_REQUESTS = {
   'sessions.create': {
     // The Project is what the interface has and may not: a refusal says so in a sentence, where
     // a schema that refused `null` would say it in the words of a parser.
-    arguments: z.object({ projectId: z.string().nullable() }),
+    //
+    // The agent is chosen when the Session is made, and it is not optional: a Session nothing
+    // can answer is refused (NoAgentError). `null` still crosses, because every Session written
+    // before the agents existed holds nothing there and is still read (design D5-06).
+    arguments: z.object({
+      projectId: z.string().nullable(),
+      provider: agentProviderSchema.nullable(),
+    }),
     response: sessionSchema,
   },
   'sessions.rename': {
@@ -313,6 +410,8 @@ export const ENGINE_REQUESTS = {
     response: z.object({ session: sessionSchema, entry: sessionEntrySchema }),
   },
   'sessions.read': {
+    // Entries are read as what they are: each one says by its `kind` which block of the thread
+    // draws it, and the block reads its own details out of `payload` (design D5-11, D5-13).
     arguments: z.object({
       sessionId: z.string(),
       before: cursorSchema.optional(),
@@ -323,6 +422,79 @@ export const ENGINE_REQUESTS = {
       nextBefore: z.number().nullable(),
     }),
   },
+
+  // The agents, asked for by name like the rest of them. What this machine has is the engine's
+  // to answer because it is the one that can start an agent, and the one that knows which of
+  // them a Session is already talking to (design D5-13).
+  'agents.list': {
+    arguments: nothingSchema,
+    response: z.object({ agents: z.readonly(z.array(agentAvailabilitySchema)) }),
+  },
+  'agents.options': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.object({ options: z.readonly(z.array(configOptionSchema)) }),
+  },
+  'agents.offer': {
+    // Asked before a Session exists: the composer of a Project's Home chooses an agent and what
+    // that agent offers, and the Session it starts keeps that agent (design D5-17). Nothing is
+    // written by the question, and the options are the same list `agents.options` would give —
+    // with the refusal beside them, because an agent this machine does not have and an agent
+    // nobody signed in are two things a composer has to be able to say (D5-21).
+    arguments: z.object({ projectId: z.string(), provider: agentProviderSchema }),
+    response: agentOfferSchema,
+  },
+  'agents.offerSet': {
+    // The same session, put on one of the agent's own options: an option an agent only publishes
+    // once another has been chosen — the effort of a reasoning model — is announced in the answer
+    // to that choice and nowhere else, so the composer asks here and draws what comes back
+    // (design D5-13, D5-17). The choice is kept for the Session this composer will start.
+    arguments: z.object({
+      projectId: z.string(),
+      provider: agentProviderSchema,
+      optionId: z.string(),
+      value: z.string(),
+    }),
+    response: agentOfferSchema,
+  },
+  'agents.setOption': {
+    arguments: z.object({ sessionId: z.string(), optionId: z.string(), value: z.string() }),
+    response: z.void(),
+  },
+  'agents.prompt': {
+    // Answered when the turn is over and not when it is sent: what the page is waiting for is
+    // why it ended, and the rest of the turn reaches it as it happens (design D5-12).
+    arguments: z.object({ sessionId: z.string(), text: z.string() }),
+    response: z.object({ stopReason: stopReasonSchema }),
+  },
+  'agents.stop': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.void(),
+  },
+  'agents.decide': {
+    // An option of null is not a missing answer: it is the user closing the request without
+    // choosing one, which the agent has to be told either way (design D5-13).
+    arguments: z.object({ sessionId: z.string(), optionId: z.string().nullable() }),
+    response: z.void(),
+  },
+  'agents.resume': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.object({ state: resumeStateSchema, reason: z.string().nullable() }),
+  },
+
+  // What the Agents section of the settings asks for, and what it does about the answer
+  // (design D5-18). `check` is the one use case here that leaves the machine: it reads the
+  // registry of the tool each agent was installed with, which is why it is asked when the
+  // section is opened and never on a schedule. `update` runs that tool's own update command,
+  // only ever because somebody pressed a button, and answers with its output rather than with a
+  // sentence of Hemera's — an update that refused says why in its own words.
+  'agents.check': {
+    arguments: nothingSchema,
+    response: z.object({ agents: z.readonly(z.array(agentAvailabilitySchema)) }),
+  },
+  'agents.update': {
+    arguments: z.object({ id: agentProviderSchema }),
+    response: agentUpdateSchema,
+  },
 } as const
 
 export type EngineRequests = typeof ENGINE_REQUESTS
@@ -332,3 +504,52 @@ export type EngineRequestName = keyof EngineRequests
 export type EngineArguments<K extends EngineRequestName> = z.infer<EngineRequests[K]['arguments']>
 
 export type EngineResponse<K extends EngineRequestName> = z.infer<EngineRequests[K]['response']>
+
+/**
+ * One pushed event, named by what it says happened.
+ *
+ * Nothing is waiting for it and nothing is answered, so it carries no identifier: what the page
+ * does with it is draw what it says, and an event that is not an answer cannot be mistaken for
+ * one. `entry` is the entry the event is about when it is about one — an entry that was written,
+ * a turn that ended, a permission that is being asked for — and null when it is about the
+ * Session or the agent itself.
+ */
+function pushedEvent<const Event extends string>(event: Event) {
+  return z.object({
+    event: z.literal(event),
+    sessionId: z.string(),
+    entry: sessionEntrySchema.nullable(),
+  })
+}
+
+/**
+ * What the engine pushes while a Session is being worked on, one schema per name (design D5-12).
+ *
+ * The engine writes these as they happen rather than when they are asked for: an entry was
+ * written, a turn began or ended, a permission is being asked for, or the agent itself changed.
+ * One schema per name, so that whoever sends one is held to the name it sends.
+ *
+ * A turn's start and its end are two names and not one: the page turns something on when a turn
+ * begins and off when it ends, and one name for both would be a page that cannot tell which of
+ * the two it has just been told (design D5-12).
+ */
+export const ENGINE_EVENTS = {
+  entry: pushedEvent('entry'),
+  turn_start: pushedEvent('turn_start'),
+  turn: pushedEvent('turn'),
+  permission: pushedEvent('permission'),
+  agent: pushedEvent('agent'),
+} as const
+
+export type EngineEventName = keyof typeof ENGINE_EVENTS
+
+/** One pushed message, of whichever of the five names it carries. */
+export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
+
+/**
+ * The name these messages travel under, from the engine to the page.
+ *
+ * Declared here for the reason every other name is: the main process sends on this name and the
+ * preload listens on it, and two copies of a name are two contracts.
+ */
+export const ENGINE_EVENT_CHANNEL = 'agents.event'

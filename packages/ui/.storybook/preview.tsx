@@ -70,6 +70,31 @@ const preview: Preview = {
   parameters: {
     layout: 'centered',
     a11y: { test: 'error' },
+    /**
+     * The sidebar is five roots and nothing else (`AGENTS.md`, "Storybook sidebar, five roots"):
+     * the roots in the order written here, and the alphabetical order inside them, which
+     * `method: 'alphabetical'` is what asks for — without it Storybook keeps whatever order the
+     * index was built in for every name this list does not mention.
+     *
+     * An array is the order of what precedes it, so `['Session', ['Complete']]` sits right after
+     * `Surfaces` and names two things: the `Surfaces/Session` entry first among the surfaces, and
+     * `Complete` first among its stories, because that is the one the UI gate opens and the
+     * alphabet would bury it.
+     */
+    options: {
+      storySort: {
+        includeNames: true,
+        method: 'alphabetical',
+        order: [
+          'Foundations',
+          'Components',
+          'Blocks',
+          'Surfaces',
+          ['Session', ['Complete']],
+          'Shell',
+        ],
+      },
+    },
   },
 }
 

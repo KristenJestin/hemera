@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import {
   type ReactNode,
   type RefObject,
@@ -42,9 +43,12 @@ export interface ShellProps {
    * The Project everything else is about, and null when there is none at all.
    *
    * Null is the first launch and the moment the last Project is archived (design D4-06): the
-   * bar keeps its mark and its fold, the sidebar is not drawn at all, and the content area is
-   * handed the whole width. The keystroke that opens the command belongs to the application,
-   * and it goes on working here as it does everywhere else.
+   * bar keeps its mark and nothing else, the sidebar is not drawn at all, and the content area
+   * is handed the whole width and closes its own left edge. The fold goes with the sidebar —
+   * a control that folds nothing is a control that answers nothing — so the bar offers it
+   * neither to the hand nor to the keystroke that would have reached it. The keystroke that
+   * opens the command belongs to the application, and it goes on working here as it does
+   * everywhere else.
    */
   activeProjectId: string | null
   onSelectProject: (id: string) => void
@@ -153,7 +157,7 @@ export function Shell({
           <div className="shell-body">
             {/* With no Project there is nothing for the sidebar to list and nothing for the
                 separator to move: both are left out rather than drawn empty, and the content
-                area takes the width they would have had. */}
+                area takes the width they would have had — and with it their edge. */}
             {activeProjectId !== null && (
               <>
                 <Sidebar
@@ -181,7 +185,7 @@ export function Shell({
                 />
               </>
             )}
-            <ContentArea>{children}</ContentArea>
+            <ContentArea alone={activeProjectId === null}>{children}</ContentArea>
           </div>
           <OverlayRoot ref={overlay} />
         </div>
@@ -201,7 +205,20 @@ export function Shell({
  * never moves the bar or the sidebar, and a wheel over something scrollable inside the content
  * stops at its own edge rather than carrying on into the page.
  */
-export function ContentArea({ children }: { children: ReactNode }): ReactNode {
+export function ContentArea({
+  alone = false,
+  children,
+}: {
+  /**
+   * Whether there is nothing beside it, which is the window before a Project (design D4-06).
+   *
+   * The sheet is set in from the window on three sides and the sidebar is the fourth; with no
+   * sidebar it is set in on the fourth as well, so that the frame is closed on every side
+   * rather than running off the edge of the window on one of them.
+   */
+  alone?: boolean | undefined
+  children: ReactNode
+}): ReactNode {
   // A tab stop, because a region that scrolls and cannot be reached by the keyboard is a region
   // whose content some readers cannot get to at all — which is what axe says about it and what
   // the suite refuses. What it wears when it is reached is the ring of the theme rather than
@@ -210,7 +227,10 @@ export function ContentArea({ children }: { children: ReactNode }): ReactNode {
   return (
     <main
       tabIndex={0}
-      className="content-area bg-surface-content outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring"
+      className={cn(
+        'content-area bg-surface-content outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring',
+        alone && 'content-area-alone',
+      )}
     >
       {children}
     </main>

@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react'
 
-import { Settings, type ArchivedProject, type ProfileFacts } from '@hemera/ui'
+import {
+  Settings,
+  type AgentsSectionProps,
+  type ArchivedProject,
+  type ProfileFacts,
+} from '@hemera/ui'
 import type { ThemeChoice } from '@hemera/ui/window'
 
 /** The settings of the application (design D4-07): composed, and bound to its callbacks. */
@@ -11,6 +16,7 @@ export function SettingsPage({
   facts,
   onOpenFolder,
   onOpenDiagnostic,
+  agents,
   archived,
   onRestore,
 }: {
@@ -20,6 +26,8 @@ export function SettingsPage({
   facts: ProfileFacts
   onOpenFolder: () => void
   onOpenDiagnostic: () => void
+  /** What this machine has, and the one thing the reader can do about it. */
+  agents: AgentsSectionProps
   archived: ArchivedProject[]
   onRestore: (id: string) => void
 }): ReactNode {
@@ -31,6 +39,7 @@ export function SettingsPage({
       facts={facts}
       onOpenFolder={onOpenFolder}
       onOpenDiagnostic={onOpenDiagnostic}
+      agents={agents}
       archived={archived}
       onRestore={onRestore}
     />

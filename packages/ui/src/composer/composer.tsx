@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { IconButton } from '../components/button/button.tsx'
 import { Frame, FrameFooter } from '../components/frame/frame.tsx'
@@ -6,7 +6,7 @@ import { IconAt, IconPaperclip } from '../icons.ts'
 import { ComposerActions } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
-import { MentionMenu } from './mention-menu.tsx'
+import { MentionMenu, mentionOptionId } from './mention-menu.tsx'
 import { PromptInput, type PromptShape } from './prompt-input.tsx'
 
 /**
@@ -66,11 +66,62 @@ export interface ComposerProps {
   onWorkspaceChange?: ((workspace: string) => void) | undefined
   /** The word on the button that sends: `Start chat` on the Home. */
   action?: string | undefined
+  /**
+   * Why the send cannot be pressed, said on the control itself (design D4b-02).
+   *
+   * The Home's composer starts a Session, and a Session is made with the agent it will run: with
+   * no agent chosen there is nothing to make and nobody to answer. The reason used to be a
+   * paragraph above the box, which pushed the whole frame down the moment it appeared and left a
+   * gap the moment it went; it belongs on the control it is about, where a hand that stops on it
+   * is told why and nothing moves at all.
+   */
+  sendDisabledReason?: string | undefined
   /** The shape of the box: the Home's greeting, or the foot of a Session. */
   variant?: PromptShape | undefined
   placeholder?: string | undefined
   /** Writes the text, and answers why it could not be written, or nothing when it was. */
   onSend: (text: string) => Promise<string | null>
+  /**
+   * The one control for the agent, its model, its effort and its mode, at the end of the box's
+   * own row (design D17-11).
+   *
+   * It is handed over already built, because what an agent announced is what the engine
+   * answered rather than something this composer could know. It sits *inside* the frame, on the
+   * row the `@` and the paperclip are on, and not in the foot: the foot used to hold the
+   * agent's controls beside the actions, they wrapped onto a second line as soon as a model had
+   * a long name, and the frame changed height while it was being read.
+   *
+   * There is no second slot for the mode since the trial of 22 September 2026. The mode is one
+   * of the four things the agent is set on, it is a row of that same panel, and two controls
+   * side by side asking about one agent was one control too many in a row that must not wrap.
+   */
+  agentMenu?: ReactNode | undefined
+  /**
+   * Whether the foot offers to turn what is written into a Spec (design D4b-02).
+   *
+   * The Home does and a Session does not: a Session is a conversation that is already under
+   * way, and a Spec is made from the question that starts one. Off unless the page asks for it,
+   * so the control has to be earned rather than removed.
+   */
+  spec?: boolean | undefined
+  /**
+   * Whether a turn is running, which is what the send becomes while it does (design D17-13).
+   *
+   * It is not the same question as `sending`: a write is in flight for as long as the engine
+   * takes to take it, and a turn runs for minutes. A stop offered during a write would be a
+   * stop offered before there is anything to stop.
+   */
+  running?: boolean | undefined
+  /** Cancels the running turn, when there is one. */
+  onStop?: (() => void) | undefined
+  /**
+   * What the turn is waiting on, drawn above the box (design D5-13).
+   *
+   * A permission is the one thing that makes this box a place to read rather than a place to
+   * write, and it is built by whoever knows what is being asked: the strip is handed over
+   * already written, and the composer only gives it the room.
+   */
+  blocked?: ReactNode | undefined
 }
 
 export function Composer({
@@ -84,9 +135,15 @@ export function Composer({
   workspace,
   onWorkspaceChange,
   action = 'Start chat',
+  sendDisabledReason,
   variant = 'hero',
   placeholder = 'Ask anything, think out loud, or describe what you want to do…',
   onSend,
+  agentMenu,
+  spec = false,
+  running = false,
+  onStop,
+  blocked,
 }: ComposerProps): ReactNode {
   const box = useRef<ComposerBoxHandle>(null)
   const [matches, setMatches] = useState<string[]>([])
@@ -94,11 +151,30 @@ export function Composer({
   const [active, setActive] = useState(0)
   const [sending, setSending] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  /**
+   * Whether the Stop was pressed during the turn that is running (design D5-10).
+   *
+   * The first press asks the agent to cancel and the second one forces it: the control says
+   * "Force stop" in between. A turn that ended takes the press with it, so the next turn starts
+   * on a plain Stop — reset while rendering rather than in an effect, so the word never lags.
+   */
+  const [stopPressed, setStopPressed] = useState(false)
+  if (!running && stopPressed) setStopPressed(false)
   const [chosen, setChosen] = useState(workspaces[0] ?? 'main')
   const current = workspace ?? chosen
+  // What names the entries of the mention band, so the box can point at the one the arrows are
+  // on: the band takes no focus, and this is the only thing that tells a reader who cannot see
+  // it which file Enter would put in. Two composers on one page are two sets of names.
+  const mentions = useId()
 
-  /** Whether there is anything to send, which Enter and the button both ask. */
-  const ready = value.trim() !== '' && !sending
+  /**
+   * Whether there is anything to send, which Enter and the button both ask.
+   *
+   * `sendDisabledReason` is part of the answer: a sentence with nothing behind it to send it to
+   * is a sentence that would be written into a Session that cannot answer, and the reason it is
+   * off is on the control itself while it is.
+   */
+  const ready = value.trim() !== '' && !sending && sendDisabledReason === undefined
 
   /**
    * Asks for the files matching what has been typed, once the typing has stopped.
@@ -194,9 +270,21 @@ export function Composer({
     setPicking(null)
   }
 
-  /** Writes what is written, and lets the box go when it has been written. */
+  /** Stops the running turn: the button and Escape from the box are the same press. */
+  const stop = () => {
+    setStopPressed(true)
+    onStop?.()
+  }
+
+  /**
+   * Writes what is written, and lets the box go when it has been written.
+   *
+   * Not while a turn runs: the box stays open so the next message can be typed, but the agent is
+   * busy with this one, and Enter keeps the sentence where it is rather than sending it into a
+   * turn that would refuse it.
+   */
   const send = async () => {
-    if (!ready) return
+    if (!ready || running) return
     setSending(true)
     const said = await onSend(value)
     setSending(false)
@@ -237,6 +325,7 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2">
+      {blocked}
       <Frame
         animated
         focusable
@@ -258,8 +347,13 @@ export function Composer({
               }}
               ready={ready}
               sending={sending}
+              running={running}
+              forcing={stopPressed}
+              spec={spec}
               action={action}
               onSend={() => void send()}
+              onStop={stop}
+              sendDisabledReason={sendDisabledReason}
             />
           </FrameFooter>
         }
@@ -268,6 +362,25 @@ export function Composer({
           variant={variant}
           ready={ready}
           onSend={() => void send()}
+          // The list of files is a band of the frame, under the text and over the row of tools,
+          // and the row is pushed down while it is open. A popup anchored to the `@` covered the
+          // thread the sentence was answering — the one thing the reader is looking at while
+          // they type. One band for both ways in: what tells a mention from an attachment is
+          // what else happens when one is chosen, not which list it came from, and two lists
+          // drawn in one place would be two bands fighting over it.
+          menu={
+            <MentionMenu
+              open={picking !== null}
+              files={matches}
+              activeIndex={active}
+              onActiveIndexChange={setActive}
+              onChoose={picking === 'attach' ? attach : mention}
+              hint={
+                picking === 'attach' ? 'Attach a file of the Project…' : 'A file of the Project…'
+              }
+              optionId={mentions}
+            />
+          }
           tools={
             <>
               {/* Two ways to the same files, and what tells them apart is what else happens.
@@ -277,41 +390,26 @@ export function Composer({
                   it: it opens the system's own window, over any folder on the machine, and a
                   list opening on top of that window was one gesture answering twice. The list
                   is what a catalogue with no disk behind it has. */}
-              <MentionMenu
-                open={picking === 'mention'}
-                onOpenChange={(next) => setPicking(next ? 'mention' : null)}
-                files={matches}
-                activeIndex={active}
-                onActiveIndexChange={setActive}
-                onChoose={mention}
-                trigger={
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={<IconAt size="sm" />}
-                    aria-label="Mention a file of the Project"
-                    onClick={() => {
-                      // The `@` goes in where the caret is, so what is typed next narrows the
-                      // list exactly as it does when the `@` was typed by hand.
-                      box.current?.insertText('@')
-                      search('mention', '')
-                    }}
-                  />
-                }
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={<IconAt size="sm" />}
+                aria-label="Mention a file of the Project"
+                onClick={() => {
+                  // The `@` goes in where the caret is, so what is typed next narrows the
+                  // list exactly as it does when the `@` was typed by hand.
+                  box.current?.insertText('@')
+                  search('mention', '')
+                }}
               />
-              {onPickFiles === undefined ? (
-                <MentionMenu
-                  open={picking === 'attach'}
-                  onOpenChange={(next) => setPicking(next ? 'attach' : null)}
-                  files={matches}
-                  activeIndex={active}
-                  onActiveIndexChange={setActive}
-                  onChoose={attach}
-                  hint="Attach a file of the Project…"
-                  trigger={clip}
-                />
-              ) : (
-                clip
+              {clip}
+              {/* The agent, its model, its effort and its mode, at the end of the same row:
+                  they belong to what the box is about, not to what is done with what it holds,
+                  and the foot below is the Workspace and the send alone. Pushed to the end
+                  rather than wrapped to a line of their own — the height of the frame must not
+                  change when a choice is made. */}
+              {agentMenu !== undefined && (
+                <span className="ml-auto flex min-w-0 items-center gap-1">{agentMenu}</span>
               )}
             </>
           }
@@ -320,6 +418,13 @@ export function Composer({
             handle={box}
             value={value}
             placeholder={placeholder}
+            // Which file the band is on, while there is a band: the caret never leaves the box,
+            // so the box is what has to name it.
+            activeDescendant={
+              picking !== null && matches[active] !== undefined
+                ? mentionOptionId(mentions, active)
+                : undefined
+            }
             onValueChange={typed}
             onKeyDown={(event) => {
               // The list open over the box reads the arrows and Enter, and says so by taking the
@@ -345,7 +450,13 @@ export function Composer({
                 if (event.key === 'Escape') {
                   event.preventDefault()
                   setPicking(null)
+                  return
                 }
+              }
+              // Escape with no list open is the Stop, from where the hands already are.
+              if (event.key === 'Escape' && picking === null && running && onStop !== undefined) {
+                event.preventDefault()
+                stop()
               }
             }}
           />

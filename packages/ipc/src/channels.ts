@@ -15,6 +15,7 @@ import {
   displayPreferencesChangeSchema,
   displayPreferencesSchema,
   nothingSchema,
+  type EngineEvent,
 } from './engine.ts'
 
 /** What a location on disk turns out to hold, read at the moment it is asked about. */
@@ -81,6 +82,22 @@ export const CHANNELS = {
   'sessions.restore': ENGINE_REQUESTS['sessions.restore'],
   'sessions.append': ENGINE_REQUESTS['sessions.append'],
   'sessions.read': ENGINE_REQUESTS['sessions.read'],
+
+  // The agents, relayed the same way: what this machine has, what a Session's agent offers, and
+  // what the window asks of a Session that is running — a turn, a stop, a decision, a resume.
+  'agents.list': ENGINE_REQUESTS['agents.list'],
+  'agents.options': ENGINE_REQUESTS['agents.options'],
+  'agents.offer': ENGINE_REQUESTS['agents.offer'],
+  'agents.offerSet': ENGINE_REQUESTS['agents.offerSet'],
+  'agents.setOption': ENGINE_REQUESTS['agents.setOption'],
+  'agents.prompt': ENGINE_REQUESTS['agents.prompt'],
+  'agents.stop': ENGINE_REQUESTS['agents.stop'],
+  'agents.decide': ENGINE_REQUESTS['agents.decide'],
+  'agents.resume': ENGINE_REQUESTS['agents.resume'],
+  // The two the Agents section is drawn from: what this machine has, and the one thing that
+  // changes it, which happens because somebody pressed a button and not on its own (D5-18).
+  'agents.check': ENGINE_REQUESTS['agents.check'],
+  'agents.update': ENGINE_REQUESTS['agents.update'],
 
   /**
    * The four the main process answers itself, because each of them is something only it can do.
@@ -164,4 +181,12 @@ export interface Bridge {
     channel: K,
     argument: ChannelArguments<K>,
   ): Promise<ChannelResponse<K>>
+  /**
+   * What the engine pushes on its own, as it happens.
+   *
+   * One subscription for all of it, and what it answers is the way to stop listening: the page
+   * keeps the Session it has open and hears about that one, so a page that could not stop
+   * listening would keep hearing about every Session it ever opened.
+   */
+  on(listener: (event: EngineEvent) => void): () => void
 }

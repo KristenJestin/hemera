@@ -20,6 +20,7 @@ import { browser, expect } from '@wdio/globals'
 import { DIAGNOSTIC_FILE } from '../src/main/diagnostic.ts'
 import { DATABASE_FILE } from '../src/engine/index.ts'
 import { e2eDataOf } from '../wdio.conf.ts'
+import { addProject } from './hand.ts'
 
 const application = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -128,6 +129,11 @@ describe('La base vit dans le process dédié', () => {
 
 describe('La sidebar survit au redémarrage', () => {
   it('folding the sidebar by hand is what the data folder is left holding', async () => {
+    // A Project first, because the fold is a control of a window that has a sidebar: before the
+    // first Project the bar is the mark and nothing else, and there is nothing to fold.
+    const sources = mkdtempSync(join(tmpdir(), 'hemera-e2e-data-'))
+    await addProject('Atlas', sources)
+
     // Through the control the user has, not through the channel: what is under test is the
     // round trip from a hand to the database, and a channel called behind the page's back is a
     // fold the page does not know it made.
@@ -156,6 +162,8 @@ describe('La sidebar survit au redémarrage', () => {
       if (button instanceof HTMLElement) button.click()
     })
     await browser.pause(600)
+
+    rmSync(sources, { recursive: true, force: true })
   })
 })
 

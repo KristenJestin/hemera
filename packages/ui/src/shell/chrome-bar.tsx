@@ -118,23 +118,25 @@ export function ChromeBar({
       </div>
 
       <div className="flex min-w-0 items-center gap-1 pr-2">
-        <span className="no-drag-children flex shrink-0 items-center">
-          <Tooltip label={fold} keys={collapseShortcut} side="bottom">
-            <IconButton
-              variant="ghost"
-              icon={<IconLayoutSidebar size="md" />}
-              aria-label={fold}
-              aria-expanded={!collapsed}
-              onClick={onToggleCollapsed}
-            />
-          </Tooltip>
-        </span>
-
-        {/* Before the first Project, the bar is the mark and the fold and nothing else: there
-            is no tab to draw, nothing to add a Project beside, and no event to have missed.
-            The one action there is belongs to the page underneath (design D4-06). */}
+        {/* Before the first Project, the bar is the mark and nothing else: there is no tab to
+            draw, nothing to add a Project beside, no event to have missed — and nothing to
+            fold, since the sidebar is not drawn either. The fold is left out rather than
+            disabled: a control drawn where it can do nothing is a control the hand is invited
+            to press for no answer, and the keystroke that reaches it has nothing to reach
+            either. The one action there is belongs to the page underneath (design D4-06). */}
         {activeProjectId === null ? null : (
           <>
+            <span className="no-drag-children flex shrink-0 items-center">
+              <Tooltip label={fold} keys={collapseShortcut} side="bottom">
+                <IconButton
+                  variant="ghost"
+                  icon={<IconLayoutSidebar size="md" />}
+                  aria-label={fold}
+                  aria-expanded={!collapsed}
+                  onClick={onToggleCollapsed}
+                />
+              </Tooltip>
+            </span>
             <span aria-hidden="true" className={RULE} />
             <Tabs
               projects={projects}

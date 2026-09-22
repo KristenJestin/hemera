@@ -23,8 +23,13 @@ import type {
   EmptyTitleError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
+  NoAgentError,
 } from '@hemera/core'
 
+import { type AgentOption } from './agents/client.ts'
+import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
+import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
+import { Discovery } from './agents/discovery.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
 import { Projects, type UnknownProjectError } from './projects.ts'
@@ -32,6 +37,28 @@ import { Sessions, type UnknownSessionError } from './sessions.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
+
+/**
+ * The options an agent announced, in the page's words.
+ *
+ * The engine holds an option as a value with a kind, and what crosses is the list of values the
+ * agent announced and the one it is on now, which is what the composer draws (D5-13). Asked of a
+ * Session and asked of a Project that has none yet, the shape crossing the port is the same.
+ */
+function announced(options: readonly AgentOption[]) {
+  return options.map((option) => ({
+    id: option.id,
+    name: option.name,
+    category: option.category,
+    values: option.values.map((value) => ({
+      value: value.id,
+      name: value.name,
+      description: value.description,
+      recommended: value.recommended,
+    })),
+    current: option.value,
+  }))
+}
 
 /** What the main process sends: an identifier to answer, a use case, and its argument. */
 export interface EngineRequest {
@@ -104,7 +131,7 @@ export function answer(
 ): Effect.Effect<
   EngineResponse<EngineRequestName>,
   Refusal,
-  Preferences | EngineStatus | Projects | Journal | Sessions
+  Preferences | EngineStatus | Projects | Journal | Sessions | Discovery | AgentRuntime | Agents
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -129,7 +156,10 @@ export function answer(
       return yield* sessions.list(decision.argument.projectId, decision.argument.archived)
     }
     if (decision.name === 'sessions.create') {
-      return yield* sessions.create(decision.argument.projectId)
+      // The agent the Session is made with crosses with the Project (D5-06): it is chosen once,
+      // in the composer that starts it, and every turn of that Session runs it.
+      const { projectId, provider } = decision.argument
+      return yield* sessions.create(projectId, provider)
     }
     if (decision.name === 'sessions.rename') {
       const { id, version, title } = decision.argument
@@ -170,6 +200,74 @@ export function answer(
       const { id, version, relativePath } = decision.argument
       return yield* projects.addRepository(id, version, relativePath)
     }
+    if (decision.name === 'agents.list') {
+      const discovery = yield* Discovery
+      // Every agent the machine has, as the settings page shows it. `path` is where the command
+      // resolved, which is the engine's own business: what crosses is the availability, and
+      // whether the agent is signed in is what the agent itself reports when a Session starts it
+      // (D5-17) — this page starts nothing, so it says false rather than guessing. Nobody has
+      // asked a registry here: this list is read off the machine, and `latest` stays null until
+      // the Agents section of the settings is opened and asks for itself (D5-18).
+      const found = yield* discovery.list()
+      return { agents: found.map((agent) => availabilityOf(agent, null)) }
+    }
+
+    const runtime = yield* AgentRuntime
+    if (decision.name === 'agents.options') {
+      const offered = yield* runtime.options(decision.argument.sessionId)
+      return { options: announced(offered) }
+    }
+    if (decision.name === 'agents.offer') {
+      // What an agent offers a Project that no Session holds yet (D5-17): the Home's composer
+      // has the agent to choose and its own controls before anything is written. An agent that
+      // cannot be asked answers a refusal beside an empty list, because "this machine does not
+      // have it" and "it offers nothing" are not the same page (D5-21).
+      const { projectId, provider } = decision.argument
+      const report = yield* runtime.offer(projectId, provider)
+      return { options: announced(report.options), refusal: report.refusal }
+    }
+    if (decision.name === 'agents.offerSet') {
+      // The choice made in that composer, on the session the offer opened: what comes back is
+      // what the agent announces now, which is the only place an option it publishes after a
+      // choice ever appears (D5-13).
+      const { projectId, provider, optionId, value } = decision.argument
+      const report = yield* runtime.offerSet(projectId, provider, optionId, value)
+      return { options: announced(report.options), refusal: report.refusal }
+    }
+    if (decision.name === 'agents.setOption') {
+      const { sessionId, optionId, value } = decision.argument
+      return yield* runtime.setOption(sessionId, optionId, value)
+    }
+    if (decision.name === 'agents.prompt') {
+      const { sessionId, text } = decision.argument
+      // What the page is waiting for is why the turn ended; everything else about it reached the
+      // window as it happened, on the engine's own channel (design D5-12).
+      const report = yield* runtime.prompt(sessionId, text)
+      return { stopReason: report.stopReason }
+    }
+    if (decision.name === 'agents.stop') return yield* runtime.stop(decision.argument.sessionId)
+    if (decision.name === 'agents.decide') {
+      const { sessionId, optionId } = decision.argument
+      return yield* runtime.decide(sessionId, optionId)
+    }
+    if (decision.name === 'agents.resume') {
+      const report = yield* runtime.resume(decision.argument.sessionId)
+      return { state: report.state, reason: report.reason }
+    }
+
+    // What the Agents section asks about the three agents of this machine, and the one thing it
+    // does about the answer (design D5-18). The check is the only use case of this process that
+    // leaves the machine, and the update is the only one that changes what is installed:
+    // neither happens on its own, and both are asked for by somebody pressing something.
+    if (decision.name === 'agents.check') {
+      const agents = yield* Agents
+      return { agents: yield* agents.check() }
+    }
+    if (decision.name === 'agents.update') {
+      const agents = yield* Agents
+      return yield* agents.update(decision.argument.id)
+    }
+
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
   })
@@ -183,6 +281,8 @@ export function answer(
  * something that happens by writing a service.
  */
 export type Refusal =
+  | AgentRuntimeError
+  | AgentUpdateRefusedError
   | DatabaseError
   | StaleVersionError
   | UnknownProjectError
@@ -192,3 +292,4 @@ export type Refusal =
   | InvalidRepositoryPathError
   | EmptyMessageError
   | EmptyTitleError
+  | NoAgentError

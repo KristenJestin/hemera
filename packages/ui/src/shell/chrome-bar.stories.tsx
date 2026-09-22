@@ -13,7 +13,7 @@ const PROJECTS: ShellProject[] = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Shell/ChromeBar',
   component: ChromeBar,
   parameters: { layout: 'fullscreen' },
@@ -88,7 +88,7 @@ export const Variants: Story = {
   args: { collapsed: true },
 }
 
-/** The bar of a first launch: the mark, the fold, and nothing that supposes a Project. */
+/** The bar of a first launch: the mark, and nothing that supposes a Project. */
 export const WithoutAProject: Story = {
   parameters: { controls: { disable: true } },
   args: { projects: [], activeProjectId: null },
@@ -97,7 +97,9 @@ export const WithoutAProject: Story = {
     expect(canvas.queryByRole('navigation', { name: 'Projects' })).toBeNull()
     expect(canvas.queryByRole('button', { name: 'Add a Project' })).toBeNull()
     expect(canvas.queryByRole('button', { name: /Notifications/ })).toBeNull()
-    expect(canvas.getByRole('button', { name: 'Collapse the sidebar' })).toBeInTheDocument()
+    // Nothing folds a sidebar that is not drawn, at either label the fold could wear.
+    expect(canvas.queryByRole('button', { name: 'Collapse the sidebar' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: 'Expand the sidebar' })).toBeNull()
   },
 }
 

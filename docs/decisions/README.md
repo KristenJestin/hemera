@@ -6,6 +6,7 @@ one is not rewritten, it is dated and pointed back here.
 
 | Date | File | Covers |
 |---|---|---|
+| 2026-09-22 | [`decisions-2026-09-22-motion.md`](./decisions-2026-09-22-motion.md) | Motion goes where the UX needs it; replaces D0-06 compositor-only rule with the preset named kinds |
 | 2026-09-15 | [`decisions-2026-09-15.md`](./decisions-2026-09-15.md) | Abandoning GPUiX and Bun, Electron 44 + Node + pnpm + Vite+ foundation, Drizzle 1.0 on `node:sqlite`, Effect from lot 3 on, Base UI + motion design system, re-splitting into lots 0 to 11 |
 | 2026-09-13 | [`decisions-2026-09-13.md`](./decisions-2026-09-13.md) | Project restart: Session-first, shell layout, lots of the GPUiX era |
 | 2026-09-12 | [`decisions-architecture-acp-2.md`](./decisions-architecture-acp-2.md) | Multi-agent chat architecture with ACP |

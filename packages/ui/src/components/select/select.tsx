@@ -65,6 +65,13 @@ export interface SelectProps<Value extends string> {
   defaultValue?: Value | undefined
   onValueChange?: ((value: Value) => void) | undefined
   placeholder?: string | undefined
+  /**
+   * One mark of the catalogue, drawn at the head of the trigger.
+   *
+   * The list's `icon` marks an item; this one marks the control, and says what the value is
+   * about — which agent these models belong to, what kind of setting is being chosen.
+   */
+  mark?: ReactNode | undefined
   disabled?: boolean | undefined
   /** Where the select sits; never how it looks. */
   className?: string | undefined
@@ -77,6 +84,7 @@ export function Select<Value extends string>({
   defaultValue,
   onValueChange,
   placeholder = 'Choose',
+  mark,
   disabled,
   className,
 }: SelectProps<Value>) {
@@ -101,7 +109,10 @@ export function Select<Value extends string>({
           nativeButton
           render={<Button variant="secondary" className={TRIGGER} />}
         >
-          <BaseSelect.Value placeholder={placeholder} />
+          <span className="flex min-w-0 items-center gap-2">
+            {mark}
+            <BaseSelect.Value placeholder={placeholder} />
+          </span>
           <BaseSelect.Icon className={CHEVRON}>
             <IconChevronDown size="sm" />
           </BaseSelect.Icon>

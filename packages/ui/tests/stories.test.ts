@@ -1,13 +1,16 @@
 /**
- * What the catalogue claims about itself: the components anything may use, the pieces of the
- * shell, and the surfaces a lot draws with them — each with the stories the lot says they all
- * have, and with the badge that says whether the lot in flight created it or changed it. A
- * component whose stories are missing is a component nobody validated.
+ * What the catalogue claims about itself: the components anything may use, the composed pieces
+ * a feature draws with them, the pieces of the shell and the surfaces a lot assembles — each
+ * with the stories the lot says they all have, and with the badge that says whether the lot in
+ * flight created it or changed it. A component whose stories are missing is a component nobody
+ * validated.
  *
- * Three families, and the split is what a reader needs to find anything: `Components/` is what
- * is reusable and knows nothing of Hemera, `Shell/` is the window's own layout, `Surfaces/` is
- * the Project, the Journal and the composer drawn as themselves. A surface is not a component:
- * it exists in one place, and it is made of components.
+ * Five roots, and the split is what a reader needs to find anything (`AGENTS.md`):
+ * `Foundations/` is the tokens, the icons and the motion, `Components/` is what is reusable and
+ * knows nothing of Hemera, `Blocks/` is the composed pieces that are not a screen, `Surfaces/`
+ * is the Project, the Journal and the Session drawn as themselves, and `Shell/` is the window's
+ * own layout. A surface is not a component: it exists in one place, and it is made of
+ * components. The order of the roots, and of what sits inside them, is forced by `storySort`.
  *
  * Each suite is named after the scenario of `specs/design-system/spec.md` or of
  * `specs/window-shell/spec.md` it covers.
@@ -19,6 +22,36 @@ import { join, relative } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
 const designSystem = join(import.meta.dirname, '..', 'src')
+const repositoryRoot = join(import.meta.dirname, '..', '..', '..')
+
+/** Every story file of the catalogue, wherever it sits under `src`. */
+function storyFilesIn(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory()
+      ? storyFilesIn(join(directory, entry.name))
+      : entry.name.endsWith('.stories.tsx')
+        ? [join(directory, entry.name)]
+        : [],
+  )
+}
+
+const STORY_FILES = storyFilesIn(designSystem)
+
+/** A file as Git names it, which is always with forward slashes. */
+function asGitPath(file: string): string {
+  return relative(repositoryRoot, file).replaceAll('\\', '/')
+}
+
+/**
+ * The title a story file files itself under, which is the entry it shows up as.
+ *
+ * Read from the meta and not from the whole file: a story whose fixtures carry a Session wears
+ * a `title:` argument of its own, and only one of them is the file's entry.
+ */
+function titleOf(file: string): string {
+  const source = readFileSync(file, 'utf8')
+  return /title: '([^']*)'/.exec(source.slice(source.indexOf('const meta')))![1]!
+}
 
 interface Catalogued {
   /** The component as the application imports it. */
@@ -54,12 +87,18 @@ const CATALOGUE: Catalogued[] = [
   { name: 'List', folder: 'list', keyboard: true },
   { name: 'Timeline', folder: 'timeline', keyboard: false },
   { name: 'ToneSwatches', folder: 'tone-swatches', keyboard: true },
+  // HEM-17: where a piece of work stands, said as a dot. A thing to read and not a thing to
+  // operate, so there is no keyboard story to ask of it.
+  { name: 'StatusDot', folder: 'status-dot', keyboard: false },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */
 const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter', 'command-palette']
 
-/** The surfaces of lot 4, one folder per domain: a story file each, and the same discipline. */
+/**
+ * The story files of lot 4 and of this lot, one folder per domain: the entries the catalogue
+ * shows as a screen or a composed piece, with the same discipline whatever root they sit under.
+ */
 const SURFACES = {
   project: ['project-dialog', 'project-settings'],
   journal: ['journal'],
@@ -68,7 +107,9 @@ const SURFACES = {
   // Session as a surface. One folder per domain and not per screen, as the lot asks.
   message: ['message'],
   'message/scroller': ['scroller'],
-  session: ['session', 'session-page'],
+  // `activity-row` is a block of a Session and not an entry of its own, so it is walked for its
+  // documentation and its controls and left out of the three stories a surface entry owes.
+  session: ['session', 'session-page', 'activity-row'],
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
@@ -83,6 +124,19 @@ const SURFACES = {
  * where it counts instead — the whole catalogue is run once per theme.
  */
 const ALWAYS = ['Playground', 'Variants', 'States']
+
+/**
+ * The entries whose states are named after the states they show, rather than gathered under one
+ * `States`.
+ *
+ * `AGENTS.md` asks for one story per state, named after the state, and the composer is where
+ * that bites: `Variants` and `States` were "the box with nothing in it" and "the box with
+ * something in it", which is two states wearing two names that do not say so. They are `Empty`
+ * and `Ready`, and the two the trial of 22 September 2026 added are `Sending` and `Blocked`.
+ */
+const NAMED_STATES = new Map([
+  ['composer/composer', ['Playground', 'Empty', 'Ready', 'Sending', 'Blocked']],
+])
 
 function storiesIn(path: string): string[] {
   return [...readFileSync(path, 'utf8').matchAll(/^export const (\w+): Story\b/gm)].map(
@@ -112,6 +166,16 @@ function unique<T>(value: T, index: number, all: T[]): boolean {
 /** Every surface as a `[folder, file]` pair, which is how the two suites below walk them. */
 const SURFACE_FILES = Object.entries(SURFACES).flatMap(([folder, files]) =>
   files.map((file) => [folder, file] as const),
+)
+
+/**
+ * The story file that carries a surface entry, when one screen is drawn by more than one file.
+ * `Surfaces/Session` is the head and the row, the page, and the whole Session an agent fills —
+ * one entry of the sidebar, three story files — and the three stories every entry has, its
+ * playground, its variants and its states, live with the page, which is the screen itself.
+ */
+const ENTRY_FILES = SURFACE_FILES.filter(
+  ([folder, file]) => folder !== 'session' || file === 'session-page',
 )
 
 const barrel = readFileSync(join(designSystem, 'index.ts'), 'utf8')
@@ -186,7 +250,7 @@ function exportedComponents(source: string): string[] {
 }
 
 describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
-  test('the design system hands out exactly what the three families declare', () => {
+  test('the design system hands out exactly what the catalogue declares', () => {
     // Neither `DialogClose` nor `Kbd` is a component of its own: the first is the dialog's own
     // way of saying that a button of the caller's closes it, the second is a keystroke drawn as
     // keys, which every component that shows one borrows, and `CardRow` is a row of a card and
@@ -229,7 +293,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'WorkspacePill',
       // HEM-57: the thread of a Session, the viewport it is read in, and its own surface. The
       // day separator of a thread is `MessageDaySeparator`: the Journal already hands out a
-      // `DaySeparator`, and one barrel cannot export two things under one word.
+      // `DaySeparator`, and one barrel cannot export two things under one word. The two ways
+      // a line of a thread is made are `MessageText` — what somebody typed — and `AgentText`,
+      // which is the Markdown an agent is still writing (D5-14).
+      'AgentText',
       'MessageGroup',
       'MessageRow',
       'MessageText',
@@ -258,6 +325,34 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ArchivedProjects',
       'NotificationBell',
       'NotificationList',
+      // HEM-17: a turn with an agent, from the call it makes to the gate it stops at. The blocks
+      // of a turn (its calls, its thoughts, its console, its changes), the permission card and
+      // the line an answer leaves, what the agent advertises and the reader sets, the agents this
+      // machine has, and what a Session says about itself beside its thread.
+      'Disclosure',
+      'ThoughtBlock',
+      'ToolCallCard',
+      'TerminalOutput',
+      'DiffBlock',
+      'PermissionRequest',
+      'DecisionSummary',
+      // The agent, its model and its effort are one control since the trial of 22 September
+      // 2026: three selectors in the foot of the composer, plus the agent's own at the far end
+      // of the row, wrapped onto a second line as soon as a model had a long name, and the frame
+      // changed height while it was being read. `AgentSelector`, `ModelSelector` and
+      // `EffortSelector` went with it.
+      'AgentModelMenu',
+      'ModeSelector',
+      // The row that stands at the end of the thread while a turn runs, built on the live
+      // marker the thread already had.
+      'ActivityRow',
+      'UsageMeter',
+      'BlockedBanner',
+      'AgentsSection',
+      'PlanPanel',
+      'SessionSideColumn',
+      'StoppedTurn',
+      'ResumeFallbackBanner',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
@@ -316,15 +411,76 @@ describe('Coquille montrée en Storybook', () => {
 })
 
 describe('Surfaces du lot 4 montrées en Storybook', () => {
-  test.each(SURFACE_FILES)(
-    '%s/%s has its playground, variant and state stories',
-    (folder, file) => {
-      const stories = storiesIn(join(designSystem, folder, `${file}.stories.tsx`))
-      for (const required of ALWAYS) {
-        expect(stories, `${folder}/${file} has no ${required} story`).toContain(required)
-      }
-    },
-  )
+  test.each(ENTRY_FILES)('%s/%s has its playground, variant and state stories', (folder, file) => {
+    const stories = storiesIn(join(designSystem, folder, `${file}.stories.tsx`))
+    for (const required of NAMED_STATES.get(`${folder}/${file}`) ?? ALWAYS) {
+      expect(stories, `${folder}/${file} has no ${required} story`).toContain(required)
+    }
+  })
+})
+
+/**
+ * The five roots of the sidebar, and the one thing a title shared by several files cannot
+ * survive: two of them declaring the same story name, which Storybook refuses by handing the
+ * same story id out twice. The `Surfaces/Session` entry is where that bites — the head and the
+ * row, the page and the whole Session an agent fills make one entry — so the stories of an
+ * entry that more than one file feeds are named after the state they show.
+ */
+describe('Les cinq racines du catalogue', () => {
+  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell']
+
+  /**
+   * The order is not the alphabet's: a reader is given the five roots in the order above, and,
+   * inside them, the alphabetical order — except for the one name the sort lists, a surface's
+   * first story `Complete`, which is what the UI gate opens. Every name the sort declares, in the
+   * order it declares them, is the sidebar; an author who adds or moves a root changes this.
+   */
+  test('the sort gives the five roots in order, and a surface its gate story first', () => {
+    const settings = preview.slice(preview.indexOf('storySort'))
+    // The declared order is what the `order` array says, and nothing else in the block: the
+    // method beside it names no entry of the sidebar.
+    const order = settings.slice(settings.indexOf('order: ['))
+    const declared = [...order.matchAll(/'([A-Za-z]+)'/g)].map((match) => match[1]!)
+    expect(declared).toEqual([
+      'Foundations',
+      'Components',
+      'Blocks',
+      'Surfaces',
+      'Session',
+      'Complete',
+      'Shell',
+    ])
+    // The alphabet, asked for rather than hoped for: Storybook keeps the index's own order for
+    // every name the list above does not mention, so the method is what makes the rule true.
+    expect(settings).toContain("method: 'alphabetical'")
+  })
+
+  test('every story file is filed under one of the five roots', () => {
+    const stray = STORY_FILES.filter((file) => !ROOTS.includes(titleOf(file).split('/')[0]!))
+    expect(stray.map(asGitPath)).toEqual([])
+  })
+
+  test('a primitive is one word under Components, and a block three under Blocks', () => {
+    const mislaid = STORY_FILES.filter((file) => {
+      const [root, , third] = titleOf(file).split('/')
+      if (root === 'Blocks') return third === undefined
+      return (root === 'Components' || root === 'Shell') && third !== undefined
+    })
+    expect(mislaid.map(asGitPath)).toEqual([])
+  })
+
+  test('two files under one title declare two different stories', () => {
+    const seen = new Map<string, string>()
+    const twice = STORY_FILES.flatMap((file) =>
+      storiesIn(file).flatMap((story) => {
+        const id = `${titleOf(file)}--${story}`
+        const first = seen.get(id)
+        seen.set(id, file)
+        return first === undefined ? [] : [`${id}: ${asGitPath(first)} and ${asGitPath(file)}`]
+      }),
+    )
+    expect(twice).toEqual([])
+  })
 })
 
 describe('Stories dans les deux thèmes', () => {
@@ -381,27 +537,6 @@ describe('Stories dans les deux thèmes', () => {
  */
 describe('Badges du lot en cours', () => {
   const BADGES = ['new', 'updated']
-
-  /** The repository, which is what Git is asked about. */
-  const repositoryRoot = join(import.meta.dirname, '..', '..', '..')
-
-  /** Every story file of the catalogue, wherever it sits under `src`. */
-  function storyFilesIn(directory: string): string[] {
-    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
-      entry.isDirectory()
-        ? storyFilesIn(join(directory, entry.name))
-        : entry.name.endsWith('.stories.tsx')
-          ? [join(directory, entry.name)]
-          : [],
-    )
-  }
-
-  const STORY_FILES = storyFilesIn(designSystem)
-
-  /** A file as Git names it, which is always with forward slashes. */
-  function asGitPath(file: string): string {
-    return relative(repositoryRoot, file).replaceAll('\\', '/')
-  }
 
   /** The package, as Git names it: what a branch has to touch for a badge to be its business. */
   const PACKAGE = `${asGitPath(join(import.meta.dirname, '..'))}/`

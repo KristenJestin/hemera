@@ -41,3 +41,45 @@ function until(reached: () => boolean): Promise<void> {
     look()
   })
 }
+
+/**
+ * Whether the page is being asked for less movement right now, whoever asked: the system the
+ * runner stands on, or a story that emulated it.
+ *
+ * A play that measures a journey has nothing to measure where the journey is not played, and
+ * a runner can ask for less movement by itself — a headless Chromium on a CI machine may. Such a
+ * play reads this and asserts the end state with no journey instead, which is the rule it is
+ * then being run under.
+ */
+export function movesLess(): boolean {
+  return globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+/**
+ * Whether the page agrees within that many frames: how a play tells "at once" from "after a
+ * journey" without a clock, which a slow runner would stretch and a frame count does not.
+ */
+export function withinFrames(reached: () => boolean, frames: number): Promise<boolean> {
+  return new Promise((settle) => {
+    const look = (left: number): void => {
+      if (reached()) {
+        settle(true)
+        return
+      }
+      if (left === 0) {
+        settle(false)
+        return
+      }
+      requestAnimationFrame(() => {
+        look(left - 1)
+      })
+    }
+    look(frames)
+  })
+}
+
+/**
+ * What "at once" is, in frames: time for React and motion to answer a press, and a small part
+ * of the journey the slowest fold of the preset takes, so a fold still travelling fails it.
+ */
+export const AT_ONCE = 5

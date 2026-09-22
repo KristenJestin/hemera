@@ -72,7 +72,7 @@ packages/ui       @hemera/ui       the design system: the CSS theme, the motion 
                                    icon catalogue and the components. React, Tailwind 4, Base
                                    UI and motion; nothing of Hemera, nothing of Electron.
 tools/            —                boundaries, commit-message, git-flow, environment-report,
-                                   package-desktop, window-options, motion-properties.
+                                   package-desktop, window-options, motion-presets.
                                    TypeScript run by Node, tested by Vitest.
 ```
 
@@ -226,6 +226,10 @@ or the Effect SQLite client, and `tools/boundaries.ts` refuses it anywhere else.
 process asks the engine by name — `preferences.read`, `preferences.write`, `engine.status`,
 declared in `packages/ipc/src/engine.ts` — and never opens the file itself.
 
+The engine holds the agents as well, under `apps/desktop/src/engine/agents/`: the ACP client, the
+supervisor of the agent processes, what the machine has installed and the adapter of each agent.
+An agent is started, stopped and asked from there, and its thread is written from there.
+
 `data` and `engine` are the names the code uses; `Profile` is the word the interface keeps for
 the same folder, in the settings, in the Journal filter and on the `profile` events the engine
 writes at start-up.
@@ -236,16 +240,18 @@ writes at start-up.
   closed set: `press` for what answers the hand (hover, press, a width following it — stiff and
   light), `arrival` for what puts itself in place (panels, popups — the prototype's "Calme"
   spring, `stiffness 170, damping 26`, no overshoot), `instant` for a system asking for less
-  movement. Components read `useTransition(preset)`, never a preset directly: it answers the
-  reduced-motion preference with the end state for every property, where motion's own
-  `reducedMotion` would keep animating opacity. The tree runs under
-  `MotionConfig reducedMotion="user"` all the same, as the net under any element that forgets
-  the hook — and the lint refuses a `motion.*` element that animates without a `transition`
-  from it. CSS transitions of the design system stop under `prefers-reduced-motion: reduce`.
-  No component writes its own spring numbers or durations; a lint check refuses them outside
-  that one file.
-  **Only `transform`, `opacity`, `filter` and `clip-path` are animated.** A lint check refuses
-  an animation that targets a layout property or a colour.
+  movement, `slide`, `expand`, `collapse` and `push` for what changes place or size.
+  Components read `useTransition(kind)`, never a kind directly: it answers the reduced-motion
+  preference with the end state for every property, where motion's own `reducedMotion` would
+  keep animating opacity. The tree runs under `MotionConfig reducedMotion="user"` all the same,
+  as the net under any element that forgets the hook — and the lint refuses a `motion.*`
+  element that animates without a `transition` from it. CSS transitions of the design system
+  stop under `prefers-reduced-motion: reduce`. No component writes its own spring, duration,
+  curve or keyframe; a lint check refuses them outside that one file.
+  **Animate whatever the UX needs — a height, a width, a push on the neighbours included** (the
+  decision of 22 September 2026 replaces D0-06, which allowed four composited properties).
+  What is closed is the set of kinds, not the set of properties: a movement the preset has no
+  kind for is added to `motion.ts` as one, named and explained, and read from there.
 - Every visual value comes from the design system's CSS tokens. **No hex colors, no px sizes,
   no inline styles outside the token files.**
 - The HTML prototype in `docs/prototypes/` and `spikes/proto-motion/` are **token and motion

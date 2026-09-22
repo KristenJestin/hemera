@@ -1,6 +1,7 @@
 /** Wires the declared channels to what the main process does when one is called. */
 
-import type { DisplayPreferences } from '@hemera/ipc'
+import type { DisplayPreferences, EngineEvent } from '@hemera/ipc'
+import { ENGINE_EVENT_CHANNEL } from '@hemera/ipc'
 import { type BrowserWindow, dialog } from 'electron/main'
 import { shell } from 'electron/common'
 import { join } from 'node:path'
@@ -33,6 +34,14 @@ export function registerChannels(
   engine: EngineConversation,
   directory: string,
 ): void {
+  // What the engine pushes while a Session is worked on goes straight to the page, on the one
+  // channel the preload listens on: nothing in the main process reads it, and a turn that is
+  // happening is drawn from what arrives rather than from asking again (D5-12).
+  engine.hear((event: EngineEvent) => {
+    if (window.isDestroyed()) return
+    window.webContents.send(ENGINE_EVENT_CHANNEL, event)
+  })
+
   handle('env.report', () => Effect.promise(() => collectReport(identity)))
 
   handle('window.command', ({ command }) =>
@@ -179,6 +188,19 @@ const RELAYED = [
   'sessions.restore',
   'sessions.append',
   'sessions.read',
+  // The agents, relayed like the rest: what a Session is, what it was asked, and whether the
+  // command of an agent is on this machine are all the engine's to answer (design D5-13, D5-18).
+  'agents.list',
+  'agents.options',
+  'agents.offer',
+  'agents.offerSet',
+  'agents.setOption',
+  'agents.prompt',
+  'agents.stop',
+  'agents.decide',
+  'agents.resume',
+  'agents.check',
+  'agents.update',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

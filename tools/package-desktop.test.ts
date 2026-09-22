@@ -5,7 +5,10 @@ import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  BUNDLED_ADAPTERS,
   DESCRIBE_ARGUMENTS,
+  adaptersProblems,
+  closureOf,
   channelAsked,
   channelProblems,
   identityOf,
@@ -15,6 +18,7 @@ import {
   packagingOptions,
   refusalFor,
   refusedEntries,
+  refusedInClosure,
   unpackedFolderOf,
   versionFrom,
 } from './package-desktop.ts'
@@ -197,5 +201,60 @@ describe('Migrations embarquées', () => {
     expect(
       migrationsProblems(['drizzle/20260916123330_profile_and_preferences/migration.sql']),
     ).toEqual([])
+  })
+})
+
+describe('Adaptateurs embarqués', () => {
+  const carried = BUNDLED_ADAPTERS.map(
+    (name) => `resources/adapters/node_modules/${name}/package.json`,
+  )
+  const forked = ['dist/adapter/index.js']
+
+  test('the adapters travel in the one node_modules a package is allowed', () => {
+    // Everything under the adapters' own folder is a package this application declares, laid out
+    // where Node resolves one: it is the exception, and it is an exception to that folder alone.
+    expect(refusedEntries(carried)).toEqual([])
+  })
+
+  test('a development node_modules anywhere else is refused as it always was', () => {
+    expect(refusedEntries(['resources/app/node_modules/vite-plus/index.js'])).toHaveLength(1)
+  })
+
+  test('a package without its adapters is refused: no agent of the two could be started', () => {
+    const problems = adaptersProblems([], forked)
+    expect(problems.map((problem) => problem.entry)).toEqual(carried)
+  })
+
+  test('a package without the program that forks them is refused too', () => {
+    expect(adaptersProblems(carried, ['dist/main/index.js'])[0]?.entry).toBe('dist/adapter')
+  })
+
+  test('a package carrying both is accepted', () => {
+    expect(adaptersProblems(carried, forked)).toEqual([])
+  })
+
+  test('an agent carried as a platform binary is refused wherever it came from', () => {
+    // Each adapter declares the agent itself as a dependency of its own, hundreds of megabytes
+    // per platform, and Hemera runs the one the reader installed instead (D5-21).
+    expect(
+      refusedInClosure(['@anthropic-ai/claude-agent-sdk-win32-x64', '@openai/codex']),
+    ).toHaveLength(2)
+    expect(refusedInClosure(['@anthropic-ai/claude-agent-sdk', 'zod'])).toEqual([])
+  })
+
+  test('the closure is what the packages declare, each walked once', () => {
+    const declared = {
+      adapter: ['sdk', 'zod'],
+      sdk: ['zod'],
+      zod: [],
+    } satisfies Record<string, readonly string[]>
+    // SAFETY: the walk only ever asks about a name this very table put in front of it.
+    const closure = closureOf([{ name: 'adapter', folder: '/a' }], (found) =>
+      (declared[found.name as keyof typeof declared] ?? []).map((name) => ({
+        name,
+        folder: `/${name}`,
+      })),
+    )
+    expect(closure.map((found) => found.name)).toEqual(['adapter', 'sdk', 'zod'])
   })
 })
