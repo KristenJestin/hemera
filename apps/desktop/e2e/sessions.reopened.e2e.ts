@@ -17,25 +17,22 @@
 
 import { browser, expect } from '@wdio/globals'
 
-import { removeFakeWorkspace } from './agent/install.ts'
 import { ANSWERS } from './agent/script.ts'
-import { awaits, press, shows, strike, write } from './hand.ts'
+import { awaits, control, press, shows, strike, write } from './hand.ts'
 
-/** What the first instance asked, which is the message the Session was named after. */
+/** What the first instance asked, which is what its thread opens with. */
 const ASKED = 'The CSV export drops the invoice date.'
 
-after(() => {
-  // The folder the two instances ran the agent in, removed by the last of them.
-  removeFakeWorkspace('sessions')
-})
+/** What it named the Session, which is what the sidebar of a window that just opened shows. */
+const NAMED = 'Invoice export'
 
 describe('App restart resumes the native session', () => {
   it('finds the Session and its thread, and answers the next prompt in it', async () => {
     // The sidebar of a window that has just opened: the Session is the one the previous instance
-    // made, under the name its first message proposed.
-    await awaits(ASKED)
+    // made, under the name it was given.
+    await awaits(NAMED)
 
-    await press(ASKED)
+    await press(NAMED)
     await browser.pause(1200)
 
     // The thread as it was written: what was asked, and what the agent answered it.
@@ -54,18 +51,19 @@ describe('Archivage durable', () => {
   it('stays put away once it has been, and is still consultable', async () => {
     await press('Archive')
     await browser.pause(1000)
-    expect(await shows(ASKED)).toBe(false)
+    expect(await shows('No Session yet')).toBe(true)
 
     // Read back from the data folder rather than from the page: everything the window shows
     // after a load is what the engine answered about the folder it opened.
     await browser.refresh()
-    await browser.pause(2000)
-    expect(await shows(ASKED)).toBe(false)
+    await browser.pause(2500)
+    expect(await shows('No Session yet')).toBe(true)
+    expect(await control(`Archive ${NAMED}`)).toBeNull()
 
     await strike('k', 'KeyK')
     await browser.pause(500)
     await press('Archived Sessions')
     await browser.pause(900)
-    expect(await shows(ASKED)).toBe(true)
+    expect(await shows(NAMED)).toBe(true)
   })
 })

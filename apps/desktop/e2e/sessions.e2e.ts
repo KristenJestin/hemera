@@ -36,8 +36,26 @@ import { addProject, awaits, control, press, shows, strike, write } from './hand
  */
 const SOURCES = fakeWorkspace('sessions')
 
-/** What the first message says, and therefore what the Session ends up being called (D4b-03). */
+/** What is asked of the agent, which is the message the thread opens with. */
 const ASKED = 'The CSV export drops the invoice date.'
+
+/** What the Session is called once it has been named, which is how the sidebar is read. */
+const NAMED = 'Invoice export'
+
+/** Names the Session whose title field is open, the way the field takes a name. */
+async function nameIt(title: string): Promise<void> {
+  await browser.execute((said: string) => {
+    const field = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Title of the Session"]',
+    )
+    if (field === null) return
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setter?.call(field, said)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  }, title)
+  await browser.pause(800)
+}
 
 describe('A Session cannot start without an agent', () => {
   it('leaves the send off with the reason, and makes nothing', async () => {
@@ -103,6 +121,20 @@ describe('A thought folds', () => {
   })
 })
 
+describe('Création dans un Projet', () => {
+  it('is called New session until it is renamed on the spot', async () => {
+    // The name a Session is given when nothing has named it, and a field waiting to replace it.
+    expect(await shows('New session')).toBe(true)
+
+    await press('Rename')
+    await browser.pause(500)
+    await nameIt(NAMED)
+
+    expect(await shows(NAMED)).toBe(true)
+    expect(await shows('New session')).toBe(false)
+  })
+})
+
 describe('Agent and model are shown', () => {
   it('says on the Session which agent runs it and which model it is on', async () => {
     // Two values and not one: the agent the Session was made with, which it keeps (D5-06), and
@@ -119,25 +151,30 @@ describe('Session archivée puis restaurée', () => {
 
     // Gone from the list, and the window is back on the Home. A message moves what the thread
     // holds and not the Session itself, so archiving after one is not a stale version (D5-11).
-    expect(await shows(ASKED)).toBe(false)
+    //
+    // Read on the sidebar and not on the whole page: the Home's Activity frame carries the lines
+    // the Journal wrote, and one of them is the rename — a name in the history of a Project is
+    // not a Session in its list.
+    expect(await shows('No Session yet')).toBe(true)
+    expect(await control(`Archive ${NAMED}`)).toBeNull()
 
     // Consultable: the palette holds it, and the archive page lists it.
     await strike('k', 'KeyK')
     await browser.pause(500)
     await press('Archived Sessions')
     await browser.pause(900)
-    expect(await shows(ASKED)).toBe(true)
+    expect(await shows(NAMED)).toBe(true)
     // Nothing was deleted: the way back is the only thing offered.
     expect(await shows('Delete')).toBe(false)
 
     await press('Restore')
     await browser.pause(1100)
-    expect(await shows(ASKED)).toBe(true)
+    expect(await shows(NAMED)).toBe(true)
 
     // And it is back in the sidebar, where the current ones are, which is where the instance
     // that starts after this one finds it.
     await browser.keys(['\uE00C'])
     await browser.pause(400)
-    expect(await shows(ASKED)).toBe(true)
+    expect(await shows(NAMED)).toBe(true)
   })
 })
