@@ -362,8 +362,10 @@ export const commandsLayer = Layer.effect(
                   type,
                   entityKind: 'session' as const,
                   entityId: one.sessionId,
-                  source: 'system' as const,
-                  author: 'mcp' as const,
+                  // Who asked is who the Journal names: a run the user started from the panel is
+                  // the user's, and one the agent asked for through its tool is the tool's.
+                  source: one.startedBy === 'user' ? ('ui' as const) : ('system' as const),
+                  author: one.startedBy === 'user' ? ('human' as const) : ('mcp' as const),
                   projectId: one.projectId,
                   sessionId: one.sessionId,
                   payload: { name: one.name, state: one.state, url: one.url },

@@ -24,6 +24,7 @@ import {
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
 import { Commands, commandsLayer } from '#engine/commands/service.ts'
+import { Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
@@ -52,7 +53,7 @@ afterEach(() => {
 })
 
 /** Everything a program of these suites may ask for: the engine, and nothing of the window. */
-type Engine = Projects | Sessions | Commands | Database | SqliteClient
+type Engine = Projects | Sessions | Commands | Journal | Database | SqliteClient
 
 /**
  * One run of this engine, over one database in the suite's folder.
@@ -66,6 +67,7 @@ function engine() {
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
   const services: Layer.Layer<Engine> = commandsLayer.pipe(
+    Layer.provideMerge(journalLayer),
     Layer.provideMerge(
       Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
         Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite'))),
@@ -256,5 +258,37 @@ describe('The agent starts the app and the user opens it', () => {
       url: 'http://localhost:4321',
       oneOff: false,
     })
+  })
+})
+
+describe('A run is written in the Journal under whoever started it', () => {
+  it('names the human for a run of the panel, and the tool for a run of the agent', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const run = (startedBy: 'agent' | 'user') =>
+          commands.run({
+            sessionId: session.sessionId,
+            projectId: session.projectId,
+            commandId: null,
+            name: startedBy,
+            line: `${process.execPath} -e 0`,
+            kind: 'check',
+            cwd: root,
+            startedBy,
+          })
+        yield* run('user')
+        yield* run('agent')
+        const journal = yield* Journal
+        const read = yield* journal.read({ projectId: session.projectId })
+        return read.entries.filter((entry) => entry.type === 'command.started')
+      }),
+    )
+
+    const byName = (name: string) =>
+      seen.find((entry) => JSON.stringify(entry.payload).includes(`"name":"${name}"`))
+    expect(byName('user')?.author).toBe('human')
+    expect(byName('agent')?.author).toBe('mcp')
   })
 })
