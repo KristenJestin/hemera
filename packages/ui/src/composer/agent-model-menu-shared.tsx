@@ -48,6 +48,10 @@ export interface ModelChoice {
   label: string
   /** The provider label the agent announced, or nothing when it announced one group. */
   group?: string | undefined
+  /** What the agent said this model is, where it said anything about it at all. */
+  description?: string | undefined
+  /** Whether the agent named this model as the one it advises. See `EffortChoice`. */
+  recommended?: boolean | undefined
 }
 
 /** One level of effort the agent announced. */
@@ -59,11 +63,19 @@ export interface EffortChoice {
    *
    * `Default` is the case it exists for: the agent announces it as a value like the others and
    * ACP says nothing about which level it stands for, so the agent's own sentence is the only
-   * thing that can — and Hemera inventing one would be inventing a level. The options of ACP
-   * carry no description today (`ConfigOption`), so nothing fills it yet: the control draws it
+   * thing that can — and Hemera inventing one would be inventing a level. The control draws it
    * where there is one and draws nothing where there is not.
    */
   description?: string | undefined
+  /**
+   * Whether the agent named this level as the one it advises (decision of 22 September 2026).
+   *
+   * The two halves of one rule, and never both at once. An agent that says which level its
+   * `Default` stands for has that level marked here and no `Default` entry in the list at all;
+   * an agent that says nothing keeps its `Default` entry and marks nothing. A list holding a
+   * `Default` beside the level it names would be offering the same thing twice.
+   */
+  recommended?: boolean | undefined
 }
 
 /** One thing the agent says it may be told to do without asking. */

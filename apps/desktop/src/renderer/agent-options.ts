@@ -61,13 +61,22 @@ function currentOf(option: ConfigOption): string | null {
  * Go/DeepSeek V4.1 Flash` — and the menu groups by what stands before the first slash. One that
  * publishes its own models alone writes no slash, and the list is then drawn without a header.
  */
-function modelOf(value: { value: string; name: string }): ModelChoice {
+function modelOf(value: ConfigOption['values'][number]): ModelChoice {
   const cut = value.name.indexOf(GROUPED)
-  if (cut === -1) return { id: value.value, label: value.name }
+  if (cut === -1) {
+    return {
+      id: value.value,
+      label: value.name,
+      description: value.description,
+      recommended: value.recommended,
+    }
+  }
   return {
     id: value.value,
     group: value.name.slice(0, cut).trim(),
     label: value.name.slice(cut + GROUPED.length).trim(),
+    description: value.description,
+    recommended: value.recommended,
   }
 }
 
@@ -82,7 +91,14 @@ export function effortStage(options: readonly ConfigOption[]): Stage<EffortChoic
   if (option === null) return null
   return {
     optionId: option.id,
-    choices: option.values.map((value) => ({ id: value.value, label: value.name })),
+    choices: option.values.map((value) => ({
+      id: value.value,
+      label: value.name,
+      // The agent's own sentence about the level and the level it advises, both as they came:
+      // what `Default` stands for is the agent's to say, and the menu's to draw (D17-11).
+      description: value.description,
+      recommended: value.recommended,
+    })),
     current: currentOf(option),
   }
 }

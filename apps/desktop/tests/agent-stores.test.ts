@@ -17,7 +17,7 @@ import type {
   Session,
   SessionEntry,
 } from '@hemera/ipc'
-import { openingAgentOf } from '#renderer/agent-options.ts'
+import { effortStage, modelStage, openingAgentOf } from '#renderer/agent-options.ts'
 import {
   activityOf,
   agentOf,
@@ -367,5 +367,60 @@ describe('Le titre proposé paraît sans rechargement', () => {
     await readSessions('lyra')
 
     expect(sessionsSnapshot().sessions.map((one) => one.id)).toEqual(['session-1'])
+  })
+})
+
+describe('Ce que l’agent dit de ses valeurs arrive jusqu’au menu', () => {
+  test('a choice carries the sentence the agent wrote and the value it advises', () => {
+    const announced: ConfigOption[] = [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        values: [
+          { value: 'opus-4-5', name: 'Opus 4.5', description: '1M context', recommended: true },
+          { value: 'sonnet-4-5', name: 'OpenCode Zen/Sonnet 4.5' },
+        ],
+        current: 'opus-4-5',
+      },
+      {
+        id: 'effort',
+        name: 'Effort',
+        category: 'thought_level',
+        values: [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium', description: 'What it starts on', recommended: true },
+        ],
+        current: 'medium',
+      },
+    ]
+
+    const models = modelStage(announced)
+    expect(models?.choices[0]).toEqual({
+      id: 'opus-4-5',
+      label: 'Opus 4.5',
+      description: '1M context',
+      recommended: true,
+    })
+    // The provider is still read off the label, and the two words travel with the group.
+    expect(models?.choices[1]).toEqual({
+      id: 'sonnet-4-5',
+      group: 'OpenCode Zen',
+      label: 'Sonnet 4.5',
+      description: undefined,
+      recommended: undefined,
+    })
+
+    const efforts = effortStage(announced)
+    expect(efforts?.choices.map((choice) => choice.recommended)).toEqual([undefined, true])
+    expect(efforts?.choices[1]?.description).toBe('What it starts on')
+  })
+
+  test('an agent that said nothing about its values hands over nothing invented', () => {
+    const efforts = effortStage([option('effort', ['low', 'high'], 'high')])
+    expect(efforts?.choices).toEqual([
+      { id: 'low', label: 'low', description: undefined, recommended: undefined },
+      { id: 'high', label: 'high', description: undefined, recommended: undefined },
+    ])
   })
 })
