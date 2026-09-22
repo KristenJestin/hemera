@@ -51,6 +51,7 @@ afterEach(() => {
 const noQuestions = {
   askOutside: () => Effect.succeed<'refused'>('refused'),
   answer: () => Effect.succeed(false),
+  waiting: () => Effect.succeed(null),
 }
 
 type Engine =

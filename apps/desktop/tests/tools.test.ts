@@ -62,6 +62,7 @@ interface Human {
   readonly service: {
     readonly askOutside: (asked: OutsideRequest) => Effect.Effect<OutsideAnswer>
     readonly answer: () => Effect.Effect<boolean>
+    readonly waiting: () => Effect.Effect<string | null>
   }
   readonly asked: OutsideRequest[]
 }
@@ -87,6 +88,8 @@ function humanSaying(...answers: readonly OutsideAnswer[]): Human {
           return answer
         }),
       answer: () => Effect.succeed(false),
+      // This human answers where they are asked: nothing here is left standing for a window.
+      waiting: () => Effect.succeed(null),
     },
   }
 }

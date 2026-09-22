@@ -27,6 +27,7 @@ import {
   type ContentBlock,
   type ToolCallContent,
   type Cost,
+  type McpServer,
   type SessionNotification,
   type StopReason,
   type Usage,
@@ -274,8 +275,16 @@ export interface AgentConnection {
     optionId: string,
     value: string,
   ) => Effect.Effect<readonly AgentOption[], AgentProtocolError>
-  /** Opens a session in that directory and answers the handle the agent gave it. */
-  readonly open: (workingDirectory: string) => Effect.Effect<string, AgentProtocolError>
+  /**
+   * Opens a session in that directory and answers the handle the agent gave it.
+   *
+   * The MCP servers are the caller's: Hemera hands over one, its own tools on a loopback address
+   * with the token of this Session in it, and the three ways into a session all carry it (D6-01).
+   */
+  readonly open: (
+    workingDirectory: string,
+    mcpServers: readonly McpServer[],
+  ) => Effect.Effect<string, AgentProtocolError>
   /**
    * Asks the agent to carry the session on as it stands, without sending its history back.
    *
@@ -285,6 +294,7 @@ export interface AgentConnection {
   readonly resume: (
     nativeSessionId: string,
     workingDirectory: string,
+    mcpServers: readonly McpServer[],
   ) => Effect.Effect<void, AgentProtocolError>
   /**
    * Asks the agent to stream the session's history back, so the thread can be matched to it.
@@ -295,6 +305,7 @@ export interface AgentConnection {
   readonly load: (
     nativeSessionId: string,
     workingDirectory: string,
+    mcpServers: readonly McpServer[],
   ) => Effect.Effect<void, AgentProtocolError>
   /** Sends one turn and waits for the agent to be done with it. */
   readonly prompt: (text: string) => Effect.Effect<PromptOutcome, AgentProtocolError>
@@ -725,10 +736,11 @@ export function connect(
           return announced
         }),
 
-      open: (workingDirectory) =>
+      open: (workingDirectory, mcpServers) =>
         Effect.gen(function* () {
           const opened = yield* Effect.tryPromise({
-            try: () => connection.newSession({ cwd: workingDirectory, mcpServers: [] }),
+            try: () =>
+              connection.newSession({ cwd: workingDirectory, mcpServers: [...mcpServers] }),
             catch: (cause) => new AgentProtocolError({ what: 'newSession', cause: String(cause) }),
           })
           sessionId = opened.sessionId
@@ -736,14 +748,14 @@ export function connect(
           return opened.sessionId
         }),
 
-      resume: (nativeSessionId, workingDirectory) =>
+      resume: (nativeSessionId, workingDirectory, mcpServers) =>
         Effect.gen(function* () {
           const answered = yield* Effect.tryPromise({
             try: () =>
               connection.resumeSession({
                 sessionId: nativeSessionId,
                 cwd: workingDirectory,
-                mcpServers: [],
+                mcpServers: [...mcpServers],
               }),
             catch: (cause) =>
               new AgentProtocolError({ what: 'resumeSession', cause: String(cause) }),
@@ -752,7 +764,7 @@ export function connect(
           announced = optionsOf(answered.configOptions)
         }),
 
-      load: (nativeSessionId, workingDirectory) =>
+      load: (nativeSessionId, workingDirectory, mcpServers) =>
         Effect.gen(function* () {
           // Every chunk a load sends back is a replay: the flag is set for the whole call, so a
           // notification that arrives while the history is streaming is marked as what it is.
@@ -762,7 +774,7 @@ export function connect(
               connection.loadSession({
                 sessionId: nativeSessionId,
                 cwd: workingDirectory,
-                mcpServers: [],
+                mcpServers: [...mcpServers],
               }),
             catch: (cause) => new AgentProtocolError({ what: 'loadSession', cause: String(cause) }),
           }).pipe(Effect.ensuring(Effect.sync(() => (replaying = false))))

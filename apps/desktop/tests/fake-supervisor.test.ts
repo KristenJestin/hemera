@@ -248,7 +248,7 @@ describe('Un tour de l’agent, conduit par le client', () => {
             return { optionId: 'allow-once' }
           },
         })
-        yield* connection.open('/tmp/atlas')
+        yield* connection.open('/tmp/atlas', [])
         return yield* connection.prompt('run them')
       }),
     )
@@ -299,7 +299,7 @@ describe('Un tour de l’agent, conduit par le client', () => {
           onEvent: (event) => events.push(event),
           onPermission: async () => ({ optionId: 'allow-once' }),
         })
-        yield* connection.open('/tmp/atlas')
+        yield* connection.open('/tmp/atlas', [])
         stopTheTurn = () => Effect.runPromise(connection.cancel())
         return yield* connection.prompt('go')
       }),

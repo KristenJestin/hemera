@@ -23,6 +23,9 @@ import type { ProcessSupervisor } from '#engine/agents/supervisor.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { AgentNotices, CHUNK_FLUSH, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime, Notice } from '#engine/agents/runtime.ts'
+import { StderrSink } from '#engine/agents/supervisor.ts'
+import { commandsLayer } from '#engine/commands/service.ts'
+import { contextLayer } from '#engine/context/service.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { preferencesLayer } from '#engine/preferences.ts'
 import type { Preferences } from '#engine/preferences.ts'
@@ -30,6 +33,10 @@ import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
+import { toolAccessLayer } from '#engine/tools/access.ts'
+import type { ToolAccess } from '#engine/tools/access.ts'
+import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
+import { ToolServer } from '#engine/tools/server.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -83,6 +90,22 @@ export function watching() {
   }
 }
 
+/** Nothing to write a diagnostic line to: a suite reads the thread, not the engine's stderr. */
+const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
+
+/**
+ * The tools of an engine whose suite never calls one.
+ *
+ * The runtime is handed an address to configure its agent with and nothing listens on it: what
+ * these suites are about is the turn, and a real socket per test is a port taken for nothing. The
+ * tokens themselves are real — `toolAccessLayer` is the engine's own — because a Session that
+ * lets go of its agent lets go of its token, and that is a thing a suite reads.
+ */
+const server = Layer.succeed(ToolServer, {
+  origin: 'http://127.0.0.1:1',
+  forAgent: (token: string) => `http://127.0.0.1:1/mcp?t=${token}`,
+})
+
 /** A run of the application over one scripted agent, on one data folder. */
 export function application(
   dataFolder: string,
@@ -101,10 +124,20 @@ export function application(
       | Sessions
       | Preferences
       | AgentRuntime
+      | ToolAccess
       | Database
       | SqliteClient
       | TestClock.TestClock
     > = runtimeLayer.pipe(
+      Layer.provideMerge(toolAccessLayer),
+      Layer.provide(
+        Layer.mergeAll(
+          server,
+          contextLayer,
+          commandsLayer,
+          toolPermissionsLayer,
+        ),
+      ),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, sessionsLayer, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
@@ -113,6 +146,7 @@ export function application(
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(supervisor ?? fakeSupervisor(agent)),
       Layer.provide(notices),
+      Layer.provide(sink),
       // The pool reads the clock the suite moves, because it is the engine's own clock: five
       // idle minutes are a `TestClock.adjust` here rather than five minutes of waiting (D5-05).
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
@@ -126,6 +160,7 @@ export function application(
         | Sessions
         | Preferences
         | AgentRuntime
+        | ToolAccess
         | Database
         | SqliteClient
         | TestClock.TestClock

@@ -23,6 +23,8 @@ import {
   type Agent as AcpAgent,
   type ContentBlock,
   type LoadSessionRequest,
+  type McpServer,
+  type NewSessionRequest,
   type NewSessionResponse,
   type PermissionOption,
   type PlanEntryStatus,
@@ -204,6 +206,13 @@ export interface FakeAnswers {
   readonly cancelled: number
   /** The text of every prompt the agent was sent, in the order it was sent them. */
   readonly prompts: string[]
+  /**
+   * What `session/new` was configured with, one entry per session opened.
+   *
+   * What Hemera lends an agent travels here and nowhere else (D6-01), so a suite reads the
+   * address and the token the agent was handed rather than trusting that it was.
+   */
+  readonly mcpServers: McpServer[][]
   /** How many times the agent was asked to load a session, whether or not it agreed. */
   readonly loads: number
   /** How many times the agent was asked to resume one, whether or not it agreed. */
@@ -231,6 +240,7 @@ interface FakeTally {
   optionIds: string[]
   cancelled: number
   prompts: string[]
+  mcpServers: McpServer[][]
   loads: number
   resumes: number
   cancels: number
@@ -369,6 +379,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     optionIds: [],
     cancelled: 0,
     prompts: [],
+    mcpServers: [],
     loads: 0,
     resumes: 0,
     cancels: 0,
@@ -431,7 +442,8 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         agentInfo: { name: 'Fake agent', version: '1.0.0' },
       }
     },
-    newSession: () => {
+    newSession: (request: NewSessionRequest) => {
+      answers.mcpServers.push([...request.mcpServers])
       const opened: NewSessionResponse = { sessionId }
       // Left out when the script named none, for the reason a tool call leaves out what it does
       // not say: an agent that announces no options is not an agent that announces zero.
@@ -597,6 +609,10 @@ function supervisedOf(agent: FakeAgent): SupervisedProcess {
       readers.push(read)
       pump()
     },
+    // The fake has no standard error: it is a peer in this process and not a program that can
+    // complain, so the reader is taken and never called. Refusing it would refuse a wiring the
+    // real port allows — a caller that reads both streams reads them here too.
+    onStderr: () => undefined,
   }
 }
 

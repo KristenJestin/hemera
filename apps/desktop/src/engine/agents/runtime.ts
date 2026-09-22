@@ -32,6 +32,8 @@ import {
 } from 'effect'
 import { existsSync } from 'node:fs'
 
+import type { McpServer } from '@agentclientprotocol/sdk'
+
 import type { AgentProvider, Session, SessionEntry, SessionEntryOrigin } from '@hemera/core'
 import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice } from '@hemera/ipc'
 
@@ -49,12 +51,18 @@ import {
   connect,
 } from './client.ts'
 import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discovery.ts'
+import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, type SupervisedProcess } from './supervisor.ts'
+import { Commands } from '../commands/service.ts'
+import { Context as AgentContext } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
+import { ToolAccess } from '../tools/access.ts'
+import { ToolPermissions } from '../tools/permissions.ts'
+import { ToolServer } from '../tools/server.ts'
 
 /** How long an agent is given to answer `session/cancel` before its process tree is stopped. */
 export const CANCEL_GRACE = Duration.seconds(10)
@@ -69,6 +77,14 @@ export const CANCEL_GRACE = Duration.seconds(10)
  * like it is streaming.
  */
 export const CHUNK_FLUSH = Duration.millis(100)
+
+/**
+ * How long a turn waits for what the agent said to be in the thread before it goes on.
+ *
+ * The net under a write that never answers: the entries are written by another fiber, and a turn
+ * that cannot end because one of them is stuck is worse than a turn whose last line arrives late.
+ */
+const DRAIN_LIMIT = Duration.seconds(5)
 
 /** Everything that can stop the engine from talking to an agent, as one thing to report. */
 export class AgentRuntimeError extends Data.TaggedError('AgentRuntimeError')<{
@@ -217,36 +233,8 @@ export interface AgentRuntimeService {
   readonly alive: Effect.Effect<readonly string[]>
 }
 
-/** What a Session did that the window is told about, and that has no entry of its own. */
-export type Notice =
-  | 'permission_requested'
-  | 'turn_started'
-  | 'turn_ended'
-  | 'agent_died'
-  | 'session_fallback'
-
-/** Where a written entry goes besides the database: the window watching this Session. */
-export interface AgentNoticesService {
-  readonly wrote: (sessionId: string, entry: SessionEntry) => void
-  /** Something about a Session changed without an entry: a question arrived, a turn ended. */
-  readonly changed: (sessionId: string, what: Notice) => void
-}
-
-export class AgentNotices extends Context.Service<AgentNotices, AgentNoticesService>()(
-  'AgentNotices',
-) {}
-
-/**
- * A runtime with nobody watching.
- *
- * The engine's own layer puts the window there; a test that only reads the thread does not need
- * one, and a port with a default is what keeps a notice from being something a caller can
- * forget to provide.
- */
-export const NoNotices = Layer.succeed(AgentNotices, {
-  wrote: () => undefined,
-  changed: () => undefined,
-})
+export { AgentNotices, NoNotices } from './notices.ts'
+export type { AgentNoticesService, Notice } from './notices.ts'
 
 /** One running agent, as the runtime keeps it. */
 interface Live {
@@ -261,6 +249,14 @@ interface Live {
    */
   readonly queue: Queue.Queue<AgentEvent>
   readonly cwd: string
+  /**
+   * The one MCP server this agent process was configured with: Hemera's own tools (D6-01).
+   *
+   * Held rather than rebuilt at each call, because the token in it is the one thing that says
+   * which Session a tool call belongs to: `session/new`, `session/resume` and `session/load` all
+   * hand over the same address, and the grant behind it dies with this process.
+   */
+  readonly mcp: readonly McpServer[]
   /** The handle the agent gave this Session, which a resume asks it to take back. */
   nativeSessionId: string
   /** What the supervisor observed when the process died, or null while it is alive. */
@@ -304,6 +300,15 @@ interface Live {
   readonly chunks: Map<string, Coalesced>
   /** The fiber of the flush that is due, or null when this Session holds nothing. */
   timer: Fiber.Fiber<void> | null
+  /**
+   * What a turn waits on for those writes to be done: completed when the last one is.
+   *
+   * A latch rather than a count looked at again and again: the fiber that writes is the one that
+   * knows when it has caught up, and a waiter that polls is a waiter burning a core to find out.
+   * It is replaced when the count goes from none to one, so each wait is about the writes that
+   * were outstanding when it began.
+   */
+  settled: Deferred.Deferred<void>
 }
 
 /** A tool call, as the thread accumulates it: an update carries only what changed. */
@@ -458,6 +463,14 @@ export const runtimeLayer = Layer.effect(
     const discovery = yield* Discovery
     const supervisor = yield* ProcessSupervisor
     const notices = yield* AgentNotices
+    // What a Session's agent is lent: a token of its own, the address the tools are served on,
+    // what it was provided with, the commands it started and the book of who is live (D6-01,
+    // D6-07, D6-12, D5-05).
+    const access = yield* ToolAccess
+    const server = yield* ToolServer
+    const context = yield* AgentContext
+    const commands = yield* Commands
+    const permissions = yield* ToolPermissions
     const pool = yield* Pool
 
     /**
@@ -761,7 +774,11 @@ export const runtimeLayer = Layer.effect(
         Effect.ensuring(
           Effect.sync(() => {
             const held = live.get(sessionId)
-            if (held !== undefined) held.pending -= 1
+            if (held === undefined) return
+            held.pending -= 1
+            // The last write of a batch opens the latch: what waits on it is a turn that must not
+            // end above the words it ended with.
+            if (held.pending <= 0) Deferred.doneUnsafe(held.settled, Effect.void)
           }),
         ),
       )
@@ -779,8 +796,10 @@ export const runtimeLayer = Layer.effect(
      */
     const drained = (sessionId: string, held: Live) =>
       Effect.gen(function* () {
-        for (let look = 0; look < 10_000 && held.pending > 0; look++) {
-          yield* Effect.yieldNow
+        // Read and awaited in the same step: the latch caught here is the one the writes that are
+        // outstanding right now will open, and a batch that starts after this is not this wait.
+        if (held.pending > 0) {
+          yield* Deferred.await(held.settled).pipe(Effect.timeoutOption(DRAIN_LIMIT))
         }
         yield* flush(sessionId, held, true)
       })
@@ -1070,7 +1089,7 @@ export const runtimeLayer = Layer.effect(
                 onPermission: () => Promise.resolve({ cancelled: true } satisfies PermissionAnswer),
               }),
             )
-            yield* attempt('opening a session', connection.open(cwd))
+            yield* attempt('opening a session', connection.open(cwd, []))
             return connection
           }),
         )
@@ -1180,6 +1199,20 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
+     * What goes with a Session's agent when it goes (D6-01, D6-12, D5-05).
+     *
+     * The same three things whether the process died under a turn or was let go of on purpose: the
+     * token it was handed stops being one this engine knows, what it started is stopped because
+     * nothing is left to read it, and the pool is told to forget an agent it can no longer sweep.
+     */
+    const letGo = (sessionId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        yield* access.revoked(sessionId)
+        yield* commands.stopped(sessionId).pipe(Effect.ignore)
+        yield* pool.forgotten(sessionId)
+      })
+
+    /**
      * Watches one agent for its death.
      *
      * A process that dies under a turn is the one end of a turn nothing in the protocol
@@ -1243,6 +1276,7 @@ export const runtimeLayer = Layer.effect(
               }),
             ).pipe(Effect.ignore)
           }
+          yield* letGo(sessionId)
           notices.changed(sessionId, 'agent_died')
         }),
       )
@@ -1282,6 +1316,19 @@ export const runtimeLayer = Layer.effect(
           supervisor.start(resolved.command, resolved.args, startOptions(resolved, cwd)),
         )
 
+        // The token is minted for this process and for this Session, and it is the whole of what
+        // says whose call a tool call is (D6-01). It travels in the address the agent is
+        // configured with and as a bearer header, because agents read one or the other.
+        const granted = yield* access.granted(sessionId, String(process.pid ?? 'unknown'), 'free')
+        const mcp: readonly McpServer[] = [
+          {
+            type: 'http',
+            name: 'hemera',
+            url: server.forAgent(granted.token),
+            headers: [{ name: 'Authorization', value: `Bearer ${granted.token}` }],
+          },
+        ]
+
         const queue = yield* Queue.unbounded<AgentEvent>()
         const connection = yield* attempt(
           'speaking to the agent',
@@ -1292,7 +1339,11 @@ export const runtimeLayer = Layer.effect(
               // Counted before it is offered: the thread is not told the Session is back while one
               // of its own events is still on its way to it.
               const current = live.get(sessionId)
-              if (current !== undefined) current.pending += 1
+              if (current !== undefined) {
+                // The first of a batch closes the latch a turn waits on; the last one opens it.
+                if (current.pending <= 0) current.settled = Deferred.makeUnsafe<void>()
+                current.pending += 1
+              }
               Queue.offerUnsafe(queue, event)
             },
             onPermission: (question) => Effect.runPromise(ask(sessionId, question)),
@@ -1304,6 +1355,7 @@ export const runtimeLayer = Layer.effect(
           process,
           queue,
           cwd,
+          mcp,
           nativeSessionId: '',
           death: null,
           context: null,
@@ -1312,6 +1364,7 @@ export const runtimeLayer = Layer.effect(
           pending: 0,
           chunks: new Map(),
           timer: null,
+          settled: Deferred.makeUnsafe<void>(),
         }
         live.set(sessionId, started)
         replayed.delete(sessionId)
@@ -1392,6 +1445,25 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
+     * What a session that has just been opened is provided with (design D6-07).
+     *
+     * `Context.start` records the two: the base, word for word, and the fingerprint of the
+     * `AGENTS.md` the agent reads itself — which is never sent, because sending a text the agent
+     * already has is saying it twice. The base rides on the first prompt rather than on a turn of
+     * its own: it is a provision, not something to answer.
+     */
+    const provide = (sessionId: string, held: Live): Effect.Effect<AgentRuntimeError | null> =>
+      Effect.gen(function* () {
+        const started = yield* Effect.result(
+          attempt('providing the context', context.start(sessionId)),
+        )
+        if (Result.isFailure(started)) return started.failure
+        const base = started.success.base
+        held.context = held.context === null ? base : `${base}\n\n${held.context}`
+        return null
+      })
+
+    /**
      * Hands the agent back its own session, or opens a new one.
      *
      * A Session that was never run in has no handle to give back and is opened; one whose handle
@@ -1411,9 +1483,11 @@ export const runtimeLayer = Layer.effect(
         const handle = native.nativeSessionId
         if (handle === null || native.nativeState === 'none') {
           const openedSession = yield* Effect.result(
-            attempt('opening a session', held.connection.open(held.cwd)),
+            attempt('opening a session', held.connection.open(held.cwd, held.mcp)),
           )
           if (Result.isFailure(openedSession)) return openedSession.failure
+          const provided = yield* provide(sessionId, held)
+          if (provided !== null) return provided
           return yield* attached(sessionId, held, openedSession.success)
         }
         // A Session that ran in a directory that is gone cannot be taken back there: the agent is
@@ -1430,14 +1504,14 @@ export const runtimeLayer = Layer.effect(
         // conversation on as it stands, and asked to send it back only if it cannot.
         if (held.connection.handshake.resumes) {
           const resumed = yield* Effect.result(
-            attempt('resuming the session', held.connection.resume(handle, held.cwd)),
+            attempt('resuming the session', held.connection.resume(handle, held.cwd, held.mcp)),
           )
           if (Result.isSuccess(resumed)) return yield* attached(sessionId, held, handle)
         }
 
         if (held.connection.handshake.continues) {
           const loaded = yield* Effect.result(
-            attempt('loading the session', held.connection.load(handle, held.cwd)),
+            attempt('loading the session', held.connection.load(handle, held.cwd, held.mcp)),
           )
           if (Result.isSuccess(loaded)) return yield* attached(sessionId, held, handle)
           return yield* fallback(sessionId, held, loaded.failure.cause)
@@ -1473,12 +1547,16 @@ export const runtimeLayer = Layer.effect(
         // context rather than a session it cannot take back, and the handle of that new session
         // is what the next run of the application takes back.
         const openedSession = yield* Effect.result(
-          attempt('opening a session', held.connection.open(held.cwd)),
+          attempt('opening a session', held.connection.open(held.cwd, held.mcp)),
         )
         if (Result.isFailure(openedSession)) return openedSession.failure
         held.nativeSessionId = openedSession.success
         held.context = rebuilt
         held.why = reason
+        // A session opened here is as new as any other, so it is provided like one: the base goes
+        // in front of what was rebuilt, because it says who the agent is talking to (D6-07).
+        const provided = yield* provide(sessionId, held)
+        if (provided !== null) return provided
         yield* attempt(
           'recording the agent',
           sessions.recordNative(sessionId, {
@@ -1516,6 +1594,15 @@ export const runtimeLayer = Layer.effect(
           return { cancelled: true } satisfies PermissionAnswer
         }
 
+        // A turn holds one question at a time, and an agent that asks a second one before the
+        // first was answered has stopped waiting on it: the one being replaced is ended rather
+        // than dropped, because a question nobody ever answers is a call blocked for ever.
+        const standing = turn.permission
+        if (standing !== null) {
+          turn.permission = null
+          yield* Deferred.succeed(standing.answer, { cancelled: true })
+        }
+
         const answer = yield* Deferred.make<PermissionAnswer>()
         const payload = JSON.stringify({
           toolCallId: question.toolCallId,
@@ -1540,7 +1627,12 @@ export const runtimeLayer = Layer.effect(
           state: 'pending',
         })
         notices.changed(sessionId, 'permission_requested')
-        return yield* Deferred.await(answer)
+        // A question waiting for the user is not an idle agent, whatever the clock says: the pool
+        // is told so for exactly as long as the question stands (D5-05).
+        yield* pool.busy(sessionId, true).pipe(Effect.ignore)
+        return yield* Deferred.await(answer).pipe(
+          Effect.ensuring(pool.busy(sessionId, false).pipe(Effect.ignore)),
+        )
       })
 
     /** The turn entry, written once per turn: what it ended with, in the thread's words. */
@@ -1637,10 +1729,40 @@ export const runtimeLayer = Layer.effect(
           }
           turns.set(sessionId, turn)
 
-          const sent = held.context === null ? text : `${held.context}\n\n${text}`
-          held.context = null
-
+          // Everything from here to the end of the turn runs under the one `ensuring` below: a
+          // delivery that failed must not leave a turn registered that never ran — every later
+          // prompt would be refused as "already running".
           const report = yield* Effect.gen(function* () {
+            yield* pool.used(sessionId)
+            yield* pool.busy(sessionId, true).pipe(Effect.ignore)
+
+            // Right before the prompt is the safe point of D6-08: the previous turn is over and
+            // this one has not started, which is the only moment a change of the Workspace's
+            // instructions can be handed over as text rather than as a message nobody wrote.
+            const delivered = yield* attempt('delivering the context', context.deliver(sessionId))
+            if (delivered !== null) {
+              yield* write(sessionId, {
+                role: 'hemera',
+                kind: 'context_delivery',
+                body: 'The instructions of the Workspace changed and were handed to the agent.',
+                payload: JSON.stringify({
+                  kind: delivered.record.kind,
+                  path: delivered.record.path,
+                  fingerprint: delivered.record.fingerprint,
+                  deliveredAt: delivered.record.deliveredAt,
+                }),
+                correlationId: `delivery:${delivered.record.fingerprint}`,
+                turnId: null,
+              })
+            }
+
+            // The base first, then what changed, then what the user asked: a provision is read
+            // before the instructions that amend it, and both before the turn they are provided
+            // for.
+            const provided = [held.context, delivered?.text ?? null].filter((one) => one !== null)
+            const sent = [...provided, text].join('\n\n')
+            held.context = null
+
             const outcome = yield* Effect.result(attempt('prompting', held.connection.prompt(sent)))
             if (Result.isSuccess(outcome)) {
               const answered = outcome.success
@@ -1689,6 +1811,7 @@ export const runtimeLayer = Layer.effect(
             Effect.ensuring(
               Effect.gen(function* () {
                 turns.delete(sessionId)
+                yield* pool.busy(sessionId, false).pipe(Effect.ignore)
                 // The idle time is counted from the end of the turn, not from its start: a sweep
                 // that ran during a long turn found it busy and struck it out of the book.
                 if (live.has(sessionId)) yield* kept(sessionId)
@@ -1711,6 +1834,12 @@ export const runtimeLayer = Layer.effect(
      */
     const stop = (sessionId: string) =>
       Effect.gen(function* () {
+        // A question one of Hemera's own tools is waiting on holds the turn just as still as the
+        // agent's own, and the Stop ends it the way it ends that one: refused, so the call it
+        // blocks answers rather than waiting for ever (D6-05).
+        const outside = yield* permissions.waiting(sessionId)
+        if (outside !== null) yield* permissions.answer(outside, 'refused')
+
         const held = live.get(sessionId)
         const turn = turns.get(sessionId)
         if (turn === undefined) {
@@ -1780,6 +1909,15 @@ export const runtimeLayer = Layer.effect(
         const turn = turns.get(sessionId)
         const pending = turn?.permission ?? null
         if (turn === undefined || pending === null) {
+          // Two questions reach the same block of the same thread: the agent's own permission, and
+          // the one Hemera's tools ask before acting outside the Workspace (D6-05). The second one
+          // is answered here when the first is not what is waiting, and its options are the two
+          // the catalogue wrote — anything but `allowed` is a refusal.
+          const outside = yield* permissions.waiting(sessionId)
+          if (outside !== null) {
+            yield* permissions.answer(outside, optionId === 'allowed' ? 'allowed' : 'refused')
+            return
+          }
           return yield* Effect.fail(
             new AgentRuntimeError({
               what: 'deciding',
@@ -1842,14 +1980,16 @@ export const runtimeLayer = Layer.effect(
         // nobody is talking to.
         yield* Queue.shutdown(held.queue).pipe(Effect.ignore)
         yield* attempt('stopping the agent', held.process.stop).pipe(Effect.ignore)
+        yield* letGo(sessionId)
       })
 
     /**
      * The pool's own timer, for as long as the engine runs (D5-05).
      *
      * The pool says which agents have been idle long enough; something has to ask it. One fiber
-     * of this layer does, on the clock the engine was given, which is what closes the probe a
-     * Home's composer opened once nobody is looking at that composer any more.
+     * of this layer does, on the clock the engine was given, which is what closes a Session's
+     * agent nobody has talked to for five minutes, and the probe a Home's composer opened once
+     * nobody is looking at that composer any more.
      */
     yield* Effect.forkScoped(
       Effect.gen(function* () {

@@ -19,6 +19,9 @@ import type { Discovery } from '#engine/agents/discovery.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
+import { StderrSink } from '#engine/agents/supervisor.ts'
+import { commandsLayer } from '#engine/commands/service.ts'
+import { contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
@@ -28,6 +31,9 @@ import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import type { Database } from '#engine/storage/database.ts'
+import { toolAccessLayer } from '#engine/tools/access.ts'
+import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
+import { ToolServer } from '#engine/tools/server.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /**
@@ -78,6 +84,19 @@ function running<A, E>(
     }),
     fakeSupervisor(fakeAgent()),
     NoNotices,
+    Layer.succeed(StderrSink, { write: () => Effect.void }),
+  )
+  // The tools an agent would be lent: the tokens are the engine's own, and the address is one
+  // nothing listens on — what this suite asks is whether a message reaches its use case.
+  const tools = Layer.mergeAll(
+    toolAccessLayer,
+    toolPermissionsLayer,
+    contextLayer,
+    commandsLayer,
+    Layer.succeed(ToolServer, {
+      origin: 'http://127.0.0.1:1',
+      forAgent: (token: string) => `http://127.0.0.1:1/mcp?t=${token}`,
+    }),
   )
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very
   // same ones: `provideMerge` hands them up rather than hiding them.
@@ -110,6 +129,7 @@ function running<A, E>(
       Layer.provideMerge(discoveryLayer),
       Layer.provide(rows),
       Layer.provide(preferencesLayer),
+      Layer.provide(tools.pipe(Layer.provide(rows), Layer.provide(agents))),
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provide(agents),
     ),

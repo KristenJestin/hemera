@@ -46,6 +46,20 @@ const ARGUMENTS_KEPT = 400
 /** How many entries of the thread `session.get` hands back. */
 const THREAD_TAIL = 20
 
+/** How many answered keys are held against a retry before the oldest are let go of. */
+const KEYS_KEPT = 200
+
+/**
+ * The two answers a path outside the Workspace can be given, as the block draws them.
+ *
+ * `allow_once` and `reject_once` and nothing else: what the user allows is this call, and the
+ * next one asks again — there is no "always" to give, because nothing is remembered (D6-05).
+ */
+const OUTSIDE_OPTIONS = [
+  { optionId: 'allowed', name: 'Allow once', kind: 'allow_once' },
+  { optionId: 'refused', name: 'Refuse', kind: 'reject_once' },
+] as const
+
 /** What one call is, as the server has already established it. */
 export interface ToolCall {
   readonly sessionId: string
@@ -86,6 +100,19 @@ export class ToolCatalogue extends Context.Service<ToolCatalogue, ToolCatalogueS
   'ToolCatalogue',
 ) {}
 
+/**
+ * What one call is written down with, beside its own answer.
+ *
+ * Read from the Session once the call has been admitted: the Project the Journal line belongs to,
+ * the agent the thread names as the caller, and how long the tool took — which is what the
+ * Journal measures a call by, and what an entry of the thread shows beside it.
+ */
+interface Made {
+  readonly projectId: string
+  readonly agent: string
+  readonly milliseconds: number
+}
+
 /** What a tool hands back before it has been written down. */
 interface Answer {
   readonly ok: boolean
@@ -98,6 +125,8 @@ interface Answer {
 interface Page {
   readonly text: string
   readonly offset: number
+  /** How many bytes this page took, which is where the next one starts. */
+  readonly read: number
   readonly size: number
 }
 
@@ -170,16 +199,36 @@ export const toolCatalogueLayer: Layer.Layer<
     /** The answers already given for a key, so a retry is answered and not repeated. */
     const done = new Map<string, ToolOutcome>()
 
+    /**
+     * Keeps one answer against its key, and lets go of the oldest when there are too many.
+     *
+     * A retry happens seconds after the answer it lost, so what is worth holding is the recent
+     * past: an engine that ran for a day would otherwise be holding every write of every Session
+     * it ever served, texts and all.
+     */
+    const remember = (key: string, outcome: ToolOutcome) => {
+      done.set(key, outcome)
+      while (done.size > KEYS_KEPT) {
+        const oldest = done.keys().next()
+        if (oldest.done === true) break
+        done.delete(oldest.value)
+      }
+    }
+
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
 
     /** The line and the event of one call, written together, in the thread and in the Journal. */
-    const note = (asked: ToolCall, state: ToolState, answer: Answer, projectId: string) =>
+    const note = (asked: ToolCall, state: ToolState, answer: Answer, made: Made) =>
       Effect.gen(function* () {
         const payload = JSON.stringify({
           tool: asked.tool,
           state,
           caller: asked.caller,
+          // Who asked and how long it took: the thread shows a call under the agent that made it,
+          // and a call that took a while is a call the reader wants the length of.
+          agent: made.agent,
+          ms: made.milliseconds,
           paths: answer.paths,
           arguments: JSON.stringify(asked.arguments).slice(0, ARGUMENTS_KEPT),
         })
@@ -208,14 +257,14 @@ export const toolCatalogueLayer: Layer.Layer<
                   entityId: asked.sessionId,
                   source: 'system' as const,
                   author: 'mcp' as const,
-                  projectId,
+                  projectId: made.projectId,
                   sessionId: asked.sessionId,
                   payload: {
                     tool: asked.tool,
                     state,
                     caller: asked.caller,
                     paths: answer.paths.length,
-                    milliseconds: 0,
+                    milliseconds: made.milliseconds,
                   },
                 },
               ],
@@ -225,9 +274,9 @@ export const toolCatalogueLayer: Layer.Layer<
       })
 
     /** Writes the answer down and hands it to the caller. */
-    const settle = (asked: ToolCall, projectId: string, answer: Answer, state: ToolState) =>
+    const settle = (asked: ToolCall, made: Made, answer: Answer, state: ToolState) =>
       Effect.gen(function* () {
-        yield* note(asked, state, answer, projectId)
+        yield* note(asked, state, answer, made)
         const outcome: ToolOutcome = {
           ok: answer.ok,
           state,
@@ -236,13 +285,19 @@ export const toolCatalogueLayer: Layer.Layer<
           paths: answer.paths,
           repeated: false,
         }
-        if (asked.key !== null) done.set(`${asked.sessionId}|${asked.tool}|${asked.key}`, outcome)
+        // Only what happened is remembered. A key is there so that a retry after a lost answer
+        // does not write twice, and a call that wrote nothing — a refusal, a read that failed —
+        // wrote nothing to protect: answering it from memory would refuse the corrected call
+        // that comes back under the same key for ever.
+        if (asked.key !== null && state === 'completed') {
+          remember(`${asked.sessionId}|${asked.tool}|${asked.key}`, outcome)
+        }
         return outcome
       })
 
     /** A refusal: the same road as an answer, so a refusal is recorded like any call. */
-    const refused = (asked: ToolCall, projectId: string, reason: string) =>
-      settle(asked, projectId, { ok: false, summary: reason, text: reason, paths: [] }, 'refused')
+    const refused = (asked: ToolCall, made: Made, reason: string) =>
+      settle(asked, made, { ok: false, summary: reason, text: reason, paths: [] }, 'refused')
 
     /** Where a tool may act: inside the root, or wherever the human has just allowed. */
     const allowed = (asked: ToolCall, root: string, named: string) =>
@@ -258,16 +313,30 @@ export const toolCatalogueLayer: Layer.Layer<
           return { allowed: false as const, reason: settled.refusal.message }
         }
         const id = crypto.randomUUID()
-        yield* sessions
-          .write(asked.sessionId, {
-            role: 'hemera',
-            kind: 'permission_request',
-            body: `${asked.tool} asks to act outside the Workspace: ${named}`,
-            payload: JSON.stringify({ tool: asked.tool, named, root }),
-            correlationId: id,
-            state: 'in_progress',
-          })
-          .pipe(Effect.catch(() => Effect.void))
+        const body = `${asked.tool} asks to act outside the Workspace: ${named}`
+        // The block the window already draws for an agent's own permission is the one this is
+        // read by: the same two options every time, because the question is always the same one
+        // and nothing about it is remembered (D6-05). The request and the decision are two rows
+        // under two correlations, so neither is written over the other.
+        const request = (state: string) =>
+          sessions
+            .write(asked.sessionId, {
+              role: 'hemera',
+              kind: 'permission_request',
+              body,
+              payload: JSON.stringify({
+                toolCallId: id,
+                options: OUTSIDE_OPTIONS,
+                tool: asked.tool,
+                named,
+                root,
+              }),
+              correlationId: `perm:${id}`,
+              state,
+            })
+            .pipe(Effect.catch(() => Effect.void))
+
+        yield* request('pending')
         const answer = yield* permissions.askOutside({
           id,
           sessionId: asked.sessionId,
@@ -275,16 +344,23 @@ export const toolCatalogueLayer: Layer.Layer<
           named,
           root,
         })
+        yield* request(answer === 'allowed' ? 'decided' : 'refused')
         yield* sessions
           .write(asked.sessionId, {
-            role: 'hemera',
+            role: 'user',
             kind: 'permission_decision',
             body:
               answer === 'allowed'
                 ? `you allowed ${asked.tool} to act on ${named}`
                 : `you refused ${asked.tool} on ${named}`,
-            payload: JSON.stringify({ tool: asked.tool, named, answer }),
-            correlationId: id,
+            payload: JSON.stringify({
+              toolCallId: id,
+              optionId: answer === 'allowed' ? 'allowed' : null,
+              tool: asked.tool,
+              named,
+              answer,
+            }),
+            correlationId: `decision:${id}`,
             state: answer === 'allowed' ? 'completed' : 'refused',
           })
           .pipe(Effect.catch(() => Effect.void))
@@ -350,9 +426,15 @@ export const toolCatalogueLayer: Layer.Layer<
               readFile(settled.path).then((data) => {
                 const offset = call.arguments.offset ?? 0
                 const limit = call.arguments.limit ?? READ_PAGE_BYTES
+                const slice = data.subarray(offset, offset + limit)
                 return {
-                  text: data.subarray(offset, offset + limit).toString('utf8'),
+                  text: slice.toString('utf8'),
                   offset,
+                  // What the next page starts at is how many bytes were taken, not how long the
+                  // text reads: a page that ends in the middle of a character decodes to a
+                  // replacement character three bytes wide, and an offset measured on the text
+                  // would skip the two bytes the next page has to begin with.
+                  read: slice.length,
                   size: data.length,
                 }
               }),
@@ -360,7 +442,7 @@ export const toolCatalogueLayer: Layer.Layer<
             if (!page.ok) {
               return failed(`could not read ${call.arguments.path}`, page.reason)
             }
-            const end = page.value.offset + Buffer.byteLength(page.value.text, 'utf8')
+            const end = page.value.offset + page.value.read
             const more =
               end < page.value.size
                 ? `\n(that is bytes ${page.value.offset}-${end} of ${page.value.size}; the next page starts at offset ${end})`
@@ -659,18 +741,25 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
           const root = project.mainPath
+          // The agent of the Session is what the thread names as the caller, beside the digest of
+          // the token: a Session without one is served all the same, and "agent" is what it says.
+          const made = {
+            projectId: project.id,
+            agent: session.provider ?? 'agent',
+            milliseconds: 0,
+          } satisfies Made
 
           if (named === undefined) {
-            return yield* refused(asked, project.id, `Hemera has no tool named ${asked.tool}`)
+            return yield* refused(asked, made, `Hemera has no tool named ${asked.tool}`)
           }
           const decision = admitTool(asked.offered, named)
-          if (!decision.admitted) return yield* refused(asked, project.id, decision.reason)
+          if (!decision.admitted) return yield* refused(asked, made, decision.reason)
 
           const parsed = parseCall(named, asked.arguments)
           if (!parsed.ok) {
             return yield* refused(
               asked,
-              project.id,
+              made,
               `the arguments of ${named} do not read: ${parsed.reason}`,
             )
           }
@@ -681,6 +770,9 @@ export const toolCatalogueLayer: Layer.Layer<
             if (earlier !== undefined) return { ...earlier, repeated: true }
           }
 
+          // Measured around the tool itself, question to the human included: what the Journal
+          // says a call took is how long the agent waited for it.
+          const began = Date.now()
           const answer = yield* perform(
             asked,
             root,
@@ -691,7 +783,12 @@ export const toolCatalogueLayer: Layer.Layer<
           )
           // A tool has no error channel on purpose: everything a tool can be told no by is
           // answered as a value, and what would remain is a defect the engine should hear about.
-          return yield* settle(asked, project.id, answer, answer.ok ? 'completed' : 'failed')
+          return yield* settle(
+            asked,
+            { ...made, milliseconds: Date.now() - began },
+            answer,
+            answer.ok ? 'completed' : 'failed',
+          )
         }),
     }
   }),

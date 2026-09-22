@@ -18,13 +18,21 @@ import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
+import { AgentNotices } from './agents/notices.ts'
+import type { Notice } from './agents/notices.ts'
 import { clockLayer, poolLayer } from './agents/pool.ts'
-import { AgentNotices, runtimeLayer } from './agents/runtime.ts'
-import type { AgentRuntime, Notice } from './agents/runtime.ts'
+import { runtimeLayer } from './agents/runtime.ts'
+import type { AgentRuntime } from './agents/runtime.ts'
 import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
+import { commandsLayer } from './commands/service.ts'
+import { contextLayer } from './context/service.ts'
+import { toolAccessLayer } from './tools/access.ts'
+import { toolCatalogueLayer } from './tools/catalogue.ts'
+import { toolPermissionsLayer } from './tools/permissions.ts'
+import { toolServerLayer } from './tools/server.ts'
 import { openProfile } from './migrate.ts'
 import { journalLayer } from './journal.ts'
 import type { Journal } from './journal.ts'
@@ -136,6 +144,25 @@ function servicesOf(
   const discovery = discoveryLayer.pipe(Layer.provide(rows), Layer.provide(agents))
   const sources = Layer.mergeAll(registryLayer, updaterLayer).pipe(Layer.provide(agents))
   const listed = agentsLayer.pipe(Layer.provide(discovery), Layer.provide(sources))
+  // The processes a command becomes and the processes an agent is are started by the same
+  // supervisor, built once: a quit closes one scope and every tree of both goes with it (D5-04).
+  const processes = processSupervisorLayer.pipe(Layer.provide(agents))
+  // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
+  // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
+  // rather than minting a second one, and a token of one book means nothing to the other.
+  const tools = toolServerLayer.pipe(
+    Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(toolAccessLayer),
+    Layer.provideMerge(toolPermissionsLayer),
+    Layer.provideMerge(commandsLayer),
+    Layer.provide(rows),
+    Layer.provide(processes),
+    Layer.provide(agents),
+  )
+  // What a Session is provided with, and the book of which agents are live (D6-07, D5-05).
+  const provisions = Layer.mergeAll(contextLayer.pipe(Layer.provide(rows)), poolLayer).pipe(
+    Layer.provide(clockLayer),
+  )
 
   return Layer.mergeAll(
     preferencesLayer,
@@ -151,10 +178,11 @@ function servicesOf(
       // What each Project's composer was left on: the runtime seeds the Home's choices from it
       // at start and writes them back as they are made (D5-17).
       Layer.provide(preferencesLayer),
-      Layer.provide(processSupervisorLayer),
-      // The book of what is running, on the engine's own clock: it is what closes the agent a
-      // Home's composer started once nobody is looking at that composer any more (D5-05).
-      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
+      Layer.provide(tools),
+      // What a Session is provided with, and the book of what is running on the engine's own
+      // clock: it is what closes an agent nobody is talking to any more (D5-05).
+      Layer.provide(provisions),
+      Layer.provide(processes),
       Layer.provide(agents),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
