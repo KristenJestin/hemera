@@ -20,6 +20,25 @@ import { type AgentAdapter, versionIn } from '../adapter.ts'
  * route taken on the user's behalf (D5-17).
  */
 
+/**
+ * The agent OpenCode is asked to be: one primary agent of Hemera's own, and nothing else.
+ *
+ * A catch-all deny is what removes a tool's definition from the request sent to the provider,
+ * which is what bare mode means here — a per-tool deny would only refuse at call time, with the
+ * definition still on its way. The `hemera_*` re-allow is mandatory rather than polite: MCP tools
+ * go through the same filter, so a blanket deny hides Hemera's own tools too. `build` and `plan`
+ * are the two primary agents OpenCode ships, and they are disabled so that the namespace is the
+ * only one reachable.
+ */
+const BARE_AGENT = {
+  default_agent: 'hemera',
+  agent: {
+    hemera: { mode: 'primary', permission: { '*': 'deny', 'hemera_*': 'allow' } },
+    build: { disable: true },
+    plan: { disable: true },
+  },
+}
+
 export const opencode: AgentAdapter = {
   id: 'opencode',
   label: 'OpenCode',
@@ -33,4 +52,29 @@ export const opencode: AgentAdapter = {
   acp: { from: 'agent', command: 'opencode', args: ['acp'] },
   readVersion: versionIn,
   isAuthenticated: (methods) => methods.length === 0,
+  /**
+   * This agent's means is a configuration of its own, handed inline so that no file of the
+   * user's is read to get it, plus the two variables that keep the project's own configuration
+   * out of the way (D6-09).
+   *
+   * The platform is read because the wildcard matching is not the same on both: on Windows it is
+   * case-insensitive, so the re-allow holds whatever case the agent spells the namespace in.
+   * What survives the means is `$HOME/.opencode`, managed configuration and a remote
+   * `.well-known/opencode`, which the Context view names.
+   */
+  bareMode: (platform) => ({
+    means:
+      platform === 'win32'
+        ? "OPENCODE_CONFIG_CONTENT: a primary agent of Hemera's, a catch-all deny with the hemera_* namespace re-allowed, build and plan disabled — matched case-insensitively on Windows"
+        : "OPENCODE_CONFIG_CONTENT: a primary agent of Hemera's, a catch-all deny with the hemera_* namespace re-allowed, build and plan disabled",
+    qualified: true,
+    options: (input) => ({
+      meta: undefined,
+      env: {
+        XDG_CONFIG_HOME: input.ownerDirectory,
+        OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+        OPENCODE_CONFIG_CONTENT: JSON.stringify(BARE_AGENT),
+      },
+    }),
+  }),
 }

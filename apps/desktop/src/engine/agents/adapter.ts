@@ -27,6 +27,8 @@
 
 import { AGENT_PROVIDERS, type AgentProvider } from '@hemera/core'
 
+import type { BareMode } from './bare.ts'
+
 export { AGENT_PROVIDERS, type AgentProvider }
 
 /**
@@ -100,6 +102,13 @@ export interface AgentAdapter {
   readonly isAuthenticated: (
     methods: readonly { readonly id: string; readonly name?: string }[],
   ) => boolean
+  /**
+   * What running this agent bare means here, and whether it removes everything it ships.
+   *
+   * The platform is asked rather than read: the answer is declared per platform (D6-02), and a
+   * machine cannot try the other one's answer.
+   */
+  readonly bareMode: (platform: NodeJS.Platform) => BareMode
 }
 
 /**

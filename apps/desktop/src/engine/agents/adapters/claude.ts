@@ -53,5 +53,39 @@ export const claude: AgentAdapter = {
     agentVariable: 'CLAUDE_CODE_EXECUTABLE',
   },
   readVersion: versionIn,
+
   isAuthenticated: (methods) => !methods.some((method) => LOGINS.has(method.id)),
+  /**
+   * Every lever this agent has is in one place, which is why it needs no configuration file of
+   * Hemera's: `session/new` carries its options on `_meta`, and the ACP field beside them
+   * carries Hemera's server.
+   *
+   * What survives the means is managed and policy settings, which load whatever `settingSources`
+   * says (D6-09): the Context view names it, and nothing here pretends otherwise.
+   */
+  bareMode: () => ({
+    means: 'session/new _meta: no built-in tool, no settings source, the base as the system prompt',
+    qualified: true,
+    options: (input) => ({
+      meta: {
+        claudeCode: {
+          options: {
+            // Documented as removing every built-in, with the MCP tools kept — which is what
+            // makes this agent qualified rather than merely configured.
+            tools: [],
+            settingSources: [],
+            systemPrompt: { type: 'custom', prompt: input.base, snapshot: true },
+            env: {
+              CLAUDE_CONFIG_DIR: input.ownerDirectory,
+              CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+              ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+            },
+          },
+        },
+      },
+      // This agent is handed its environment inside `_meta` and not on its process, which is the
+      // one thing the three do not agree on.
+      env: {},
+    }),
+  }),
 }
