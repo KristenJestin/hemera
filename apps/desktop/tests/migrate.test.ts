@@ -59,8 +59,16 @@ const LOT_FOUR_A = '20260918102229_projects_and_journal'
  */
 const LOT_FOUR_B = '20260920001303_sessions_and_entries'
 
-/** The migration this lot adds: the one a profile of lot 4b has never heard of. */
+/** The migration lot 5 added: the one a profile of lot 4b has never heard of. */
 const AGENTS_MIGRATION = '20260921133441_sessions_with_agents'
+
+/**
+ * The migration this lot adds: the one a profile of lot 5 has never heard of.
+ *
+ * It is named after what it brings rather than after a lot number, as the others are, because
+ * what it brings is three tables and a wider set of entry kinds rather than a page.
+ */
+const TOOLS_MIGRATION = '20260922075631_tools_commands_and_context'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -363,8 +371,9 @@ describe('Un profil du lot 4b est migré vers le lot 5', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
 
-    // One migration behind, and the copy taken before it is named after it.
-    expect(standing.behind).toEqual([AGENTS_MIGRATION])
+    // Two migrations behind now — the agents' and this lot's — and the copy taken before them
+    // is named after the first of the two, which is the one that was applied first.
+    expect(standing.behind).toEqual([AGENTS_MIGRATION, TOOLS_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${AGENTS_MIGRATION}.sqlite`])
 
     // The agent columns arrived...
@@ -600,4 +609,127 @@ describe('Les tests de migration tournent sur un dossier temporaire', () => {
       expect(real.startsWith(workspace)).toBe(false)
     },
   )
+})
+
+describe('Un profil du lot 5 est migré vers le lot 6', () => {
+  test('the migration keeps the Sessions and adds the catalogue, the runs and the deliveries', async () => {
+    const dataFolder = join(workspace, 'from-lot-five')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(AGENTS_MIGRATION), '0.5.0'))
+
+    // A Session of the user's, with a message in it, and an agent it is attached to: none of it
+    // may be lost by a migration that widens the kinds an entry may have.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-21T10:00:00.000Z', '2026-09-21T10:00:00.000Z', 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Fix the parser', 'derived', 'claude', 'native-9', 'attached', '/work/atlas', '2026-09-21T10:00:00.000Z', '2026-09-21T10:01:00.000Z', 1)`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, created_at)
+          VALUES ('entry-1', 'session-1', 1, 'agent', 'tool_call', 'Read the parser', '{"toolCallId":"call-1"}', '2026-09-21T10:01:00.000Z')`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+
+    // One migration behind, and the copy taken before it is named after it.
+    expect(standing.behind).toEqual([TOOLS_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
+
+    // The three tables of this lot arrived...
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const table of ['project_commands', 'command_runs', 'context_deliveries']) {
+      expect(schema).toContain(table)
+    }
+    // ...the kinds a thread may hold were widened...
+    for (const kind of ['hemera_tool_call', 'command_run', 'context_delivery']) {
+      expect(schema).toContain(kind)
+    }
+
+    // ...and the Session the user had is untouched, handle and all.
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const sessions = yield* sql<{
+          title: string
+          provider: string | null
+          native_session_id: string | null
+          native_state: string
+        }>`SELECT title, provider, native_session_id, native_state FROM sessions WHERE id = 'session-1'`
+        const entries = yield* sql<{
+          seq: number
+          kind: string
+          body: string
+          payload: string
+          origin: string
+        }>`SELECT seq, kind, body, payload, origin FROM session_entries WHERE session_id = 'session-1'`
+        return { session: sessions[0], entries }
+      }),
+    )
+    expect(kept.session?.native_session_id).toBe('native-9')
+    expect(kept.session?.native_state).toBe('attached')
+    expect(kept.entries).toEqual([
+      {
+        seq: 1,
+        kind: 'tool_call',
+        body: 'Read the parser',
+        payload: '{"toolCallId":"call-1"}',
+        origin: 'live',
+      },
+    ])
+  })
+
+  test('a run of an unknown state, or of an unknown kind, is refused by the database', async () => {
+    const dataFolder = join(workspace, 'checks-six')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+
+    // The closed sets of this lot are the database's own: a state nothing reads and a kind
+    // nobody draws are refused where they are written rather than shown as an empty block.
+    const refusals = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-22T10:00:00.000Z', '2026-09-22T10:00:00.000Z', 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'T', 'derived', '2026-09-22T10:00:00.000Z', '2026-09-22T10:00:00.000Z', 1)`
+        const unknownKind = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO project_commands (id, project_id, name, line, kind, created_at, updated_at)
+              VALUES ('c1', 'atlas', 'dev', 'pnpm dev', 'daemon', '2026-09-22T10:00:00.000Z', '2026-09-22T10:00:00.000Z')`
+          }),
+        )
+        const unknownState = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO command_runs (id, session_id, name, line, kind, cwd, state, started_by, started_at)
+              VALUES ('r1', 'session-1', 'dev', 'pnpm dev', 'app', '/work/atlas', 'wandering', 'agent', '2026-09-22T10:00:00.000Z')`
+          }),
+        )
+        const unknownDelivery = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+              VALUES ('d1', 'session-1', 'rumour', '', 'abc', '2026-09-22T10:00:00.000Z')`
+          }),
+        )
+        // The same delivery twice is one row: what the fingerprint is for.
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('d2', 'session-1', 'instructions', 'AGENTS.md', 'abc', '2026-09-22T10:00:00.000Z')`
+        const twice = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+              VALUES ('d3', 'session-1', 'instructions', 'AGENTS.md', 'abc', '2026-09-22T10:01:00.000Z')`
+          }),
+        )
+        return {
+          refused: [unknownKind, unknownState, unknownDelivery, twice].map((exit) =>
+            Exit.isFailure(exit),
+          ),
+        }
+      }),
+    )
+
+    expect(refusals.refused).toEqual([true, true, true, true])
+  })
 })
