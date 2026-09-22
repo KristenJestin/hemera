@@ -82,7 +82,11 @@ export interface ContextService {
 }
 
 /** Everything a delivery can be refused with. */
-type Refusal = DatabaseError | UnknownProjectError | UnknownSessionError | UnreadableInstructionsError
+type Refusal =
+  | DatabaseError
+  | UnknownProjectError
+  | UnknownSessionError
+  | UnreadableInstructionsError
 
 /** Thrown when `AGENTS.md` is there and could not be read: not the same as not having one. */
 export class UnreadableInstructionsError extends Error {
@@ -150,18 +154,22 @@ export const contextLayer = Layer.effect(
     /** The root of the Workspace: what a Session is given is its Project's own folder. */
     const rootOf = (sessionId: string): Effect.Effect<string, Refusal> =>
       Effect.gen(function* () {
-        const { session } = yield* sessions.one(sessionId).pipe(
-          Effect.mapError((cause) =>
-            cause instanceof UnknownSessionError
-              ? cause
-              : new DatabaseError({ doing: 'reading the Session of a delivery', cause }),
-          ),
-        )
-        const all = yield* projects.list(true).pipe(
-          Effect.mapError(
-            (cause) => new DatabaseError({ doing: 'reading the Projects of a delivery', cause }),
-          ),
-        )
+        const { session } = yield* sessions
+          .one(sessionId)
+          .pipe(
+            Effect.mapError((cause) =>
+              cause instanceof UnknownSessionError
+                ? cause
+                : new DatabaseError({ doing: 'reading the Session of a delivery', cause }),
+            ),
+          )
+        const all = yield* projects
+          .list(true)
+          .pipe(
+            Effect.mapError(
+              (cause) => new DatabaseError({ doing: 'reading the Projects of a delivery', cause }),
+            ),
+          )
         const project = all.find((one) => one.id === session.projectId)
         if (project === undefined) {
           return yield* Effect.fail(new UnknownProjectError(session.projectId))
@@ -253,11 +261,11 @@ export const contextLayer = Layer.effect(
 
     const start = (sessionId: string): Effect.Effect<Started, Refusal> =>
       Effect.gen(function* () {
-          const root = yield* rootOf(sessionId)
-          const instructions = yield* instructionsOf(root)
-          yield* record(sessionId, 'base', '', fingerprintOf(CONTEXT_BASE))
-          if (instructions === null) return { base: CONTEXT_BASE, instructions: null }
-          yield* record(sessionId, 'native', AGENTS_FILE, instructions.fingerprint)
+        const root = yield* rootOf(sessionId)
+        const instructions = yield* instructionsOf(root)
+        yield* record(sessionId, 'base', '', fingerprintOf(CONTEXT_BASE))
+        if (instructions === null) return { base: CONTEXT_BASE, instructions: null }
+        yield* record(sessionId, 'native', AGENTS_FILE, instructions.fingerprint)
         return {
           base: CONTEXT_BASE,
           instructions: { path: AGENTS_FILE, fingerprint: instructions.fingerprint },
@@ -266,16 +274,16 @@ export const contextLayer = Layer.effect(
 
     const pending = (sessionId: string): Effect.Effect<Pending | null, Refusal> =>
       Effect.gen(function* () {
-          const root = yield* rootOf(sessionId)
-          const instructions = yield* instructionsOf(root)
-          if (instructions === null) return null
-          const given = yield* rowsOf(sessionId)
-          // The fingerprint recorded at the start counts as given, whatever the kind: the agent
-          // read that text itself, and a file that reads again as it did is not a change.
-          const same = given.some(
-            (one) => one.path === AGENTS_FILE && one.fingerprint === instructions.fingerprint,
-          )
-          if (same) return null
+        const root = yield* rootOf(sessionId)
+        const instructions = yield* instructionsOf(root)
+        if (instructions === null) return null
+        const given = yield* rowsOf(sessionId)
+        // The fingerprint recorded at the start counts as given, whatever the kind: the agent
+        // read that text itself, and a file that reads again as it did is not a change.
+        const same = given.some(
+          (one) => one.path === AGENTS_FILE && one.fingerprint === instructions.fingerprint,
+        )
+        if (same) return null
         return {
           path: AGENTS_FILE,
           fingerprint: instructions.fingerprint,
@@ -285,16 +293,11 @@ export const contextLayer = Layer.effect(
 
     const deliver = (sessionId: string): Effect.Effect<Delivered | null, Refusal> =>
       Effect.gen(function* () {
-          const waiting = yield* pending(sessionId)
-          if (waiting === null) return null
-          const record_ = yield* record(
-            sessionId,
-            'instructions',
-            waiting.path,
-            waiting.fingerprint,
-          )
-          if (record_ === null) return null
-        return { record: record_, text: waiting.text }
+        const waiting = yield* pending(sessionId)
+        if (waiting === null) return null
+        const written = yield* record(sessionId, 'instructions', waiting.path, waiting.fingerprint)
+        if (written === null) return null
+        return { record: written, text: waiting.text }
       })
 
     return { start, pending, deliver, provided: rowsOf }
