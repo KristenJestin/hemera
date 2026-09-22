@@ -262,15 +262,18 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
               onArchive={fn()}
             />
           </div>
-          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 px-6">
+          {/* The thread takes the whole width under the head and lays its own column on the
+              head's and the composer's, so a wheel beside it scrolls it; the banner is not
+              scrolled, and stands in the column above it. */}
+          <div className="mx-auto w-full max-w-3xl px-6">
             <ResumeFallbackBanner
               agent="claude-code"
               session="CSV invoice export"
               kept="everything up to the last tool call"
               onDismiss={fn()}
             />
-            <MessageScroller label="The thread of this Session" entries={THREAD} />
           </div>
+          <MessageScroller className="flex-1" label="The thread of this Session" entries={THREAD} />
           {/* What the turn has spent stands above the box rather than in its foot: the foot is
               the Workspace and the send alone since the trial of 22 September 2026, and a figure
               read at a glance is a figure that must not be what makes a row wrap. What the turn
@@ -411,16 +414,53 @@ export const Complete: Story = {
     await expect(onOneLine(pill, stops[1]!), 'the foot of the composer wrapped').toBe(true)
 
     /*
-     * The thread is the column the composer is written in, to the pixel (trial of 22 September
-     * 2026). The scroller carries no padding across the line any more, so what was said and what
-     * was answered start where the frame starts — and the row above the box, the meter and what
-     * the turn is doing, starts there too. Asked of the boxes the browser laid out, because an
-     * inset of six pixels is invisible in the markup and unmissable on the screen.
+     * The thread is the column the composer is written in, to the pixel, on both edges (trial of
+     * 22 September 2026, evening): what was said ends where the frame ends, what was answered
+     * starts where it starts, and the rail stands in the gutter beside the column rather than
+     * taking its width out of it. The row above the box, the meter and what the turn is doing,
+     * starts there too. Asked of the boxes the browser laid out, because an inset of a few pixels
+     * is invisible in the markup and unmissable on the screen.
      */
     const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
-    const frame = canvas.getByRole('textbox').closest('.rounded-xl')!
-    const edge = frame.getBoundingClientRect().left
-    await expect(thread.getBoundingClientRect().left, 'the thread left the frame’s edge').toBe(edge)
+    const frame = canvas.getByRole('textbox').closest('.rounded-xl')!.getBoundingClientRect()
+    const edge = frame.left
+    const asked = canvas.getByRole('group', { name: 'Messages from You' }).getBoundingClientRect()
+    await expect(asked.left, 'the reader’s run left the frame’s left edge').toBe(frame.left)
+    await expect(asked.right, 'the reader’s run left the frame’s right edge').toBe(frame.right)
+    const answered = [...thread.firstElementChild!.children]
+      .find((entry) => entry.textContent?.includes('builds the whole file'))!
+      .getBoundingClientRect()
+    await expect(answered.left, 'the agent’s block left the frame’s left edge').toBe(frame.left)
+    await expect(answered.right, 'the agent’s block left the frame’s right edge').toBe(frame.right)
+    const rail = canvas.getByRole('navigation', { name: /^Marks of/ }).getBoundingClientRect()
+    await expect(rail.left, 'the rail is inside the thread’s column').toBeGreaterThanOrEqual(
+      frame.right,
+    )
+    /*
+     * And the thread is what a wheel turns anywhere under the head, not only over the column:
+     * the far left of the content area is the scroller's own box, so a wheel there scrolls it.
+     * A synthetic wheel event does not scroll a page — only the browser's own input does — so
+     * what is asked is where a wheel at that point goes: the element under it is inside the
+     * thread, and the event dispatched there reaches the thread's scroll container.
+     */
+    const box = thread.getBoundingClientRect()
+    const area = thread.parentElement!.parentElement!.getBoundingClientRect()
+    await expect([box.left, box.right], 'the thread scrolls in its column only').toEqual([
+      area.left,
+      area.right,
+    ])
+    const farLeft = document.elementFromPoint(box.left + 1, box.top + box.height / 2)!
+    await expect(thread.contains(farLeft), 'a wheel beside the thread misses it').toBe(true)
+    const wheel = new WheelEvent('wheel', { deltaY: -400, bubbles: true, cancelable: true })
+    let reached: Element | null = null
+    thread.addEventListener('wheel', (event) => {
+      reached = event.currentTarget instanceof Element ? event.currentTarget : null
+    })
+    farLeft.dispatchEvent(wheel)
+    await expect(reached, 'the wheel at the far left did not reach the thread').toBe(thread)
+    await expect(thread.scrollHeight, 'the thread has nothing to scroll').toBeGreaterThan(
+      thread.clientHeight,
+    )
     const loader = canvas.getByRole('status', { name: 'Waiting for your permission' })
     await expect(loader.getBoundingClientRect().left, 'the row above the box is inset').toBe(edge)
     // And what the turn has spent is said above the box, not in the row that would have wrapped.

@@ -47,14 +47,22 @@ const OVERFLOW = 1
  */
 const WIDTH = { rest: 1, near: 1.5, active: 2 } as const
 
-/** The row of the thread and its rail. The rail does not scroll with what it maps. */
-const FRAME = 'flex h-full min-h-0 gap-3'
-
-/** The thread's own column, which the pill floats over — centred on the thread, not the page. */
-const COLUMN = 'relative flex min-w-0 flex-1 flex-col'
+/**
+ * The whole of the room the page gives the thread, which the rail and the pill stand in.
+ *
+ * It is as wide as the content area and not as wide as the thread (trial of 22 September 2026,
+ * evening): the rail stands at its right edge, in the gutter beside the thread's column, and the
+ * pill floats over its middle — which is the middle of the column, since the column is centred
+ * in it. Neither takes anything of the column's width.
+ */
+const FRAME = 'relative flex h-full min-h-0 min-w-0 flex-col'
 
 /**
- * The one thing that scrolls.
+ * The one thing that scrolls, and it is the whole width of the frame.
+ *
+ * A wheel turned beside the thread scrolls the thread (trial of 22 September 2026, evening): a
+ * box as narrow as the column was a thread that answered the wheel over the text and ignored it
+ * a hand's width to either side of it, in a page where nothing else scrolls.
  *
  * A tab stop, because a region that scrolls and cannot be reached by the keyboard is a region
  * some readers cannot get to at all. It wears the theme's outline rather than the design
@@ -68,12 +76,8 @@ const COLUMN = 'relative flex min-w-0 flex-1 flex-col'
  * what is being read. It is the rail that is drawn only when it overflows, so the two never
  * disagree about whether there is anything below.
  *
- * It carries no padding across the line, and that is the whole of what the thread's width is
- * (trial of 22 September 2026): a message and an answer sit on the edges of the column the page
- * gave them, which is the column the composer's frame is drawn on. Six pixels of its own here
- * meant a thread inset from the box it is written in — two left edges a hand's width apart, down
- * the middle of the one screen the reader never leaves. Above and below it still breathes: that
- * is the thread's own rhythm, and nothing is aligned to it.
+ * It carries no padding of its own: the column inside it is what sets the thread in, and a box
+ * that padded as well would put the thread a second inset away from the composer's frame.
  */
 const BOX =
   'scroll-quiet relative flex min-h-0 flex-1 flex-col overflow-y-auto outline-none focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring'
@@ -85,17 +89,32 @@ const BOX =
  * however much is written into it, so the only thing a `ResizeObserver` can be told to watch is
  * the content. The thread's own rhythm — the room between two blocks, and the air at either end
  * — lives here with it.
+ *
+ * It is the page's reading column, the one the head and the composer of a Session are laid on:
+ * centred, three extra-large widths at most, and set in by the same six on either side. The
+ * thread is that column to the pixel, left edge and right edge, because a message ending past
+ * the frame it was written in is the one misalignment the reader sees on every line of it.
  */
-const LIST = 'flex flex-col gap-5 pt-4 pb-6'
+const LIST = 'mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 pt-4 pb-6'
 
 /**
  * The pill's row, which covers the thread without taking it: the row is the full width of the
- * column and lets every press through it, and only the pill itself answers one.
+ * frame — whose middle is the column's — and lets every press through it, and only the pill
+ * itself answers one.
  */
 const PILL_ROW = 'pointer-events-none absolute inset-x-0 bottom-4 flex justify-center'
 
 /** The rail: a column of marks, as tall as what it holds and never as tall as the thread. */
 const RAIL = 'flex shrink-0 flex-col items-center gap-1 pt-3'
+
+/**
+ * Where the scroller stands its rail: at the right edge of the frame, not beside the column.
+ *
+ * Counted inside the column, the rail took its own width and a gap out of the thread's, and the
+ * thread ended short of the composer under it (trial of 22 September 2026, evening). Out here it
+ * is in the gutter the column leaves, and the column is the composer's.
+ */
+const RAIL_PLACE = 'absolute top-0 right-1'
 
 /**
  * A mark is drawn as a line, and pressed as a square.
@@ -315,71 +334,71 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
 
   return (
     <div className={cn(FRAME, className)}>
-      <div className={COLUMN}>
-        {/*
-          `layoutScroll` because this is the thing that scrolls: motion measures a block against
-          the viewport, and a measurement taken in a column that has been scrolled by eight
-          hundred pixels is eight hundred pixels wrong. It is the one prop that tells it to read
-          the offset.
-        */}
-        <motion.div
-          ref={box}
-          layoutScroll
-          tabIndex={0}
-          role="log"
-          aria-label={label}
-          onScroll={scrolled}
-          className={BOX}
-        >
-          <div ref={list} className={LIST}>
-            {/*
-            A fold opening takes the thread below it with it, and takes it *smoothly* (trial of
-            22 September 2026). Every block is its own layout element and the group is what makes
-            them one movement: motion measures where each of them ended up and plays the
-            difference as a transform, so a tool card unfolding pushes the blocks under it
-            instead of the column being redrawn somewhere else between two frames.
+      {/*
+        `layoutScroll` because this is the thing that scrolls: motion measures a block against
+        the viewport, and a measurement taken in a column that has been scrolled by eight
+        hundred pixels is eight hundred pixels wrong. It is the one prop that tells it to read
+        the offset.
+      */}
+      <motion.div
+        ref={box}
+        layoutScroll
+        tabIndex={0}
+        role="log"
+        aria-label={label}
+        onScroll={scrolled}
+        className={BOX}
+      >
+        <div ref={list} className={LIST}>
+          {/*
+          A fold opening takes the thread below it with it, and takes it *smoothly* (trial of
+          22 September 2026). Every block is its own layout element and the group is what makes
+          them one movement: motion measures where each of them ended up and plays the
+          difference as a transform, so a tool card unfolding pushes the blocks under it
+          instead of the column being redrawn somewhere else between two frames.
 
-            `position` and not the whole box, which is what keeps a growing entry out of it: an
-            answer arriving word by word changes its own height on nearly every frame, and a
-            block whose *size* was animated would be a paragraph stretching under the eye that
-            is reading it. Where a block starts is what travels; what it holds never does.
+          `position` and not the whole box, which is what keeps a growing entry out of it: an
+          answer arriving word by word changes its own height on nearly every frame, and a
+          block whose *size* was animated would be a paragraph stretching under the eye that
+          is reading it. Where a block starts is what travels; what it holds never does.
 
-            And for a reader who asked for less movement it is not a layout element at all: a
-            journey given no time is still a journey the machinery sets up, and `false` is the
-            block simply being where it belongs.
+          And for a reader who asked for less movement it is not a layout element at all: a
+          journey given no time is still a journey the machinery sets up, and `false` is the
+          block simply being where it belongs.
           */}
-            <LayoutGroup>
-              {entries.map((entry, index) => (
-                <motion.div
-                  key={entry.id}
-                  layout={still ? false : 'position'}
-                  transition={transition}
-                  ref={(node) => {
-                    // A day registers as nothing, and so does an entry that asked for no mark: the
-                    // rail counts what it drew and only what it drew, so the walk above lands on
-                    // the same index the rail drew its marks with.
-                    anchors.current[index] = isMarked(entry) ? node : null
-                  }}
-                >
-                  {entry.content}
-                </motion.div>
-              ))}
-            </LayoutGroup>
-          </div>
-        </motion.div>
-        {!atEdge && (
-          <div className={PILL_ROW}>
-            <LatestPill onGoToLatest={goToLatest} />
-          </div>
-        )}
-      </div>
+          <LayoutGroup>
+            {entries.map((entry, index) => (
+              <motion.div
+                key={entry.id}
+                layout={still ? false : 'position'}
+                transition={transition}
+                ref={(node) => {
+                  // A day registers as nothing, and so does an entry that asked for no mark: the
+                  // rail counts what it drew and only what it drew, so the walk above lands on
+                  // the same index the rail drew its marks with.
+                  anchors.current[index] = isMarked(entry) ? node : null
+                }}
+              >
+                {entry.content}
+              </motion.div>
+            ))}
+          </LayoutGroup>
+        </div>
+      </motion.div>
+      {!atEdge && (
+        <div className={PILL_ROW}>
+          <LatestPill onGoToLatest={goToLatest} />
+        </div>
+      )}
       {overflowing && (
-        <NavigationRail
-          label={`Marks of ${label}`}
-          marks={marks}
-          active={active}
-          onSelect={goToMark}
-        />
+        <div className={RAIL_PLACE}>
+          <NavigationRail
+            label={`Marks of ${label}`}
+            marks={marks}
+            active={active}
+            onSelect={goToMark}
+          />
+        </div>
       )}
     </div>
   )

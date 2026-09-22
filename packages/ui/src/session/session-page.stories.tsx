@@ -120,13 +120,17 @@ function Page({
             archiveDisabled={empty}
           />
         </div>
-        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
-          {empty ? (
+        {empty ? (
+          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
             <SessionEmpty />
-          ) : (
-            <MessageScroller label="The thread of this Session" entries={entries} />
-          )}
-        </div>
+          </div>
+        ) : (
+          <MessageScroller
+            className="flex-1"
+            label="The thread of this Session"
+            entries={entries}
+          />
+        )}
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
           {activity !== undefined && <ActivityRow {...activity} />}
           <Composer
