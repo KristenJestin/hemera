@@ -81,6 +81,18 @@ function notchAt(scale: HTMLElement, id: string): number {
   return middleOf(scale.querySelector(`[data-step="${id}"]`))
 }
 
+/**
+ * The three things drawn at one level stand at one height, to the pixel: the thumb, the notch's
+ * own dot (or the rule, where the agent advises that level) and the level's mark.
+ */
+function standTogether(scale: HTMLElement, id: string): void {
+  const thumb = middleOf(within(scale).getByTestId('effort-thumb'))
+  const dot = middleOf(scale.querySelector(`[data-step="${id}"]`)?.firstElementChild ?? null)
+  const mark = middleOf(scale.querySelector(`[data-mark="${id}"]`))
+  expect(Math.abs(thumb - dot), `the thumb is off the notch of ${id}`).toBeLessThan(1)
+  expect(Math.abs(mark - dot), `the mark of ${id} is off its notch`).toBeLessThan(1)
+}
+
 /** A hand on the track: pressed, moved or let go at that height, and the frame it is drawn in. */
 async function hand(track: HTMLElement, what: string, clientY: number): Promise<void> {
   const box = track.getBoundingClientRect()
@@ -135,6 +147,49 @@ export const Dragging: Story = {
       { timeout: 2000 },
     )
   },
+}
+
+/**
+ * **The thumb, the notch and the mark are at one height**, at every level of the scale — the
+ * defect of the trial of 22 September 2026, where the thumb stood between `XH` and `H` with
+ * `Xhigh` set.
+ *
+ * Read the moment the scale is drawn, and not once something has had time to settle: the thumb
+ * used to be carried to its notch in pixels measured against a rail still being laid out, which
+ * is a thumb off its notch for as long as the reader is looking at it. Then walked from the foot
+ * to the head, and measured again at every notch once the thumb has arrived.
+ */
+export const Aligned: Story = {
+  args: { effort: 'xhigh' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const scale = canvas.getByRole('slider', { name: 'Effort' })
+
+    // Where the scale opens, at once: the thumb is drawn where it stands, never carried there.
+    standTogether(scale, 'xhigh')
+
+    scale.focus()
+    await userEvent.keyboard('{Home}')
+    await walkUp(scale, 0)
+  },
+}
+
+/**
+ * Walks Claude Code's scale up from that notch, one at a time, and measures every notch once the
+ * thumb has arrived on it. One step after the other and never at once: each one is a key the
+ * scale has to have answered before the next is pressed.
+ */
+async function walkUp(scale: HTMLElement, index: number): Promise<void> {
+  const level = CLAUDE_EFFORTS[index]
+  if (level === undefined) return
+  if (index > 0) await userEvent.keyboard('{ArrowUp}')
+  await waitFor(
+    () => {
+      standTogether(scale, level.id)
+    },
+    { timeout: 2000 },
+  )
+  await walkUp(scale, index + 1)
 }
 
 /**

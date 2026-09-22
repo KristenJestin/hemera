@@ -120,40 +120,57 @@ const ADVISED_WORD = 'text-muted-foreground'
 /** The scale under the hand: the cursor says the thumb is being held rather than aimed at. */
 const HELD = 'cursor-grabbing'
 
-/** What the pointer is read on: the marks and the track, as one row. */
-const ROW = 'flex cursor-pointer touch-none items-stretch gap-3'
-
-/** The short marks, one per notch and down — `col-reverse`, so the first level is lowest. */
-const MARKS = 'flex flex-col-reverse justify-between gap-2'
-
 /**
- * The room one mark is written in: as tall as a notch, so the two columns line up row for row,
- * and one width for all of them, so the track sits in the same place whatever is on.
+ * What the pointer is read on: the notches, down — `col-reverse`, so the first level is lowest.
+ *
+ * **One geometry, and only one** (the trial of 22 September 2026). Each notch is one row holding
+ * its mark and its dot, so a mark cannot stand at another height than its dot: there is one
+ * column of rows and not two columns that happen to agree. The rows are one height and one gap
+ * apart, so notch `i` is at `i / (n - 1)` of the rail from its foot, and the rail is the box
+ * from the middle of the lowest row to the middle of the highest: the scale inset by half a row
+ * at each end. The track, the fill and the thumb are all laid in that one box.
  */
+const ROW = 'relative flex cursor-pointer touch-none flex-col-reverse gap-2'
+
+/** One notch: its short mark, then its dot on the track, on one line. */
+const NOTCH = 'flex items-center gap-3'
+
+/** The room one mark is written in: one width for all of them, so the track never shifts. */
 const MARK_WORD =
   'flex h-4 w-8 shrink-0 items-center justify-end text-xs tabular-nums text-muted-foreground'
 
 /** The mark of a level behind the reader, in the accent the fill beside it is drawn in. */
 const MARK_DONE = 'text-primary'
 
-/** The notches and the track they sit on, down and in the same order as the marks. */
-const COLUMN = 'relative flex flex-col-reverse items-center justify-between gap-2'
+/**
+ * The lane the track runs down: the column of dots, which is the last cell of every row and
+ * exactly as wide as one (`w-4`, the `size-4` of `CELL`). It is drawn twice, once under the
+ * rows for the groove and the track and once over them for the thumb, because the dots stand on
+ * the track and the thumb stands on the dots.
+ */
+const LANE = 'pointer-events-none absolute inset-y-0 right-0 w-4'
+
+/**
+ * The rail: the middle of the lowest row to the middle of the highest, which is half a row
+ * (`h-4`, so `inset-y-2`) in from each end of the lane. The track is this box and the thumb
+ * travels this box, so a level is one fraction of one length for both of them.
+ */
+const RAIL_BOX = 'absolute inset-y-2'
 
 /**
  * The groove the track is sunk into, which is what makes this an instrument rather than a form
  * control: a track drawn on the panel is a line somebody put there, and a track sunk into a
  * well is part of something.
  *
- * It reaches past the column it is drawn in on all four sides rather than the column being made
- * wider, because the column's width is the width of a notch and the rail is measured off it:
+ * It reaches past the lane it is drawn in on all four sides rather than the lane being made
+ * wider, because the lane's width is the width of a notch and the rail is measured off it:
  * a well that pushed the notches apart would move every level the pointer reads.
  */
-const WELL =
-  'pointer-events-none absolute -inset-x-1.5 -inset-y-1 rounded-full bg-surface-page track-well'
+const WELL = 'absolute -inset-x-1.5 -inset-y-1 rounded-full bg-surface-page track-well'
 
-/** The track: a thin line in the page's own muted surface, on a rim of its own. */
+/** The track, on the rail: a thin line in the page's own muted surface, on a rim of its own. */
 const TRACK =
-  'absolute inset-x-0 inset-y-2 mx-auto w-track overflow-hidden rounded-full bg-muted ring-1 ring-border ring-inset'
+  'inset-x-0 mx-auto w-track overflow-hidden rounded-full bg-muted ring-1 ring-border ring-inset'
 
 /**
  * The part of it behind the reader: the accent, which is what says how much of the scale is on.
@@ -187,18 +204,17 @@ const DOT_DONE = 'bg-primary-foreground'
 const RULE = 'absolute h-0.5 w-8 rounded-full bg-primary'
 
 /**
- * The length the thumb travels: the middle of the lowest notch to the middle of the highest,
- * which is half a cell in from each end. It is what a pointer is measured against, and it takes
- * none of them itself — the press belongs to the row around it.
+ * The length the thumb travels, which is the rail and nothing else. It is what a pointer is
+ * measured against, and it takes none of them itself — the press belongs to the rows around it.
  */
-const RAIL = 'pointer-events-none absolute inset-x-0 inset-y-2'
+const RAIL = 'inset-x-0'
 
 /**
- * Where the thumb is hung: across the whole width of the column and centred in it.
+ * Where the thumb is hung: across the whole width of the lane and centred in it.
  *
  * The thumb is wider than a notch — twenty pixels against a sixteen-pixel cell — so what is
  * positioned is a full-width row and the thumb is centred inside it. A thumb pinned to the
- * column's left edge would hang off to one side.
+ * lane's left edge would hang off to one side.
  */
 const THUMB = 'absolute inset-x-0 flex translate-y-1/2 justify-center'
 
@@ -242,7 +258,16 @@ function fractionAt(here: number, last: number): number {
   return here / last
 }
 
-/** The same place as the length CSS draws it, which is what the fill and the thumb are given. */
+/**
+ * The same place as the length CSS draws it, which is what the fill and the thumb are given.
+ *
+ * Always a percentage, from the first frame on — which is why the two are mounted where they
+ * stand (`initial={false}`) rather than carried there. `bottom` and `height` are lengths motion
+ * converts by measuring the page when the unit it starts from is not the unit it is sent to, and
+ * a thumb mounted with no `initial` starts from the pixels the page drew it at: in a panel still
+ * being laid out, that measure was taken against a rail of another height, and the thumb
+ * travelled in pixels to the wrong notch and stood there until the spring came to rest.
+ */
 function share(fraction: number): string {
   return `${fraction * 100}%`
 }
@@ -474,35 +499,40 @@ export function EffortSlider({
         onPointerUp={drop}
         onPointerCancel={drop}
       >
-        <span data-testid="effort-marks" className={MARKS}>
-          {levels.map((one, index) => (
-            <span key={one.id} className={cn(MARK_WORD, index <= standing && MARK_DONE)}>
+        {/* Under the rows: the groove, and the track on the rail — so the fill ends on a notch,
+            never past one. */}
+        <span className={LANE}>
+          <span data-testid="effort-well" className={WELL} />
+          <span className={cn(RAIL_BOX, TRACK)}>
+            <motion.span
+              className={FILLED}
+              initial={false}
+              animate={{ height: share(at) }}
+              transition={travel}
+            />
+          </span>
+        </span>
+        {levels.map((one, index) => (
+          <span key={one.id} className={NOTCH}>
+            <span data-mark={one.id} className={cn(MARK_WORD, index <= standing && MARK_DONE)}>
               {marks[index]}
             </span>
-          ))}
-        </span>
-
-        <span className={COLUMN}>
-          <span data-testid="effort-well" className={WELL} />
-          {/* The track runs from the middle of the lowest notch to the middle of the highest,
-              which is half a cell in from each end — so the fill ends on a notch, never past
-              one. */}
-          <span className={TRACK}>
-            <motion.span className={FILLED} animate={{ height: share(at) }} transition={travel} />
-          </span>
-          {levels.map((one, index) => (
-            <span key={one.id} data-step={one.id} className={CELL}>
+            <span data-step={one.id} className={CELL}>
               {one.recommended === true ? (
                 <span data-testid="effort-rule" className={RULE} />
               ) : (
                 <span className={cn(DOT, index <= standing && DOT_DONE)} />
               )}
             </span>
-          ))}
-          <span ref={rail} className={RAIL}>
+          </span>
+        ))}
+        {/* Over the rows: the thumb, on the same rail as the track. */}
+        <span className={LANE}>
+          <span ref={rail} className={cn(RAIL_BOX, RAIL)}>
             <motion.span
               data-testid="effort-thumb"
               className={THUMB}
+              initial={false}
               animate={{ bottom: share(at) }}
               transition={travel}
             >
