@@ -15,7 +15,8 @@ describe('The address a dev server prints is found', () => {
   })
 
   test('through the colour codes a terminal program paints it with', () => {
-    const painted = '  \u001b[32m➜\u001b[39m  Local: \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m'
+    const painted =
+      '  \u001b[32m➜\u001b[39m  Local: \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m'
     expect(addressIn(painted)).toBe('http://localhost:5173')
   })
 
