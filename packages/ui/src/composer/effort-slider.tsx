@@ -1,7 +1,7 @@
 import { cn } from 'cn'
-import { motion } from 'motion/react'
+import { animate, useMotionValue } from 'motion/react'
 import type { PointerEvent as PointerPress, ReactNode } from 'react'
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 
 import { instant, morph, useTransition } from '../motion.ts'
 import {
@@ -69,8 +69,11 @@ import {
  * and the marks stand in a column one width wide, so the track never shifts sideways either.
  *
  * **What moves** is the thumb and the fill, on `morph` where they are travelling on their own
- * and on `instant` while a hand is holding them: a spring under the finger is a thumb lagging
- * behind the hand dragging it. `morph` is the spring that arrives without turning round — a
+ * and not at all while a hand is holding them: the hand draws them itself, in the pointer event,
+ * because a spring under the finger is a thumb lagging behind the hand dragging it — and so is
+ * a thumb waiting for a render and for motion's next frame, which on a slow machine is a thumb
+ * still where the press landed when the hand is already elsewhere (CI of 22 September 2026).
+ * `morph` is the spring that arrives without turning round — a
  * thumb that overshot its notch and came back would read as a value set and then changed — and
  * `useTransition` answers a reader asking for less movement with the notch and no glide at all.
  * Under the hand and under the focus the halo brightens and the thumb grows, which is CSS and
@@ -264,15 +267,25 @@ function fractionAt(here: number, last: number): number {
 /**
  * The same place as the length CSS draws it, which is what the fill and the thumb are given.
  *
- * Always a percentage, from the first frame on — which is why the two are mounted where they
- * stand (`initial={false}`) rather than carried there. `bottom` and `height` are lengths motion
- * converts by measuring the page when the unit it starts from is not the unit it is sent to, and
- * a thumb mounted with no `initial` starts from the pixels the page drew it at: in a panel still
- * being laid out, that measure was taken against a rail of another height, and the thumb
- * travelled in pixels to the wrong notch and stood there until the spring came to rest.
+ * Always a percentage, from the first frame on. What travels is the fraction and not a length:
+ * a length handed to motion in one unit and sent to another is converted by measuring the page,
+ * and in a panel still being laid out that measure was taken against a rail of another height —
+ * the thumb travelled in pixels to the wrong notch and stood there until the spring came to rest.
  */
 function share(fraction: number): string {
   return `${fraction * 100}%`
+}
+
+/**
+ * Draws the fill and the thumb at one place along the track.
+ *
+ * Written onto the two elements rather than rendered, the way the shell writes the sidebar's
+ * width: a place that changes under a hand has to be on the page in the event that moved it,
+ * not a render and a frame later. The theme owns the shapes; this owns the number.
+ */
+function drawAt(fill: HTMLElement | null, thumb: HTMLElement | null, fraction: number): void {
+  fill?.style.setProperty('height', share(fraction))
+  thumb?.style.setProperty('bottom', share(fraction))
 }
 
 /**
@@ -369,19 +382,24 @@ export function EffortSlider({
 }: EffortProps): ReactNode {
   const frame = useRef<HTMLDivElement>(null)
   const rail = useRef<HTMLSpanElement>(null)
+  const fill = useRef<HTMLSpanElement>(null)
+  const thumb = useRef<HTMLSpanElement>(null)
   /**
    * Whether a hand is on the thumb. A ref and not a state, for the reason the sidebar's own
    * separator gives: a pointer that has already moved cannot wait for a render to be answered,
    * and a move arriving before React has drawn the press would be a move read as nothing.
    */
   const holding = useRef(false)
-  /** Where that hand is along the track, and `null` when there is none: what is drawn. */
+  /** Where that hand is along the track, and `null` when there is none. */
   const [held, setHeld] = useState<number | null>(null)
   const glide = useTransition(morph)
+  /** Where the fill and the thumb stand along the track, which is what a spring carries. */
+  const place = useMotionValue(0)
+  /** Whether they have been drawn once: the first time, they are put where they stand. */
+  const drawn = useRef(false)
 
   /** The notches: the levels the agent announced, less a `Default` it never resolved. */
   const levels = efforts.filter((one) => one.id !== UNRESOLVED)
-  if (levels.length === 0) return null
 
   const last = levels.length - 1
   const here = levels.findIndex((one) => one.id === effort)
@@ -398,10 +416,34 @@ export function EffortSlider({
   const said: EffortChoice | undefined = shown ?? levels[standing]
   const marks = marksOf(levels.map((one) => one.label))
   const described = efforts.some((one) => one.description !== undefined)
-  /** Where the thumb is drawn: under the hand while it is held, on its notch otherwise. */
-  const at = held ?? fractionAt(standing, last)
-  /** What the thumb and the fill travel on: nothing at all while a hand is moving them. */
-  const travel = held === null ? glide : instant
+  /** Where the thumb rests once no hand is on it: on its notch. */
+  const resting = fractionAt(standing, last)
+
+  // Carried to the notch whenever no hand is on the thumb: when the level changes, and when the
+  // hand lets go. Before the paint, so the scale is drawn where it stands from its first frame
+  // rather than carried there; and at once where less movement was asked for. While a hand is
+  // on it this does nothing: the hand draws it, in the event (`follow`).
+  useLayoutEffect(() => {
+    if (held !== null) return undefined
+    if (!drawn.current || glide === instant) {
+      // Drawn once there is something to draw on: a scale with no level renders nothing.
+      drawn.current = thumb.current !== null
+      place.jump(resting)
+      drawAt(fill.current, thumb.current, resting)
+      return undefined
+    }
+    const travel = animate(place, resting, {
+      ...glide,
+      onUpdate: (fraction) => {
+        drawAt(fill.current, thumb.current, fraction)
+      },
+    })
+    return () => {
+      travel.stop()
+    }
+  }, [held, resting, glide, place])
+
+  if (levels.length === 0) return null
 
   /** Sets the level at that index, and says nothing about one that is already set. */
   const set = (index: number): void => {
@@ -419,6 +461,10 @@ export function EffortSlider({
   /** The thumb goes where the hand is, and the level it is nearest is the one that is set. */
   const follow = (event: PointerPress<HTMLSpanElement>): void => {
     const reach = reached(event.clientY)
+    // Drawn here and not left to a render: a hand is not an animation, and whatever was carrying
+    // the thumb stops where the hand took it.
+    place.jump(reach)
+    drawAt(fill.current, thumb.current, reach)
     setHeld(reach)
     set(Math.round(reach * last))
   }
@@ -508,12 +554,7 @@ export function EffortSlider({
         <span className={LANE}>
           <span data-testid="effort-well" className={WELL} />
           <span className={cn(RAIL_BOX, TRACK)}>
-            <motion.span
-              className={FILLED}
-              initial={false}
-              animate={{ height: share(at) }}
-              transition={travel}
-            />
+            <span ref={fill} className={FILLED} />
           </span>
         </span>
         {levels.map((one, index) => (
@@ -533,19 +574,13 @@ export function EffortSlider({
         {/* Over the rows: the thumb, on the same rail as the track. */}
         <span className={LANE}>
           <span ref={rail} className={cn(RAIL_BOX, RAIL)}>
-            <motion.span
-              data-testid="effort-thumb"
-              className={THUMB}
-              initial={false}
-              animate={{ bottom: share(at) }}
-              transition={travel}
-            >
+            <span ref={thumb} data-testid="effort-thumb" className={THUMB}>
               <span data-testid="effort-knob" className={KNOB}>
                 <span className={GLOW} />
                 <span className={HALO} />
                 <span className={DOMED} />
               </span>
-            </motion.span>
+            </span>
           </span>
         </span>
       </span>
