@@ -12,7 +12,8 @@ import { WorkspacePill } from './workspace-pill.tsx'
  *
  * Sending is the one live control of the row, and the only one that writes: `onSend` hands the
  * sentence to the page, which records it and answers with the reason it could not, or with
- * nothing when it did. `New Spec` stays disabled — a Spec is lot 6 — and the arrow becomes a
+ * nothing when it did. `New Spec` is the Home's alone and stays disabled there — a Spec is made
+ * from the question that starts a Session, and the Spec itself is lot 6 — and the arrow becomes a
  * square while the write is in flight: two icons crossing in opacity and scale, a morph a
  * compositor carries, and never a swap that flickers.
  *
@@ -38,6 +39,15 @@ export interface ComposerActionsProps {
   sending: boolean
   /** Whether an agent turn is running, which is what the square stops. */
   running?: boolean | undefined
+  /**
+   * Whether the row offers to turn what is written into a Spec (design D4b-02).
+   *
+   * The Home does and a Session does not: a Session is a conversation already under way, and a
+   * Spec is made from the question that starts one. Off unless the page asks for it — a control
+   * drawn and disabled in every place it appears is a control that says nothing about where it
+   * belongs.
+   */
+  spec?: boolean | undefined
   /** The word on the button: `Start chat` on the Home, `Send` inside a Session. */
   action: string
   onSend: () => void
@@ -61,6 +71,7 @@ export function ComposerActions({
   ready,
   sending,
   running = false,
+  spec = false,
   action,
   onSend,
   onStop,
@@ -82,10 +93,12 @@ export function ComposerActions({
         onWorkspaceChange={onWorkspaceChange}
       />
       <span className="ml-auto flex items-center gap-2">
-        <Button variant="secondary" size="sm" disabled title="A Spec comes with lot 6">
-          <IconPencil size="sm" />
-          New Spec
-        </Button>
+        {spec && (
+          <Button variant="secondary" size="sm" disabled title="A Spec comes with lot 6">
+            <IconPencil size="sm" />
+            New Spec
+          </Button>
+        )}
         <Button
           variant={running ? 'secondary' : 'primary'}
           size="sm"

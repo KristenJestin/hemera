@@ -7,7 +7,6 @@ import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { AgentModelMenu, type ModelChoice, type OfferedAgent } from './agent-model-menu.tsx'
 import { BlockedBanner } from './blocked-banner.tsx'
 import { Composer, type ComposerProps } from './composer.tsx'
-import { ModeSelector } from './mode-selector.tsx'
 
 /**
  * The composer, complete (design D4b-02, D4-07).
@@ -110,16 +109,18 @@ const EFFORTS = [
 ]
 
 const MODES = [
-  { id: 'ask', name: 'Ask before edits' },
-  { id: 'acceptEdits', name: 'Accept edits' },
-  { id: 'plan', name: 'Plan only' },
+  { id: 'ask', label: 'Ask before edits' },
+  { id: 'acceptEdits', label: 'Accept edits' },
+  { id: 'plan', label: 'Plan only' },
 ]
 
 /**
- * The one control for the agent, its model and its effort, as the page hands it over.
+ * The one control for the agent, its model, its effort and its mode, as the page hands it over.
  *
  * The composer is given it already built: what an agent announced is the engine's answer, not
- * something a box a sentence is written in could know.
+ * something a box a sentence is written in could know. The mode is a row of that same panel
+ * since the trial of 22 September 2026 — it used to be a second selector beside it, which was
+ * two controls asking about one agent in a row that must not wrap.
  */
 function Menu({ start = null }: { start?: string | null }): ReactNode {
   const [agent, setAgent] = useState<string | null>(start)
@@ -127,6 +128,7 @@ function Menu({ start = null }: { start?: string | null }): ReactNode {
     start === 'opencode' ? 'zen/deepseek-v4-1-flash' : null,
   )
   const [effort, setEffort] = useState<string | null>(start === 'opencode' ? 'low' : null)
+  const [mode, setMode] = useState<string | null>(start === 'opencode' ? 'acceptEdits' : null)
   return (
     <AgentModelMenu
       agents={AGENTS}
@@ -135,6 +137,7 @@ function Menu({ start = null }: { start?: string | null }): ReactNode {
         setAgent(id)
         setModel(null)
         setEffort(null)
+        setMode(null)
       }}
       models={agent === null ? [] : MODELS}
       model={model}
@@ -142,14 +145,11 @@ function Menu({ start = null }: { start?: string | null }): ReactNode {
       efforts={agent === null ? [] : EFFORTS}
       effort={effort}
       onEffortChange={setEffort}
+      modes={agent === null ? [] : MODES}
+      mode={mode}
+      onModeChange={setMode}
     />
   )
-}
-
-/** What the agent may do without asking, which stays a control of its own. */
-function Mode(): ReactNode {
-  const [mode, setMode] = useState('acceptEdits')
-  return <ModeSelector modes={MODES} value={mode} onValueChange={setMode} />
 }
 
 /**
@@ -183,7 +183,7 @@ const meta = {
     onSearchFiles: fn(async (query: string) => await Promise.resolve(lookUp(query))),
     onSend: fn(async (): Promise<string | null> => await Promise.resolve(null)),
     agentMenu: <Menu start="opencode" />,
-    mode: <Mode />,
+    spec: true,
   },
   argTypes: {
     value: { control: 'text', description: 'What is written; the page holds it.' },
@@ -211,9 +211,14 @@ const meta = {
     onSearchFiles: { control: false, description: 'Asks the Project for the files that match.' },
     agentMenu: {
       control: false,
-      description: 'The agent, its model and its effort, at the end of the box’s own row.',
+      description:
+        'The agent, its model, its effort and its mode, at the end of the box’s own row.',
     },
-    mode: { control: false, description: 'What the agent may do without asking, beside it.' },
+    spec: {
+      control: 'boolean',
+      description: 'Whether the foot offers a Spec: the Home does, a Session does not.',
+      table: { defaultValue: { summary: 'false' } },
+    },
     sendDisabledReason: {
       control: 'text',
       description: 'Why the send cannot be pressed, said on the control itself.',
@@ -252,11 +257,13 @@ export const Empty: Story = {
     // Nothing is attached, so the header is not there at all.
     expect(canvas.queryByText('Attached')).toBeNull()
 
-    // The row inside the frame: the two file controls, the mode, and the agent at its end.
+    // The row inside the frame: the two file controls, and the agent at its end. The mode is a
+    // row of that agent's own panel since the trial of 22 September 2026, so there is no second
+    // control beside it.
     const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
     const menu = canvas.getByRole('button', { name: 'Choose an agent' })
     expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
-    expect(onOneLine(at, canvas.getByRole('combobox', { name: 'Mode' }))).toBe(true)
+    expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
 
     // The foot below it: the Workspace, and the two buttons at the other end. One line.
     const pill = canvas.getByRole('combobox', { name: 'Workspace' })
@@ -437,16 +444,38 @@ export const AttachAnywhere: Story = {
   },
 }
 
-/** Scenario « Mention d'un fichier » of `specs/shell-navigation/spec.md`. */
+/**
+ * Scenario « Mention d'un fichier » of `specs/shell-navigation/spec.md`.
+ *
+ * And where the list is drawn, since the trial of 22 September 2026: inside the frame, under the
+ * text being typed and above the row of tools, which it pushes down. It used to be a popover
+ * anchored to the `@` and opening upwards, over the thread — over the last thing written, which
+ * is what the sentence being typed is answering. The frame grows while it is open and shrinks
+ * back when it closes, which is the one thing this story measures.
+ */
 export const MentionAFile: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const box = canvas.getByRole('textbox')
+    const frame = frameOf(box)
+    const tools = canvas.getByRole('button', { name: 'Mention a file of the Project' })
+    const shut = frame.getBoundingClientRect().height
+    const toolsAt = tools.getBoundingClientRect().top
 
     await userEvent.type(box, 'Look at @pages/billing')
     const menu = await within(document.body).findByRole('listbox', {
       name: 'Files of the Project',
     })
+    // Inside the frame, between the text and the row of tools, and the row has moved down for
+    // it: a list that floated over the page would leave both exactly where they were.
+    expect(frame.contains(menu), 'the list is drawn outside the composer’s frame').toBe(true)
+    expect(menu.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      box.getBoundingClientRect().bottom - 1,
+    )
+    await waitFor(() => {
+      expect(tools.getBoundingClientRect().top).toBeGreaterThan(toolsAt)
+    })
+    expect(frame.getBoundingClientRect().height).toBeGreaterThan(shut)
     // Only what matches is offered, and the typing that opened the menu never stopped. Waited
     // for: every character asks the folder again, so the menu is open with the answer to an
     // earlier one for as long as the last answer is still coming.
@@ -476,6 +505,10 @@ export const MentionAFile: Story = {
     expect(canvas.queryByRole('button', { name: 'Clear' })).toBeNull()
 
     await menuGone()
+    // And the frame goes back to the shape it had: the band took its room and gave it back.
+    await waitFor(() => {
+      expect(frame.getBoundingClientRect().height).toBeCloseTo(shut, 0)
+    })
   },
 }
 

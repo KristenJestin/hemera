@@ -8,6 +8,10 @@ import { ComposerActions } from './composer-actions.tsx'
  *
  * A write in flight cannot be interrupted, so its square is disabled. A turn running can be, so
  * its square is the Stop — and the word beside it says which of the two is being drawn.
+ *
+ * `New Spec` is the Home's and nobody else's since the trial of 22 September 2026: a Spec is
+ * made from the question that starts a Session, and a control drawn and disabled in every place
+ * it appears says nothing about where it belongs.
  */
 const meta = {
   title: 'Blocks/Composer/ComposerActions',
@@ -29,6 +33,11 @@ const meta = {
     ready: { control: 'boolean', description: 'Whether there is anything to send.' },
     sending: { control: 'boolean', description: 'Whether a write is in flight.' },
     running: { control: 'boolean', description: 'Whether an agent turn is running.' },
+    spec: {
+      control: 'boolean',
+      description: 'Whether the row offers a Spec: the Home does, a Session does not.',
+      table: { defaultValue: { summary: 'false' } },
+    },
     onStop: { description: 'Cancels the running turn, when there is one to cancel.' },
   },
 } satisfies Meta<typeof ComposerActions>
@@ -43,9 +52,27 @@ export const ReadyToSend: Story = {
     const canvas = within(canvasElement)
     const send = canvas.getByRole('button', { name: /Send/ })
     await expect(send).toBeEnabled()
+    // A Session's foot: the Workspace and the send, and no Spec, because none was asked for.
+    await expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
     await userEvent.click(send)
     await expect(args.onSend).toHaveBeenCalled()
     await expect(args.onStop).not.toHaveBeenCalled()
+  },
+}
+
+/**
+ * The Home's foot, which is the one that offers a Spec.
+ *
+ * It is drawn and off: a Spec is lot 6. What this story holds is that it is drawn *here* and
+ * nowhere else — the same row in a Session has no such button at all.
+ */
+export const WithASpec: Story = {
+  args: { spec: true, action: 'Start chat' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const spec = canvas.getByRole('button', { name: /New Spec/ })
+    await expect(spec).toBeDisabled()
+    await expect(spec).toHaveAttribute('title', 'A Spec comes with lot 6')
   },
 }
 

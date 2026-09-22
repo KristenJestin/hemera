@@ -82,24 +82,28 @@ export interface ComposerProps {
   /** Writes the text, and answers why it could not be written, or nothing when it was. */
   onSend: (text: string) => Promise<string | null>
   /**
-   * The one control for the agent, its model and its effort, at the end of the box's own row
-   * (design D17-11).
+   * The one control for the agent, its model, its effort and its mode, at the end of the box's
+   * own row (design D17-11).
    *
    * It is handed over already built, because what an agent announced is what the engine
    * answered rather than something this composer could know. It sits *inside* the frame, on the
    * row the `@` and the paperclip are on, and not in the foot: the foot used to hold the
    * agent's controls beside the actions, they wrapped onto a second line as soon as a model had
    * a long name, and the frame changed height while it was being read.
+   *
+   * There is no second slot for the mode since the trial of 22 September 2026. The mode is one
+   * of the four things the agent is set on, it is a row of that same panel, and two controls
+   * side by side asking about one agent was one control too many in a row that must not wrap.
    */
   agentMenu?: ReactNode | undefined
   /**
-   * What the agent may do without asking, beside that control and never in the foot.
+   * Whether the foot offers to turn what is written into a Spec (design D4b-02).
    *
-   * The agent's own modes, handed over already built for the same reason: an agent that
-   * announced none hands over nothing, and the row is then the row of a box with no mode to
-   * set, which is what it is.
+   * The Home does and a Session does not: a Session is a conversation that is already under
+   * way, and a Spec is made from the question that starts one. Off unless the page asks for it,
+   * so the control has to be earned rather than removed.
    */
-  mode?: ReactNode | undefined
+  spec?: boolean | undefined
   /**
    * Whether a turn is running, which is what the send becomes while it does (design D17-13).
    *
@@ -136,7 +140,7 @@ export function Composer({
   placeholder = 'Ask anything, think out loud, or describe what you want to do…',
   onSend,
   agentMenu,
-  mode,
+  spec = false,
   running = false,
   onStop,
   blocked,
@@ -319,6 +323,7 @@ export function Composer({
               ready={ready}
               sending={sending}
               running={running}
+              spec={spec}
               action={action}
               onSend={() => void send()}
               onStop={onStop}
@@ -331,6 +336,24 @@ export function Composer({
           variant={variant}
           ready={ready}
           onSend={() => void send()}
+          // The list of files is a band of the frame, under the text and over the row of tools,
+          // and the row is pushed down while it is open. A popup anchored to the `@` covered the
+          // thread the sentence was answering — the one thing the reader is looking at while
+          // they type. One band for both ways in: what tells a mention from an attachment is
+          // what else happens when one is chosen, not which list it came from, and two lists
+          // drawn in one place would be two bands fighting over it.
+          menu={
+            <MentionMenu
+              open={picking !== null}
+              files={matches}
+              activeIndex={active}
+              onActiveIndexChange={setActive}
+              onChoose={picking === 'attach' ? attach : mention}
+              hint={
+                picking === 'attach' ? 'Attach a file of the Project…' : 'A file of the Project…'
+              }
+            />
+          }
           tools={
             <>
               {/* Two ways to the same files, and what tells them apart is what else happens.
@@ -340,52 +363,26 @@ export function Composer({
                   it: it opens the system's own window, over any folder on the machine, and a
                   list opening on top of that window was one gesture answering twice. The list
                   is what a catalogue with no disk behind it has. */}
-              <MentionMenu
-                open={picking === 'mention'}
-                onOpenChange={(next) => setPicking(next ? 'mention' : null)}
-                files={matches}
-                activeIndex={active}
-                onActiveIndexChange={setActive}
-                onChoose={mention}
-                trigger={
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={<IconAt size="sm" />}
-                    aria-label="Mention a file of the Project"
-                    onClick={() => {
-                      // The `@` goes in where the caret is, so what is typed next narrows the
-                      // list exactly as it does when the `@` was typed by hand.
-                      box.current?.insertText('@')
-                      search('mention', '')
-                    }}
-                  />
-                }
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={<IconAt size="sm" />}
+                aria-label="Mention a file of the Project"
+                onClick={() => {
+                  // The `@` goes in where the caret is, so what is typed next narrows the
+                  // list exactly as it does when the `@` was typed by hand.
+                  box.current?.insertText('@')
+                  search('mention', '')
+                }}
               />
-              {onPickFiles === undefined ? (
-                <MentionMenu
-                  open={picking === 'attach'}
-                  onOpenChange={(next) => setPicking(next ? 'attach' : null)}
-                  files={matches}
-                  activeIndex={active}
-                  onActiveIndexChange={setActive}
-                  onChoose={attach}
-                  hint="Attach a file of the Project…"
-                  trigger={clip}
-                />
-              ) : (
-                clip
-              )}
-              {/* The agent, its model and its effort, and the mode beside them, at the end of
-                  the same row: they belong to what the box is about, not to what is done with
-                  what it holds, and the foot below is the Workspace and the send alone. Pushed
-                  to the end rather than wrapped to a line of their own — the height of the
-                  frame must not change when a choice is made. */}
-              {(mode !== undefined || agentMenu !== undefined) && (
-                <span className="ml-auto flex min-w-0 items-center gap-1">
-                  {mode}
-                  {agentMenu}
-                </span>
+              {clip}
+              {/* The agent, its model, its effort and its mode, at the end of the same row:
+                  they belong to what the box is about, not to what is done with what it holds,
+                  and the foot below is the Workspace and the send alone. Pushed to the end
+                  rather than wrapped to a line of their own — the height of the frame must not
+                  change when a choice is made. */}
+              {agentMenu !== undefined && (
+                <span className="ml-auto flex min-w-0 items-center gap-1">{agentMenu}</span>
               )}
             </>
           }

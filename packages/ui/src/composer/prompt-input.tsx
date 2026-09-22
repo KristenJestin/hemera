@@ -74,6 +74,15 @@ export interface PromptInputProps {
   onSend: () => void
   /** The row of controls under the box. */
   tools?: ReactNode
+  /**
+   * A list that belongs to what is being typed, drawn between the box and the row of tools.
+   *
+   * The mention menu, and nothing else so far. It is a band of this surface and not a popup over
+   * the page: a list floating above the box covered the thread the sentence was answering, and
+   * where it sits in the frame is the whole point of it. The row of tools is pushed down while
+   * it is open, the frame grows with it, and both go back when it closes.
+   */
+  menu?: ReactNode
   /** The editable: where the caret lives, and what the sentence is written into. */
   children: ReactNode
 }
@@ -83,6 +92,7 @@ export function PromptInput({
   ready,
   onSend,
   tools,
+  menu,
   children,
 }: PromptInputProps): ReactNode {
   return (
@@ -104,6 +114,7 @@ export function PromptInput({
       >
         {children}
       </div>
+      {menu}
       {tools !== undefined && <div className={TOOLS}>{tools}</div>}
     </div>
   )
