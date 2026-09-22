@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Fiber, Layer } from 'effect'
+import { Effect, Fiber, Layer, Result } from 'effect'
 import * as TestClock from 'effect/testing/TestClock'
 
 import type { SessionEntry } from '@hemera/core'
@@ -889,6 +889,70 @@ describe('A tool call keeps what it was given and what it returned', () => {
         expect(call.state).toBe('cancelled')
         expect(callOf(call).status).toBe('cancelled')
         expect(entryOf(entries, 'turn').state).toBe('cancelled')
+      }),
+    )
+  })
+})
+
+/**
+ * What the window has to show between the message and the first word (design D5-12).
+ *
+ * A turn is announced when it begins and not only when it ends: the agent's first chunk is
+ * seconds away at best, and a page told nothing until then has nothing to show but the message
+ * that was just sent. The end follows every turn, however it ended.
+ */
+describe('A turn announces its start before its first chunk', () => {
+  test('the start is pushed after the message and before anything the agent says', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'reading it now' }] })
+    const window = watching()
+
+    await application(dataFolder, window.layer)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'read the reader')
+
+        const order = window.pushed.map(
+          (push) => push.what ?? `${push.entry?.role}:${push.entry?.kind}`,
+        )
+
+        // The message, then the start, and the agent's first word after both of them.
+        expect(order[0]).toBe('user:message')
+        expect(order[1]).toBe('turn_started')
+        expect(order.indexOf('turn_started')).toBeLessThan(order.indexOf('agent:message'))
+        // And the end follows, once.
+        expect(order.filter((what) => what === 'turn_ended')).toEqual(['turn_ended'])
+      }),
+    )
+  })
+
+  test('a turn the agent never started still announces its end', async () => {
+    /** A machine whose agents are all there and none of them signed in. */
+    const signedOut = Layer.succeed(MachineEnvironment, {
+      home: '/home/ana',
+      env: {},
+      locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
+      bundled: (packageName: string) =>
+        Effect.succeed(join('/opt/hemera', packageName, 'index.js')),
+      readVersion: () => Effect.succeed('1.0.0'),
+      holds: () => Effect.succeed(false),
+    })
+    const agent = fakeAgent({})
+    const window = watching()
+
+    await application(dataFolder, window.layer, signedOut)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const refused = yield* Effect.result(runtime.prompt(session.id, 'read the reader'))
+
+        // Nobody signed this agent in, so the turn never started — and the window, which was
+        // told a turn had begun, is told it is over rather than left waiting for it.
+        expect(Result.isFailure(refused)).toBe(true)
+        expect(window.pushed.map((push) => push.what).filter((what) => what !== null)).toEqual([
+          'turn_started',
+          'turn_ended',
+        ])
       }),
     )
   })

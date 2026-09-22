@@ -204,7 +204,12 @@ export interface AgentRuntimeService {
 }
 
 /** What a Session did that the window is told about, and that has no entry of its own. */
-export type Notice = 'permission_requested' | 'turn_ended' | 'agent_died' | 'session_fallback'
+export type Notice =
+  | 'permission_requested'
+  | 'turn_started'
+  | 'turn_ended'
+  | 'agent_died'
+  | 'session_fallback'
 
 /** Where a written entry goes besides the database: the window watching this Session. */
 export interface AgentNoticesService {
@@ -1244,68 +1249,76 @@ export const runtimeLayer = Layer.effect(
         const asked = yield* attempt('writing the message', sessions.append(sessionId, text))
         notices.wrote(sessionId, asked.entry)
 
-        const held = yield* opened(sessionId)
-        const turn: Turn = {
-          id: `${sessionId}:${Date.now()}`,
-          said: new Map(),
-          calls: new Map(),
-          permission: null,
-          closed: null,
-        }
-        turns.set(sessionId, turn)
+        // The turn has begun, and the window is told so before the agent has said anything: the
+        // first chunk of an answer is seconds away at best, and a page with nothing between the
+        // message and it has no way to show that something is happening. Its end is announced
+        // however the turn ends — a stop reason, a Stop, a death, a start that failed — which is
+        // why it is announced by what runs the turn rather than after it.
+        notices.changed(sessionId, 'turn_started')
 
-        const sent = held.context === null ? text : `${held.context}\n\n${text}`
-        held.context = null
-
-        const report = yield* Effect.gen(function* () {
-          const outcome = yield* Effect.result(attempt('prompting', held.connection.prompt(sent)))
-          if (Result.isSuccess(outcome)) {
-            const answered = outcome.success
-            // What is in the thread is read before the window is: the announcement travels as a
-            // notification of its own, and the entry is written from it once everything the agent
-            // said is held rather than racing it.
-            yield* drained(held)
-            const window = held.window
-            // What a turn used and what the window holds are two readings, and either can be
-            // missing: an agent that accounts for a turn but never announces a window leaves the
-            // meter with nothing to divide by, and one that announces a window and answers
-            // nothing leaves it with what it is filling (D5-20). The entry is written when the
-            // agent had anything to say at all, and the payload says which halves it said.
-            if (answered.usage !== null || window !== null) {
-              yield* write(sessionId, {
-                role: 'hemera',
-                kind: 'usage',
-                body: `${answered.usage?.totalTokens ?? window?.used ?? 0} tokens`,
-                payload: JSON.stringify({
-                  totalTokens: answered.usage?.totalTokens ?? null,
-                  inputTokens: answered.usage?.inputTokens ?? null,
-                  outputTokens: answered.usage?.outputTokens ?? null,
-                  thoughtTokens: answered.usage?.thoughtTokens ?? null,
-                  used: window?.used ?? null,
-                  size: window?.size ?? null,
-                  cost: window?.cost ?? null,
-                }),
-                correlationId: `turn:${turn.id}:usage`,
-                turnId: turn.id,
-              })
-            }
-            yield* closeTurn(sessionId, turn, turn.closed ?? answered.stopReason)
-            return {
-              stopReason: turn.closed ?? answered.stopReason,
-              usage: answered.usage,
-            } satisfies TurnReport
+        return yield* Effect.gen(function* () {
+          const held = yield* opened(sessionId)
+          const turn: Turn = {
+            id: `${sessionId}:${Date.now()}`,
+            said: new Map(),
+            calls: new Map(),
+            permission: null,
+            closed: null,
           }
+          turns.set(sessionId, turn)
 
-          // The agent never answered: either the process died under the turn, or Hemera stopped
-          // an agent that would not stop. The thread keeps everything it received either way.
-          const stopReason = turn.closed ?? (held.death === null ? 'cancelled' : 'interrupted')
-          yield* drained(held)
-          yield* closeTurn(sessionId, turn, stopReason)
-          return { stopReason, usage: null } satisfies TurnReport
-        }).pipe(Effect.ensuring(Effect.sync(() => turns.delete(sessionId))))
+          const sent = held.context === null ? text : `${held.context}\n\n${text}`
+          held.context = null
 
-        notices.changed(sessionId, 'turn_ended')
-        return report
+          const report = yield* Effect.gen(function* () {
+            const outcome = yield* Effect.result(attempt('prompting', held.connection.prompt(sent)))
+            if (Result.isSuccess(outcome)) {
+              const answered = outcome.success
+              // What is in the thread is read before the window is: the announcement travels as a
+              // notification of its own, and the entry is written from it once everything the agent
+              // said is held rather than racing it.
+              yield* drained(held)
+              const window = held.window
+              // What a turn used and what the window holds are two readings, and either can be
+              // missing: an agent that accounts for a turn but never announces a window leaves the
+              // meter with nothing to divide by, and one that announces a window and answers
+              // nothing leaves it with what it is filling (D5-20). The entry is written when the
+              // agent had anything to say at all, and the payload says which halves it said.
+              if (answered.usage !== null || window !== null) {
+                yield* write(sessionId, {
+                  role: 'hemera',
+                  kind: 'usage',
+                  body: `${answered.usage?.totalTokens ?? window?.used ?? 0} tokens`,
+                  payload: JSON.stringify({
+                    totalTokens: answered.usage?.totalTokens ?? null,
+                    inputTokens: answered.usage?.inputTokens ?? null,
+                    outputTokens: answered.usage?.outputTokens ?? null,
+                    thoughtTokens: answered.usage?.thoughtTokens ?? null,
+                    used: window?.used ?? null,
+                    size: window?.size ?? null,
+                    cost: window?.cost ?? null,
+                  }),
+                  correlationId: `turn:${turn.id}:usage`,
+                  turnId: turn.id,
+                })
+              }
+              yield* closeTurn(sessionId, turn, turn.closed ?? answered.stopReason)
+              return {
+                stopReason: turn.closed ?? answered.stopReason,
+                usage: answered.usage,
+              } satisfies TurnReport
+            }
+
+            // The agent never answered: either the process died under the turn, or Hemera stopped
+            // an agent that would not stop. The thread keeps everything it received either way.
+            const stopReason = turn.closed ?? (held.death === null ? 'cancelled' : 'interrupted')
+            yield* drained(held)
+            yield* closeTurn(sessionId, turn, stopReason)
+            return { stopReason, usage: null } satisfies TurnReport
+          }).pipe(Effect.ensuring(Effect.sync(() => turns.delete(sessionId))))
+
+          return report
+        }).pipe(Effect.ensuring(Effect.sync(() => notices.changed(sessionId, 'turn_ended'))))
       })
 
     /**

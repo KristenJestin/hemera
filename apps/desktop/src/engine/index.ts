@@ -62,6 +62,7 @@ export interface EngineStart {
 function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.Layer<AgentNotices> {
   const PUSHED: Record<Notice, EngineEventName> = {
     permission_requested: 'permission',
+    turn_started: 'turn',
     turn_ended: 'turn',
     agent_died: 'agent',
     session_fallback: 'agent',
