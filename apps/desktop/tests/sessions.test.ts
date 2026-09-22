@@ -212,7 +212,9 @@ describe('Message enregistré', () => {
     )
 
     expect(before.lastWrittenAt).toBeLessThanOrEqual(after.lastWrittenAt)
-    expect(after.version).toBe(before.version + 1)
+    // And it comes back at the version it was read at: no version is taken by a message, and
+    // none is handed out by one — what the Session *is* has not changed (D4b-02).
+    expect(after.version).toBe(before.version)
   })
 
   test('an empty message is refused and writes nothing', async () => {
@@ -400,7 +402,9 @@ describe('Renommage conservé', () => {
         const project = yield* atlas
         const sessions = yield* Sessions
         const session = yield* sessionIn(project.id)
-        yield* sessions.append(session.id, 'A message that moved the version on')
+        // A rename is a change to what the Session is, and it is what moves the version on; a
+        // message written into the thread is not one and moves nothing.
+        yield* sessions.rename(session.id, session.version, 'One window')
         // The two windows case: the second one still believes it is at version 1.
         return yield* Effect.flip(sessions.rename(session.id, session.version, 'Two windows'))
       }),
@@ -435,7 +439,7 @@ describe('Session archivée puis restaurée', () => {
         const sessions = yield* Sessions
         const session = yield* sessionIn(project.id)
         yield* sessions.append(session.id, 'A message that must survive the archive')
-        const put = yield* sessions.archive(session.id, 2)
+        const put = yield* sessions.archive(session.id, session.version)
         return [
           put,
           yield* sessions.list(project.id),
@@ -463,7 +467,7 @@ describe('Session archivée puis restaurée', () => {
         const sessions = yield* Sessions
         const session = yield* sessionIn(project.id)
         yield* sessions.append(session.id, 'Written before the archive')
-        yield* sessions.archive(session.id, 2)
+        yield* sessions.archive(session.id, session.version)
         return session.id
       }),
     )
@@ -488,6 +492,49 @@ describe('Session archivée puis restaurée', () => {
     expect(kept.map((one) => one.id)).toEqual([id])
     expect(kept[0]?.archivedAt).not.toBeNull()
     expect(page.entries.map((entry) => entry.body)).toEqual(['Written before the archive'])
+  })
+})
+
+/**
+ * What a window holds of a Session after the thread was written into (design D4b-02, D4b-06).
+ *
+ * The version is what a change to the Session itself is refused against, and a window writes
+ * against the one it was handed: a message that moved it would make the archive, the rename and
+ * the choice of an agent refuse every Session that has been used — which is every Session there
+ * is once somebody has said something.
+ */
+describe('Une Session utilisée reste archivable', () => {
+  test('A Session can be archived after a message was written', async () => {
+    const [created, archived] = await opened()(
+      Effect.gen(function* () {
+        const project = yield* atlas
+        const sessions = yield* Sessions
+        const session = yield* sessionIn(project.id)
+        yield* sessions.append(session.id, 'Have a look at the reader')
+        // The window still holds the Session it created, at the version it was created with.
+        return [session, yield* sessions.archive(session.id, session.version)] as const
+      }),
+    )
+
+    expect(created.version).toBe(1)
+    expect(archived.archivedAt).not.toBeNull()
+    expect(archived.version).toBe(2)
+  })
+
+  test('two messages leave the version where the Session was read at', async () => {
+    const [before, after] = await opened()(
+      Effect.gen(function* () {
+        const project = yield* atlas
+        const sessions = yield* Sessions
+        const session = yield* sessionIn(project.id)
+        yield* sessions.append(session.id, 'One')
+        yield* sessions.append(session.id, 'Two')
+        const held = yield* sessions.list(project.id)
+        return [session, held[0]] as const
+      }),
+    )
+
+    expect(after?.version).toBe(before.version)
   })
 })
 

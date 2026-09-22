@@ -583,7 +583,16 @@ export const sessionsLayer = Layer.effect(
               // The title follows the first message of a Session that has none of its own, and
               // only then: `titleAfterMessage` says no to every later one.
               const title = titleAfterMessage(session, text, seq === 1)
-              yield* bump(transaction, id, session.version, { title, lastWrittenAt: at })
+              // Written without the optimistic check and without raising the version, exactly as
+              // the entries an agent writes are: no version is taken here, and a message is not
+              // a change to what the Session *is* — a version the thread kept raising would
+              // refuse the archive, the rename or the choice the window is making from the
+              // Session it read, which is a thread that cannot be put away once it is used.
+              yield* transaction
+                .update(sessions)
+                .set({ title, lastWrittenAt: at })
+                .where(eq(sessions.id, id))
+                .pipe(Effect.mapError(failed('writing the Session')))
               const after = yield* readOne(transaction, id)
 
               return {
