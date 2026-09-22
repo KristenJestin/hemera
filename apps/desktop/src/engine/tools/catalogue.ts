@@ -28,7 +28,7 @@ import {
 } from '@hemera/core'
 import { Context, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
@@ -312,8 +312,11 @@ export const toolCatalogueLayer: Layer.Layer<
         if (settled.refusal.why === 'unreadable') {
           return { allowed: false as const, reason: settled.refusal.message }
         }
+        // What the human is shown is where the path leads, not how the agent spelled it: `..`
+        // and a link are resolved, so the question is about the place and not about the text.
+        const where = settled.refusal.resolved
         const id = crypto.randomUUID()
-        const body = `${asked.tool} asks to act outside the Workspace: ${named}`
+        const body = `${asked.tool} asks to act outside the Workspace: ${where}`
         // The block the window already draws for an agent's own permission is the one this is
         // read by: the same two options every time, because the question is always the same one
         // and nothing about it is remembered (D6-05). The request and the decision are two rows
@@ -329,6 +332,7 @@ export const toolCatalogueLayer: Layer.Layer<
                 options: OUTSIDE_OPTIONS,
                 tool: asked.tool,
                 named,
+                resolved: where,
                 root,
               }),
               correlationId: `perm:${id}`,
@@ -341,7 +345,7 @@ export const toolCatalogueLayer: Layer.Layer<
           id,
           sessionId: asked.sessionId,
           tool: asked.tool,
-          named,
+          named: where,
           root,
         })
         yield* request(answer === 'allowed' ? 'decided' : 'refused')
@@ -351,27 +355,28 @@ export const toolCatalogueLayer: Layer.Layer<
             kind: 'permission_decision',
             body:
               answer === 'allowed'
-                ? `you allowed ${asked.tool} to act on ${named}`
-                : `you refused ${asked.tool} on ${named}`,
+                ? `you allowed ${asked.tool} to act on ${where}`
+                : `you refused ${asked.tool} on ${where}`,
             payload: JSON.stringify({
               toolCallId: id,
               optionId: answer === 'allowed' ? 'allowed' : null,
               tool: asked.tool,
               named,
+              resolved: where,
               answer,
             }),
             correlationId: `decision:${id}`,
             state: answer === 'allowed' ? 'completed' : 'refused',
           })
           .pipe(Effect.catch(() => Effect.void))
-        const absolute = isAbsolute(named) ? named : join(root, named)
         if (answer === 'refused') {
           return {
             allowed: false as const,
-            reason: `the user refused: ${named} is outside ${root}`,
+            reason: `the user refused: ${where} is outside ${root}`,
           }
         }
-        return { allowed: true as const, path: absolute }
+        // What was allowed is the place the human was shown, and that is where the tool acts.
+        return { allowed: true as const, path: where }
       })
 
     /** Which run a call means, when it named none: the only one this Session has going. */

@@ -12,7 +12,7 @@
  * that refuses is a tool that answered.
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -475,5 +475,30 @@ describe('a one-off command naming a folder outside the root', () => {
     expect(human.asked[0]?.named).toContain('elsewhere')
     expect(seen.answer.ok).toBe(false)
     expect(seen.running).toHaveLength(0)
+  })
+})
+
+describe('a write outside the root', () => {
+  it('asks the human about the place it leads to, not the text the agent wrote', async () => {
+    const human = humanSaying('allowed')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const answer = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'src/../../elsewhere.txt', content: 'allowed once', key: 'out-1' },
+        })
+        return { answer, entries: yield* threadEntries(session.sessionId) }
+      }),
+    )
+
+    const where = join(realpathSync(folder), 'elsewhere.txt')
+    expect(human.asked).toHaveLength(1)
+    expect(human.asked[0]?.named).toBe(where)
+    const asked = seen.entries.find((entry) => entry.kind === 'permission_request')
+    expect(asked?.body).toContain(where)
+    expect(seen.answer.ok).toBe(true)
+    expect(readFileSync(where, 'utf8')).toBe('allowed once')
   })
 })

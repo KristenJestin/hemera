@@ -22,7 +22,7 @@ export interface OutsideRequest {
   readonly id: string
   readonly sessionId: string
   readonly tool: string
-  /** What the tool named, as the human reads it. */
+  /** Where the tool would act, resolved: the place the human decides on, not the agent's text. */
   readonly named: string
   /** The root it is outside of. */
   readonly root: string
