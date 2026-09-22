@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { AnimatePresence, motion } from 'motion/react'
+import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 import { useRef, useState } from 'react'
 
@@ -11,11 +11,9 @@ import { arrival, slide, useTransition } from '../motion.ts'
 import { AgentMark } from './agent-mark.tsx'
 import {
   AgentList,
-  type AgentModelMenuProps,
+  type AgentModelMenuVariantProps,
   BACK,
-  EffortRow,
   HELD,
-  ModeList,
   ModelPicker,
   PanelHead,
   RefusalNote,
@@ -23,6 +21,8 @@ import {
   triggerLabel,
 } from './agent-model-menu-shared.tsx'
 import { nameOfCurrent } from './current-name.ts'
+import { EffortControl } from './effort.tsx'
+import { ModeControl } from './mode.tsx'
 
 /**
  * Variant A of the universal model picker: two stages, one after the other.
@@ -41,27 +41,59 @@ import { nameOfCurrent } from './current-name.ts'
  * under it is the panel's own surface rather than a void, because the alternative is a box that
  * changes size between one stage and the next.
  *
- * **What moves.** The `slide` kind of the preset, at its `stage` distance: the leaving stage
- * goes out by the width of the panel while the entering one arrives from the other side —
- * right on the way forward, left on the way back — on the `arrival` timing. A transform and
- * nothing else here: the two surfaces stay opaque the whole way,
- * because a stage fading through half its opacity is a stage nobody can read mid-flight, and
- * whatever checks the page at that moment is right to call the text unreadable. `useTransition`
- * answers a system asking for less movement with the end state and no journey.
+ * **What moves: a carousel, not a swap.** The two stages sit side by side on one rail twice the
+ * panel's width, inside a box exactly one panel wide that clips it. Going on, the rail travels
+ * one panel to the left, so the models visibly push the agents out of the way; coming back it
+ * travels the same distance the other way, and the agents push the models back. The distance is
+ * the `slide` kind at its `stage` distance, read on the rail itself — whose own width is the
+ * panel's, so one panel is `100%` of it — and the timing is `arrival`, because a stage putting
+ * itself in place is what `arrival` is for.
+ *
+ * Both stages stay mounted throughout, and that is the correction of 22 September 2026:
+ * `AnimatePresence` made this two surfaces crossing in the same place, each opaque, neither
+ * pushing the other, which the maintainer read as a swap rather than as travel. Nothing is
+ * unmounted now, so nothing has to be drawn twice, and the one thing that moves is a transform
+ * on the rail. `useTransition` answers a system asking for less movement with the end state and
+ * no journey.
+ *
+ * **The caret follows the rail.** The agent stage is opened with the first agent focused, the
+ * model stage with its search field focused, and a stage arrived at by travelling takes the
+ * caret once the travelling is over — not while the panel is still crossing under it, which is
+ * what typing into a field halfway across a box reads as.
  *
  * **While the agent is being read**, the list that is there stays there and the indicator sits
- * in the header beside the name of what is under it. The panel used to replace the whole list
- * with "Reading what this agent offers…", which is the panel changing under the reader's eye.
+ * in the header beside the name of what is under it.
  */
 
 /** One height and one width, whatever stage is inside: the whole point of the panel. */
 const PANEL = 'flex h-menu-panel w-menu flex-col gap-2'
 
-/** The room the stages cross in, which clips whichever one is on its way out. */
-const STAGES = 'relative min-h-0 flex-1 overflow-hidden'
+/** The room the rail runs in, exactly one panel wide, which clips whatever is off to the side. */
+const BOX = 'relative min-h-0 flex-1 overflow-hidden'
 
-/** A stage, drawn over the other one for as long as the two are both on their way. */
-const SURFACE = 'absolute inset-0 flex flex-col gap-2'
+/**
+ * The rail, one panel wide and carrying two of them: the second overflows to the right, which
+ * is what the box clips, and the rail's own width is what a slide of `100%` is measured
+ * against — so one step of it is exactly one panel and never a guess.
+ */
+const RAIL = 'absolute inset-0 flex'
+
+/** One stage of the rail, which is a whole panel's width of it. */
+const BLOCK = 'flex w-full shrink-0 flex-col gap-2'
+
+/** The model stage laid out as two columns, which is what the `column` mode variant asks for. */
+const COLUMNS = 'flex min-h-0 flex-1 gap-2'
+
+/** The models, which are the list that scrolls, and so the column that is given the room. */
+const MODELS = 'flex min-w-0 flex-1 flex-col gap-2'
+
+/** What is set beside the models rather than under them: the effort, then the mode. */
+const ASIDE =
+  'scroll-quiet flex w-menu-agents shrink-0 flex-col gap-2 overflow-y-auto border-l border-border pl-2'
+
+/** Where the rail rests: at the agents, and one whole panel to the left for the models. */
+const AT_AGENTS = 0
+const AT_MODELS = slide('stage', 'forward').leave
 
 /** Which of the two lists the panel is on: the agents, or the models of the one that was picked. */
 type Stage = 'agent' | 'model'
@@ -83,19 +115,21 @@ export function AgentModelMenuStages({
   loading = false,
   refusal = null,
   disabled = false,
+  effortVariant = 'row',
+  modeVariant = 'list',
   className,
-}: AgentModelMenuProps): ReactNode {
+}: AgentModelMenuVariantProps): ReactNode {
   const [open, setOpen] = useState(false)
   const [stage, setStage] = useState<Stage>(fixed ? 'model' : 'agent')
-  const [forward, setForward] = useState(true)
   const trigger = useRef<HTMLButtonElement>(null)
+  const field = useRef<HTMLInputElement>(null)
   const transition = useTransition(arrival)
 
   const chosen = agents.find((one) => one.id === agent) ?? null
   /** The stage the panel is on: a Session's agent leaves it only one to be on. */
   const shown: Stage = fixed ? 'model' : stage
-  /** A stage swap: the whole width of the panel, so one surface replaces the other. */
-  const { enter, leave } = slide('stage', forward ? 'forward' : 'backward')
+  /** The stage the panel opens on, which is the one whose control is handed the caret. */
+  const opened: Stage = fixed || agent !== null ? 'model' : 'agent'
 
   /** Closes the panel and hands the focus back to what opened it. */
   const close = () => {
@@ -103,13 +137,40 @@ export function AgentModelMenuStages({
     trigger.current?.focus()
   }
 
+  /* The two scales of the agent, which are the same two whichever side of the stage they are
+     drawn on. An agent that announced neither is given no control rather than an empty one,
+     which each of them answers for itself. */
+  const scales = (
+    <>
+      <EffortControl
+        variant={effortVariant}
+        efforts={efforts}
+        effort={effort}
+        onEffortChange={onEffortChange}
+        caption={nameOfCurrent(models, model)}
+      />
+      <ModeControl variant={modeVariant} modes={modes} mode={mode} onModeChange={onModeChange} />
+    </>
+  )
+
+  const picker = (
+    <ModelPicker
+      models={models}
+      model={model}
+      loading={loading}
+      autoFocus={opened === 'model'}
+      fieldRef={field}
+      onChoose={(one) => onModelChange(one.id)}
+      onEscape={close}
+    />
+  )
+
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
         if (next) {
           setStage(fixed || agent !== null ? 'model' : 'agent')
-          setForward(true)
           setOpen(true)
         } else close()
       }}
@@ -131,79 +192,82 @@ export function AgentModelMenuStages({
     >
       <div className={PANEL}>
         <RefusalNote refusal={refusal} />
-        <div className={STAGES}>
-          <AnimatePresence initial={false}>
-            <motion.div
-              key={shown}
-              className={SURFACE}
-              initial={{ x: enter }}
-              animate={{ x: 0 }}
-              exit={{ x: leave }}
-              transition={transition}
-            >
-              {shown === 'agent' ? (
-                <>
-                  <PanelHead title="Agent" loading={loading} />
-                  <AgentList
-                    agents={agents}
-                    agent={agent}
-                    autoFocus
-                    onChoose={(one) => {
-                      onAgentChange(one.id)
-                      setForward(true)
-                      setStage('model')
-                    }}
-                  />
-                </>
+        <div className={BOX}>
+          <motion.div
+            data-testid="stage-rail"
+            className={RAIL}
+            animate={{ x: shown === 'model' && !fixed ? AT_MODELS : AT_AGENTS }}
+            transition={transition}
+            // The caret is given to the stage that arrived, once it has arrived: a field taking
+            // what is typed while the panel it sits in is still crossing the box is a field the
+            // reader is aiming at rather than reading.
+            onAnimationComplete={() => {
+              if (shown === 'model') field.current?.focus()
+            }}
+          >
+            {/* A Session runs the agent it was made with: there is no agent stage on the rail
+                at all, and so nothing for the rail to travel to. */}
+            {!fixed && (
+              <div className={BLOCK}>
+                {/* The indicator belongs to the stage that is being looked at. Both stages are
+                    on the rail at once, and two of them at once would be one machine reported
+                    twice. */}
+                <PanelHead title="Agent" loading={loading && shown === 'agent'} />
+                <AgentList
+                  agents={agents}
+                  agent={agent}
+                  autoFocus={opened === 'agent'}
+                  onChoose={(one) => {
+                    onAgentChange(one.id)
+                    setStage('model')
+                  }}
+                />
+              </div>
+            )}
+
+            <div className={BLOCK}>
+              {/* The agent stays in sight while its models are read, and pressing it is the way
+                  back: a panel that swapped its whole content with no way out would be a dead
+                  end for anyone who picked the wrong agent. A Session's agent cannot be
+                  changed, so the same line is drawn and there is nothing to press. */}
+              {fixed ? (
+                <p className={HELD}>
+                  {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
+                  <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
+                  {loading && shown === 'model' && <Loading size="sm" label="Loading" />}
+                </p>
+              ) : (
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    className={cn(BACK, 'min-w-0 flex-1')}
+                    onClick={() => setStage('agent')}
+                  >
+                    <IconChevronLeft size="sm" />
+                    {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
+                    <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
+                    <span className={STATE}>Change</span>
+                  </button>
+                  {loading && shown === 'model' && <Loading size="sm" label="Loading" />}
+                </div>
+              )}
+
+              {/* The `column` variant of the mode is the one that changes the panel around it:
+                  the models go left where the scrolling is, and the effort and the mode stand
+                  in a column of their own beside them. */}
+              {modeVariant === 'column' ? (
+                <div className={COLUMNS}>
+                  <div className={MODELS}>{picker}</div>
+                  <div className={ASIDE}>{scales}</div>
+                </div>
               ) : (
                 <>
-                  {/* The agent stays in sight while its models are read, and pressing it is the
-                      way back: a panel that swapped its whole content with no way out would be
-                      a dead end for anyone who picked the wrong agent. A Session's agent cannot
-                      be changed, so the same line is drawn and there is nothing to press. */}
-                  {fixed ? (
-                    <p className={HELD}>
-                      {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
-                      <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
-                      {loading && <Loading size="sm" label="Loading" />}
-                    </p>
-                  ) : (
-                    <div className="flex shrink-0 items-center gap-2">
-                      <button
-                        type="button"
-                        className={cn(BACK, 'min-w-0 flex-1')}
-                        onClick={() => {
-                          setForward(false)
-                          setStage('agent')
-                        }}
-                      >
-                        <IconChevronLeft size="sm" />
-                        {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
-                        <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
-                        <span className={STATE}>Change</span>
-                      </button>
-                      {loading && <Loading size="sm" label="Loading" />}
-                    </div>
-                  )}
-
-                  <ModelPicker
-                    models={models}
-                    model={model}
-                    loading={loading}
-                    onChoose={(one) => onModelChange(one.id)}
-                    onEscape={close}
-                  />
-
-                  {/* The effort and the mode are the agent's own scales, so an agent that
-                      announced neither is given no row rather than an empty one. The modes are
-                      a list and not a row: five of the agent's own sentences read across a
-                      panel are five sentences cut short. */}
-                  <EffortRow efforts={efforts} effort={effort} onEffortChange={onEffortChange} />
-                  <ModeList modes={modes} mode={mode} onModeChange={onModeChange} />
+                  {picker}
+                  {scales}
                 </>
               )}
-            </motion.div>
-          </AnimatePresence>
+            </div>
+          </motion.div>
         </div>
       </div>
     </Popover>

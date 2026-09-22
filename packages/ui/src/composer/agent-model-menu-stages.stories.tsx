@@ -20,9 +20,10 @@ import { AgentModelMenuStages } from './agent-model-menu-stages.tsx'
  *
  * It is the narrow panel — `w-menu` — and the one that asks the four questions in the order
  * they make sense in. The price is a stage change, and the stage change is the thing to judge:
- * the leaving list slides out by the width of the panel while the arriving one comes in from
- * the other side, and the box around them never moves a pixel. The way back is the line at the
- * top, which carries the agent it is leaving so the eye keeps its place.
+ * the two stages sit side by side on one rail twice the panel's width, and going on moves the
+ * rail one panel to the left, so the models are read as pushing the agents out of the way
+ * rather than as replacing them. The box around them never moves a pixel. The way back is the
+ * line at the top, which carries the agent it is leaving so the eye keeps its place.
  *
  * The agent stage has four rows and does not fill the panel. It is drawn at the top of it and
  * the room left under it is the panel's own surface: a panel that shrank to its rows and grew
@@ -59,6 +60,88 @@ type Story = StoryObj<typeof meta>
 
 /** Every prop as a control, and the four answers wired to a page that behaves like the engine. */
 export const Playground: Story = {}
+
+/** How far the rail has been carried from where it started, in pixels. */
+function travelledBy(rail: Element): number {
+  const written = getComputedStyle(rail).transform
+  return written === 'none' ? 0 : new DOMMatrixReadOnly(written).m41
+}
+
+/** Where the rail sat, frame by frame, for as long as a stage takes to cross. */
+function travelOf(rail: Element, frames: number): Promise<number[]> {
+  const seen: number[] = []
+  return new Promise((settle) => {
+    const look = (): void => {
+      seen.push(travelledBy(rail))
+      if (seen.length >= frames) settle(seen)
+      else requestAnimationFrame(look)
+    }
+    look()
+  })
+}
+
+/**
+ * The stage change as a carousel: the models push the agents out, and the agents push back.
+ *
+ * It used to be two absolutely positioned surfaces entering and leaving in the same place, and
+ * the maintainer read it as a swap rather than as travel — the leaving one was drawn over the
+ * arriving one, and neither pushed anything. The two stages sit side by side on one rail twice
+ * the panel's width now, and the rail is what moves: one panel to the left on the way on, the
+ * same panel back on the way in reverse. Nothing is unmounted, so both stages are fully drawn
+ * the whole way across and there is never a blank edge behind the one that is leaving.
+ *
+ * Read over the frames rather than at one moment, for the reason the thread's fold gives: what
+ * a swap looks like is a rail that was at one rest position and then at the other with nothing
+ * in between, and the only way to refuse that is to find the in between.
+ */
+export const ACarousel: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose an agent' }))
+
+    const rail = await screen.findByTestId('stage-rail')
+    const agents = await screen.findByRole('listbox', { name: 'Agents' })
+    // One panel is what the rail travels, and the rail's own box is exactly one panel wide.
+    const panel = rail.getBoundingClientRect().width
+    await expect(panel).toBeGreaterThan(0)
+    // At rest on the agents: nothing is carrying the rail anywhere.
+    await waitFor(() => {
+      expect(travelledBy(rail)).toBeCloseTo(0, 0)
+    })
+
+    await userEvent.click(within(agents).getByRole('option', { name: /Claude Code/ }))
+    const onward = await travelOf(rail, 40)
+    // Caught on the way: at least one frame has it neither where it was nor where it is going,
+    // which is the whole difference between travelling and being swapped.
+    await expect(
+      onward.some((x) => x < -1 && x > -panel + 1),
+      'the stage was swapped instead of pushed',
+    ).toBe(true)
+    // And at rest on the models: exactly one panel to the left, so the model block fills the box.
+    await waitFor(() => {
+      expect(travelledBy(rail)).toBeCloseTo(-panel, 0)
+    })
+    // Both blocks are drawn the whole way: the agents are still in the page, off to the left.
+    await expect(agents).toBeInTheDocument()
+
+    // The caret is handed to the search field once the travelling is over, and not before.
+    const searching = screen.getByRole('combobox', { name: 'Search the models of this agent' })
+    await waitFor(() => {
+      expect(document.activeElement).toBe(searching)
+    })
+
+    // And back the other way, which is the same movement mirrored.
+    await userEvent.click(screen.getByRole('button', { name: /Claude Code Change/ }))
+    const back = await travelOf(rail, 40)
+    await expect(
+      back.some((x) => x < -1 && x > -panel + 1),
+      'the way back was a swap rather than the same travel mirrored',
+    ).toBe(true)
+    await waitFor(() => {
+      expect(travelledBy(rail)).toBeCloseTo(0, 0)
+    })
+  },
+}
 
 /**
  * Nothing chosen: the trigger says what to do rather than naming a model of nobody's.
