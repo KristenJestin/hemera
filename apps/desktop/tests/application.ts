@@ -21,7 +21,7 @@ import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import { fakeSupervisor, type FakeAgent, type FakeStep } from '#engine/agents/fake.ts'
 import type { ProcessSupervisor } from '#engine/agents/supervisor.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
-import { AgentNotices, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
+import { AgentNotices, CHUNK_FLUSH, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime, Notice } from '#engine/agents/runtime.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { preferencesLayer } from '#engine/preferences.ts'
@@ -177,6 +177,11 @@ export const pause = (milliseconds: number) =>
  *
  * Looking again rather than being told: the entries are written by the fiber that drains the
  * agent's events, and looking again is what a reader of the window does.
+ *
+ * The clock moves with the looking, because that is what happens in the application: what an
+ * agent streamed is written by a timer of its own (Decided 10 of #17), and a suite whose clock
+ * never moves would wait for a flush that cannot come. Real time passes between two looks as
+ * well, so a write that is on its way has landed by the time the thread is read again.
  */
 export const heldInThread = (
   sessionId: string,
@@ -187,6 +192,7 @@ export const heldInThread = (
       const entries = yield* threadOf(sessionId)
       if (ready(entries)) return entries
       yield* pause(5)
+      yield* TestClock.adjust(CHUNK_FLUSH)
     }
     return yield* Effect.die('the thread never held what the suite waited for')
   })
