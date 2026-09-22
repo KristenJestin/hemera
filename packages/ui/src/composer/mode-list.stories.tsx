@@ -11,17 +11,17 @@ import {
 import { ModeList } from './mode-list.tsx'
 
 /**
- * **Variant 1 of the mode — the list.** One line per mode, the mark its own words earned, and
- * the one that is on checked.
+ * **What the next turn may do without asking**: one line per mode, under the word that names
+ * them, with the mark its own words earned and the one that is on checked.
  *
  * A mode is a sentence and not a step of a scale: "Ask before edits" and "Bypass permissions"
  * are the agent's own words, and five of them read across a panel are five sentences cut short.
  * What the list buys is that every one of them is read whole without anything being opened;
- * what it costs is five lines of a panel that has about twenty.
+ * what it costs is five lines of the column it stands in, beside the models.
  */
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Blocks/Composer/Mode/List',
+  title: 'Blocks/Composer/ModeList',
   component: ModeList,
   render: (args) => <SetMode {...args} render={(props) => <ModeList {...props} />} />,
   parameters: { layout: 'padded' },
@@ -39,7 +39,7 @@ type Story = StoryObj<typeof meta>
 /** Every prop as a control, and the answer wired to a page that keeps it. */
 export const Playground: Story = {}
 
-/** Nothing set, something set, two modes instead of five, folded two to a line, turned off. */
+/** Nothing set, something set, two modes instead of five, and the list turned off. */
 export const States: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
@@ -47,14 +47,13 @@ export const States: Story = {
       <ModeList modes={CLAUDE_MODES} mode={null} onModeChange={fn()} />
       <ModeList modes={CLAUDE_MODES} mode="bypass-permissions" onModeChange={fn()} />
       <ModeList modes={OPENCODE_MODES} mode="plan" onModeChange={fn()} />
-      <ModeList modes={CLAUDE_MODES} mode="auto" onModeChange={fn()} across />
       <ModeList modes={CLAUDE_MODES} mode="accept-edits" onModeChange={fn()} disabled />
     </div>
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const lists = canvas.getAllByRole('listbox', { name: 'Mode' })
-    await expect(lists).toHaveLength(5)
+    await expect(lists).toHaveLength(4)
 
     const none = within(lists[0]!).getAllByRole('option')
     await expect(none.filter((one) => one.getAttribute('aria-selected') === 'true')).toHaveLength(0)
@@ -65,10 +64,12 @@ export const States: Story = {
     // and the check on the one that is set.
     await expect(lists[1]!.querySelectorAll('svg')).toHaveLength(6)
     await expect(within(lists[2]!).getAllByRole('option')).toHaveLength(2)
-    // Folded, the same five are read two to a line rather than one.
-    await expect(cutShort(lists[3]!)).toEqual([])
-    const off = within(lists[4]!).getAllByRole('option')
+    const off = within(lists[3]!).getAllByRole('option')
     await expect(off.filter((one) => one.hasAttribute('disabled'))).toHaveLength(off.length)
+
+    // The word over each list is written and never announced a second time: the list is already
+    // a listbox called "Mode", and a landmark with the same name is one control said twice.
+    await expect(canvas.getAllByText('Mode')).toHaveLength(4)
   },
 }
 

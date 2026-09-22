@@ -306,10 +306,6 @@
 
   --shadow-sm: var(--shadow);
   --shadow-lg: var(--shadow-raised);
-  --shadow-halo: var(--halo);
-  --shadow-halo-strong: var(--halo-strong);
-  --shadow-halo-glow: var(--halo-glow);
-  --shadow-halo-glow-strong: var(--halo-glow-strong);
 }
 
 /* ---- The scales, the same under both themes ---- */
@@ -353,46 +349,33 @@
      One height for the loading state, the list, the empty answer and a refusal alike: the panel
      opens upwards out of the composer, so a body that grew would push it past the top of the
      window and make the positioner flip it to the other side under the reader's hand. Tall
-     enough for six models and the two rows below them, short enough to sit above a composer in
-     a window that is not maximised. */
-  --spacing-menu-panel: 24rem;
+     enough for the models on one side and the effort above the modes on the other, short enough
+     to sit above a composer in a window that is not maximised. */
+  --spacing-menu-panel: 26rem;
 
-  /* How wide the two-column agent panel stands since the trial of 22 September 2026, and how
-     tall with it. The composer is the frame the panel opens out of, and a panel narrower than
-     the box it belongs to reads as the menu of something else: this is that column's width, so
-     the panel and the composer share one edge. The height goes with the width — the room a
-     wider panel buys is room for the list to be read in, and a list four rows tall in a panel
-     twice as wide is a panel that got wider for nothing. Still one box whatever stage it is
-     on, and still short enough to open upwards above a composer in a window that is not
-     maximised. */
-  --spacing-menu-wide: 40rem;
-  --spacing-menu-tall: 30rem;
+  /* And how wide, since the maintainer kept the two-column model stage on 22 September 2026:
+     the models are searched on one side and what is set about them stands on the other, and
+     both have to be read without a name being cut short. Narrow enough to stay a menu of the
+     composer rather than a window of its own. */
+  --spacing-menu-wide: 26rem;
 
-  /* How wide the agents stand in the two-column agent panel, out of the `menu-panel` width.
-     A fraction of the parent is not a step of anything — it moves with whatever is around it,
-     and the column beside it was left to take the remainder. Written down instead: wide enough
-     for a mark, an agent's name and the word beside it, narrow enough to leave the models the
-     larger half, which is the list that scrolls. */
-  --spacing-menu-agents: 9.5rem;
+  /* How wide that second column stands, out of the panel's own width. A fraction of the parent
+     is not a step of anything — it moves with whatever is around it, and the column beside it
+     was left to take the remainder. Written down instead: wide enough for the effort's marks
+     beside its track and for "Bypass permissions" read whole, narrow enough to leave the models
+     the larger half, which is the list that scrolls. */
+  --spacing-menu-side: 11.5rem;
 
-  /* How thick the track of a scale is drawn — the effort's slider and its dial. Thin enough to
-     read as a line the thumb runs along rather than as a bar, and thick enough that the part of
-     it that is filled is read as filled at a glance. A named step, because two tracks of two
-     thicknesses in one panel is two controls that look like they came from two systems. */
+  /* How thick the track of the effort's scale is drawn. Thin enough to read as a line the thumb
+     runs along rather than as a bar, and thick enough that the part of it that is filled is
+     read as filled at a glance. A named step, because two tracks of two thicknesses in one
+     panel is two controls that look like they came from two systems. */
   --spacing-track: 0.375rem;
 
-  /* And how thin it is drawn where the whole point is that it is barely there, which is the
-     minimal look's hairline. Two pixels: the thinnest a rounded track can be and still read as
-     a filled length rather than as a coloured line. A step and not a number, for the reason the
-     step above it is one — two hairlines of two thicknesses are two design systems again. */
-  --spacing-track-hair: 0.125rem;
-
-  /* How wide the thumb of a scale is drawn, one step per look (trial of 22 September 2026).
-     Tailwind's own multiplication has no step between sixteen and twenty-four, and the three
-     looks want fourteen, sixteen and twenty. Written down here they are three steps the scale
-     check knows the whole list of, and a fourth look cannot invent a fourth size in silence. */
-  --spacing-thumb-sm: 0.875rem;
-  --spacing-thumb-md: 1rem;
+  /* How wide the thumb of that scale is drawn. Tailwind's own multiplication has no step
+     between sixteen and twenty-four, and a thumb that is to be taken hold of wants twenty.
+     Written down here it is a step the scale check knows, and a second control cannot invent a
+     size of its own in silence. */
   --spacing-thumb-lg: 1.25rem;
 
   /* The prototype draws its icons at eighteen, with sixteen for the small ones and twenty-two
@@ -841,22 +824,30 @@
   box-shadow: var(--well);
 }
 
-@utility thumb-dome {
-  box-shadow: var(--knob);
+/* And the two the thumb of that scale is lit by: the ring it sits in, and the glow it throws on
+   the surface under it, each at its resting strength and at the one it answers the hand with.
+   Utilities for the reason the well is one — a `shadow-*` utility named anything but a size is
+   read as a colour, by Tailwind's grammar and so by the design-system lint — and four of them
+   rather than two, because the halo is given to a state at a time: `halo group-hover:halo-strong`
+   is the ring brightening under the hand, and the glow is the same sentence one layer down. */
+@utility halo {
+  box-shadow: var(--halo);
 }
 
-/* What a surface does when the hand comes over it: it lifts by one step of the shadow scale.
-   A card that answers the hand with a shadow and nothing else says "this is one thing, and it
-   is the one you are pointing at" without moving a single word inside it. Named here rather
-   than written at the call site, so that the duration and the curve stay the theme's — and so
-   that a reader asking for less movement is handed the lifted card and nothing on the way. */
-@utility lift-motion {
-  transition-property: box-shadow;
-  transition-duration: var(--duration-base);
-  transition-timing-function: var(--ease-calm);
-  @media (prefers-reduced-motion: reduce) {
-    transition-property: none;
-  }
+@utility halo-strong {
+  box-shadow: var(--halo-strong);
+}
+
+@utility halo-glow {
+  box-shadow: var(--halo-glow);
+}
+
+@utility halo-glow-strong {
+  box-shadow: var(--halo-glow-strong);
+}
+
+@utility thumb-dome {
+  box-shadow: var(--knob);
 }
 
 /* What a chevron does while the list it opens is open: it turns over, so the control says

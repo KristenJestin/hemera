@@ -7,17 +7,21 @@ import { IconCheck, IconSearch } from '../icons.ts'
 import { AgentMark } from './agent-mark.tsx'
 
 /**
- * What the three ways of asking the same four questions have in common (design D17-11, D17-14).
+ * What the agent menu is made of: the shape of its four answers, and its two lists
+ * (design D17-11, D17-14).
  *
- * The agent, its model, its effort and its mode are one control of the application, and the
- * maintainer is choosing between three panels that ask for them: stages, panes and a palette.
- * The three take the same props, so the shape of the answer — the types below — and the pieces
- * every panel is built out of live here rather than three times over.
+ * The agent, its model, its effort and its mode are one control of the application. The panel
+ * that asks for them is `agent-model-menu.tsx`, its effort is `effort-slider.tsx` and its modes
+ * are `mode-list.tsx`: what those three have to agree on — the types the engine's answer
+ * arrives in, the list of agents, and the searched list of models — is written here once rather
+ * than three times. Three panels and six controls were drawn side by side in the catalogue and
+ * compared on 22 September 2026; these are the ones the maintainer kept, and the variant props
+ * went out with the ones that were not.
  *
- * Two rules bind all three, and they are the reason this file exists:
+ * Two rules the panel is held to, and they are the reason this file exists:
  *
  * **Nothing jumps.** The panel's box is the same while the agent's options are being read and
- * once they have landed, and the same on every stage a variant has. It opens upwards out of the
+ * once they have landed, and the same on both of its stages. It opens upwards out of the
  * foot of a window, so a panel that grew as its answer arrived would push past the top of the
  * screen and be flipped to the other side under the hand that opened it. While `loading`, the
  * list that is already there stays where it is and a small indicator sits in the header: a
@@ -84,50 +88,23 @@ export interface ModeChoice {
   label: string
 }
 
-/**
- * What every way of asking for the effort is handed, whichever shape it is drawn in.
- *
- * Three of them are being compared — a row of steps, a vertical slider and a horizontal dial —
- * and they are interchangeable or they are not comparable: one set of props, one set of
- * answers, and the menu is what decides which one is drawn.
- *
- * `caption` is the one thing only the dial has the room to say: what the effort is being set
- * for, which is the model's name. The other two take it and draw nothing with it rather than
- * the dial carrying a prop of its own, because a variant whose props the others lack is a
- * variant the menu cannot swap for another.
- */
+/** What the effort slider is handed: the agent's levels, the one that is set, and the answer. */
 export interface EffortProps {
   /** The efforts of the chosen agent; empty when it announced none, and then no control at all. */
   efforts: readonly EffortChoice[]
   effort: string | null
   onEffortChange: (id: string) => void
   disabled?: boolean | undefined
-  /** What the effort is being set for, for the one variant that has room to say it. */
-  caption?: string | undefined
 }
 
-/** Which of the three ways the effort is drawn. */
-export type EffortVariant = 'row' | 'slider' | 'dial'
-
-/**
- * What every way of asking for the mode is handed.
- *
- * `across` is the list folded two to a line, for the panel wide enough to read two of the
- * agent's own sentences side by side; the other two draw nothing with it, for the reason the
- * effort's `caption` gives.
- */
+/** And what the mode list is handed, which is the same three things about the other question. */
 export interface ModeProps {
   /** The modes of the chosen agent; empty when it announced none, and then no control at all. */
   modes: readonly ModeChoice[]
   mode: string | null
   onModeChange: (id: string) => void
   disabled?: boolean | undefined
-  /** Whether the modes are folded two to a line, where the panel is wide enough for it. */
-  across?: boolean | undefined
 }
-
-/** Which of the three ways the mode is drawn. */
-export type ModeVariant = 'list' | 'column' | 'select'
 
 export interface AgentModelMenuProps {
   /** The agents the engine offered, in the order it offered them. */
@@ -162,26 +139,11 @@ export interface AgentModelMenuProps {
   className?: string | undefined
 }
 
-/**
- * The same panel, with the effort and the mode drawn as one of three each.
- *
- * The maintainer is choosing between three effort controls and three mode controls as well as
- * between three panels, and a comparison where each panel shows a different one of them is not
- * a comparison. So the two are a prop, the defaults are what the application ships — the row
- * and the list — and the `Compare` story is a grid the choices are flipped in.
- */
-export interface AgentModelMenuVariantProps extends AgentModelMenuProps {
-  /** How the effort is asked for. `row` unless the catalogue says otherwise. */
-  effortVariant?: EffortVariant | undefined
-  /** How the mode is asked for. `list` unless the catalogue says otherwise. */
-  modeVariant?: ModeVariant | undefined
-}
-
 /** What the trigger puts between one answer and the next. */
 const SEPARATOR = ' · '
 
 /**
- * What a value the agent advises is called, in one place so the four controls that say it agree.
+ * What a value the agent advises is called, in one place so the model list and the effort agree.
  *
  * The agent's recommendation replaces the `Default` entry it used to be announced as, so this
  * word stands exactly where that entry stood — beside the value it named, and never as a value
@@ -255,62 +217,6 @@ export const QUERY =
 /** What stands where a list would be when there is none: the room, kept, and a word in it. */
 export const INSTEAD =
   'flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-2 text-center text-xs text-muted-foreground'
-
-/** A scale read across and not down a list: the effort. */
-export const SEGMENT =
-  'flex shrink-0 items-center gap-1 rounded-md border border-border bg-muted p-0.5'
-
-export const SEGMENT_ITEM =
-  'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground outline-none focus-ring hover:bg-accent'
-
-export const SEGMENT_ON = 'bg-card text-foreground shadow-sm'
-
-/** The modes, one per line, because a mode is a sentence and not a step of a scale. */
-export const MODES_DOWN = 'flex shrink-0 flex-col gap-0.5'
-
-/** The same modes where the panel is wide enough to read two of them across. */
-export const MODES_ACROSS = 'grid shrink-0 grid-cols-2 gap-0.5'
-
-/**
- * How far a page key goes: a third of the scale, and never less than an arrow's own step.
- *
- * A page has to be more than an arrow and less than End, and a fixed number of steps would be
- * one or the other depending on how many levels the agent announced — two steps is a page of
- * Claude's six and the whole of OpenCode's three.
- */
-function pageOf(last: number): number {
-  return Math.max(1, Math.round(last / 3))
-}
-
-/**
- * Where an arrow, a page key, Home or End take a scale, and `null` for a key that is none of
- * them.
- *
- * Shared by the slider and the dial, which are the same scale drawn down and across: up and
- * right go on, down and left come back, the page keys go the same way by more than one, and
- * Home and End are the two ends of it. One place, so a reader who learned one of them has
- * learned the other.
- */
-export function steppedBy(key: string, here: number, last: number): number | null {
-  if (key === 'ArrowUp' || key === 'ArrowRight') return Math.min(here + 1, last)
-  if (key === 'ArrowDown' || key === 'ArrowLeft') return Math.max(here - 1, 0)
-  if (key === 'PageUp') return Math.min(here + pageOf(last), last)
-  if (key === 'PageDown') return Math.max(here - pageOf(last), 0)
-  if (key === 'Home') return 0
-  if (key === 'End') return last
-  return null
-}
-
-/**
- * The step a press landed on, read off the element it landed in.
- *
- * The scale itself is what answers the pointer, not its notches: a notch is a mark, and a mark
- * that took the focus would be a second control inside a control that already has a role.
- */
-export function stepUnder(target: EventTarget): string | null {
-  if (!(target instanceof Element)) return null
-  return target.closest('[data-step]')?.getAttribute('data-step') ?? null
-}
 
 /** What the trigger reads, which is what is set and never what could be. */
 export function triggerLabel(chosen: OfferedAgent | null, said: (string | undefined)[]): string {

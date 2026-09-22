@@ -3,35 +3,21 @@ import { motion } from 'motion/react'
 import type { PointerEvent as PointerPress, ReactNode } from 'react'
 import { useRef, useState } from 'react'
 
-import { IconBolt, IconChevronRight } from '../icons.ts'
 import { instant, morph, useTransition } from '../motion.ts'
 import {
   ADVISED_BESIDE,
+  type EffortChoice,
   type EffortProps,
   levelSaid,
-  steppedBy,
 } from './agent-model-menu-shared.tsx'
-import {
-  ADVISED,
-  ADVISED_DOT,
-  ADVISED_WORD,
-  FILLED,
-  GLOW,
-  HALO,
-  MARK_DONE,
-  TRACK,
-  fractionAt,
-  marksOf,
-  share,
-} from './effort-scale.ts'
 
 /**
- * The effort as a vertical slider — the control the maintainer kept on 22 September 2026.
+ * The effort, as the instrument the maintainer kept on 22 September 2026.
  *
- * A thin track with a notch on every level the agent announced, the part of it under the thumb
- * filled in the accent, a round thumb on the level that is on, the agent's own word for that
- * level over the top of it and what it is being set for under the bottom. Down the side of the
- * track, one short mark per notch, so six dots are six levels rather than six dots.
+ * A thin track sunk into a groove, one notch per level the agent announced, the part of it
+ * under the thumb filled in the accent, a lit twenty-pixel thumb on the level that is on, the
+ * agent's own word for that level over the top of it, and down the left of the track a short
+ * mark per notch — `L M H XH Max` — so five dots are five levels rather than five dots.
  *
  * **Why down and not across.** A scale of six levels read across a narrow panel gives each of
  * them four characters and reads as six buttons; read down, it reads as what it is — more of
@@ -57,6 +43,21 @@ import {
  * ends. The notches are marks and answer the pointer through the scale itself, because a notch
  * that took the focus would be a second control inside a control that already has a role.
  *
+ * **What the agent advises is a rule across the track**, at that level's notch, and never a
+ * notch of its own (decision of 22 September 2026). A thin accent line laid across the scale is
+ * read the way the red line on a dial is read — this is where it is meant to sit — without
+ * offering a value of its own; the word `recommended` is said beside the level's own name while
+ * that level is the one standing, and in `aria-valuetext` for whoever cannot see the line. It
+ * is also where the scale opens: handed nothing at all, it rests on the level the agent
+ * advises, because that is what the next turn would run at.
+ *
+ * **`Default` is not a notch.** An agent that never said which level its `Default` stands for
+ * leaves it announced as a value like any other, and a scale cannot place a level whose meaning
+ * nobody knows: the notches are the real levels alone, and where `Default` is what is set the
+ * thumb sits at the foot of the track with the word above it reading `Default`, until a level
+ * is chosen. Nothing is guessed here — resolving that value is the engine's business, and it
+ * does it the moment the agent gives it the means.
+ *
  * **Nothing moves when the level does.** Every word of the scale is drawn in the same cell of a
  * grid and all but the one that is on are `invisible`: the column is as wide as the longest
  * word the agent announced, whichever word is being shown. Nothing is measured and nothing is
@@ -71,31 +72,14 @@ import {
  * `useTransition` answers a reader asking for less movement with the notch and no glide at all.
  * Under the hand and under the focus the halo brightens and the thumb grows, which is CSS and
  * stops on its own where less movement was asked for.
- *
- * **Three looks, one control** (pass of 22 September 2026). The maintainer's verdict on the
- * first drawing was that it behaved and did not look like anything, so the same slider is drawn
- * three ways and `look` is which one. Nothing below the drawing changes with it: the same
- * props, the same role, the same `aria-valuetext`, the same drag, the same keys, and the same
- * geometry — one cell per notch, the rail half a cell in from each end — so the level a press
- * lands on is the level it lands on whichever look is on.
- *
- * - `instrument`, the one that ships: the track sunk into a pill-shaped well a surface below
- *   the panel, notch dots that light up in the accent as they are passed, a twenty-pixel thumb
- *   with a domed core and two layers of halo, and the short mark of the level in a chip that
- *   travels beside the thumb.
- * - `minimal`: a hairline track, notches at two pixels, a fourteen-pixel thumb and the level's
- *   name. Nothing else at all — what it is made of is the room around it.
- * - `card`: the shape the maintainer brought back from another application — a bolt at the top
- *   left, the level in the accent with a chevron after it, the model under it in the quiet
- *   colour, and the scale under that, the whole of it on a card that lifts under the hand.
  */
 
-/** Which of the three drawings of the same scale is on. */
-export type EffortLook = 'instrument' | 'minimal' | 'card'
+/** The value an agent announces as its own stand-in, which is the engine's word for it too. */
+const UNRESOLVED = 'default'
 
-/** What every look has in common: the role, the focus, the keys and the words being unselectable. */
+/** The box around the whole control: the role, the focus, the keys, the words unselectable. */
 const FRAME =
-  'group flex shrink-0 select-none flex-col outline-none focus-ring aria-disabled:opacity-50'
+  'group flex shrink-0 select-none flex-col items-center gap-1.5 rounded-lg px-2 py-2 outline-none focus-ring aria-disabled:opacity-50'
 
 /**
  * One cell with every word of the scale in it, which is what keeps the column still.
@@ -104,9 +88,6 @@ const FRAME =
  * as tall as the widest and tallest of them, and which one is shown decides nothing.
  */
 const STACK = 'grid shrink-0 justify-items-center'
-
-/** The same cell, read from its left edge, which is where a card's header starts its line. */
-const STACK_START = 'grid shrink-0 justify-items-start'
 
 /**
  * The same stack for the descriptions, at one width rather than at the width of the longest.
@@ -124,42 +105,23 @@ const LAID = 'col-start-1 row-start-1'
 /** Where it stands, in the agent's own word, over the top of the track and in the accent. */
 const LEVEL = 'text-xs font-medium whitespace-nowrap tabular-nums text-primary'
 
-/** The same word where the whole look is one weight: the accent, and nothing else said about it. */
-const LEVEL_PLAIN = 'text-xs whitespace-nowrap tabular-nums text-primary'
-
 /** What the agent said that level is, under its name and quieter: its sentence, not Hemera's. */
 const SAID = 'text-center text-xs text-balance text-muted-foreground'
 
 /** A word of the stack that is not the one being shown: drawn, taking its room, unread. */
 const UNSHOWN = 'invisible'
 
-/** What the effort is being set for, under it and quieter, because it is not what is being set. */
-const CAPTION = 'max-w-full truncate text-center text-xs text-muted-foreground'
-
-/** The same, read from the left, which is where a card's second line starts. */
-const CAPTION_START = 'max-w-full truncate text-xs text-muted-foreground'
-
-/** The header of the card look: the bolt, and the two lines of type beside it. */
-const HEAD = 'flex items-center gap-2'
-
-/** The bolt, in a tile of the accent's own quiet fill so it reads as a mark and not as a glyph. */
-const BOLT =
-  'flex shrink-0 items-center justify-center rounded-sm bg-primary-muted p-1 text-primary-muted-foreground'
-
-/** The two lines the bolt stands beside. */
-const TITLES = 'flex min-w-0 flex-col'
-
-/** The level and the chevron after it, which is what says the word is what the card sets. */
-const TITLE = 'flex items-center gap-0.5 text-xs font-medium text-primary'
-
-/** The chevron itself, in the accent the word beside it is in, at the far end of its line.
-    `ml-auto`: the word is drawn in a cell as wide as the longest of them so that the header
-    never changes width, and a chevron pinned to the end of a word of another length would be a
-    chevron that moved every time the level did. */
-const AFFORDANCE = 'ml-auto flex text-primary'
+/**
+ * And the word beside a level's name when the agent advises it: quiet, because the name is what
+ * is being set and this is a thing said about it.
+ */
+const ADVISED_WORD = 'text-muted-foreground'
 
 /** The scale under the hand: the cursor says the thumb is being held rather than aimed at. */
 const HELD = 'cursor-grabbing'
+
+/** What the pointer is read on: the marks and the track, as one row. */
+const ROW = 'flex cursor-pointer touch-none items-stretch gap-3'
 
 /** The short marks, one per notch and down — `col-reverse`, so the first level is lowest. */
 const MARKS = 'flex flex-col-reverse justify-between gap-2'
@@ -169,16 +131,18 @@ const MARKS = 'flex flex-col-reverse justify-between gap-2'
  * and one width for all of them, so the track sits in the same place whatever is on.
  */
 const MARK_WORD =
-  'flex h-4 w-8 shrink-0 items-center justify-end gap-1 text-xs tabular-nums text-muted-foreground'
+  'flex h-4 w-8 shrink-0 items-center justify-end text-xs tabular-nums text-muted-foreground'
 
 /** The mark of a level behind the reader, in the accent the fill beside it is drawn in. */
-const MARK_WORD_DONE = 'text-primary'
+const MARK_DONE = 'text-primary'
 
 /** The notches and the track they sit on, down and in the same order as the marks. */
 const COLUMN = 'relative flex flex-col-reverse items-center justify-between gap-2'
 
 /**
- * The well of the instrument look: the groove the track is sunk into.
+ * The groove the track is sunk into, which is what makes this an instrument rather than a form
+ * control: a track drawn on the panel is a line somebody put there, and a track sunk into a
+ * well is part of something.
  *
  * It reaches past the column it is drawn in on all four sides rather than the column being made
  * wider, because the column's width is the width of a notch and the rail is measured off it:
@@ -187,11 +151,40 @@ const COLUMN = 'relative flex flex-col-reverse items-center justify-between gap-
 const WELL =
   'pointer-events-none absolute -inset-x-1.5 -inset-y-1 rounded-full bg-surface-page track-well'
 
-/** The room one notch is drawn in, which is one step of the scale and the same in every look. */
+/** The track: a thin line in the page's own muted surface, on a rim of its own. */
+const TRACK =
+  'absolute inset-x-0 inset-y-2 mx-auto w-track overflow-hidden rounded-full bg-muted ring-1 ring-border ring-inset'
+
+/**
+ * The part of it behind the reader: the accent, which is what says how much of the scale is on.
+ * It is anchored at the foot of the track, because a fill growing downwards from the top would
+ * read as a scale running backwards.
+ */
+const FILLED = 'absolute bottom-0 left-0 w-full rounded-full bg-primary'
+
+/** The room one notch is drawn in, which is one step of the scale. */
 const CELL = 'relative flex size-4 shrink-0 items-center justify-center'
 
-/** A notch, whichever side of the thumb it is on; each look says how wide and in what colour. */
-const DOT = 'relative rounded-full'
+/** A notch ahead of the reader: a dot a little wider than the track, so it reads as a mark on it. */
+const DOT = 'relative size-1 rounded-full bg-input'
+
+/**
+ * And one behind them. A dot on the filled length has the accent underneath it, so a dot in the
+ * accent is not a dot at all: it is drawn in what reads *on* the accent, which is the fill's
+ * own foreground role.
+ */
+const DOT_DONE = 'bg-primary-foreground'
+
+/**
+ * The level the agent advises: a rule drawn across the track at its notch.
+ *
+ * Wider than the notch it replaces and than the track it crosses, so it reads as a line laid
+ * over the scale rather than as a fat dot — which is the whole difference between a mark and a
+ * value. It is in the accent on both sides of the thumb: the fill runs under its middle and its
+ * ends stand on the panel, and a rule that changed colour as the thumb passed it would read as
+ * something the reader had set.
+ */
+const RULE = 'absolute h-0.5 w-8 rounded-full bg-primary'
 
 /**
  * The length the thumb travels: the middle of the lowest notch to the middle of the highest,
@@ -203,106 +196,120 @@ const RAIL = 'pointer-events-none absolute inset-x-0 inset-y-2'
 /**
  * Where the thumb is hung: across the whole width of the column and centred in it.
  *
- * The thumb of a look may be wider than a notch — the instrument's is twenty pixels against a
- * sixteen-pixel cell — so what is positioned is a full-width row and the thumb is centred
- * inside it. A thumb pinned to the column's left edge would hang off to one side the moment it
- * stopped being exactly one cell wide.
+ * The thumb is wider than a notch — twenty pixels against a sixteen-pixel cell — so what is
+ * positioned is a full-width row and the thumb is centred inside it. A thumb pinned to the
+ * column's left edge would hang off to one side.
  */
 const THUMB = 'absolute inset-x-0 flex translate-y-1/2 justify-center'
 
-/** The chip that travels with the thumb, carrying the short mark of the level it is on. */
-const CHIP =
-  'pointer-events-none absolute inset-y-0 left-full ml-2 flex items-center rounded-full bg-primary-muted px-1.5 text-xs font-medium tabular-nums whitespace-nowrap text-primary-muted-foreground'
+/** The room the thumb and its two halos are drawn in. */
+const KNOB = 'relative size-thumb-lg shrink-0'
 
-/** What one look is: which pieces are drawn, and what each of the shared ones is drawn as. */
-interface LookRules {
-  /** The box around the whole control. */
-  frame: string
-  /** The marks and the track beside them, and what the pointer is read on. */
-  row: string
-  /** Whether the short marks stand in a column of their own down the side of the track. */
-  marks: boolean
-  /** Whether the agent's own sentence about the level is drawn under its name. */
-  said: boolean
-  /** Whether the level's short mark travels beside the thumb in a chip. */
-  chip: boolean
-  /** Whether the track is sunk into a well. */
-  well: boolean
-  /** Whether the halo carries its wide, blurred layer as well as its ring. */
-  glow: boolean
-  /** How thick the track is drawn, and whether it is drawn on a rim of its own. */
-  track: string
-  /** How large a notch ahead of the reader is drawn, and in what colour. */
-  dot: string
-  /**
-   * And what one behind the reader is drawn in.
-   *
-   * A dot on the filled length has the accent underneath it, so a dot in the accent is not a
-   * dot at all: the two looks that want their notches read all the way down the scale draw the
-   * passed ones in what reads *on* the accent, which is the fill's own foreground role. The
-   * minimal look wants the opposite — one weight, one length, no ticks in it — so its passed
-   * notches disappear into the fill, which is what `MARK_DONE` is.
-   */
-  dotDone: string
-  /** How large the thumb is drawn. */
-  thumb: string
-  /** What the thumb itself is: a surface, its rim, and what lights it. */
-  knob: string
-}
+/**
+ * The halo: the accent bleeding out of the thumb, which is what says the round thing on the
+ * track is the thing the hand has hold of. It brightens under the hand and under the focus, on
+ * the theme's own `thumb-motion` — a CSS transition, so a reader asking for less movement is
+ * given the end of it and nothing on the way.
+ *
+ * `active` and not only `hover`: a thumb being dragged is held rather than pointed at, and a
+ * halo that went back to its resting strength the moment the hand started moving would say the
+ * control had been let go of.
+ */
+const HALO =
+  'thumb-motion absolute inset-0 rounded-full halo group-hover:halo-strong group-focus-visible:halo-strong group-active:halo-strong'
 
-/** The thumb as every look but the minimal one draws it: a lighter core inside an accent rim. */
+/**
+ * The wide, blurred layer under that ring: the light the thumb throws on the surface it sits
+ * on, which is what makes a thumb read as lit rather than as drawn.
+ */
+const GLOW =
+  'thumb-motion absolute inset-0 rounded-full halo-glow group-hover:halo-glow-strong group-focus-visible:halo-glow-strong group-active:halo-glow-strong'
+
+/** The thumb itself: a domed core inside an accent rim, larger than the track it runs on. */
 const DOMED =
   'thumb-motion relative block size-full rounded-full border-2 border-primary bg-card thumb-dome group-hover:scale-110 group-active:scale-95'
 
-/** And as the minimal one does: the same surface, at a rim thin enough to belong to a hairline. */
-const PLAIN =
-  'thumb-motion relative block size-full rounded-full border border-primary bg-card shadow-sm group-hover:scale-110 group-active:scale-95'
+/**
+ * Where a level sits along the track, between the foot of it and the head: 0 and 1.
+ *
+ * Measured between the middle of the first notch and the middle of the last, which is where the
+ * track itself begins and ends: a fill measured edge to edge would stop short of the last notch
+ * at the top of the scale and read as a scale that cannot be filled.
+ */
+function fractionAt(here: number, last: number): number {
+  if (here <= 0) return 0
+  if (last <= 0) return 1
+  return here / last
+}
 
-const LOOKS: Record<EffortLook, LookRules> = {
-  instrument: {
-    frame: 'items-center gap-1.5 rounded-lg px-2 py-2',
-    row: 'flex cursor-pointer touch-none items-stretch gap-3',
-    marks: true,
-    said: true,
-    chip: true,
-    well: true,
-    glow: true,
-    track: 'w-track ring-1 ring-border ring-inset',
-    dot: 'size-1 bg-input',
-    dotDone: 'bg-primary-foreground',
-    thumb: 'relative size-thumb-lg shrink-0',
-    knob: DOMED,
-  },
-  minimal: {
-    frame: 'items-center gap-2 rounded-md px-2 py-2',
-    row: 'flex cursor-pointer touch-none items-stretch',
-    marks: false,
-    said: false,
-    chip: false,
-    well: false,
-    glow: false,
-    // A hairline has no room for a rim: a one-pixel ring inside a two-pixel track is the track.
-    track: 'w-track-hair',
-    dot: 'size-1 bg-border',
-    dotDone: MARK_DONE,
-    thumb: 'relative size-thumb-sm shrink-0',
-    knob: PLAIN,
-  },
-  card: {
-    frame:
-      'lift-motion items-stretch gap-3 rounded-lg border border-border bg-card p-3 shadow-sm hover:shadow-lg',
-    row: 'flex cursor-pointer touch-none items-stretch self-center',
-    marks: false,
-    said: false,
-    chip: false,
-    well: false,
-    glow: true,
-    track: 'w-track ring-1 ring-border ring-inset',
-    dot: 'size-1 bg-input',
-    dotDone: 'bg-primary-foreground',
-    thumb: 'relative size-thumb-lg shrink-0',
-    knob: DOMED,
-  },
+/** The same place as the length CSS draws it, which is what the fill and the thumb are given. */
+function share(fraction: number): string {
+  return `${fraction * 100}%`
+}
+
+/**
+ * How far a page key goes: a third of the scale, and never less than an arrow's own step.
+ *
+ * A page has to be more than an arrow and less than End, and a fixed number of steps would be
+ * one or the other depending on how many levels the agent announced — two steps is a page of
+ * Claude's six and the whole of OpenCode's three.
+ */
+function pageOf(last: number): number {
+  return Math.max(1, Math.round(last / 3))
+}
+
+/**
+ * Where an arrow, a page key, Home or End take the scale, and `null` for any other key.
+ *
+ * Up and right go on, down and left come back, the page keys go the same way by more than one,
+ * and Home and End are its two ends. It stops at either end rather than wrapping round: a scale
+ * that came back to the top from the bottom is a scale nobody can hold the shape of.
+ */
+function steppedBy(key: string, here: number, last: number): number | null {
+  if (key === 'ArrowUp' || key === 'ArrowRight') return Math.min(here + 1, last)
+  if (key === 'ArrowDown' || key === 'ArrowLeft') return Math.max(here - 1, 0)
+  if (key === 'PageUp') return Math.min(here + pageOf(last), last)
+  if (key === 'PageDown') return Math.max(here - pageOf(last), 0)
+  if (key === 'Home') return 0
+  if (key === 'End') return last
+  return null
+}
+
+/** How long a level's own word may be before it is worth shortening at all. */
+const SHORT = 3
+
+/**
+ * The short mark every level of the scale is written beside its notch as.
+ *
+ * A vertical scale has no room for the agent's own words down its side, and a scale with no
+ * words at all is five identical dots: the mark is the one letter that says which notch is
+ * which without the panel growing a column of text. It is derived from the label and never
+ * chosen here, because the levels are the agent's and not Hemera's.
+ *
+ * The rule is the initials, the label itself when it is short enough to stand as it is, and the
+ * first two letters where two levels would otherwise carry the same letter: Claude's five come
+ * out `L`, `M`, `H`, `XH` and `Max`. It is a set of marks and not a set of names — two levels
+ * that still collide read the same, and the word above the track is what settles it.
+ */
+function marksOf(labels: readonly string[]): string[] {
+  const marks: string[] = []
+  for (const label of labels) marks.push(markOf(label, marks))
+  return marks
+}
+
+/** One mark, kept out of the marks already given out. */
+function markOf(label: string, taken: readonly string[]): string {
+  const words = label.split(/[^\p{L}\p{N}]+/u).filter((word) => word !== '')
+  // Two words are two initials: an agent that says "Very high" means both of them.
+  if (words.length > 1) return words.map((word) => word.slice(0, 1).toUpperCase()).join('')
+  const word = words[0] ?? label
+  // `x` in front of a level is a prefix and not a word: `Xhigh` is an extra high, and reads XH.
+  const first = /^x\p{L}/iu.test(word)
+    ? `X${word.slice(1, 2).toUpperCase()}`
+    : word.slice(0, 1).toUpperCase()
+  if (!taken.includes(first)) return first
+  // `Medium` took the M, so `Max` is written out rather than the two of them reading alike.
+  return word.length <= SHORT ? word : word.slice(0, 2)
 }
 
 /**
@@ -330,9 +337,7 @@ export function EffortSlider({
   effort,
   onEffortChange,
   disabled,
-  caption,
-  look = 'instrument',
-}: EffortProps & { look?: EffortLook | undefined }): ReactNode {
+}: EffortProps): ReactNode {
   const frame = useRef<HTMLDivElement>(null)
   const rail = useRef<HTMLSpanElement>(null)
   /**
@@ -344,22 +349,34 @@ export function EffortSlider({
   /** Where that hand is along the track, and `null` when there is none: what is drawn. */
   const [held, setHeld] = useState<number | null>(null)
   const glide = useTransition(morph)
-  if (efforts.length === 0) return null
 
-  const drawn = LOOKS[look]
-  const here = efforts.findIndex((one) => one.id === effort)
-  const last = efforts.length - 1
-  const current = efforts[here]
-  const marks = marksOf(efforts.map((one) => one.label))
-  const described = drawn.said && efforts.some((one) => one.description !== undefined)
-  /** Where the thumb is drawn: under the hand while it is held, on its own notch otherwise. */
-  const at = held ?? fractionAt(here, last)
+  /** The notches: the levels the agent announced, less a `Default` it never resolved. */
+  const levels = efforts.filter((one) => one.id !== UNRESOLVED)
+  if (levels.length === 0) return null
+
+  const last = levels.length - 1
+  const here = levels.findIndex((one) => one.id === effort)
+  /** The level whose word is over the track: what is set, `Default` included. */
+  const shown: EffortChoice | undefined = efforts.find((one) => one.id === effort)
+  /** The level the agent advises, which is where the scale opens and where the rule is drawn. */
+  const advised = levels.findIndex((one) => one.recommended === true)
+  /**
+   * Which notch the thumb rests on: the level that is set, the advised one while nothing is,
+   * and the foot of the track for an unresolved `Default` or an agent that advises nothing.
+   */
+  const standing = here === -1 && shown === undefined ? advised : here
+  /** And what the scale reads as, which is the level that is set or the one it opened on. */
+  const said: EffortChoice | undefined = shown ?? levels[standing]
+  const marks = marksOf(levels.map((one) => one.label))
+  const described = efforts.some((one) => one.description !== undefined)
+  /** Where the thumb is drawn: under the hand while it is held, on its notch otherwise. */
+  const at = held ?? fractionAt(standing, last)
   /** What the thumb and the fill travel on: nothing at all while a hand is moving them. */
   const travel = held === null ? glide : instant
 
   /** Sets the level at that index, and says nothing about one that is already set. */
   const set = (index: number): void => {
-    const one = efforts[index]
+    const one = levels[index]
     if (one !== undefined && one.id !== effort) onEffortChange(one.id)
   }
 
@@ -384,22 +401,6 @@ export function EffortSlider({
     setHeld(null)
   }
 
-  /** The word of the level that is on, drawn once per level so the column never changes width. */
-  const words = (className: string, stack: string): ReactNode => (
-    <span aria-hidden="true" className={stack}>
-      {efforts.map((one) => (
-        <span key={one.id} className={cn(LAID, className, one.id !== effort && UNSHOWN)}>
-          {one.label}
-          {/* The level the agent advises, said beside its name and quietly: it is what the
-               `Default` entry used to stand for, and never an entry of its own. */}
-          {one.recommended === true && <span className={ADVISED_WORD}>{ADVISED_BESIDE}</span>}
-        </span>
-      ))}
-      {/* Nothing set yet: the control says what it is for, in the room the words leave. */}
-      <span className={cn(LAID, className, here !== -1 && UNSHOWN)}>Effort</span>
-    </span>
-  )
-
   return (
     /*
       One element with the role, the focus and the keys. `aria-disabled` and not `disabled`,
@@ -412,47 +413,42 @@ export function EffortSlider({
       aria-orientation="vertical"
       aria-valuemin={0}
       aria-valuemax={last}
-      aria-valuenow={here === -1 ? 0 : here}
-      aria-valuetext={levelSaid(current)}
+      aria-valuenow={standing === -1 ? 0 : standing}
+      aria-valuetext={levelSaid(said)}
       aria-disabled={disabled === true ? true : undefined}
       tabIndex={disabled === true ? -1 : 0}
-      data-look={look}
-      className={cn(FRAME, drawn.frame)}
+      className={FRAME}
       onKeyDown={(event) => {
         if (disabled === true) return
-        const next = steppedBy(event.key, here === -1 ? 0 : here, last)
+        const next = steppedBy(event.key, standing === -1 ? 0 : standing, last)
         if (next === null) return
         event.preventDefault()
         set(next)
       }}
     >
       {/* The words are the value, and the value is announced once, by the role: read again as
-          the text inside the control, it would be read twice. */}
-      {look === 'card' ? (
-        <span data-testid="effort-head" className={HEAD}>
-          <span aria-hidden="true" className={BOLT}>
-            <IconBolt size="sm" weight="filled" />
+          the text inside the control, it would be read twice. Every level the agent announced
+          is drawn in the one cell — the unresolved `Default` among them, which has no notch of
+          its own and is still what the scale is on while it is what is set. */}
+      <span aria-hidden="true" className={STACK}>
+        {efforts.map((one) => (
+          <span key={one.id} className={cn(LAID, LEVEL, one.id !== said?.id && UNSHOWN)}>
+            {one.label}
+            {/* The level the agent advises, said beside its name and quietly: it is what the
+                `Default` entry used to stand for, and never an entry of its own. */}
+            {one.recommended === true && <span className={ADVISED_WORD}>{ADVISED_BESIDE}</span>}
           </span>
-          <span className={TITLES}>
-            <span className={TITLE}>
-              {words(LEVEL, STACK_START)}
-              <span aria-hidden="true" className={AFFORDANCE}>
-                <IconChevronRight size="sm" />
-              </span>
-            </span>
-            {/* The model the effort is being set for, on the line the reference gives it. */}
-            {caption !== undefined && <span className={CAPTION_START}>{caption}</span>}
-          </span>
-        </span>
-      ) : (
-        words(look === 'minimal' ? LEVEL_PLAIN : LEVEL, STACK)
-      )}
+        ))}
+        {/* Nothing set and nothing advised: the control says what it is for, in the room the
+            words leave. */}
+        <span className={cn(LAID, LEVEL, said !== undefined && UNSHOWN)}>Effort</span>
+      </span>
 
       {/* Only where the agent described its levels: an empty line under the name is a gap. */}
       {described && (
         <span aria-hidden="true" className={SAYINGS}>
           {efforts.map((one) => (
-            <span key={one.id} className={cn(LAID, SAID, one.id !== effort && UNSHOWN)}>
+            <span key={one.id} className={cn(LAID, SAID, one.id !== said?.id && UNSHOWN)}>
               {one.description}
             </span>
           ))}
@@ -461,7 +457,7 @@ export function EffortSlider({
 
       <span
         data-testid="effort-scale"
-        className={cn(drawn.row, held !== null && HELD)}
+        className={cn(ROW, held !== null && HELD)}
         onPointerDown={(event) => {
           if (disabled === true) return
           // The press is refused so that dragging does not select the words around the track —
@@ -478,39 +474,29 @@ export function EffortSlider({
         onPointerUp={drop}
         onPointerCancel={drop}
       >
-        {drawn.marks && (
-          <span data-testid="effort-marks" className={MARKS}>
-            {efforts.map((one, index) => (
-              <span key={one.id} className={cn(MARK_WORD, index <= here && MARK_WORD_DONE)}>
-                {one.recommended === true && <span className={ADVISED_DOT} />}
-                {marks[index]}
-              </span>
-            ))}
-          </span>
-        )}
+        <span data-testid="effort-marks" className={MARKS}>
+          {levels.map((one, index) => (
+            <span key={one.id} className={cn(MARK_WORD, index <= standing && MARK_DONE)}>
+              {marks[index]}
+            </span>
+          ))}
+        </span>
 
         <span className={COLUMN}>
-          {drawn.well && <span data-testid="effort-well" className={WELL} />}
+          <span data-testid="effort-well" className={WELL} />
           {/* The track runs from the middle of the lowest notch to the middle of the highest,
               which is half a cell in from each end — so the fill ends on a notch, never past
               one. */}
-          <span className={cn(TRACK, drawn.track, 'inset-x-0 inset-y-2 mx-auto')}>
-            <motion.span
-              className={cn(FILLED, 'bottom-0 left-0 w-full')}
-              animate={{ height: share(at) }}
-              transition={travel}
-            />
+          <span className={TRACK}>
+            <motion.span className={FILLED} animate={{ height: share(at) }} transition={travel} />
           </span>
-          {efforts.map((one, index) => (
+          {levels.map((one, index) => (
             <span key={one.id} data-step={one.id} className={CELL}>
-              <span
-                className={cn(
-                  DOT,
-                  drawn.dot,
-                  index <= here && drawn.dotDone,
-                  one.recommended === true && ADVISED,
-                )}
-              />
+              {one.recommended === true ? (
+                <span data-testid="effort-rule" className={RULE} />
+              ) : (
+                <span className={cn(DOT, index <= standing && DOT_DONE)} />
+              )}
             </span>
           ))}
           <span ref={rail} className={RAIL}>
@@ -520,23 +506,15 @@ export function EffortSlider({
               animate={{ bottom: share(at) }}
               transition={travel}
             >
-              <span data-testid="effort-knob" className={drawn.thumb}>
-                {drawn.glow && <span className={GLOW} />}
+              <span data-testid="effort-knob" className={KNOB}>
+                <span className={GLOW} />
                 <span className={HALO} />
-                <span className={drawn.knob} />
-                {drawn.chip && current !== undefined && (
-                  <span aria-hidden="true" data-testid="effort-chip" className={CHIP}>
-                    {marks[here]}
-                  </span>
-                )}
+                <span className={DOMED} />
               </span>
             </motion.span>
           </span>
         </span>
       </span>
-
-      {/* Only where there is one, and never twice: the card already said it in its header. */}
-      {caption !== undefined && look !== 'card' && <span className={CAPTION}>{caption}</span>}
     </div>
   )
 }

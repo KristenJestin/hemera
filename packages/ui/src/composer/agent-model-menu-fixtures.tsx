@@ -13,18 +13,18 @@ import type {
 } from './agent-model-menu-shared.tsx'
 
 /**
- * The machine the three variants of the model picker are compared on.
+ * The machine the agent menu and its two controls are shown on.
  *
- * One set of agents and one set of answers for all of them, because a comparison where each
- * candidate is shown different data is not a comparison. It is a plausible machine rather than
- * a small one: Claude Code with five models, six efforts and five modes whose names are
- * sentences; Codex with four models and no effort at all; OpenCode with thirty models under
- * three providers, which is where a list has to scroll and a search has to earn its place; and
- * one agent that is installed and signed out, which every panel has to draw and refuse.
+ * One set of agents and one set of answers for all of them, because a panel and the controls
+ * inside it shown on different data are three things nobody can compare. It is a plausible
+ * machine rather than a small one: Claude Code with five models, five levels of effort and five
+ * modes whose names are sentences; Codex with four models and no effort at all; OpenCode with
+ * thirty models under three providers, which is where a list has to scroll and a search has to
+ * earn its place; and one agent that is installed and signed out, which the panel has to draw
+ * and refuse.
  *
  * Nothing here is a component of the design system: it is the story's own engine, and it lives
- * beside the three story files instead of inside one of them so that the three show the same
- * machine.
+ * beside the story files instead of inside one of them so that they all show the same machine.
  */
 
 export const AGENTS: OfferedAgent[] = [
@@ -76,7 +76,30 @@ export const CLAUDE_MODELS = ungrouped([
   'Sonnet 3.7',
 ])
 
-export const CLAUDE_EFFORTS = scale(['Default', 'Low', 'Medium', 'High', 'Xhigh', 'Max'])
+/**
+ * The five levels of Claude Code, with the one it advises marked — which is the shape an
+ * announcement takes once the engine has resolved the agent's own `Default` (decision of
+ * 22 September 2026). `UNRESOLVED_EFFORTS` is the other half of that rule, for the agent that
+ * never said what its `Default` stood for.
+ */
+export const CLAUDE_EFFORTS: EffortChoice[] = [
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium', recommended: true },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Xhigh' },
+  { id: 'max', label: 'Max' },
+]
+
+/**
+ * And the announcement nobody could resolve: `Default` as a value like the others, and no level
+ * named. It is the one case the scale draws no notch for, and the thumb waits at the foot of
+ * the track until a level is chosen.
+ */
+export const UNRESOLVED_EFFORTS: EffortChoice[] = [
+  { id: 'default', label: 'Default', description: 'Whatever the agent starts on' },
+  ...scale(['Low', 'Medium', 'High', 'Xhigh']),
+  { id: 'max', label: 'Max', description: 'Everything it has, for as long as it takes' },
+]
 
 /** Five sentences, and the reason the modes are a list: not one of them is a word. */
 export const CLAUDE_MODES = saying([
@@ -311,31 +334,23 @@ export function SetMode({
   )
 }
 
-/** The controls the three ways of asking for the effort show, so the three read the same. */
+/** What the effort slider shows as controls in the catalogue. */
 export const EFFORT_ARG_TYPES = {
   efforts: { control: 'object', description: 'What the agent says it can think with.' },
   effort: { control: 'text', description: 'The effort the next turn will run at.' },
   disabled: { control: 'boolean' },
-  caption: {
-    control: 'text',
-    description: 'What the effort is being set for; only the dial has the room to say it.',
-  },
   onEffortChange: { action: 'effort chosen', description: 'Called with the id, never the label.' },
 } as const
 
-/** And the controls the three ways of asking for the mode show. */
+/** And what the mode list shows. */
 export const MODE_ARG_TYPES = {
   modes: { control: 'object', description: 'What the agent says it may be told to do.' },
   mode: { control: 'text', description: 'What the next turn may do without asking.' },
   disabled: { control: 'boolean' },
-  across: {
-    control: 'boolean',
-    description: 'Whether the list is folded two to a line; only the list reads it.',
-  },
   onModeChange: { action: 'mode chosen', description: 'Called with the id, never the label.' },
 } as const
 
-/** The controls every variant shows, so the three read the same in the catalogue. */
+/** And the controls of the panel itself. */
 export const ARG_TYPES = {
   agents: { control: 'object', description: 'The agents the engine offered, in its order.' },
   agent: { control: 'text', description: 'The agent chosen so far, or null while none is.' },
