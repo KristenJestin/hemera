@@ -26,15 +26,26 @@ export const MODELS = [
   { value: 'fake-deep', name: 'Fake Deep' },
 ] as const
 
-/** The one option it opens a session with: the models, under the category the menu reads. */
-export const MODEL_OPTION: SessionConfigOption = {
-  id: 'model',
-  type: 'select',
-  name: 'Model',
-  category: 'model',
-  currentValue: MODELS[0].value,
-  options: MODELS.map((model) => ({ value: model.value, name: model.name })),
+/**
+ * The one option it opens a session with: the models, under the category the menu reads.
+ *
+ * Built from the value it is on rather than copied and changed, because the protocol answers a
+ * choice with the whole set of options as they stand: what the agent announces after a pick is
+ * the same option, on another value.
+ */
+export function modelOption(current: string): SessionConfigOption {
+  return {
+    id: 'model',
+    type: 'select',
+    name: 'Model',
+    category: 'model',
+    currentValue: current,
+    options: MODELS.map((model) => ({ value: model.value, name: model.name })),
+  }
 }
+
+/** What it announces when a session opens, which is the first of its models. */
+export const MODEL_OPTION = modelOption(MODELS[0].value)
 
 /** What it thinks before it answers, one thought per turn, folded in the thread. */
 export const THOUGHTS = [
@@ -49,7 +60,7 @@ export const ANSWERS = [
 ] as const
 
 /** What the agent does on the turn of this number, counted from one. */
-export function turnOf(turn: number): { readonly thought: string; readonly answer: string } {
+export function turnOf(turn: number) {
   const at = Math.min(Math.max(turn, 1), ANSWERS.length) - 1
   return { thought: THOUGHTS[at] ?? THOUGHTS[0], answer: ANSWERS[at] ?? ANSWERS[0] }
 }

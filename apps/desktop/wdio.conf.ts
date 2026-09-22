@@ -27,7 +27,7 @@ const application = dirname(fileURLToPath(import.meta.url))
  * holds a thread, which is what reopening the application is. They run in order because the
  * capabilities are read in order and one window runs at a time.
  */
-const CONTINUED: Record<string, string> = { 'sessions.reopened.e2e.ts': 'sessions.e2e.ts' }
+const CONTINUED = new Map([['sessions.reopened.e2e.ts', 'sessions.e2e.ts']])
 
 /**
  * The data folder one spec file runs on, made for it and thrown away after the run (D3-06).
@@ -48,7 +48,7 @@ const CONTINUED: Record<string, string> = { 'sessions.reopened.e2e.ts': 'session
  * starting it somewhere else entirely.
  */
 export function e2eDataOf(spec: string): string {
-  const folder = CONTINUED[basename(spec)] ?? basename(spec)
+  const folder = CONTINUED.get(basename(spec)) ?? basename(spec)
   return join(tmpdir(), `hemera-e2e-${basename(folder, '.e2e.ts')}`)
 }
 

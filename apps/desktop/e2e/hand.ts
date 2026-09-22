@@ -12,10 +12,13 @@ import { browser, expect } from '@wdio/globals'
 /** Presses whatever the page shows under this name, and says so when there is nothing there. */
 export async function press(name: string): Promise<void> {
   // Matched on what the button contains rather than on what it is exactly: a tab carries the
-  // count of what nobody has seen, and the archive button carries the name of the Project.
+  // count of what nobody has seen, and the archive button carries the name of what it puts away
+  // — `Archive Invoice export` — so a label is read by what it starts with.
   const pressed = await browser.execute((label: string) => {
     const button = [...document.querySelectorAll('button')].find(
-      (one) => (one.textContent ?? '').includes(label) || one.getAttribute('aria-label') === label,
+      (one) =>
+        (one.textContent ?? '').includes(label) ||
+        (one.getAttribute('aria-label') ?? '').startsWith(label),
     )
     if (button === undefined) return false
     button.click()

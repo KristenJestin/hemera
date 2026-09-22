@@ -19,15 +19,7 @@
  * the program and ignores the subcommand.
  */
 
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  linkSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -82,18 +74,15 @@ export function installFakeAgent(): void {
  * The path is drawn from the name rather than from `mkdtemp`, for the reason `wdio.conf.ts`
  * spells its data folders out: a folder made on evaluation is a different folder in every
  * worker, and a Session opened again by the instance that comes after has to find the folder it
- * ran in.
+ * ran in. It is kept after a run, like the directory the command itself lives in: the agent is
+ * still running in it when the last spec file ends, and a folder a process is sitting in is a
+ * folder Windows will not let anybody remove.
  */
 export function fakeWorkspace(name: string): string {
   const folder = join(tmpdir(), `hemera-e2e-workspace-${name}`)
   mkdirSync(folder, { recursive: true })
   writeFileSync(join(folder, ENTRY), entryOf(PROGRAM))
   return folder
-}
-
-/** Removes one, which is the last spec file's to do: the one before it left a Session in it. */
-export function removeFakeWorkspace(name: string): void {
-  rmSync(join(tmpdir(), `hemera-e2e-workspace-${name}`), { recursive: true, force: true })
 }
 
 /** The file Windows reads the subcommand as: the program, started from wherever it was run. */
