@@ -98,20 +98,26 @@ const TICK = 'group flex h-3 w-4 shrink-0 items-center justify-center outline-no
 const BAR = 'block h-0.5 w-1.5 rounded-full'
 
 /**
- * A message of the thread, and the mark the rail draws for it.
+ * An entry of the thread, and the mark the rail draws for it when it asks for one.
  */
 export interface ScrollerMessage {
   /** What identifies the entry, for React and for what a press on a mark goes to. */
   id: string
   /**
-   * The beginning of what was written, already written for the platform.
+   * The beginning of what was written, already written for the platform — or nothing.
    *
    * It is what the rail says when the pointer rests on a mark, and what a screen reader reads
    * when the keyboard lands on one: a mark has nothing of its own to say, and the only thing
    * worth saying about it is where it goes. The two are the same words on purpose — what the
    * eye is shown and what is announced are one answer, not two of different lengths.
+   *
+   * Left out, the entry draws no mark at all and the rail's reading position steps over it, as
+   * it steps over a day. That is the opt-in the trial of 22 September 2026 asked for: a rail
+   * that ticked every block of a turn was forty ticks for one question, and the marks a reader
+   * navigates a Session by are what *they* wrote. Everything the agent answered is read by
+   * scrolling through it, which is how it was written.
    */
-  mark: string
+  mark?: string | undefined
   /** What the thread draws there, handed over already drawn. */
   content: ReactNode
   /** A message is never a day; the two are told apart by this and by nothing else. */
@@ -136,9 +142,16 @@ export interface ScrollerDay {
 
 export type ScrollerEntry = ScrollerDay | ScrollerMessage
 
-/** Whether an entry is a message, which is the only kind of entry the rail draws a mark for. */
-function isMessage(entry: ScrollerEntry): entry is ScrollerMessage {
-  return entry.day !== true
+/**
+ * Whether the rail draws a mark for an entry, which is the one question the rail asks of it.
+ *
+ * A day never does, and an entry that named no mark never does either. The same answer decides
+ * the anchor the reading position is counted off and the tick that is drawn, so the two cannot
+ * come apart: a rail whose active index counted one list and drew another would point at the
+ * wrong message every time an unmarked entry went past.
+ */
+function isMarked(entry: ScrollerEntry): entry is ScrollerMessage & { mark: string } {
+  return entry.day !== true && entry.mark !== undefined
 }
 
 /** How wide a mark is drawn: the one being read, the two beside it, and all the others. */
@@ -249,7 +262,7 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     node?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
   }
 
-  const marks = entries.filter(isMessage).map((entry) => ({ id: entry.id, label: entry.mark }))
+  const marks = entries.filter(isMarked).map((entry) => ({ id: entry.id, label: entry.mark }))
 
   return (
     <div className={cn(FRAME, className)}>
@@ -259,9 +272,10 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
             <div
               key={entry.id}
               ref={(node) => {
-                // A day registers as nothing: the rail counts messages and only messages, so
-                // the walk above lands on the same index the rail drew its marks with.
-                anchors.current[index] = entry.day === true ? null : node
+                // A day registers as nothing, and so does an entry that asked for no mark: the
+                // rail counts what it drew and only what it drew, so the walk above lands on
+                // the same index the rail drew its marks with.
+                anchors.current[index] = isMarked(entry) ? node : null
               }}
             >
               {entry.content}

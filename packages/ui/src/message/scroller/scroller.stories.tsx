@@ -267,8 +267,21 @@ const THREAD: ScrollerEntry[] = [
   },
 ]
 
+/**
+ * The entries of that same thread that asked for a mark: the reader's own questions.
+ *
+ * A Session with an agent is mostly the agent's: its answers, its thoughts, its tool calls, its
+ * consoles. The rail is how a reader gets back to something *they* asked, so an entry names a
+ * mark or it draws none — and everything else is read by scrolling, which is how it arrived.
+ */
+const ASKED_FOR = ['ask', 'client', 'question', 'page']
+
+const ASKED: ScrollerEntry[] = THREAD.map((entry) =>
+  entry.day === true || ASKED_FOR.includes(entry.id) ? entry : { ...entry, mark: undefined },
+)
+
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Message/Scroller',
   component: MessageScroller,
   decorators: [withTooltips],
@@ -469,6 +482,38 @@ export const AMarkPressed: Story = {
     })
     // The reader is on a message in the middle of the thread, so the way back is offered.
     expect(canvas.getByRole('button', { name: 'Latest' })).toBeInTheDocument()
+  },
+}
+
+/**
+ * A thread where only some entries asked for a mark, which is how a Session with an agent reads.
+ *
+ * The rail is how a reader finds their way back to something *they* asked. A tick for every
+ * block an agent reported was forty ticks for one question, and the trial of 22 September 2026
+ * made the mark an opt-in: an entry that names none draws none, and the rail's reading position
+ * steps over it exactly as it steps over a day. What matters here is that the two stay in step —
+ * a rail whose active index counted one list and drew another would point at the wrong message
+ * every time an unmarked entry went past.
+ */
+export const OnlyWhatAsksForAMark: Story = {
+  args: { entries: ASKED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const rail = canvas.getByRole('navigation', { name: /^Marks of/ })
+    const marks = within(rail).getAllByRole('button')
+
+    // Four marks where `ARealThread` drew twelve: only what asked for one has one.
+    expect(marks).toHaveLength(ASKED_FOR.length)
+    // And the reading position is still the last mark, which is where the Session opened.
+    expect(marks.at(-1)).toHaveAttribute('aria-current', 'true')
+
+    // Pressed, a mark still lands on its own entry and on no other: the rail counts what it
+    // drew, so its indices and its anchors cannot come apart.
+    await userEvent.click(marks[1]!)
+    await waitFor(() => {
+      expect(marks[1]).toHaveAttribute('aria-current', 'true')
+    })
+    expect(marks.filter((mark) => mark.getAttribute('aria-current') === 'true')).toHaveLength(1)
   },
 }
 
