@@ -58,7 +58,7 @@ const DRAIN_MS = 100
 /** How long a run has to die quietly before its tree is taken down. */
 const GRACE_MS = 5_000
 
-/** A run was asked for by an identifier nothing of this Session answers to. */
+/** A run was asked for by an identifier nothing of this Project answers to. */
 export class UnknownRunError extends Error {
   constructor(readonly id: string) {
     super(`no run of this Project has the identifier "${id}"`)
