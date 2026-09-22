@@ -76,6 +76,7 @@ export {
   installerToolSchema,
   resumeStateSchema,
   stopReasonSchema,
+  toolCallStatusSchema,
 } from './agents.ts'
 export type {
   AgentAvailability,
@@ -87,4 +88,5 @@ export type {
   InstallerTool,
   ResumeState,
   StopReason,
+  ToolCallStatus,
 } from './agents.ts'

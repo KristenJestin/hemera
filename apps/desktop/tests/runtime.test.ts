@@ -14,10 +14,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Fiber, Layer } from 'effect'
 import * as TestClock from 'effect/testing/TestClock'
 
+import type { SessionEntry } from '@hemera/core'
+
 import { MachineEnvironment } from '#engine/agents/discovery.ts'
 import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
-import { AgentRuntime, CANCEL_GRACE } from '#engine/agents/runtime.ts'
+import { AgentRuntime, CANCEL_GRACE, TEXT_LIMIT } from '#engine/agents/runtime.ts'
 import { Projects } from '#engine/projects.ts'
 import {
   ASKED,
@@ -705,6 +707,188 @@ describe('The user’s message is in the thread before the agent has started', (
         const report = yield* Fiber.join(running)
 
         expect(report.stopReason).toBe('end_turn')
+      }),
+    )
+  })
+})
+
+/** A text the thread kept of a call, and whether all of it is there. */
+interface WrittenText {
+  readonly text: string
+  readonly truncated: boolean
+  readonly length: number
+}
+
+/** One block of what a call produced, as the runtime wrote it under `tool_call`. */
+interface WrittenBlock {
+  readonly type: string
+  readonly text?: WrittenText
+  readonly mime?: string | null
+  readonly path?: string
+  readonly newText?: WrittenText
+}
+
+/** The call a `tool_call` entry carries, as the window reads it back. */
+interface WrittenCall {
+  readonly title: string
+  readonly status: string | null
+  readonly locations: readonly { readonly path: string; readonly line: number | null }[]
+  readonly content: readonly WrittenBlock[]
+  readonly rawInput: WrittenText | null
+  readonly rawOutput: WrittenText | null
+}
+
+const callOf = (entry: SessionEntry): WrittenCall => {
+  // SAFETY: the payload of a `tool_call` is what the runtime wrote for it, and this is the one
+  // shape it writes — a payload of another shape would be a defect of the runtime, which is what
+  // the suite is here to catch.
+  const payload = JSON.parse(entry.payload ?? '{}') as { call: WrittenCall }
+  return payload.call
+}
+
+/**
+ * What a call was given and what it answered, kept where the thread can show it (design D5-11).
+ *
+ * A call the thread holds as a title and a status is a call nobody can read afterwards: what
+ * the tool was asked, what it answered and what it printed are what the reader opens a finished
+ * call for, and none of them can be asked for again once the agent has moved on.
+ */
+describe('A tool call keeps what it was given and what it returned', () => {
+  test('its input, its output, its content and the line it named are in the thread', async () => {
+    const agent = fakeAgent({
+      steps: [
+        {
+          does: 'calls',
+          call: {
+            id: 'call-1',
+            title: 'Read parser.ts',
+            kind: 'read',
+            status: 'in_progress',
+            path: '/tmp/atlas/parser.ts',
+            line: 42,
+            rawInput: { path: '/tmp/atlas/parser.ts' },
+          },
+        },
+        {
+          does: 'updates',
+          call: {
+            id: 'call-1',
+            status: 'completed',
+            content: [
+              { type: 'content', content: { type: 'text', text: 'export const parse = () => {}' } },
+            ],
+            rawOutput: { bytes: '512' },
+          },
+        },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'read the parser')
+
+        const entries = yield* heldInThread(session.id, (thread) =>
+          thread.some((entry) => entry.kind === 'tool_call' && entry.state === 'completed'),
+        )
+        const call = callOf(entryOf(entries, 'tool_call'))
+
+        // The line the agent pointed at, and not the file alone.
+        expect(call.locations).toEqual([{ path: '/tmp/atlas/parser.ts', line: 42 }])
+        // What the tool was asked and what it answered, as the agent published them — kept
+        // through the update that only carried the answer.
+        expect(call.rawInput?.text).toBe(JSON.stringify({ path: '/tmp/atlas/parser.ts' }))
+        expect(call.rawOutput?.text).toBe(JSON.stringify({ bytes: '512' }))
+        expect(call.content).toEqual([
+          {
+            type: 'content',
+            text: { text: 'export const parse = () => {}', truncated: false, length: 29 },
+            mime: null,
+          },
+        ])
+      }),
+    )
+  })
+
+  test('a text longer than the thread holds is cut, and says how long it was', async () => {
+    const printed = 'x'.repeat(TEXT_LIMIT + 1_000)
+    const agent = fakeAgent({
+      steps: [
+        {
+          does: 'calls',
+          call: {
+            id: 'call-1',
+            title: 'Run the build',
+            kind: 'execute',
+            status: 'completed',
+            content: [{ type: 'content', content: { type: 'text', text: printed } }],
+          },
+        },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'build it')
+
+        const entries = yield* heldInThread(session.id, (thread) =>
+          thread.some((entry) => entry.kind === 'tool_call'),
+        )
+        const block = callOf(entryOf(entries, 'tool_call')).content[0]
+
+        // What is kept is a row of a thread rather than a build log, and what was cut is said:
+        // a reader shown the beginning of a file has to know it is the beginning.
+        expect(block?.text?.text.length).toBe(TEXT_LIMIT)
+        expect(block?.text?.truncated).toBe(true)
+        expect(block?.text?.length).toBe(printed.length)
+      }),
+    )
+  })
+
+  test('A cancelled tool call is recorded as cancelled', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({
+      steps: [
+        {
+          does: 'calls',
+          call: {
+            id: 'call-1',
+            title: 'Search the repository',
+            kind: 'search',
+            status: 'in_progress',
+          },
+        },
+        { does: 'updates', call: { id: 'call-1', status: 'completed' } },
+      ],
+      between: gate.between,
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'find the reader'))
+
+        yield* heldInThread(session.id, (thread) =>
+          thread.some((entry) => entry.kind === 'tool_call' && entry.state === 'in_progress'),
+        )
+        yield* runtime.stop(session.id)
+        gate.carryOn()
+        yield* Fiber.join(running)
+
+        const entries = yield* heldInThread(session.id, (thread) =>
+          thread.some((entry) => entry.kind === 'turn'),
+        )
+        const call = entryOf(entries, 'tool_call')
+
+        // The call the stop caught in the middle of itself is not left running: ACP has no word
+        // for it, and a call that stays `in_progress` is a spinner that never stops.
+        expect(call.state).toBe('cancelled')
+        expect(callOf(call).status).toBe('cancelled')
+        expect(entryOf(entries, 'turn').state).toBe('cancelled')
       }),
     )
   })

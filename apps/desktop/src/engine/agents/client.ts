@@ -25,6 +25,7 @@ import {
   ndJsonStream,
   type Client as AcpClient,
   type ContentBlock,
+  type ToolCallContent,
   type Cost,
   type SessionNotification,
   type StopReason,
@@ -53,6 +54,37 @@ export class AgentProtocolError extends Data.TaggedError('AgentProtocolError')<{
   }
 }
 
+/** One file a call is about, and where in it, as the agent named them. */
+export interface ToolCallLocation {
+  readonly path: string
+  /** The line the agent pointed at, or null when it named the file alone. */
+  readonly line: number | null
+}
+
+/**
+ * One thing a call carries, in Hemera's words (ACP's `ToolCallContent`).
+ *
+ * Three shapes and not one string of JSON: what a call produced is what the thread draws — the
+ * text it printed, the change it proposes, the terminal it opened — and a reader that had to
+ * parse the protocol's own JSON to find out would be a second implementation of it.
+ */
+export type ToolCallContentBlock =
+  | {
+      readonly type: 'content'
+      /** What the block says, as text; empty for a block that carries bytes rather than words. */
+      readonly text: string
+      /** The media type the agent gave it, and null for plain text, which names none. */
+      readonly mime: string | null
+    }
+  | {
+      readonly type: 'diff'
+      readonly path: string
+      /** What the file held before, and null when the change creates it. */
+      readonly oldText: string | null
+      readonly newText: string
+    }
+  | { readonly type: 'terminal'; readonly terminalId: string }
+
 /** A tool call, as the thread draws it: one report, updated as the agent goes. */
 export interface ToolCallReport {
   readonly id: string
@@ -62,26 +94,26 @@ export interface ToolCallReport {
   /** `pending`, `in_progress`, `completed` or `failed`. */
   readonly status: string | null
   /** The files this call is about, as the agent named them. */
-  readonly locations: readonly string[]
+  readonly locations: readonly ToolCallLocation[]
   /**
-   * What the agent attached to the call — its content blocks, the file change it proposes, the
-   * terminal it opened — as the JSON it was written as.
+   * What the agent attached to the call: its content blocks, the change it proposes, the
+   * terminal it opened, in the order it sent them.
    *
-   * It is kept as JSON rather than as fields of Hemera's own because the shape is ACP's and it
-   * is not one shape: a call carries text, or a diff, or a terminal, or none of them, and the
-   * window reads what it draws out of this rather than the engine inventing a union it would
-   * then have to keep in step with the protocol.
+   * Empty is read as "unchanged" by the runtime, which is the only reader of these reports: an
+   * update carries what changed, and a call that sends no content again is one whose content is
+   * what it already was.
    */
-  readonly detail: string
+  readonly content: readonly ToolCallContentBlock[]
   /**
-   * What kinds of content the call carries — `diff`, `terminal`, `text`, `image` — as it named
-   * them.
+   * What the tool was called with, as the JSON the agent sent; null when it said nothing.
    *
-   * The runtime reads them to write the entries the side column draws on their own, and never
-   * reads the detail to find out: a report says what it holds rather than making its reader
-   * parse it.
+   * Kept as the text it arrived as rather than as fields: the arguments of a tool are the
+   * tool's own shape, and Hemera is not the program that knows what `rg`'s are. Without it a
+   * finished call says what it was about and never what it was asked to do.
    */
-  readonly contents: readonly string[]
+  readonly rawInput: string | null
+  /** What the tool answered, the same way; null when the agent has not answered yet. */
+  readonly rawOutput: string | null
 }
 
 /** One line of the plan the agent is keeping, as it reports it. */
@@ -270,6 +302,61 @@ function textOf(content: ContentBlock): string | null {
   return content.type === 'text' ? content.text : null
 }
 
+/**
+ * One content block of a call, as words and the media type they came under.
+ *
+ * Text is what the thread draws, and what is not text is named rather than carried: an image
+ * and an audio block are megabytes of base64, and a thread is not where they belong — the media
+ * type says what arrived, and the call's raw output holds what the tool actually answered.
+ */
+function saidOf(content: ContentBlock) {
+  switch (content.type) {
+    case 'text':
+      return { text: content.text, mime: null }
+    case 'image':
+    case 'audio':
+      return { text: '', mime: content.mimeType }
+    case 'resource_link':
+      return { text: content.uri, mime: content.mimeType ?? null }
+    case 'resource':
+      return {
+        text: 'text' in content.resource ? content.resource.text : '',
+        mime: content.resource.mimeType ?? null,
+      }
+    default:
+      return { text: '', mime: null }
+  }
+}
+
+/** What a call attached to itself, in Hemera's three shapes. */
+function contentOf(blocks: readonly ToolCallContent[]): readonly ToolCallContentBlock[] {
+  return blocks.map((block) => {
+    if (block.type === 'diff') {
+      return {
+        type: 'diff' as const,
+        path: block.path,
+        oldText: block.oldText ?? null,
+        newText: block.newText,
+      }
+    }
+    if (block.type === 'terminal') {
+      return { type: 'terminal' as const, terminalId: block.terminalId }
+    }
+    return { type: 'content' as const, ...saidOf(block.content) }
+  })
+}
+
+/**
+ * What the agent sent as the raw input or output of a call, as the JSON it sent.
+ *
+ * `undefined` is the agent saying nothing about it — an update carries what changed — and null
+ * is what that becomes here, so a call that says nothing keeps what it already had.
+ */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- the arguments of a tool are the tool's own shape and the protocol says so: this is the boundary where they arrive
+function rawOf(raw: unknown): string | null {
+  return raw === undefined ? null : (JSON.stringify(raw) ?? null)
+}
+
 /** A notification, as an event of the thread — or null for what this lot does not draw. */
 function eventOf(notification: SessionNotification, replay: boolean): AgentEvent | null {
   const update = notification.update
@@ -299,11 +386,13 @@ function eventOf(notification: SessionNotification, replay: boolean): AgentEvent
           title: 'title' in update ? (update.title ?? '') : '',
           kind: 'kind' in update ? (update.kind ?? null) : null,
           status: 'status' in update ? (update.status ?? null) : null,
-          locations: ('locations' in update ? (update.locations ?? []) : []).map(
-            (location) => location.path,
-          ),
-          detail: JSON.stringify('content' in update ? (update.content ?? []) : []),
-          contents: ('content' in update ? (update.content ?? []) : []).map((block) => block.type),
+          locations: ('locations' in update ? (update.locations ?? []) : []).map((location) => ({
+            path: location.path,
+            line: location.line ?? null,
+          })),
+          content: contentOf('content' in update ? (update.content ?? []) : []),
+          rawInput: rawOf('rawInput' in update ? update.rawInput : undefined),
+          rawOutput: rawOf('rawOutput' in update ? update.rawOutput : undefined),
         },
       }
     }

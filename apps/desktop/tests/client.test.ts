@@ -127,7 +127,7 @@ describe('Un tour en cours', () => {
       title: 'Read parser.ts',
       kind: 'read',
       status: 'pending',
-      locations: ['/tmp/atlas/parser.ts'],
+      locations: [{ path: '/tmp/atlas/parser.ts', line: null }],
     })
     // An update carries only what changed: what it does not repeat is read as unchanged.
     expect(calls[1]?.call).toMatchObject({ title: '', status: 'completed' })

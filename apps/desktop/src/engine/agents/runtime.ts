@@ -40,6 +40,8 @@ import {
   type AgentOption,
   type PermissionAnswer,
   type PermissionQuestion,
+  type ToolCallContentBlock,
+  type ToolCallLocation,
   type UsageReport,
   type WindowReport,
   connect,
@@ -278,9 +280,55 @@ interface Call {
   title: string
   kind: string | null
   status: string | null
-  locations: readonly string[]
-  detail: string
+  locations: readonly ToolCallLocation[]
+  content: readonly ToolCallContentBlock[]
+  rawInput: string | null
+  rawOutput: string | null
 }
+
+/**
+ * How much of one text the thread keeps of a call, in characters.
+ *
+ * A tool answers with whatever it answers with — a file, a build log, a directory listing — and
+ * a row of the thread is not the place to hold all of it: what is kept is enough to read, and
+ * what was cut is said rather than hidden, so the window never shows the beginning of a file as
+ * if it were the file.
+ */
+export const TEXT_LIMIT = 64 * 1024
+
+/** A text of a call, as the thread keeps it: cut when it was too long, and honest that it was. */
+interface BoundedText {
+  readonly text: string
+  /** True when what is here is only the beginning of what the agent sent. */
+  readonly truncated: boolean
+  /** How long the whole text was, whether or not all of it is here. */
+  readonly length: number
+}
+
+const bounded = (text: string): BoundedText =>
+  text.length <= TEXT_LIMIT
+    ? { text, truncated: false, length: text.length }
+    : { text: text.slice(0, TEXT_LIMIT), truncated: true, length: text.length }
+
+const boundedOr = (text: string | null): BoundedText | null =>
+  text === null ? null : bounded(text)
+
+/** One content block as the thread keeps it: the same block, with its texts bounded. */
+const boundedBlock = (block: ToolCallContentBlock) => {
+  if (block.type === 'diff') {
+    return { ...block, oldText: boundedOr(block.oldText), newText: bounded(block.newText) }
+  }
+  if (block.type === 'terminal') return block
+  return { ...block, text: bounded(block.text) }
+}
+
+/** What a `tool_call` entry carries: the call as it stands, with every text of it bounded. */
+const payloadOf = (call: Call) => ({
+  ...call,
+  content: call.content.map(boundedBlock),
+  rawInput: boundedOr(call.rawInput),
+  rawOutput: boundedOr(call.rawOutput),
+})
 
 /** A permission the turn is blocked on. */
 interface Pending {
@@ -468,14 +516,17 @@ export const runtimeLayer = Layer.effect(
 
         const said = event.call
         const held = turn?.calls.get(said.id)
-        // An update carries only what changed: a title or a detail it does not repeat is one the
-        // thread already has, and writing the empty one over it would erase what is on screen.
+        // An update carries only what changed: a title, a content or a raw answer it does not
+        // repeat is one the thread already has, and writing the empty one over it would erase
+        // what is on screen.
         const call: Call = {
           title: said.title === '' ? (held?.title ?? '') : said.title,
           kind: said.kind ?? held?.kind ?? null,
           status: said.status ?? held?.status ?? null,
           locations: said.locations.length === 0 ? (held?.locations ?? []) : said.locations,
-          detail: said.detail === '[]' ? (held?.detail ?? '[]') : said.detail,
+          content: said.content.length === 0 ? (held?.content ?? []) : said.content,
+          rawInput: said.rawInput ?? held?.rawInput ?? null,
+          rawOutput: said.rawOutput ?? held?.rawOutput ?? null,
         }
         if (turn !== undefined) turn.calls.set(said.id, call)
 
@@ -483,7 +534,7 @@ export const runtimeLayer = Layer.effect(
           role: 'agent',
           kind: 'tool_call',
           body: call.title,
-          payload: JSON.stringify({ call }),
+          payload: JSON.stringify({ call: payloadOf(call) }),
           correlationId: `call:${said.id}`,
           turnId: turn?.id ?? null,
           state: call.status,
@@ -494,12 +545,13 @@ export const runtimeLayer = Layer.effect(
         // it opened. They are written beside the call rather than inside it, because the side
         // column reads the files a turn touched without reading the calls one by one.
         for (const kind of ['diff', 'terminal'] as const) {
-          if (!said.contents.includes(kind)) continue
+          const blocks = call.content.filter((block) => block.type === kind)
+          if (blocks.length === 0) continue
           yield* write(sessionId, {
             role: 'agent',
             kind,
             body: call.title,
-            payload: call.detail,
+            payload: JSON.stringify(blocks.map(boundedBlock)),
             correlationId: `call:${said.id}:${kind}`,
             turnId: turn?.id ?? null,
             origin,
@@ -1298,6 +1350,23 @@ export const runtimeLayer = Layer.effect(
         // The user stopped the turn, so the turn is closed as cancelled whatever the agent says
         // next: an agent that answers `end_turn` after being cancelled has still been stopped.
         turn.closed = 'cancelled'
+
+        // A call that was still running when the turn was stopped never finished, and the
+        // protocol has no word for it: an agent that is cancelled stops sending updates, and a
+        // call left `in_progress` is a spinner the thread would turn for ever.
+        for (const [id, call] of turn.calls) {
+          if (call.status === 'completed' || call.status === 'failed') continue
+          call.status = 'cancelled'
+          yield* write(sessionId, {
+            role: 'agent',
+            kind: 'tool_call',
+            body: call.title,
+            payload: JSON.stringify({ call: payloadOf(call) }),
+            correlationId: `call:${id}`,
+            turnId: turn.id,
+            state: 'cancelled',
+          }).pipe(Effect.ignore)
+        }
 
         if (held === undefined) return
         yield* attempt('cancelling the turn', held.connection.cancel()).pipe(Effect.ignore)

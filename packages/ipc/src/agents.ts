@@ -170,3 +170,20 @@ export type StopReason = z.infer<typeof stopReasonSchema>
 export const resumeStateSchema = z.enum(['attached', 'fallback', 'lost'])
 
 export type ResumeState = z.infer<typeof resumeStateSchema>
+
+/**
+ * How far a tool call got, in the words the thread draws it with (design D5-11).
+ *
+ * The first four are the protocol's own — a call is announced, runs, finishes or fails. The
+ * fifth is Hemera's, for the one end ACP has no word for: a turn the user stopped leaves the
+ * calls it was running unfinished, and a call left `in_progress` is a spinner that never stops.
+ */
+export const toolCallStatusSchema = z.enum([
+  'pending',
+  'in_progress',
+  'completed',
+  'failed',
+  'cancelled',
+])
+
+export type ToolCallStatus = z.infer<typeof toolCallStatusSchema>

@@ -35,6 +35,7 @@ import {
   type SessionUpdate,
   type StopReason,
   type ToolCall,
+  type ToolCallContent,
   type ToolCallStatus,
   type Usage,
 } from '@agentclientprotocol/sdk'
@@ -59,6 +60,13 @@ export type FakeStep =
         readonly kind?: NonNullable<ToolCall['kind']>
         readonly status?: NonNullable<ToolCall['status']>
         readonly path?: string
+        /** The line in that file the agent points at, which a call may name and rarely does. */
+        readonly line?: number
+        /** What it attached to the call: what it printed, a change, a terminal it opened. */
+        readonly content?: readonly ToolCallContent[]
+        /** What the tool was called with, as the agent publishes it. */
+        readonly rawInput?: Record<string, string>
+        readonly rawOutput?: Record<string, string>
       }
     }
   | {
@@ -67,6 +75,8 @@ export type FakeStep =
         readonly id: string
         readonly status: ToolCallStatus
         readonly title?: string
+        readonly content?: readonly ToolCallContent[]
+        readonly rawOutput?: Record<string, string>
       }
     }
   | {
@@ -288,6 +298,12 @@ function updateOf(step: FakeStep): SessionUpdate | null {
       }
       if (step.call.kind !== undefined) call.kind = step.call.kind
       if (step.call.status !== undefined) call.status = step.call.status
+      if (step.call.line !== undefined && step.call.path !== undefined) {
+        call.locations = [{ path: step.call.path, line: step.call.line }]
+      }
+      if (step.call.content !== undefined) call.content = [...step.call.content]
+      if (step.call.rawInput !== undefined) call.rawInput = step.call.rawInput
+      if (step.call.rawOutput !== undefined) call.rawOutput = step.call.rawOutput
       return call
     }
     case 'updates': {
@@ -297,6 +313,8 @@ function updateOf(step: FakeStep): SessionUpdate | null {
         status: step.call.status,
       }
       if (step.call.title !== undefined) update.title = step.call.title
+      if (step.call.content !== undefined) update.content = [...step.call.content]
+      if (step.call.rawOutput !== undefined) update.rawOutput = step.call.rawOutput
       return update
     }
     case 'spends': {
