@@ -25,6 +25,7 @@ import {
   Queue,
   Result,
   Scope,
+  Semaphore,
   Stream,
 } from 'effect'
 import { existsSync } from 'node:fs'
@@ -650,12 +651,32 @@ export const runtimeLayer = Layer.effect(
     })
 
     /**
+     * One start at a time, per Project and agent.
+     *
+     * Starting a probe is a spawn and a handshake, and two questions asked of the same composer
+     * while that is in flight — the model chosen, then the effort, both after the pool let the
+     * first probe go — would each find no probe and each start one. The second would take the
+     * first's place in the book and the first would be a process nobody can reach, holding the
+     * Project's folder open until the engine stops. The gate is per composer, so an agent being
+     * started does not hold up the question asked of another one.
+     */
+    const probing = new Map<string, Semaphore.Semaphore>()
+
+    const gateOf = (key: string): Semaphore.Semaphore => {
+      const held = probing.get(key)
+      if (held !== undefined) return held
+      const made = Semaphore.makeUnsafe(1)
+      probing.set(key, made)
+      return made
+    }
+
+    /**
      * The probe of one Project and one agent, started if there is none.
      *
      * The agent is resolved first and refused first: an agent this machine does not have and an
      * agent nobody signed in are answered before a process exists (D5-17, D5-21).
      */
-    const probeOf = (
+    const probeStarted = (
       projectId: string,
       provider: AgentProvider,
     ): Effect.Effect<Probe | AgentOfferReport, AgentRuntimeError, Scope.Scope> =>
@@ -731,6 +752,13 @@ export const runtimeLayer = Layer.effect(
         }
         return probe
       })
+
+    /** The same, asked one at a time: a composer asked twice at once starts one agent. */
+    const probeOf = (
+      projectId: string,
+      provider: AgentProvider,
+    ): Effect.Effect<Probe | AgentOfferReport, AgentRuntimeError, Scope.Scope> =>
+      gateOf(`${projectId}:${provider}`).withPermits(1)(probeStarted(projectId, provider))
 
     /** A probe, or the refusal to make one: what `probeOf` answered, told apart. */
     const isProbe = (answered: Probe | AgentOfferReport): answered is Probe =>
