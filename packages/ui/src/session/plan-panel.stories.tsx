@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { AT_ONCE, movesLess, withinFrames } from '../../.storybook/reduced-motion.ts'
 import { PlanPanel, type PlanEntry } from './plan-panel.tsx'
 
 /**
@@ -54,9 +55,17 @@ export const AFoldClosing: Story = {
     await expect(canvas.getByText('Hand the lot to the gate')).toBeVisible()
 
     await userEvent.click(summary)
+    await expect(summary).toHaveAttribute('aria-expanded', 'false')
+    if (movesLess()) {
+      // Asked for less movement, the fold is its end state with no journey to be caught in:
+      // the steps are gone with the press, within a few frames where the spring takes dozens.
+      await expect(
+        await withinFrames(() => canvas.queryByText('Hand the lot to the gate') === null, AT_ONCE),
+      ).toBe(true)
+      return
+    }
     // Mid-exit: the line already says it is closed, and the steps are still in the page folding
     // away. A body that vanished under the press would fail here.
-    await expect(summary).toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.getByText('Hand the lot to the gate')).toBeInTheDocument()
 
     await waitFor(() => {

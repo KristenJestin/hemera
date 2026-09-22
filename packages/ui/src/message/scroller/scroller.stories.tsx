@@ -4,6 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { MotionConfig } from 'motion/react'
 
+import { AT_ONCE, movesLess, withinFrames } from '../../../.storybook/reduced-motion.ts'
 import { ToolCallCard } from '../../activity/tool-call-card.tsx'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
 import { IconSparkles } from '../../icons.ts'
@@ -652,6 +653,15 @@ export const AFoldOpening: Story = {
     const before = block.getBoundingClientRect().top
 
     await userEvent.click(canvas.getByRole('button', { name: /Read src\/billing\/export\.ts/ }))
+
+    if (movesLess()) {
+      // Asked for less movement, there is no journey to catch: the block is in its new place
+      // within a few frames, which is what `AFoldWithoutMotion` says of a tree told the same.
+      await expect(
+        await withinFrames(() => block.getBoundingClientRect().top > before, AT_ONCE),
+      ).toBe(true)
+      return
+    }
 
     const travel = await travelOf(block, 40)
     const arrived = travel.at(-1)!

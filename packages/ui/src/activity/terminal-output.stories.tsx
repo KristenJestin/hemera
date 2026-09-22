@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { AT_ONCE, movesLess, withinFrames } from '../../.storybook/reduced-motion.ts'
 import { TerminalOutput } from './terminal-output.tsx'
 
 /**
@@ -92,9 +93,17 @@ export const AFoldClosing: Story = {
     })
 
     await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    if (movesLess()) {
+      // Asked for less movement, the fold is its end state with no journey to be caught in:
+      // the output is gone with the press, within a few frames where the spring takes dozens.
+      await expect(await withinFrames(() => canvas.queryByText(written) === null, AT_ONCE)).toBe(
+        true,
+      )
+      return
+    }
     // Mid-exit: the row already says it is closed, and the output is still in the page folding
     // away. A body that vanished under the press would fail here.
-    await expect(row).toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.getByText(written)).toBeInTheDocument()
 
     await waitFor(() => {
