@@ -224,8 +224,14 @@ type Refusal =
   | NoAgentError
 
 /** The date every row of one mutation shares, so an entry and its event agree on when. */
+let last = 0
 function now(): string {
-  return new Date().toISOString()
+  // `Sessions.list` orders by `desc(lastWrittenAt), desc(createdAt)`: two writes landing in the
+  // same millisecond must still come out in the order they happened, so the clock is forced to
+  // advance by at least one millisecond on every call instead of ticking on its own.
+  const at = Math.max(Date.now(), last + 1)
+  last = at
+  return new Date(at).toISOString()
 }
 
 /**
