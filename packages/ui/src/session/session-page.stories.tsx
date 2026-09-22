@@ -7,6 +7,7 @@ import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { MessageDaySeparator, MessageGroup } from '../message/message.tsx'
 import type { MessageLine, MessageState } from '../message/model.ts'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
+import { ActivityRow, type ActivityRowProps } from './activity-row.tsx'
 import { SessionEmpty, SessionHeader } from './session.tsx'
 
 /**
@@ -37,9 +38,23 @@ interface PageProps {
   editing?: boolean
   /** Whether the page is a Session with nothing in it yet. */
   empty?: boolean
+  /** What the last turn is doing, or how it ended: the row above the box. */
+  activity?: ActivityRowProps
+  /** Whether a turn is running, which makes the send a Stop. */
+  running?: boolean
 }
 
-function Page({ title, meta, thread, state, error, editing = false, empty = false }: PageProps) {
+function Page({
+  title,
+  meta,
+  thread,
+  state,
+  error,
+  editing = false,
+  empty = false,
+  activity,
+  running = false,
+}: PageProps) {
   const [name, setName] = useState(title)
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -112,8 +127,11 @@ function Page({ title, meta, thread, state, error, editing = false, empty = fals
             <MessageScroller label="The thread of this Session" entries={entries} />
           )}
         </div>
-        <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+          {activity !== undefined && <ActivityRow {...activity} />}
           <Composer
+            running={running}
+            onStop={fn()}
             value={value}
             onValueChange={setValue}
             files={files}
@@ -247,6 +265,39 @@ export const States: Story = {
     // be sent again: the reason is said, and the way back is offered.
     expect(canvas.getByText('Not saved: the profile is read-only')).toBeInTheDocument()
     expect(canvas.getAllByRole('button', { name: 'Retry' })).toHaveLength(1)
+  },
+}
+
+/**
+ * A turn under way: the row above the box says what it is doing, for the whole of the turn, and
+ * the send is the Stop — destructive, in the same place — while the box stays open for the next
+ * message (trial of 22 September 2026).
+ */
+export const TurnRunning: Story = {
+  parameters: { controls: { disable: true } },
+  args: { running: true, activity: { state: 'running', detail: 'cat recap.md' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Running cat recap.md')).toBeVisible()
+    const stop = canvas.getByRole('button', { name: 'Stop' })
+    expect(stop).toBeEnabled()
+    expect(stop).toHaveClass('bg-destructive')
+    expect(canvas.queryByRole('button', { name: /Send/ })).toBeNull()
+  },
+}
+
+/**
+ * The turn is over: the row stays, quiet, and says how long it took, until the next message is
+ * sent; the Stop is the send again.
+ */
+export const TurnDone: Story = {
+  parameters: { controls: { disable: true } },
+  args: { activity: { state: 'done', elapsedMs: 12_000 } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Done in 12 s')).toBeVisible()
+    expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expect(canvas.getByRole('button', { name: /Send/ })).toBeInTheDocument()
   },
 }
 
