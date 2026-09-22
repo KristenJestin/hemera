@@ -5,7 +5,7 @@ import { useRef, useState } from 'react'
 import { Button } from '../components/button/button.tsx'
 import { Loading } from '../components/loading/loading.tsx'
 import { Popover } from '../components/popover/popover.tsx'
-import { arrival, useTransition } from '../motion.ts'
+import { arrival, slide, useTransition } from '../motion.ts'
 import { AgentMark } from './agent-mark.tsx'
 import {
   AgentList,
@@ -35,9 +35,11 @@ import { nameOfCurrent } from './current-name.ts'
  * answers and never after.
  *
  * **What moves.** Only the right column: picking another agent swaps it for that agent's models
- * with a crossfade and a short slide in from the side, on the `arrival` preset — a column that
- * changed contents with no movement at all reads as a list that was there all along. Transform
- * and opacity, and `useTransition` answers a system asking for less movement with no journey.
+ * with a crossfade and the `slide` kind of the preset at its `nudge` distance, a short travel
+ * in from the side on the `arrival` timing — a column that changed contents with no movement at
+ * all reads as a list that was there all along. The column is replaced in place, so it is a
+ * nudge and not a stage swap. `useTransition` answers a system asking for less movement with no
+ * journey.
  *
  * **While the agent is being read**, the models already on the right stay on the right, and the
  * indicator sits in that column's header.
@@ -64,16 +66,6 @@ const SURFACE = 'absolute inset-0 flex flex-col gap-2'
 /** The effort and the modes, across the foot of both columns. */
 const BAND = 'flex shrink-0 flex-col gap-2 border-t border-border pt-2'
 
-/**
- * How far the models slide as they are swapped: a nudge, not a stage change — the column is
- * being replaced in place, and the panel around it does not move at all.
- *
- * Written here rather than in `motion.ts` because the preset has no `slide` kind with a
- * direction yet; the timing is the preset's own, and only the distance is local.
- */
-const FROM_THE_RIGHT = '12%'
-const TO_THE_LEFT = '-12%'
-
 export function AgentModelMenuPanes({
   agents,
   agent,
@@ -96,6 +88,9 @@ export function AgentModelMenuPanes({
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const transition = useTransition(arrival)
+
+  /** The column is replaced where it stands, so the models travel a nudge and not a width. */
+  const { enter, leave } = slide('nudge')
 
   const chosen = agents.find((one) => one.id === agent) ?? null
 
@@ -149,9 +144,9 @@ export function AgentModelMenuPanes({
               <motion.div
                 key={agent ?? 'none'}
                 className={SURFACE}
-                initial={{ opacity: 0, x: FROM_THE_RIGHT }}
+                initial={{ opacity: 0, x: enter }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: TO_THE_LEFT }}
+                exit={{ opacity: 0, x: leave }}
                 transition={transition}
               >
                 <PanelHead title={chosen?.name ?? 'Model'} loading={loading} />

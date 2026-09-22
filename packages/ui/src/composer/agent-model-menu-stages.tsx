@@ -7,7 +7,7 @@ import { Button } from '../components/button/button.tsx'
 import { Loading } from '../components/loading/loading.tsx'
 import { Popover } from '../components/popover/popover.tsx'
 import { IconChevronLeft } from '../icons.ts'
-import { arrival, useTransition } from '../motion.ts'
+import { arrival, slide, useTransition } from '../motion.ts'
 import { AgentMark } from './agent-mark.tsx'
 import {
   AgentList,
@@ -41,9 +41,10 @@ import { nameOfCurrent } from './current-name.ts'
  * under it is the panel's own surface rather than a void, because the alternative is a box that
  * changes size between one stage and the next.
  *
- * **What moves.** The leaving stage slides out by the width of the panel while the entering one
- * arrives from the other side — right on the way forward, left on the way back — on the
- * `arrival` preset. A transform and nothing else: the two surfaces stay opaque the whole way,
+ * **What moves.** The `slide` kind of the preset, at its `stage` distance: the leaving stage
+ * goes out by the width of the panel while the entering one arrives from the other side —
+ * right on the way forward, left on the way back — on the `arrival` timing. A transform and
+ * nothing else here: the two surfaces stay opaque the whole way,
  * because a stage fading through half its opacity is a stage nobody can read mid-flight, and
  * whatever checks the page at that moment is right to call the text unreadable. `useTransition`
  * answers a system asking for less movement with the end state and no journey.
@@ -61,16 +62,6 @@ const STAGES = 'relative min-h-0 flex-1 overflow-hidden'
 
 /** A stage, drawn over the other one for as long as the two are both on their way. */
 const SURFACE = 'absolute inset-0 flex flex-col gap-2'
-
-/**
- * How far a stage travels: the whole width of the panel, so one surface replaces the other
- * rather than nudging it.
- *
- * Written here rather than in `motion.ts` because the preset has no `slide` kind with a
- * direction yet; the timing is the preset's own, and only the distance is local.
- */
-const FROM_THE_RIGHT = '100%'
-const TO_THE_LEFT = '-100%'
 
 /** Which of the two lists the panel is on: the agents, or the models of the one that was picked. */
 type Stage = 'agent' | 'model'
@@ -103,8 +94,8 @@ export function AgentModelMenuStages({
   const chosen = agents.find((one) => one.id === agent) ?? null
   /** The stage the panel is on: a Session's agent leaves it only one to be on. */
   const shown: Stage = fixed ? 'model' : stage
-  const enter = forward ? FROM_THE_RIGHT : TO_THE_LEFT
-  const leave = forward ? TO_THE_LEFT : FROM_THE_RIGHT
+  /** A stage swap: the whole width of the panel, so one surface replaces the other. */
+  const { enter, leave } = slide('stage', forward ? 'forward' : 'backward')
 
   /** Closes the panel and hands the focus back to what opened it. */
   const close = () => {

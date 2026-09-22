@@ -119,3 +119,69 @@ export function useTransition(preset: Transition = arrival): Transition {
   if (reducedMotion === 'always') return instant
   return system === true ? instant : preset
 }
+
+/**
+ * Which way a surface is travelling, from the reader's side: on into the next thing, or back
+ * to where they came from. The same kind plays both, mirrored, so a panel never comes back the
+ * way it went.
+ */
+export type SlideDirection = 'forward' | 'backward'
+
+/**
+ * How far a slide goes, and the two answers a surface ever needs.
+ *
+ * `stage` is a swap: one surface leaves by its own width and the next arrives from the other
+ * side, so what is read is a replacement — the agent stage of the model menu giving way to the
+ * models. `nudge` is the same movement kept short, for a surface that is being replaced *in
+ * place* while the frame around it does not move at all: the models column of the two-column
+ * menu changing agent. A nudge as long as a swap reads as the whole panel sliding; a swap as
+ * short as a nudge reads as a list that was there all along.
+ */
+export const SLIDE = { stage: '100%', nudge: '12%' } as const
+
+/** Which of the two distances a slide is drawn at. */
+export type SlideDistance = keyof typeof SLIDE
+
+/** Where a sliding surface comes in from, and where the one it replaces goes out to. */
+export interface Slide {
+  enter: string
+  leave: string
+}
+
+/**
+ * The `slide` kind: a surface arriving from one side while the one it replaces leaves by the
+ * other, at one of the two distances and in one of the two directions.
+ *
+ * The timing is not its own — a slide is something putting itself in place, so it is played on
+ * `arrival` like everything else that does. Only the geometry lives here, which is the whole
+ * reason it is a kind and not a pair of constants in whichever component needed it first.
+ */
+export function slide(distance: SlideDistance, direction: SlideDirection = 'forward'): Slide {
+  const away = SLIDE[distance]
+  const back = `-${away}`
+  return direction === 'forward' ? { enter: away, leave: back } : { enter: back, leave: away }
+}
+
+/**
+ * The `expand` and `collapse` kinds: a body whose height is its own, growing and folding away.
+ *
+ * Height and opacity together. The height is what makes room — the page under it moves over
+ * rather than being redrawn — and the opacity is what keeps the clipped edge from reading as a
+ * line of text cut in half on the way. A tool call's body, a thought, a menu panel whose stage
+ * is taller than the last one: all of them are this.
+ *
+ * Played on `morph`, which is the spring made for a dimension: it arrives without turning
+ * round, and a body that overshot its height would take the whole column below it along.
+ */
+export const expand = { height: 'auto', opacity: 1 } as const
+export const collapse = { height: 0, opacity: 0 } as const
+
+/**
+ * The `push` kind: what a neighbour does when the thing above it grows or folds away.
+ *
+ * The same spring the growth itself is played on, deliberately and by name rather than by
+ * reaching for `morph` at the call site — because the one thing a push must never do is arrive
+ * on a different beat from what pushed it. Read it on `layout`, where motion measures where
+ * each block ended up and plays the difference.
+ */
+export const push: Transition = morph
