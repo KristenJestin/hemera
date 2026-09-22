@@ -177,7 +177,9 @@ export function AgentModelMenuStages({
       side="top"
       align="end"
       keepFocus
-      label="Agent, model, effort and mode"
+      // What the panel is called, which is what it holds: a Session runs the agent it was made
+      // with, so its menu has no agent stage to announce.
+      label={fixed ? 'Model, effort and mode' : 'Agent, model, effort and mode'}
       trigger={
         <Button ref={trigger} variant="ghost" size="sm" disabled={disabled} className={className}>
           {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}

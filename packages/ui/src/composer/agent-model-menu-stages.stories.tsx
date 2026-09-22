@@ -288,9 +288,12 @@ export const Fixed: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: /Sonnet 4\.5 · High · Accept edits/ }))
 
+    // Straight onto the models, with no stage before them, and the panel named for what it
+    // holds: there is no agent stage here, so there is no agent in its name either.
     await expect(
       await screen.findByRole('listbox', { name: 'Models of this agent' }),
     ).toBeInTheDocument()
+    await expect(screen.getByRole('dialog', { name: 'Model, effort and mode' })).toBeInTheDocument()
     await expect(screen.queryByRole('listbox', { name: 'Agents' })).toBeNull()
     // Waited out rather than read the moment it exists: the panel comes down from its trigger
     // in opacity, and nothing drawn halfway through that is visible yet.
