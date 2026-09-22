@@ -18,10 +18,10 @@ describe('Renderer sans Node', () => {
     // Two ways through and no other: a call the page makes, and a subscription to what the
     // engine pushes without being asked (D5-12).
     const bridge = await browser.execute(() => ({
-      invoke: typeof window.hemera.invoke,
-      on: typeof window.hemera.on,
+      invoke: window.hemera.invoke instanceof Function,
+      on: window.hemera.on instanceof Function,
     }))
-    expect(bridge).toEqual({ invoke: 'function', on: 'function' })
+    expect(bridge).toEqual({ invoke: true, on: true })
   })
 
   it('runs isolated and sandboxed, which is what the page is unable to do', async () => {
