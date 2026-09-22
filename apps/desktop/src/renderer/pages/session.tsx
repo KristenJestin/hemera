@@ -297,8 +297,11 @@ export function SessionPage({
    * block at the end of the scroller grew the thread every time the turn changed its mind, and
    * it stood right-aligned, on the reader's own side of the column. The row below the thread is
    * the one place a running turn is said — on the left of it, where the agent's content is.
+   *
+   * It is read where it is drawn rather than above the branch: a thread with no turn under way
+   * has no activity to derive, and the row that would show it is not drawn.
    */
-  const activity = activityOf(thread)
+  const activity = agent.running ? activityOf(thread) : null
 
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).
@@ -361,7 +364,7 @@ export function SessionPage({
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
           {(agent.running || usage !== null) && (
             <div className="flex items-center justify-between gap-3">
-              {agent.running ? (
+              {activity !== null ? (
                 <ActivityRow
                   state={activity.state}
                   detail={activity.detail}
