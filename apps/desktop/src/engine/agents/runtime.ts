@@ -288,9 +288,9 @@ interface Call {
   kind: string | null
   status: string | null
   locations: readonly ToolCallLocation[]
-  content: readonly ToolCallContentBlock[]
-  rawInput: string | null
-  rawOutput: string | null
+  content: readonly BoundedBlock[]
+  rawInput: BoundedText | null
+  rawOutput: BoundedText | null
 }
 
 /**
@@ -329,13 +329,8 @@ const boundedBlock = (block: ToolCallContentBlock) => {
   return { ...block, text: bounded(block.text) }
 }
 
-/** What a `tool_call` entry carries: the call as it stands, with every text of it bounded. */
-const payloadOf = (call: Call) => ({
-  ...call,
-  content: call.content.map(boundedBlock),
-  rawInput: boundedOr(call.rawInput),
-  rawOutput: boundedOr(call.rawOutput),
-})
+/** One content block of a call, as the thread keeps it. */
+type BoundedBlock = ReturnType<typeof boundedBlock>
 
 /** A permission the turn is blocked on. */
 interface Pending {
@@ -524,6 +519,9 @@ export const runtimeLayer = Layer.effect(
 
         const said = event.call
         const held = turn?.calls.get(said.id)
+        // Every text of it is bounded here, where it lands, rather than where the entry is
+        // written: between two updates the turn would otherwise hold a file, a build log or a
+        // listing of the size the agent sent, and the row it is read in is not that size.
         // An update carries only what changed: a title, a content or a raw answer it does not
         // repeat is one the thread already has, and writing the empty one over it would erase
         // what is on screen.
@@ -532,9 +530,10 @@ export const runtimeLayer = Layer.effect(
           kind: said.kind ?? held?.kind ?? null,
           status: said.status ?? held?.status ?? null,
           locations: said.locations.length === 0 ? (held?.locations ?? []) : said.locations,
-          content: said.content.length === 0 ? (held?.content ?? []) : said.content,
-          rawInput: said.rawInput ?? held?.rawInput ?? null,
-          rawOutput: said.rawOutput ?? held?.rawOutput ?? null,
+          content:
+            said.content.length === 0 ? (held?.content ?? []) : said.content.map(boundedBlock),
+          rawInput: said.rawInput === null ? (held?.rawInput ?? null) : bounded(said.rawInput),
+          rawOutput: said.rawOutput === null ? (held?.rawOutput ?? null) : bounded(said.rawOutput),
         }
         if (turn !== undefined) turn.calls.set(said.id, call)
 
@@ -542,7 +541,7 @@ export const runtimeLayer = Layer.effect(
           role: 'agent',
           kind: 'tool_call',
           body: call.title,
-          payload: JSON.stringify({ call: payloadOf(call) }),
+          payload: JSON.stringify({ call }),
           correlationId: `call:${said.id}`,
           turnId: turn?.id ?? null,
           state: call.status,
@@ -559,7 +558,7 @@ export const runtimeLayer = Layer.effect(
             role: 'agent',
             kind,
             body: call.title,
-            payload: JSON.stringify(blocks.map(boundedBlock)),
+            payload: JSON.stringify(blocks),
             correlationId: `call:${said.id}:${kind}`,
             turnId: turn?.id ?? null,
             origin,
@@ -1437,7 +1436,7 @@ export const runtimeLayer = Layer.effect(
             role: 'agent',
             kind: 'tool_call',
             body: call.title,
-            payload: JSON.stringify({ call: payloadOf(call) }),
+            payload: JSON.stringify({ call }),
             correlationId: `call:${id}`,
             turnId: turn.id,
             state: 'cancelled',
