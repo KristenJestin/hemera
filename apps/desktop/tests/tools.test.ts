@@ -502,3 +502,42 @@ describe('a write outside the root', () => {
     expect(readFileSync(where, 'utf8')).toBe('allowed once')
   })
 })
+
+describe('an edit whose new text carries replacement patterns', () => {
+  it('writes the new text as it was sent', async () => {
+    fileInRoot('price.txt', 'price: TBD\n')
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_edit',
+          arguments: { path: 'price.txt', old: 'TBD', new: "$& costs $$5, $' and $`", key: 'e-1' },
+        })
+      }),
+    )
+
+    expect(seen.ok).toBe(true)
+    expect(readFileSync(join(root, 'price.txt'), 'utf8')).toBe("price: $& costs $$5, $' and $`\n")
+  })
+})
+
+describe('an edit whose old and new texts are the same', () => {
+  it('is refused, and the file is left as it was', async () => {
+    fileInRoot('same.txt', 'unchanged\n')
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_edit',
+          arguments: { path: 'same.txt', old: 'unchanged', new: 'unchanged', key: 'e-2' },
+        })
+      }),
+    )
+
+    expect(seen.ok).toBe(false)
+    expect(seen.summary).toContain('changes nothing')
+    expect(readFileSync(join(root, 'same.txt'), 'utf8')).toBe('unchanged\n')
+  })
+})

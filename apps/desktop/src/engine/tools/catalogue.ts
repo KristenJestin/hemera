@@ -481,6 +481,14 @@ export const toolCatalogueLayer: Layer.Layer<
           }
 
           case 'fs_edit': {
+            // An edit that changes nothing is a mistake of the agent's, and saying so is more use
+            // to it than a write that leaves the file as it was and reports success.
+            if (call.arguments.old === call.arguments.new) {
+              return failed(
+                `the edit of ${call.arguments.path} changes nothing`,
+                'the old and the new text are the same, so nothing was changed',
+              )
+            }
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const current = yield* attempt(() => readFile(settled.path, 'utf8'))
@@ -494,7 +502,13 @@ export const toolCatalogueLayer: Layer.Layer<
                 `the text to replace appears ${occurrences} time(s) in ${call.arguments.path}: it must appear exactly once, so nothing was changed`,
               )
             }
-            const next = current.value.replace(call.arguments.old, call.arguments.new)
+            // Spliced, not `replace`d: a replacement string reads `$&`, `$'` and `$$` as patterns,
+            // and the new text is the agent's text, written as it was sent.
+            const at = current.value.indexOf(call.arguments.old)
+            const next =
+              current.value.slice(0, at) +
+              call.arguments.new +
+              current.value.slice(at + call.arguments.old.length)
             const written = yield* attempt(() => writeFile(settled.path, next, 'utf8'))
             if (!written.ok) {
               return failed(`could not write ${call.arguments.path}`, written.reason)
