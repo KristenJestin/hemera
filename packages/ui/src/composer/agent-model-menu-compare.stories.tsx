@@ -5,7 +5,7 @@ import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 import { AGENTS, ARG_TYPES, Controlled, panelBox } from './agent-model-menu-fixtures.tsx'
 import { AgentModelMenuPalette } from './agent-model-menu-palette.tsx'
 import { AgentModelMenuPanes } from './agent-model-menu-panes.tsx'
-import type { AgentModelMenuProps } from './agent-model-menu-shared.tsx'
+import type { AgentModelMenuProps, EffortVariant, ModeVariant } from './agent-model-menu-shared.tsx'
 import { AgentModelMenuStages } from './agent-model-menu-stages.tsx'
 
 /** What every candidate is handed: the same machine, and its own copy of what was answered. */
@@ -132,5 +132,105 @@ export const SideBySide: Story = {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull()
     })
+  },
+}
+
+/** One cell of the grid: which effort and which mode the panel in it was told to draw. */
+const CELL = 'flex flex-col items-start gap-1 rounded-md border border-border p-2'
+
+const COMBINATION = 'text-xs text-muted-foreground'
+
+/** The combinations, three across, under the name of the panel they are drawn in. */
+const GRID = 'grid grid-cols-3 gap-2'
+
+/** The two panels that take an effort and a mode variant: the two the application could ship. */
+const PANELS = {
+  'A · Stages': AgentModelMenuStages,
+  'B · Panes': AgentModelMenuPanes,
+} as const
+
+/** The combinations worth opening, which is one per shape rather than all nine of them. */
+const COMBINATIONS: { effort: EffortVariant; mode: ModeVariant }[] = [
+  { effort: 'row', mode: 'list' },
+  { effort: 'slider', mode: 'column' },
+  { effort: 'dial', mode: 'select' },
+]
+
+/**
+ * Every panel against every effort and every mode, as a grid to flip through.
+ *
+ * The panels take `effortVariant` and `modeVariant` since the trial of 22 September 2026, so
+ * the two questions *inside* the panel are chosen independently of the panel around them — and
+ * this is where they are chosen together. One row per panel, one cell per combination, each
+ * cell its own machine: six triggers, six separate answers, nothing shared but the agents.
+ *
+ * `column` is the one that changes the panel rather than the control, and it is worth opening
+ * for that alone: the stages panel becomes two columns, and the panes panel grows a third.
+ *
+ * The application keeps the defaults — `AgentModelMenu` is the stages with the row and the
+ * list — and pointing it at anything else is one line of `agent-model-menu.tsx`.
+ */
+export const Variants: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <div className="flex w-full flex-col gap-4">
+      {Object.entries(PANELS).map(([name, Panel]) => (
+        <div key={name} className="flex flex-col gap-2">
+          <span className={TITLE}>{name}</span>
+          <div className={GRID}>
+            {COMBINATIONS.map((combination) => (
+              <div key={`${combination.effort}-${combination.mode}`} className={CELL}>
+                <span className={COMBINATION}>
+                  {combination.effort} · {combination.mode}
+                </span>
+                <Controlled
+                  {...OFFER}
+                  agent="claude-code"
+                  render={(props) => (
+                    <Panel
+                      {...props}
+                      effortVariant={combination.effort}
+                      modeVariant={combination.mode}
+                    />
+                  )}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const triggers = canvas.getAllByRole('button')
+    // Two panels, three combinations each: six machines and six triggers.
+    await expect(triggers).toHaveLength(6)
+
+    // The stages panel with the slider and the column: the effort is one control rather than a
+    // row of them, and it stands beside the models instead of under them.
+    await userEvent.click(triggers[1]!)
+    await waitFor(() => {
+      expect(screen.getByRole('listbox', { name: 'Models of this agent' })).toBeVisible()
+    })
+    const scale = screen.getByRole('slider', { name: 'Effort' })
+    const models = screen.getByRole('listbox', { name: 'Models of this agent' })
+    await expect(screen.queryByRole('group', { name: 'Effort' })).toBeNull()
+    await expect(scale.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+      models.getBoundingClientRect().right - 1,
+    )
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    // The same panel with the dial and the select: one line for the mode and the rest behind a
+    // press, which is the trade the select is here to be judged on.
+    await userEvent.click(triggers[2]!)
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Mode' })).toBeVisible()
+    })
+    await expect(screen.queryByRole('listbox', { name: 'Mode' })).toBeNull()
+    await expect(screen.getByRole('slider', { name: 'Effort' })).toBeVisible()
   },
 }
