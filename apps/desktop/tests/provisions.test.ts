@@ -133,13 +133,13 @@ describe('The tools are lent to the agent’s own process', () => {
 
         yield* runtime.start(session.id)
 
-        // One server, the address of this engine's own tools, and the token in both places an
-        // agent may read it from: the query it is configured with and the bearer header (D6-01).
+        // One server, the address of this engine's own tools, and the token as a bearer header
+        // and nowhere else: not in the address, which is what a log keeps (D6-01).
         expect(agent.answers.mcpServers[0]).toEqual([
           {
             type: 'http',
             name: 'hemera',
-            url: expect.stringContaining('/mcp?t='),
+            url: expect.stringMatching(/\/mcp$/),
             headers: [{ name: 'Authorization', value: expect.stringMatching(/^Bearer .+/) }],
           },
         ])

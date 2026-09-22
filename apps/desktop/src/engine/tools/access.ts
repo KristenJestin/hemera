@@ -30,6 +30,12 @@ export interface AccessGrant {
   /** The agent process the token was handed to: it ends, the grant ends with it. */
   readonly agentProcess: string
   readonly offered: readonly ToolName[]
+  /**
+   * Whether this agent may carry its token in the query of its address rather than in a bearer
+   * header. False for every agent today: a URL is what a proxy logs and a crash report quotes,
+   * and a header is not. An agent that can only be configured with a URL is the one reason for it.
+   */
+  readonly tokenInQuery: boolean
 }
 
 /** The grant and the secret itself, handed out once, at `session/new`. */
@@ -43,6 +49,7 @@ export interface ToolAccessService {
     sessionId: string,
     agentProcess: string,
     mission: Mission,
+    tokenInQuery?: boolean,
   ) => Effect.Effect<GrantedAccess>
   /** The grant a token belongs to, and null for anything else — a foreign or a revoked one. */
   readonly byToken: (token: string | null) => Effect.Effect<AccessGrant | null>
@@ -93,7 +100,7 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
       })
 
     return {
-      granted: (sessionId, agentProcess, mission) =>
+      granted: (sessionId, agentProcess, mission, tokenInQuery = false) =>
         Effect.gen(function* () {
           yield* forget(sessionId)
           const token = randomBytes(32).toString('base64url')
@@ -103,6 +110,7 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
             sessionId,
             agentProcess,
             offered: offeredTools(mission),
+            tokenInQuery,
           }
           byToken.set(token, grant)
           byId.set(id, grant)

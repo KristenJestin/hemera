@@ -8,10 +8,11 @@
  * and nothing else — and the port is not published anywhere: an agent gets an address and a
  * token, and the address alone gets a 401.
  *
- * The token travels in the query of the address an agent is configured with, and as a bearer
- * header when the client can send one, because the two happen in the wild: an MCP configuration
- * is a URL on most agents, and a header on the few that take one. Both are read, and neither is
- * logged — what the diagnostics call a caller is the digest, never the secret.
+ * The token travels as a bearer header (D6-01): the three agents take `headers` in the
+ * `mcpServers` of ACP, and a header is not what a proxy logs or a crash report quotes. The query
+ * of the address is read only for a grant minted to carry it there, which no agent is today, and
+ * never over a header that is present. Neither is logged — what the diagnostics call a caller is
+ * the digest, never the secret.
  *
  * A refused access is answered generically: the caller learns that it is not allowed, and
  * nothing about which Sessions exist or what the tools are called. The line the user may have to
@@ -24,7 +25,7 @@ import {
   flatArguments,
   type ToolArguments,
 } from './arguments.ts'
-import { type AccessGrant, ToolAccess } from './access.ts'
+import { type AccessGrant, type GrantedAccess, ToolAccess } from './access.ts'
 import { ToolCatalogue } from './catalogue.ts'
 import { TOOL_NAMES } from '@hemera/core'
 import { McpServer, createMcpHandler } from '@modelcontextprotocol/server'
@@ -49,22 +50,24 @@ const REFUSED = { error: 'unauthorized' }
 export interface ToolServerService {
   /** Where this engine's tools are served: `http://127.0.0.1:<port>`. */
   readonly origin: string
-  /** The address an agent's configuration carries, with the token it needs. */
-  readonly forAgent: (token: string) => string
+  /** The address an agent's configuration carries: the token is in it only when the grant says so. */
+  readonly forAgent: (granted: GrantedAccess) => string
 }
 
 export class ToolServer extends Context.Service<ToolServer, ToolServerService>()('ToolServer') {}
 
-/** The token a request carries, from the query it was configured with or from its header. */
-function tokenOf(request: Request): string | null {
-  const fromQuery = new URL(request.url).searchParams.get('t')
-  if (fromQuery !== null && fromQuery !== '') return fromQuery
+/** The token of a bearer header, and null without one. */
+function bearerOf(request: Request): string | null {
   const header = request.headers.get('authorization')
   if (header === null) return null
-  const [scheme, value] = header.split(' ')
-  return scheme !== undefined && scheme.toLowerCase() === 'bearer' && value !== undefined
-    ? value
-    : null
+  const found = /^bearer\s+(\S+)$/i.exec(header.trim())
+  return found?.[1] ?? null
+}
+
+/** The token of the address's query, and null without one. */
+function queryTokenOf(request: Request): string | null {
+  const fromQuery = new URL(request.url).searchParams.get('t')
+  return fromQuery === null || fromQuery === '' ? null : fromQuery
 }
 
 /**
@@ -133,14 +136,26 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
       })
 
       /**
+       * The grant a request carries: the bearer header's, else the query's when that grant was
+       * minted to be carried there. A token in the query of an agent that was not is refused, so a
+       * URL that leaked into a log is not a key.
+       */
+      const grantOf = (request: Request): Effect.Effect<AccessGrant | null> =>
+        Effect.gen(function* () {
+          const bearer = bearerOf(request)
+          if (bearer !== null) return yield* access.byToken(bearer)
+          const inQuery = yield* access.byToken(queryTokenOf(request))
+          return inQuery?.tokenInQuery === true ? inQuery : null
+        })
+
+      /**
        * The fetch door: the token is read, the grant behind it is looked up, and only then does
        * anything reach the tools. A token this engine never minted, or one it has revoked, ends
        * here — with a 401 that names nothing.
        */
       const door: FetchLikeMcpHandler = {
         fetch: async (request) => {
-          const token = tokenOf(request)
-          const grant = await Effect.runPromise(access.byToken(token))
+          const grant = await Effect.runPromise(grantOf(request))
           if (grant === null) {
             await Effect.runPromise(
               access.refusedAccess(
@@ -191,7 +206,10 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
 
       return {
         origin,
-        forAgent: (token: string) => `${origin}${PATH}?t=${encodeURIComponent(token)}`,
+        forAgent: (granted: GrantedAccess) =>
+          granted.tokenInQuery
+            ? `${origin}${PATH}?t=${encodeURIComponent(granted.token)}`
+            : `${origin}${PATH}`,
       }
     }),
   )

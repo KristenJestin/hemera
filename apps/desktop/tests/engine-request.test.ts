@@ -95,7 +95,7 @@ function running<A, E>(
     commandsLayer,
     Layer.succeed(ToolServer, {
       origin: 'http://127.0.0.1:1',
-      forAgent: (token: string) => `http://127.0.0.1:1/mcp?t=${token}`,
+      forAgent: () => 'http://127.0.0.1:1/mcp',
     }),
   )
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very

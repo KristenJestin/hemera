@@ -26,7 +26,7 @@ import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
-import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
+import { type GrantedAccess, ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer, type ToolCatalogue } from '#engine/tools/catalogue.ts'
 import { ToolPermissions, type ToolPermissionsService } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
@@ -142,15 +142,16 @@ const aSessionWithAToken = Effect.gen(function* () {
 })
 
 /** What one `tools/list` asked of an address answered. */
-const listed = (server: { readonly forAgent: (token: string) => string }) =>
+const listed = (server: { readonly forAgent: (granted: GrantedAccess) => string }) =>
   Effect.gen(function* () {
     const granted = yield* aSessionWithAToken
     const response = yield* Effect.promise(() =>
-      fetch(server.forAgent(granted.granted.token), {
+      fetch(server.forAgent(granted.granted), {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           accept: 'application/json, text/event-stream',
+          authorization: `Bearer ${granted.granted.token}`,
         },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
       }),
@@ -161,14 +162,14 @@ const listed = (server: { readonly forAgent: (token: string) => string }) =>
 
 /** One `tools/call`, sent the way an agent sends it: the address, and the token as a bearer. */
 const toolCall = (
-  server: { readonly forAgent: (token: string) => string },
+  server: { readonly origin: string },
   token: string,
   id: number,
   name: string,
   sent: Record<string, string>,
 ) =>
   Effect.promise(async () => {
-    const response = await fetch(server.forAgent(token), {
+    const response = await fetch(`${server.origin}/mcp`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -230,11 +231,12 @@ describe('a token of a revoked grant', () => {
         const held = yield* aSessionWithAToken
         yield* access.revoked(held.session.id)
         const response = yield* Effect.promise(() =>
-          fetch(server.forAgent(held.granted.token), {
+          fetch(server.forAgent(held.granted), {
             method: 'POST',
             headers: {
               'content-type': 'application/json',
               accept: 'application/json, text/event-stream',
+              authorization: `Bearer ${held.granted.token}`,
             },
             body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
           }),
@@ -288,5 +290,63 @@ describe('two calls of one Session at the same time', () => {
     expect(seen.outside.status).toBe(200)
     expect(seen.outside.body).toContain('"id":1')
     expect(seen.outside.body).toContain('the user refused')
+  })
+})
+
+/** A `tools/list` sent to an address, with no header: the token, if any, is the address's own. */
+const listedAt = (address: string) =>
+  Effect.promise(async () => {
+    const response = await fetch(address, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    })
+    return { status: response.status, body: await response.text() }
+  })
+
+describe('the token of a Session', () => {
+  it('is handed to the agent as a bearer header, and the address carries no secret', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const held = yield* aSessionWithAToken
+        return { address: server.forAgent(held.granted), origin: server.origin }
+      }),
+    )
+
+    expect(seen.address).toBe(`${seen.origin}/mcp`)
+  })
+
+  it('is refused in the address of an agent that was not minted to carry it there', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const held = yield* aSessionWithAToken
+        return yield* listedAt(`${server.origin}/mcp?t=${held.granted.token}`)
+      }),
+    )
+
+    expect(seen.status).toBe(401)
+    expect(seen.body).toBe('{"error":"unauthorized"}')
+  })
+
+  it('is read from the address only for a grant minted to carry it there', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const access = yield* ToolAccess
+        const held = yield* aSessionWithAToken
+        const inQuery = yield* access.granted(held.session.id, 'agent-2', 'free', true)
+        const address = server.forAgent(inQuery)
+        return { address, answer: yield* listedAt(address) }
+      }),
+    )
+
+    expect(seen.address).toContain('/mcp?t=')
+    expect(seen.answer.status).toBe(200)
+    expect(seen.answer.body).toContain('fs_read')
   })
 })
