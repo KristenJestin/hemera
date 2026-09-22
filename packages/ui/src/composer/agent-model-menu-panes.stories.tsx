@@ -20,8 +20,9 @@ import { AgentModelMenuPanes } from './agent-model-menu-panes.tsx'
  * foot of both.
  *
  * Nothing is behind a stage, so there is no back arrow and nothing to remember. The price is
- * width — `w-menu-panel` rather than `w-menu` — and two columns that are each narrower than the
- * one list the other variants give the reader. What moves is only the right column: picking
+ * width: it is `w-menu-wide` by `h-menu-tall` since 22 September 2026 — the composer column it
+ * opens out of, rather than a panel narrower than its own frame — and two columns where the
+ * other variants give the reader one list. What moves is only the right column: picking
  * another agent swaps it for that agent's models with a crossfade and a short slide, so the
  * change is read as a change rather than as a list that was there all along.
  *
@@ -58,6 +59,46 @@ type Story = StoryObj<typeof meta>
 export const Playground: Story = {}
 
 /**
+ * The panel at the width of the composer it opens out of, and the height that went with it.
+ *
+ * It was `w-menu-panel` by `h-menu-panel`, and the maintainer read it as the menu of something
+ * else: the composer is the frame this belongs to, and a panel narrower than its own frame
+ * looks borrowed. It is `w-menu-wide` by `h-menu-tall` now — the composer column's width, and
+ * the height that makes the extra width worth having, since a list four rows tall in a panel
+ * twice as wide is a panel that got wider for nothing.
+ *
+ * The agents keep `w-menu-agents`, which is the whole point: every pixel of the new width went
+ * to the models, and the models are the list that scrolls.
+ */
+export const Wider: Story = {
+  args: { agent: 'opencode' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /OpenCode/ }))
+    await waitFor(() => {
+      expect(screen.getByRole('listbox', { name: 'Models of this agent' })).toBeVisible()
+    })
+
+    // Read off the page rather than asserted at a number of pixels: what matters is that the
+    // panel is the width the theme says, whatever the root font size makes of it.
+    // The popup carries the panel and its own padding, so it is that wide and a little more.
+    const box = panelBox()
+    const wide = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 40
+    await expect(box.width).toBeGreaterThanOrEqual(wide)
+    await expect(box.width).toBeLessThan(wide * 1.1)
+
+    const agents = screen.getByRole('listbox', { name: 'Agents' })
+    const models = screen.getByRole('listbox', { name: 'Models of this agent' })
+    await expect(agents.getBoundingClientRect().width).toBeLessThan(
+      models.getBoundingClientRect().width,
+    )
+    // Taller with it, and still one box: the list runs to the foot of the panel and no further.
+    await expect(models.getBoundingClientRect().bottom).toBeLessThanOrEqual(box.bottom + 1)
+    await expect(box.height).toBeGreaterThan(box.width / 2)
+  },
+}
+
+/**
  * Nothing chosen: the agents stand on the left and the right column says what it is waiting for.
  *
  * The room the models will take is already taken, because the panel is one size from the moment
@@ -76,7 +117,11 @@ export const NoAgent: Story = {
     await userEvent.click(options[3]!)
     await expect(args.onAgentChange).not.toHaveBeenCalled()
 
-    await expect(screen.getByText(/Choose an agent to see the models/)).toBeVisible()
+    // Waited out: the column comes in on a crossfade, and nothing halfway through one is
+    // visible yet.
+    await waitFor(() => {
+      expect(screen.getByText(/Choose an agent to see the models/)).toBeVisible()
+    })
     await expect(screen.queryByRole('listbox', { name: 'Models of this agent' })).toBeNull()
   },
 }

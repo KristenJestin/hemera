@@ -9,16 +9,16 @@ import { arrival, slide, useTransition } from '../motion.ts'
 import { AgentMark } from './agent-mark.tsx'
 import {
   AgentList,
-  type AgentModelMenuProps,
-  EffortRow,
+  type AgentModelMenuVariantProps,
   INSTEAD,
-  ModeList,
   ModelPicker,
   PanelHead,
   RefusalNote,
   triggerLabel,
 } from './agent-model-menu-shared.tsx'
 import { nameOfCurrent } from './current-name.ts'
+import { EffortControl } from './effort.tsx'
+import { ModeControl } from './mode.tsx'
 
 /**
  * Variant B of the universal model picker: one panel, two columns, and a band under them.
@@ -29,10 +29,17 @@ import { nameOfCurrent } from './current-name.ts'
  * the two questions that follow whatever was picked above. There is no back arrow: the way back
  * to the agents is to look left.
  *
- * **One box, always.** `h-menu-panel` tall and `w-menu-panel` wide, whatever is in it: the
- * columns take what is left after the band, and each of them scrolls inside its own column. The
- * panel opens upwards out of the foot of a window, so its size is decided before the agent
- * answers and never after.
+ * **One box, always, and it is the composer's box.** `h-menu-tall` tall and `w-menu-wide` wide,
+ * whatever is in it: the columns take what is left after the band, and each of them scrolls
+ * inside its own column. The panel opens upwards out of the foot of a window, so its size is
+ * decided before the agent answers and never after.
+ *
+ * It grew on 22 September 2026, and grew in both directions. It is the width of the composer
+ * column it belongs to now, because a panel narrower than the box it opens out of reads as the
+ * menu of something else; and it is taller with it, because the room a wider panel buys is room
+ * for the lists to be read in — a list four rows tall in a panel twice as wide is a panel that
+ * got wider for nothing. The agents keep `w-menu-agents`, so all of the width went to the
+ * models, which is the list that scrolls.
  *
  * **What moves.** Only the right column: picking another agent swaps it for that agent's models
  * with a crossfade and the `slide` kind of the preset at its `nudge` distance, a short travel
@@ -49,7 +56,7 @@ import { nameOfCurrent } from './current-name.ts'
  */
 
 /** One height and one width, whatever is inside, and wide enough to carry two columns. */
-const PANEL = 'flex h-menu-panel w-menu-panel flex-col gap-2'
+const PANEL = 'flex h-menu-tall w-menu-wide flex-col gap-2'
 
 /** The two columns, which take whatever the band under them left. */
 const COLUMNS = 'flex min-h-0 flex-1 gap-2'
@@ -58,7 +65,11 @@ const COLUMNS = 'flex min-h-0 flex-1 gap-2'
 const LEFT = 'flex w-menu-agents min-w-0 flex-col gap-2'
 
 /** The room the models cross in, which clips the column on its way out. */
-const RIGHT = 'relative min-w-0 flex-1 border-l border-border pl-2'
+const MIDDLE = 'relative min-w-0 flex-1 border-l border-border pl-2'
+
+/** What the `column` variant of the mode asks for: the two scales, standing beside the models. */
+const RIGHT =
+  'scroll-quiet flex w-menu-agents shrink-0 flex-col gap-2 overflow-y-auto border-l border-border pl-2'
 
 /** One agent's models, drawn over the outgoing ones for as long as the two are on their way. */
 const SURFACE = 'absolute inset-0 flex flex-col gap-2'
@@ -83,8 +94,10 @@ export function AgentModelMenuPanes({
   loading = false,
   refusal = null,
   disabled = false,
+  effortVariant = 'row',
+  modeVariant = 'list',
   className,
-}: AgentModelMenuProps): ReactNode {
+}: AgentModelMenuVariantProps): ReactNode {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const transition = useTransition(arrival)
@@ -99,6 +112,28 @@ export function AgentModelMenuPanes({
     setOpen(false)
     trigger.current?.focus()
   }
+
+  /* The two scales of the agent, in the band under the columns or in a column of their own.
+     The modes are folded two to a line in the band, where there is width for two of the
+     agent's own sentences, and one per line in a column, where there is not. */
+  const scales = (
+    <>
+      <EffortControl
+        variant={effortVariant}
+        efforts={efforts}
+        effort={effort}
+        onEffortChange={onEffortChange}
+        caption={nameOfCurrent(models, model)}
+      />
+      <ModeControl
+        variant={modeVariant}
+        modes={modes}
+        mode={mode}
+        onModeChange={onModeChange}
+        across={modeVariant === 'list'}
+      />
+    </>
+  )
 
   return (
     <Popover
@@ -139,7 +174,7 @@ export function AgentModelMenuPanes({
               />
             </div>
           )}
-          <div className={RIGHT}>
+          <div className={MIDDLE}>
             <AnimatePresence initial={false}>
               <motion.div
                 key={agent ?? 'none'}
@@ -166,14 +201,16 @@ export function AgentModelMenuPanes({
               </motion.div>
             </AnimatePresence>
           </div>
+          {/* The `column` variant is the one that changes the panel around it: the effort and
+              the mode leave the band and stand in a third column, to the right of the models. */}
+          {modeVariant === 'column' && (efforts.length > 0 || modes.length > 0) && (
+            <div className={RIGHT}>{scales}</div>
+          )}
         </div>
         {/* The effort and the mode are the agent's own scales, so an agent that announced
             neither is given no row rather than an empty one, and the band closes up. */}
-        {(efforts.length > 0 || modes.length > 0) && (
-          <div className={BAND}>
-            <EffortRow efforts={efforts} effort={effort} onEffortChange={onEffortChange} />
-            <ModeList modes={modes} mode={mode} onModeChange={onModeChange} across />
-          </div>
+        {modeVariant !== 'column' && (efforts.length > 0 || modes.length > 0) && (
+          <div className={BAND}>{scales}</div>
         )}
       </div>
     </Popover>
