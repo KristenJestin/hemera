@@ -291,6 +291,22 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
 
     expect(activityOf([before, now]).thought).toBe(undefined)
   })
+
+  test('what a turn that died left unfinished is not what the next turn is doing', () => {
+    // The agent died under the first turn: nothing closed its call and nothing answered its
+    // question, so the thread keeps both exactly as they were left, for ever.
+    const dead = [
+      entry('e1', 'user', 'Push it'),
+      reported('e2', 'tool_call', 'git push', 'in_progress'),
+      reported('e3', 'permission_request', 'git push origin main', 'pending'),
+      reported('e4', 'turn', 'The agent stopped running.', 'interrupted'),
+    ]
+
+    // A second turn asked in the same Session reads its own half of the thread and no further
+    // back: it is thinking, and not waiting on a question nobody can answer any more.
+    const asked: SessionEntry = { ...entry('e5', 'user', 'Try again'), turnId: null }
+    expect(activityOf([...dead, asked])).toEqual({ state: 'thinking', thought: undefined })
+  })
 })
 
 describe('Le tour tourne dès que la question est écrite', () => {

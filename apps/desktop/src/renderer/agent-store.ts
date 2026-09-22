@@ -141,12 +141,18 @@ const UNFINISHED = ['pending', 'in_progress']
  * two blocks is doing.
  */
 export function activityOf(entries: readonly SessionEntry[]): Activity {
-  const last = entries.at(-1)
-  const thought = thoughtOf(entries, last?.turnId ?? null)
+  // Read over the turn that is running and no further back. A turn whose agent died under it
+  // leaves its calls `in_progress` and its question undecided — nothing closed them, because
+  // nothing was left to — and a rule read over the whole thread would answer with that dead
+  // turn's call, or with its question, for every turn after it and for as long as the Session
+  // lasts. The entry that ends a turn is where the previous one stops being this one's business.
+  const running = sinceLastTurn(entries)
+  const last = running.at(-1)
+  const thought = thoughtOf(running, last?.turnId ?? null)
 
-  if (waiting(entries)) return { state: 'waiting', thought }
+  if (waiting(running)) return { state: 'waiting', thought }
 
-  const call = [...entries].reverse().find((entry) => entry.kind === 'tool_call')
+  const call = [...running].reverse().find((entry) => entry.kind === 'tool_call')
   if (call !== undefined && UNFINISHED.includes(call.state ?? '')) {
     return { state: 'running', detail: call.body, thought }
   }
@@ -164,6 +170,20 @@ export function activityOf(entries: readonly SessionEntry[]): Activity {
   }
 
   return { state: 'thinking', thought }
+}
+
+/**
+ * The end of the thread since the last turn closed, which is the turn that is running.
+ *
+ * The `turn` entry is written once per turn and never moved, so it is the line between what a
+ * finished turn left behind and what the one running has done. A thread with no such entry is
+ * a Session whose first turn is under way, and the whole of it is that turn's.
+ */
+function sinceLastTurn(entries: readonly SessionEntry[]): readonly SessionEntry[] {
+  for (let at = entries.length - 1; at >= 0; at -= 1) {
+    if (entries[at]?.kind === 'turn') return entries.slice(at + 1)
+  }
+  return entries
 }
 
 /** Whether the agent is waiting on an answer: a request with no decision written after it. */
