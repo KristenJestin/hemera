@@ -308,7 +308,6 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         }))}
         input={boundedNode(input)}
         output={boundedNode(output)}
-        defaultOpen={call.status === 'failed'}
         error={call.status === 'failed' ? entry.body : undefined}
       />
     )
