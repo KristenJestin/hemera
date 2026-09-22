@@ -56,6 +56,12 @@ export type ParsedCall =
  */
 const KEY = z.string().min(1).max(200)
 
+/** How long `commands_run` waits for a command to end when it is not told: 30 seconds. */
+export const RUN_WAIT_MS = 30_000
+
+/** The longest it may be told to wait: 10 minutes. */
+export const RUN_WAIT_LONGEST_MS = 600_000
+
 /**
  * The arguments of every tool, as the agent is told them and as they are read back.
  *
@@ -103,6 +109,19 @@ export const TOOL_ARGUMENTS = {
       .optional()
       .describe('where to run it: a repository of the Project, or a path in the Workspace'),
     key: KEY.describe('an idempotency key, so a retry does not start it twice'),
+    timeout: z
+      .number()
+      .int()
+      .min(0)
+      .max(RUN_WAIT_LONGEST_MS)
+      .optional()
+      .describe(
+        `how long to wait for it to end, in milliseconds: ${RUN_WAIT_MS} by default, ${RUN_WAIT_LONGEST_MS} at most`,
+      ),
+    background: z
+      .boolean()
+      .optional()
+      .describe('true to answer as soon as it has started, without waiting for it to end'),
   }),
   commands_output: z.object({
     run: z.string().min(1).optional().describe('which run; the only one running without it'),
@@ -124,7 +143,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   search: `Search the files of the Workspace root for a piece of text, \`.gitignore\` respected. One call returns at most ${SEARCH_MATCH_LIMIT} matches and scans at most ${SEARCH_SCAN_BYTES} bytes: the answer says which limit stopped it, gives the cursor to continue from, and names the files it did not read (binary or unreadable).`,
   commands_list:
     "The commands the Project's catalogue holds: name, line, kind, and the folder each runs in.",
-  commands_run: `Ask for a command of the Project's catalogue to run, by name, or a one-off line, which the user is asked to allow before it runs. An app command that is already running is handed back rather than started twice. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
+  commands_run: `Ask for a command of the Project's catalogue to run, by name, or a one-off line, which the user is asked to allow before it runs. An app command that is already running is handed back rather than started twice. A check or a utility is waited for, up to timeout, and answers with its exit code and the end of its output; one still running then is left running in the background and its run id is given, so there is nothing to poll for. background: true answers at once. An app is left running as soon as it has started. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
   commands_output:
     'What a run has printed, bounded, the address it published, and how it ended if it has.',
   commands_stop: 'Stop a run and everything it started.',

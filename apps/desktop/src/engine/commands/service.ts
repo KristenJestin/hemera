@@ -34,7 +34,7 @@ import {
   joinsRunningRun,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
-import { Context, Deferred, Effect, Exit, Layer, Scope } from 'effect'
+import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
 
 import { ProcessSupervisor } from '../agents/supervisor.ts'
 import { Sessions } from '../sessions.ts'
@@ -166,6 +166,15 @@ export interface CommandsService {
    * are what the agent came for.
    */
   readonly recent: (sessionId: string) => Effect.Effect<RunView[], DatabaseError>
+  /**
+   * Waits up to `milliseconds` for a run to end, and answers it as it then stands: ended, with
+   * its exit code and all it printed, or still running.
+   */
+  readonly awaited: (
+    sessionId: string,
+    runId: string,
+    milliseconds: number,
+  ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
   /** Stops everything of a Session, or everything at all when no Session is named. */
   readonly stopped: (sessionId?: string | undefined) => Effect.Effect<void, DatabaseError>
 }
@@ -418,7 +427,7 @@ export const commandsLayer = Layer.effect(
         yield* Deferred.await(record.ended)
       })
 
-    return {
+    const service: CommandsService = {
       list: (projectId) =>
         database
           .select()
@@ -739,6 +748,20 @@ export const commandsLayer = Layer.effect(
             live.delete(id)
           }
         }),
+
+      awaited: (sessionId, runId, milliseconds) =>
+        Effect.gen(function* () {
+          const record = live.get(runId)
+          // A run of this engine is waited on until its end is written, or until the time is up;
+          // one that is not in memory has already ended, and its row is the answer.
+          if (record !== undefined) {
+            yield* Deferred.await(record.ended).pipe(
+              Effect.timeoutOption(Duration.millis(milliseconds)),
+            )
+          }
+          return yield* service.output(sessionId, runId)
+        }),
     }
+    return service
   }),
 )

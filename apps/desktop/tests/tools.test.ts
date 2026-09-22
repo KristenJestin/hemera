@@ -846,3 +846,51 @@ describe('A run asked for before its Session ended', () => {
     expect(seen.recent).toHaveLength(0)
   })
 })
+
+describe('A short command answers with its output; a long one is left running', () => {
+  it('waits for a short one, and leaves one that outlasts the wait running with its run id', async () => {
+    const human = humanSaying()
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const save = (name: string, line: string) =>
+          commands.save(
+            { projectId: session.projectId, name, line, kind: 'check', folder: null },
+            false,
+          )
+        yield* save('short', 'node -e console.log(42)')
+        yield* save('long', 'node -e setInterval(()=>{},1000)')
+        const short = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { name: 'short', key: 'wait-1' },
+        })
+        const long = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { name: 'long', key: 'wait-2', timeout: 300 },
+        })
+        const began = Date.now()
+        const background = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { name: 'long', key: 'wait-3', background: true },
+        })
+        const waited = Date.now() - began
+        yield* commands.stopped(session.sessionId)
+        return { short, long, background, waited }
+      }),
+    )
+
+    // The short one is answered once it has ended: its exit code and what it printed.
+    expect(seen.short.text).toContain('exit code 0')
+    expect(seen.short.text).toContain('42')
+    // The long one outlasted the wait: it is still running, and the answer says which run it is.
+    expect(seen.long.text).toContain('still running, left in the background')
+    expect(seen.long.text).toMatch(/run id [0-9a-f-]{36}/)
+    // Asked for in the background, it is answered as soon as it has started, not 30 s later.
+    expect(seen.background.text).toContain('still running')
+    expect(seen.waited).toBeLessThan(5_000)
+  })
+})

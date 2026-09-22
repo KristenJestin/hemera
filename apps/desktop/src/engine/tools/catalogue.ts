@@ -36,7 +36,7 @@ import { Sessions } from '../sessions.ts'
 import { Database } from '../storage/database.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
-import { type ToolArguments, type ParsedCall, parseCall } from './arguments.ts'
+import { RUN_WAIT_MS, type ToolArguments, type ParsedCall, parseCall } from './arguments.ts'
 import { type RefusedPathError, resolveInside } from './paths.ts'
 import { ToolPermissions } from './permissions.ts'
 import { type Page, type ReadRange, numbered, readPage } from './read.ts'
@@ -724,7 +724,23 @@ export const toolCatalogueLayer: Layer.Layer<
             if (started === undefined) {
               return failed('the command did not start', 'the engine could not start this command')
             }
-            const run = started
+            // A check or a utility is waited for, so the agent reads how it ended in the same
+            // answer instead of polling for it; one that outlasts the wait is left running and
+            // said to be. An app is meant to keep running, and is answered once it has started.
+            const waits =
+              call.arguments.background !== true &&
+              !started.joined &&
+              started.kind !== 'app' &&
+              started.state === 'running'
+            const run = waits
+              ? ((yield* answered(
+                  commands.awaited(
+                    asked.sessionId,
+                    started.id,
+                    call.arguments.timeout ?? RUN_WAIT_MS,
+                  ),
+                )) ?? started)
+              : started
             const tail = run.output.split('\n').slice(-40).join('\n')
             return {
               ok: run.state !== 'failed',
@@ -733,6 +749,9 @@ export const toolCatalogueLayer: Layer.Layer<
                 : `${run.name} is ${run.state} (${run.id})`,
               text: [
                 `run ${run.id}: ${run.name} — ${run.state}${run.pid === null ? '' : ` (pid ${run.pid})`}`,
+                run.state === 'running'
+                  ? `still running, left in the background: run id ${run.id}; read it with commands_output, stop it with commands_stop`
+                  : `exit code ${run.exitCode === null ? 'none' : String(run.exitCode)}`,
                 run.url === null ? 'no address published yet' : `address: ${run.url}`,
                 tail === '' ? 'nothing printed yet' : `output:\n${tail}`,
               ].join('\n'),
