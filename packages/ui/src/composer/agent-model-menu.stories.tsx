@@ -186,17 +186,19 @@ export const AgentNotSignedIn: Story = {
     const list = await screen.findByRole('listbox', { name: 'Agents' })
     const options = within(list).getAllByRole('option')
     await expect(options[1]).toHaveTextContent('codex login')
-    await expect(options[1]).toBeDisabled()
+    // Off, and still an entry of the list: whatever reads the page can reach it and say why,
+    // which a button the browser disabled would be passed over without a word.
+    await expect(options[1]).toHaveAttribute('aria-disabled', 'true')
     await expect(options[2]).toHaveTextContent('Not installed on this machine')
-    await expect(options[2]).toBeDisabled()
+    await expect(options[2]).toHaveAttribute('aria-disabled', 'true')
 
     // Pressed all the same, and nothing happens: the panel stays on the agents.
-    await userEvent.click(options[1]!, { pointerEventsCheck: 0 })
+    await userEvent.click(options[1]!)
     await expect(args.onAgentChange).not.toHaveBeenCalled()
     await expect(screen.getByRole('listbox', { name: 'Agents' })).toBeInTheDocument()
 
     // The one agent that is both there and signed in is the one that can be taken.
-    await expect(options[0]).toBeEnabled()
+    await expect(options[0]).not.toHaveAttribute('aria-disabled')
   },
 }
 

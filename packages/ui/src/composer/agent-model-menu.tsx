@@ -39,7 +39,7 @@ const NOTE = 'rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground'
 const LIST = 'scroll-quiet flex max-h-64 flex-col gap-0.5 overflow-y-auto'
 
 const ITEM =
-  'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-ring hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent'
+  'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-ring hover:bg-accent aria-disabled:opacity-50 aria-disabled:hover:bg-transparent'
 
 /**
  * Where the keys are, which is the one entry Enter would take.
@@ -235,9 +235,16 @@ export function AgentModelMenu({
                     type="button"
                     role="option"
                     aria-selected={one.id === agent}
-                    disabled={!offered}
+                    // `aria-disabled` and not `disabled`: an agent that cannot be picked is still
+                    // an entry of the list, and what it says — not installed, not signed in, and
+                    // the command that fixes either — is the reason it is off. A disabled button
+                    // is skipped by the keyboard and by whatever reads the page, which is the one
+                    // reader who cannot see the sentence beside it.
+                    aria-disabled={offered ? undefined : true}
                     className={cn(ITEM, one.id === agent && ITEM_ACTIVE)}
-                    onClick={() => takeAgent(one)}
+                    onClick={() => {
+                      if (offered) takeAgent(one)
+                    }}
                   >
                     <AgentMark agent={one.name} />
                     <span className="flex min-w-0 flex-1 flex-col">

@@ -217,7 +217,7 @@ export const Variants: Story = {
     const agents = await screen.findByRole('listbox', { name: 'Agents' })
     const options = within(agents).getAllByRole('option')
     expect(options[2]).toHaveTextContent('opencode auth login')
-    expect(options[2]).toBeDisabled()
+    expect(options[2]).toHaveAttribute('aria-disabled', 'true')
 
     await userEvent.click(options[0]!)
     // The agent is taken, the send comes alive, and nothing above the box appeared to say so.
