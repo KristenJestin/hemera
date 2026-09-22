@@ -277,6 +277,8 @@ export type RunState = (typeof COMMAND_RUN_STATES)[number]
 /** What a delivery of the context was: the base, the record of a native read, or a change. */
 export const CONTEXT_DELIVERY_KINDS = ['base', 'native', 'instructions'] as const
 
+export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
+
 /**
  * The commands of a Project: a name, a line to run, what it is for, and where it runs (D6-12).
  *
