@@ -22,7 +22,7 @@ import {
   type ScrollerEntry,
 } from '@hemera/ui'
 
-import { activityOf, type AgentSessionState } from '../agent-store.ts'
+import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
 import { effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { whenOf } from '../journal-lines.ts'
@@ -69,6 +69,9 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
     ...live.filter((entry) => !known.has(entry.id)),
   ]
 }
+
+/** What a turn that has just been asked for is doing, before anything of it has arrived. */
+const THINKING: Activity = { state: 'thinking' }
 
 /** When a run was written, `HH:MM`, in the one reading the whole window uses. */
 function timeOf(at: number): string {
@@ -298,10 +301,23 @@ export function SessionPage({
    * it stood right-aligned, on the reader's own side of the column. The row below the thread is
    * the one place a running turn is said — on the left of it, where the agent's content is.
    *
-   * It is read where it is drawn rather than above the branch: a thread with no turn under way
-   * has no activity to derive, and the row that would show it is not drawn.
+   * Once the turn is over the row stays, quiet, and says how it ended — "Done in 12 s",
+   * "Stopped", "Failed" — for as long as that end is the last thing that happened: the next
+   * message sets a turn running again, and the row goes back to saying what that one is doing.
+   * Until the engine has echoed that message the thread still ends on the previous turn's end,
+   * which is not what a turn just asked for is doing: it is thinking. The end is believed while
+   * running only when it is the very entry the engine pushed last, the few instants between the
+   * `turn` entry and the `turn` event that follows it.
    */
-  const activity = agent.running ? activityOf(thread) : null
+  const read = activityOf(thread, agent.latest)
+  const endedNow = thread.find((entry) => entry.id === agent.latest)?.kind === 'turn'
+  const activity = agent.running
+    ? hasEnded(read) && !endedNow
+      ? THINKING
+      : read
+    : hasEnded(read)
+      ? read
+      : null
 
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).
@@ -362,13 +378,14 @@ export function SessionPage({
           something to say, and the meter keeps its end of it whether or not a turn is running.
         */}
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          {(agent.running || usage !== null) && (
+          {(activity !== null || usage !== null) && (
             <div className="flex items-center justify-between gap-3">
               {activity !== null ? (
                 <ActivityRow
                   state={activity.state}
                   detail={activity.detail}
                   thought={activity.thought}
+                  elapsedMs={activity.elapsedMs}
                 />
               ) : (
                 <span />

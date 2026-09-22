@@ -35,10 +35,29 @@ export interface AgentSessionState {
   running: boolean
   /** Why its last turn ended, as the engine answered it, or null while none has. */
   stopReason: StopReason | null
+  /**
+   * The entry the engine pushed last, which is not always the last one of the thread.
+   *
+   * An entry being written is written again in the place it first took, and an agent that names
+   * none of its messages has every word of a turn folded into the first one: the answer it writes
+   * after a tool call lands above that call. What the turn is doing is what it wrote last, and
+   * only the order of the pushes says which that is.
+   */
+  latest: string | null
 }
 
 /** What a Session nothing has happened in yet holds. */
-const QUIET: AgentSessionState = { entries: [], running: false, stopReason: null }
+const QUIET: AgentSessionState = { entries: [], running: false, stopReason: null, latest: null }
+
+/**
+ * The Sessions whose turn the engine said had begun and has not yet said had ended.
+ *
+ * Kept apart from `running`, which `say` also sets before the engine has said anything: the
+ * answer to a prompt can fail while the turn goes on — the main process stops waiting for an
+ * answer after a few seconds, and a turn lasts minutes — and a failure then is not the end of
+ * the turn. Only the engine's own `turn` is.
+ */
+const announced = new Set<string>()
 
 /**
  * What one agent offers one Project before a Session holds it (design D5-17, D5-21).
@@ -127,28 +146,89 @@ export interface Activity {
   detail?: string | undefined
   /** The thought arriving now, which is the last one of the turn that is running. */
   thought?: string | undefined
+  /** How long the last turn took, from the user's message to its `turn` entry, once it is over. */
+  elapsedMs?: number | undefined
 }
 
 /** How far a call got, in the two words that mean it has not finished (ipc, `ToolCallStatus`). */
 const UNFINISHED = ['pending', 'in_progress']
 
+/** The three states a turn is in once it is over, which the row keeps until the next message. */
+const ENDED: readonly ActivityState[] = ['done', 'stopped', 'failed']
+
+/** Whether an activity is the end of a turn rather than something a turn is doing. */
+export function hasEnded(activity: Activity): boolean {
+  return ENDED.includes(activity.state)
+}
+
 /**
- * What the turn running in this thread is doing, in the order the four states answer.
+ * How a turn ended, from the stop reason its `turn` entry carries.
  *
- * A permission first, because a turn waiting on the reader is not working whatever else the
- * thread holds; then the call it is running, because that is the one thing worth naming; then
- * the answer being written; and thinking for everything else, which is what an agent between
- * two blocks is doing.
+ * `cancelled` is the user's Stop, and `interrupted` is the agent gone from under the turn — the
+ * one ending Hemera wrote rather than the agent. Every other reason is an agent that answered and
+ * stopped where it chose to, which is a turn that is done.
  */
-export function activityOf(entries: readonly SessionEntry[]): Activity {
-  // Read over the turn that is running and no further back. A turn whose agent died under it
-  // leaves its calls `in_progress` and its question undecided — nothing closed them, because
-  // nothing was left to — and a rule read over the whole thread would answer with that dead
-  // turn's call, or with its question, for every turn after it and for as long as the Session
-  // lasts. The entry that ends a turn is where the previous one stops being this one's business.
-  const running = sinceLastTurn(entries)
-  const last = running.at(-1)
-  const thought = thoughtOf(running, last?.turnId ?? null)
+function endOf(stopReason: string | null): ActivityState {
+  if (stopReason === 'cancelled') return 'stopped'
+  if (stopReason === 'interrupted') return 'failed'
+  return 'done'
+}
+
+/** Where the last message the user wrote is, or -1 in a thread they never wrote in. */
+function lastSaid(entries: readonly SessionEntry[]): number {
+  for (let at = entries.length - 1; at >= 0; at -= 1) {
+    const entry = entries[at]
+    if (entry?.role === 'user' && entry.kind === 'message') return at
+  }
+  return -1
+}
+
+/** Where the last `turn` entry is, or -1 in a thread no turn has ended in. */
+function lastEnd(entries: readonly SessionEntry[]): number {
+  for (let at = entries.length - 1; at >= 0; at -= 1) {
+    if (entries[at]?.kind === 'turn') return at
+  }
+  return -1
+}
+
+/**
+ * What the last turn of this thread is doing, or how it ended (trial of 22 September 2026).
+ *
+ * Read over what came after the user's last message and no further back. A turn whose agent
+ * died under it leaves its calls `in_progress` and its question undecided — nothing closed them,
+ * because nothing was left to — and a rule read over the whole thread would answer with that dead
+ * turn's call, or with its question, for every turn after it and for as long as the Session
+ * lasts.
+ *
+ * A `turn` entry after that message is the turn over: done, stopped or failed, and how long it
+ * took from the message to that entry. Otherwise the states answer in this order: a permission
+ * first, because a turn waiting on the reader is not working whatever else the thread holds;
+ * then the call it is running, because that is the one thing worth naming; then the answer being
+ * written, when the entry the engine wrote last is one; and thinking for everything else, which
+ * is what an agent between two blocks is doing.
+ *
+ * `latest` is the entry the engine pushed last. Absent — a Session opened on a thread read back
+ * rather than watched — the last entry of the thread stands in for it.
+ */
+export function activityOf(
+  entries: readonly SessionEntry[],
+  latest: string | null = null,
+): Activity {
+  const said = lastSaid(entries)
+  const end = lastEnd(entries)
+
+  if (end > said) {
+    const closing = entries[end]
+    const ending = endOf(closing?.state ?? null)
+    const asked = entries[said]
+    if (ending !== 'done' || closing === undefined || asked === undefined) return { state: ending }
+    return { state: ending, elapsedMs: closing.createdAt - asked.createdAt }
+  }
+
+  const running = entries.slice(Math.max(said, end) + 1)
+  const newest =
+    (latest === null ? undefined : running.find((entry) => entry.id === latest)) ?? running.at(-1)
+  const thought = thoughtOf(running, newest?.turnId ?? null)
 
   if (waiting(running)) return { state: 'waiting', thought }
 
@@ -157,33 +237,14 @@ export function activityOf(entries: readonly SessionEntry[]): Activity {
     return { state: 'running', detail: call.body, thought }
   }
 
-  // A message has no state of its own while it is being written: the engine writes the same
-  // entry again with more in it, and a turn is running, so the last word of the thread is a word
-  // being written. One that says where it stands is believed over that.
-  if (
-    last !== undefined &&
-    last.kind === 'message' &&
-    last.role === 'agent' &&
-    (last.state === null || last.state === 'in_progress')
-  ) {
+  // A message has no state while it is being written — the engine writes the same entry again
+  // with more in it, and never gives a message one (`state` is null on every message) — so the
+  // entry the engine wrote last being a message of the agent is the answer being written.
+  if (newest !== undefined && newest.kind === 'message' && newest.role === 'agent') {
     return { state: 'streaming', thought }
   }
 
   return { state: 'thinking', thought }
-}
-
-/**
- * The end of the thread since the last turn closed, which is the turn that is running.
- *
- * The `turn` entry is written once per turn and never moved, so it is the line between what a
- * finished turn left behind and what the one running has done. A thread with no such entry is
- * a Session whose first turn is under way, and the whole of it is that turn's.
- */
-function sinceLastTurn(entries: readonly SessionEntry[]): readonly SessionEntry[] {
-  for (let at = entries.length - 1; at >= 0; at -= 1) {
-    if (entries[at]?.kind === 'turn') return entries.slice(at + 1)
-  }
-  return entries
 }
 
 /** Whether the agent is waiting on an answer: a request with no decision written after it. */
@@ -266,7 +327,10 @@ export function listenToAgents(): () => void {
   const stop = window.hemera.on((event: EngineEvent) => {
     if (event.event === 'entry' && event.entry !== null) {
       const held = state.sessions.get(event.sessionId) ?? QUIET
-      changed(event.sessionId, { entries: withEntry(held.entries, event.entry) })
+      changed(event.sessionId, {
+        entries: withEntry(held.entries, event.entry),
+        latest: event.entry.id,
+      })
       return
     }
     // The others carry no entry of their own, and none of them is dropped for that. A permission
@@ -278,11 +342,18 @@ export function listenToAgents(): () => void {
     // the user's message is written, before the agent has been given anything to do: the row at
     // the end of the thread and the stop in the composer stand from then, and not from the first
     // word that comes back (design D5-12).
-    if (event.event === 'turn_start') changed(event.sessionId, { running: true })
-    if (event.event === 'turn') changed(event.sessionId, { running: false })
+    if (event.event === 'turn_start') {
+      announced.add(event.sessionId)
+      changed(event.sessionId, { running: true })
+    }
+    if (event.event === 'turn') {
+      announced.delete(event.sessionId)
+      changed(event.sessionId, { running: false })
+    }
   })
   return () => {
     listening = false
+    announced.clear()
     stop()
   }
 }
@@ -391,6 +462,11 @@ export async function setOffered(
  * arrives on its own. `null` is what the composer reads as accepted, and anything else is the
  * sentence it shows — the engine refuses a prompt when the Session has no agent, or when the
  * agent is no longer there.
+ *
+ * A failure does not end a turn the engine said had begun. The main process gives up waiting
+ * for an answer after a few seconds, a turn takes minutes, and taking the running flag down
+ * then is what emptied the row and put the Stop away five seconds into every turn (trial of
+ * 22 September 2026): once the turn is announced, the engine's own `turn` is what ends it.
  */
 export async function say(sessionId: string, text: string): Promise<string | null> {
   changed(sessionId, { running: true })
@@ -399,7 +475,7 @@ export async function say(sessionId: string, text: string): Promise<string | nul
     changed(sessionId, { running: false, stopReason: answered.stopReason })
     return null
   } catch (cause) {
-    changed(sessionId, { running: false })
+    if (!announced.has(sessionId)) changed(sessionId, { running: false })
     replace({ ...state, refusal: message(cause) })
     return message(cause)
   }

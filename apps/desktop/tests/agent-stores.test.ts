@@ -307,6 +307,48 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
     const again: SessionEntry = { ...entry('e5', 'user', 'Try again'), turnId: null }
     expect(activityOf([...dead, again])).toEqual({ state: 'thinking', thought: undefined })
   })
+
+  test('a turn writing its answer is writing, then done in the time it took', () => {
+    const said = { ...entry('e1', 'user', 'Read the recap'), createdAt: 1_000 }
+    const answer = reported('e2', 'message', 'The recap says')
+
+    // A message is never given a state by the engine: null while it is written, and still null
+    // once it is — the entry being the last one written is what says it is being written.
+    expect(activityOf([said, answer], 'e2')).toEqual({ state: 'streaming', thought: undefined })
+
+    // The turn entry closes it: done, twelve seconds after the message that asked for it.
+    const end = { ...reported('e3', 'turn', 'The agent finished its turn.', 'end_turn') }
+    const closed = [said, answer, { ...end, createdAt: 13_400 }]
+    expect(activityOf(closed, 'e3')).toEqual({ state: 'done', elapsedMs: 12_400 })
+
+    // And it stays done until the next message, whatever the engine pushed last.
+    expect(activityOf(closed, 'e2')).toEqual({ state: 'done', elapsedMs: 12_400 })
+    const next = { ...entry('e4', 'user', 'And the credit notes'), createdAt: 20_000 }
+    expect(activityOf([...closed, next], 'e4').state).toBe('thinking')
+  })
+
+  test('an answer folded above a call is still the answer being written', () => {
+    // An agent that names none of its messages has every word of the turn written into the first
+    // message entry, which stays where it was: the answer after a call lands above that call.
+    const said = entry('e1', 'user', 'Read the recap')
+    const answer = reported('e2', 'message', 'Reading it. The recap says')
+    const call = reported('e3', 'tool_call', 'cat recap.md', 'completed')
+
+    expect(activityOf([said, answer, call], 'e2').state).toBe('streaming')
+    // The call written last and finished: the agent is between two blocks.
+    expect(activityOf([said, answer, call], 'e3').state).toBe('thinking')
+  })
+
+  test('a turn the user stopped says stopped, and one whose agent died says failed', () => {
+    const said = entry('e1', 'user', 'Push it')
+    const call = reported('e2', 'tool_call', 'git push', 'cancelled')
+
+    const stopped = reported('e3', 'turn', 'The turn was stopped.', 'cancelled')
+    expect(activityOf([said, call, stopped])).toEqual({ state: 'stopped' })
+
+    const died = reported('e3', 'turn', 'The agent stopped running.', 'interrupted')
+    expect(activityOf([said, call, died])).toEqual({ state: 'failed' })
+  })
 })
 
 describe('Le tour tourne dès que la question est écrite', () => {
@@ -320,6 +362,56 @@ describe('Le tour tourne dès que la question est écrite', () => {
 
     push({ event: 'turn', sessionId: 'session-3', entry: null })
     expect(agentOf('session-3').running).toBe(false)
+  })
+
+  test('a prompt whose answer fails does not end a turn the engine said had begun', async () => {
+    // What the main process answers once it stops waiting: a turn takes minutes, the wait for the
+    // answer is a few seconds, and the turn goes on after it (trial of 22 September 2026).
+    answers.set('agents.prompt', new Error('{"useCase":"agents.prompt","_tag":"EngineTimeout"}'))
+
+    const asking = say('session-4', 'Read the recap')
+    push({ event: 'turn_start', sessionId: 'session-4', entry: null })
+    await asking
+    expect(agentOf('session-4').running).toBe(true)
+
+    // The engine's own end is what ends it.
+    push({ event: 'turn', sessionId: 'session-4', entry: null })
+    expect(agentOf('session-4').running).toBe(false)
+  })
+
+  test('a message said sets the Session running at once, which is what draws the Stop', async () => {
+    // The page hands `running` to the composer as it is, and the composer draws the Stop from it
+    // (`Composer > Running`): what is proved here is that it is on from the press, through the
+    // engine's own start, until the turn ends and its answer arrives.
+    let answer: (value: { stopReason: string }) => void = () => undefined
+    Object.assign(window.hemera, {
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the same stand-in, held open
+      invoke: async (name: string, argument: unknown) => {
+        asked.push({ name, argument })
+        return await new Promise((resolve) => {
+          answer = resolve
+        })
+      },
+    })
+
+    const asking = say('session-6', 'Read the recap')
+    expect(agentOf('session-6').running).toBe(true)
+    push({ event: 'turn_start', sessionId: 'session-6', entry: null })
+    push({ event: 'entry', sessionId: 'session-6', entry: entry('e1', 'user', 'Read the recap') })
+    expect(agentOf('session-6').running).toBe(true)
+
+    push({ event: 'turn', sessionId: 'session-6', entry: null })
+    answer({ stopReason: 'end_turn' })
+    await asking
+    expect(agentOf('session-6').running).toBe(false)
+    expect(agentOf('session-6').stopReason).toBe('end_turn')
+  })
+
+  test('a prompt refused before any turn began leaves nothing running', async () => {
+    answers.set('agents.prompt', new Error('the engine is not running'))
+
+    await say('session-5', 'Again')
+    expect(agentOf('session-5').running).toBe(false)
   })
 })
 
