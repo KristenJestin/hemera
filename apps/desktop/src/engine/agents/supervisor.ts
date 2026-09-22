@@ -141,6 +141,11 @@ export interface HostProcessOptions {
   runtime: 'command' | 'script'
   cwd?: string
   env?: Record<string, string>
+  /**
+   * Whether the arguments go to Windows as they are, unquoted by Node: what `cmd.exe /s /c` is
+   * handed is a line already quoted once, and quoting it again would break it.
+   */
+  windowsVerbatimArguments?: boolean
 }
 
 /**
@@ -329,6 +334,8 @@ export interface ProcessSupervisorService {
        * processes by the main process (D5-21). An agent's own command is spawned as it was.
        */
       readonly script?: boolean
+      /** Whether the arguments reach Windows unquoted by Node, as a `cmd.exe /s /c` line needs. */
+      readonly verbatim?: boolean
     },
   ) => Effect.Effect<SupervisedProcess, AgentSpawnError, Scope.Scope>
 }
@@ -359,10 +366,12 @@ function hostOptionsOf(
   runtime: HostProcessOptions['runtime'],
   cwd: string | undefined,
   env: Record<string, string> | undefined,
+  verbatim = false,
 ): HostProcessOptions {
   const settings: HostProcessOptions = { detached: grouped, runtime }
   if (cwd !== undefined) settings.cwd = cwd
   if (env !== undefined) settings.env = env
+  if (verbatim) settings.windowsVerbatimArguments = true
   return settings
 }
 
@@ -547,6 +556,7 @@ export const processSupervisorLayer = Layer.effect(
         readonly env?: Record<string, string>
         readonly graceMilliseconds?: number
         readonly script?: boolean
+        readonly verbatim?: boolean
       },
     ): Effect.Effect<SupervisedProcess, AgentSpawnError, Scope.Scope> =>
       Effect.acquireRelease(
@@ -568,6 +578,7 @@ export const processSupervisorLayer = Layer.effect(
               options.script === true ? 'script' : 'command',
               options.cwd,
               options.env,
+              options.verbatim,
             ),
           )
 

@@ -41,6 +41,7 @@ import { Sessions } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
 import { type RunState, commandRuns, projectCommands, sessions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { hostLookup, invocationOf } from './line.ts'
 
 /** How many runs `recent` hands back: what a panel draws, oldest ones out of sight. */
 const RECENT_RUNS = 8
@@ -587,10 +588,14 @@ export const commandsLayer = Layer.effect(
           live.set(id, record)
 
           // A line is run and not interpreted: what it names is the program, and the rest are
-          // its arguments. A line that needs a shell — a pipeline, a variable — is a line the
-          // user writes in a script and names here.
-          const [executable, ...args] = asked.line.split(/\s+/).filter((one) => one.length > 0)
-          if (executable === undefined) {
+          // its arguments, a quoted one staying one. A line that needs a shell — a pipeline, a
+          // variable — is a line the user writes in a script and names here.
+          const invocation = invocationOf(
+            asked.line,
+            globalThis.process.platform,
+            hostLookup(asked.cwd),
+          )
+          if (invocation === null) {
             record.state = 'failed'
             record.kept = `Hemera has nothing to run: the line of ${asked.name} is empty`
             record.endedAt = startedAt
@@ -601,7 +606,11 @@ export const commandsLayer = Layer.effect(
           }
 
           const spawned = yield* owned(
-            supervisor.start(executable, args, { cwd: asked.cwd, graceMilliseconds: GRACE_MS }),
+            supervisor.start(invocation.command, invocation.args, {
+              cwd: asked.cwd,
+              graceMilliseconds: GRACE_MS,
+              verbatim: invocation.verbatim,
+            }),
           ).pipe(Effect.exit)
 
           if (Exit.isFailure(spawned)) {

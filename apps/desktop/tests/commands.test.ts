@@ -7,11 +7,11 @@
  * tests, started through the real supervisor. A run that says it failed has to have failed.
  *
  * The children are `node` itself, reached through `process.execPath` rather than through the
- * `PATH`: a line is run and not interpreted, so what the suite writes is one token of code with
- * no space in it, exactly as a user's line would be split.
+ * `PATH`: a line is run and not interpreted, so what the suite writes is split into words as a
+ * user's line would be, a quoted word — the path, the code to evaluate — staying one word.
  */
 
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -130,10 +130,10 @@ const runEntries = (sessionId: string) =>
   )
 
 /** A line that says something on its standard error and ends badly, as a failing tool does. */
-const FAILS_LOUDLY = `${process.execPath} -e process.stderr.write('boom\\n');process.exit(3)`
+const FAILS_LOUDLY = `"${process.execPath}" -e "process.stderr.write('boom\\n');process.exit(3)"`
 
 /** A line that publishes an address and stays up, as a dev server does. */
-const PUBLISHES_AN_ADDRESS = `${process.execPath} -e console.log('http://localhost:4321');setInterval(()=>{},1000)`
+const PUBLISHES_AN_ADDRESS = `"${process.execPath}" -e "console.log('http://localhost:4321');setInterval(()=>{},1000)"`
 
 describe('A one-off command shows and is not promoted', () => {
   it('keeps what it said on standard error, its exit code, and one entry of the thread', async () => {
@@ -406,4 +406,60 @@ describe('A running app is shared by the Sessions of its Project', () => {
     expect(seen.refused.message).toContain(seen.started.id)
     expect(seen.stopped.state).toBe('stopped')
   })
+})
+
+/** A program that prints the arguments it was given, one `|` between two of them. */
+const PRINTS_ITS_ARGUMENTS = `-e "console.log(process.argv.slice(1).join('|'))"`
+
+/** Starts one line as a `check` of the suite's Session and reads it once it has ended. */
+const ranToTheEnd = (line: string) =>
+  Effect.gen(function* () {
+    const session = yield* opened
+    const commands = yield* Commands
+    const started = yield* commands.run({
+      sessionId: session.sessionId,
+      projectId: session.projectId,
+      commandId: null,
+      name: 'arguments',
+      line,
+      kind: 'check',
+      cwd: root,
+      startedBy: 'user',
+    })
+    return yield* until(
+      commands.output(session.sessionId, started.id),
+      (view) => view.state !== 'running',
+    )
+  })
+
+describe('A line is split into words, a quoted one staying whole', () => {
+  it('hands the program a quoted argument as one argument', async () => {
+    const seen = await engine()(
+      ranToTheEnd(`"${process.execPath}" ${PRINTS_ITS_ARGUMENTS} "two words" plain`),
+    )
+
+    expect(seen.state).toBe('exited')
+    expect(seen.output).toContain('two words|plain')
+  })
+
+  it.runIf(process.platform === 'win32')(
+    'runs a .cmd shim through cmd.exe, with its arguments as they were written',
+    async () => {
+      // A shim as npm writes one: a batch file that hands its arguments on to a program.
+      writeFileSync(
+        join(root, 'echo-args.cmd'),
+        `@"${process.execPath}" ${PRINTS_ITS_ARGUMENTS} %*\r\n`,
+      )
+      const before = process.env['PATH']
+      process.env['PATH'] = `${root};${before ?? ''}`
+      try {
+        const seen = await engine()(ranToTheEnd('echo-args "two words" "a&b" plain'))
+
+        expect(seen.state).toBe('exited')
+        expect(seen.output).toContain('two words|a&b|plain')
+      } finally {
+        process.env['PATH'] = before
+      }
+    },
+  )
 })
