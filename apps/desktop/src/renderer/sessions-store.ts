@@ -115,6 +115,26 @@ export async function openSessions(projectId: string): Promise<void> {
   replace({ ...state, loaded: true })
 }
 
+/**
+ * Reads the Sessions of a Project again, and keeps nothing but the list.
+ *
+ * A turn is the engine's own work: it writes the message the user sent, and the first message of
+ * a Session is what proposes its title (design D4b-05, D5-11). Nothing of this store is what
+ * changed the Session, so the list is read again rather than patched — and only the list: the
+ * thread and the Session that is open belong to whoever is reading them, and a read that dropped
+ * them would close a page nobody asked to close.
+ */
+export async function readSessions(projectId: string): Promise<void> {
+  try {
+    const sessions = await listed(projectId)
+    if (shown !== projectId) return
+    replace({ ...state, sessions, refusal: null })
+  } catch (cause) {
+    if (shown !== projectId) return
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
 /** Reads the thread of a Session and keeps it as what the page is showing. */
 export async function openSession(sessionId: string): Promise<void> {
   replace({ ...state, open: sessionId, thread: [], loaded: false, refusal: null })

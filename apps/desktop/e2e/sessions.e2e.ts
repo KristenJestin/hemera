@@ -24,7 +24,7 @@ import { browser, expect } from '@wdio/globals'
 
 import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, MODELS, THOUGHTS } from './agent/script.ts'
-import { addProject, awaits, control, press, shows, strike, write } from './hand.ts'
+import { addProject, awaits, control, press, shows, sidebar, strike, write } from './hand.ts'
 
 /**
  * Somewhere for the Project to point at, which is also where the agent is started.
@@ -122,15 +122,21 @@ describe('A thought folds', () => {
 })
 
 describe('Création dans un Projet', () => {
-  it('is called New session until it is renamed on the spot', async () => {
-    // The name a Session is given when nothing has named it, and a field waiting to replace it.
-    expect(await shows('New session')).toBe(true)
+  it('is listed under the title its first message proposes', async () => {
+    // The engine writes the message as part of the prompt, and the first message of a Session is
+    // what proposes the title it is listed under (D4b-05, D5-11). The list is read again the
+    // moment that entry arrives, so the name is there without a reload — and it is read on the
+    // sidebar, because the thread says the same words for a reason of its own.
+    expect(await sidebar()).toContain(ASKED)
+    expect(await shows('New session')).toBe(false)
+  })
 
+  it('is renamed on the spot, and the name given replaces the proposed one', async () => {
     await press('Rename')
     await browser.pause(500)
     await nameIt(NAMED)
 
-    expect(await shows(NAMED)).toBe(true)
+    expect(await sidebar()).toContain(NAMED)
     expect(await shows('New session')).toBe(false)
   })
 })

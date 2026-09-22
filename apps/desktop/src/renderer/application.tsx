@@ -86,6 +86,7 @@ import {
   closeSessions,
   openSession,
   openSessions,
+  readSessions,
   renameSession,
   restoreSession,
   sessionsSnapshot,
@@ -308,6 +309,14 @@ export function Application() {
   const [naming, setNaming] = useState<string | null>(null)
   /** Which Project the window has already decided where to look in. */
   const placed = useRef<string | null>(null)
+  /**
+   * The Sessions the window has already sent back to the list, once their first entry arrived.
+   *
+   * A Session is named by the first message written in it, and the engine writes that message
+   * itself: nothing else tells the sidebar that the Session it lists stopped being "New
+   * session", so the first entry of one is what sends it to the list again.
+   */
+  const named = useRef(new Set<string>())
   /** The folder the settings are showing, which is what everything below it is read against. */
   const [shownPath, setShownPath] = useState<string | null>(null)
 
@@ -449,6 +458,23 @@ export function Application() {
   // about a Session and not about the page on screen, so one subscription holds them all and each
   // page reads the Session it draws (design D5-12).
   useEffect(() => listenToAgents(), [])
+
+  // The list the sidebar draws is read again when a Session gets its first entry: the engine
+  // writes the user's own message as part of the prompt (design D5-11), and that message is what
+  // proposes the title the Session is listed under (design D4b-05). Once per Session and once per
+  // first entry — every later entry of a turn changes nothing about how the Session is listed.
+  useEffect(() => {
+    const projectId = shell.activeProjectId
+    if (projectId === null) return
+    let stale = false
+    for (const [sessionId, pushed] of agents.sessions) {
+      if (named.current.has(sessionId)) continue
+      if (!pushed.entries.some((one) => one.seq === 1)) continue
+      named.current.add(sessionId)
+      stale = true
+    }
+    if (stale) void readSessions(projectId)
+  }, [agents.sessions, shell.activeProjectId])
 
   // What the agent of the Session on screen offers, asked when that Session becomes the one the
   // window is on: an agent announces its models and its modes when it starts, and what it is on

@@ -147,6 +147,17 @@ export async function shows(text: string): Promise<boolean> {
 }
 
 /**
+ * What the sidebar says, which is where a Session is named and not the thread it draws.
+ *
+ * A name is in two places at once — the sidebar lists the Session under it and the page heads the
+ * thread with it — so a suite reading the whole page cannot tell which of the two it saw. The
+ * sidebar is the one that says how a Session is listed.
+ */
+export async function sidebar(): Promise<string> {
+  return await browser.execute(() => document.querySelector('aside')?.textContent ?? '')
+}
+
+/**
  * What the bar lists, in the order it lists them.
  *
  * Read as "does a tab say this", because a tab says more than a name: its tone is a dot and

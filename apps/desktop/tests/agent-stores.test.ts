@@ -22,6 +22,7 @@ import {
 import {
   archiveSession,
   openSessions,
+  readSessions,
   sessionsSnapshot,
   writeMessage,
 } from '#renderer/sessions-store.ts'
@@ -217,5 +218,39 @@ describe('Ranger une Session après un message', () => {
       id: 'session-1',
       version: 1,
     })
+  })
+})
+
+describe('Le titre proposé paraît sans rechargement', () => {
+  test('the list is read again on a Session first entry, and the thread is left alone', async () => {
+    answers.set('sessions.list', [session('session-1')])
+    await openSessions('atlas')
+
+    // The engine proposes the title from the first message and writes it in the same transaction
+    // (D4b-05, D5-11), then pushes that entry: the list the sidebar draws is read again on it, so
+    // the name is there without a reload.
+    answers.set('sessions.list', [session('session-2'), session('session-1')])
+    push({
+      event: 'entry',
+      sessionId: 'session-2',
+      entry: entry('e1', 'user', 'The export drops the invoice date'),
+    })
+    await readSessions('atlas')
+
+    expect(asked.map((one) => one.name)).toEqual(['sessions.list', 'sessions.list'])
+    expect(sessionsSnapshot().sessions.map((one) => one.id)).toEqual(['session-2', 'session-1'])
+    // The list alone: a read that dropped the thread would close a page nobody asked to close.
+    expect(sessionsSnapshot().thread).toEqual([])
+    expect(sessionsSnapshot().open).toBe(null)
+  })
+
+  test('a list read for a Project the window has left is not applied', async () => {
+    answers.set('sessions.list', [session('session-1')])
+    await openSessions('atlas')
+
+    answers.set('sessions.list', [session('session-2')])
+    await readSessions('lyra')
+
+    expect(sessionsSnapshot().sessions.map((one) => one.id)).toEqual(['session-1'])
   })
 })
