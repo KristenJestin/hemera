@@ -16,6 +16,7 @@ import {
   type ToolKind,
   type ToolStatus,
   type TouchedFile,
+  type UsageCost,
 } from '@hemera/ui'
 import type { ReactNode } from 'react'
 import { z } from 'zod'
@@ -80,6 +81,19 @@ const decisionSchema = z.object({
 const turnSchema = z.object({ stopReason: z.string() })
 
 const planSchema = z.object({ entries: z.array(planEntrySchema) })
+
+/**
+ * What the turn has spent, as the runtime writes it under `usage` (design D5-20).
+ *
+ * Either half can be missing and the entry is written all the same: an agent that accounts for a
+ * turn but announces no window leaves nothing to divide by, and one that announces a window and
+ * accounts for nothing leaves the meter with what it is filling. Both are read as they came.
+ */
+const usageSchema = z.object({
+  used: z.number().nullable(),
+  size: z.number().nullable(),
+  cost: z.object({ amount: z.number(), currency: z.string() }).nullable(),
+})
 
 const callPayloadSchema = z.object({ call: callSchema })
 
@@ -282,6 +296,36 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     )
   }
 
+  return null
+}
+
+/** What the turn has spent, as the meter above the composer reads it (design D5-20). */
+export interface TurnUsage {
+  used: number
+  /** How big the window is, or null when the agent announced none to divide by. */
+  size: number | null
+  cost?: UsageCost | undefined
+}
+
+/**
+ * What the last accounted turn spent, or null when nothing has been accounted for.
+ *
+ * The last one and not a sum: what the agent announces is where the session stands, so adding
+ * them up would count the same window twice over.
+ */
+export function usageOf(entries: readonly SessionEntry[]): TurnUsage | null {
+  for (let at = entries.length - 1; at >= 0; at -= 1) {
+    const entry = entries[at]
+    if (entry === undefined || entry.kind !== 'usage') continue
+    const read = readPayload(usageSchema, entry.payload)
+    if (read === null || read.used === null) return null
+    return {
+      used: read.used,
+      size: read.size,
+      cost:
+        read.cost === null ? undefined : { amount: read.cost.amount, currency: read.cost.currency },
+    }
+  }
   return null
 }
 

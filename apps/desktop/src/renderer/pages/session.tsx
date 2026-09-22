@@ -14,6 +14,7 @@ import {
   SessionEmpty,
   SessionHeader,
   SessionSideColumn,
+  UsageMeter,
   type MessageLine,
   type MessageState,
   type OfferedAgent,
@@ -23,7 +24,7 @@ import {
 
 import type { AgentSessionState } from '../agent-store.ts'
 import { effortStage, modeStage, modelStage } from '../agent-options.ts'
-import { drawEntry, planOf, touchedOf, waitingOf } from '../agent-blocks.tsx'
+import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { whenOf } from '../journal-lines.ts'
 
 /**
@@ -281,6 +282,7 @@ export function SessionPage({
   // meter above the box and the column are two readings of the same turn.
   const plan = planOf(thread)
   const touched = touchedOf(thread)
+  const usage = usageOf(thread)
 
   return (
     /*
@@ -316,7 +318,18 @@ export function SessionPage({
             <MessageScroller label="The thread of this Session" entries={scroller} />
           )}
         </div>
-        <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+        {/*
+          What the turn has spent stands above the box rather than in its foot: the foot is the
+          Workspace and the send alone, and a figure read at a glance is a figure that must not be
+          what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
+          a meter drawn at zero is a figure that says nothing (D5-20).
+        */}
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+          {usage !== null && (
+            <div className="flex justify-end">
+              <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
+            </div>
+          )}
           <Composer
             value={value}
             onValueChange={setValue}
