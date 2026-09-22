@@ -57,6 +57,12 @@ export interface ToolAccessService {
   readonly byId: (id: string) => Effect.Effect<AccessGrant | null>
   /** Revokes every token of a Session, which is what releasing one does. */
   readonly revoked: (sessionId: string) => Effect.Effect<void>
+  /**
+   * The Session a token was minted for, live or revoked, and null for one this engine never
+   * minted: what a refusal names so the user can tell which Session was turned away, never the
+   * token itself.
+   */
+  readonly sessionOf: (token: string | null) => Effect.Effect<string | null>
   /** Whether a Session still has an agent process that may ask. */
   readonly live: (sessionId: string) => Effect.Effect<boolean>
   /**
@@ -70,6 +76,14 @@ export class ToolAccess extends Context.Service<ToolAccess, ToolAccessService>()
 
 /** How much of a digest is enough to name a grant without naming the secret. */
 const DIGEST_CHARACTERS = 12
+
+/** How many revoked grants are remembered, so a refusal can name the Session a token served. */
+const REVOKED_KEPT = 256
+
+/** The digest a grant is named by: enough to tell grants apart, nothing of the secret. */
+function digestOf(token: string): string {
+  return createHash('sha256').update(token).digest('hex').slice(0, DIGEST_CHARACTERS)
+}
 
 /**
  * The grants of this engine run, in memory and nowhere else.
@@ -86,6 +100,8 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
     const byToken = new Map<string, AccessGrant>()
     const byId = new Map<string, AccessGrant>()
     const bySession = new Map<string, string>()
+    /** The Session of each revoked grant, by its digest, the oldest let go of first. */
+    const revokedSessions = new Map<string, string>()
 
     const write = (line: string) => sink.write(`tools: ${line}`)
 
@@ -97,6 +113,11 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
         bySession.delete(sessionId)
         byId.delete(grant.id)
         for (const [token, held] of byToken) if (held.id === grant.id) byToken.delete(token)
+        revokedSessions.set(grant.id, sessionId)
+        for (const oldest of revokedSessions.keys()) {
+          if (revokedSessions.size <= REVOKED_KEPT) break
+          revokedSessions.delete(oldest)
+        }
       })
 
     return {
@@ -104,7 +125,7 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
         Effect.gen(function* () {
           yield* forget(sessionId)
           const token = randomBytes(32).toString('base64url')
-          const id = createHash('sha256').update(token).digest('hex').slice(0, DIGEST_CHARACTERS)
+          const id = digestOf(token)
           const grant: AccessGrant = {
             id,
             sessionId,
@@ -115,7 +136,7 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
           byToken.set(token, grant)
           byId.set(id, grant)
           bySession.set(sessionId, id)
-          yield* write(`granted to ${agentProcess} for a Session, as ${id}`)
+          yield* write(`granted to ${agentProcess} for Session ${sessionId}, as ${id}`)
           return { ...grant, token }
         }),
 
@@ -123,6 +144,14 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
         Effect.sync(() => (token === null ? undefined : byToken.get(token)) ?? null),
 
       byId: (id) => Effect.sync(() => byId.get(id) ?? null),
+
+      sessionOf: (token) =>
+        Effect.sync(() => {
+          if (token === null) return null
+          const live = byToken.get(token)
+          if (live !== undefined) return live.sessionId
+          return revokedSessions.get(digestOf(token)) ?? null
+        }),
 
       revoked: forget,
 

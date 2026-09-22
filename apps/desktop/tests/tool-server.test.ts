@@ -99,8 +99,13 @@ type Engine =
   | SqliteClient
 
 /** The engine with its tools served, over one database in the suite's folder. */
-function engine(permissions: ToolPermissionsService = noQuestions) {
-  const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
+function engine(permissions: ToolPermissionsService = noQuestions, written: string[] = []) {
+  const sink = Layer.succeed(StderrSink, {
+    write: (line: string) =>
+      Effect.sync(() => {
+        written.push(line)
+      }),
+  })
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
@@ -374,5 +379,42 @@ describe('a request from a web page', () => {
     )
 
     expect(seen.status).toBe(403)
+  })
+})
+
+describe('the diagnostics of a refused access', () => {
+  it('name the Session and the tool, and never the token', async () => {
+    const written: string[] = []
+    const seen = await engine(
+      noQuestions,
+      written,
+    )(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const access = yield* ToolAccess
+        const held = yield* aSessionWithAToken
+        yield* access.revoked(held.session.id)
+        const refused = yield* toolCall(server, held.granted.token, 1, 'fs_read', {
+          path: 'notes.md',
+        })
+        const foreign = yield* toolCall(server, 'f'.repeat(43), 2, 'fs_write', { path: 'x' })
+        return { refused, foreign, sessionId: held.session.id, token: held.granted.token }
+      }),
+    )
+
+    expect(seen.refused.status).toBe(401)
+    expect(seen.foreign.status).toBe(401)
+    const granted = written.find((line) => line.includes('granted'))
+    expect(granted).toContain(seen.sessionId)
+    const refusals = written.filter((line) => line.includes('refused'))
+    expect(refusals).toHaveLength(2)
+    expect(refusals[0]).toContain(seen.sessionId)
+    expect(refusals[0]).toContain('fs_read')
+    expect(refusals[1]).toContain('fs_write')
+    expect(refusals[1]).toContain('no Session this engine knows')
+    for (const line of written) {
+      expect(line).not.toContain(seen.token)
+      expect(line).not.toContain('f'.repeat(43))
+    }
   })
 })

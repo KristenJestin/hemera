@@ -57,6 +57,38 @@ export interface ToolServerService {
 
 export class ToolServer extends Context.Service<ToolServer, ToolServerService>()('ToolServer') {}
 
+/** What a JSON-RPC call to a tool reads as: the method, and the tool it names. */
+const TOOL_CALL = z.object({
+  method: z.literal('tools/call'),
+  params: z.object({ name: z.string() }),
+})
+
+/**
+ * The tool a refused request asked for, and null for anything that is not one call to a tool.
+ *
+ * Read from a copy of the body, and only to name the tool in the diagnostic: what the request
+ * asked is not trusted for anything else, and a body that does not read is simply not a call.
+ */
+async function toolAskedIn(request: Request): Promise<string | null> {
+  const body = await request
+    .clone()
+    .text()
+    .catch(() => '')
+  const sent = z
+    .string()
+    .transform((text, context) => {
+      try {
+        return JSON.parse(text)
+      } catch {
+        context.addIssue({ code: 'custom', message: 'not JSON' })
+        return z.NEVER
+      }
+    })
+    .pipe(TOOL_CALL)
+    .safeParse(body)
+  return sent.success ? sent.data.params.name.slice(0, 64) : null
+}
+
 /** The token of a bearer header, and null without one. */
 function bearerOf(request: Request): string | null {
   const header = request.headers.get('authorization')
@@ -158,9 +190,17 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
         fetch: async (request) => {
           const grant = await Effect.runPromise(grantOf(request))
           if (grant === null) {
+            // The line names the Session the token served and the tool it asked for — what the
+            // user needs to tell which agent was turned away — and never the token (D6-01).
+            const sessionId = await Effect.runPromise(
+              access.sessionOf(bearerOf(request) ?? queryTokenOf(request)),
+            )
+            const tool = await toolAskedIn(request)
             await Effect.runPromise(
               access.refusedAccess(
-                `refused a call from ${new URL(request.url).origin} with no token this engine knows`,
+                `refused ${tool === null ? 'a request' : `a call to ${tool}`} for ${
+                  sessionId === null ? 'no Session this engine knows' : `Session ${sessionId}`
+                }`,
               ),
             )
             return new Response(JSON.stringify(REFUSED), {
