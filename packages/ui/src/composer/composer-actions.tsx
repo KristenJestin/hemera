@@ -43,6 +43,15 @@ export interface ComposerActionsProps {
   onSend: () => void
   /** Cancels the running turn, when there is one to cancel. */
   onStop?: (() => void) | undefined
+  /**
+   * Why the send cannot be pressed, said on the control itself (design D4b-02).
+   *
+   * A control that is off and says nothing is a control the reader is left to guess about. The
+   * reason rides the button — `aria-disabled`, so whatever reads the page says it is off rather
+   * than passing over it, and `title`, so the reason itself is there to be asked for — instead
+   * of a paragraph above the frame, which moved the whole box the moment it appeared.
+   */
+  sendDisabledReason?: string | undefined
 }
 
 export function ComposerActions({
@@ -55,6 +64,7 @@ export function ComposerActions({
   action,
   onSend,
   onStop,
+  sendDisabledReason,
 }: ComposerActionsProps): ReactNode {
   const transition = useTransition(arrival)
   const morphs = sending || running
@@ -62,6 +72,8 @@ export function ComposerActions({
   // control that stopped working. The indicator the button draws is what says so; the word and
   // the glyph stay as they are.
   const busy = sending && !running
+  /** Whether the send is off for a reason the caller gave, which is a reason worth saying. */
+  const blocked = !running && sendDisabledReason !== undefined
   return (
     <>
       <WorkspacePill
@@ -79,6 +91,13 @@ export function ComposerActions({
           size="sm"
           state={busy ? 'loading' : 'idle'}
           disabled={running ? false : busy || !ready}
+          // Said when the control is off for a reason it can give: a write in flight, which the
+          // button already says it is waiting on, or a Session with no agent behind it. Not when
+          // there is simply nothing typed yet — the empty box is its own explanation. It is
+          // written here rather than left to Base UI because a value handed to a component wins
+          // over the one the component computes, and `undefined` handed over is a value.
+          aria-disabled={busy || blocked ? true : undefined}
+          title={running ? undefined : sendDisabledReason}
           onClick={running ? onStop : onSend}
         >
           <span className={MORPH}>

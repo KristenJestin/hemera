@@ -67,29 +67,39 @@ export interface ComposerProps {
   /** The word on the button that sends: `Start chat` on the Home. */
   action?: string | undefined
   /**
-   * What this composer cannot be sent without, drawn above the box (design D4b-02).
+   * Why the send cannot be pressed, said on the control itself (design D4b-02).
    *
    * The Home's composer starts a Session, and a Session is made with the agent it will run: with
-   * no agent chosen there is nothing to make and nobody to answer, so the action stays off and
-   * the sentence says what is missing. It is neither a refusal nor a permission: nothing was
-   * written and lost, and nothing is waiting on an answer — the choice above the box is.
+   * no agent chosen there is nothing to make and nobody to answer. The reason used to be a
+   * paragraph above the box, which pushed the whole frame down the moment it appeared and left a
+   * gap the moment it went; it belongs on the control it is about, where a hand that stops on it
+   * is told why and nothing moves at all.
    */
-  missing?: string | undefined
+  sendDisabledReason?: string | undefined
   /** The shape of the box: the Home's greeting, or the foot of a Session. */
   variant?: PromptShape | undefined
   placeholder?: string | undefined
   /** Writes the text, and answers why it could not be written, or nothing when it was. */
   onSend: (text: string) => Promise<string | null>
   /**
-   * What the agent of the Session is on, drawn in the foot beside the actions (design D17-11).
+   * The one control for the agent, its model and its effort, at the end of the box's own row
+   * (design D17-11).
    *
-   * The controls are the agent's own — the models it announced, the effort it can think with,
-   * the mode it can be told — and they are handed over already built, because which of them
-   * exists is what the agent answered rather than something this composer could know. A Session
-   * with no agent, and an agent that advertises nothing, hand over nothing: the foot is the row
-   * of a box with nothing set, which is what it is, rather than a row of empty controls.
+   * It is handed over already built, because what an agent announced is what the engine
+   * answered rather than something this composer could know. It sits *inside* the frame, on the
+   * row the `@` and the paperclip are on, and not in the foot: the foot used to hold the
+   * agent's controls beside the actions, they wrapped onto a second line as soon as a model had
+   * a long name, and the frame changed height while it was being read.
    */
-  controls?: ReactNode | undefined
+  agentMenu?: ReactNode | undefined
+  /**
+   * What the agent may do without asking, beside that control and never in the foot.
+   *
+   * The agent's own modes, handed over already built for the same reason: an agent that
+   * announced none hands over nothing, and the row is then the row of a box with no mode to
+   * set, which is what it is.
+   */
+  mode?: ReactNode | undefined
   /**
    * Whether a turn is running, which is what the send becomes while it does (design D17-13).
    *
@@ -121,11 +131,12 @@ export function Composer({
   workspace,
   onWorkspaceChange,
   action = 'Start chat',
-  missing,
+  sendDisabledReason,
   variant = 'hero',
   placeholder = 'Ask anything, think out loud, or describe what you want to do…',
   onSend,
-  controls,
+  agentMenu,
+  mode,
   running = false,
   onStop,
   blocked,
@@ -142,11 +153,11 @@ export function Composer({
   /**
    * Whether there is anything to send, which Enter and the button both ask.
    *
-   * `missing` is part of the answer: a sentence with nothing behind it to send it to is a
-   * sentence that would be written into a Session that cannot answer, and the reason it is off
-   * is on screen while it is.
+   * `sendDisabledReason` is part of the answer: a sentence with nothing behind it to send it to
+   * is a sentence that would be written into a Session that cannot answer, and the reason it is
+   * off is on the control itself while it is.
    */
-  const ready = value.trim() !== '' && !sending && missing === undefined
+  const ready = value.trim() !== '' && !sending && sendDisabledReason === undefined
 
   /**
    * Asks for the files matching what has been typed, once the typing has stopped.
@@ -285,7 +296,6 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2">
-      {missing !== undefined && <p className="text-sm text-muted-foreground">{missing}</p>}
       {blocked}
       <Frame
         animated
@@ -312,8 +322,8 @@ export function Composer({
               action={action}
               onSend={() => void send()}
               onStop={onStop}
+              sendDisabledReason={sendDisabledReason}
             />
-            {controls}
           </FrameFooter>
         }
       >
@@ -365,6 +375,17 @@ export function Composer({
                 />
               ) : (
                 clip
+              )}
+              {/* The agent, its model and its effort, and the mode beside them, at the end of
+                  the same row: they belong to what the box is about, not to what is done with
+                  what it holds, and the foot below is the Workspace and the send alone. Pushed
+                  to the end rather than wrapped to a line of their own — the height of the
+                  frame must not change when a choice is made. */}
+              {(mode !== undefined || agentMenu !== undefined) && (
+                <span className="ml-auto flex min-w-0 items-center gap-1">
+                  {mode}
+                  {agentMenu}
+                </span>
               )}
             </>
           }

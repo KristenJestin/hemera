@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, waitFor, within } from 'storybook/test'
 
+import { onOneLine } from '../../.storybook/one-line.ts'
 import { DiffBlock } from '../activity/diff-block.tsx'
 import { TerminalOutput } from '../activity/terminal-output.tsx'
 import { ThoughtBlock } from '../activity/thought-block.tsx'
@@ -9,10 +10,14 @@ import { ToolCallCard } from '../activity/tool-call-card.tsx'
 import { DecisionSummary } from '../approval/decision-summary.tsx'
 import { PermissionRequest } from '../approval/permission-request.tsx'
 import { BlockedBanner } from '../composer/blocked-banner.tsx'
+import {
+  AgentModelMenu,
+  type EffortChoice,
+  type ModelChoice,
+  type OfferedAgent,
+} from '../composer/agent-model-menu.tsx'
 import { Composer } from '../composer/composer.tsx'
-import { EffortSelector } from '../composer/effort-selector.tsx'
 import { ModeSelector } from '../composer/mode-selector.tsx'
-import { ModelSelector } from '../composer/model-selector.tsx'
 import { UsageMeter } from '../composer/usage-meter.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { AgentText } from '../message/agent-text.tsx'
@@ -30,8 +35,8 @@ import { StoppedTurn } from './stopped-turn.tsx'
  * Every other story here shows one surface at a time; this one is the surface the reader
  * actually has, and it is the one the lot is judged on: the head, a thread carrying each kind of
  * block an agent reports, the column that holds what is a state rather than an event, and the
- * foot where the agent's own controls stand. A block that reads well alone and badly here is a
- * block that reads badly.
+ * box the next turn is written in, with what the Session runs on at the end of its own row. A
+ * block that reads well alone and badly here is a block that reads badly.
  *
  * The thread is drawn the way the renderer draws it — the user's runs grouped, the agent's
  * entries standing between them — so what this story proves about the page is what the page
@@ -68,14 +73,22 @@ const AFTER = `export async function exportInvoices(rows: Invoice[], out: Writab
 }
 `
 
-const MODELS = [
-  { id: 'claude-sonnet-4-5', name: 'Sonnet 4.5' },
-  { id: 'claude-opus-4-1', name: 'Opus 4.1' },
+/** The agent of this Session, and the two others this machine has. */
+const AGENTS: OfferedAgent[] = [
+  { id: 'claude-code', name: 'Claude Code', available: true, signedIn: true },
+  { id: 'codex', name: 'Codex', available: true, signedIn: true },
+  { id: 'opencode', name: 'OpenCode', available: true, signedIn: true },
 ]
 
-const EFFORTS = [
-  { id: 'low', name: 'Low' },
-  { id: 'high', name: 'High' },
+/** What Claude Code announced: one provider, so the list carries no group header. */
+const MODELS: ModelChoice[] = [
+  { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5' },
+  { id: 'claude-opus-4-1', label: 'Opus 4.1' },
+]
+
+const EFFORTS: EffortChoice[] = [
+  { id: 'low', label: 'Low' },
+  { id: 'high', label: 'High' },
 ]
 
 const MODES = [
@@ -216,8 +229,9 @@ interface PageProps {
 function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
-  const [model, setModel] = useState('claude-sonnet-4-5')
-  const [effort, setEffort] = useState('high')
+  const [agent, setAgent] = useState<string | null>('claude-code')
+  const [model, setModel] = useState<string | null>('claude-sonnet-4-5')
+  const [effort, setEffort] = useState<string | null>('high')
   const [mode, setMode] = useState('acceptEdits')
   return (
     <TooltipProvider>
@@ -250,7 +264,13 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
             />
             <MessageScroller label="The thread of this Session" entries={THREAD} />
           </div>
-          <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+          {/* What the turn has spent stands above the box rather than in its foot: the foot is
+              the Workspace and the send alone since the trial of 22 September 2026, and a figure
+              read at a glance is a figure that must not be what makes a row wrap. */}
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+            <div className="flex justify-end">
+              <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
+            </div>
             <Composer
               value={value}
               onValueChange={setValue}
@@ -264,18 +284,23 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
               running
               onStop={fn()}
               blocked={<BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />}
-              controls={
-                <>
-                  <ModelSelector
-                    agent="claude-code"
-                    models={MODELS}
-                    value={model}
-                    onValueChange={setModel}
-                  />
-                  <EffortSelector efforts={EFFORTS} value={effort} onValueChange={setEffort} />
-                  <ModeSelector modes={MODES} value={mode} onValueChange={setMode} />
-                  <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
-                </>
+              mode={<ModeSelector modes={MODES} value={mode} onValueChange={setMode} />}
+              agentMenu={
+                <AgentModelMenu
+                  agents={AGENTS}
+                  agent={agent}
+                  onAgentChange={(id) => {
+                    setAgent(id)
+                    setModel(null)
+                    setEffort(null)
+                  }}
+                  models={MODELS}
+                  model={model}
+                  onModelChange={setModel}
+                  efforts={EFFORTS}
+                  effort={effort}
+                  onEffortChange={setEffort}
+                />
               }
             />
           </div>
@@ -301,7 +326,8 @@ type Story = StoryObj<typeof meta>
  * Everything the lot draws, in one page: the reader's turn, the agent's answer, what it thought,
  * what it read and ran, the change it made, the console it opened, the plan it is working to,
  * the permission it is waiting on and the answer it was given, a turn that was stopped, and the
- * foot with the agent's models, its effort, its mode and what the turn has cost.
+ * box with the agent, its model and its effort behind one control, the mode beside it, and what
+ * the turn has cost said above the whole thing.
  *
  * The first story of the entry, and the one the UI gate reads on `Surfaces/Session`.
  */
@@ -326,7 +352,23 @@ export const Complete: Story = {
     // The agent is waiting for an answer, and the turn it is in can be stopped.
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
     // One Stop on the box and one on the strip that says why the box is waiting.
-    await expect(canvas.getAllByRole('button', { name: 'Stop' })).toHaveLength(2)
+    const stops = canvas.getAllByRole('button', { name: 'Stop' })
+    await expect(stops).toHaveLength(2)
+
+    /*
+     * The foot of the page, as the trial of 22 September 2026 settled it: the agent, its model
+     * and its effort are one control at the end of the box's own row, the mode is beside it, and
+     * the frame's foot is the Workspace and the two buttons alone. Nothing wraps — which is the
+     * whole point, and the only way to ask it is of the boxes the browser laid out.
+     */
+    const menu = canvas.getByRole('button', { name: /Sonnet 4\.5 · High/ })
+    const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
+    await expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
+    await expect(onOneLine(at, canvas.getByRole('combobox', { name: 'Mode' }))).toBe(true)
+    const pill = canvas.getByRole('combobox', { name: 'Workspace' })
+    await expect(onOneLine(pill, stops[1]!), 'the foot of the composer wrapped').toBe(true)
+    // And what the turn has spent is said above the box, not in the row that would have wrapped.
+    await expect(canvas.getByLabelText(/12,400 of 200,000 tokens used/)).toBeVisible()
     await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()
   },
 }

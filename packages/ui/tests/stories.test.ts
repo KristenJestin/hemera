@@ -120,6 +120,19 @@ const SURFACES = {
  */
 const ALWAYS = ['Playground', 'Variants', 'States']
 
+/**
+ * The entries whose states are named after the states they show, rather than gathered under one
+ * `States`.
+ *
+ * `AGENTS.md` asks for one story per state, named after the state, and the composer is where
+ * that bites: `Variants` and `States` were "the box with nothing in it" and "the box with
+ * something in it", which is two states wearing two names that do not say so. They are `Empty`
+ * and `Ready`, and the two the trial of 22 September 2026 added are `Sending` and `Blocked`.
+ */
+const NAMED_STATES = new Map([
+  ['composer/composer', ['Playground', 'Empty', 'Ready', 'Sending', 'Blocked']],
+])
+
 function storiesIn(path: string): string[] {
   return [...readFileSync(path, 'utf8').matchAll(/^export const (\w+): Story\b/gm)].map(
     (match) => match[1]!,
@@ -318,12 +331,15 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'DiffBlock',
       'PermissionRequest',
       'DecisionSummary',
-      'ModelSelector',
-      'EffortSelector',
+      // The agent, its model and its effort are one control since the trial of 22 September
+      // 2026: three selectors in the foot of the composer, plus the agent's own at the far end
+      // of the row, wrapped onto a second line as soon as a model had a long name, and the frame
+      // changed height while it was being read. `AgentSelector`, `ModelSelector` and
+      // `EffortSelector` went with it.
+      'AgentModelMenu',
       'ModeSelector',
       'UsageMeter',
       'BlockedBanner',
-      'AgentSelector',
       'AgentsSection',
       'PlanPanel',
       'SessionSideColumn',
@@ -389,7 +405,7 @@ describe('Coquille montrée en Storybook', () => {
 describe('Surfaces du lot 4 montrées en Storybook', () => {
   test.each(ENTRY_FILES)('%s/%s has its playground, variant and state stories', (folder, file) => {
     const stories = storiesIn(join(designSystem, folder, `${file}.stories.tsx`))
-    for (const required of ALWAYS) {
+    for (const required of NAMED_STATES.get(`${folder}/${file}`) ?? ALWAYS) {
       expect(stories, `${folder}/${file} has no ${required} story`).toContain(required)
     }
   })

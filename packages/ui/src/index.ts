@@ -119,15 +119,21 @@ export {
  * The `Start chat` of the Home and the `Send` of a Session are one control: the word on it is
  * the page's, and the write is `onSend`, which answers with the reason it could not be written.
  */
-export { Composer, type ComposerProps } from './composer/composer.tsx'
-export { PromptInput, type PromptInputProps, type PromptShape } from './composer/prompt-input.tsx'
-export { ComposerActions, type ComposerActionsProps } from './composer/composer-actions.tsx'
 export {
+  Composer,
+  ComposerActions,
   ComposerAttachments,
+  MentionMenu,
+  PromptInput,
+  WorkspacePill,
+  type ComposerActionsProps,
   type ComposerAttachmentsProps,
-} from './composer/composer-attachments.tsx'
-export { MentionMenu, type MentionMenuProps } from './composer/mention-menu.tsx'
-export { WorkspacePill } from './composer/workspace-pill.tsx'
+  type ComposerProps,
+  type MentionMenuProps,
+  type PromptInputProps,
+  type PromptShape,
+  type WorkspacePillProps,
+} from './composer/index.ts'
 
 /** The Journal: what happened, in the order it happened. */
 export {
@@ -247,18 +253,29 @@ export {
 } from './approval/permission-request.tsx'
 export { DecisionSummary, type DecisionSummaryProps } from './approval/decision-summary.tsx'
 
-/** What an agent advertises, what the reader sets, and what the session has spent. */
-export { type AgentChoice } from './composer/agent-choice.ts'
-export { ModelSelector, type ModelSelectorProps } from './composer/model-selector.tsx'
-export { EffortSelector, type EffortSelectorProps } from './composer/effort-selector.tsx'
-export { ModeSelector, type ModeSelectorProps } from './composer/mode-selector.tsx'
-export { UsageMeter, type UsageCost, type UsageMeterProps } from './composer/usage-meter.tsx'
-export { BlockedBanner, type BlockedBannerProps } from './composer/blocked-banner.tsx'
+/**
+ * What an agent advertises, what the reader sets, and what the session has spent.
+ *
+ * The agent, its model and its effort are one control — `AgentModelMenu` — because they are one
+ * question asked in three steps, and three selectors in the foot of the composer was three
+ * controls wrapping onto a second line. What the agent may do without asking is a different
+ * question and stays a control of its own.
+ */
 export {
-  AgentSelector,
-  type AgentSelectorProps,
+  AgentModelMenu,
+  BlockedBanner,
+  ModeSelector,
+  UsageMeter,
+  type AgentChoice,
+  type AgentModelMenuProps,
+  type BlockedBannerProps,
+  type EffortChoice,
+  type ModeSelectorProps,
+  type ModelChoice,
   type OfferedAgent,
-} from './composer/agent-selector.tsx'
+  type UsageCost,
+  type UsageMeterProps,
+} from './composer/index.ts'
 
 /** The agents this machine has, with what it can say about each. */
 export {
