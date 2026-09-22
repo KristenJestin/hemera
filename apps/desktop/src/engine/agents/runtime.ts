@@ -744,19 +744,45 @@ export const runtimeLayer = Layer.effect(
     )
 
     /**
+     * Drops what a Project that is no longer there left in the composers.
+     *
+     * Archiving is how a Project ends (design D4-03) and it takes no composer with it: the
+     * preference is one row holding every Project's, and one that kept a closed Project would
+     * grow a line per Project ever opened — a line read back at every start and written again at
+     * every choice. A Project that is restored is asked about again when its Home is opened,
+     * which is where a composer comes from anyway.
+     *
+     * Projects that cannot be read are not a reason to drop what the folder remembers: the read
+     * fails, and nothing goes.
+     */
+    const forgetClosed = (): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const read = yield* Effect.result(projects.list())
+        if (Result.isFailure(read)) return
+        const standing = new Set(read.success.map((project) => project.id))
+        for (const projectId of composers.keys()) {
+          if (!standing.has(projectId)) composers.delete(projectId)
+        }
+      })
+
+    /**
      * What this Project's composer is on now, written down for the next start.
      *
      * The whole record is written rather than the one entry, because the preference is one row:
-     * what it holds is every Project's composer, and this is the one place it is changed.
+     * what it holds is every Project's composer, and this is the one place it is changed — a
+     * Project that is gone goes with it.
      */
     const remember = (projectId: string, provider: AgentProvider) =>
-      Effect.suspend(() => {
-        composers.set(projectId, {
-          provider,
-          options: Object.fromEntries(chosen.get(`${projectId}:${provider}`) ?? []),
-        })
-        return preferences.write({ composers: Object.fromEntries(composers) }).pipe(Effect.ignore)
-      })
+      Effect.suspend(() =>
+        Effect.gen(function* () {
+          composers.set(projectId, {
+            provider,
+            options: Object.fromEntries(chosen.get(`${projectId}:${provider}`) ?? []),
+          })
+          yield* forgetClosed()
+          yield* preferences.write({ composers: Object.fromEntries(composers) }).pipe(Effect.ignore)
+        }),
+      )
 
     /** How the pool names a probe, so a Session and a Home's agent are never the same entry. */
     const probeKey = (key: string) => `probe:${key}`

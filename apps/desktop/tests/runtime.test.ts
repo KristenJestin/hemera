@@ -1070,4 +1070,50 @@ describe('The composer’s choices are kept per Project', () => {
       }),
     )
   })
+
+  test('A Project that is archived is dropped from the composers', async () => {
+    const atlasAgent = fakeAgent({ configOptions: [MODEL] })
+    const borealAgent = fakeAgent({ configOptions: [MODEL] })
+    const queue = [atlasAgent, borealAgent]
+
+    await application(
+      dataFolder,
+      undefined,
+      machine,
+      fakeSupervisorOf(() => queue.shift() ?? borealAgent),
+    )(atlasAgent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const preferences = yield* Preferences
+        const atlas = yield* projects.create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: workingDirectory,
+        })
+        const boreal = yield* projects.create({
+          name: 'Boreal',
+          tone: 'info',
+          mainPath: workingDirectory,
+        })
+
+        yield* runtime.offer(boreal.id, 'claude')
+        const before = yield* preferences.read
+        expect(before.composers[boreal.id]).toEqual({ provider: 'claude', options: {} })
+
+        // Boreal ends — its Sessions and its Journal stay whole, its composer does not — and the
+        // next choice made anywhere writes the preference again.
+        yield* projects.archive(boreal.id, boreal.version)
+        yield* runtime.offer(atlas.id, 'claude')
+        yield* runtime.offerSet(atlas.id, 'claude', 'model', 'opus')
+
+        const after = yield* preferences.read
+        expect(after.composers[boreal.id]).toBeUndefined()
+        expect(after.composers[atlas.id]).toEqual({
+          provider: 'claude',
+          options: { model: 'opus' },
+        })
+      }),
+    )
+  })
 })
