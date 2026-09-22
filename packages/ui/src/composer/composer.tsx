@@ -151,6 +151,15 @@ export function Composer({
   const [active, setActive] = useState(0)
   const [sending, setSending] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  /**
+   * Whether the Stop was pressed during the turn that is running (design D5-10).
+   *
+   * The first press asks the agent to cancel and the second one forces it: the control says
+   * "Force stop" in between. A turn that ended takes the press with it, so the next turn starts
+   * on a plain Stop — reset while rendering rather than in an effect, so the word never lags.
+   */
+  const [stopPressed, setStopPressed] = useState(false)
+  if (!running && stopPressed) setStopPressed(false)
   const [chosen, setChosen] = useState(workspaces[0] ?? 'main')
   const current = workspace ?? chosen
   // What names the entries of the mention band, so the box can point at the one the arrows are
@@ -261,9 +270,21 @@ export function Composer({
     setPicking(null)
   }
 
-  /** Writes what is written, and lets the box go when it has been written. */
+  /** Stops the running turn: the button and Escape from the box are the same press. */
+  const stop = () => {
+    setStopPressed(true)
+    onStop?.()
+  }
+
+  /**
+   * Writes what is written, and lets the box go when it has been written.
+   *
+   * Not while a turn runs: the box stays open so the next message can be typed, but the agent is
+   * busy with this one, and Enter keeps the sentence where it is rather than sending it into a
+   * turn that would refuse it.
+   */
   const send = async () => {
-    if (!ready) return
+    if (!ready || running) return
     setSending(true)
     const said = await onSend(value)
     setSending(false)
@@ -327,10 +348,11 @@ export function Composer({
               ready={ready}
               sending={sending}
               running={running}
+              forcing={stopPressed}
               spec={spec}
               action={action}
               onSend={() => void send()}
-              onStop={onStop}
+              onStop={stop}
               sendDisabledReason={sendDisabledReason}
             />
           </FrameFooter>
@@ -428,7 +450,13 @@ export function Composer({
                 if (event.key === 'Escape') {
                   event.preventDefault()
                   setPicking(null)
+                  return
                 }
+              }
+              // Escape with no list open is the Stop, from where the hands already are.
+              if (event.key === 'Escape' && picking === null && running && onStop !== undefined) {
+                event.preventDefault()
+                stop()
               }
             }}
           />

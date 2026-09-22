@@ -94,15 +94,28 @@ export const Sending: Story = {
   },
 }
 
-/** A turn running draws the same square, calls it Stop, and presses. */
+/** A turn running draws the same square, calls it Stop, says it destroys, and presses. */
 export const RunningATurn: Story = {
   args: { running: true },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const stop = canvas.getByRole('button', { name: /Stop/ })
+    const stop = canvas.getByRole('button', { name: 'Stop' })
     await expect(stop).toBeEnabled()
+    await expect(stop).toHaveClass('bg-destructive')
     await userEvent.click(stop)
     await expect(args.onStop).toHaveBeenCalled()
     await expect(args.onSend).not.toHaveBeenCalled()
+  },
+}
+
+/** Pressed once and the turn still running: the next press forces the stop, and says so. */
+export const ForceStop: Story = {
+  args: { running: true, forcing: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const force = canvas.getByRole('button', { name: 'Force stop' })
+    await expect(force).toBeEnabled()
+    await userEvent.click(force)
+    await expect(args.onStop).toHaveBeenCalled()
   },
 }

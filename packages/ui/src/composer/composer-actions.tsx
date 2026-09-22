@@ -40,6 +40,13 @@ export interface ComposerActionsProps {
   /** Whether an agent turn is running, which is what the square stops. */
   running?: boolean | undefined
   /**
+   * Whether the Stop was already pressed and the turn is still running (design D5-10).
+   *
+   * The first press asks the agent to cancel; an agent that goes on after it is one the second
+   * press stops by force, and the word on the control says which of the two a press does now.
+   */
+  forcing?: boolean | undefined
+  /**
    * Whether the row offers to turn what is written into a Spec (design D4b-02).
    *
    * The Home does and a Session does not: a Session is a conversation already under way, and a
@@ -71,6 +78,7 @@ export function ComposerActions({
   ready,
   sending,
   running = false,
+  forcing = false,
   spec = false,
   action,
   onSend,
@@ -100,7 +108,9 @@ export function ComposerActions({
           </Button>
         )}
         <Button
-          variant={running ? 'secondary' : 'primary'}
+          // Destructive while a turn runs: pressing it throws away the rest of the turn, and a
+          // grey square read as a control that was off (trial of 22 September 2026).
+          variant={running ? 'destructive' : 'primary'}
           size="sm"
           state={busy ? 'loading' : 'idle'}
           disabled={running ? false : busy || !ready}
@@ -111,6 +121,8 @@ export function ComposerActions({
           // over the one the component computes, and `undefined` handed over is a value.
           aria-disabled={busy || blocked ? true : undefined}
           title={running ? undefined : sendDisabledReason}
+          // Escape from the box stops too; the composer listens for it, the control announces it.
+          aria-keyshortcuts={running ? 'Escape' : undefined}
           onClick={running ? onStop : onSend}
         >
           <span className={MORPH}>
@@ -138,7 +150,7 @@ export function ComposerActions({
               )}
             </AnimatePresence>
           </span>
-          {running ? 'Stop' : action}
+          {running ? (forcing ? 'Force stop' : 'Stop') : action}
           {running ? null : <Kbd keys="Enter" />}
         </Button>
       </span>

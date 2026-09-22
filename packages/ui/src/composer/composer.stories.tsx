@@ -379,6 +379,54 @@ export const InASession: Story = {
 }
 
 /**
+ * A turn running: the send is the Stop, in the same place and at the same size, and destructive,
+ * because pressing it throws the rest of the turn away (design D5-10, trial of 22 September
+ * 2026). The box stays open: the next message can be typed while this one is answered, and Enter
+ * keeps it there rather than sending it into a turn that is busy.
+ */
+export const Running: Story = {
+  args: { variant: 'inline', action: 'Send', running: true, onStop: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const stop = canvas.getByRole('button', { name: 'Stop' })
+    expect(stop).toBeEnabled()
+    expect(stop).toHaveClass('bg-destructive')
+    expect(stop).toHaveAttribute('aria-keyshortcuts', 'Escape')
+    expect(canvas.queryByRole('button', { name: /Send/ })).toBeNull()
+
+    const box = canvas.getByRole('textbox')
+    await userEvent.type(box, 'And the credit notes')
+    expect(box).toHaveTextContent('And the credit notes')
+    await userEvent.keyboard('{Enter}')
+    expect(args.onSend).not.toHaveBeenCalled()
+    expect(box).toHaveTextContent('And the credit notes')
+
+    await userEvent.click(stop)
+    expect(args.onStop).toHaveBeenCalledTimes(1)
+  },
+}
+
+/**
+ * The second press: the agent was asked to cancel and is still going, so the control now says
+ * what a press does from here — it forces the stop. Escape from the box is the same press.
+ */
+export const ForceStop: Story = {
+  args: { variant: 'inline', action: 'Send', running: true, onStop: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('textbox'))
+    await userEvent.keyboard('{Escape}')
+    expect(args.onStop).toHaveBeenCalledTimes(1)
+
+    const force = await canvas.findByRole('button', { name: 'Force stop' })
+    expect(force).toHaveClass('bg-destructive')
+    expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
+    await userEvent.click(force)
+    expect(args.onStop).toHaveBeenCalledTimes(2)
+  },
+}
+
+/**
  * Waits for the menu to be gone, not merely told to go.
  *
  * A popup on its way out still has Base UI's focus guards in the page, and a guard is a
