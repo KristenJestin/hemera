@@ -37,22 +37,52 @@ import { z } from 'zod'
  * understands.
  */
 
-/** The `Call` the runtime stores under `tool_call` (engine, `agents/client.ts`). */
+/**
+ * A text of a call, as the engine keeps it: cut when it was too long, and honest that it was.
+ *
+ * Every text a call carries arrives in this shape (engine, `agents/runtime.ts`): what is here,
+ * whether that is all of it, and how long the whole was. A window that drew the text alone
+ * would show the beginning of a build log as if it were the log.
+ */
+const boundedSchema = z.object({
+  text: z.string(),
+  truncated: z.boolean(),
+  length: z.number(),
+})
+
+type Bounded = z.infer<typeof boundedSchema>
+
+/** One file a call is about, and the line in it the agent pointed at. */
+const locationSchema = z.object({ path: z.string(), line: z.number().nullable() })
+
+/**
+ * One block of what a call carries, as ACP defines it (the SDK's `ToolCallContent`), with every
+ * text of it bounded.
+ *
+ * Read as one permissive shape rather than as three exact ones: a block of a kind this version
+ * does not know is a block it leaves out, and a union would refuse the whole call because of it.
+ */
+const blockSchema = z.object({
+  type: z.string(),
+  text: boundedSchema.optional(),
+  mime: z.string().nullable().optional(),
+  path: z.string().optional(),
+  oldText: boundedSchema.nullable().optional(),
+  newText: boundedSchema.optional(),
+  terminalId: z.string().optional(),
+})
+
+/** The `Call` the runtime stores under `tool_call` (engine, `agents/runtime.ts`). */
 const callSchema = z.object({
   title: z.string(),
   kind: z.string().nullable(),
   status: z.string().nullable(),
-  locations: z.array(z.string()),
-  detail: z.string(),
-})
-
-/** One block of what a call produced, as ACP defines it (the SDK's `ToolCallContent`). */
-const blockSchema = z.object({
-  type: z.string(),
-  path: z.string().optional(),
-  oldText: z.string().nullable().optional(),
-  newText: z.string().optional(),
-  terminalId: z.string().optional(),
+  locations: z.array(locationSchema),
+  content: z.array(blockSchema),
+  /** What the tool was called with, in its own words, or null when the agent said nothing. */
+  rawInput: boundedSchema.nullable(),
+  /** What it answered, the same way, or null while it has not answered. */
+  rawOutput: boundedSchema.nullable(),
 })
 
 /** A step of the plan the agent published, as it wrote it (the SDK's `PlanEntry`). */
@@ -110,7 +140,15 @@ const TOOL_KINDS: readonly ToolKind[] = [
   'other',
 ]
 
-const TOOL_STATES: readonly ToolStatus[] = ['pending', 'in_progress', 'completed', 'failed']
+const TOOL_STATES: readonly ToolStatus[] = [
+  'pending',
+  'in_progress',
+  'completed',
+  'failed',
+  // A call the turn was stopped under, which is neither done nor failed: the engine writes it
+  // when a turn is cancelled, and the card has a dot of its own for it (ipc, `ToolCallStatus`).
+  'cancelled',
+]
 
 const PLAN_STATES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed']
 
@@ -147,6 +185,43 @@ function readPayload<S extends z.ZodType>(schema: S, payload: string): z.infer<S
   } catch {
     return null
   }
+}
+
+/**
+ * The text a call attached, as one text: its content blocks, in the order it sent them.
+ *
+ * Null when it attached none, which is what says a card has nothing to show there. A block that
+ * carries bytes rather than words — an image, a sound — has an empty text and is left out: a box
+ * opened on nothing says less than no box at all.
+ */
+function textOf(blocks: readonly z.infer<typeof blockSchema>[]): Bounded | null {
+  const said = blocks.filter(
+    (block) => block.type === 'content' && block.text !== undefined && block.text.text !== '',
+  )
+  if (said.length === 0) return null
+  return {
+    text: said.map((block) => block.text?.text ?? '').join('\n\n'),
+    truncated: said.some((block) => block.text?.truncated === true),
+    length: said.reduce((whole, block) => whole + (block.text?.length ?? 0), 0),
+  }
+}
+
+/**
+ * One of a call's texts, drawn as the card's own section draws it.
+ *
+ * What was cut is said under what is left, rather than left to be guessed at: a reader looking
+ * at the last line of a log has to know whether it is the last line of the log.
+ */
+function boundedNode(bounded: Bounded | null): ReactNode {
+  if (bounded === null) return undefined
+  return (
+    <>
+      {bounded.text}
+      {bounded.truncated && (
+        <p className="mt-1 text-muted-foreground">{`Truncated, ${String(bounded.length)} bytes.`}</p>
+      )}
+    </>
+  )
 }
 
 /** How much of what a change did, for the column: what the file gained and what it lost. */
@@ -210,12 +285,23 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const read = readPayload(callPayloadSchema, entry.payload)
     if (read === null) return null
     const { call } = read
+    const said = textOf(call.content)
+    // What came back is the tool's own answer where it gave one, and what it attached where it
+    // did not. What it was called with is the raw input, and the attached text stands in for it
+    // only when that text is not already the answer above — one box of a card is one thing.
+    const output = call.rawOutput ?? said
+    const input = call.rawInput ?? (output === said ? null : said)
     return (
       <ToolCallCard
         title={call.title}
         kind={among(TOOL_KINDS, call.kind, 'other')}
         status={among(TOOL_STATES, call.status, 'pending')}
-        locations={call.locations.map((path) => ({ path }))}
+        locations={call.locations.map((location) => ({
+          path: location.path,
+          line: location.line ?? undefined,
+        }))}
+        input={boundedNode(input)}
+        output={boundedNode(output)}
         defaultOpen={call.status === 'failed'}
         error={call.status === 'failed' ? entry.body : undefined}
       />
@@ -232,8 +318,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           <DiffBlock
             key={`${entry.id}:${change.path ?? ''}`}
             path={change.path ?? ''}
-            oldText={change.oldText ?? null}
-            newText={change.newText ?? ''}
+            oldText={change.oldText?.text ?? null}
+            newText={change.newText?.text ?? ''}
           />
         ))}
       </div>
@@ -354,7 +440,7 @@ export function touchedOf(entries: readonly SessionEntry[]): readonly TouchedFil
     for (const block of blocks) {
       if (block.type !== 'diff' || block.newText === undefined) continue
       const path = block.path ?? ''
-      const counted = countsOf(block.oldText ?? null, block.newText)
+      const counted = countsOf(block.oldText?.text ?? null, block.newText.text)
       const held = files.find((one) => one.path === path)
       if (held === undefined) files.push({ path, ...counted })
       else {
