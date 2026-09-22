@@ -227,3 +227,51 @@ export const IconTimelineEvent = catalogued(
 export const IconTrash = catalogued(TablerTrashFilled, TablerTrash, 'IconTrash')
 export const IconUser = catalogued(TablerUserFilled, TablerUser, 'IconUser')
 export const IconX = catalogued(TablerXFilled, TablerX, 'IconX')
+
+/**
+ * A mark Tabler does not draw, vendored as the one path it is (design D17-11).
+ *
+ * Tabler has a handful of brand icons and the agents Hemera runs are not among them. A mark that
+ * may be redistributed is copied in here, next to the rest of the catalogue, rather than fetched:
+ * a window that opens offline must not open with holes in it. It is redrawn in `currentColor`
+ * and nothing else — a logo with its own colours inside a button would be the one thing on the
+ * page that no theme reaches — and where it came from and what allows it is written in
+ * `packages/ui/LICENSES.md`.
+ *
+ * `weight` is read and dropped: a vendored mark is one shape, and there is no solid twin of a
+ * logo to swap to.
+ */
+function vendored(name: string, viewBox: string, path: string): FunctionComponent<IconProps> {
+  const Vendored: FunctionComponent<IconProps> = ({
+    size = 'md',
+    weight: _weight,
+    className,
+    ...rest
+  }) =>
+    createElement(
+      'svg',
+      {
+        ...rest,
+        viewBox,
+        fill: 'currentColor',
+        xmlns: 'http://www.w3.org/2000/svg',
+        className: cn(SIZE_CLASS[size], className),
+      },
+      createElement('path', { fillRule: 'evenodd', clipRule: 'evenodd', d: path }),
+    )
+  Vendored.displayName = name
+  return Vendored
+}
+
+/**
+ * OpenCode's own mark, from `packages/identity/mark.svg` of `anomalyco/opencode` (MIT).
+ *
+ * The square "o" of the wordmark, kept as the one even-odd path that draws it. The grey block
+ * the original sets inside the ring is dropped: it is a second colour, this catalogue draws in
+ * one, and the ring is what the mark is recognised by at sixteen pixels.
+ */
+export const IconBrandOpencode = vendored(
+  'IconBrandOpencode',
+  '0 0 512 512',
+  'M384 416H128V96H384V416ZM320 160H192V352H320V160Z',
+)

@@ -1,17 +1,20 @@
 import type { ReactNode } from 'react'
 
-import { IconBrandOpenai } from '../icons.ts'
+import { IconBrandOpenai, IconBrandOpencode } from '../icons.ts'
 
 /**
  * The mark of the agent a control belongs to (design D17-11).
  *
- * The catalogue carries the mark of exactly one of them, and that is on purpose: Tabler has a
- * handful of brand icons and no invented logo is drawn here. An agent the catalogue does not
- * have is written as its own initials rather than handed another agent's mark or a generic
- * robot, because a mark that means "some agent" says less than two letters that mean "this one".
+ * The mark is looked up by the id the engine sends and not by the name the registry shows: an id
+ * is the one stable word for an agent — `opencode` is `opencode` whatever a release decides to
+ * call it on screen — while a name is a label. The name is still what the monogram is built
+ * from, because a reader recognises `Claude Code` where they would not recognise `claude`.
  *
- * The initials are read off the name the registry gives, never off the id: an id is a wire
- * value, and a reader recognises `Claude Code` where they would not recognise `claude`.
+ * An agent the catalogue has no mark for is written as its own initials rather than handed
+ * another agent's mark or a generic robot: a mark that means "some agent" says less than two
+ * letters that mean "this one". Claude Code is one of those, on purpose and not for want of
+ * looking — Anthropic's mark may not be redistributed without its written permission, and
+ * `packages/ui/LICENSES.md` says so in full.
  *
  * Nothing is fetched. A mark that had to leave the machine to be drawn would be a request made
  * to paint a button, and a window that opens offline would open with holes in it.
@@ -19,20 +22,38 @@ import { IconBrandOpenai } from '../icons.ts'
 const MONOGRAM =
   'flex size-icon-md shrink-0 items-center justify-center rounded-sm border border-border text-xs font-medium tracking-wide text-muted-foreground uppercase'
 
-/** The agents whose mark the catalogue has, by the name and the id the registry gives them. */
-const CATALOGUED = ['openai', 'codex', 'chatgpt']
+/**
+ * The marks the catalogue has, by the id the engine sends.
+ *
+ * Several ids to one mark where an agent is reached by more than one name: Codex answers to
+ * `codex` on one machine and to `openai` on the next, and both are the same company's mark.
+ */
+const MARKS = [
+  {
+    ids: ['openai', 'codex', 'chatgpt'],
+    draw: (className: string | undefined) => <IconBrandOpenai size="md" className={className} />,
+  },
+  {
+    ids: ['opencode'],
+    draw: (className: string | undefined) => <IconBrandOpencode size="md" className={className} />,
+  },
+] as const
 
 export interface AgentMarkProps {
-  /** The agent, as the registry names it. */
+  /** The agent, as the registry names it; what the monogram is built from. */
   agent: string
+  /** The id the engine sends, which is what the mark is looked up by. */
+  agentId?: string | undefined
   /** Where the mark sits; never how it looks. */
   className?: string | undefined
 }
 
-export function AgentMark({ agent, className }: AgentMarkProps): ReactNode {
-  if (CATALOGUED.includes(agent.trim().toLowerCase())) {
-    return <IconBrandOpenai size="md" className={className} />
-  }
+export function AgentMark({ agent, agentId, className }: AgentMarkProps): ReactNode {
+  // The id where there is one, the name where the caller only has that: a control handed a name
+  // alone still draws the mark it can.
+  const asked = (agentId ?? agent).trim().toLowerCase()
+  const found = MARKS.find((mark) => mark.ids.some((id) => id === asked))
+  if (found !== undefined) return found.draw(className)
   return (
     // A mark and not a word: beside a label that already names the thing, initials are read as
     // part of that name — "CC Haiku 4.5" — and two letters that stand for an agent are not its
