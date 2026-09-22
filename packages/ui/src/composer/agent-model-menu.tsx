@@ -6,6 +6,7 @@ import { Loading } from '../components/loading/loading.tsx'
 import { Popover } from '../components/popover/popover.tsx'
 import { IconCheck, IconChevronLeft, IconSearch } from '../icons.ts'
 import { AgentMark } from './agent-mark.tsx'
+import { nameOfCurrent } from './current-name.ts'
 
 /**
  * One control for the agent, its model and its effort (design D17-11, D17-14).
@@ -157,8 +158,8 @@ export function AgentModelMenu({
   const list = useId()
 
   const chosen = agents.find((one) => one.id === agent) ?? null
-  const modelLabel = models.find((one) => one.id === model)?.label
-  const effortLabel = efforts.find((one) => one.id === effort)?.label
+  const modelLabel = nameOfCurrent(models, model)
+  const effortLabel = nameOfCurrent(efforts, effort)
 
   const asked = query.trim().toLowerCase()
   const matching = models.filter((one) => asked === '' || one.label.toLowerCase().includes(asked))
