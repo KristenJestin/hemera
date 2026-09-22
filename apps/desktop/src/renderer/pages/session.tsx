@@ -291,21 +291,14 @@ export function SessionPage({
   }
 
   /**
-   * The row that stands at the end of the thread while the turn runs (design D17-04).
+   * What the turn is doing, for as long as it runs (design D17-04, trial of 22 September 2026).
    *
-   * It is the last entry of the scroller and not a band above it: what a turn is doing belongs
-   * where the next block will be written, and it goes when the turn does. No mark — it is not a
-   * place a reader navigates back to.
+   * It is drawn on the row the meter is on and no longer as the last entry of the thread: a
+   * block at the end of the scroller grew the thread every time the turn changed its mind, and
+   * it stood right-aligned, on the reader's own side of the column. The row below the thread is
+   * the one place a running turn is said — on the left of it, where the agent's content is.
    */
   const activity = activityOf(thread)
-  if (agent.running) {
-    scroller.push({
-      id: 'activity',
-      content: (
-        <ActivityRow state={activity.state} detail={activity.detail} thought={activity.thought} />
-      ),
-    })
-  }
 
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).
@@ -359,11 +352,27 @@ export function SessionPage({
           Workspace and the send alone, and a figure read at a glance is a figure that must not be
           what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
           a meter drawn at zero is a figure that says nothing (D5-20).
+
+          What the turn is doing shares that row, at its other end: the two are one reading of
+          one turn — what it is doing, and what it has cost — and a row drawn for one of them is
+          a row the other would have asked for anyway. The row is drawn as soon as either has
+          something to say, and the meter keeps its end of it whether or not a turn is running.
         */}
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          {usage !== null && (
-            <div className="flex justify-end">
-              <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
+          {(agent.running || usage !== null) && (
+            <div className="flex items-center justify-between gap-3">
+              {agent.running ? (
+                <ActivityRow
+                  state={activity.state}
+                  detail={activity.detail}
+                  thought={activity.thought}
+                />
+              ) : (
+                <span />
+              )}
+              {usage !== null && (
+                <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
+              )}
             </div>
           )}
           {/*

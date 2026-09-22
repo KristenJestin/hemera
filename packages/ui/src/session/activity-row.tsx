@@ -3,8 +3,6 @@ import { type ReactNode, useState } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
 import { Loading } from '../components/loading/loading.tsx'
-import { StatusDot } from '../components/status-dot/status-dot.tsx'
-import { LiveMarker } from '../message/message.tsx'
 
 /**
  * What the turn is doing right now, at the end of the thread (design D17-04, D17-13).
@@ -15,25 +13,32 @@ import { LiveMarker } from '../message/message.tsx'
  * the end of the thread for as long as the turn runs, it says which of the four things is
  * happening, and it goes when the turn does.
  *
- * It is built on the live marker the thread already had. That marker said "you are at the latest
- * message" and nothing more, which is true of a thread nobody is answering; this is the same
- * place, the same line and the same measure, saying what is being written into it — with the dot
- * that carries the state instead of the green one that means "nothing is coming".
+ * It stands where the agent's own content stands — at the start of the line, not at the end of
+ * it — and it lives on the row the usage meter is on, above the composer: what the turn is doing
+ * on the left, what it has spent on the right (trial of 22 September 2026). It was the last
+ * entry of the thread, right-aligned under the reader's own bubble, which said the wrong two
+ * things at once: that the agent was answering from the reader's side of the column, and that
+ * the thread had grown by a block every time the turn changed its mind.
+ *
+ * It is drawn for the whole of a turn — thinking, running a tool, writing — and not at all when
+ * the Session is idle. The page is what knows: it draws the row while the turn runs.
  *
  * Collapsed it is one line: "Thinking…", "Running cat recap.md", "Waiting for your permission",
  * "Writing…". The chevron opens the thought that is arriving *now*, and only that one: the
  * thoughts already in the thread are blocks of their own and stay where they are, because a row
  * that swallowed them would be a second copy of the turn.
  *
- * A row with nothing to open does not open at all, and is then the marker itself. Waiting for a
- * permission is not a thought, and a chevron over an empty body is a chevron that lies.
+ * A row with nothing to open does not open at all. Waiting for a permission is not a thought,
+ * and a chevron over an empty body is a chevron that lies.
  *
- * The indicator is the design system's own, which stands still under reduced motion, and the dot
- * is the shared one, where only `running` breathes: nothing here writes a movement of its own.
+ * No dot beside the indicator: the indicator already says that something is in flight, and two
+ * marks of the same fact on one line is one of them saying nothing. The indicator is the design
+ * system's own, which stands still under reduced motion — nothing here writes a movement of its
+ * own.
  */
 
-/** The row when it folds: the same measure and the same end of the line as the marker. */
-const ROW = 'flex w-full min-w-0 justify-end px-10'
+/** The row: at the start of the line, and as wide as what it holds rather than as the column. */
+const ROW = 'flex min-w-0 items-center'
 
 /** The fold itself, which is as wide as what it holds rather than as wide as the thread. */
 const FOLD = 'w-auto'
@@ -77,34 +82,19 @@ export function ActivityRow({ state, detail, thought, className }: ActivityRowPr
   const [open, setOpen] = useState(false)
   const said =
     state === 'running' && detail !== undefined ? `${SAID[state]} ${detail}` : SAID[state]
-  // Waiting is the one state where nothing is moving: the turn has stopped and is asking. The
-  // other three are work in flight, which is what the warning dot and the indicator say.
-  const dot = <StatusDot status={state === 'waiting' ? 'pending' : 'running'} size="sm" />
+  const line = (
+    <span className={SUMMARY}>
+      <Loading size="sm" label={said} />
+      <span className={LABEL}>{said}</span>
+    </span>
+  )
 
   if (thought === undefined) {
-    return (
-      <div className={className}>
-        <LiveMarker mark={dot}>
-          <Loading size="sm" label={said} />
-          <span className={LABEL}>{said}</span>
-        </LiveMarker>
-      </div>
-    )
+    return <div className={cn(ROW, className)}>{line}</div>
   }
   return (
     <div className={cn(ROW, className)}>
-      <Disclosure
-        className={FOLD}
-        open={open}
-        onOpenChange={setOpen}
-        summary={
-          <span className={SUMMARY}>
-            {dot}
-            <Loading size="sm" label={said} />
-            <span className={LABEL}>{said}</span>
-          </span>
-        }
-      >
+      <Disclosure className={FOLD} open={open} onOpenChange={setOpen} summary={line}>
         <p className={THOUGHT}>{thought}</p>
       </Disclosure>
     </div>

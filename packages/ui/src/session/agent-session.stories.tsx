@@ -217,12 +217,6 @@ const THREAD: ScrollerEntry[] = [
     id: 'stopped',
     content: <StoppedTurn doing="Running the billing suite" at="14:09" />,
   },
-  // The row that stands at the end of the thread for as long as the turn runs. It is what the
-  // reader watches between one block and the next, and it goes when the turn does.
-  {
-    id: 'live',
-    content: <ActivityRow state="waiting" />,
-  },
 ]
 
 interface PageProps {
@@ -279,9 +273,12 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
           </div>
           {/* What the turn has spent stands above the box rather than in its foot: the foot is
               the Workspace and the send alone since the trial of 22 September 2026, and a figure
-              read at a glance is a figure that must not be what makes a row wrap. */}
+              read at a glance is a figure that must not be what makes a row wrap. What the turn
+              is *doing* shares that row, at its other end: one reading of one turn, what it is
+              doing on the left where the agent writes, what it has cost on the right. */}
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between gap-3">
+              <ActivityRow state="waiting" />
               <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
             </div>
             <Composer
@@ -380,9 +377,18 @@ export const Complete: Story = {
     const stops = canvas.getAllByRole('button', { name: 'Stop' })
     await expect(stops).toHaveLength(2)
 
-    // The row that stands at the end of the thread while the turn runs, which is what says the
-    // Session is alive between one block and the next.
-    await expect(canvas.getByText('Waiting for your permission')).toBeVisible()
+    /*
+     * What the turn is doing shares the meter's row, at its left end: it is not an entry of the
+     * thread any more (trial of 22 September 2026), it stands where the agent's own content
+     * stands, and the loader alone says the turn is alive — no dot beside it.
+     */
+    const doing = canvas.getByText('Waiting for your permission')
+    await expect(doing).toBeVisible()
+    const meter = canvas.getByLabelText(/12,400 of 200,000 tokens used/)
+    await expect(onOneLine(doing, meter), 'what the turn is doing left the meter’s row').toBe(true)
+    await expect(doing.getBoundingClientRect().left).toBeLessThan(
+      meter.getBoundingClientRect().left,
+    )
     // The states of a call are dots and not badges: the word is announced, never drawn.
     await expect(canvas.getByRole('img', { name: 'Cancelled' })).toBeInTheDocument()
     await expect(canvas.queryByText('Failed')).toBeNull()
