@@ -46,13 +46,31 @@ export interface Standing {
 export class ProfileAheadError extends Data.TaggedError('ProfileAheadError')<{
   readonly writtenByVersion: string | null
   readonly migrations: string[]
-}> {}
+}> {
+  /**
+   * What the reader is told, and what the start diagnostic carries.
+   *
+   * A tagged error has no message of its own, and `named` in the engine's entry point is what
+   * writes this one down: without a sentence the line would say `ProfileAheadError` and nothing
+   * about the version that wrote the folder, which is the one thing to act on.
+   */
+  override get message(): string {
+    const by =
+      this.writtenByVersion === null ? 'a newer version' : `version ${this.writtenByVersion}`
+    return `This data folder was written by ${by} of Hemera and cannot be opened by this one.`
+  }
+}
 
 /** A migration was refused by the database, which is therefore as it was before. */
 export class MigrationError extends Data.TaggedError('MigrationError')<{
   readonly migrations: string[]
   readonly cause: unknown
-}> {}
+}> {
+  /** The migration that was refused and what refused it: the line a start failure is read by. */
+  override get message(): string {
+    return `The data folder could not be migrated (${this.migrations.join(', ')}): ${String(this.cause)}`
+  }
+}
 
 /** The migrations this application carries, read from the folder it ships them in. */
 export function carriedMigrations(migrationsFolder: string): Migration[] {

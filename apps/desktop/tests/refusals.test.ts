@@ -17,6 +17,7 @@ import { AgentUpdateRefusedError } from '#engine/agents/service.ts'
 import { AgentSpawnError } from '#engine/agents/supervisor.ts'
 import { UnknownHeldAgentError } from '#engine/agents/pool.ts'
 import { named } from '#engine/index.ts'
+import { MigrationError, ProfileAheadError } from '#engine/migrate.ts'
 import { UnknownSessionError } from '#engine/sessions.ts'
 import { DatabaseError } from '#engine/storage/database.ts'
 import { StaleVersionError } from '#engine/transaction.ts'
@@ -32,6 +33,11 @@ const REFUSALS: readonly Error[] = [
   new AgentUpdateRefusedError({ reason: 'Codex is not on this machine.' }),
   new UnknownHeldAgentError({ sessionId: 'session-1' }),
   new UnknownSessionError('session-1'),
+  // The two of the start. They are read in the diagnostic log of a package started from a
+  // desktop icon rather than in a window, and `MigrationError` on its own is a start that
+  // failed for a reason nobody kept.
+  new ProfileAheadError({ writtenByVersion: '0.9.0', migrations: ['0003_later'] }),
+  new MigrationError({ migrations: ['0002_sessions'], cause: new Error('no such column: tone') }),
 ]
 
 describe('A refusal crossing the port', () => {
@@ -58,6 +64,11 @@ describe('A refusal crossing the port', () => {
     expect(named(new AgentRuntimeError({ what: 'prompting', cause: 'no agent is running' }))).toBe(
       'prompting: no agent is running',
     )
+    // The start's own, which says which migration and what refused it: the cause is in the
+    // sentence, and `named` does not name it a second time beside it.
+    expect(
+      named(new MigrationError({ migrations: ['0002_sessions'], cause: new Error('locked') })),
+    ).toBe('The data folder could not be migrated (0002_sessions): Error: locked')
   })
 
   test('a failure with nothing to say is named, and never serialised', () => {
