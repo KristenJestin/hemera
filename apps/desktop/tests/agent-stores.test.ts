@@ -9,8 +9,17 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import type { AgentOffer, ConfigOption, EngineEvent, Session, SessionEntry } from '@hemera/ipc'
+import type {
+  AgentOffer,
+  ComposerChoice,
+  ConfigOption,
+  EngineEvent,
+  Session,
+  SessionEntry,
+} from '@hemera/ipc'
+import { openingAgentOf } from '#renderer/agent-options.ts'
 import {
+  activityOf,
   agentOf,
   forgetAgentRefusal,
   listenToAgents,
@@ -218,6 +227,96 @@ describe('Ranger une Session après un message', () => {
       id: 'session-1',
       version: 1,
     })
+  })
+})
+
+/** One entry of a thread the agent wrote, of the kind and the standing the engine gave it. */
+function reported(
+  id: string,
+  kind: SessionEntry['kind'],
+  body: string,
+  state: string | null = null,
+  turnId: string | null = 'turn-1',
+): SessionEntry {
+  return { ...entry(id, 'agent', body), kind, state, turnId }
+}
+
+describe('La ligne au bout du fil dit ce que le tour fait', () => {
+  test('a turn is thinking, then running the call it names, then writing its answer', () => {
+    const said = entry('e1', 'user', 'Read the recap')
+    const thought = reported('e2', 'thought', 'The file is probably at the root.')
+
+    // Nothing but the question and what the agent is thinking: there is no call and no answer,
+    // which is the state the row falls back to.
+    expect(activityOf([said, thought])).toEqual({
+      state: 'thinking',
+      thought: 'The file is probably at the root.',
+    })
+
+    // A call that has not finished is what the turn is doing, and its title is what it says.
+    const running = reported('e3', 'tool_call', 'cat recap.md', 'in_progress')
+    expect(activityOf([said, thought, running])).toEqual({
+      state: 'running',
+      detail: 'cat recap.md',
+      thought: 'The file is probably at the root.',
+    })
+
+    // The call is done and the agent is answering: the last entry is a message of its own, still
+    // being written — the engine writes it again with more in it rather than as a second entry.
+    const done = { ...running, state: 'completed' }
+    const answer = reported('e4', 'message', 'The recap says')
+    expect(activityOf([said, thought, done, answer])).toEqual({
+      state: 'streaming',
+      thought: 'The file is probably at the root.',
+    })
+  })
+
+  test('a permission the agent is waiting on is what the row says, whatever else is running', () => {
+    const thread = [
+      entry('e1', 'user', 'Push it'),
+      reported('e2', 'tool_call', 'git push', 'in_progress'),
+      reported('e3', 'permission_request', 'git push origin main'),
+    ]
+
+    expect(activityOf(thread).state).toBe('waiting')
+
+    // Answered, and the call it was about is what is running again.
+    const decided = reported('e4', 'permission_decision', 'Allowed once', 'decided')
+    expect(activityOf([...thread, decided])).toEqual({ state: 'running', detail: 'git push' })
+  })
+
+  test('the thought the row opens on is this turn’s and never the one before it', () => {
+    const before = reported('e1', 'thought', 'That was the last question.', null, 'turn-1')
+    const now = reported('e2', 'message', 'Starting.', null, 'turn-2')
+
+    expect(activityOf([before, now]).thought).toBe(undefined)
+  })
+})
+
+describe('Le tour tourne dès que la question est écrite', () => {
+  test('turn_start sets the Session running, and the turn that ends clears it', () => {
+    expect(agentOf('session-3').running).toBe(false)
+
+    // Pushed the moment the user's message is written, before the agent has been given anything
+    // to do: the row and the stop stand from then (design D5-12).
+    push({ event: 'turn_start', sessionId: 'session-3', entry: null })
+    expect(agentOf('session-3').running).toBe(true)
+
+    push({ event: 'turn', sessionId: 'session-3', entry: null })
+    expect(agentOf('session-3').running).toBe(false)
+  })
+})
+
+describe("Le composer d'un Projet rouvre sur l'agent qu'il a quitté", () => {
+  test('the Home opens on the agent the Project was left on, and a pick wins over it', () => {
+    const left: ComposerChoice = { provider: 'codex', options: { model: 'gpt-5', mode: 'ask' } }
+
+    // Nothing picked yet: what the data folder remembers for this Project is what it opens on.
+    expect(openingAgentOf(left, null)).toBe('codex')
+    // A Project nothing was ever chosen in opens on nothing at all.
+    expect(openingAgentOf(null, null)).toBe(null)
+    // A preference that arrives after the reader has chosen does not move the menu under them.
+    expect(openingAgentOf(left, 'claude')).toBe('claude')
   })
 })
 
