@@ -376,3 +376,43 @@ describe('What the window is told of a turn', () => {
     )
   })
 })
+
+/**
+ * A thought and an answer, when the agent names both with one identifier (design D5-08, D5-11).
+ *
+ * ACP lets a chunk name the message it belongs to, and OpenCode gives the thinking and the answer
+ * of one turn the same `messageId`: what they are accumulated under has to carry the kind as
+ * well, or the thread holds one entry that starts as reasoning and ends as the answer.
+ */
+describe('One message id over two kinds', () => {
+  test('A thought and an answer with one message id are two entries', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'thinks', text: 'the reader opens the project', messageId: 'msg-1' },
+        { does: 'says', text: 'it opens the project', messageId: 'msg-1' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'what does the reader do')
+
+        // The agent's own words: the thread also holds the message the user sent, which is the
+        // same kind written by somebody else.
+        const said = (yield* threadOf(session.id)).filter((entry) => entry.role === 'agent')
+        const thought = entryOf(said, 'thought')
+        const answer = entryOf(said, 'message')
+
+        // Two rows, each with what it was told, and neither holding the other's words.
+        expect(thought.body).toBe('the reader opens the project')
+        expect(answer.body).toBe('it opens the project')
+        // And two keys: one entry per kind of what the agent named once, so an update of either
+        // finds its own row.
+        expect(thought.correlationId).toBe('msg-1:thought')
+        expect(answer.correlationId).toBe('msg-1:message')
+      }),
+    )
+  })
+})

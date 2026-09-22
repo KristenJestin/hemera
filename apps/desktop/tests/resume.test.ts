@@ -121,7 +121,10 @@ describe('A Session is taken back by its agent', () => {
 
         const page = yield* sessions.read(sessionId)
         const entries = page.entries
-        const messages = entries.filter((entry) => entry.correlationId === 'msg-1')
+        // The message the agent named, under the key the thread matches it by: the identifier it
+        // gave and the kind that chunk was, because one identifier can name both a thought and
+        // the answer that followed it.
+        const messages = entries.filter((entry) => entry.correlationId === 'msg-1:message')
         const calls = entries.filter((entry) => entry.correlationId === 'call:call-7')
 
         // One entry each, not two: what the agent sent back was matched against what the thread
@@ -131,7 +134,7 @@ describe('A Session is taken back by its agent', () => {
         // An entry the replay matched keeps the origin it was written with: it was said live, and
         // being sent back does not make it a replay.
         expect(messages[0]?.origin).toBe('live')
-        const added = entries.filter((entry) => entry.correlationId === 'msg-2')
+        const added = entries.filter((entry) => entry.correlationId === 'msg-2:message')
         expect(added).toHaveLength(1)
         expect(added[0]?.origin).toBe('replay')
         // Nothing was re-executed: no prompt was sent, and the turn is the one the first run had.

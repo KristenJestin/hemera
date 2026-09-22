@@ -349,7 +349,14 @@ export const runtimeLayer = Layer.effect(
 
         if (event.type === 'message' || event.type === 'thought') {
           const kind = event.type === 'message' ? ('message' as const) : ('thought' as const)
-          const key = event.messageId ?? `turn:${turn?.id ?? 'none'}:${kind}`
+          // The kind is part of the key whether or not the agent named the message: OpenCode
+          // sends a thought and the answer that follows it under one `messageId`, and a key that
+          // ignored the kind would accumulate both into the entry the first chunk created — an
+          // answer folded into a thought, under one `correlationId`, as one row of the thread.
+          const key =
+            event.messageId === null
+              ? `turn:${turn?.id ?? 'none'}:${kind}`
+              : `${event.messageId}:${kind}`
           const said = `${turn?.said.get(key) ?? ''}${event.text}`
           turn?.said.set(key, said)
           yield* write(sessionId, {
