@@ -330,6 +330,18 @@ export function SessionPage({
               <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
             </div>
           )}
+          {/*
+            What the page's last act was refused with — a rename, an archive, a thread that could
+            not be read — said here and not on the send: those are refusals of the header and of
+            the opening, and a Session whose archive was refused is one that can still be written
+            in. It stands in the same stack as the meter rather than over the thread, so what it
+            moves is itself and nothing above it (D4b-02).
+          */}
+          {refusal !== null && (
+            <p role="alert" className="text-sm text-muted-foreground">
+              {refusal}
+            </p>
+          )}
           <Composer
             value={value}
             onValueChange={setValue}
@@ -345,11 +357,9 @@ export function SessionPage({
                 : `Say something to ${session.provider}…`
             }
             onSend={write}
-            // The last act's refusal rides the control it is about instead of a paragraph over
-            // the thread, which moved everything under it the moment it appeared: a thread that
-            // could not be read and an agent that is no longer there are both reasons not to
-            // send, and the sentence is there to be asked for on the send itself (D4b-02).
-            sendDisabledReason={refusal ?? undefined}
+            // Nothing is handed over here: a refusal of this page is not a reason not to write,
+            // and a write that is refused answers `write` itself — which is what the composer
+            // shows under the box, on the sentence that was not written (D4b-02).
             agentMenu={
               <AgentModelMenu
                 agents={agents}
