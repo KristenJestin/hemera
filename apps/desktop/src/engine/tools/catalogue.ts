@@ -299,11 +299,23 @@ export const toolCatalogueLayer: Layer.Layer<
       })
 
     /** Which run a call means, when it named none: the only one this Session has going. */
-    const chooseRun = (asked: ToolCall, named: string | null): Effect.Effect<string | null> =>
+    /**
+     * Which run a call is about: the one it names, else the only one running, else — when the
+     * call came to read and nothing is running — the last run of the Session. A `check` or a
+     * `utility` is over by the time its output is read, and its exit code is the whole point.
+     */
+    const chooseRun = (
+      asked: ToolCall,
+      named: string | null,
+      ended = false,
+    ): Effect.Effect<string | null> =>
       Effect.gen(function* () {
         if (named !== null) return named
         const running = yield* answered(commands.running(asked.sessionId))
-        return running !== undefined && running.length === 1 ? (running[0]?.id ?? null) : null
+        if (running !== undefined && running.length === 1) return running[0]?.id ?? null
+        if (!ended || (running !== undefined && running.length > 1)) return null
+        const recent = yield* answered(commands.recent(asked.sessionId))
+        return recent?.[0]?.id ?? null
       })
 
     /** One filesystem call, as an answer rather than as a thrown error. */
@@ -542,9 +554,9 @@ export const toolCatalogueLayer: Layer.Layer<
           }
 
           case 'commands.output': {
-            const chosen = yield* chooseRun(asked, call.arguments.run ?? null)
+            const chosen = yield* chooseRun(asked, call.arguments.run ?? null, true)
             if (chosen === null) {
-              return failed('no run of this Session is running', 'start one with commands.run')
+              return failed('no run of this Session to read', 'start one with commands.run')
             }
             const read = yield* answered(commands.output(asked.sessionId, chosen))
             if (read === undefined) {

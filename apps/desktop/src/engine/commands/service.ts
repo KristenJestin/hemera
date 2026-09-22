@@ -31,13 +31,21 @@ import {
   DuplicateCommandNameError,
   joinsRunningRun,
 } from '@hemera/core'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { Context, Effect, Exit, Layer, Scope } from 'effect'
 
 import { ProcessSupervisor } from '../agents/supervisor.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
-import { type RunState, commandRuns, projectCommands } from '../storage/schema.ts'
+import {
+  type RunState,
+  commandRuns,
+  projectCommands,
+  sessions,
+} from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+
+/** How many runs `recent` hands back: what a panel draws, oldest ones out of sight. */
+const RECENT_RUNS = 8
 
 /** How much of what a run printed is kept: what is older than this is dropped, and said to be. */
 export const OUTPUT_KEPT_BYTES = 64 * 1024
@@ -128,8 +136,16 @@ export interface CommandsService {
   ) => Effect.Effect<void, DatabaseError | UnknownCommandError>
   /** Starts a run, or hands back the one that is already going (D6-12). */
   readonly run: (asked: RunRequest) => Effect.Effect<RunView, DatabaseError>
-  /** What a run has printed, bounded, and the address it published. */
-  readonly output: (sessionId: string, runId: string) => Effect.Effect<RunView, UnknownRunError>
+  /**
+   * What a run has printed, bounded, and the address it published.
+   *
+   * A run that is over is read from its row, where a `check` that exited kept its output and its
+   * exit code: the question is about the run, not about the process.
+   */
+  readonly output: (
+    sessionId: string,
+    runId: string,
+  ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
   /** Stops a run and everything it started. */
   readonly stop: (
     sessionId: string,
@@ -137,6 +153,14 @@ export interface CommandsService {
   ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
   /** What this Session has running, oldest first: what the panel draws. */
   readonly running: (sessionId: string) => Effect.Effect<RunView[]>
+  /**
+   * The last runs of a Session, newest first, ended ones included.
+   *
+   * The panel draws them, and `commands.output` answers from them when the agent reads the run
+   * it just started: a `check` or a `utility` ends on its own, and its exit code and its output
+   * are what the agent came for.
+   */
+  readonly recent: (sessionId: string) => Effect.Effect<RunView[], DatabaseError>
   /** Stops everything of a Session, or everything at all when no Session is named. */
   readonly stopped: (sessionId?: string | undefined) => Effect.Effect<void, DatabaseError>
 }
@@ -193,8 +217,21 @@ export const commandsLayer = Layer.effect(
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
 
-    const viewOf = (one: Live, joined = false): RunView => ({
-      id: '',
+    /** The state of a run read from its row, which the table's check constraint already closed. */
+    const runStateOf = (state: string): RunState => {
+      switch (state) {
+        case 'running':
+        case 'exited':
+        case 'failed':
+        case 'stopped':
+          return state
+        default:
+          return 'failed'
+      }
+    }
+
+    const viewOf = (id: string, one: Live, joined = false): RunView => ({
+      id,
       projectId: one.projectId,
       sessionId: one.sessionId,
       commandId: one.commandId,
@@ -211,6 +248,32 @@ export const commandsLayer = Layer.effect(
       startedAt: one.startedAt,
       endedAt: one.endedAt,
       joined,
+    })
+
+    /**
+     * A run read from its row rather than from memory: what a process that is gone left behind.
+     *
+     * `outputBytes` is what the run printed altogether and `output` is what was kept of it, so
+     * what was dropped is what the two differ by — the number the panel says out loud.
+     */
+    const rowOf = (row: typeof commandRuns.$inferSelect, projectId: string): RunView => ({
+      id: row.id,
+      projectId,
+      sessionId: row.sessionId,
+      commandId: row.commandId,
+      name: row.name,
+      line: row.line,
+      kind: commandKind(row.kind),
+      cwd: row.cwd,
+      state: runStateOf(row.state),
+      pid: row.pid,
+      url: row.url,
+      exitCode: row.exitCode,
+      output: row.output,
+      dropped: row.truncated === 1 ? row.outputBytes - row.output.length : 0,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      joined: false,
     })
 
     /** The row of a run, written as it starts and rewritten when it ends. */
@@ -231,7 +294,7 @@ export const commandsLayer = Layer.effect(
               url: one.url,
               exitCode: one.exitCode,
               output: one.kept,
-              outputBytes: one.kept.length,
+              outputBytes: one.kept.length + one.dropped,
               truncated: one.dropped > 0 ? 1 : 0,
               startedBy: 'agent',
               startedAt: one.startedAt,
@@ -412,7 +475,7 @@ export const commandsLayer = Layer.effect(
             already !== undefined &&
             joinsRunningRun(asked.kind, already[1].state === 'running')
           ) {
-            return viewOf(already[1], true)
+            return viewOf(already[0], already[1], true)
           }
 
           const id = crypto.randomUUID()
@@ -446,7 +509,7 @@ export const commandsLayer = Layer.effect(
             record.kept = `Hemera has nothing to run: the line of ${asked.name} is empty`
             record.endedAt = startedAt
             yield* writeRow(id, record, 'command.failed')
-            return viewOf(record)
+            return viewOf(id, record)
           }
 
           const spawned = yield* owned(
@@ -458,7 +521,7 @@ export const commandsLayer = Layer.effect(
             record.kept = `the command could not be started: ${asked.line}`
             record.endedAt = new Date().toISOString()
             yield* writeRow(id, record, 'command.failed')
-            return viewOf(record)
+            return viewOf(id, record)
           }
 
           const process = spawned.value
@@ -497,16 +560,24 @@ export const commandsLayer = Layer.effect(
           )
 
           yield* writeRow(id, record, 'command.started')
-          return viewOf(record)
+          return viewOf(id, record)
         }),
 
       output: (sessionId, runId) =>
         Effect.gen(function* () {
           const record = live.get(runId)
-          if (record === undefined || record.sessionId !== sessionId) {
-            return yield* Effect.fail(new UnknownRunError(runId))
-          }
-          return viewOf(record)
+          if (record !== undefined && record.sessionId === sessionId) return viewOf(runId, record)
+          // The process is gone: the row is what is left of the run, and a `check` that exited
+          // an hour ago is read from it exactly as a run of this process is read from memory.
+          const rows = yield* database
+            .select({ run: commandRuns, projectId: sessions.projectId })
+            .from(commandRuns)
+            .innerJoin(sessions, eq(sessions.id, commandRuns.sessionId))
+            .where(and(eq(commandRuns.id, runId), eq(commandRuns.sessionId, sessionId)))
+            .pipe(Effect.mapError(failed('reading a run')))
+          const row = rows[0]
+          if (row === undefined) return yield* Effect.fail(new UnknownRunError(runId))
+          return rowOf(row.run, row.projectId)
         }),
 
       stop: (sessionId, runId) =>
@@ -519,7 +590,7 @@ export const commandsLayer = Layer.effect(
           record.state = 'stopped'
           record.endedAt = new Date().toISOString()
           yield* writeRow(runId, record, 'command.stopped')
-          return viewOf(record)
+          return viewOf(runId, record)
         }),
 
       running: (sessionId) =>
@@ -527,8 +598,21 @@ export const commandsLayer = Layer.effect(
           [...live.entries()]
             .filter(([, one]) => one.sessionId === sessionId && one.state === 'running')
             .sort((left, right) => (left[1].startedAt < right[1].startedAt ? -1 : 1))
-            .map(([, one]) => viewOf(one)),
+            .map(([id, one]) => viewOf(id, one)),
         ),
+
+      recent: (sessionId) =>
+        database
+          .select({ run: commandRuns, projectId: sessions.projectId })
+          .from(commandRuns)
+          .innerJoin(sessions, eq(sessions.id, commandRuns.sessionId))
+          .where(eq(commandRuns.sessionId, sessionId))
+          .orderBy(desc(commandRuns.startedAt))
+          .limit(RECENT_RUNS)
+          .pipe(
+            Effect.mapError(failed('reading the runs')),
+            Effect.map((rows) => rows.map((row) => rowOf(row.run, row.projectId))),
+          ),
 
       stopped: (sessionId) =>
         Effect.gen(function* () {
