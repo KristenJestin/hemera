@@ -681,3 +681,29 @@ describe('a write without an idempotency key', () => {
     expect(seen.summary).toContain('key')
   })
 })
+
+describe('the answers a Session keeps against a retry', () => {
+  it('are bounded, the least recently asked let go of first', async () => {
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const write = (key: string, content: string) =>
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: `kept/${key}.txt`, content, key },
+          })
+        yield* write('oldest', 'first')
+        yield* Effect.forEach(
+          Array.from({ length: 256 }, (_, index) => `k${String(index)}`),
+          (key) => write(key, 'filler'),
+        )
+        // 257 keys were answered: the oldest is gone, and asking it again writes again.
+        return yield* write('oldest', 'second')
+      }),
+    )
+
+    expect(seen.repeated).toBe(false)
+    expect(readFileSync(join(root, 'kept', 'oldest.txt'), 'utf8')).toBe('second')
+  })
+})
