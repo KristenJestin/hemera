@@ -2,6 +2,9 @@ import type { Decorator, Meta, StoryObj } from '@storybook/react-vite'
 import type { ReactNode } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { MotionConfig } from 'motion/react'
+
+import { ToolCallCard } from '../../activity/tool-call-card.tsx'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
 import { IconSparkles } from '../../icons.ts'
 import { MessageDaySeparator, MessageGroup } from '../message.tsx'
@@ -567,6 +570,129 @@ export const APreviewUnderTheHand: Story = {
 
     const preview = await waitFor(() => within(document.body).getByRole('tooltip'))
     expect(preview).toHaveTextContent(MARKS[0]!.label)
+  },
+}
+
+/**
+ * A thread with a fold in it, and something under the fold to be pushed.
+ *
+ * Three entries and no rail: what is read here is what happens to the third one when the second
+ * opens, and a thread long enough to scroll would put it out of sight.
+ */
+const FOLDS: ScrollerEntry[] = [
+  {
+    id: 'ask',
+    mark: 'Where does the export build the file?',
+    content: (
+      <MessageGroup
+        author="user"
+        name="You"
+        lines={[{ id: 'ask-1', body: 'Where does the export build the file?' }]}
+      />
+    ),
+  },
+  {
+    id: 'call',
+    content: (
+      <ToolCallCard
+        title="Read src/billing/export.ts"
+        kind="read"
+        status="completed"
+        input={'path: src/billing/export.ts\noffset: 20\nlimit: 40'}
+        output={
+          'export function exportInvoices(rows: Invoice[]): string {\n  return rows.join()\n}\n'
+        }
+      />
+    ),
+  },
+  {
+    id: 'after',
+    content: <p data-testid="under-the-fold">It builds the whole file before writing a byte.</p>,
+  },
+]
+
+/** The block under the fold, and the element motion carries it on. */
+function underTheFold(canvasElement: HTMLElement) {
+  const block = within(canvasElement).getByTestId('under-the-fold')
+  return { block, carried: block.parentElement! }
+}
+
+/**
+ * A fold opening pushes what is under it instead of teleporting it (trial of 22 September 2026).
+ *
+ * Every block of the thread is a layout element of one group: motion measures where each of them
+ * ended up once the card opened and plays the difference as a transform, so the answer under the
+ * call travels to its new place rather than being drawn there between two frames. Nothing of a
+ * block's own size is animated — a paragraph stretching under the eye reading it is the one
+ * thing a growing thread must not do.
+ */
+export const AFoldOpening: Story = {
+  args: { entries: FOLDS },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const { block, carried } = underTheFold(canvasElement)
+    const before = block.getBoundingClientRect().top
+    // At rest, nothing is being carried anywhere.
+    await expect(getComputedStyle(carried).transform).toBe('none')
+
+    await userEvent.click(canvas.getByRole('button', { name: /Read src\/billing\/export\.ts/ }))
+
+    // Caught in flight: the block is somewhere between where it was and where it is going, and
+    // a transform is what is holding it there.
+    await waitFor(() => {
+      expect(getComputedStyle(carried).transform, 'the thread jumped instead of moving').not.toBe(
+        'none',
+      )
+    })
+    // And it arrives: the transform is spent, and the block is lower than it was.
+    await waitFor(() => {
+      expect(getComputedStyle(carried).transform).toBe('none')
+    })
+    await expect(block.getBoundingClientRect().top).toBeGreaterThan(before)
+  },
+}
+
+/**
+ * The same fold for a reader who asked for less movement: the end state, and no journey.
+ *
+ * `MotionConfig` is the way the preference is said here rather than the browser's own media
+ * query, and on purpose: the query is read once, when a component mounts, and a story that
+ * emulates it afterwards is testing a tree that never heard. What is being proved is the rule
+ * itself — a thread told to move less is not a thread whose blocks travel quickly, it is one
+ * where a block is simply where it belongs and nothing is carrying it there.
+ */
+export const AFoldWithoutMotion: Story = {
+  args: { entries: FOLDS },
+  render: (args) => (
+    <MotionConfig reducedMotion="always">
+      <div className="h-screen p-6">
+        <MessageScroller {...args} />
+      </div>
+    </MotionConfig>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const { block, carried } = underTheFold(canvasElement)
+    const before = block.getBoundingClientRect().top
+
+    await userEvent.click(canvas.getByRole('button', { name: /Read src\/billing\/export\.ts/ }))
+
+    /*
+     * Arrived, and arrived at once. The window is a fifth of a second, which is where the
+     * assertion is: the spring this fold reads takes the better part of one to settle, so a
+     * block already in its new place with nothing carrying it is a block that was given no
+     * journey rather than one that finished the journey quickly.
+     */
+    await waitFor(
+      () => {
+        expect(block.getBoundingClientRect().top).toBeGreaterThan(before)
+        expect(
+          getComputedStyle(carried).transform,
+          'a reader who asked for less movement was taken on the journey anyway',
+        ).toBe('none')
+      },
+      { timeout: 200, interval: 10 },
+    )
   },
 }
 

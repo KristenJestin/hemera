@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { motion } from 'motion/react'
+import { LayoutGroup, motion } from 'motion/react'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -274,21 +274,55 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   return (
     <div className={cn(FRAME, className)}>
       <div className={COLUMN}>
-        <div ref={box} tabIndex={0} role="log" aria-label={label} onScroll={look} className={BOX}>
-          {entries.map((entry, index) => (
-            <div
-              key={entry.id}
-              ref={(node) => {
-                // A day registers as nothing, and so does an entry that asked for no mark: the
-                // rail counts what it drew and only what it drew, so the walk above lands on
-                // the same index the rail drew its marks with.
-                anchors.current[index] = isMarked(entry) ? node : null
-              }}
-            >
-              {entry.content}
-            </div>
-          ))}
-        </div>
+        {/*
+          `layoutScroll` because this is the thing that scrolls: motion measures a block against
+          the viewport, and a measurement taken in a column that has been scrolled by eight
+          hundred pixels is eight hundred pixels wrong. It is the one prop that tells it to read
+          the offset.
+        */}
+        <motion.div
+          ref={box}
+          layoutScroll
+          tabIndex={0}
+          role="log"
+          aria-label={label}
+          onScroll={look}
+          className={BOX}
+        >
+          {/*
+            A fold opening takes the thread below it with it, and takes it *smoothly* (trial of
+            22 September 2026). Every block is its own layout element and the group is what makes
+            them one movement: motion measures where each of them ended up and plays the
+            difference as a transform, so a tool card unfolding pushes the blocks under it
+            instead of the column being redrawn somewhere else between two frames.
+
+            `position` and not the whole box, which is what keeps a growing entry out of it: an
+            answer arriving word by word changes its own height on nearly every frame, and a
+            block whose *size* was animated would be a paragraph stretching under the eye that
+            is reading it. Where a block starts is what travels; what it holds never does.
+
+            And for a reader who asked for less movement it is not a layout element at all: a
+            journey given no time is still a journey the machinery sets up, and `false` is the
+            block simply being where it belongs.
+          */}
+          <LayoutGroup>
+            {entries.map((entry, index) => (
+              <motion.div
+                key={entry.id}
+                layout={still ? false : 'position'}
+                transition={transition}
+                ref={(node) => {
+                  // A day registers as nothing, and so does an entry that asked for no mark: the
+                  // rail counts what it drew and only what it drew, so the walk above lands on
+                  // the same index the rail drew its marks with.
+                  anchors.current[index] = isMarked(entry) ? node : null
+                }}
+              >
+                {entry.content}
+              </motion.div>
+            ))}
+          </LayoutGroup>
+        </motion.div>
         {!atEdge && (
           <div className={PILL_ROW}>
             <LatestPill onGoToLatest={goToLatest} />

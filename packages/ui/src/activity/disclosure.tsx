@@ -4,7 +4,7 @@ import { motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
 import { IconChevronDown } from '../icons.ts'
-import { arrival, useTransition } from '../motion.ts'
+import { arrival, instant, useTransition } from '../motion.ts'
 
 /**
  * What folds: a line that is read while it is closed, and what is inside once it is asked for
@@ -23,9 +23,16 @@ import { arrival, useTransition } from '../motion.ts'
  * The height is not animated, and that is deliberate rather than unfinished. The design system
  * only ever animates `transform`, `opacity`, `filter` and `clip-path` — a lint check refuses the
  * rest — and the one property a panel would want to ease is the one nobody may touch. So the row
- * carries the fold in its chevron, which turns on a transform, and the body arrives on a fade and
- * a short rise. The body is mounted when it opens, which is what makes that arrival possible: a
- * console re-reads its bottom when it is opened again, which is where a live console belongs.
+ * carries the fold in its chevron, which turns on a transform, and the body is uncovered: it is
+ * in place at its full height from the first frame, and a `clip-path` walks down it while it
+ * fades in, which is a wipe rather than a box being resized. The body is mounted when it opens,
+ * which is what makes that arrival possible: a console re-reads its bottom when it is opened
+ * again, which is where a live console belongs.
+ *
+ * What the fold moves is not this component's business, and is not teleported either: whatever
+ * holds a column of folds — the thread, in `message/scroller` — carries the blocks under it on
+ * `layout`, so the page below travels instead of arriving already somewhere else (trial of
+ * 22 September 2026).
  */
 
 /** The row, which is the control: it answers the pointer anywhere on its width. */
@@ -37,6 +44,17 @@ const CHEVRON = 'ml-auto flex shrink-0 items-center justify-center text-muted-fo
 
 /** What is inside, indented under the line that announced it. */
 const BODY = 'pt-1 pb-0.5 pl-8'
+
+/** The body before it is uncovered: nothing of it showing, cut from the bottom edge up. */
+const UNCOVERED = 'inset(0% 0% 100% 0%)'
+
+/** And the whole of it, which is what the wipe walks down to. */
+const WHOLE = 'inset(0% 0% 0% 0%)'
+
+/** The fade that goes with the wipe, as a filter rather than an opacity. */
+const FADED = 'opacity(0)'
+
+const SHOWN = 'opacity(1)'
 
 export interface DisclosureProps {
   /** The line read while the body is closed, handed over already drawn. */
@@ -70,38 +88,58 @@ export function Disclosure({
   const [asked, setAsked] = useState(defaultOpen)
   const shown = open ?? asked
   const transition = useTransition(arrival)
+  // `useTransition` hands back this very object when the system asks for less movement, and a
+  // block travelling to its new place is movement: the fold stops being a layout element at all
+  // then, rather than being one with no time to move in.
+  const still = transition === instant
   return (
-    <Collapsible.Root
-      open={shown}
-      // A controlled block is the caller's answer: the reader's press is reported and the shown
-      // state stays whatever the caller said, which is how a running call cannot be folded.
-      onOpenChange={(next) => {
-        setAsked(next)
-        onOpenChange?.(next)
-      }}
-      className={cn('w-full', className)}
-    >
-      <Collapsible.Trigger className={TRIGGER}>
-        {summary}
-        <motion.span
-          aria-hidden="true"
-          className={CHEVRON}
-          animate={{ rotate: shown ? 180 : 0 }}
-          transition={transition}
-        >
-          <IconChevronDown size="sm" />
-        </motion.span>
-      </Collapsible.Trigger>
-      <Collapsible.Panel className={BODY}>
-        <motion.div
-          key={shown ? 'open' : 'closed'}
-          initial={{ y: -4 }}
-          animate={{ y: 0 }}
-          transition={transition}
-        >
-          {children}
-        </motion.div>
-      </Collapsible.Panel>
-    </Collapsible.Root>
+    /*
+      The fold is a layout element, and this is what makes the page below it move rather than
+      jump: motion measures the tree the moment this re-renders — which is every time the block
+      opens or closes — and carries whatever changed place to its new one. `position`, so the
+      block's own box is never animated: what grows is a body appearing at its full height, and
+      a box eased into a new size would stretch everything drawn inside it.
+    */
+    <motion.div layout={still ? false : 'position'} transition={transition} className="w-full">
+      <Collapsible.Root
+        open={shown}
+        // A controlled block is the caller's answer: the reader's press is reported and the
+        // shown state stays whatever the caller said.
+        onOpenChange={(next) => {
+          setAsked(next)
+          onOpenChange?.(next)
+        }}
+        className={cn('w-full', className)}
+      >
+        <Collapsible.Trigger className={TRIGGER}>
+          {summary}
+          <motion.span
+            aria-hidden="true"
+            className={CHEVRON}
+            animate={{ rotate: shown ? 180 : 0 }}
+            transition={transition}
+          >
+            <IconChevronDown size="sm" />
+          </motion.span>
+        </Collapsible.Trigger>
+        <Collapsible.Panel className={BODY}>
+          {/*
+            The wipe: the body is laid out at its full height at once and uncovered from the top
+            down. A `clip-path` and a `filter` are the two of it, and the fade is a filter rather
+            than an `opacity` for the reason the foot of a message gives — the accessibility
+            check of the catalogue measures a text's contrast through an opacity and refuses the
+            value it would read mid-flight, while a filter is not part of what it measures.
+          */}
+          <motion.div
+            key={shown ? 'open' : 'closed'}
+            initial={{ filter: FADED, clipPath: UNCOVERED }}
+            animate={{ filter: SHOWN, clipPath: WHOLE }}
+            transition={transition}
+          >
+            {children}
+          </motion.div>
+        </Collapsible.Panel>
+      </Collapsible.Root>
+    </motion.div>
   )
 }
