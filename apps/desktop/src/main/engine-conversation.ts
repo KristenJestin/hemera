@@ -26,7 +26,19 @@ export const PATIENCE = Duration.seconds(5)
  * heard a timeout, the engine went on working. These wait as long as it takes; the turn's own
  * end is what the engine pushes as an event, and a dead process is still `EngineGone`.
  */
-export const UNHURRIED: ReadonlySet<EngineRequestName> = new Set(['agents.prompt'])
+export const UNHURRIED: ReadonlySet<EngineRequestName> = new Set([
+  'agents.prompt',
+  // These start an agent when none is running — a spawn, a handshake and a `session/new`, or a
+  // load that streams a whole history back — and a cold start of an agent is seconds, not a few.
+  'agents.options',
+  'agents.offer',
+  'agents.offerSet',
+  'agents.setOption',
+  'agents.resume',
+  // An update runs the installer's own tool, and a check asks three registries over the network.
+  'agents.update',
+  'agents.check',
+])
 
 /**
  * The use case a failure happened on, carried under a name of its own.
