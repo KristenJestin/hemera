@@ -286,6 +286,14 @@
      enough for a path to be read, narrow enough not to cover the box it belongs to. */
   --spacing-menu: 20rem;
 
+  /* How tall the agent panel is drawn, whatever stage it is on and whatever it is waiting for.
+     One height for the loading state, the list, the empty answer and a refusal alike: the panel
+     opens upwards out of the composer, so a body that grew would push it past the top of the
+     window and make the positioner flip it to the other side under the reader's hand. Tall
+     enough for six models and the two rows below them, short enough to sit above a composer in
+     a window that is not maximised. */
+  --spacing-menu-panel: 24rem;
+
   /* The prototype draws its icons at eighteen, with sixteen for the small ones and twenty-two
      for the few that stand alone. The first pass of lot 4 sat a step under all three, which is
      what made every control read as slightly unfinished: an icon beside a word has to weigh as
@@ -350,9 +358,21 @@
   --duration-turn: 1200ms;
   --animate-turn: turn var(--duration-turn) linear infinite;
 
+  /* The breath of a dot that says something is running (design D17-04). One turn of the loading
+     indicator long, because the two are read side by side in a thread, and two rhythms beating
+     against each other are what make a page look nervous. It moves nothing but the opacity —
+     the dot keeps its place, its size and its colour, and only the pixels come and go. */
+  --animate-breathe: breathe var(--duration-turn) var(--ease-calm) infinite;
+
   @keyframes turn {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  @keyframes breathe {
+    50% {
+      opacity: 0.35;
     }
   }
 }
