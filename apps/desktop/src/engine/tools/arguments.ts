@@ -111,7 +111,7 @@ export const TOOL_ARGUMENTS = {
 
 /** What each tool is, in the words the agent reads before it asks. */
 export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
-  fs_read: `Read a file inside the Workspace root. A long file is paginated: one call returns at most ${READ_PAGE_BYTES} bytes, and the answer says which bytes it is and where the next page starts.`,
+  fs_read: `Read a file inside the Workspace root. A long file is paginated: one call returns at most ${READ_PAGE_BYTES} bytes, each line comes with its number in front of it, a page ends on a whole line, and the answer ends with the range read as JSON: offset, end, size, truncated and next, the offset of the next page.`,
   fs_edit: `Replace a piece of text in a file of the Workspace root. The text must appear exactly once: none, or several, is refused and the refusal says how many were found. Send a key so that a retry after a lost answer does not edit twice.`,
   fs_write: `Write a file inside the Workspace root, creating the folders it needs; the whole file becomes what you send. Send a key so that a retry after a lost answer does not write twice.`,
   fs_list:

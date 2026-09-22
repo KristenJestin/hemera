@@ -372,6 +372,77 @@ describe('a file larger than one page', () => {
     expect(seen.first.summary).toContain(`of ${String(body.length)}`)
     expect(seen.first.text).toContain(`the next page starts at offset ${String(READ_PAGE_BYTES)}`)
     expect(seen.second.summary).toContain('bytes 262144-')
+    // The range is fields as well as words: what the Spec asks a long read to carry.
+    expect(seen.first.range).toEqual({
+      offset: 0,
+      end: READ_PAGE_BYTES,
+      size: body.length,
+      truncated: true,
+      next: READ_PAGE_BYTES,
+    })
+    expect(seen.second.range?.truncated).toBe(false)
+    expect(seen.second.range?.next).toBeNull()
+  })
+})
+
+describe('a file read in pages', () => {
+  it('numbers its lines, and each page starts on the line after the last one', async () => {
+    const lines = Array.from({ length: 40 }, (_, index) => `line ${String(index + 1)} of the file`)
+    fileInRoot('lines.txt', `${lines.join('\n')}\n`)
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const first = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: 'lines.txt', limit: 100 },
+        })
+        const second = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: 'lines.txt', offset: first.range?.next ?? 0, limit: 100 },
+        })
+        return { first, second }
+      }),
+    )
+
+    const numberedLines = (text: string) => text.split('\n').filter((one) => /^ *\d+\t/.test(one))
+    const first = numberedLines(seen.first.text)
+    const second = numberedLines(seen.second.text)
+    expect(first[0]).toBe('     1\tline 1 of the file')
+    // The first page stopped after a whole line, and the second picks up at the next one.
+    const last = Number.parseInt(first.at(-1) ?? '', 10)
+    expect(second[0]).toBe(
+      `${String(last + 1).padStart(6, ' ')}\tline ${String(last + 1)} of the file`,
+    )
+  })
+
+  it('never cuts a character in two, and the pages put together are the file', async () => {
+    // Two bytes a character and no newline: a page of an odd number of bytes would cut one.
+    const body = 'é'.repeat(300)
+    fileInRoot('accents.txt', body)
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const first = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: 'accents.txt', limit: 101 },
+        })
+        const second = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: 'accents.txt', offset: first.range?.next ?? 0 },
+        })
+        return { first, second }
+      }),
+    )
+
+    const textOf = (text: string) => (text.split('\n')[0] ?? '').replace(/^ *\d+\t/, '')
+    expect(seen.first.text).not.toContain('�')
+    expect(seen.second.text).not.toContain('�')
+    expect(seen.first.range?.end).toBe(100)
+    expect(textOf(seen.first.text) + textOf(seen.second.text)).toBe(body)
   })
 })
 

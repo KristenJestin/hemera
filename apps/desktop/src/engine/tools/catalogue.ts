@@ -38,6 +38,7 @@ import { mutate } from '../transaction.ts'
 import { type ToolArguments, type ParsedCall, parseCall } from './arguments.ts'
 import { type RefusedPathError, resolveInside } from './paths.ts'
 import { ToolPermissions } from './permissions.ts'
+import { type Page, type ReadRange, numbered, readPage } from './read.ts'
 import { searchIn } from './search.ts'
 
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
@@ -89,6 +90,8 @@ export interface ToolOutcome {
   readonly paths: readonly string[]
   /** Whether this is the answer an earlier call with the same key was given. */
   readonly repeated: boolean
+  /** The bytes a read covered and where the next page starts; null for every other tool. */
+  readonly range: ReadRange | null
 }
 
 export interface ToolCatalogueService {
@@ -119,15 +122,8 @@ interface Answer {
   readonly summary: string
   readonly text: string
   readonly paths: readonly string[]
-}
-
-/** What reading a file answered, before it became an answer. */
-interface Page {
-  readonly text: string
-  readonly offset: number
-  /** How many bytes this page took, which is where the next one starts. */
-  readonly read: number
-  readonly size: number
+  /** The bytes a read covered, for `fs_read` alone. */
+  readonly range?: ReadRange
 }
 
 function completed(summary: string, text: string, paths: readonly string[] = []): Answer {
@@ -284,6 +280,7 @@ export const toolCatalogueLayer: Layer.Layer<
           text: answer.text,
           paths: answer.paths,
           repeated: false,
+          range: answer.range ?? null,
         }
         // Only what happened is remembered. A key is there so that a retry after a lost answer
         // does not write twice, and a call that wrote nothing — a refusal, a read that failed —
@@ -428,35 +425,28 @@ export const toolCatalogueLayer: Layer.Layer<
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const page = yield* attempt<Page>(() =>
-              readFile(settled.path).then((data) => {
-                const offset = call.arguments.offset ?? 0
-                const limit = call.arguments.limit ?? READ_PAGE_BYTES
-                const slice = data.subarray(offset, offset + limit)
-                return {
-                  text: slice.toString('utf8'),
-                  offset,
-                  // What the next page starts at is how many bytes were taken, not how long the
-                  // text reads: a page that ends in the middle of a character decodes to a
-                  // replacement character three bytes wide, and an offset measured on the text
-                  // would skip the two bytes the next page has to begin with.
-                  read: slice.length,
-                  size: data.length,
-                }
-              }),
+              readPage(
+                settled.path,
+                call.arguments.offset ?? 0,
+                call.arguments.limit ?? READ_PAGE_BYTES,
+              ),
             )
             if (!page.ok) {
               return failed(`could not read ${call.arguments.path}`, page.reason)
             }
-            const end = page.value.offset + page.value.read
-            const more =
-              end < page.value.size
-                ? `\n(that is bytes ${page.value.offset}-${end} of ${page.value.size}; the next page starts at offset ${end})`
-                : ''
+            const { offset, end, size, truncated, next } = page.value
+            // The range is said in words and in fields, on a line of its own after the text: the
+            // agent reads the sentence, and a client that parses reads the same numbers.
+            const range = JSON.stringify({ offset, end, size, truncated, next })
+            const more = truncated
+              ? `(that is bytes ${offset}-${end} of ${size}; the next page starts at offset ${end})`
+              : `(that is bytes ${offset}-${end} of ${size}, the end of the file)`
             return {
               ok: true,
-              summary: `read ${call.arguments.path} (bytes ${page.value.offset}-${end} of ${page.value.size})`,
-              text: `${page.value.text}${more}`,
+              summary: `read ${call.arguments.path} (bytes ${offset}-${end} of ${size})`,
+              text: [numbered(page.value), more, range].filter((part) => part !== '').join('\n'),
               paths: [call.arguments.path],
+              range: { offset, end, size, truncated, next },
             }
           }
 
@@ -744,6 +734,7 @@ export const toolCatalogueLayer: Layer.Layer<
               text: 'this Session is unknown to the engine',
               paths: [],
               repeated: false,
+              range: null,
             }
           }
           const session = read.session
@@ -757,6 +748,7 @@ export const toolCatalogueLayer: Layer.Layer<
               text: 'this Session belongs to a Project the engine cannot read',
               paths: [],
               repeated: false,
+              range: null,
             }
           }
           const root = project.mainPath
