@@ -24,7 +24,9 @@
  *
  * What the child writes on standard error is not swallowed. A program that fails says so
  * there, and a run of lines nobody read is a failure nobody can account for; so those lines are
- * handed to a sink, which the engine points at the diagnostic log. Nothing in here prints.
+ * handed to a sink, which the engine points at the diagnostic log, and to whoever asked for them
+ * through `onStderr` — the output of a command is where they are read a second time (D6-12).
+ * Nothing in here prints.
  */
 
 import { execFile, spawn } from 'node:child_process'
@@ -97,6 +99,15 @@ export interface SupervisedProcess {
    * attached is gone, which is why the runtime attaches its reader before it writes anything.
    */
   readonly onStdout: (read: (line: string) => void) => void
+  /**
+   * Reads what the child writes on its standard error, one line at a time, as it arrives.
+   *
+   * Handed over the same way `onStdout` is, and for a reason of its own: a tool that fails says
+   * why on standard error — `tsc`, `vitest`, `eslint`, `cargo` all do — so a run that kept only
+   * standard output would show an exit code with nothing to explain it (D6-12). This is one more
+   * ear and never a redirection: the diagnostic sink is handed every line all the same.
+   */
+  readonly onStderr: (read: (line: string) => void) => void
 }
 
 /** What the engine hands its children's `stderr` to. `main/diagnostic.ts` holds the `Log`. */
@@ -516,6 +527,9 @@ export const processSupervisorLayer = Layer.effect(
       closeInput: Effect.sync(child.process.end),
       onStdout: (read) => {
         child.process.onStdout(read)
+      },
+      onStderr: (read) => {
+        child.process.onStderr(read)
       },
       stop: stopOf(child),
       kill: Effect.gen(function* () {
