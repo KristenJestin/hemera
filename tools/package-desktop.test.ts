@@ -160,7 +160,13 @@ describe('Un paquet lit son canal dans son manifeste', () => {
   test('a beta tag closer than the version tag is not what a package is named after, on this OS', () => {
     const folder = mkdtempSync(join(tmpdir(), 'hemera-describe-'))
     const git = (...args: string[]) => {
-      const run = spawnSync('git', args, { cwd: folder, encoding: 'utf8' })
+      // The machine's own configuration stays out of it: a `tag.gpgsign` set for the user turns
+      // a lightweight tag into a signed one that wants a message, and the test is about describe.
+      const run = spawnSync(
+        'git',
+        ['-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...args],
+        { cwd: folder, encoding: 'utf8' },
+      )
       expect(run.status, run.stderr).toBe(0)
       return run.stdout.trim()
     }
