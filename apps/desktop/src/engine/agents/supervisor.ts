@@ -29,6 +29,7 @@
 
 import { execFile, spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import type { Readable } from 'node:stream'
 import { Context, Data, Deferred, Duration, Effect, Layer, Option, Ref } from 'effect'
 import type { Scope } from 'effect'
 
@@ -197,6 +198,28 @@ export class HostProcesses extends Context.Service<HostProcesses, HostProcessesS
 ) {}
 
 /**
+ * The lines a pipe carries, each handed over whole and without its newline.
+ *
+ * A pipe delivers chunks, and a chunk ends wherever the operating system cut it — a message of a
+ * few tens of kilobytes arrives in several. What did not end with a newline is carried over to
+ * the next chunk rather than handed over as a line of its own, and what is left when the pipe
+ * closes is the last line.
+ */
+function linesOf(stream: Readable, read: (line: string) => void): void {
+  let rest = ''
+  stream.setEncoding('utf8')
+  stream.on('data', (chunk: string) => {
+    const parts = `${rest}${chunk}`.split('\n')
+    rest = parts.pop() ?? ''
+    for (const line of parts) if (line !== '') read(line)
+  })
+  stream.on('end', () => {
+    if (rest !== '') read(rest)
+    rest = ''
+  })
+}
+
+/**
  * The machine as this process sees it.
  *
  * `detached` is what buys a process group on POSIX and a separate console on Windows, and the
@@ -239,17 +262,10 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
         })
       },
       onStderr: (read) => {
-        child.stderr?.setEncoding('utf8')
-        child.stderr?.on('data', (chunk: string) => {
-          // The newline is the writer's, not the line's: what a sink is handed is a line.
-          for (const line of chunk.split('\n')) if (line !== '') read(line)
-        })
+        if (child.stderr !== null) linesOf(child.stderr, read)
       },
       onStdout: (read) => {
-        child.stdout?.setEncoding('utf8')
-        child.stdout?.on('data', (chunk: string) => {
-          for (const line of chunk.split('\n')) if (line !== '') read(line)
-        })
+        if (child.stdout !== null) linesOf(child.stdout, read)
       },
     }
   },
