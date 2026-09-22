@@ -31,6 +31,20 @@ export function AgentText({ text }: { text: string }): ReactNode {
   )
 }
 
+/** The schemes an address in an answer may carry; every other one is not an address. */
+const FOLLOWABLE = new Set(['http:', 'https:', 'mailto:'])
+
+/** The address of a link when it is one of those, and nothing at all when it is not. */
+function followable(href: string | undefined): string | undefined {
+  if (href === undefined) return undefined
+  try {
+    // The base is what makes a relative address readable; it never reaches the element.
+    return FOLLOWABLE.has(new URL(href, 'https://localhost/').protocol) ? href : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * The streaming profile, made once.
  *
@@ -121,9 +135,17 @@ const COMPONENTS = {
   /**
    * A link is drawn and not followed: the address arrives as the agent wrote it, and a press on
    * it belongs to the window — an answer never navigates the page it is being read on.
+   *
+   * The address the agent wrote is also a thing the agent wrote: a `javascript:` one is a press
+   * that runs the agent's own code in the window, so what is not one of the three schemes below
+   * is drawn as the text it is and carries no address at all.
    */
-  a: ({ className, ...rest }: MarkdownComponentProps<'a'>) => (
-    <a className={cn('text-primary underline underline-offset-2', className)} {...rest} />
+  a: ({ className, href, ...rest }: MarkdownComponentProps<'a'>) => (
+    <a
+      className={cn('text-primary underline underline-offset-2', className)}
+      href={followable(href)}
+      {...rest}
+    />
   ),
   /**
    * Code in two shapes, told apart by the class the parser puts on the fence's own element: a

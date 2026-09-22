@@ -110,6 +110,16 @@ export type HighlightedLine = HighlightedToken[]
 
 /** What was already drawn, so that a re-render reads the same answer and not a new one. */
 const DRAWN = new Map<string, HighlightedLine[] | null>()
+
+/**
+ * How many drawn changes are held.
+ *
+ * The cache exists so that a re-render reads the same array and not a new one, which is a
+ * question about the diffs on screen and not about every diff of a day's work: a window left
+ * open would otherwise hold the text of every file a session ever touched, twice — once as the
+ * source and once as its tokens.
+ */
+const DRAWN_KEPT = 64
 const LOADED = new Set<string>()
 const LISTENERS = new Set<() => void>()
 
@@ -170,6 +180,14 @@ export function highlighted(code: string, language: string | null): HighlightedL
   if (DRAWN.has(key)) return DRAWN.get(key) ?? null
   const drawn = draw(ready, code, language)
   DRAWN.set(key, drawn)
+  // The oldest go first, which is the diff furthest up a thread nobody is scrolled to: drawing
+  // it again is one pass of the grammar, where holding it is the whole file for as long as the
+  // window is open.
+  while (DRAWN.size > DRAWN_KEPT) {
+    const oldest = DRAWN.keys().next()
+    if (oldest.done === true) break
+    DRAWN.delete(oldest.value)
+  }
   return drawn
 }
 
