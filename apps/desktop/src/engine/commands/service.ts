@@ -637,8 +637,9 @@ export const commandsLayer = Layer.effect(
               record.dropped += dropped
               record.kept = record.kept.slice(dropped)
             }
-            const found = addressIn(record.kept)
-            if (found !== null) record.url = found
+            // The first address the run names is its address: a later one — a second server, a
+            // proxy, a link in a log line — does not move the one the user already opened.
+            if (record.url === null) record.url = addressIn(text)
           }
           process.onStdout(keep)
           process.onStderr(keep)

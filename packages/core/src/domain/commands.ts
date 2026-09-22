@@ -94,10 +94,20 @@ export function joinsRunningRun(kind: CommandKind, running: boolean): boolean {
   return kind === 'app' && running
 }
 
-/** The first address a chunk of output names, and null when it names none yet. */
-const ADDRESS = /https?:\/\/localhost:(\d{2,5})\b/
+/** An address of this machine: its name, its loopback addresses, or every interface. */
+const ADDRESS = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d{2,5})\b/
 
+/**
+ * The colour and cursor codes a terminal program writes around its text.
+ *
+ * A dev server paints its address — Vite prints the port in bold — and a code in the middle of
+ * the address is an address nobody would recognise.
+ */
+// oxlint-disable-next-line no-control-regex -- the escape character is what is being matched
+const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
+
+/** The first address a chunk of output names, and null when it names none yet. */
 export function addressIn(output: string): string | null {
-  const found = ADDRESS.exec(output)
+  const found = ADDRESS.exec(output.replace(ANSI, ''))
   return found === null ? null : found[0]
 }

@@ -463,3 +463,31 @@ describe('A line is split into words, a quoted one staying whole', () => {
     },
   )
 })
+
+describe('A run keeps the first address it names', () => {
+  it('does not move to an address printed later', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const started = yield* commands.run({
+          sessionId: session.sessionId,
+          projectId: session.projectId,
+          commandId: null,
+          name: 'two',
+          line: `"${process.execPath}" -e "console.log('http://127.0.0.1:4000');console.log('http://localhost:5000')"`,
+          kind: 'check',
+          cwd: root,
+          startedBy: 'user',
+        })
+        return yield* until(
+          commands.output(session.sessionId, started.id),
+          (view) => view.state !== 'running',
+        )
+      }),
+    )
+
+    expect(seen.output).toContain('localhost:5000')
+    expect(seen.url).toBe('http://127.0.0.1:4000')
+  })
+})
