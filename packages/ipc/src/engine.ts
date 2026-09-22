@@ -75,11 +75,33 @@ export const activeProjectSchema = z.string().nullable()
  */
 export const activeSessionsSchema = z.record(z.string(), z.string())
 
+/**
+ * What each Project's composer was left on, remembered between two starts (design D5-17).
+ *
+ * One entry per Project: the agent that was last asked there, and the choices made on it — the
+ * model, the effort, the mode, under the identifiers that agent publishes them with. A Home
+ * opens on what it was left on rather than on the agent's defaults, and a Project's choices are
+ * that Project's: two Projects on two agents are two composers.
+ *
+ * The values are whatever the agent announced, so nothing here is an enumeration of Hemera's:
+ * an option an agent adds is remembered the day it adds it, and one it no longer takes is a
+ * choice it refuses, which leaves the composer showing what the agent is really on.
+ */
+export const composerChoiceSchema = z.object({
+  provider: z.string(),
+  options: z.record(z.string(), z.string()),
+})
+
+export type ComposerChoice = z.infer<typeof composerChoiceSchema>
+
+export const composersSchema = z.record(z.string(), composerChoiceSchema)
+
 export const displayPreferencesSchema = z.object({
   theme: themePreferenceSchema,
   sidebar: sidebarPreferenceSchema,
   activeProjectId: activeProjectSchema,
   activeSessions: activeSessionsSchema,
+  composers: composersSchema,
 })
 
 export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
@@ -90,6 +112,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   sidebar: { collapsed: false, width: null },
   activeProjectId: null,
   activeSessions: {},
+  composers: {},
 }
 
 /** A change to what the window wears: what is absent is what the user did not touch. */
@@ -98,6 +121,7 @@ export const displayPreferencesChangeSchema = z.object({
   sidebar: sidebarPreferenceSchema.optional(),
   activeProjectId: activeProjectSchema.optional(),
   activeSessions: activeSessionsSchema.optional(),
+  composers: composersSchema.optional(),
 })
 
 export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>

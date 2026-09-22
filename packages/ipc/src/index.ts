@@ -28,6 +28,8 @@ export {
   ENGINE_EVENT_CHANNEL,
   ENGINE_REQUESTS,
   channelSchema,
+  composerChoiceSchema,
+  composersSchema,
   displayPreferencesChangeSchema,
   activeProjectSchema,
   activeSessionsSchema,
@@ -48,6 +50,7 @@ export {
 } from './engine.ts'
 export type {
   Channel,
+  ComposerChoice,
   DisplayPreferences,
   DisplayPreferencesChange,
   EngineArguments,

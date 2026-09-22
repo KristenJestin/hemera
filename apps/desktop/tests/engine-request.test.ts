@@ -109,6 +109,7 @@ function running<A, E>(
     runtimeLayer.pipe(
       Layer.provideMerge(discoveryLayer),
       Layer.provide(rows),
+      Layer.provide(preferencesLayer),
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provide(agents),
     ),
@@ -205,6 +206,7 @@ describe('Un message conforme est traité', () => {
       sidebar: { collapsed: false, width: null },
       activeProjectId: null,
       activeSessions: {},
+      composers: {},
     })
   })
 })

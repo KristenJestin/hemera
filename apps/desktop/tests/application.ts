@@ -24,6 +24,8 @@ import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { AgentNotices, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime, Notice } from '#engine/agents/runtime.ts'
 import { openProfile } from '#engine/migrate.ts'
+import { preferencesLayer } from '#engine/preferences.ts'
+import type { Preferences } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
@@ -95,10 +97,16 @@ export function application(
     // The runtime is built on the very same services the suite reads with — `provideMerge` hands
     // them up rather than hiding them, so one database is opened and one thread is written.
     const services: Layer.Layer<
-      Projects | Sessions | AgentRuntime | Database | SqliteClient | TestClock.TestClock
+      | Projects
+      | Sessions
+      | Preferences
+      | AgentRuntime
+      | Database
+      | SqliteClient
+      | TestClock.TestClock
     > = runtimeLayer.pipe(
       Layer.provideMerge(
-        Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
+        Layer.mergeAll(projectsLayer, sessionsLayer, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
         ),
       ),
@@ -116,6 +124,7 @@ export function application(
         E,
         | Projects
         | Sessions
+        | Preferences
         | AgentRuntime
         | Database
         | SqliteClient

@@ -20,6 +20,7 @@ import { MachineEnvironment } from '#engine/agents/discovery.ts'
 import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
 import { AgentRuntime, CANCEL_GRACE, TEXT_LIMIT } from '#engine/agents/runtime.ts'
+import { Preferences } from '#engine/preferences.ts'
 import { Projects } from '#engine/projects.ts'
 import {
   ASKED,
@@ -953,6 +954,119 @@ describe('A turn announces its start before its first chunk', () => {
           'turn_started',
           'turn_ended',
         ])
+      }),
+    )
+  })
+})
+
+/**
+ * What a Home opens on, after the application was closed (design D5-17).
+ *
+ * The agent a Project is worked with, and the model, the effort and the mode chosen on it, lived
+ * in the engine's memory and died with it: the next start put the composer back on whatever the
+ * agent's defaults were, and the reader chose them again. They are a preference of the data
+ * folder now — one per Project, because a Project is what they are about.
+ */
+describe('The composer’s choices are kept per Project', () => {
+  const MODEL = {
+    id: 'model',
+    type: 'select' as const,
+    name: 'Model',
+    category: 'model' as const,
+    currentValue: 'sonnet',
+    options: [
+      { value: 'sonnet', name: 'Sonnet' },
+      { value: 'opus', name: 'Opus' },
+    ],
+  }
+
+  test('The Home’s last agent and choices survive a restart', async () => {
+    const first = fakeAgent({ configOptions: [MODEL] })
+
+    const projectId = await application(dataFolder)(first)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const preferences = yield* Preferences
+        const project = yield* projects.create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: workingDirectory,
+        })
+
+        yield* runtime.offer(project.id, 'claude')
+        yield* runtime.offerSet(project.id, 'claude', 'model', 'opus')
+
+        // Written where a restart reads it: the agent this Project was worked with, and what was
+        // chosen on it, under the agent's own identifiers.
+        const held = yield* preferences.read
+        expect(held.composers[project.id]).toEqual({
+          provider: 'claude',
+          options: { model: 'opus' },
+        })
+        return project.id
+      }),
+    )
+
+    // A second run of the application over the same data folder: new layers, a new database
+    // handle and an agent that has never been told anything.
+    const second = fakeAgent({ configOptions: [MODEL] })
+
+    await application(dataFolder)(second)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const offered = yield* runtime.offer(projectId, 'claude')
+
+        // The Home is drawn from an agent that was put back on the model chosen last time,
+        // rather than from one on its defaults.
+        expect(offered.refusal).toBeNull()
+        expect(second.answers.choices).toEqual(['model=opus'])
+      }),
+    )
+  })
+
+  test('A Project’s choices do not leak into another Project', async () => {
+    const atlasAgent = fakeAgent({ configOptions: [MODEL] })
+    const borealAgent = fakeAgent({ configOptions: [MODEL] })
+    const queue = [atlasAgent, borealAgent]
+
+    await application(
+      dataFolder,
+      undefined,
+      machine,
+      // One probe per Project and per agent: each start answers with its own fake, which is what
+      // the two composers of two Projects really are.
+      fakeSupervisorOf(() => queue.shift() ?? borealAgent),
+    )(atlasAgent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const preferences = yield* Preferences
+        const atlas = yield* projects.create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: workingDirectory,
+        })
+        const boreal = yield* projects.create({
+          name: 'Boreal',
+          tone: 'info',
+          mainPath: workingDirectory,
+        })
+
+        yield* runtime.offer(atlas.id, 'claude')
+        yield* runtime.offerSet(atlas.id, 'claude', 'model', 'opus')
+        yield* runtime.offer(boreal.id, 'claude')
+
+        // The second Project's agent was told nothing: a model chosen in one Home is that Home's
+        // choice, and the other opens on what its own agent announces.
+        expect(borealAgent.answers.choices).toEqual([])
+
+        const held = yield* preferences.read
+        expect(held.composers[atlas.id]).toEqual({
+          provider: 'claude',
+          options: { model: 'opus' },
+        })
+        expect(held.composers[boreal.id]).toEqual({ provider: 'claude', options: {} })
       }),
     )
   })

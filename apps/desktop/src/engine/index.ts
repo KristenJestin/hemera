@@ -148,6 +148,9 @@ function servicesOf(
       // machine has, and that question is answered without starting anything.
       Layer.provideMerge(discoveryLayer),
       Layer.provide(rows),
+      // What each Project's composer was left on: the runtime seeds the Home's choices from it
+      // at start and writes them back as they are made (D5-17).
+      Layer.provide(preferencesLayer),
       Layer.provide(processSupervisorLayer),
       // The book of what is running, on the engine's own clock: it is what closes the agent a
       // Home's composer started once nobody is looking at that composer any more (D5-05).

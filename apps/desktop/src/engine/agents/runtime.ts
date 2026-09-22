@@ -32,6 +32,7 @@ import {
 import { existsSync } from 'node:fs'
 
 import type { AgentProvider, Session, SessionEntry } from '@hemera/core'
+import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice } from '@hemera/ipc'
 
 import {
   type AgentConnection,
@@ -50,6 +51,7 @@ import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discov
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, type SupervisedProcess } from './supervisor.ts'
+import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
 
@@ -420,6 +422,7 @@ export const runtimeLayer = Layer.effect(
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const projects = yield* Projects
+    const preferences = yield* Preferences
     const discovery = yield* Discovery
     const supervisor = yield* ProcessSupervisor
     const notices = yield* AgentNotices
@@ -706,6 +709,56 @@ export const runtimeLayer = Layer.effect(
      */
     const chosen = new Map<string, Map<string, string>>()
 
+    /**
+     * What each Project's composer was left on, as the data folder holds it between two starts.
+     *
+     * A choice made in a Home lived in `chosen` alone and died with the engine: the application
+     * came back on the agent's own defaults, and the reader chose the model again every morning
+     * (D5-17). This is the same thing, written down — one entry per Project, the agent last
+     * asked about and the choices made on it — and it is what `chosen` is seeded from.
+     */
+    const composers = new Map<string, ComposerChoice>()
+
+    /**
+     * What the data folder remembers, put back into the two maps, once.
+     *
+     * Read when a composer is first asked about rather than when this layer is built: the engine
+     * builds its services over a data folder that has not been migrated yet, and a preference
+     * read before the table exists is a read that fails. A folder that cannot be read is not a
+     * reason to refuse anything either — the composer then opens on what the agent announces,
+     * which is what it opened on before any of this was written down.
+     */
+    let seeded = false
+    const seeding = Semaphore.makeUnsafe(1)
+    const seed = seeding.withPermits(1)(
+      Effect.gen(function* () {
+        if (seeded) return
+        seeded = true
+        const read = yield* Effect.result(preferences.read)
+        const remembered = Result.isSuccess(read) ? read.success : DEFAULT_DISPLAY_PREFERENCES
+        for (const [projectId, composer] of Object.entries(remembered.composers)) {
+          composers.set(projectId, composer)
+          const key = `${projectId}:${composer.provider}`
+          if (!chosen.has(key)) chosen.set(key, new Map(Object.entries(composer.options)))
+        }
+      }),
+    )
+
+    /**
+     * What this Project's composer is on now, written down for the next start.
+     *
+     * The whole record is written rather than the one entry, because the preference is one row:
+     * what it holds is every Project's composer, and this is the one place it is changed.
+     */
+    const remember = (projectId: string, provider: AgentProvider) =>
+      Effect.suspend(() => {
+        composers.set(projectId, {
+          provider,
+          options: Object.fromEntries(chosen.get(`${projectId}:${provider}`) ?? []),
+        })
+        return preferences.write({ composers: Object.fromEntries(composers) }).pipe(Effect.ignore)
+      })
+
     /** How the pool names a probe, so a Session and a Home's agent are never the same entry. */
     const probeKey = (key: string) => `probe:${key}`
 
@@ -850,11 +903,13 @@ export const runtimeLayer = Layer.effect(
       provider: AgentProvider,
     ): Effect.Effect<AgentOfferReport, AgentRuntimeError, Scope.Scope> =>
       Effect.gen(function* () {
+        yield* seed
         const key = `${projectId}:${provider}`
         const known = offered.get(key)
         if (known !== undefined) {
           // A composer being read is a probe in use, whatever the clock says.
           yield* pool.used(probeKey(key))
+          yield* remember(projectId, provider)
           return { options: known, refusal: null }
         }
 
@@ -862,6 +917,9 @@ export const runtimeLayer = Layer.effect(
         if (!isProbe(answered)) return answered
         const announced = answered.connection.options()
         offered.set(key, announced)
+        // The agent this Project's composer is on, kept for the next start: a Home opens on the
+        // agent it was left on rather than on the first of a list (D5-17).
+        yield* remember(projectId, provider)
         return { options: announced, refusal: null }
       })
 
@@ -879,6 +937,7 @@ export const runtimeLayer = Layer.effect(
       value: string,
     ): Effect.Effect<AgentOfferReport, AgentRuntimeError, Scope.Scope> =>
       Effect.gen(function* () {
+        yield* seed
         const key = `${projectId}:${provider}`
         const answered = yield* probeOf(projectId, provider)
         if (!isProbe(answered)) return answered
@@ -894,6 +953,7 @@ export const runtimeLayer = Layer.effect(
         held.set(optionId, value)
         chosen.set(key, held)
         offered.set(key, set.success)
+        yield* remember(projectId, provider)
         yield* pool.used(probeKey(key))
         return { options: set.success, refusal: null }
       })
@@ -954,6 +1014,9 @@ export const runtimeLayer = Layer.effect(
      */
     const opened = (sessionId: string): Effect.Effect<Live, AgentRuntimeError, Scope.Scope> =>
       Effect.gen(function* () {
+        // The Session that a composer's choices start is opened on them, whether or not that
+        // composer was drawn in this run of the application (D5-17).
+        yield* seed
         const held = live.get(sessionId)
         if (held !== undefined && held.death === null) return held
         if (held !== undefined) live.delete(sessionId)
