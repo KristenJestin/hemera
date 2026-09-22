@@ -727,8 +727,8 @@ export const toolCatalogueLayer: Layer.Layer<
             const read = yield* answered(commands.output(asked.sessionId, chosen))
             if (read === undefined) {
               return failed(
-                `no run of this Session has the identifier "${chosen}"`,
-                'that run is not one of this Session',
+                `no run of this Project has the identifier "${chosen}"`,
+                'that run is not one of this Project',
               )
             }
             const run = read
@@ -754,8 +754,8 @@ export const toolCatalogueLayer: Layer.Layer<
             const stopped = yield* answered(commands.stop(asked.sessionId, chosen))
             if (stopped === undefined) {
               return failed(
-                `no run of this Session has the identifier "${chosen}"`,
-                'that run is not one of this Session',
+                `no run of this Project has the identifier "${chosen}"`,
+                'that run is not one of this Project',
               )
             }
             return completed(

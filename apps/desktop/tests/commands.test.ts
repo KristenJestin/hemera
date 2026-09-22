@@ -364,3 +364,46 @@ describe('A run that ended is left as it ended', () => {
     expect(seen.stops).toHaveLength(0)
   })
 })
+
+describe('A running app is shared by the Sessions of its Project', () => {
+  it('is joined, read and stopped from another Session, and from no other Project', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const first = yield* opened
+        const sessions = yield* Sessions
+        const projects = yield* Projects
+        const second = yield* sessions.create(first.projectId, 'claude')
+        const elsewhere = yield* projects.create({
+          name: 'Other',
+          tone: 'primary',
+          mainPath: folder,
+        })
+        const stranger = yield* sessions.create(elsewhere.id, 'claude')
+        const commands = yield* Commands
+        const run = (sessionId: string) =>
+          commands.run({
+            sessionId,
+            projectId: first.projectId,
+            commandId: null,
+            name: 'dev',
+            line: PUBLISHES_AN_ADDRESS,
+            kind: 'app',
+            cwd: root,
+            startedBy: 'agent',
+          })
+        const started = yield* run(first.sessionId)
+        const joined = yield* run(second.id)
+        const read = yield* commands.output(second.id, started.id)
+        const refused = yield* commands.output(stranger.id, started.id).pipe(Effect.flip)
+        const stopped = yield* commands.stop(second.id, started.id)
+        return { started, joined, read, refused, stopped }
+      }),
+    )
+
+    expect(seen.joined.joined).toBe(true)
+    expect(seen.joined.id).toBe(seen.started.id)
+    expect(seen.read.id).toBe(seen.started.id)
+    expect(seen.refused.message).toContain(seen.started.id)
+    expect(seen.stopped.state).toBe('stopped')
+  })
+})

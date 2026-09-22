@@ -3,8 +3,9 @@
  *
  * One service answers both callers — the agent through `commands_run` and the user through the
  * Project's settings — because a command is one thing with one catalogue and one set of runs. A
- * run belongs to the Session that asked for it, so the Commands panel of a Session shows what
- * that Session did and not what the user did in another window.
+ * run is started by the Session that asked for it, and the Commands panel of a Session shows what
+ * that Session started; but a run is the Project's to share (D6-12): any Session of the Project
+ * joins a running app, reads a run's output and stops it.
  *
  * Three rules live here rather than in the tool that asks:
  *
@@ -59,7 +60,7 @@ const GRACE_MS = 5_000
 /** A run was asked for by an identifier nothing of this Session answers to. */
 export class UnknownRunError extends Error {
   constructor(readonly id: string) {
-    super(`no run of this Session has the identifier "${id}"`)
+    super(`no run of this Project has the identifier "${id}"`)
     this.name = 'UnknownRunError'
   }
 }
@@ -390,6 +391,17 @@ export const commandsLayer = Layer.effect(
         ),
       ).pipe(Effect.tap(() => writeEntry(id, one)))
 
+    /** The Project a Session belongs to, and null for a Session this database does not hold. */
+    const projectOf = (sessionId: string) =>
+      database
+        .select({ projectId: sessions.projectId })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId))
+        .pipe(
+          Effect.mapError(failed('reading the Session of a run')),
+          Effect.map((rows) => rows[0]?.projectId ?? null),
+        )
+
     /**
      * Stops a run and waits for its end to be written.
      *
@@ -534,12 +546,10 @@ export const commandsLayer = Layer.effect(
 
       run: (asked) =>
         Effect.gen(function* () {
-          // A run belongs to the Session that asked for it, so the one handed back is one of this
-          // Session's: a run of another Session's is a run this one could neither read nor stop,
-          // because both are asked with the Session the run belongs to.
+          // An app is the Project's, not the Session's (D6-12): a second Session that asks for
+          // the one already running is handed that one, and can read and stop it like its own.
           const already = [...live.entries()].find(
             ([, one]) =>
-              one.sessionId === asked.sessionId &&
               one.projectId === asked.projectId &&
               one.name === asked.name &&
               one.state === 'running',
@@ -663,15 +673,16 @@ export const commandsLayer = Layer.effect(
 
       output: (sessionId, runId) =>
         Effect.gen(function* () {
+          const projectId = yield* projectOf(sessionId)
           const record = live.get(runId)
-          if (record !== undefined && record.sessionId === sessionId) return viewOf(runId, record)
+          if (record !== undefined && record.projectId === projectId) return viewOf(runId, record)
           // The process is gone: the row is what is left of the run, and a `check` that exited
           // an hour ago is read from it exactly as a run of this process is read from memory.
           const rows = yield* database
             .select({ run: commandRuns, projectId: sessions.projectId })
             .from(commandRuns)
             .innerJoin(sessions, eq(sessions.id, commandRuns.sessionId))
-            .where(and(eq(commandRuns.id, runId), eq(commandRuns.sessionId, sessionId)))
+            .where(and(eq(commandRuns.id, runId), eq(sessions.projectId, projectId ?? '')))
             .pipe(Effect.mapError(failed('reading a run')))
           const row = rows[0]
           if (row === undefined) return yield* Effect.fail(new UnknownRunError(runId))
@@ -680,8 +691,9 @@ export const commandsLayer = Layer.effect(
 
       stop: (sessionId, runId) =>
         Effect.gen(function* () {
+          const projectId = yield* projectOf(sessionId)
           const record = live.get(runId)
-          if (record === undefined || record.sessionId !== sessionId) {
+          if (record === undefined || record.projectId !== projectId) {
             return yield* Effect.fail(new UnknownRunError(runId))
           }
           yield* stopRun(record)
