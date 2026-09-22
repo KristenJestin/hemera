@@ -125,7 +125,15 @@ function runCommand(command: string, args: readonly string[]): Promise<string> {
     execFile(
       command,
       [...args],
-      { timeout: UPDATE_TIMEOUT_MS, maxBuffer: UPDATE_OUTPUT_LIMIT },
+      // On Windows `npm` and `pnpm` are `.cmd` shims, which only the command interpreter runs:
+      // without it the update is refused with `ENOENT` before the tool is even reached. The
+      // arguments are this file's own — a tool and a package name — never anything typed.
+      {
+        timeout: UPDATE_TIMEOUT_MS,
+        maxBuffer: UPDATE_OUTPUT_LIMIT,
+        shell: process.platform === 'win32',
+        windowsHide: true,
+      },
       (failure, stdout, stderr) => {
         const printed = [stdout, stderr]
           .filter((part) => part !== '')
