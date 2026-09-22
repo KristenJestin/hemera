@@ -5,7 +5,9 @@ import { expect, within } from 'storybook/test'
 import type {
   AgentModelMenuProps,
   EffortChoice,
+  EffortProps,
   ModeChoice,
+  ModeProps,
   ModelChoice,
   OfferedAgent,
 } from './agent-model-menu-shared.tsx'
@@ -258,6 +260,80 @@ export function cutShort(list: HTMLElement): string[] {
     return written.scrollWidth > written.clientWidth + 1
   }).map((one) => one.label)
 }
+
+/**
+ * The page one effort control sits on, which is the one that keeps what was set.
+ *
+ * The three controls hold nothing, exactly as the three panels hold nothing: the answer belongs
+ * to whatever drew them. One board for all three, so a comparison is three controls on one
+ * machine rather than three stories that happen to look alike.
+ */
+export function SetEffort({
+  render,
+  effort,
+  onEffortChange,
+  ...rest
+}: EffortProps & { render: (props: EffortProps) => ReactNode }): ReactNode {
+  const [level, setLevel] = useState(effort)
+  return (
+    <div className="flex justify-center p-6">
+      {render({
+        ...rest,
+        effort: level,
+        onEffortChange: (id) => {
+          setLevel(id)
+          onEffortChange(id)
+        },
+      })}
+    </div>
+  )
+}
+
+/** The same board for one mode control. */
+export function SetMode({
+  render,
+  mode,
+  onModeChange,
+  ...rest
+}: ModeProps & { render: (props: ModeProps) => ReactNode }): ReactNode {
+  const [allowed, setAllowed] = useState(mode)
+  return (
+    <div className="flex justify-center p-6">
+      {render({
+        ...rest,
+        mode: allowed,
+        onModeChange: (id) => {
+          setAllowed(id)
+          onModeChange(id)
+        },
+      })}
+    </div>
+  )
+}
+
+/** The controls the three ways of asking for the effort show, so the three read the same. */
+export const EFFORT_ARG_TYPES = {
+  efforts: { control: 'object', description: 'What the agent says it can think with.' },
+  effort: { control: 'text', description: 'The effort the next turn will run at.' },
+  disabled: { control: 'boolean' },
+  caption: {
+    control: 'text',
+    description: 'What the effort is being set for; only the dial has the room to say it.',
+  },
+  onEffortChange: { action: 'effort chosen', description: 'Called with the id, never the label.' },
+} as const
+
+/** And the controls the three ways of asking for the mode show. */
+export const MODE_ARG_TYPES = {
+  modes: { control: 'object', description: 'What the agent says it may be told to do.' },
+  mode: { control: 'text', description: 'What the next turn may do without asking.' },
+  disabled: { control: 'boolean' },
+  across: {
+    control: 'boolean',
+    description: 'Whether the list is folded two to a line; only the list reads it.',
+  },
+  onModeChange: { action: 'mode chosen', description: 'Called with the id, never the label.' },
+} as const
 
 /** The controls every variant shows, so the three read the same in the catalogue. */
 export const ARG_TYPES = {

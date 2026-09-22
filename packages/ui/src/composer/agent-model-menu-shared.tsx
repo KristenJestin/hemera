@@ -1,11 +1,10 @@
 import { cn } from 'cn'
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode, Ref } from 'react'
 import { useId, useState } from 'react'
 
 import { Loading } from '../components/loading/loading.tsx'
 import { IconCheck, IconSearch } from '../icons.ts'
 import { AgentMark } from './agent-mark.tsx'
-import { modeMark } from './mode-selector.tsx'
 
 /**
  * What the three ways of asking the same four questions have in common (design D17-11, D17-14).
@@ -63,6 +62,51 @@ export interface ModeChoice {
   label: string
 }
 
+/**
+ * What every way of asking for the effort is handed, whichever shape it is drawn in.
+ *
+ * Three of them are being compared — a row of steps, a vertical slider and a horizontal dial —
+ * and they are interchangeable or they are not comparable: one set of props, one set of
+ * answers, and the menu is what decides which one is drawn.
+ *
+ * `caption` is the one thing only the dial has the room to say: what the effort is being set
+ * for, which is the model's name. The other two take it and draw nothing with it rather than
+ * the dial carrying a prop of its own, because a variant whose props the others lack is a
+ * variant the menu cannot swap for another.
+ */
+export interface EffortProps {
+  /** The efforts of the chosen agent; empty when it announced none, and then no control at all. */
+  efforts: readonly EffortChoice[]
+  effort: string | null
+  onEffortChange: (id: string) => void
+  disabled?: boolean | undefined
+  /** What the effort is being set for, for the one variant that has room to say it. */
+  caption?: string | undefined
+}
+
+/** Which of the three ways the effort is drawn. */
+export type EffortVariant = 'row' | 'slider' | 'dial'
+
+/**
+ * What every way of asking for the mode is handed.
+ *
+ * `across` is the list folded two to a line, for the panel wide enough to read two of the
+ * agent's own sentences side by side; the other two draw nothing with it, for the reason the
+ * effort's `caption` gives.
+ */
+export interface ModeProps {
+  /** The modes of the chosen agent; empty when it announced none, and then no control at all. */
+  modes: readonly ModeChoice[]
+  mode: string | null
+  onModeChange: (id: string) => void
+  disabled?: boolean | undefined
+  /** Whether the modes are folded two to a line, where the panel is wide enough for it. */
+  across?: boolean | undefined
+}
+
+/** Which of the three ways the mode is drawn. */
+export type ModeVariant = 'list' | 'column' | 'select'
+
 export interface AgentModelMenuProps {
   /** The agents the engine offered, in the order it offered them. */
   agents: OfferedAgent[]
@@ -94,6 +138,21 @@ export interface AgentModelMenuProps {
   disabled?: boolean | undefined
   /** Where the control sits; never how it looks. */
   className?: string | undefined
+}
+
+/**
+ * The same panel, with the effort and the mode drawn as one of three each.
+ *
+ * The maintainer is choosing between three effort controls and three mode controls as well as
+ * between three panels, and a comparison where each panel shows a different one of them is not
+ * a comparison. So the two are a prop, the defaults are what the application ships — the row
+ * and the list — and the `Compare` story is a grid the choices are flipped in.
+ */
+export interface AgentModelMenuVariantProps extends AgentModelMenuProps {
+  /** How the effort is asked for. `row` unless the catalogue says otherwise. */
+  effortVariant?: EffortVariant | undefined
+  /** How the mode is asked for. `list` unless the catalogue says otherwise. */
+  modeVariant?: ModeVariant | undefined
 }
 
 /** What the trigger puts between one answer and the next. */
@@ -152,18 +211,45 @@ export const INSTEAD =
   'flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-2 text-center text-xs text-muted-foreground'
 
 /** A scale read across and not down a list: the effort. */
-const SEGMENT = 'flex shrink-0 items-center gap-1 rounded-md border border-border bg-muted p-0.5'
+export const SEGMENT =
+  'flex shrink-0 items-center gap-1 rounded-md border border-border bg-muted p-0.5'
 
-const SEGMENT_ITEM =
+export const SEGMENT_ITEM =
   'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-sm px-2 py-1 text-xs text-muted-foreground outline-none focus-ring hover:bg-accent'
 
-const SEGMENT_ON = 'bg-card text-foreground shadow-sm'
+export const SEGMENT_ON = 'bg-card text-foreground shadow-sm'
 
 /** The modes, one per line, because a mode is a sentence and not a step of a scale. */
-const MODES_DOWN = 'flex shrink-0 flex-col gap-0.5'
+export const MODES_DOWN = 'flex shrink-0 flex-col gap-0.5'
 
 /** The same modes where the panel is wide enough to read two of them across. */
-const MODES_ACROSS = 'grid shrink-0 grid-cols-2 gap-0.5'
+export const MODES_ACROSS = 'grid shrink-0 grid-cols-2 gap-0.5'
+
+/**
+ * Where an arrow, Home or End take a scale, and `null` for a key that is none of them.
+ *
+ * Shared by the slider and the dial, which are the same scale drawn down and across: up and
+ * right go on, down and left come back, Home and End are the two ends of it. One place, so a
+ * reader who learned one of them has learned the other.
+ */
+export function steppedBy(key: string, here: number, last: number): number | null {
+  if (key === 'ArrowUp' || key === 'ArrowRight') return Math.min(here + 1, last)
+  if (key === 'ArrowDown' || key === 'ArrowLeft') return Math.max(here - 1, 0)
+  if (key === 'Home') return 0
+  if (key === 'End') return last
+  return null
+}
+
+/**
+ * The step a press landed on, read off the element it landed in.
+ *
+ * The scale itself is what answers the pointer, not its notches: a notch is a mark, and a mark
+ * that took the focus would be a second control inside a control that already has a role.
+ */
+export function stepUnder(target: EventTarget): string | null {
+  if (!(target instanceof Element)) return null
+  return target.closest('[data-step]')?.getAttribute('data-step') ?? null
+}
 
 /** What the trigger reads, which is what is set and never what could be. */
 export function triggerLabel(chosen: OfferedAgent | null, said: (string | undefined)[]): string {
@@ -325,76 +411,6 @@ export function AgentList({
 }
 
 /**
- * The effort, as one row: a handful of steps read across is a scale, and a scale read down a
- * menu is a list of unrelated things.
- */
-export function EffortRow({
-  efforts,
-  effort,
-  onEffortChange,
-}: {
-  efforts: readonly EffortChoice[]
-  effort: string | null
-  onEffortChange: (id: string) => void
-}): ReactNode {
-  if (efforts.length === 0) return null
-  return (
-    <div className={SEGMENT} role="group" aria-label="Effort">
-      {efforts.map((one) => (
-        <button
-          key={one.id}
-          type="button"
-          aria-pressed={one.id === effort}
-          className={cn(SEGMENT_ITEM, one.id === effort && SEGMENT_ON)}
-          onClick={() => onEffortChange(one.id)}
-        >
-          {one.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-/**
- * The modes, one per line, each with the mark its own words earned and the current one checked.
- *
- * `across` is for the panel wide enough to carry two of them side by side; it is the same list,
- * folded, and never a label cut short. What an agent calls its modes is the agent's business,
- * so the mark is read off the words exactly as the mode selector reads them.
- */
-export function ModeList({
-  modes,
-  mode,
-  onModeChange,
-  across = false,
-}: {
-  modes: readonly ModeChoice[]
-  mode: string | null
-  onModeChange: (id: string) => void
-  across?: boolean | undefined
-}): ReactNode {
-  if (modes.length === 0) return null
-  return (
-    <div className={across ? MODES_ACROSS : MODES_DOWN} role="listbox" aria-label="Mode">
-      {modes.map((one) => (
-        <button
-          key={one.id}
-          type="button"
-          role="option"
-          aria-selected={one.id === mode}
-          className={cn(ITEM, one.id === mode && ITEM_ACTIVE)}
-          onClick={() => onModeChange(one.id)}
-        >
-          {modeMark(one.label)}
-          <span className="min-w-0 flex-1">{one.label}</span>
-          {one.id === mode && <IconCheck size="sm" />}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-/**
  * The search field over a list of models, and the list itself.
  *
  * The field takes the focus and the list beside it only says which entry Enter would land on —
@@ -410,6 +426,8 @@ export function ModelPicker({
   onChoose,
   onEscape,
   loading = false,
+  autoFocus = true,
+  fieldRef,
   label = 'Search the models of this agent',
   placeholder = 'Search a model…',
   listLabel = 'Models of this agent',
@@ -420,6 +438,17 @@ export function ModelPicker({
   onChoose: (one: ModelChoice) => void
   onEscape: () => void
   loading?: boolean | undefined
+  /**
+   * Whether the field takes the caret as it mounts.
+   *
+   * On by default, which is every panel that draws this on the stage it opens on. The stages
+   * panel keeps both of its stages mounted since the trial of 22 September 2026, so a field
+   * that always took the caret would take it off the list of agents: it is handed `false`
+   * there, and the caret is given to the field once the rail has finished moving.
+   */
+  autoFocus?: boolean | undefined
+  /** A hold on the field, for a panel that hands it the caret itself. */
+  fieldRef?: Ref<HTMLInputElement> | undefined
   label?: string | undefined
   placeholder?: string | undefined
   listLabel?: string | undefined
@@ -444,7 +473,8 @@ export function ModelPicker({
             panel is told to open, so an effect keyed on "open" runs while there is still
             nothing to focus. */}
         <input
-          autoFocus
+          autoFocus={autoFocus}
+          ref={fieldRef}
           className={QUERY}
           type="text"
           role="combobox"

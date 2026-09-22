@@ -9,13 +9,11 @@ import { IconSearch } from '../icons.ts'
 import { AgentMark } from './agent-mark.tsx'
 import {
   type AgentModelMenuProps,
-  EffortRow,
   HEAD,
   INSTEAD,
   ITEM,
   ITEM_ACTIVE,
   LIST,
-  ModeList,
   type ModelChoice,
   type OfferedAgent,
   PanelHead,
@@ -28,6 +26,8 @@ import {
   stateOf,
   triggerLabel,
 } from './agent-model-menu-shared.tsx'
+import { EffortRow } from './effort-row.tsx'
+import { ModeList } from './mode-list.tsx'
 import { nameOfCurrent } from './current-name.ts'
 
 /**
