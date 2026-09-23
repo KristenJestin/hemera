@@ -31,7 +31,8 @@ import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
-import type { Database, SqliteClient } from '#engine/storage/database.ts'
+import { SqliteClient } from '#engine/storage/database.ts'
+import type { Database } from '#engine/storage/database.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -64,7 +65,13 @@ type Engine = Projects | Sessions | Commands | Journal | Database | SqliteClient
  * machine, and the entry it writes is a row of the same thread the window draws.
  */
 function engine() {
-  const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
+  diagnostics.length = 0
+  const sink = Layer.succeed(StderrSink, {
+    write: (line: string) =>
+      Effect.sync(() => {
+        diagnostics.push(line)
+      }),
+  })
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
@@ -76,6 +83,7 @@ function engine() {
       ),
     ),
     Layer.provide(processes),
+    Layer.provide(sink),
     Layer.provide(heldWordsLayer),
     // Nobody is watching: these suites read the thread and the runs, not what was pushed.
     Layer.provide(NoNotices),
@@ -93,6 +101,9 @@ function engine() {
       ),
     )
 }
+
+/** The engine's diagnostic lines, as the suite's sink received them. */
+const diagnostics: string[] = []
 
 /** A Project on the suite's Workspace and one Session of it, as the window would make them. */
 const opened = Effect.gen(function* () {
@@ -332,6 +343,39 @@ describe('A stopped run ends once', () => {
     expect(seen.ended.state).toBe('stopped')
     expect(seen.row?.state).toBe('stopped')
     expect(seen.ends.map((entry) => entry.type)).toEqual(['command.stopped'])
+  })
+})
+
+describe('A run whose end cannot be recorded', () => {
+  it('still ends: a stop returns, and the diagnostic log says the row was not written', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const started = yield* commands.run({
+          sessionId: session.sessionId,
+          projectId: session.projectId,
+          commandId: null,
+          name: 'server',
+          line: PUBLISHES_AN_ADDRESS,
+          kind: 'app',
+          cwd: root,
+          startedBy: 'user',
+        })
+        // The database refuses every later write of a run, as a locked or full one would.
+        const sql = yield* SqliteClient
+        yield* sql.unsafe(
+          "CREATE TRIGGER refuse_runs BEFORE UPDATE ON command_runs BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+        )
+        const stopped = yield* commands
+          .stop(session.sessionId, started.id)
+          .pipe(Effect.timeout('10 seconds'), Effect.result)
+        return { stopped, lines: [...diagnostics] }
+      }),
+    )
+
+    expect(seen.stopped._tag).toBe('Success')
+    expect(seen.lines.some((line) => line.includes('was not recorded'))).toBe(true)
   })
 })
 

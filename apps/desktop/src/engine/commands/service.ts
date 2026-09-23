@@ -38,7 +38,7 @@ import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
 
 import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
-import { ProcessSupervisor } from '../agents/supervisor.ts'
+import { ProcessSupervisor, StderrSink } from '../agents/supervisor.ts'
 import { Sessions } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
 import { type RunState, commandRuns, projectCommands, sessions } from '../storage/schema.ts'
@@ -241,6 +241,8 @@ export const commandsLayer = Layer.effect(
     // The window watching the Session: the entry a run writes and the run itself are pushed to
     // it as they change, so the thread and the Commands panel are drawn from what arrives.
     const notices = yield* AgentNotices
+    /** The engine's diagnostic log: where a run whose end could not be recorded is told. */
+    const diagnostic = yield* StderrSink
     /** The engine's own scope: everything started here dies when the engine does. */
     const scope = yield* Effect.scope
     const live = new Map<string, Live>()
@@ -709,11 +711,25 @@ export const commandsLayer = Layer.effect(
                     id,
                     record,
                     record.stopping ? 'command.stopped' : 'command.exited',
+                  ).pipe(
+                    // A row that cannot be written — the database locked, the disk full — is a
+                    // run whose end is not recorded, and said so; it has ended all the same.
+                    Effect.catch((cause) =>
+                      diagnostic.write(
+                        `commands: the end of run ${id} (${record.name}) was not recorded: ${cause.message}`,
+                      ),
+                    ),
+                    // Whatever happened to the row, the run has ended: what waits on its end — a
+                    // stop, a Session let go of — is released, or it would wait for ever.
+                    Effect.ensuring(
+                      Effect.gen(function* () {
+                        yield* Deferred.succeed(record.ended, undefined)
+                        // What is left of a run that ended is its row: the memory, and the output
+                        // it holds, is let go of rather than kept for as long as the engine runs.
+                        live.delete(id)
+                      }),
+                    ),
                   )
-                  yield* Deferred.succeed(record.ended, undefined)
-                  // What is left of a run that ended is its row: the memory, and the output it
-                  // holds, is let go of rather than kept for as long as the engine runs.
-                  live.delete(id)
                 }),
               ),
             ),
