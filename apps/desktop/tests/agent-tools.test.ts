@@ -126,14 +126,23 @@ const inCatalogue = (
 const questionsIn = (entries: readonly SessionEntry[]) =>
   entries.filter((entry) => entry.kind === 'permission_request' && entry.role === 'hemera')
 
+/** The identifier a question was asked under, which is what its answer is sent with. */
+const questionOf = (entry: SessionEntry | undefined) =>
+  z
+    .object({ toolCallId: z.string(), tool: z.string().optional() })
+    .parse(JSON.parse(entry?.payload ?? '{}'))
+
 /** Waits for the Session to be blocked on a question, and answers it as the human does. */
 const decided = (sessionId: string, optionId: 'allowed' | 'refused') =>
   Effect.gen(function* () {
-    yield* until(threadOf(sessionId), (entries) =>
-      entries.some((entry) => entry.kind === 'permission_request' && entry.state === 'pending'),
+    const entries = yield* until(threadOf(sessionId), (seen) =>
+      seen.some((entry) => entry.kind === 'permission_request' && entry.state === 'pending'),
+    )
+    const pending = entries.find(
+      (entry) => entry.kind === 'permission_request' && entry.state === 'pending',
     )
     const runtime = yield* AgentRuntime
-    yield* runtime.decide(sessionId, optionId)
+    yield* runtime.decide(sessionId, questionOf(pending).toolCallId, optionId)
   })
 
 /** A turn the human has to answer in, answered: the prompt, the question, the decision. */
@@ -442,6 +451,103 @@ describe('A write outside the root asks the human', () => {
       expect(existsSync(join(outside, 'notes.md'))).toBe(false)
     } finally {
       rmSync(join(workspace, 'elsewhere'), { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Two questions at once are each answered by their own block', () => {
+  /** An agent that reads one file and writes another outside the root, in one step. */
+  const together = (outside: string) =>
+    fakeAgent({
+      steps: [
+        {
+          does: 'usesTogether',
+          calls: [
+            { does: 'uses', call: 'fs_read', arguments: { path: join(outside, 'a.md') } },
+            {
+              does: 'uses',
+              call: 'fs_write',
+              arguments: { path: join(outside, 'b.md'), content: 'written', key: 'b' },
+            },
+          ],
+        },
+      ],
+    })
+
+  /** The two questions, once both are waiting, by the tool that asked each. */
+  const bothAsked = (sessionId: string) =>
+    Effect.gen(function* () {
+      const entries = yield* until(
+        threadOf(sessionId),
+        (seen) => questionsIn(seen).filter((entry) => entry.state === 'pending').length === 2,
+      )
+      const pending = questionsIn(entries).filter((entry) => entry.state === 'pending')
+      const byTool = (tool: string) =>
+        questionOf(pending.find((entry) => questionOf(entry).tool === tool)).toolCallId
+      return { read: byTool('fs_read'), write: byTool('fs_write') }
+    })
+
+  test('answered out of order, each answer goes to the question it was given for', async () => {
+    const outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-outside-')))
+    writeFileSync(join(outside, 'a.md'), 'secret\n')
+    const agent = together(outside)
+
+    try {
+      const entries = await toolApplication(dataFolder)(agent)(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime
+          const session = yield* aSessionOn(workspace, 'claude')
+          const turn = yield* Effect.forkScoped(runtime.prompt(session.id, 'read and write'))
+          const asked = yield* bothAsked(session.id)
+          // The second block first: allowing the write is not allowing the read.
+          yield* runtime.decide(session.id, asked.write, 'allowed')
+          yield* runtime.decide(session.id, asked.read, 'refused')
+          yield* Fiber.join(turn)
+          return yield* threadOf(session.id)
+        }),
+      )
+
+      expect(readFileSync(join(outside, 'b.md'), 'utf8')).toBe('written')
+      const read = agent.answers.used.find((one) => one.tool === 'fs_read')
+      expect(read?.text).toContain('the user refused')
+      expect(read?.text).not.toContain('secret')
+      const said = entries
+        .filter((entry) => entry.kind === 'permission_decision')
+        .map((entry) => entry.body)
+        .sort()
+      expect(said).toEqual([
+        `you allowed fs_write to act on ${join(outside, 'b.md')}`,
+        `you refused fs_read on ${join(outside, 'a.md')}`,
+      ])
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  test('a Stop cancels both, and nothing is read or written', async () => {
+    const outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-outside-')))
+    writeFileSync(join(outside, 'a.md'), 'secret\n')
+    const agent = together(outside)
+
+    try {
+      const entries = await toolApplication(dataFolder)(agent)(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime
+          const session = yield* aSessionOn(workspace, 'claude')
+          const turn = yield* Effect.forkScoped(runtime.prompt(session.id, 'read and write'))
+          yield* bothAsked(session.id)
+          yield* runtime.stop(session.id)
+          yield* Fiber.join(turn)
+          return yield* until(threadOf(session.id), (seen) =>
+            questionsIn(seen).every((entry) => entry.state === 'cancelled'),
+          )
+        }),
+      )
+
+      expect(questionsIn(entries).map((entry) => entry.state)).toEqual(['cancelled', 'cancelled'])
+      expect(existsSync(join(outside, 'b.md'))).toBe(false)
+    } finally {
       rmSync(outside, { recursive: true, force: true })
     }
   })

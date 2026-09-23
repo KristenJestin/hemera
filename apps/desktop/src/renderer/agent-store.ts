@@ -567,14 +567,18 @@ export async function stopTurn(sessionId: string): Promise<void> {
 }
 
 /**
- * Answers the permission the agent is waiting on, from the page.
+ * Answers the question one block was drawn for, from the page.
  *
  * A null option is not a missing answer: it is the request closed without choosing anything,
  * and the agent is told either way (design D5-13).
  */
-export async function decide(sessionId: string, optionId: string | null): Promise<void> {
+export async function decide(
+  sessionId: string,
+  toolCallId: string,
+  optionId: string | null,
+): Promise<void> {
   try {
-    await window.hemera.invoke('agents.decide', { sessionId, optionId })
+    await window.hemera.invoke('agents.decide', { sessionId, toolCallId, optionId })
     replace({ ...state, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })

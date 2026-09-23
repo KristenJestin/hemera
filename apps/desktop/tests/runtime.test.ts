@@ -94,7 +94,7 @@ describe('A permission request blocks the turn', () => {
         ])
         expect(asked.state).toBe('pending')
 
-        yield* runtime.decide(session.id, 'allow-once')
+        yield* runtime.decide(session.id, 'call-1', 'allow-once')
         const report = yield* Fiber.join(running)
 
         expect(report.stopReason).toBe('end_turn')
@@ -113,7 +113,7 @@ describe('A permission request blocks the turn', () => {
         const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'touch the config'))
 
         yield* heldInThread(session.id, (held) => waiting(held) === 1)
-        yield* runtime.decide(session.id, 'allow-once')
+        yield* runtime.decide(session.id, 'call-1', 'allow-once')
         yield* Fiber.join(running)
 
         const entries = yield* heldInThread(session.id, (held) =>
@@ -150,13 +150,13 @@ describe('A permission request blocks the turn', () => {
         // The turn is held by the question: nothing goes on until it is answered, and no turn
         // entry has been written yet.
         expect((yield* threadOf(session.id)).some((entry) => entry.kind === 'turn')).toBe(false)
-        yield* runtime.decide(session.id, 'allow-once')
+        yield* runtime.decide(session.id, 'call-1', 'allow-once')
 
         // The same tool asks again, and it blocks the turn again: allowing once is not a
         // permission remembered anywhere.
         yield* heldInThread(session.id, (held) => waiting(held) === 1)
         expect((yield* threadOf(session.id)).some((entry) => entry.kind === 'turn')).toBe(false)
-        yield* runtime.decide(session.id, 'allow-once')
+        yield* runtime.decide(session.id, 'call-2', 'allow-once')
 
         const report = yield* Fiber.join(running)
         expect(report.stopReason).toBe('end_turn')

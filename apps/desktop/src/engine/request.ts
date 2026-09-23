@@ -276,8 +276,8 @@ export function answer(
     }
     if (decision.name === 'agents.stop') return yield* runtime.stop(decision.argument.sessionId)
     if (decision.name === 'agents.decide') {
-      const { sessionId, optionId } = decision.argument
-      return yield* runtime.decide(sessionId, optionId)
+      const { sessionId, toolCallId, optionId } = decision.argument
+      return yield* runtime.decide(sessionId, toolCallId, optionId)
     }
     if (decision.name === 'agents.resume') {
       const report = yield* runtime.resume(decision.argument.sessionId)

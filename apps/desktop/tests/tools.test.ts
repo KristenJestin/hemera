@@ -77,7 +77,7 @@ interface Human {
   readonly service: {
     readonly askOutside: (asked: OutsideRequest) => Effect.Effect<OutsideAnswer>
     readonly answer: () => Effect.Effect<boolean>
-    readonly waiting: () => Effect.Effect<string | null>
+    readonly withdrawn: () => Effect.Effect<void>
   }
   readonly asked: OutsideRequest[]
 }
@@ -104,7 +104,7 @@ function humanSaying(...answers: readonly OutsideAnswer[]): Human {
         }),
       answer: () => Effect.succeed(false),
       // This human answers where they are asked: nothing here is left standing for a window.
-      waiting: () => Effect.succeed(null),
+      withdrawn: () => Effect.void,
     },
   }
 }
@@ -725,7 +725,7 @@ describe('the same write twice at the same time', () => {
             return yield* Deferred.await(decision)
           }),
         answer: () => Effect.succeed(false),
-        waiting: () => Effect.succeed(null),
+        withdrawn: () => Effect.void,
       },
     }
     const outside = join(folder, 'shared.txt')
@@ -898,7 +898,7 @@ describe('A run asked for before its Session ended', () => {
             return 'allowed' as const
           }),
         answer: () => Effect.succeed(false),
-        waiting: () => Effect.succeed(null),
+        withdrawn: () => Effect.void,
       },
     }
     const seen = await engine(human)(

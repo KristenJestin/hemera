@@ -245,15 +245,27 @@ describe('Stop during a permission', () => {
   test('a decision with no option is the user closing the request', () => {
     const decision = ENGINE_REQUESTS['agents.decide'].arguments
 
-    expect(decision.safeParse({ sessionId: 'session-1', optionId: 'allow-once' }).success).toBe(
-      true,
-    )
-    expect(decision.safeParse({ sessionId: 'session-1', optionId: null }).success).toBe(true)
+    const asked = { sessionId: 'session-1', toolCallId: 'call-1' }
+
+    expect(decision.safeParse({ ...asked, optionId: 'allow-once' }).success).toBe(true)
+    expect(decision.safeParse({ ...asked, optionId: null }).success).toBe(true)
   })
 
   test('a decision that names no option at all is refused', () => {
     expect(
-      ENGINE_REQUESTS['agents.decide'].arguments.safeParse({ sessionId: 'session-1' }).success,
+      ENGINE_REQUESTS['agents.decide'].arguments.safeParse({
+        sessionId: 'session-1',
+        toolCallId: 'call-1',
+      }).success,
+    ).toBe(false)
+  })
+
+  test('a decision that names no question is refused: a Session can wait on several', () => {
+    expect(
+      ENGINE_REQUESTS['agents.decide'].arguments.safeParse({
+        sessionId: 'session-1',
+        optionId: 'allowed',
+      }).success,
     ).toBe(false)
   })
 

@@ -239,9 +239,10 @@ export interface AgentRuntimeService {
   readonly prompt: (sessionId: string, text: string) => Effect.Effect<TurnReport, AgentRuntimeError>
   /** Stops the turn running in this Session, if one is: the user's Stop. */
   readonly stop: (sessionId: string) => Effect.Effect<void>
-  /** Answers the permission a Session is waiting on; null is the end of the question. */
+  /** Answers the question a block was drawn for; null is the end of the question. */
   readonly decide: (
     sessionId: string,
+    toolCallId: string,
     optionId: string | null,
   ) => Effect.Effect<void, AgentRuntimeError>
   /** Asks the agent to carry on the session it handed back, or rebuilds the context (D5-07). */
@@ -1265,8 +1266,7 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         // A question a tool of Hemera's was asking has nobody left to act on its answer: it is
         // cancelled, and the block it drew in the thread closes with it (D6-05).
-        const outside = yield* permissions.waiting(sessionId)
-        if (outside !== null) yield* permissions.answer(outside, 'cancelled')
+        yield* permissions.withdrawn(sessionId)
         unwatched(sessionId)
         yield* access.revoked(sessionId)
         yield* commands.stopped(sessionId).pipe(Effect.ignore)
@@ -2138,9 +2138,9 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         // A question one of Hemera's own tools is waiting on holds the turn just as still as the
         // agent's own, and the Stop ends it the way it ends that one: cancelled, so the call it
-        // blocks answers rather than waiting for ever, and nothing acts (D6-05).
-        const outside = yield* permissions.waiting(sessionId)
-        if (outside !== null) yield* permissions.answer(outside, 'cancelled')
+        // blocks answers rather than waiting for ever, and nothing acts (D6-05). Every one of
+        // them: an agent that ran two calls at once is waiting on two.
+        yield* permissions.withdrawn(sessionId)
 
         const held = live.get(sessionId)
         const turn = turns.get(sessionId)
@@ -2206,20 +2206,21 @@ export const runtimeLayer = Layer.effect(
         )
       })
 
-    const decide = (sessionId: string, optionId: string | null) =>
+    const decide = (sessionId: string, toolCallId: string, optionId: string | null) =>
       Effect.gen(function* () {
         const turn = turns.get(sessionId)
         const pending = turn?.permission ?? null
-        if (turn === undefined || pending === null) {
-          // Two questions reach the same block of the same thread: the agent's own permission, and
-          // the one Hemera's tools ask before acting outside the Workspace (D6-05). The second one
-          // is answered here when the first is not what is waiting, and its options are the two
-          // the catalogue wrote — anything but `allowed` is a refusal.
-          const outside = yield* permissions.waiting(sessionId)
-          if (outside !== null) {
-            yield* permissions.answer(outside, optionId === 'allowed' ? 'allowed' : 'refused')
-            return
-          }
+        if (turn === undefined || pending === null || pending.toolCallId !== toolCallId) {
+          // Two kinds of question reach the same block of the same thread: the agent's own
+          // permission, and the ones Hemera's tools ask before acting outside the Workspace
+          // (D6-05). The block names the question it was drawn for, and that one is answered:
+          // its options are the two the catalogue wrote, and anything but `allowed` is a refusal.
+          const answered = yield* permissions.answer(
+            sessionId,
+            toolCallId,
+            optionId === 'allowed' ? 'allowed' : 'refused',
+          )
+          if (answered) return
           return yield* Effect.fail(
             new AgentRuntimeError({
               what: 'deciding',
@@ -2317,7 +2318,7 @@ export const runtimeLayer = Layer.effect(
       setOption: (sessionId, optionId, value) => owned(setOption(sessionId, optionId, value)),
       prompt: (sessionId, text) => owned(prompt(sessionId, text)),
       stop: (sessionId) => owned(stop(sessionId)),
-      decide: (sessionId, optionId) => owned(decide(sessionId, optionId)),
+      decide: (sessionId, toolCallId, optionId) => owned(decide(sessionId, toolCallId, optionId)),
       resume: (sessionId) => owned(resume(sessionId)),
       release: (sessionId) => owned(release(sessionId)),
       alive: Effect.sync(() => [...live.keys()]),

@@ -45,6 +45,7 @@ afterEach(async () => {
 
 /** What a question of Hemera's tools carries, as the block reads it. */
 const QUESTION = z.object({
+  toolCallId: z.string(),
   tool: z.string(),
   resolved: z.string(),
   options: z.array(z.object({ optionId: z.string(), kind: z.string() })),
@@ -107,7 +108,7 @@ describe('A write outside the root asks the human', () => {
     // Two options, for this call only: nothing offers an "always".
     expect(asked.options.map((option) => option.kind).sort()).toEqual(['allow_once', 'reject_once'])
 
-    await decide(session.id, 'allowed')
+    await decide(session.id, asked.toolCallId, 'allowed')
     expect(await turn).toBeNull()
 
     expect(readFileSync(target, 'utf8')).toBe('hi')
@@ -125,7 +126,10 @@ describe('A write outside the root asks the human', () => {
 
     const turn = say(session.id, 'write the notes')
     await until(() => pendingIn(agentOf(session.id).entries) !== undefined)
-    await decide(session.id, 'refused')
+    const asked = QUESTION.parse(
+      JSON.parse(pendingIn(agentOf(session.id).entries)?.payload ?? '{}'),
+    )
+    await decide(session.id, asked.toolCallId, 'refused')
     await turn
 
     expect(existsSync(target)).toBe(false)

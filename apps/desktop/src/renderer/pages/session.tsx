@@ -156,8 +156,8 @@ export interface SessionPageProps {
   onSay: (text: string) => void
   /** Cancels the running turn, when there is one. */
   onStop: () => void
-  /** Answers the permission the agent is waiting on. */
-  onDecide: (option: PermissionOption) => void
+  /** Answers the question the block of `toolCallId` was drawn for. */
+  onDecide: (toolCallId: string, option: PermissionOption) => void
   /** Sets one of the agent's own options for the turn to come. */
   onChooseOption: (optionId: string, value: string) => void
   onRename: (title: string) => void

@@ -53,7 +53,7 @@ afterEach(() => {
 const noQuestions: ToolPermissionsService = {
   askOutside: () => Effect.succeed<'refused'>('refused'),
   answer: () => Effect.succeed(false),
-  waiting: () => Effect.succeed(null),
+  withdrawn: () => Effect.void,
 }
 
 /**
@@ -73,7 +73,7 @@ function humanHolding() {
         return yield* Deferred.await(decision)
       }),
     answer: () => Effect.succeed(false),
-    waiting: () => Effect.succeed(null),
+    withdrawn: () => Effect.void,
   }
   return {
     service,

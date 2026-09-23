@@ -37,15 +37,17 @@ export type OutsideAnswer = 'allowed' | 'refused' | 'cancelled'
 export interface ToolPermissionsService {
   /** Waits for the human, for as long as they take. */
   readonly askOutside: (asked: OutsideRequest) => Effect.Effect<OutsideAnswer>
-  /** Answers a question that is waiting, and answers false for one nothing is waiting on. */
-  readonly answer: (id: string, answer: OutsideAnswer) => Effect.Effect<boolean>
   /**
-   * The question this Session is blocked on, and null when it is blocked on none.
+   * Answers the one question a block was drawn for, and answers false when that Session is waiting
+   * on no question of that identifier.
    *
-   * The window answers a Session and not a question: what the block it draws knows is the thread
-   * it is in, and the identifier of what is waiting is this service's to say.
+   * The window answers a question and not a Session: a Session can be waiting on several at once —
+   * an agent runs the calls of one step together — and the block the human clicked is the one they
+   * decided about.
    */
-  readonly waiting: (sessionId: string) => Effect.Effect<string | null>
+  readonly answer: (sessionId: string, id: string, answer: OutsideAnswer) => Effect.Effect<boolean>
+  /** Cancels every question this Session is waiting on: its turn stopped, or its agent went. */
+  readonly withdrawn: (sessionId: string) => Effect.Effect<void>
 }
 
 export class ToolPermissions extends Context.Service<ToolPermissions, ToolPermissionsService>()(
@@ -91,22 +93,25 @@ export const toolPermissionsLayer: Layer.Layer<ToolPermissions, never, AgentNoti
           )
         }),
 
-      answer: (id, answer) =>
+      answer: (sessionId, id, answer) =>
         Effect.gen(function* () {
           const held = questions.get(id)
-          if (held === undefined) return false
+          if (held === undefined || held.sessionId !== sessionId) return false
           questions.delete(id)
           yield* Deferred.succeed(held.answer, answer)
           return true
         }),
 
-      waiting: (sessionId) =>
-        Effect.sync(() => {
-          for (const [id, held] of questions) {
-            if (held.sessionId === sessionId) return id
-          }
-          return null
-        }),
+      withdrawn: (sessionId) =>
+        Effect.forEach(
+          [...questions].filter(([, held]) => held.sessionId === sessionId),
+          ([id, held]) =>
+            Effect.gen(function* () {
+              questions.delete(id)
+              yield* Deferred.succeed(held.answer, 'cancelled')
+            }),
+          { discard: true },
+        ),
     } satisfies ToolPermissionsService
   }),
 )

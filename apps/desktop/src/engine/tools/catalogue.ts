@@ -406,7 +406,7 @@ export const toolCatalogueLayer: Layer.Layer<
         const place = yield* placeOf(root, named)
         if (place.inside === null) return { allowed: false as const, reason: place.reason }
         if (place.inside) return { allowed: true as const, path: place.path }
-        return yield* askHuman(
+        const answer = yield* askHuman(
           asked,
           root,
           named,
@@ -414,6 +414,15 @@ export const toolCatalogueLayer: Layer.Layer<
           `${asked.tool} asks to act outside the Workspace: ${place.path}`,
           null,
         )
+        // Asked again once the human answered: they can take their time, and a yes given to a
+        // Session whose agent has gone since is a yes nobody is left to act on.
+        if (answer.allowed && !(yield* access.live(asked.sessionId))) {
+          return {
+            allowed: false as const,
+            reason: 'the Session ended before the user answered, so nothing was done',
+          }
+        }
+        return answer
       })
 
     /**

@@ -291,8 +291,8 @@ export interface AgentContext {
   now: number
   /** When the next entry was written, which is what a thought's seconds are measured to. */
   nextAt: number | null
-  /** Answers a permission the agent is waiting on, in the agent's own option. */
-  onDecide: (option: PermissionOption) => void
+  /** Answers the question of one block, by its identifier, in one of the options it offered. */
+  onDecide: (toolCallId: string, option: PermissionOption) => void
   /** The runs of the Session as they were last pushed: what a run's block is drawn from (D6-12). */
   runs: readonly Run[]
   /** Opens the address a run published, in the browser: this window is not one. */
@@ -406,7 +406,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
             name: option.name,
             kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
           }))}
-          onDecide={context.onDecide}
+          onDecide={(option) => context.onDecide(read.toolCallId, option)}
         />
       )
     }
@@ -420,7 +420,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
         }))}
         scope="For this Session"
-        onDecide={context.onDecide}
+        onDecide={(option) => context.onDecide(read.toolCallId, option)}
       />
     )
   }

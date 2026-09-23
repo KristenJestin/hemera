@@ -1026,7 +1026,7 @@ export function Application() {
           onWrite={async (body) => await writeInto(open.id, body)}
           onSay={(text) => void say(open.id, text)}
           onStop={() => void stopTurn(open.id)}
-          onDecide={(option) => void decide(open.id, option.optionId)}
+          onDecide={(toolCallId, option) => void decide(open.id, toolCallId, option.optionId)}
           onChooseOption={(optionId, value) => void chooseOption(open.id, optionId, value)}
           onRename={(title) => void renameTo(open, title)}
           onStartEditing={() => setNaming(open.id)}

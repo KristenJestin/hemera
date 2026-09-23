@@ -476,8 +476,14 @@ export const ENGINE_REQUESTS = {
   },
   'agents.decide': {
     // An option of null is not a missing answer: it is the user closing the request without
-    // choosing one, which the agent has to be told either way (design D5-13).
-    arguments: z.object({ sessionId: z.string(), optionId: z.string().nullable() }),
+    // choosing one, which the agent has to be told either way (design D5-13). The question is
+    // named, because a Session can be waiting on several at once and the block the user clicked
+    // is the one they decided about.
+    arguments: z.object({
+      sessionId: z.string(),
+      toolCallId: z.string(),
+      optionId: z.string().nullable(),
+    }),
     response: z.void(),
   },
   'agents.resume': {

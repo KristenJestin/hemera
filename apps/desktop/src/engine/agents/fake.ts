@@ -133,6 +133,14 @@ export type FakeStep =
     }
   | {
       /**
+       * Several calls to the tools it was lent, sent at once: what an agent that runs the calls of
+       * one step in parallel does, and what leaves a Session waiting on more than one question.
+       */
+      readonly does: 'usesTogether'
+      readonly calls: readonly Extract<FakeStep, { does: 'uses' }>[]
+    }
+  | {
+      /**
        * What the agent says the window is filling to (design D5-20).
        *
        * `usage_update` is the only place a context window is ever named, so a script that wants
@@ -441,6 +449,7 @@ function updateOf(step: FakeStep): SessionUpdate | null {
       }
     case 'asks':
     case 'uses':
+    case 'usesTogether':
       return null
     default:
       return null
@@ -715,7 +724,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   const reachesTools =
     script.listsTools === true ||
     [...(script.steps ?? []), ...(script.history ?? []), ...(script.turns ?? []).flat()].some(
-      (step) => step.does === 'uses',
+      (step) => step.does === 'uses' || step.does === 'usesTogether',
     )
   let link: McpLink | null = null
   let turnsTaken = 0
@@ -875,6 +884,11 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         if (step.does === 'uses') {
           // oxlint-disable-next-line no-await-in-loop -- a tool is answered before the agent does anything with the answer
           await use(step)
+          continue
+        }
+        if (step.does === 'usesTogether') {
+          // oxlint-disable-next-line no-await-in-loop -- the calls of one step run together, and the next step waits for all of them
+          await Promise.all(step.calls.map(use))
           continue
         }
         if (step.does !== 'asks') {
