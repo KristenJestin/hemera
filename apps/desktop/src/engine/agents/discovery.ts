@@ -132,7 +132,8 @@ export interface DiscoveredAgent {
    */
   readonly installer: InstallerTool
   /**
-   * The version the registry of `installer` publishes, or null when nobody asked.
+   * The version published for this agent — Homebrew's formula for a `brew` install, the npm
+   * registry for any other installer — or null when nobody asked.
    *
    * Always null here: discovery reads the machine and never the network, and the registry is
    * asked only when the Agents section of the settings is opened (D5-18).

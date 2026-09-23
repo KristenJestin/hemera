@@ -115,7 +115,7 @@ Windows, Claude Code 2.1.280). Copying or linking the credentials into a directo
 would mean handling a secret that is not Hemera's. What the move was for is done without it:
 `settingSources: []` reads none of the user's settings files, and `strictMcpConfig: true` loads
 no MCP server but Hemera's. What still loads, `~/.claude.json` and the managed and policy
-settings, is named as residue in the Context view (D6-09). Hemera also sends
+settings, is named as residue under the agent in Settings › Agents (D6-09). Hemera also sends
 `strictMcpConfig: true`, `MCP_TOOL_TIMEOUT` in `env`, and `allowedTools` (below).
 
 ### The Workspace's instructions under bare mode (added in lot 2b)
