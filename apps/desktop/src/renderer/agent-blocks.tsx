@@ -40,7 +40,13 @@ import {
   questionOpen,
   subjectOf,
 } from './agent-tool-payloads.ts'
-import { briefOf, proposalOf, questionAnchor, questionEntryOf } from './spec-entries.ts'
+import {
+  type DefinedSpec,
+  briefOf,
+  proposalOf,
+  questionAnchor,
+  questionEntryOf,
+} from './spec-entries.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -328,8 +334,8 @@ export interface SpecContext {
   thread: readonly SessionEntry[]
   /** The Spec the Session defines, or null while it is `free`. */
   specId: string | null
-  /** Its key, once it is known: what a created proposal names. */
-  specKey: string | undefined
+  /** That Spec as its first revision named it, once it is read: what a created proposal names. */
+  defined: DefinedSpec | null
   /** The proposals `Not now` was pressed on, in this window only: nothing keeps it. */
   declined: ReadonlySet<string>
   onAnswer: (questionId: string, answer: SpecAnswer) => void
@@ -539,14 +545,15 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
 
   // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07).
   if (entry.kind === 'spec_proposal') {
-    const proposal = proposalOf(entry, context.spec.specId, context.spec.declined.has(entry.id))
+    const { thread, specId, defined, declined } = context.spec
+    const proposal = proposalOf(entry, thread, specId, defined, declined.has(entry.id))
     if (proposal === null) return null
     return (
       <CreateSpecProposal
         title={proposal.title}
         type={proposal.type}
         state={proposal.state}
-        createdKey={context.spec.specKey}
+        createdKey={defined?.key}
         onCreate={context.spec.onCreate}
         onDecline={() => context.spec.onDecline(entry.id)}
       />

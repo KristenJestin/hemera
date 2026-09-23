@@ -113,25 +113,41 @@ describe('A free Session’s agent proposes a Spec', () => {
   const proposal = entry(
     'spec_proposal',
     JSON.stringify({ title: 'CSV invoice export', type: 'feature' }),
+    'proposal',
   )
+  const other = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'Payments report', type: 'feature' }),
+    'other',
+  )
+  const thread = [proposal, other]
+  const created = { key: 'ATL-7', title: 'CSV invoice export', type: 'feature' as const }
 
-  test('proposed while the Session is free, created once it defines a Spec', () => {
-    expect(proposalOf(proposal, null, false)).toEqual({
+  test('proposed while the Session is free, created once it defines the Spec it proposed', () => {
+    expect(proposalOf(proposal, thread, null, null, false)).toEqual({
       title: 'CSV invoice export',
       type: 'feature',
       state: 'proposed',
     })
-    expect(proposalOf(proposal, 'spec-7', false)?.state).toBe('created')
+    expect(proposalOf(proposal, thread, 'spec-7', created, false)?.state).toBe('created')
   })
 
-  test('declined when Not now was pressed, which a created Spec overrides', () => {
-    expect(proposalOf(proposal, null, true)?.state).toBe('declined')
-    expect(proposalOf(proposal, 'spec-7', true)?.state).toBe('created')
+  test('of two proposals in one Session, only the one the Spec came from reads created', () => {
+    expect(proposalOf(other, thread, 'spec-7', created, false)?.state).toBe('declined')
+    // Created with a title edited in the card, the Spec came from the last proposal.
+    const edited = { ...created, title: 'CSV export of a month' }
+    expect(proposalOf(proposal, thread, 'spec-7', edited, false)?.state).toBe('declined')
+    expect(proposalOf(other, thread, 'spec-7', edited, false)?.state).toBe('created')
   })
 
-  test('a proposal of an unknown type is not drawn', () => {
-    expect(
-      proposalOf(entry('spec_proposal', JSON.stringify({ title: 'X', type: 'epic' })), null, false),
-    ).toBe(null)
+  test('declined when Not now was pressed, which the Spec it came from overrides', () => {
+    expect(proposalOf(proposal, thread, null, null, true)?.state).toBe('declined')
+    expect(proposalOf(proposal, thread, 'spec-7', created, true)?.state).toBe('created')
+  })
+
+  test('not drawn while the Spec of a define Session is still being read, nor of an unknown type', () => {
+    expect(proposalOf(proposal, thread, 'spec-7', null, false)).toBe(null)
+    const epic = entry('spec_proposal', JSON.stringify({ title: 'X', type: 'epic' }))
+    expect(proposalOf(epic, [epic], null, null, false)).toBe(null)
   })
 })

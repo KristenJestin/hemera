@@ -8,6 +8,8 @@ import type {
   SectionName,
   Session,
   SessionEntry,
+  SpecRevision,
+  SpecSnapshot,
 } from '@hemera/ipc'
 import {
   ActivityRow,
@@ -38,7 +40,7 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
-import { questionAnchor } from '../spec-entries.ts'
+import { type DefinedSpec, questionAnchor } from '../spec-entries.ts'
 import {
   answerQuestion,
   createSpec,
@@ -127,6 +129,16 @@ function metaOf(session: Session, entries: number, now: number, specKey: string 
     return ['DEFINE', agent, session.model, specKey].filter((one) => one !== null).join(' · ')
   }
   return `created ${whenOf(session.createdAt, now)} · ${agent} · ${countOf(entries)}`
+}
+
+/** The Spec a Session defines as its first revision named it, once it is read (D7-07). */
+function definedOf(
+  snapshot: SpecSnapshot | null,
+  revisions: readonly SpecRevision[],
+): DefinedSpec | null {
+  const first = revisions.find((one) => one.number === 1)
+  if (snapshot === null || first === undefined) return null
+  return { key: snapshot.spec.key, title: first.title, type: first.type }
 }
 
 /**
@@ -355,7 +367,7 @@ export function SessionPage({
       spec: {
         thread,
         specId: session.specId,
-        specKey: spec?.key,
+        defined: definedOf(defined, stored.revisions),
         declined,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),

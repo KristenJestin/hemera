@@ -102,18 +102,51 @@ export function questionAnchor(questionId: string): string {
   return `ask-${questionId}`
 }
 
+/** The Spec a `define` Session defines, as a proposal would have named it: its first revision. */
+export interface DefinedSpec {
+  key: string
+  title: string
+  type: SpecType
+}
+
+/** A proposal as its block draws it. */
+export interface ProposalView {
+  title: string
+  type: SpecType
+  state: ProposalState
+}
+
 /**
- * A proposal of the agent, and where it stands: `created` once the Session defines a Spec,
- * `declined` when `Not now` was pressed in this window — which nothing keeps — and `proposed`
- * otherwise.
+ * Which proposal of the thread the Spec was created from: the one whose title and type are the
+ * Spec's first revision's, or — the title edited in the card before `Create` — the last one the
+ * thread holds.
+ */
+function createdFrom(thread: readonly SessionEntry[], spec: DefinedSpec): string | null {
+  const proposals = thread.filter((entry) => entry.kind === 'spec_proposal')
+  const same = proposals.find((entry) => {
+    const said = parsed(proposalSchema, entry.payload)
+    return said?.title === spec.title && said.type === spec.type
+  })
+  return (same ?? proposals.at(-1))?.id ?? null
+}
+
+/**
+ * A proposal of the agent, and where it stands (D7-07). While the Session is `free`, `proposed`,
+ * or `declined` when `Not now` was pressed in this window — which nothing keeps. Once it defines a
+ * Spec, the proposal the Spec came from is `created` and every other one `declined`; until that
+ * Spec is read, `spec` is null and the proposal is not drawn, rather than drawn as a guess.
  */
 export function proposalOf(
   entry: SessionEntry,
+  thread: readonly SessionEntry[],
   specId: string | null,
+  spec: DefinedSpec | null,
   declined: boolean,
-): { title: string; type: SpecType; state: ProposalState } | null {
+): ProposalView | null {
   const proposal = parsed(proposalSchema, entry.payload)
   if (proposal === null) return null
-  const state: ProposalState = specId !== null ? 'created' : declined ? 'declined' : 'proposed'
-  return { title: proposal.title, type: proposal.type, state }
+  const { title, type } = proposal
+  if (specId === null) return { title, type, state: declined ? 'declined' : 'proposed' }
+  if (spec === null) return null
+  return { title, type, state: createdFrom(thread, spec) === entry.id ? 'created' : 'declined' }
 }
