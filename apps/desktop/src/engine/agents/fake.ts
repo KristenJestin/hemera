@@ -42,6 +42,9 @@ import {
   type Usage,
 } from '@agentclientprotocol/sdk'
 import { Effect, Layer } from 'effect'
+import { z } from 'zod'
+
+import { DELIVERY_MARKER } from '@hemera/core'
 
 import {
   type ExitObservation,
@@ -49,6 +52,20 @@ import {
   type ProcessSupervisorService,
   type SupervisedProcess,
 } from './supervisor.ts'
+
+/** What a script hands a tool: the flat arguments an MCP call carries. */
+export type FakeArguments = Readonly<Record<string, string | number | boolean>>
+
+/** One tool call the agent made over MCP, and what the server answered it. */
+export interface FakeToolAnswer {
+  readonly tool: string
+  readonly arguments: FakeArguments
+  /** The HTTP status the server answered with: 401 is a door that stayed shut. */
+  readonly status: number
+  /** The text of the answer, or the error the server gave instead of one. */
+  readonly text: string
+  readonly isError: boolean
+}
 
 /** One thing the agent does during a turn, in the order it does them. */
 export type FakeStep =
@@ -96,6 +113,22 @@ export type FakeStep =
   | {
       readonly does: 'plans'
       readonly lines: readonly { readonly content: string; readonly status: PlanEntryStatus }[]
+    }
+  | {
+      /**
+       * A call to one of the tools it was lent, made over MCP (design D6-11).
+       *
+       * The agent asks the server it was handed at `session/new`, with the header it was handed,
+       * by the name the server listed, and streams what it asked and what came back as a
+       * `tool_call` and its `tool_call_update` — which is what an agent does with a tool of an MCP
+       * server, and what makes every scenario of the tools playable without a real agent.
+       */
+      readonly does: 'uses'
+      /** The name the server lists the tool under. */
+      readonly call: string
+      readonly arguments?: FakeArguments
+      /** The identifier of the call in the thread; one is made up when a script names none. */
+      readonly id?: string
     }
   | {
       /**
@@ -182,6 +215,15 @@ export interface FakeScript {
   readonly between?: () => Promise<void>
   /** Called with the text of each prompt as it arrives, for a test that watches the pipe. */
   readonly onPrompt?: (text: string) => void
+  /**
+   * Whether it connects to the MCP server it is handed and lists its tools, as an agent does at
+   * the start of a session (D6-11).
+   *
+   * True whenever a step of the script uses a tool, and a suite about what the agent can see
+   * says so for a script that uses none. An agent that connects to nothing is the default,
+   * because most suites hand it an address nothing listens on.
+   */
+  readonly listsTools?: boolean
 }
 
 /**
@@ -207,7 +249,8 @@ export interface FakeAnswers {
   /** The text of every prompt the agent was sent, in the order it was sent them. */
   readonly prompts: string[]
   /**
-   * What `session/new` was configured with, one entry per session opened.
+   * What `session/new`, `session/load` and `session/resume` were configured with, one entry per
+   * session opened, loaded or resumed.
    *
    * What Hemera lends an agent travels here and nowhere else (D6-01), so a suite reads the
    * address and the token the agent was handed rather than trusting that it was.
@@ -228,6 +271,22 @@ export interface FakeAnswers {
    * this peer knows nothing about, and a fake that parsed it would be a second reader of it.
    */
   readonly advertised: string[]
+  /**
+   * What each session it opened, loaded or resumed was configured with on `_meta`, as the JSON it
+   * arrived as, and `null` for one that carried none: where Claude Code reads its options (D6-02).
+   */
+  readonly metas: (string | null)[]
+  /** The blocks of every prompt, as they arrived: a resource is a block, not a text (D6-07). */
+  readonly blocks: ContentBlock[][]
+  /**
+   * The tools the MCP server listed, once per session it was handed a server for (D6-11).
+   *
+   * What the agent can call is what this says: a list holding Hemera's tools and nothing else is
+   * the capability a bare Session is meant to have.
+   */
+  readonly tools: string[][]
+  /** Every tool call it made over MCP, in order, with what the server answered. */
+  readonly used: FakeToolAnswer[]
 }
 
 /**
@@ -246,6 +305,10 @@ interface FakeTally {
   cancels: number
   choices: string[]
   advertised: string[]
+  metas: (string | null)[]
+  blocks: ContentBlock[][]
+  tools: string[][]
+  used: FakeToolAnswer[]
 }
 
 /** The peer, the script it follows, and the two pipes a client talks to it through. */
@@ -278,6 +341,11 @@ export interface FakeAgent {
    * list is what says so.
    */
   readonly starts: string[]
+  /**
+   * The environment each of those starts was given, beyond the machine's own: what an agent that
+   * takes its bare mode from variables is handed (D6-02, D6-09).
+   */
+  readonly environments: Record<string, string>[]
   /** Ends the agent now, as a process that died on the spot does. */
   readonly die: () => void
   /** The death of the agent, which resolves once and only once. */
@@ -354,10 +422,209 @@ function updateOf(step: FakeStep): SessionUpdate | null {
         })),
       }
     case 'asks':
+    case 'uses':
       return null
     default:
       return null
   }
+}
+
+/**
+ * The one MCP server an agent was handed over HTTP, as the fake reaches it (D6-01, D6-11).
+ *
+ * A client of the protocol's streamable HTTP transport and nothing more: a JSON-RPC request per
+ * POST, the headers the agent was handed on every one of them, and an answer that comes back as
+ * JSON or as one event of a stream. It stays here, in the fake, because no part of Hemera is an
+ * MCP client — the agents are, and this is the agent.
+ */
+interface McpLink {
+  readonly url: string
+  readonly headers: Readonly<Record<string, string>>
+  /** What the server negotiated at `initialize`, sent back on every request after it. */
+  protocol: string | null
+  /** The session the server opened, when it opened one. */
+  session: string | null
+  next: number
+}
+
+/** What travels in a request of the protocol: JSON, and nothing a JSON text cannot hold. */
+type Json = string | number | boolean | null | readonly Json[] | { readonly [key: string]: Json }
+
+/** The protocol version the fake asks for: the server answers with the one it speaks. */
+const MCP_PROTOCOL = '2025-06-18'
+
+/** One JSON-RPC answer, whatever it answers. */
+const RPC_ANSWER = z.object({
+  id: z.union([z.number(), z.string()]).optional(),
+  result: z.json().optional(),
+  error: z.object({ message: z.string() }).optional(),
+})
+
+const INITIALIZED = z.object({ protocolVersion: z.string() })
+
+const TOOLS_LISTED = z.object({ tools: z.array(z.object({ name: z.string() })) })
+
+const TOOL_ANSWERED = z.object({
+  content: z.array(z.object({ type: z.string(), text: z.string().optional() })),
+  isError: z.boolean().optional(),
+})
+
+/** A text read as JSON, then as the schema, or null when it is neither. */
+const readAs = <T>(schema: z.ZodType<T>, text: string): T | null => {
+  const read = z
+    .string()
+    .transform((sent, context) => {
+      try {
+        return JSON.parse(sent)
+      } catch {
+        context.addIssue({ code: 'custom', message: 'not JSON' })
+        return z.NEVER
+      }
+    })
+    .pipe(schema)
+    .safeParse(text)
+  return read.success ? read.data : null
+}
+
+/** The link to the HTTP server among those an agent was handed, and null without one. */
+function linkOf(servers: readonly McpServer[]): McpLink | null {
+  for (const server of servers) {
+    if (!('type' in server) || server.type !== 'http') continue
+    return {
+      url: server.url,
+      headers: Object.fromEntries(server.headers.map((header) => [header.name, header.value])),
+      protocol: null,
+      session: null,
+      next: 1,
+    }
+  }
+  return null
+}
+
+/** What one request answered: the status, and the result or the error it carried. */
+interface Answered {
+  readonly status: number
+  readonly result: z.infer<typeof RPC_ANSWER>['result'] | null
+  readonly error: string | null
+}
+
+/**
+ * One request of the protocol, and its answer.
+ *
+ * A notification is sent the same way and answered with nothing, which is what `id: null` says.
+ * An answer sent as a stream is read to its event that carries the request's identifier.
+ */
+async function rpc(
+  link: McpLink,
+  method: string,
+  params: Readonly<Record<string, Json>>,
+  notification = false,
+): Promise<Answered> {
+  const id = notification ? null : link.next++
+  const headers = new Headers({
+    ...link.headers,
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+  })
+  if (link.protocol !== null) headers.set('mcp-protocol-version', link.protocol)
+  if (link.session !== null) headers.set('mcp-session-id', link.session)
+  const response = await fetch(link.url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(
+      id === null ? { jsonrpc: '2.0', method, params } : { jsonrpc: '2.0', id, method, params },
+    ),
+  })
+  const opened = response.headers.get('mcp-session-id')
+  if (opened !== null) link.session = opened
+  const body = await response.text()
+  if (!response.ok) return { status: response.status, result: null, error: body }
+  if (id === null) return { status: response.status, result: null, error: null }
+  // A stream holds its messages on `data:` lines; a plain answer is the message itself.
+  const messages = (response.headers.get('content-type') ?? '').includes('text/event-stream')
+    ? body
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice('data:'.length).trim())
+    : [body]
+  for (const message of messages) {
+    const read = readAs(RPC_ANSWER, message)
+    if (read === null || read.id !== id) continue
+    return {
+      status: response.status,
+      result: read.result ?? null,
+      error: read.error?.message ?? null,
+    }
+  }
+  return { status: response.status, result: null, error: 'the server answered nothing' }
+}
+
+/** The handshake and the list of tools, which is what an agent does with a server it is handed. */
+async function listedOver(link: McpLink): Promise<string[]> {
+  const initialized = await rpc(link, 'initialize', {
+    protocolVersion: MCP_PROTOCOL,
+    capabilities: {},
+    clientInfo: { name: 'fake-agent', version: '1.0.0' },
+  })
+  const version = INITIALIZED.safeParse(initialized.result)
+  link.protocol = version.success ? version.data.protocolVersion : MCP_PROTOCOL
+  await rpc(link, 'notifications/initialized', {}, true)
+  const listed = await rpc(link, 'tools/list', {})
+  const tools = TOOLS_LISTED.safeParse(listed.result)
+  return tools.success ? tools.data.tools.map((tool) => tool.name) : []
+}
+
+/** One tool call over the link, as the answer the fake records and streams back. */
+async function calledOver(
+  link: McpLink,
+  tool: string,
+  sent: FakeArguments,
+): Promise<FakeToolAnswer> {
+  const answered = await rpc(link, 'tools/call', { name: tool, arguments: { ...sent } })
+  const result = TOOL_ANSWERED.safeParse(answered.result)
+  if (!result.success) {
+    return {
+      tool,
+      arguments: sent,
+      status: answered.status,
+      text: answered.error ?? 'the server answered no result',
+      isError: true,
+    }
+  }
+  return {
+    tool,
+    arguments: sent,
+    status: answered.status,
+    text: result.data.content.map((block) => block.text ?? '').join('\n'),
+    isError: result.data.isError === true,
+  }
+}
+
+/** The kind ACP gives a call of one of Hemera's tools, by what the tool does. */
+function kindOfTool(tool: string): NonNullable<ToolCall['kind']> {
+  if (tool === 'fs_read' || tool === 'fs_list' || tool.endsWith('_get')) return 'read'
+  if (tool === 'fs_write' || tool === 'fs_edit') return 'edit'
+  if (tool === 'search') return 'search'
+  if (tool.startsWith('commands_')) return 'execute'
+  return 'other'
+}
+
+/** The path a tool call names, which is the location its `tool_call` points at. */
+const PATH_SENT = z.object({ path: z.string() })
+
+/**
+ * Whether a prompt is only what Hemera provides: its marker and resources, and no word of anyone's.
+ *
+ * That is the shape of a delivery (D6-08), and an agent that is handed one has nothing to answer.
+ */
+function provisionOnly(request: PromptRequest): boolean {
+  return (
+    request.prompt.some((block) => block.type === 'resource') &&
+    request.prompt.every(
+      (block) =>
+        block.type === 'resource' || (block.type === 'text' && block.text === DELIVERY_MARKER),
+    )
+  )
 }
 
 /** The text of a prompt as it was sent: a scripted agent reads text and ignores the rest. */
@@ -385,6 +652,10 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     cancels: 0,
     choices: [],
     advertised: [],
+    metas: [],
+    blocks: [],
+    tools: [],
+    used: [],
   }
 
   let sessionId = script.nativeSessionId ?? 'native-session'
@@ -422,6 +693,79 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     announceDeath()
   }
 
+  // The server the agent was handed, once it was handed one and the script reaches for tools.
+  const reachesTools =
+    script.listsTools === true ||
+    [...(script.steps ?? []), ...(script.history ?? [])].some((step) => step.does === 'uses')
+  let link: McpLink | null = null
+  let callsMade = 0
+
+  /**
+   * What a session was configured with, kept, and the server it names reached (D6-01, D6-11).
+   *
+   * The three ways into a session carry the same servers, and an agent connects to them on each:
+   * a session resumed after a restart is a session whose tools have a new token.
+   */
+  const handed = async (
+    request: NewSessionRequest | LoadSessionRequest | ResumeSessionRequest,
+  ): Promise<void> => {
+    const { mcpServers: servers = [], _meta: meta } = request
+    answers.mcpServers.push([...servers])
+    answers.metas.push(meta == null ? null : JSON.stringify(meta))
+    if (!reachesTools) return
+    link = linkOf(servers)
+    if (link === null) return
+    // A server that cannot be reached is a session with no tools, which is what the agents do
+    // with one: they say nothing and go on, and the list says what the agent could see.
+    answers.tools.push(await listedOver(link).catch(() => []))
+  }
+
+  /** One tool call over the server, streamed to the client as the agent's own call. */
+  const use = async (step: Extract<FakeStep, { does: 'uses' }>): Promise<void> => {
+    callsMade += 1
+    const id = step.id ?? `hemera-call-${String(callsMade)}`
+    const sent = step.arguments ?? {}
+    const named = PATH_SENT.safeParse(sent)
+    const path = named.success ? named.data.path : null
+    if (!dead) {
+      await connection?.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: id,
+          title: step.call,
+          kind: kindOfTool(step.call),
+          status: 'in_progress',
+          locations: path === null ? [] : [{ path }],
+          content: [],
+          rawInput: { ...sent },
+        },
+      })
+    }
+    const answer =
+      link === null
+        ? { tool: step.call, arguments: sent, status: 0, text: 'no MCP server', isError: true }
+        : await calledOver(link, step.call, sent).catch((cause: Error) => ({
+            tool: step.call,
+            arguments: sent,
+            status: 0,
+            text: cause.message,
+            isError: true,
+          }))
+    answers.used.push(answer)
+    if (dead) return
+    await connection?.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: id,
+        status: answer.isError ? 'failed' : 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: answer.text } }],
+        rawOutput: { text: answer.text },
+      },
+    })
+  }
+
   const agent: AcpAgent = {
     initialize: (request) => {
       // What the client said about itself, kept as it arrived: this is how a suite proves that
@@ -442,8 +786,8 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         agentInfo: { name: 'Fake agent', version: '1.0.0' },
       }
     },
-    newSession: (request: NewSessionRequest) => {
-      answers.mcpServers.push([...request.mcpServers])
+    newSession: async (request: NewSessionRequest) => {
+      await handed(request)
       const opened: NewSessionResponse = { sessionId }
       // Left out when the script named none, for the reason a tool call leaves out what it does
       // not say: an agent that announces no options is not an agent that announces zero.
@@ -462,15 +806,17 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     loadSession: async (request: LoadSessionRequest): Promise<void> => {
       answers.loads += 1
       if (script.refusesLoad === true) throw new Error('this agent refuses to load a session')
+      await handed(request)
       sessionId = request.sessionId
       for (const step of script.history ?? []) {
         // oxlint-disable-next-line no-await-in-loop -- a scripted agent replays its history in the order it was written, one message at a time
         await notify(step)
       }
     },
-    resumeSession: (request: ResumeSessionRequest): ResumeSessionResponse => {
+    resumeSession: async (request: ResumeSessionRequest): Promise<ResumeSessionResponse> => {
       answers.resumes += 1
       if (script.refusesResume === true) throw new Error('this agent refuses to resume a session')
+      await handed(request)
       sessionId = request.sessionId
       return {}
     },
@@ -485,12 +831,21 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       cancelled = false
       const text = promptTextOf(request)
       answers.prompts.push(text)
+      answers.blocks.push([...request.prompt])
       script.onPrompt?.(text)
+      // A prompt that is only what Hemera provides — the marker and its resources, no word of the
+      // user's — is a delivery (D6-08): the agent takes it in and has nothing to do about it.
+      if (provisionOnly(request)) return { stopReason: 'end_turn' }
       for (const step of script.steps ?? []) {
         if (cancelled) break
         // oxlint-disable-next-line no-await-in-loop -- the script is a sequence, and a test holds a turn open here
         await script.between?.()
         if (cancelled) break
+        if (step.does === 'uses') {
+          // oxlint-disable-next-line no-await-in-loop -- a tool is answered before the agent does anything with the answer
+          await use(step)
+          continue
+        }
         if (step.does !== 'asks') {
           // oxlint-disable-next-line no-await-in-loop -- what it says is sent before what it says next, and there is nothing to run in parallel
           await notify(step)
@@ -530,6 +885,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     input: fromClient.writable,
     output: toClient.readable,
     starts: [],
+    environments: [],
     die,
     exited,
   }
@@ -643,17 +999,32 @@ export function fakeSupervisorOf(
   next: () => FakeAgent,
   before: () => Promise<void> = () => Promise.resolve(),
 ): Layer.Layer<ProcessSupervisor> {
-  return Layer.succeed(ProcessSupervisor, {
-    start: (command) =>
+  return Layer.succeed(ProcessSupervisor, fakeSupervisorService(next, before))
+}
+
+/**
+ * The same supervisor as a service rather than a layer, for a suite that composes it.
+ *
+ * A suite that runs real commands beside a fake agent needs one supervisor that answers both —
+ * a command is a process of the machine, the agent is this peer — and it builds that supervisor
+ * out of the real one and this.
+ */
+export function fakeSupervisorService(
+  next: () => FakeAgent,
+  before: () => Promise<void> = () => Promise.resolve(),
+): ProcessSupervisorService {
+  return {
+    start: (command, _args, options) =>
       Effect.acquireRelease(
         Effect.map(Effect.promise(before), () => {
           const agent = next()
           // Recorded on the agent itself, so a suite can say what was started — and, which is
           // the point of D5-17, what was not.
           agent.starts.push(command)
+          agent.environments.push({ ...options.env })
           return supervisedOf(agent)
         }),
         (process) => process.stop,
       ),
-  } satisfies ProcessSupervisorService)
+  }
 }
