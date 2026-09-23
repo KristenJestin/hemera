@@ -120,6 +120,7 @@ export function watching() {
 const server = Layer.succeed(ToolServer, {
   origin: 'http://127.0.0.1:1',
   forAgent: () => 'http://127.0.0.1:1/mcp',
+  gaveUp: () => Effect.void,
 })
 
 /**

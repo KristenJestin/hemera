@@ -563,6 +563,56 @@ describe('Two questions at once are each answered by their own block', () => {
   })
 })
 
+describe('An agent that gives up on a call withdraws the question it asked', () => {
+  test('the question closes as withdrawn while the turn goes on, and a later decision acts on nothing', async () => {
+    const outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-outside-')))
+    const target = join(outside, 'notes.md')
+    // Claude Code's idle timeout, made short: the agent reports the call failed and goes on, and
+    // the request it made is left open with nothing sent to cancel it.
+    const agent = fakeAgent({
+      steps: [
+        {
+          does: 'uses',
+          call: 'fs_write',
+          arguments: { path: target, content: 'written for nobody', key: 'w1' },
+          id: 'toolu_01',
+          givesUpAfter: 200,
+        },
+        { does: 'says', text: 'I went on without it.' },
+      ],
+    })
+
+    try {
+      const seen = await toolApplication(dataFolder)(agent)(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime
+          const session = yield* aSessionOn(workspace, 'claude')
+          const report = yield* runtime.prompt(session.id, 'write it')
+          const entries = yield* until(threadOf(session.id), (thread) =>
+            thread.some((entry) => entry.kind === 'hemera_tool_call'),
+          )
+          const asked = questionOf(questionsIn(entries)[0]).toolCallId
+          const late = yield* Effect.exit(runtime.decide(session.id, asked, 'allowed'))
+          yield* pause(100)
+          return { report, entries, late }
+        }),
+      )
+
+      expect(seen.report.stopReason).toBe('end_turn')
+      expect(questionsIn(seen.entries).map((entry) => entry.state)).toEqual(['cancelled'])
+      const decision = seen.entries.find((entry) => entry.kind === 'permission_decision')
+      expect(decision?.body).toBe('Withdrawn: the agent stopped waiting for this call')
+      const call = seen.entries.find((entry) => entry.kind === 'hemera_tool_call')
+      expect(call?.state).toBe('failed')
+      expect(call?.body).toBe('the agent stopped waiting for this call')
+      expect(Exit.isFailure(seen.late)).toBe(true)
+      expect(existsSync(target)).toBe(false)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('A token is not an authorisation', () => {
   test('an agent holding a valid token still waits for the human outside the root', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'hemera-outside-'))

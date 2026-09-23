@@ -66,6 +66,12 @@ export interface ToolServerService {
   readonly origin: string
   /** The address an agent's configuration carries: the token is in it only when the grant says so. */
   readonly forAgent: (granted: GrantedAccess) => string
+  /**
+   * Stops the call of this Session the agent names, if it is still in flight: the agent reported
+   * it ended without waiting for the answer. Claude Code's idle timeout gives up on a call this
+   * way, and sends nothing over the request, which it leaves open (D6-05).
+   */
+  readonly gaveUp: (sessionId: string, callId: string) => Effect.Effect<void>
 }
 
 export class ToolServer extends Context.Service<ToolServer, ToolServerService>()('ToolServer') {}
@@ -134,6 +140,8 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
        * the catalogue does, rather than left to write its entry into a database that is gone.
        */
       const runOwned = yield* FiberSet.makeRuntimePromise()
+      /** The calls in flight whose agent named them, by Session and by the agent's identifier. */
+      const named = new Map<string, AbortController>()
 
       /**
        * The tools, as one MCP server built for one request and for the grant that request carried.
@@ -158,8 +166,14 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
               context: ServerContext,
             ) => {
               const argumentsRead = flatArguments(Object.entries(argumentsSent ?? {}))
-              // The request's own signal: an agent that gives up on a call — its timeout, its
-              // cancel, a connection closed — stops what the call was doing (D6-05).
+              // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+              const callId = callIdIn(context.mcpReq._meta)
+              const slot = `${grant.sessionId}|${callId ?? ''}`
+              const given = new AbortController()
+              if (callId !== null) named.set(slot, given)
+              // An agent that gives up on a call stops what the call was doing (D6-05): the request's
+              // own signal says so for a request aborted or a connection closed, and `gaveUp` for an
+              // agent that reports the call ended and leaves its request open.
               const outcome = await runOwned(
                 catalogue.call({
                   sessionId: grant.sessionId,
@@ -168,11 +182,12 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
                   key: keyIn(argumentsRead),
                   offered: grant.offered,
                   caller: grant.id,
-                  // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
-                  callId: callIdIn(context.mcpReq._meta),
+                  callId,
                 }),
-                { signal: context.mcpReq.signal },
-              )
+                { signal: AbortSignal.any([context.mcpReq.signal, given.signal]) },
+              ).finally(() => {
+                if (named.get(slot) === given) named.delete(slot)
+              })
               return {
                 content: [{ type: 'text' as const, text: outcome.text }],
                 isError: !outcome.ok,
@@ -297,6 +312,10 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
           granted.tokenInQuery
             ? `${origin}${PATH}?t=${encodeURIComponent(granted.token)}`
             : `${origin}${PATH}`,
+        gaveUp: (sessionId: string, callId: string) =>
+          Effect.sync(() => {
+            named.get(`${sessionId}|${callId}`)?.abort()
+          }),
       }
     }),
   )

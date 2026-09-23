@@ -130,6 +130,12 @@ export type FakeStep =
       readonly arguments?: FakeArguments
       /** The identifier of the call in the thread; one is made up when a script names none. */
       readonly id?: string
+      /**
+       * Stops waiting for the answer after this many milliseconds, as Claude Code's idle timeout
+       * does: the call is reported failed and the turn goes on, while the request is left open and
+       * nothing is sent to cancel it.
+       */
+      readonly givesUpAfter?: number
     }
   | {
       /**
@@ -608,8 +614,15 @@ async function calledOver(
   link: McpLink,
   tool: string,
   sent: FakeArguments,
+  id: string,
 ): Promise<FakeToolAnswer> {
-  const answered = await rpc(link, 'tools/call', { name: tool, arguments: { ...sent } })
+  // The call's own identifier rides on `_meta`, under the key Claude Code sends it with: it is
+  // the `toolCallId` the agent reports the call under.
+  const answered = await rpc(link, 'tools/call', {
+    name: tool,
+    arguments: { ...sent },
+    _meta: { 'claudecode/toolUseId': id },
+  })
   const result = TOOL_ANSWERED.safeParse(answered.result)
   if (!result.success) {
     return {
@@ -774,16 +787,40 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         },
       })
     }
-    const answer =
+    const calling: Promise<FakeToolAnswer> =
       link === null
-        ? { tool: step.call, arguments: sent, status: 0, text: 'no MCP server', isError: true }
-        : await calledOver(link, step.call, sent).catch((cause: Error) => ({
+        ? Promise.resolve({
+            tool: step.call,
+            arguments: sent,
+            status: 0,
+            text: 'no MCP server',
+            isError: true,
+          })
+        : calledOver(link, step.call, sent, id).catch((cause: Error) => ({
             tool: step.call,
             arguments: sent,
             status: 0,
             text: cause.message,
             isError: true,
           }))
+    const patience = step.givesUpAfter
+    const answer =
+      patience === undefined
+        ? await calling
+        : await Promise.race([
+            calling,
+            new Promise<FakeToolAnswer>((resolve) => {
+              setTimeout(() => {
+                resolve({
+                  tool: step.call,
+                  arguments: sent,
+                  status: 0,
+                  text: `no answer after ${String(patience)} ms: the agent stopped waiting`,
+                  isError: true,
+                })
+              }, patience)
+            }),
+          ])
     answers.used.push(answer)
     if (dead) return
     await connection?.sessionUpdate({

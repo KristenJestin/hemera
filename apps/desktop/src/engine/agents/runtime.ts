@@ -848,6 +848,12 @@ export const runtimeLayer = Layer.effect(
           rawOutput: said.rawOutput === null ? (held?.rawOutput ?? null) : bounded(said.rawOutput),
         }
         if (turn !== undefined) turn.calls.set(said.id, call)
+        // A call the agent says has ended is one it no longer waits for: if it is one of Hemera's
+        // still in flight — the agent timed out on it — what it was doing stops, a question to
+        // the user included, rather than waiting on an answer nobody will read (D6-05).
+        if (call.status === 'completed' || call.status === 'failed') {
+          yield* server.gaveUp(sessionId, said.id)
+        }
 
         yield* write(sessionId, {
           role: 'agent',

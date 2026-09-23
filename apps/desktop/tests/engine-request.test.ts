@@ -101,6 +101,7 @@ function running<A, E>(
     Layer.succeed(ToolServer, {
       origin: 'http://127.0.0.1:1',
       forAgent: () => 'http://127.0.0.1:1/mcp',
+      gaveUp: () => Effect.void,
     }),
   )
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very
