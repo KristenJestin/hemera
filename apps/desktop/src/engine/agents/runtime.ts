@@ -21,6 +21,7 @@ import {
   Deferred,
   Duration,
   Effect,
+  type Fiber,
   Layer,
   Predicate,
   Queue,
@@ -31,7 +32,7 @@ import {
 } from 'effect'
 import { existsSync } from 'node:fs'
 
-import type { AgentProvider, Session, SessionEntry } from '@hemera/core'
+import type { AgentProvider, Session, SessionEntry, SessionEntryOrigin } from '@hemera/core'
 import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice } from '@hemera/ipc'
 
 import {
@@ -57,6 +58,17 @@ import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
 
 /** How long an agent is given to answer `session/cancel` before its process tree is stopped. */
 export const CANCEL_GRACE = Duration.seconds(10)
+
+/**
+ * How long what an agent streamed waits before the thread is written (Decided 10 of #17).
+ *
+ * A chunk is a few words and an answer at length is a few hundred of them: writing each one where
+ * it lands is a transaction, a Journal line and the whole body rewritten per chunk, for one entry
+ * the reader watches grow either way. They are held in memory instead and written at most this
+ * often — which is also as often as the window is told, and no more than a page needs to look
+ * like it is streaming.
+ */
+export const CHUNK_FLUSH = Duration.millis(100)
 
 /** Everything that can stop the engine from talking to an agent, as one thing to report. */
 export class AgentRuntimeError extends Data.TaggedError('AgentRuntimeError')<{
@@ -280,6 +292,18 @@ interface Live {
    * is back. Counted when an event is offered, given back when it is written.
    */
   pending: number
+  /**
+   * What the agent said that the thread does not hold yet, by the key it is accumulated under.
+   *
+   * The chunks of one entry are held here rather than written one by one (Decided 10 of #17):
+   * what is written when the flush comes is the whole text so far, under the same
+   * `correlationId`, so the row is the row it would have been and there is still one row per
+   * entry. The key is what a replay matches an entry by: the message the agent named and the kind
+   * of it.
+   */
+  readonly chunks: Map<string, Coalesced>
+  /** The fiber of the flush that is due, or null when this Session holds nothing. */
+  timer: Fiber.Fiber<void> | null
 }
 
 /** A tool call, as the thread accumulates it: an update carries only what changed. */
@@ -339,6 +363,19 @@ interface Pending {
   readonly payload: string
   readonly options: readonly { readonly id: string; readonly name: string }[]
   readonly answer: Deferred.Deferred<PermissionAnswer>
+}
+
+/**
+ * One entry of the thread the agent is still writing, as the coalescer holds it.
+ *
+ * The whole text so far rather than the last chunk of it: what is written when the flush comes is
+ * the entry as the thread should read it, under the key a replayed history is matched by.
+ */
+interface Coalesced {
+  readonly kind: 'message' | 'thought'
+  readonly body: string
+  readonly turnId: string | null
+  readonly origin: SessionEntryOrigin
 }
 
 /** One turn of one Session. */
@@ -454,12 +491,60 @@ export const runtimeLayer = Layer.effect(
      */
     const replayed = new Map<string, Map<string, string>>()
 
-    /** One entry written for an agent, and the window told about it. */
-    const write = (sessionId: string, entry: ThreadWrite) =>
+    /** One entry written, with nothing held in front of it. */
+    const writeNow = (sessionId: string, entry: ThreadWrite) =>
       Effect.gen(function* () {
         const written = yield* attempt('writing the entry', sessions.write(sessionId, entry))
         notices.wrote(sessionId, written.entry)
         return written.entry
+      })
+
+    /**
+     * Writes what the agent said and the thread does not hold yet (Decided 10 of #17).
+     *
+     * `settled` is the caller's word on the entry: the chunks of a message that is over — the
+     * agent moved on to another message or to another kind, the turn ended, the Stop came, the
+     * agent died — are written as finished, and the Journal keeps one line for the entry rather
+     * than one per flush. The timer's own flush says nothing of the sort: the entry it writes is
+     * one the agent may still be speaking into. Nor does a chunk a replay streamed back, whose
+     * entry the Journal already has a line for.
+     *
+     * What is held is taken out of the map before anything is written, and in the order it was
+     * accumulated in: the thread reads in the order its `seq` was handed out, and two writes of
+     * one entry have to be that entry growing rather than two rows.
+     */
+    const flush = (sessionId: string, held: Live, settled: boolean) =>
+      Effect.gen(function* () {
+        const writing = [...held.chunks]
+        held.chunks.clear()
+        for (const [key, chunk] of writing) {
+          yield* writeNow(sessionId, {
+            role: 'agent',
+            kind: chunk.kind,
+            body: chunk.body,
+            correlationId: key,
+            turnId: chunk.turnId,
+            origin: chunk.origin,
+            // A replayed entry is the history being read back rather than an entry settling now:
+            // its row is one the Journal has already told its reader about, and a resume says
+            // nothing about it that the first turn did not say.
+            settled: settled && chunk.origin === 'live',
+          })
+        }
+      })
+
+    /**
+     * One entry written for an agent, and the window told about it.
+     *
+     * Whatever the agent is holding in memory goes first: whatever the caller is writing belongs
+     * after what the agent said before it — a call, a question, the end of the turn — because the
+     * thread reads in the order of its `seq`.
+     */
+    const write = (sessionId: string, entry: ThreadWrite) =>
+      Effect.gen(function* () {
+        const held = live.get(sessionId)
+        if (held !== undefined) yield* flush(sessionId, held, true)
+        return yield* writeNow(sessionId, entry)
       })
 
     /** One line, written as a `note`: what Hemera did that the agent did not say. */
@@ -505,6 +590,59 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
+     * Holds one chunk of a message or of a thought, and makes sure a flush is due (Decided 10 of
+     * #17).
+     *
+     * A chunk of another key is the agent moving on: what was held is written and settled before
+     * this one takes its place, which is what keeps the thread in the agent's own order — an
+     * answer is never written after the words a later message begins with.
+     */
+    const hold = (sessionId: string, key: string, chunk: Coalesced) =>
+      Effect.gen(function* () {
+        const held = live.get(sessionId)
+        // An agent that is gone holds nothing: what it said while it was alive was written when it
+        // died, and a chunk arriving now is written where it stands rather than waiting for a
+        // timer nobody is coming back to.
+        if (held === undefined) {
+          yield* writeNow(sessionId, {
+            role: 'agent',
+            kind: chunk.kind,
+            body: chunk.body,
+            correlationId: key,
+            turnId: chunk.turnId,
+            origin: chunk.origin,
+          })
+          return
+        }
+        if (!held.chunks.has(key) && held.chunks.size > 0) yield* flush(sessionId, held, true)
+        held.chunks.set(key, chunk)
+        yield* armFlush(sessionId, held)
+      })
+
+    /**
+     * The flush that is due for what a Session holds: the timer of Decided 10 of #17.
+     *
+     * One fiber per Session rather than one per key, because the chunks that arrive are the chunks
+     * of one entry: a message is streamed before the next one begins, and a turn with a timer per
+     * message in it would be a fiber per message. It starts when something is held, writes it, and
+     * ends when nothing is left — a chunk that arrives while it is writing is written by the next
+     * turn of its own loop, which is what `hold` counts on when it finds a timer already running.
+     */
+    const armFlush = (sessionId: string, held: Live) =>
+      Effect.gen(function* () {
+        if (held.timer !== null) return
+        held.timer = yield* Effect.forkScoped(
+          Effect.gen(function* () {
+            while (live.get(sessionId) === held && held.chunks.size > 0) {
+              yield* Effect.sleep(CHUNK_FLUSH)
+              yield* flush(sessionId, held, false)
+            }
+            held.timer = null
+          }).pipe(Effect.ignore),
+        )
+      })
+
+    /**
      * What one thing an agent said becomes in the thread.
      *
      * Chunks are accumulated rather than appended: an agent streams a message a few words at a
@@ -535,11 +673,11 @@ export const runtimeLayer = Layer.effect(
             (event.replay && event.messageId !== null ? replayedOf(sessionId) : undefined)
           const said = `${heard?.get(key) ?? ''}${event.text}`
           heard?.set(key, said)
-          yield* write(sessionId, {
-            role: 'agent',
+          // Held rather than written: a chunk is a few words, and the entry it belongs to is not
+          // one the thread has finished reading (Decided 10 of #17).
+          yield* hold(sessionId, key, {
             kind,
             body: said,
-            correlationId: key,
             turnId: turn?.id ?? null,
             origin,
           })
@@ -634,12 +772,17 @@ export const runtimeLayer = Layer.effect(
      * Called before a turn entry is written, and before a Session is reported back: the entries of
      * a Session are written by the fiber that drains them, and the entry that ends a turn is not
      * the first thing that turn says.
+     *
+     * What the coalescer holds is written here too, and settled: whatever the caller writes after
+     * this — the entry that ends the turn, the window being told the Session is back — says the
+     * agent's last words are the last of them.
      */
-    const drained = (held: Live) =>
+    const drained = (sessionId: string, held: Live) =>
       Effect.gen(function* () {
         for (let look = 0; look < 10_000 && held.pending > 0; look++) {
           yield* Effect.yieldNow
         }
+        yield* flush(sessionId, held, true)
       })
 
     /** The two pipes of a child, as the ACP client takes them. */
@@ -1058,7 +1201,7 @@ export const runtimeLayer = Layer.effect(
           if (turn !== undefined && turn.closed === null) {
             // What the agent said before it died is in the thread before the entry that says it
             // died: the death does not jump the queue of its own words.
-            yield* drained(held)
+            yield* drained(sessionId, held)
             // A question the agent was asking when it died will never be answered, and a call it
             // was running will never finish: both are closed here, or the thread would go on
             // asking and spinning for as long as the Session lasts.
@@ -1167,6 +1310,8 @@ export const runtimeLayer = Layer.effect(
           why: null,
           window: null,
           pending: 0,
+          chunks: new Map(),
+          timer: null,
         }
         live.set(sessionId, started)
         replayed.delete(sessionId)
@@ -1315,6 +1460,11 @@ export const runtimeLayer = Layer.effect(
       reason: string,
     ): Effect.Effect<AgentRuntimeError | null, never> =>
       Effect.gen(function* () {
+        // Whatever the load holds is written before the thread is read: the context is rebuilt
+        // from what the thread holds, and a history missing its last hundred milliseconds is a
+        // history the agent is told it never said. Not settled — a load is still streaming into
+        // the same entries as this is read.
+        yield* flush(sessionId, held, false).pipe(Effect.ignore)
         const page = yield* Effect.result(attempt('reading the thread', sessions.read(sessionId)))
         if (Result.isFailure(page)) return page.failure
 
@@ -1497,7 +1647,7 @@ export const runtimeLayer = Layer.effect(
               // What is in the thread is read before the window is: the announcement travels as a
               // notification of its own, and the entry is written from it once everything the agent
               // said is held rather than racing it.
-              yield* drained(held)
+              yield* drained(sessionId, held)
               const window = held.window
               // What a turn used and what the window holds are two readings, and either can be
               // missing: an agent that accounts for a turn but never announces a window leaves the
@@ -1532,7 +1682,7 @@ export const runtimeLayer = Layer.effect(
             // The agent never answered: either the process died under the turn, or Hemera stopped
             // an agent that would not stop. The thread keeps everything it received either way.
             const stopReason = turn.closed ?? (held.death === null ? 'cancelled' : 'interrupted')
-            yield* drained(held)
+            yield* drained(sessionId, held)
             yield* closeTurn(sessionId, turn, stopReason)
             return { stopReason, usage: null } satisfies TurnReport
           }).pipe(
@@ -1604,6 +1754,9 @@ export const runtimeLayer = Layer.effect(
         yield* closeCalls(sessionId, turn)
 
         if (held === undefined) return
+        // What the agent said before the Stop is in the thread before the cancel goes out: the
+        // turn is over, and the entry it was still writing settles with it.
+        yield* flush(sessionId, held, true).pipe(Effect.ignore)
         yield* attempt('cancelling the turn', held.connection.cancel()).pipe(Effect.ignore)
 
         yield* Effect.forkScoped(
@@ -1665,7 +1818,7 @@ export const runtimeLayer = Layer.effect(
         const held = yield* opened(sessionId)
         // What a load streams back is written by the drain fiber like anything else, so the window
         // is not told the Session is back before its own history is in the thread.
-        yield* drained(held)
+        yield* drained(sessionId, held)
         // The reason the fallback recorded, not a second guess at it: the sentence the interface
         // shows over the thread is the one the agent's refusal was read as.
         if (held.why !== null) return { state: 'fallback', reason: held.why } satisfies ResumeReport
@@ -1680,6 +1833,9 @@ export const runtimeLayer = Layer.effect(
         if (turn !== undefined || starting.has(sessionId)) return
         const held = live.get(sessionId)
         if (held === undefined) return
+        // The last words of a turn are written before the connection is let go: the queue ending
+        // is what ends the fiber that would have written them.
+        yield* flush(sessionId, held, true).pipe(Effect.ignore)
         live.delete(sessionId)
         replayed.delete(sessionId)
         // The queue ending is what ends the fiber draining it: nothing keeps reading a Session

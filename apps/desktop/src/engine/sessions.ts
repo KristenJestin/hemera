@@ -35,7 +35,7 @@ import {
 import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
-import { InvalidCursorError, PAGE } from './journal.ts'
+import { InvalidCursorError, PAGE, type NewEvent } from './journal.ts'
 import { UnknownProjectError } from './projects.ts'
 import { Database, DatabaseError } from './storage/database.ts'
 import { projects, sessionEntries, sessions } from './storage/schema.ts'
@@ -99,6 +99,13 @@ export interface ThreadWrite {
    * with: a replayed update to a live entry is that same entry, updated.
    */
   readonly origin?: SessionEntryOrigin
+  /**
+   * Whether this write is the last one this entry will see (Decided 10 of #17).
+   *
+   * Absent means it may be written again, which is what every caller but the coalescer says: a
+   * message grows chunk by chunk, and whoever wrote it last is the one that knows it has stopped.
+   */
+  readonly settled?: boolean
 }
 
 /**
@@ -190,6 +197,11 @@ export interface SessionsService {
    * The user's own message does not come through here: `append` is the one that refuses an
    * empty message and proposes the title. This one is told what to write, and its `kind` is
    * what the block on screen is drawn from.
+   *
+   * The Journal keeps one line per entry, whatever the number of writes (Decided 10 of #17): the
+   * first write says the entry exists, and a later one says it has settled — only when the caller
+   * says so with `settled`. An agent streams a message a few words at a time, and a Journal with
+   * one line per chunk is a Journal nobody reads.
    *
    * When a `correlationId` is given and a row of this Session already carries it, that row is
    * updated rather than a second one appended: a tool call that was running and has finished is
@@ -791,25 +803,34 @@ export const sessionsLayer = Layer.effect(
               const settledRow = rows[0]
               if (settledRow === undefined) return yield* Effect.fail(new UnknownSessionError(id))
 
+              // What both lines say, and all they say: the entry this is about, and who it was
+              // for. A reader of the Journal has the thread for the rest of it.
+              const line: Omit<NewEvent, 'type'> = {
+                entityKind: 'session',
+                entityId: id,
+                source: 'system',
+                author: entry.role === 'agent' ? 'agent' : 'hemera',
+                projectId: session.projectId,
+                sessionId: id,
+                payload: {
+                  seq,
+                  kind: entry.kind,
+                  role: entry.role,
+                  state: entry.state ?? null,
+                },
+              }
+
+              // One line per entry, never one per write (Decided 10 of #17). The first write says
+              // the entry was written; a write the caller says is the last says it has settled.
+              // A rewrite that is neither — a call in a later state, a message with more of it in
+              // it — is the entry the reader has already been told about.
+              const events: NewEvent[] = []
+              if (settled === undefined) events.push({ ...line, type: 'session.entry_written' })
+              if (entry.settled === true) events.push({ ...line, type: 'session.entry_settled' })
+
               return {
                 result: { session, entry: entryOf(settledRow) },
-                events: [
-                  {
-                    type: settled === undefined ? 'session.entry_written' : 'session.entry_settled',
-                    entityKind: 'session',
-                    entityId: id,
-                    source: 'system',
-                    author: entry.role === 'agent' ? 'agent' : 'hemera',
-                    projectId: session.projectId,
-                    sessionId: id,
-                    payload: {
-                      seq,
-                      kind: entry.kind,
-                      role: entry.role,
-                      state: entry.state ?? null,
-                    },
-                  },
-                ],
+                events,
               } satisfies Mutation<Written>
             }),
           ),

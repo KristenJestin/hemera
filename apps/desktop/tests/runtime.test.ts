@@ -19,7 +19,8 @@ import type { SessionEntry } from '@hemera/core'
 import { MachineEnvironment } from '#engine/agents/discovery.ts'
 import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
-import { AgentRuntime, CANCEL_GRACE, TEXT_LIMIT } from '#engine/agents/runtime.ts'
+import { AgentRuntime, CANCEL_GRACE, CHUNK_FLUSH, TEXT_LIMIT } from '#engine/agents/runtime.ts'
+import { SqliteClient } from '#engine/storage/database.ts'
 import { Preferences } from '#engine/preferences.ts'
 import { Projects } from '#engine/projects.ts'
 import {
@@ -52,6 +53,22 @@ afterEach(() => {
   rmSync(dataFolder, { recursive: true, force: true })
   rmSync(workingDirectory, { recursive: true, force: true })
 })
+
+/**
+ * What the Journal wrote about the entries of one Session, oldest line first.
+ *
+ * The `seq` of the entry each line is about is in its payload, which is what tells the lines of
+ * one entry from the lines of another in the same turn.
+ */
+const journalOf = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqliteClient
+    return yield* sql<{ type: string; seq: number }>`
+      SELECT type, CAST(json_extract(payload, '$.seq') AS INTEGER) AS seq
+      FROM domain_events
+      WHERE session_id = ${sessionId} AND type LIKE 'session.entry_%'
+      ORDER BY sequence`
+  })
 
 describe('A permission request blocks the turn', () => {
   test('the options are the agent’s', async () => {
@@ -420,6 +437,146 @@ describe('One message id over two kinds', () => {
         // finds its own row.
         expect(thought.correlationId).toBe('msg-1:thought')
         expect(answer.correlationId).toBe('msg-1:message')
+      }),
+    )
+  })
+})
+
+/**
+ * An answer at length, as the coalescer writes it (Decided 10 of #17).
+ *
+ * 300 chunks under one message id is what an agent streams when it answers for a while. The
+ * flush timer runs on the suite's clock, so the flushes are the suite's to make rather than a race
+ * against a real one.
+ */
+describe('A 300-chunk answer is a few flushes and one Journal line', () => {
+  test('the answer is written a few times, each with more of it, and settles once', async () => {
+    const texts = Array.from({ length: 300 }, (_, at) => `word ${at} `)
+    const whole = texts.join('')
+    const gate = gated(150)
+    const agent = fakeAgent({
+      steps: texts.map((text) => ({ does: 'says' as const, text, messageId: 'msg-1' })),
+      between: gate.between,
+    })
+    const window = watching()
+
+    await application(dataFolder, window.layer)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(
+          runtime.prompt(session.id, 'count three hundred words'),
+        )
+
+        /** What the window was told about that one entry, in the order it was told. */
+        const flushed = () =>
+          window.pushed.filter((push) => push.entry?.correlationId === 'msg-1:message')
+
+        // The agent is held at the gate halfway through, and the timer is the suite's to run: the
+        // first flush writes a prefix of the answer rather than the whole of it, which is the
+        // whole difference between writing a stream and writing its end.
+        const first = yield* Effect.gen(function* () {
+          for (let look = 0; look < 40; look++) {
+            yield* pause(5)
+            yield* TestClock.adjust(CHUNK_FLUSH)
+            if (flushed().length > 0) return flushed()
+          }
+          return yield* Effect.die('the coalescer never flushed what the agent said')
+        })
+        const half = first[0]?.entry?.body ?? ''
+        expect(half.length).toBeGreaterThan(0)
+        expect(whole.startsWith(half)).toBe(true)
+        expect(half).not.toBe(whole)
+
+        gate.carryOn()
+        expect((yield* Fiber.join(running)).stopReason).toBe('end_turn')
+
+        const answer = entryOf(
+          (yield* threadOf(session.id)).filter((entry) => entry.role === 'agent'),
+          'message',
+        )
+        // One row for the whole answer, holding all of it: the flushes are writes of one entry.
+        expect(answer.correlationId).toBe('msg-1:message')
+        expect(answer.body).toBe(whole)
+
+        // A few writes for 300 chunks, and each of them the entry with more of it in it — the
+        // thread a reader is told about is the thread it would have been told about chunk by
+        // chunk, minus the hundreds of transactions nobody was reading.
+        const bodies = flushed().map((push) => push.entry?.body ?? '')
+        expect(bodies.length).toBeLessThanOrEqual(10)
+        expect(bodies.at(-1)).toBe(whole)
+        expect(
+          bodies.every((body, at) => {
+            const before = bodies[at - 1]
+            return whole.startsWith(body) && (before === undefined || body.length > before.length)
+          }),
+        ).toBe(true)
+
+        // And the lines of that one entry say it once each: it was written, and it settled.
+        const mine = (yield* journalOf(session.id)).filter((line) => line.seq === answer.seq)
+        expect(mine.map((line) => line.type)).toEqual([
+          'session.entry_written',
+          'session.entry_settled',
+        ])
+
+        // Three lines for the whole turn, whatever the number of writes: the answer was written,
+        // the answer settled, and the turn entry was written. The turn entry is written and never
+        // settled, so it is one line — a write is not a line, and a Journal that counted writes
+        // would have told its reader about the same entry three hundred times.
+        expect((yield* journalOf(session.id)).map((line) => line.type)).toEqual([
+          'session.entry_written',
+          'session.entry_settled',
+          'session.entry_written',
+        ])
+      }),
+    )
+  })
+})
+
+/**
+ * A turn that ends with what the agent said still held (Decided 10 of #17).
+ *
+ * The clock never moves in this suite, so the timer that would have written the answer never
+ * runs: the turn ends first, and the end of a turn is what writes what is left — a coalescer that
+ * wrote on its timer alone would lose the last hundred milliseconds of every turn.
+ */
+describe('A turn that ends mid-flush loses nothing', () => {
+  test('what the coalescer held is written, before the entry that ends the turn', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'the reader opens ', messageId: 'msg-1' },
+        { does: 'says', text: 'the project', messageId: 'msg-1' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        expect((yield* runtime.prompt(session.id, 'what does the reader do')).stopReason).toBe(
+          'end_turn',
+        )
+
+        const entries = yield* threadOf(session.id)
+        const answer = entryOf(
+          entries.filter((entry) => entry.role === 'agent'),
+          'message',
+        )
+
+        // The whole answer, in one entry: two chunks the timer never wrote, written by the end of
+        // the turn rather than lost with it.
+        expect(answer.body).toBe('the reader opens the project')
+        expect(entries.filter((entry) => entry.correlationId === 'msg-1:message')).toHaveLength(1)
+        // And before the entry that says the turn is over: the thread reads in the order the agent
+        // said it, whatever a timer did or did not do.
+        expect(answer.seq).toBeLessThan(entryOf(entries, 'turn').seq)
+
+        // One write, so one pair of lines: the entry exists, and it will not move again.
+        const lines = (yield* journalOf(session.id)).filter((line) => line.seq === answer.seq)
+        expect(lines.map((line) => line.type)).toEqual([
+          'session.entry_written',
+          'session.entry_settled',
+        ])
       }),
     )
   })
