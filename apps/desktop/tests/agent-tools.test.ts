@@ -946,3 +946,44 @@ describe('A change during a turn leaves at the next safe point', () => {
     expect(seen.provided.find((one) => one.kind === 'native')?.reached).toBe('read_natively')
   })
 })
+
+describe('A delivery outside a turn is its own turn', () => {
+  test('the change goes out as a turn with no message, and the answer lands inside it', async () => {
+    writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')
+    const agent = fakeAgent({
+      steps: [{ does: 'says', text: 'done' }],
+      answersDelivery: [{ does: 'says', text: 'Noted: brief, and why.' }],
+    })
+
+    const entries = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'start')
+        // The instructions change while nothing runs: the next safe point is now.
+        writeFileSync(join(workspace, AGENTS_FILE), 'Be brief, and say why.\n')
+        return yield* until(
+          threadOf(session.id),
+          (thread) => thread.filter((entry) => entry.kind === 'turn').length === 2,
+        )
+      }),
+    )
+
+    const [first, delivery] = entries.filter((entry) => entry.kind === 'turn')
+    expect(JSON.parse(first?.payload ?? '{}')).toEqual({ stopReason: 'end_turn' })
+    // A turn of its own, said to be a delivery, which ended as the agent ended it.
+    expect(JSON.parse(delivery?.payload ?? '{}')).toEqual({
+      stopReason: 'end_turn',
+      kind: 'delivery',
+    })
+    const turnId = delivery?.turnId ?? ''
+    const inside = entries.filter((entry) => entry.turnId === turnId)
+    // The delivery, what the agent answered it, and the entry that closes the turn — and no
+    // message of the user's: the one they wrote is the first turn's.
+    expect(inside.map((entry) => entry.kind)).toEqual(['context_delivery', 'message', 'turn'])
+    expect(inside.find((entry) => entry.kind === 'message')?.body).toBe('Noted: brief, and why.')
+    expect(
+      entries.filter((entry) => entry.role === 'user' && entry.kind === 'message'),
+    ).toHaveLength(1)
+  })
+})

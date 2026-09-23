@@ -237,6 +237,11 @@ export interface FakeScript {
    * because most suites hand it an address nothing listens on.
    */
   readonly listsTools?: boolean
+  /**
+   * What it says in answer to a delivery (D6-08): nothing, by default, as an agent that takes the
+   * change in; a real agent may answer it, and that answer belongs to a turn of its own.
+   */
+  readonly answersDelivery?: readonly FakeStep[]
 }
 
 /**
@@ -853,7 +858,13 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       script.onPrompt?.(text)
       // A prompt that is only what Hemera provides — the marker and its resources, no word of the
       // user's — is a delivery (D6-08): the agent takes it in and has nothing to do about it.
-      if (provisionOnly(request)) return { stopReason: 'end_turn' }
+      if (provisionOnly(request)) {
+        for (const step of script.answersDelivery ?? []) {
+          // oxlint-disable-next-line no-await-in-loop -- what it says is sent in order
+          await notify(step)
+        }
+        return { stopReason: 'end_turn' }
+      }
       const scripted = script.turns?.[turnsTaken] ?? script.steps ?? []
       turnsTaken += 1
       for (const step of scripted) {

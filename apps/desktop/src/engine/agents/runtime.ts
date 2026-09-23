@@ -1738,13 +1738,23 @@ export const runtimeLayer = Layer.effect(
         )
       })
 
-    /** The turn entry, written once per turn: what it ended with, in the thread's words. */
-    const closeTurn = (sessionId: string, turn: Turn, stopReason: TurnStopReason) =>
+    /**
+     * The turn entry, written once per turn: what it ended with, in the thread's words.
+     *
+     * A turn Hemera opened to hand a change over says so (D6-08): `kind: 'delivery'`, a turn
+     * with no message of the user's in it.
+     */
+    const closeTurn = (
+      sessionId: string,
+      turn: Turn,
+      stopReason: TurnStopReason,
+      kind: 'prompt' | 'delivery' = 'prompt',
+    ) =>
       write(sessionId, {
         role: 'hemera',
         kind: 'turn',
         body: STOP_TEXT[stopReason] ?? `The turn ended: ${stopReason}.`,
-        payload: JSON.stringify({ stopReason }),
+        payload: JSON.stringify(kind === 'delivery' ? { stopReason, kind } : { stopReason }),
         correlationId: `turn:${turn.id}`,
         turnId: turn.id,
         state: stopReason,
@@ -1759,17 +1769,24 @@ export const runtimeLayer = Layer.effect(
      */
     const turnGate = (sessionId: string) => gateOf(`turn:${sessionId}`)
 
+    /** A change of the instructions, as the context hands it over, or null when none waits. */
+    type Delivery = Effect.Success<ReturnType<typeof context.deliver>>
+
     /**
-     * Hands a change of the Workspace's instructions over, if one waits (D6-08).
+     * Sends one change of the Workspace's instructions (D6-08).
      *
      * A prompt of its own, made of the marker and the new text as a resource and of nothing the
      * user said: the agent is handed a change, not a message. The thread gets a
-     * `context_delivery` entry — never a message of anyone — and the window is told.
+     * `context_delivery` entry — never a message of anyone — in the turn it went out in, and the
+     * window is told. What the agent answered the prompt with is handed back.
      */
-    const handOver = (sessionId: string, held: Live) =>
+    const sendDelivery = (
+      sessionId: string,
+      held: Live,
+      delivered: NonNullable<Delivery>,
+      turnId: string | null,
+    ) =>
       Effect.gen(function* () {
-        const delivered = yield* attempt('delivering the context', context.deliver(sessionId))
-        if (delivered === null) return
         yield* write(sessionId, {
           role: 'hemera',
           kind: 'context_delivery',
@@ -1782,11 +1799,10 @@ export const runtimeLayer = Layer.effect(
             reached: delivered.record.reached,
           }),
           correlationId: `delivery:${delivered.record.fingerprint}`,
-          turnId: null,
+          turnId,
         })
         notices.changed(sessionId, 'context_delivered')
-        yield* attempt(
-          'delivering the context',
+        return yield* Effect.result(
           held.connection.prompt('', [
             {
               uri: contextUri(delivered.record.path),
@@ -1798,10 +1814,34 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
+     * Hands a change over, if one waits, right before the prompt of a turn the user started: it
+     * goes out inside that turn, and whatever the agent answers it lands there.
+     */
+    const handOver = (sessionId: string, held: Live) =>
+      Effect.gen(function* () {
+        const delivered = yield* attempt('delivering the context', context.deliver(sessionId))
+        if (delivered === null) return
+        const sent = yield* sendDelivery(sessionId, held, delivered, null)
+        if (Result.isFailure(sent)) {
+          return yield* Effect.fail(
+            new AgentRuntimeError({
+              what: 'delivering the context',
+              cause: describe(sent.failure),
+            }),
+          )
+        }
+      })
+
+    /**
      * Hands a change over at the next safe point: when the turn running now ends, or now.
      *
      * Nothing is sent to an agent that is not running any more — the next one reads the file when
      * it starts — nor while a prompt is being started, which hands the change over itself.
+     *
+     * Sent while no turn runs, the delivery is a prompt the agent may answer, so it is a turn of
+     * its own (D6-08): opened as the user's turns are — announced, registered, so a Stop reaches
+     * it — with no message of anyone's, and closed by a `turn` entry of kind `delivery`. What the
+     * agent says in answer lands inside it, and the activity row shows it.
      */
     const deliverWhenSafe = (sessionId: string) =>
       turnGate(sessionId).withPermits(1)(
@@ -1809,11 +1849,47 @@ export const runtimeLayer = Layer.effect(
           const held = live.get(sessionId)
           if (held === undefined || held.death !== null) return
           if (turns.has(sessionId) || starting.has(sessionId)) return
+          const delivered = yield* attempt(
+            'delivering the context',
+            context.deliver(sessionId),
+          ).pipe(Effect.orElseSucceed(() => null))
+          if (delivered === null) return
+
+          const turn: Turn = {
+            id: `${sessionId}:${Date.now()}`,
+            said: new Map(),
+            calls: new Map(),
+            permission: null,
+            closed: null,
+          }
+          turns.set(sessionId, turn)
+          notices.changed(sessionId, 'turn_started')
           yield* pool.busy(sessionId, true).pipe(Effect.ignore)
-          yield* handOver(sessionId, held).pipe(
-            Effect.andThen(drained(sessionId, held)),
+          yield* Effect.gen(function* () {
+            const sent = yield* sendDelivery(sessionId, held, delivered, turn.id)
+            yield* drained(sessionId, held)
+            // The same endings as a turn the user started: its stop reason, a Stop, a death, or
+            // an error the agent answered with, which is a turn that failed.
+            const stopReason: TurnStopReason =
+              turn.closed ??
+              (Result.isSuccess(sent)
+                ? sent.success.stopReason
+                : held.death === null
+                  ? 'failed'
+                  : 'interrupted')
+            if (Result.isFailure(sent) && stopReason === 'failed') {
+              yield* note(sessionId, turn, sent.failure.cause, 'delivery_failed')
+            }
+            yield* closeTurn(sessionId, turn, stopReason, 'delivery')
+          }).pipe(
             Effect.ignore,
-            Effect.ensuring(pool.busy(sessionId, false).pipe(Effect.ignore)),
+            Effect.ensuring(
+              Effect.gen(function* () {
+                turns.delete(sessionId)
+                yield* pool.busy(sessionId, false).pipe(Effect.ignore)
+                notices.changed(sessionId, 'turn_ended')
+              }),
+            ),
           )
         }),
       )

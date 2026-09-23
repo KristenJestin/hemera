@@ -362,6 +362,27 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
     expect(activityOf([said, call, died])).toEqual({ state: 'failed' })
   })
 
+  test('A delivery outside a turn is its own turn', () => {
+    const said = entry('e1', 'user', 'Start')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn', 'turn-1')
+    const delivered = reported(
+      'e3',
+      'context_delivery',
+      'The instructions changed.',
+      null,
+      'turn-2',
+    )
+    const answer = reported('e4', 'message', 'Noted', null, 'turn-2')
+
+    // The answer to the delivery is the turn that runs now, not the end of the one before it.
+    expect(activityOf([said, done, delivered, answer]).state).toBe('streaming')
+    const closed = reported('e5', 'turn', 'The agent finished its turn.', 'end_turn', 'turn-2')
+    expect(activityOf([said, done, delivered, answer, closed]).state).toBe('done')
+    // A delivery inside the user's turn carries no turn of its own and starts nothing.
+    const inTurn = reported('e3', 'context_delivery', 'The instructions changed.', null, null)
+    expect(activityOf([said, done, inTurn]).state).toBe('done')
+  })
+
   test('A refused prompt is a failed turn, not a stopped one', () => {
     const said = entry('e1', 'user', 'Read the notes')
     const refused = reported('e2', 'turn', 'The agent could not answer.', 'failed')
