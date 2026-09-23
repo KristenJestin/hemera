@@ -92,17 +92,16 @@ export const providedSchema = z.object({
 export type Provided = z.infer<typeof providedSchema>
 
 /**
- * The three lists of the Context view (design D6-10).
+ * The Context view of a Session (design D6-10).
  *
  * Provided: what went to the agent and how. Consultable: the tools offered, each with the limit
- * it is held to, and the catalogue the agent may run. Private: one sentence about what the
- * Session's agent keeps that Hemera does not see — nothing about what the model retained.
+ * it is held to, and the catalogue the agent may run. What the agent keeps to itself is not the
+ * Session's to say: it is said of the agent, in its settings.
  */
 export const contextViewSchema = z.object({
   provided: z.array(providedSchema),
   tools: z.array(z.object({ name: z.string(), bound: z.string() })),
   commands: z.array(z.object({ name: z.string(), line: z.string() })),
-  private: z.array(z.object({ agent: z.string(), sentence: z.string() })),
 })
 
 export type ContextView = z.infer<typeof contextViewSchema>

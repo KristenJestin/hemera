@@ -100,7 +100,6 @@ function aView(
     })),
     tools: [{ name: 'fs_read', bound: '256 KiB' }],
     commands,
-    private: [],
   }
 }
 
@@ -169,7 +168,6 @@ function aViewOf(provided: Provided[]): ContextView {
     provided,
     tools: [{ name: 'search', bound: '200 matches and 1 MiB scanned a call' }],
     commands: [],
-    private: [],
   }
 }
 

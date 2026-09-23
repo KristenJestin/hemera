@@ -194,7 +194,7 @@ describe('The agent starts the app and the user opens it', () => {
 })
 
 describe('The view lists the sources with their provenance', () => {
-  test('the base and AGENTS.md with how they reached the agent, the tools, the catalogue, the private part', async () => {
+  test('the base and AGENTS.md with how they reached the agent, the tools and the catalogue', async () => {
     writeFileSync(join(workspace, AGENTS_FILE), '# Atlas\n\nKeep the tests green.\n')
     opened = await openWindow(dataFolder, fakeAgent({ steps: [{ does: 'says', text: 'ok' }] }))
     const { bridge } = opened
@@ -224,8 +224,5 @@ describe('The view lists the sources with their provenance', () => {
       '200 matches and 1 MiB scanned a call',
     )
     expect(view.commands).toEqual([{ name: 'check', line: 'pnpm check' }])
-    expect(view.private).toHaveLength(1)
-    expect(view.private[0]?.agent).toBe('OpenCode')
-    expect(view.private[0]?.sentence).toContain('Hemera does not read')
   })
 })
