@@ -1780,8 +1780,8 @@ export const runtimeLayer = Layer.effect(
      */
     const turnGate = (sessionId: string) => gateOf(`turn:${sessionId}`)
 
-    /** A change of the instructions, as the context hands it over, or null when none waits. */
-    type Delivery = Effect.Success<ReturnType<typeof context.deliver>>
+    /** A change of the instructions, as the context says it waits, or null when none does. */
+    type Delivery = Effect.Success<ReturnType<typeof context.pending>>
 
     /**
      * Sends one change of the Workspace's instructions (D6-08).
@@ -1790,38 +1790,66 @@ export const runtimeLayer = Layer.effect(
      * user said: the agent is handed a change, not a message. The thread gets a
      * `context_delivery` entry — never a message of anyone — in the turn it went out in, and the
      * window is told. What the agent answered the prompt with is handed back.
+     *
+     * The change counts as given only once the agent took it: a prompt that failed or was stopped
+     * leaves it pending, so the next safe point hands it over again, and the entry says it was not.
+     * Each delivery is an entry of its own, whatever its text: a file edited A, B, A, B is four.
      */
     const sendDelivery = (
       sessionId: string,
       held: Live,
-      delivered: NonNullable<Delivery>,
+      waiting: NonNullable<Delivery>,
       turnId: string | null,
     ) =>
       Effect.gen(function* () {
-        yield* write(sessionId, {
-          role: 'hemera',
-          kind: 'context_delivery',
-          body: 'The instructions of the Workspace changed and were handed to the agent.',
-          payload: JSON.stringify({
-            kind: delivered.record.kind,
-            path: delivered.record.path,
-            fingerprint: delivered.record.fingerprint,
-            deliveredAt: delivered.record.deliveredAt,
-            reached: delivered.record.reached,
-          }),
-          correlationId: `delivery:${delivered.record.fingerprint}`,
-          turnId,
-        })
+        const correlationId = `delivery:${crypto.randomUUID()}`
+        const entry = (body: string, state: string | null, deliveredAt: string | null) =>
+          write(sessionId, {
+            role: 'hemera',
+            kind: 'context_delivery',
+            body,
+            payload: JSON.stringify({
+              kind: 'instructions',
+              path: waiting.path,
+              // What the agent held and what it is handed, both named (D6-08).
+              before: waiting.before,
+              after: waiting.fingerprint,
+              fingerprint: waiting.fingerprint,
+              deliveredAt,
+              reached: 'delivery_prompt',
+            }),
+            correlationId,
+            turnId,
+            state,
+          })
+        yield* entry(
+          'The instructions of the Workspace changed and were handed to the agent.',
+          null,
+          new Date().toISOString(),
+        )
         notices.changed(sessionId, 'context_delivered')
-        return yield* Effect.result(
+        const sent = yield* Effect.result(
           held.connection.prompt('', [
             {
-              uri: contextUri(delivered.record.path),
-              text: delivered.content,
+              uri: contextUri(waiting.path),
+              text: waiting.content,
               mimeType: 'text/markdown',
             },
           ]),
         )
+        const taken = Result.isSuccess(sent) && sent.success.stopReason !== 'cancelled'
+        if (taken) {
+          yield* attempt('recording the delivery', context.delivered(sessionId, waiting)).pipe(
+            Effect.ignore,
+          )
+        } else {
+          yield* entry(
+            'The instructions of the Workspace changed, and were not handed over: they wait for the next safe point.',
+            'failed',
+            null,
+          ).pipe(Effect.ignore)
+        }
+        return sent
       })
 
     /**
@@ -1830,9 +1858,9 @@ export const runtimeLayer = Layer.effect(
      */
     const handOver = (sessionId: string, held: Live) =>
       Effect.gen(function* () {
-        const delivered = yield* attempt('delivering the context', context.deliver(sessionId))
-        if (delivered === null) return
-        const sent = yield* sendDelivery(sessionId, held, delivered, null)
+        const waiting = yield* attempt('delivering the context', context.pending(sessionId))
+        if (waiting === null) return
+        const sent = yield* sendDelivery(sessionId, held, waiting, null)
         if (Result.isFailure(sent)) {
           return yield* Effect.fail(
             new AgentRuntimeError({
@@ -1860,11 +1888,10 @@ export const runtimeLayer = Layer.effect(
           const held = live.get(sessionId)
           if (held === undefined || held.death !== null) return
           if (turns.has(sessionId) || starting.has(sessionId)) return
-          const delivered = yield* attempt(
-            'delivering the context',
-            context.deliver(sessionId),
-          ).pipe(Effect.orElseSucceed(() => null))
-          if (delivered === null) return
+          const waiting = yield* attempt('delivering the context', context.pending(sessionId)).pipe(
+            Effect.orElseSucceed(() => null),
+          )
+          if (waiting === null) return
 
           const turn: Turn = {
             id: `${sessionId}:${Date.now()}`,
@@ -1877,7 +1904,7 @@ export const runtimeLayer = Layer.effect(
           notices.changed(sessionId, 'turn_started')
           yield* pool.busy(sessionId, true).pipe(Effect.ignore)
           yield* Effect.gen(function* () {
-            const sent = yield* sendDelivery(sessionId, held, delivered, turn.id)
+            const sent = yield* sendDelivery(sessionId, held, waiting, turn.id)
             yield* drained(sessionId, held)
             // The same endings as a turn the user started: its stop reason, a Stop, a death, or
             // an error the agent answered with, which is a turn that failed.

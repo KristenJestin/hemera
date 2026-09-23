@@ -1053,6 +1053,84 @@ describe('A change during a turn leaves at the next safe point', () => {
   })
 })
 
+describe('A delivery counts as given only once it was sent', () => {
+  test('a delivery the agent refused stays pending, and the next safe point hands it over', async () => {
+    writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')
+    let refusals = 0
+    const agent = fakeAgent({
+      steps: [{ does: 'says', text: 'done' }],
+      onPrompt: (text) => {
+        if (text !== DELIVERY_MARKER || refusals > 0) return
+        refusals += 1
+        throw new Error('the provider refused the prompt')
+      },
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const context = yield* AgentContext
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'start')
+        // Changed while nothing runs: the watcher hands it over, and the agent refuses it.
+        writeFileSync(join(workspace, AGENTS_FILE), 'Be brief, and say why.\n')
+        yield* until(threadOf(session.id), (thread) =>
+          thread.some((entry) => entry.kind === 'context_delivery' && entry.state === 'failed'),
+        )
+        const afterRefusal = yield* context.provided(session.id)
+        // The next prompt is the next safe point: the change goes out before it, again.
+        yield* runtime.prompt(session.id, 'carry on')
+        return {
+          afterRefusal,
+          provided: yield* context.provided(session.id),
+          entries: yield* threadOf(session.id),
+        }
+      }),
+    )
+
+    expect(seen.afterRefusal.filter((one) => one.kind === 'instructions')).toHaveLength(0)
+    expect(seen.provided.filter((one) => one.kind === 'instructions')).toHaveLength(1)
+    const deliveries = seen.entries.filter((entry) => entry.kind === 'context_delivery')
+    expect(deliveries.map((entry) => entry.state)).toEqual(['failed', null])
+    expect(
+      agent.answers.blocks.filter((blocks) => blocks[0]?.type === 'text' && blocks.length === 2),
+    ).toHaveLength(2)
+  })
+
+  test('a file edited A, B, A, B keeps an entry per delivery, each naming what it replaced', async () => {
+    const A = 'Be brief.\n'
+    const B = 'Be brief, and say why.\n'
+    const fingerprintOf = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex')
+    writeFileSync(join(workspace, AGENTS_FILE), A)
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
+
+    const entries = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'start')
+        for (const text of [B, A, B, A]) {
+          writeFileSync(join(workspace, AGENTS_FILE), text)
+          yield* runtime.prompt(session.id, 'go on')
+        }
+        return yield* threadOf(session.id)
+      }),
+    )
+
+    const deliveries = entries
+      .filter((entry) => entry.kind === 'context_delivery')
+      .map((entry) =>
+        z.object({ before: z.string(), after: z.string() }).parse(JSON.parse(entry.payload)),
+      )
+    expect(deliveries).toEqual([
+      { before: fingerprintOf(A), after: fingerprintOf(B) },
+      { before: fingerprintOf(B), after: fingerprintOf(A) },
+      { before: fingerprintOf(A), after: fingerprintOf(B) },
+      { before: fingerprintOf(B), after: fingerprintOf(A) },
+    ])
+  })
+})
+
 describe('A delivery outside a turn is its own turn', () => {
   test('the change goes out as a turn with no message, and the answer lands inside it', async () => {
     writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')

@@ -78,6 +78,16 @@ const instructions = (text: string): void => {
   writeFileSync(join(root, AGENTS_FILE), text)
 }
 
+/** What waits, handed to the agent and recorded as given, as the runtime does once it was sent. */
+const handedOver = (sessionId: string) =>
+  Effect.gen(function* () {
+    const context = yield* Context
+    const waiting = yield* context.pending(sessionId)
+    if (waiting === null) return null
+    const record = yield* context.delivered(sessionId, waiting)
+    return { ...waiting, record }
+  })
+
 describe('what a Session is provided', () => {
   it('records the base and the file a Session starts with', async () => {
     instructions('Be brief.\n')
@@ -125,8 +135,8 @@ describe('what a Session is provided', () => {
         const before = yield* context.pending(sessionId)
         instructions('Be brief, and say why.\n')
         const waiting = yield* context.pending(sessionId)
-        const once = yield* context.deliver(sessionId)
-        const twice = yield* context.deliver(sessionId)
+        const once = yield* handedOver(sessionId)
+        const twice = yield* handedOver(sessionId)
         const provided = yield* context.provided(sessionId)
         return { before, waiting, once, twice, provided }
       }),
@@ -150,7 +160,7 @@ describe('what a Session is provided', () => {
         yield* context.start(sessionId)
         const unchanged = yield* context.pending(sessionId)
         instructions('Be brief, and say why.\n')
-        yield* context.deliver(sessionId)
+        yield* handedOver(sessionId)
         const delivered = yield* context.pending(sessionId)
         return { unchanged, delivered }
       }),
@@ -173,7 +183,7 @@ describe('what a Session is provided', () => {
         const handed: (string | null)[] = []
         for (const text of [B, A, B]) {
           instructions(text)
-          const delivered = yield* context.deliver(sessionId)
+          const delivered = yield* handedOver(sessionId)
           handed.push(delivered === null ? null : delivered.text)
         }
         return { handed, provided: yield* context.provided(sessionId) }
@@ -185,5 +195,28 @@ describe('what a Session is provided', () => {
     expect(seen.handed[1]).toContain('Be brief.')
     expect(seen.handed[1]).not.toContain('say why')
     expect(seen.provided.filter((one) => one.kind === 'instructions')).toHaveLength(3)
+  })
+
+  it('keeps a change pending until it is recorded as given, and names what it replaces', async () => {
+    const A = 'Be brief.\n'
+    const B = 'Be brief, and say why.\n'
+    instructions(A)
+
+    const seen = await given(
+      Effect.gen(function* () {
+        const { sessionId } = yield* opened
+        const context = yield* Context
+        const started = yield* context.start(sessionId)
+        instructions(B)
+        // Asked for, and never recorded as given: its sending failed.
+        const first = yield* context.pending(sessionId)
+        const again = yield* context.pending(sessionId)
+        return { started, first, again, provided: yield* context.provided(sessionId) }
+      }),
+    )
+
+    expect(seen.again?.fingerprint).toBe(seen.first?.fingerprint)
+    expect(seen.first?.before).toBe(seen.started.instructions?.fingerprint)
+    expect(seen.provided.filter((one) => one.kind === 'instructions')).toHaveLength(0)
   })
 })

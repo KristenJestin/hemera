@@ -15,7 +15,9 @@
  * Nothing here watches the filesystem. The safe point is the caller's, and `pending` reads the
  * file then, which is the only moment the answer is worth anything. The entry a delivery makes
  * in the thread is the caller's too: it is written when the text is handed over, by the one that
- * hands it over, and not by the service that computed it.
+ * hands it over, and not by the service that computed it. So is the moment a change counts as
+ * given: `delivered` is told once the agent took it, and a change whose sending failed is still
+ * pending at the next safe point.
  */
 
 import { createHash } from 'node:crypto'
@@ -70,18 +72,13 @@ export interface Started {
 /** What waits for the next safe point. */
 export interface Pending {
   readonly path: string
+  /** The fingerprint of what the agent was last given, which this change replaces (D6-08). */
+  readonly before: string | null
+  /** The fingerprint of the instructions as they now read. */
   readonly fingerprint: string
   /** The text as it is handed over: the marker, and the instructions as they now read. */
   readonly text: string
   /** The instructions as they now read, which is what a delivery carries as its resource. */
-  readonly content: string
-}
-
-/** What a delivery leaves behind: what to hand over, and what to record in the thread. */
-export interface Delivered {
-  readonly record: Delivery
-  readonly text: string
-  /** The instructions as they now read, without the marker: the resource of the delivery. */
   readonly content: string
 }
 
@@ -92,12 +89,10 @@ export interface ContextService {
   /** What waits for the next safe point, if anything. */
   readonly pending: (sessionId: string) => Effect.Effect<Pending | null, Refusal>
   /**
-   * Hands over what waits: the row, once, and the text to give the agent between two turns.
-   *
-   * Null when nothing waits, and null again for a text that was already given — which is not a
-   * failure but the ordinary answer of a Session whose instructions did not change.
+   * Records a change as given, once the agent took it: from then on it is what the agent holds,
+   * and the file reading as it is no longer a change.
    */
-  readonly deliver: (sessionId: string) => Effect.Effect<Delivered | null, Refusal>
+  readonly delivered: (sessionId: string, given: Pending) => Effect.Effect<Delivery, Refusal>
   /** Everything a Session was provided, oldest first. */
   readonly provided: (sessionId: string) => Effect.Effect<Delivery[], Refusal>
 }
@@ -323,26 +318,29 @@ export const contextLayer = Layer.effect(
         if (instructions === null) return null
         // What the agent holds is what it was last given, read at the start or delivered since:
         // a file that reads as that is not a change, and one that reads as anything else is.
-        if ((yield* lastGiven(sessionId)) === instructions.fingerprint) return null
+        const before = yield* lastGiven(sessionId)
+        if (before === instructions.fingerprint) return null
         return {
           path: AGENTS_FILE,
+          before,
           fingerprint: instructions.fingerprint,
           text: deliveryText(instructions.text),
           content: instructions.text,
         }
       })
 
-    const deliver = (sessionId: string): Effect.Effect<Delivered | null, Refusal> =>
+    const delivered = (sessionId: string, given: Pending): Effect.Effect<Delivery, Refusal> =>
       Effect.gen(function* () {
-        const waiting = yield* pending(sessionId)
-        if (waiting === null) return null
-        const written = yield* record(sessionId, 'instructions', waiting.path, waiting.fingerprint)
-        if (written === null) return null
-        return {
-          record: { ...written, reached: 'delivery_prompt' as const },
-          text: waiting.text,
-          content: waiting.content,
+        const written = yield* record(sessionId, 'instructions', given.path, given.fingerprint)
+        // A delivery row is always new — the unique index leaves them out — so this is the row
+        // just written; a base or a native file never reaches here.
+        const row = written ?? {
+          kind: 'instructions' as const,
+          path: given.path,
+          fingerprint: given.fingerprint,
+          deliveredAt: new Date().toISOString(),
         }
+        return { ...row, reached: 'delivery_prompt' as const }
       })
 
     /**
@@ -387,6 +385,6 @@ export const contextLayer = Layer.effect(
         }))
       })
 
-    return { start, pending, deliver, provided }
+    return { start, pending, delivered, provided }
   }),
 )
