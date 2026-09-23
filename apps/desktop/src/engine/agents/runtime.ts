@@ -1368,7 +1368,7 @@ export const runtimeLayer = Layer.effect(
             (refused) =>
               new AgentRuntimeError({
                 what: 'starting the agent',
-                cause: `${refused.label} cannot run without its own tools here: ${refused.reason}`,
+                cause: refused.message,
               }),
           ),
         )

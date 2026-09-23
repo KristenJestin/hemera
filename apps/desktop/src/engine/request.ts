@@ -32,7 +32,8 @@ import type {
 import { type AgentOption } from './agents/client.ts'
 import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
-import { Discovery } from './agents/discovery.ts'
+import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
+import { ADAPTERS, Discovery } from './agents/discovery.ts'
 import {
   type NothingToRunError,
   type UnknownCommandFolderError,
@@ -182,6 +183,11 @@ export function answer(
       // The agent the Session is made with crosses with the Project (D5-06): it is chosen once,
       // in the composer that starts it, and every turn of that Session runs it.
       const { projectId, provider } = decision.argument
+      // Bare, or no Session at all (D6-02): an agent whose means leaves a tool of its own behind
+      // is refused here, with its adapter's reason, before anything is written.
+      if (provider !== null) {
+        yield* refusedUnlessBare(ADAPTERS[provider], globalThis.process.platform)
+      }
       return yield* sessions.create(projectId, provider)
     }
     if (decision.name === 'sessions.rename') {
@@ -343,6 +349,7 @@ export type Refusal =
   | EmptyMessageError
   | EmptyTitleError
   | NoAgentError
+  | BareModeNotQualifiedError
   | DuplicateCommandNameError
   | EmptyCommandNameError
   | EmptyCommandLineError

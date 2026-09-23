@@ -1,5 +1,5 @@
 import type { AgentAvailability } from '@hemera/ipc'
-import type { BareMode } from '@hemera/ui'
+import type { BareMode, OfferedAgent } from '@hemera/ui'
 
 /**
  * An agent's bare mode, in the words the window says it with (design D6-02).
@@ -21,4 +21,30 @@ export function bareRowOf(agent: AgentAvailability): BareMode {
   // The adapter's sentence as it wrote it, and the means it was about after it.
   const said = reason ?? 'Its adapter says it cannot run bare here.'
   return { qualified, reason: `${said} Means tried: ${means}.` }
+}
+
+/**
+ * An agent of this machine, as the Home's composer offers it (design D5-21, D6-02).
+ *
+ * An agent is offered when a Session could be made on it: it is installed, signed in, and its
+ * combination is qualified here. One that is not is drawn and cannot be picked, and the hint is
+ * the way out of it in the engine's own words — the command that installs it, the adapter's
+ * reason it cannot run bare, the command that signs it in — which is the one thing the reader
+ * can act on, and the same sentence `sessions.create` refuses it with.
+ */
+export function offeredOf(agent: AgentAvailability): OfferedAgent {
+  const { qualified, reason } = agent.bareMode
+  const offered: OfferedAgent = {
+    id: agent.id,
+    name: agent.label,
+    // Not qualified is not "not installed", and the hint says which it is: the menu reads an
+    // agent it cannot offer from this flag, and the sentence under it from the hint.
+    available: agent.found && qualified,
+    signedIn: agent.authenticated,
+  }
+  if (!agent.found) offered.hint = agent.installHint
+  else if (!qualified)
+    offered.hint = `${agent.label} cannot run without its own tools here: ${reason ?? ''}`
+  else if (!agent.authenticated) offered.hint = agent.loginHint
+  return offered
 }

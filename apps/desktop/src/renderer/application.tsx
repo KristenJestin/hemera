@@ -82,7 +82,7 @@ import {
   subscribeToAgent,
   updateAgent,
 } from './agent-store.ts'
-import { bareRowOf } from './bare-mode.ts'
+import { bareRowOf, offeredOf } from './bare-mode.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
   archivedSessions,
@@ -225,19 +225,6 @@ async function pickFolder(): Promise<string | null> {
 async function checkFolder(path: string): Promise<string | null> {
   const found = await window.hemera.invoke('workspace.check', { path })
   return found.ok ? null : found.reason
-}
-
-/**
- * What is said about an agent that cannot be picked, in the engine's own words (design D5-21).
- *
- * The way out of it and not the state alone: the menu can say "not installed" by itself, and
- * what it cannot say is the command that installs this agent or signs it in — which is the one
- * thing the reader can do about either.
- */
-function hintOf(agent: AgentAvailability): string | undefined {
-  if (!agent.found) return agent.installHint
-  if (!agent.authenticated) return agent.loginHint
-  return undefined
 }
 
 /**
@@ -1025,13 +1012,7 @@ export function Application() {
         projectName={active.name}
         sessions={recent}
         entries={linesOf(journal.entries).slice(0, ACTIVITY)}
-        agents={agents.agents.map((one) => ({
-          id: one.id,
-          name: one.label,
-          available: one.found,
-          signedIn: one.authenticated,
-          hint: hintOf(one),
-        }))}
+        agents={agents.agents.map(offeredOf)}
         // What this Project's composer was left on, which is what the Home opens on.
         choice={composers[active.id] ?? null}
         offeringOf={(chosen) => offeringOf(active.id, providerOf(chosen))}

@@ -123,7 +123,17 @@ export class BareModeNotQualifiedError extends Data.TaggedError('BareModeNotQual
   readonly label: string
   readonly means: string
   readonly reason: string
-}> {}
+}> {
+  /**
+   * What the window shows: the agent, and the adapter's own reason, word for word (D6-02).
+   *
+   * A tagged error has no message, and a refusal that crosses the port without one crosses as
+   * its own fields. This is the sentence, the same wherever the refusal is met.
+   */
+  override get message(): string {
+    return `${this.label} cannot run without its own tools here: ${this.reason}`
+  }
+}
 
 /** What this adapter declares about running its agent bare on this platform. */
 export function bareModeOf(adapter: AgentAdapter, platform: NodeJS.Platform): BareMode {
@@ -144,6 +154,28 @@ export function bareOptionsOf(
 ): Effect.Effect<BareOptions, BareModeNotQualifiedError> {
   const mode = bareModeOf(adapter, platform)
   if (mode.qualified) return Effect.succeed(mode.options(input))
+  return Effect.fail(
+    new BareModeNotQualifiedError({
+      id: adapter.id,
+      label: adapter.label,
+      means: mode.means,
+      reason: mode.reason,
+    }),
+  )
+}
+
+/**
+ * Nothing, or the refusal of an agent whose combination is not qualified on this platform (D6-02).
+ *
+ * Asked before a Session is made, not only when its agent is started: a Session on an agent that
+ * cannot run bare is not a Session that fails later, it is one that is never written.
+ */
+export function refusedUnlessBare(
+  adapter: AgentAdapter,
+  platform: NodeJS.Platform,
+): Effect.Effect<void, BareModeNotQualifiedError> {
+  const mode = bareModeOf(adapter, platform)
+  if (mode.qualified) return Effect.void
   return Effect.fail(
     new BareModeNotQualifiedError({
       id: adapter.id,

@@ -1,0 +1,68 @@
+/**
+ * A Session is not made on an agent that cannot run bare (design D6-02).
+ *
+ * The refusal is the engine's, at `sessions.create`, before anything is written — not only when
+ * the agent is started. What is under test is what the window is told, through the stores the
+ * Home is drawn from: the reason is the adapter's own, the same sentence under the agent in the
+ * composer's menu and in the refusal of a Session asked for all the same, and no Session exists.
+ */
+
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
+
+import { bareModeOf } from '#engine/agents/bare.ts'
+import { ADAPTERS } from '#engine/agents/discovery.ts'
+import { fakeAgent } from '#engine/agents/fake.ts'
+import { agentSnapshot, loadAgents } from '#renderer/agent-store.ts'
+import { offeredOf } from '#renderer/bare-mode.ts'
+import { sessionsSnapshot, startSession } from '#renderer/sessions-store.ts'
+
+import { type OpenWindow, install, openWindow } from './window.ts'
+
+let dataFolder: string
+let workspace: string
+let opened: OpenWindow | null = null
+
+beforeEach(() => {
+  dataFolder = mkdtempSync(join(tmpdir(), 'hemera-session-refusal-'))
+  workspace = mkdtempSync(join(tmpdir(), 'hemera-session-refusal-workspace-'))
+})
+
+afterEach(async () => {
+  await opened?.close()
+  opened = null
+  rmSync(dataFolder, { recursive: true, force: true })
+  rmSync(workspace, { recursive: true, force: true })
+})
+
+describe('An unqualified combination is refused with its reason', () => {
+  test('the Session is not created, and the reason shown is the one the adapter declares', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    install(opened.bridge)
+    const project = await opened.bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: workspace,
+    })
+    const declared = bareModeOf(ADAPTERS.codex, process.platform)
+    if (declared.qualified) throw new Error('Codex is qualified here: this scenario has no subject')
+    const sentence = `Codex cannot run without its own tools here: ${declared.reason}`
+
+    // The Home's menu draws Codex and does not offer it, with the adapter's reason under it.
+    await loadAgents()
+    const codex = agentSnapshot().agents.find((one) => one.id === 'codex')
+    const offered = codex === undefined ? null : offeredOf(codex)
+    expect(offered?.available).toBe(false)
+    expect(offered?.hint).toBe(sentence)
+    // A qualified agent is offered as it always was.
+    const opencode = agentSnapshot().agents.find((one) => one.id === 'opencode')
+    expect(opencode === undefined ? null : offeredOf(opencode).available).toBe(true)
+
+    // Asked all the same, the engine refuses at the creation, in the same words.
+    expect(await startSession(project.id, 'codex')).toBeNull()
+    expect(sessionsSnapshot().refusal).toBe(sentence)
+    expect(await opened.bridge.invoke('sessions.list', { projectId: project.id })).toEqual([])
+  })
+})
