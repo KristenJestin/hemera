@@ -15,6 +15,7 @@ import { Effect, Layer } from 'effect'
 
 import { AGENTS_FILE, CONTEXT_BASE, DELIVERY_MARKER } from '@hemera/core'
 
+import { StderrSink } from '#engine/agents/supervisor.ts'
 import { Context, contextLayer } from '#engine/context/service.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
@@ -47,6 +48,7 @@ const engine = (
     Layer.provideMerge(
       Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
         Layer.provideMerge(databaseLayer(join(place, 'hemera.sqlite'))),
+        Layer.provide(Layer.succeed(StderrSink, { write: () => Effect.void })),
       ),
     ),
   )

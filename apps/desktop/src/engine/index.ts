@@ -137,16 +137,20 @@ function servicesOf(
   log: (line: string) => void,
 ): Layer.Layer<EngineServices> {
   const channel = channelSchema.parse(start.channel)
+  // The engine's diagnostic log, which a child's `stderr` and a write dropped at the quit go to.
+  const diagnostic = Layer.succeed(StderrSink, {
+    write: (line: string) => Effect.sync(() => log(line)),
+  })
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very
   // same ones: `provideMerge` hands them up rather than hiding them.
-  const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer).pipe(Layer.provide(diagnostic))
   // The machine the agents are looked for on, the processes they are started as, where their
   // `stderr` goes, and the window that hears about all of it: everything the runtime needs that
   // is not a row.
   const agents = Layer.mergeAll(
     machineEnvironmentLayer,
     hostProcessesLayer,
-    Layer.succeed(StderrSink, { write: (line: string) => Effect.sync(() => log(line)) }),
+    diagnostic,
     noticesTo(port, log),
   )
   // What the Agents section of the settings asks about: the three agents this machine has, and

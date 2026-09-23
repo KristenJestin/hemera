@@ -105,7 +105,7 @@ function running<A, E>(
   )
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very
   // same ones: `provideMerge` hands them up rather than hiding them.
-  const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer).pipe(Layer.provide(agents))
   // Nothing here asks the three agents of the machine: their own suite is where that is proved,
   // and what this one is about is whether a message reaches the use case it names.
   const listed = Layer.succeed(Agents, {
