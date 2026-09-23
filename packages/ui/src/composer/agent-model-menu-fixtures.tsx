@@ -217,9 +217,12 @@ export function offerOf(agent: string | null, model: string | null = null): Offe
  *
  * Changing the agent clears the model, the effort and the mode: a model id belongs to the agent
  * that announced it, and carrying one across would ask an agent for a model it never published.
- * Changing the model leaves the effort where it was, as Claude Code does when its own settings
- * set one (trial of 23 September 2026). The rule across the scale is where the page puts it:
- * at the level the efforts on offer mark as advised, and nowhere when none of them is.
+ * Changing the model lands the effort on the level the new model advises while nobody has chosen
+ * one, which is what Hemera asks the agent for (decision of 23 September 2026): the agent on its
+ * own keeps whatever its settings say, and a thumb left there reads as the model's default. Once
+ * a level is chosen it stays across the models, and a model that advises none leaves the effort
+ * where it was. The rule across the scale is where the page puts it: at the level the efforts
+ * on offer mark as advised, and nowhere when none of them is.
  */
 export function Controlled({
   render,
@@ -237,6 +240,8 @@ export function Controlled({
   const [picked, setPicked] = useState(agent)
   const [run, setRun] = useState(model)
   const [thinking, setThinking] = useState(effort)
+  // Whether a level was chosen on this page, which is what keeps it across the models.
+  const [chose, setChose] = useState(false)
   const [allowed, setAllowed] = useState(mode)
 
   const offer = offerOf(picked, run)
@@ -254,17 +259,21 @@ export function Controlled({
           setPicked(id)
           setRun(null)
           setThinking(null)
+          setChose(false)
           setAllowed(null)
           onAgentChange(id)
         },
         model: run,
         onModelChange: (id) => {
           setRun(id)
+          const advised = offerOf(picked, id).efforts.find((one) => one.recommended === true)
+          if (!chose && advised !== undefined) setThinking(advised.id)
           onModelChange(id)
         },
         effort: thinking,
         onEffortChange: (id) => {
           setThinking(id)
+          setChose(true)
           onEffortChange(id)
         },
         mode: allowed,

@@ -492,10 +492,11 @@ export const RecommendedStaysPut: Story = {
  * announces its own efforts, and the rule stands at the one it advises, or nowhere when it
  * advises none — or the scale goes altogether with a model that announces no effort at all.
  *
- * The page answers like the engine: Claude Code is on `Xhigh`, because its own settings put
- * every model there (trial of 23 September 2026), and advises `Medium`. The rule never goes
- * where the agent is, nor where the reader clicked. And the thumb is on its notch the moment
- * the panel opens, which is the trial of 22 September 2026.
+ * The page answers like the application: Claude Code opens on `Xhigh`, because its own settings
+ * put every model there (trial of 23 September 2026), and advises `Medium`; a new model while
+ * no level was chosen lands on the level it advises. The rule never goes where the agent is, nor
+ * where the reader clicked. And the thumb is on its notch the moment the panel opens, which is
+ * the trial of 22 September 2026.
  */
 export const RuleStaysOnTheRecommendation: Story = {
   args: { agent: 'claude-code', model: 'fable', effort: 'xhigh' },
@@ -514,7 +515,7 @@ export const RuleStaysOnTheRecommendation: Story = {
       Math.abs(thumb.top + thumb.height / 2 - (notch.top + notch.height / 2)),
     ).toBeLessThan(1)
 
-    // Opus: the agent stays on Xhigh, and the rule stays on the level advised.
+    // Opus, while no level was chosen: the effort lands on the level advised, under the rule.
     await userEvent.click(within(list).getByRole('option', { name: /Opus 4\.5/ }))
     await waitFor(() => {
       expect(within(list).getByRole('option', { name: /Opus 4\.5/ })).toHaveAttribute(
@@ -522,7 +523,7 @@ export const RuleStaysOnTheRecommendation: Story = {
         'true',
       )
     })
-    await expect(effort).toHaveAttribute('aria-valuetext', 'Xhigh')
+    await expect(effort).toHaveAttribute('aria-valuetext', 'Medium, default')
     await expect(within(effort).getAllByTestId('effort-rule')).toHaveLength(1)
     await expect(ruleOf(effort)).toBe('medium')
 
@@ -553,6 +554,50 @@ export const RuleStaysOnTheRecommendation: Story = {
       expect(ruleOf(again)).toBeNull()
     })
     await expect(again).toHaveAttribute('aria-valuetext', 'Low')
+  },
+}
+
+/**
+ * **A new model lands the effort on the level it advises**, as long as nobody chose one.
+ *
+ * Claude Code on its own keeps the effort its settings set, `Xhigh`, on every model it is
+ * switched to, and a thumb left there reads as the new model's default. So while no level was
+ * chosen, Hemera puts the agent on the level the model advises and the thumb lands on the rule.
+ * Once a level is chosen, it is the reader's, and it stays across the models (decided by the
+ * maintainer on 23 September 2026).
+ */
+export const EffortLandsOnTheRecommendation: Story = {
+  args: { agent: 'claude-code', model: 'fable', effort: 'xhigh' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Fable · Xhigh/ }))
+
+    const list = await screen.findByRole('listbox', { name: 'Models of this agent' })
+    const effort = await screen.findByRole('slider', { name: 'Effort' })
+    await expect(effort).toHaveAttribute('aria-valuetext', 'Xhigh')
+
+    // Nothing chosen yet: Opus takes the level it advises, where the rule is.
+    await userEvent.click(within(list).getByRole('option', { name: /Opus 4\.5/ }))
+    await waitFor(() => {
+      expect(effort).toHaveAttribute('aria-valuetext', 'Medium, default')
+    })
+    await expect(ruleOf(effort)).toBe('medium')
+    // Set by the page on the agent, and not a choice of the reader's.
+    await expect(args.onEffortChange).not.toHaveBeenCalled()
+
+    // Chosen: High is kept when the model changes again.
+    effort.focus()
+    await userEvent.keyboard('{ArrowUp}')
+    await expect(args.onEffortChange).toHaveBeenCalledWith('high')
+    await userEvent.click(within(list).getByRole('option', { name: /Fable/ }))
+    await waitFor(() => {
+      expect(within(list).getByRole('option', { name: /Fable/ })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      )
+    })
+    await expect(effort).toHaveAttribute('aria-valuetext', 'High')
+    await expect(ruleOf(effort)).toBe('medium')
   },
 }
 
