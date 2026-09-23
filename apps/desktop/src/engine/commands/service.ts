@@ -529,10 +529,8 @@ export const commandsLayer = Layer.effect(
     })
 
     /**
-     * The rows of runs, with what a row does not hold itself: the Project, from the Session; the
-     * Workspace's name, `main` for a row without one (D8-08); and the folder and the scope, from
-     * the catalogue entry it ran — a one-off, or an entry since taken out, ran at the root once
-     * per Workspace — because `command_runs` keeps neither.
+     * The rows of runs, with what a row does not hold itself: the Project, from the Session; and
+     * the Workspace's name, `main` for a row without one (D8-08).
      */
     const runRows = () =>
       database
@@ -540,13 +538,10 @@ export const commandsLayer = Layer.effect(
           run: commandRuns,
           projectId: sessions.projectId,
           workspaceName: workspaces.name,
-          folder: projectCommands.folder,
-          scope: projectCommands.scope,
         })
         .from(commandRuns)
         .innerJoin(sessions, eq(sessions.id, commandRuns.sessionId))
         .leftJoin(workspaces, eq(workspaces.id, commandRuns.workspaceId))
-        .leftJoin(projectCommands, eq(projectCommands.id, commandRuns.commandId))
 
     /**
      * A run read from its row rather than from memory: what a process that is gone left behind.
@@ -558,14 +553,10 @@ export const commandsLayer = Layer.effect(
       run: row,
       projectId,
       workspaceName,
-      folder,
-      scope: runsIn,
     }: {
       run: typeof commandRuns.$inferSelect
       projectId: string
       workspaceName: string | null
-      folder: string | null
-      scope: string | null
     }): RunView => ({
       id: row.id,
       projectId,
@@ -574,9 +565,11 @@ export const commandsLayer = Layer.effect(
       name: row.name,
       line: row.line,
       type: commandType(row.type),
-      scope: runsIn === null ? 'workspace' : commandScope(runsIn),
+      // The folder and the scope the run was started with, from its own row: the catalogue entry
+      // may have changed or gone since, and a one-off has none (D8-07).
+      scope: commandScope(row.scope),
       cwd: row.cwd,
-      folder: folder === null || folder === '' ? null : folder,
+      folder: row.folder,
       workspaceId: row.workspaceId,
       workspaceName: workspaceName ?? MAIN_WORKSPACE,
       environment: variablesOf(row.environment),
@@ -671,6 +664,8 @@ export const commandsLayer = Layer.effect(
               line: one.line,
               type: one.type,
               cwd: one.cwd,
+              folder: one.folder,
+              scope: one.scope,
               workspaceId: one.workspaceId,
               environment: JSON.stringify(one.environment),
               state: one.state,
