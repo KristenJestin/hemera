@@ -331,13 +331,21 @@ export type ToolEngine =
  * was stopped.
  */
 const besideTheAgent = (
-  agent: FakeAgent,
+  agents: readonly FakeAgent[],
 ): Layer.Layer<ProcessSupervisor, never, HostProcesses | StderrSink> =>
   Layer.effect(
     ProcessSupervisor,
     Effect.gen(function* () {
       const real = yield* ProcessSupervisor
-      const fake = fakeSupervisorService(() => agent)
+      // Each start is handed the next agent, and the last one stays: a fake that was stopped is
+      // dead, so a suite about two Sessions hands over two.
+      let started = 0
+      const fake = fakeSupervisorService(() => {
+        const next = agents[Math.min(started, agents.length - 1)]
+        started += 1
+        if (next === undefined) throw new Error('the suite handed over no agent')
+        return next
+      })
       return {
         start: (command, args, options) =>
           options.script === true || args[0] === 'acp'
@@ -363,7 +371,7 @@ export function toolApplication(
   written: string[] = [],
   environment: Layer.Layer<MachineEnvironment> = machine,
 ) {
-  return (agent: FakeAgent) => {
+  return (agent: FakeAgent, ...others: readonly FakeAgent[]) => {
     const lines = Layer.succeed(StderrSink, {
       write: (line: string) =>
         Effect.sync(() => {
@@ -387,7 +395,9 @@ export function toolApplication(
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(
-        besideTheAgent(agent).pipe(Layer.provide(Layer.mergeAll(hostProcessesLayer, lines))),
+        besideTheAgent([agent, ...others]).pipe(
+          Layer.provide(Layer.mergeAll(hostProcessesLayer, lines)),
+        ),
       ),
       Layer.provide(NoNotices),
       Layer.provide(lines),

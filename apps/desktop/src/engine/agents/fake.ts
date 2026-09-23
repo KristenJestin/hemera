@@ -164,6 +164,13 @@ export interface FakeScript {
   readonly advertisesResume?: boolean
   /** What it does, in order, on each prompt. */
   readonly steps?: readonly FakeStep[]
+  /**
+   * What it does on its first prompts, one list per prompt, before `steps` takes over.
+   *
+   * A scenario that spans turns — an app started in one and read in the next — scripts each of
+   * them; a delivery of context is not a turn of the agent's and does not count as one.
+   */
+  readonly turns?: readonly (readonly FakeStep[])[]
   /** What it announces in `session/new`, in the SDK's own shape for a configuration option. */
   readonly configOptions?: readonly SessionConfigOption[]
   /**
@@ -696,8 +703,11 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   // The server the agent was handed, once it was handed one and the script reaches for tools.
   const reachesTools =
     script.listsTools === true ||
-    [...(script.steps ?? []), ...(script.history ?? [])].some((step) => step.does === 'uses')
+    [...(script.steps ?? []), ...(script.history ?? []), ...(script.turns ?? []).flat()].some(
+      (step) => step.does === 'uses',
+    )
   let link: McpLink | null = null
+  let turnsTaken = 0
   let callsMade = 0
 
   /**
@@ -836,7 +846,9 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       // A prompt that is only what Hemera provides — the marker and its resources, no word of the
       // user's — is a delivery (D6-08): the agent takes it in and has nothing to do about it.
       if (provisionOnly(request)) return { stopReason: 'end_turn' }
-      for (const step of script.steps ?? []) {
+      const scripted = script.turns?.[turnsTaken] ?? script.steps ?? []
+      turnsTaken += 1
+      for (const step of scripted) {
         if (cancelled) break
         // oxlint-disable-next-line no-await-in-loop -- the script is a sequence, and a test holds a turn open here
         await script.between?.()
