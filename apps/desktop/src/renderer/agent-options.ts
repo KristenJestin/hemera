@@ -128,6 +128,26 @@ export function effortDefaultOf(options: readonly ConfigOption[]): string | null
 }
 
 /**
+ * The effort to put the agent on once its model has changed, or null when it stays where it is.
+ *
+ * While nobody has chosen an effort, a new model takes the level it recommends: an agent left to
+ * itself keeps whatever its own settings say — Claude Code stays on the effort its settings set
+ * for every model — and a thumb left there reads as the new model's default when it is not
+ * (decided 23 September 2026). An effort chosen is kept across the models, and a model that
+ * recommends no level, or announces no effort at all, leaves the agent where it is.
+ */
+export function effortToLand(
+  options: readonly ConfigOption[],
+  chosen: boolean,
+): { optionId: string; value: string } | null {
+  if (chosen) return null
+  const stage = effortStage(options)
+  const advised = effortDefaultOf(options)
+  if (stage === null || advised === null || stage.current === advised) return null
+  return { optionId: stage.optionId, value: advised }
+}
+
+/**
  * Which agent a Home's composer stands on: the one picked in it, or the one the Project was
  * left on (design D5-17).
  *

@@ -643,6 +643,109 @@ describe('The rule of the scale marks the recommended level', () => {
   })
 })
 
+/** What Claude recommends on each model: Haiku announces no effort, Sonnet advises none. */
+const ADVISED: ReadonlyMap<string, string | null> = new Map([
+  ['fable', 'medium'],
+  ['opus', 'high'],
+  ['sonnet', null],
+])
+
+/**
+ * An engine that answers like Claude Code: a model change keeps the effort its settings put it
+ * on, Xhigh here, and each model announces its own recommendation. Both the Session's channels
+ * and the Home's answer from it, and every question is still written down in `asked`.
+ */
+function claudeEngine(): void {
+  let model = 'fable'
+  let effort = 'xhigh'
+  const announced = (): ConfigOption[] =>
+    claudeOn(model, model === 'haiku' ? null : effort, ADVISED.get(model) ?? null)
+  const hemera = Reflect.get(Reflect.get(globalThis, 'window'), 'hemera')
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- stands in for the preload's bridge, whose job is to carry an argument it never reads
+  Reflect.set(hemera, 'invoke', async (name: string, argument: unknown) => {
+    asked.push({ name, argument })
+    const set = Reflect.get(Object(argument), 'optionId')
+    const value = Reflect.get(Object(argument), 'value')
+    if (set === 'model') model = String(value)
+    if (set === 'effort') effort = String(value)
+    if (name === 'agents.options') return await Promise.resolve({ options: announced() })
+    if (name === 'agents.offer' || name === 'agents.offerSet') {
+      return await Promise.resolve(offer(announced()))
+    }
+    return await Promise.resolve({})
+  })
+}
+
+/** The options set, in order, as `[optionId, value]`. */
+function setsOf(): [unknown, unknown][] {
+  return asked
+    .filter((one) => one.name === 'agents.setOption' || one.name === 'agents.offerSet')
+    .map((one) => [
+      Reflect.get(Object(one.argument), 'optionId'),
+      Reflect.get(Object(one.argument), 'value'),
+    ])
+}
+
+describe('A new model lands the effort on its recommended level', () => {
+  test('A model change lands the effort on the recommended level while nothing is chosen', async () => {
+    claudeEngine()
+    await readOptions('session-21')
+
+    await chooseOption('session-21', 'model', 'opus')
+    // The agent stayed on Xhigh; Hemera put it on the level Opus recommends.
+    expect(setsOf()).toEqual([
+      ['model', 'opus'],
+      ['effort', 'high'],
+    ])
+    expect(effortStage(optionsOf('session-21'))?.current).toBe('high')
+
+    // A model that recommends no level, or has no effort at all, leaves the effort alone.
+    await chooseOption('session-21', 'model', 'sonnet')
+    await chooseOption('session-21', 'model', 'haiku')
+    expect(setsOf().slice(2)).toEqual([
+      ['model', 'sonnet'],
+      ['model', 'haiku'],
+    ])
+
+    // And the Home's composer follows the same rule before any Session holds the agent.
+    asked = []
+    await offerAgent('orion', 'claude')
+    await setOffered('orion', 'claude', 'model', 'fable')
+    expect(setsOf()).toEqual([
+      ['model', 'fable'],
+      ['effort', 'medium'],
+    ])
+    expect(effortStage(offeringOf('orion', 'claude').options)?.current).toBe('medium')
+  })
+
+  test('A chosen effort survives a model change', async () => {
+    claudeEngine()
+    await readOptions('session-22')
+
+    await chooseOption('session-22', 'effort', 'low')
+    await chooseOption('session-22', 'model', 'opus')
+    await chooseOption('session-22', 'model', 'fable')
+    // Nothing but what was asked for: Low stays across both models.
+    expect(setsOf()).toEqual([
+      ['effort', 'low'],
+      ['model', 'opus'],
+      ['model', 'fable'],
+    ])
+    expect(effortStage(optionsOf('session-22'))?.current).toBe('low')
+
+    // The Home's composer keeps a chosen effort the same way.
+    asked = []
+    await offerAgent('lyra', 'claude')
+    await setOffered('lyra', 'claude', 'effort', 'max')
+    await setOffered('lyra', 'claude', 'model', 'opus')
+    expect(setsOf()).toEqual([
+      ['effort', 'max'],
+      ['model', 'opus'],
+    ])
+    expect(effortStage(offeringOf('lyra', 'claude').options)?.current).toBe('max')
+  })
+})
+
 describe('The agent starts the app and the user opens it', () => {
   /** A run of a command, as the thread holds its entry. */
   function aRun(id: string, name: string, kind: 'app' | 'check', state: string): SessionEntry {

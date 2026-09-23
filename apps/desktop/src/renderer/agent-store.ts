@@ -11,6 +11,7 @@ import type {
 } from '@hemera/ipc'
 import type { ActivityState } from '@hemera/ui'
 
+import { effortStage, effortToLand, modelStage } from './agent-options.ts'
 import { commandRunOf } from './agent-tool-payloads.ts'
 
 /**
@@ -60,6 +61,13 @@ const QUIET: AgentSessionState = { entries: [], running: false, stopReason: null
  * the turn. Only the engine's own `turn` is.
  */
 const announced = new Set<string>()
+
+/**
+ * Where the user has chosen an effort: a Session by its id, a Home's composer by its
+ * `projectId:provider` key. A model change there keeps the effort; anywhere else it lands on
+ * the level the new model recommends (`effortToLand`).
+ */
+const effortChosen = new Set<string>()
 
 /**
  * What one agent offers one Project before a Session holds it (design D5-17, D5-21).
@@ -468,7 +476,22 @@ export async function setOffered(
       optionId,
       value,
     })
-    offering(key, offered(answer))
+    if (effortStage(held.options)?.optionId === optionId) effortChosen.add(key)
+    const landing =
+      modelStage(held.options)?.optionId === optionId
+        ? effortToLand(answer.options, effortChosen.has(key))
+        : null
+    if (landing === null) {
+      offering(key, offered(answer))
+      return
+    }
+    // The same rule as in a Session: a new model while no effort was chosen takes its own.
+    const landed = await window.hemera.invoke('agents.offerSet', {
+      projectId,
+      provider,
+      ...landing,
+    })
+    offering(key, offered(landed))
   } catch (cause) {
     offering(key, { ...held, refusal: message(cause), loading: false })
   }
@@ -529,14 +552,27 @@ export async function decide(
   }
 }
 
-/** Puts the agent of a Session on another of its own options, and reads back what it is on. */
+/**
+ * Puts the agent of a Session on another of its own options, and reads back what it is on.
+ *
+ * A model changed while no effort was chosen in the Session is followed by the effort that model
+ * recommends (`effortToLand`); an effort chosen once is kept across the models.
+ */
 export async function chooseOption(
   sessionId: string,
   optionId: string,
   value: string,
 ): Promise<void> {
+  const held = optionsOf(sessionId)
   try {
     await window.hemera.invoke('agents.setOption', { sessionId, optionId, value })
+    if (effortStage(held)?.optionId === optionId) effortChosen.add(sessionId)
+    await readOptions(sessionId)
+    if (modelStage(held)?.optionId !== optionId) return
+    // A new model while no effort was chosen: the effort goes to the level that model advises.
+    const landing = effortToLand(optionsOf(sessionId), effortChosen.has(sessionId))
+    if (landing === null) return
+    await window.hemera.invoke('agents.setOption', { sessionId, ...landing })
     await readOptions(sessionId)
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
