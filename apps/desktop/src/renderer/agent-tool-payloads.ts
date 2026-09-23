@@ -1,6 +1,13 @@
-import { hemeraToolNamed } from '@hemera/core'
+import { TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
 import type { CommandRun, SessionEntry } from '@hemera/ipc'
-import type { CommandKind, CommandState, HemeraToolArgument, HemeraToolStatus } from '@hemera/ui'
+import type {
+  CommandKind,
+  CommandState,
+  HemeraToolArgument,
+  HemeraToolStatus,
+  ToolKind,
+  ToolSubject,
+} from '@hemera/ui'
 import { z } from 'zod'
 
 /**
@@ -77,30 +84,191 @@ export function argumentsOf(bounded: string): readonly HemeraToolArgument[] {
   }
 }
 
+/** How many characters of a query or a command line the line shows; the rest is in its title. */
+const SUBJECT_CHARACTERS = 60
+
+/** A subject that is not a path, cut to what the line shows and whole where the pointer rests. */
+function shortened(text: string): ToolSubject {
+  if (text.length <= SUBJECT_CHARACTERS) return { text }
+  return { text: `${text.slice(0, SUBJECT_CHARACTERS - 1)}…`, full: text }
+}
+
+/** What a string argument is written as in JSON text: a quoted string, escapes and all. */
+const JSON_STRING = String.raw`"((?:[^"\\]|\\.)*)"`
+
+/**
+ * One string argument of a call, out of JSON text that may have been cut short.
+ *
+ * The engine keeps the first 400 characters of the arguments, so a write carrying a whole file
+ * is JSON that no longer parses — and its path, written first, is still there to be read. What
+ * does parse is read as JSON; what does not is looked for as `"key": "value"`, and a value the
+ * cut went through is not found at all rather than found half.
+ */
+function stringArgument(bounded: string, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const read = readPayload(z.object({ [key]: z.string() }), bounded)
+    const value = read?.[key]
+    if (value !== undefined) return value
+  }
+  for (const key of keys) {
+    const found = new RegExp(`"${key}"\\s*:\\s*${JSON_STRING}`).exec(bounded)?.[1]
+    if (found === undefined) continue
+    const value = readPayload(z.string(), `"${found}"`)
+    if (value !== null) return value
+  }
+  return undefined
+}
+
+/** A path as a subject: whole, because the line truncates it, and the press that goes there. */
+function pathSubject(path: string): ToolSubject {
+  return { text: path, path }
+}
+
+/**
+ * What a call to one of Hemera's tools is about, read from its arguments (recette 3 of
+ * 23 September 2026): the line reads "Read file notes.md", not "fs_read".
+ *
+ * The file of the three that touch one; the folder a listing is of, the Workspace root itself
+ * named `root`; the query of a search, quoted, and the folder it was kept to; the catalogue name
+ * or the one-off line a command was run by; the name of the run a stop or an output is about,
+ * which the runs of the Session know and the arguments only hold the identifier of. Nothing for
+ * the three that are about nothing but the Project, the catalogue or the Session.
+ */
+export function subjectOf(
+  tool: string,
+  bounded: string,
+  runs: readonly Pick<CommandRun, 'id' | 'name'>[] = [],
+): ToolSubject | undefined {
+  switch (hemeraToolNamed(tool)) {
+    case 'fs_read':
+    case 'fs_write':
+    case 'fs_edit': {
+      const path = stringArgument(bounded, ['path'])
+      return path === undefined ? undefined : pathSubject(path)
+    }
+    case 'fs_list': {
+      const path = stringArgument(bounded, ['path']) ?? '.'
+      return path === '' || path === '.' || path === './' ? { text: 'root' } : pathSubject(path)
+    }
+    case 'search': {
+      const query = stringArgument(bounded, ['query'])
+      if (query === undefined) return undefined
+      const within = stringArgument(bounded, ['path'])
+      return shortened(within === undefined ? `"${query}"` : `"${query}" in ${within}`)
+    }
+    case 'commands_run': {
+      const named = stringArgument(bounded, ['name', 'line'])
+      return named === undefined ? undefined : shortened(named)
+    }
+    case 'commands_stop':
+    case 'commands_output': {
+      const run = stringArgument(bounded, ['run'])
+      if (run === undefined) return undefined
+      return shortened(runs.find((one) => one.id === run)?.name ?? run)
+    }
+    case 'commands_list':
+    case 'project_get':
+    case 'session_get':
+    case null:
+      return undefined
+  }
+}
+
+/** The keys an agent's own tools name what a call is about under, by the kind of the call. */
+const NATIVE_KEYS: Record<ToolKind, readonly string[]> = {
+  read: ['file_path', 'filePath', 'path', 'notebook_path'],
+  edit: ['file_path', 'filePath', 'path', 'notebook_path'],
+  delete: ['file_path', 'filePath', 'path'],
+  move: ['source', 'from', 'file_path', 'filePath', 'path'],
+  search: ['pattern', 'query'],
+  execute: ['command', 'cmd'],
+  fetch: ['url'],
+  think: [],
+  other: ['file_path', 'filePath', 'path', 'command', 'query', 'pattern', 'url'],
+}
+
+/** What an agent reports of one of its own calls, as far as its subject goes. */
+export interface ReportedCall {
+  readonly title: string
+  readonly locations: readonly { readonly path: string; readonly line: number | null }[]
+  readonly rawInput: { readonly text: string } | null
+}
+
+/**
+ * What an agent's own call is about, by the same rule as Hemera's (recette 3 of 23 September
+ * 2026): the file the call reported touching first; else what its input names under the key its
+ * kind is read by — the file, the query, quoted, the command line, the address; else, for a call
+ * of a kind, the title the agent gave it, which is where an agent that sends no input says it.
+ * A call of no kind is read by its title already, so its title is not said twice.
+ */
+export function nativeSubjectOf(kind: ToolKind, call: ReportedCall): ToolSubject | undefined {
+  const first = call.locations[0]
+  if (first !== undefined) {
+    return {
+      text: first.line === null ? first.path : `${first.path}:${first.line}`,
+      path: first.path,
+    }
+  }
+  const input = call.rawInput?.text ?? ''
+  const keys = NATIVE_KEYS[kind]
+  const said =
+    stringArgument(input, keys) ??
+    // A command may be sent as its words rather than as one line.
+    keys
+      .map((key) => readPayload(z.object({ [key]: z.array(z.string()) }), input)?.[key]?.join(' '))
+      .find((line) => line !== undefined)
+  if (said !== undefined) {
+    if (kind === 'search') return shortened(`"${said}"`)
+    if (kind === 'read' || kind === 'edit' || kind === 'delete' || kind === 'move') {
+      return pathSubject(said)
+    }
+    return shortened(said)
+  }
+  if (kind === 'other' || kind === 'think') return undefined
+  return shortened(call.title)
+}
+
 /** What `HemeraToolCall` needs, read off a `hemera_tool_call` entry. */
 export interface HemeraToolCallDrawn {
   readonly tool: string
+  readonly label: string
+  readonly mark: ToolMark | undefined
+  readonly subject: ToolSubject | undefined
   readonly status: HemeraToolStatus
   readonly summary: string
   readonly arguments: readonly HemeraToolArgument[]
-  readonly paths: readonly string[]
   readonly ms: number | undefined
   readonly provenance: { readonly session: string; readonly agent: string; readonly token: string }
   readonly error: string | undefined
   readonly defaultOpen: boolean
 }
 
-/** `null` when the payload does not parse: the entry is left out rather than drawn from a guess. */
-export function hemeraToolCallOf(entry: SessionEntry): HemeraToolCallDrawn | null {
+/** What a reader calls one of Hemera's tools and the mark it wears; its own name for a stranger. */
+export function hemeraToolLabelOf(tool: string): { label: string; mark: ToolMark | undefined } {
+  const named = hemeraToolNamed(tool)
+  return named === null ? { label: tool, mark: undefined } : TOOL_LABELS[named]
+}
+
+/**
+ * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
+ *
+ * `runs` are the Session's runs as the window last heard them, which is where the name of the
+ * run a stop or an output was about is found.
+ */
+export function hemeraToolCallOf(
+  entry: SessionEntry,
+  runs: readonly Pick<CommandRun, 'id' | 'name'>[] = [],
+): HemeraToolCallDrawn | null {
   const read = readPayload(hemeraToolCallPayloadSchema, entry.payload)
   if (read === null) return null
-  const { tool, state, caller, paths, arguments: bounded, agent, ms } = read
+  const { tool, state, caller, arguments: bounded, agent, ms } = read
   return {
     tool,
+    ...hemeraToolLabelOf(tool),
+    subject: subjectOf(tool, bounded, runs),
     status: state,
     summary: entry.body,
     arguments: argumentsOf(bounded),
-    paths,
     ms,
     provenance: { session: entry.sessionId, agent: agent ?? 'agent', token: caller },
     error: state !== 'completed' ? entry.body : undefined,
@@ -273,4 +441,46 @@ export function foldedCallsOf(entries: readonly SessionEntry[]): FoldedCalls {
     if (answer !== undefined) pair(report.entry, answer.entry)
   }
   return { hidden, inPlaceOf }
+}
+
+/** What a permission card is headed by: the label, the subject and what the call asks. */
+export interface PermissionHead {
+  readonly label: string | undefined
+  readonly subject: string | undefined
+  readonly intent: string
+}
+
+/**
+ * The head of a question one of Hemera's tools asks (D6-05), in the words of the call's own line
+ * (recette 3 of 23 September 2026): "Write file ../outside.txt asks to act outside the
+ * Workspace", not "fs_write asks to act outside the Workspace: /home/…/outside.txt".
+ *
+ * The subject is what the agent named — the path as it wrote it, the line a one-off would run —
+ * and the intent is the engine's sentence without the two things the card already says: the
+ * tool's code name in front, and the resolved place, which is a parameter of the card. A tool
+ * the catalogue does not know keeps the sentence whole.
+ */
+export function hemeraPermissionOf(
+  tool: string,
+  body: string,
+  asked: {
+    readonly named?: string | undefined
+    readonly resolved?: string | undefined
+    readonly line?: string | null | undefined
+  },
+): PermissionHead {
+  const named = hemeraToolNamed(tool)
+  if (named === null) return { label: undefined, subject: undefined, intent: body }
+  const { label } = TOOL_LABELS[named]
+  const line = asked.line ?? null
+  const subject = line ?? asked.named
+  let intent = body.startsWith(`${tool} `) ? body.slice(tool.length + 1) : body
+  if (line !== null && intent.startsWith(`asks to run ${line} `)) {
+    intent = `asks to run ${intent.slice(`asks to run ${line} `.length)}`
+  }
+  const resolved = asked.resolved
+  if (resolved !== undefined && intent.endsWith(`: ${resolved}`)) {
+    intent = intent.slice(0, -(resolved.length + 2))
+  }
+  return { label, subject, intent }
 }

@@ -12,6 +12,7 @@ import {
   StoppedTurn,
   ThoughtBlock,
   ToolCallCard,
+  toolKindLabel,
   type PermissionOption,
   type PermissionOptionKind,
   type PlanEntry,
@@ -25,7 +26,15 @@ import {
 import type { ReactNode } from 'react'
 import { z } from 'zod'
 
-import { commandRunOf, contextDeliveryOf, hemeraToolCallOf } from './agent-tool-payloads.ts'
+import {
+  commandRunOf,
+  contextDeliveryOf,
+  hemeraPermissionOf,
+  hemeraToolCallOf,
+  hemeraToolLabelOf,
+  nativeSubjectOf,
+  subjectOf,
+} from './agent-tool-payloads.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -113,6 +122,8 @@ const permissionSchema = z.object({
    * line a one-off command would run. Absent from a question the agent asked itself.
    */
   tool: z.string().optional(),
+  /** The place as the agent named it, before it was resolved. */
+  named: z.string().optional(),
   resolved: z.string().optional(),
   root: z.string().optional(),
   line: z.string().nullable().optional(),
@@ -295,6 +306,12 @@ export interface AgentContext {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /**
+   * The agent's report of a call, by the identifier the agent gave it: what a question about
+   * that call is headed by — the label and the subject of its line (recette 3 of 23 September
+   * 2026).
+   */
+  reportedCall: (toolCallId: string) => SessionEntry | undefined
 }
 
 /**
@@ -334,6 +351,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
       return (
         <HemeraToolCall
           tool={hemera}
+          {...hemeraToolLabelOf(hemera)}
+          subject={subjectOf(hemera, call.rawInput?.text ?? '', context.runs)}
           status={reportedStatus(call.status)}
           summary={call.title}
           provenance={{ session: entry.sessionId, agent: 'agent', token: '' }}
@@ -347,10 +366,12 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     // only when that text is not already the answer above — one box of a card is one thing.
     const output = call.rawOutput ?? said
     const input = call.rawInput ?? (output === said ? null : said)
+    const kind = among(TOOL_KINDS, call.kind, 'other')
     return (
       <ToolCallCard
         title={call.title}
-        kind={among(TOOL_KINDS, call.kind, 'other')}
+        kind={kind}
+        subject={nativeSubjectOf(kind, call)}
         status={among(TOOL_STATES, call.status, 'pending')}
         locations={call.locations.map((location) => ({
           path: location.path,
@@ -391,7 +412,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
       return (
         <PermissionRequest
           toolName={read.tool}
-          intent={entry.body}
+          {...hemeraPermissionOf(read.tool, entry.body, read)}
           parameters={[
             { label: 'Resolved path', value: read.resolved },
             { label: 'Outside', value: read.root ?? 'the Workspace root' },
@@ -406,10 +427,26 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         />
       )
     }
+    // An agent's own question is headed by the line of the call it is about, where the thread
+    // holds the agent's report of it: the kind's label and what the call is about.
+    const asked = context.reportedCall(read.toolCallId)
+    const reported = asked === undefined ? null : readPayload(callPayloadSchema, asked.payload)
+    const head =
+      reported === null
+        ? { label: undefined, subject: undefined, intent: entry.body }
+        : {
+            label: toolKindLabel(
+              among(TOOL_KINDS, reported.call.kind, 'other'),
+              reported.call.title,
+            ),
+            subject: nativeSubjectOf(among(TOOL_KINDS, reported.call.kind, 'other'), reported.call)
+              ?.text,
+            intent: 'asks for your permission',
+          }
     return (
       <PermissionRequest
         toolName={entry.body}
-        intent={entry.body}
+        {...head}
         options={read.options.map((option) => ({
           optionId: option.optionId,
           name: option.name,
@@ -460,7 +497,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'hemera_tool_call') {
-    const drawn = hemeraToolCallOf(entry)
+    const drawn = hemeraToolCallOf(entry, context.runs)
     if (drawn === null) return null
     return <HemeraToolCall {...drawn} />
   }

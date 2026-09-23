@@ -18,7 +18,10 @@ import {
   commandRunOf,
   contextDeliveryOf,
   foldedCallsOf,
+  hemeraPermissionOf,
   hemeraToolCallOf,
+  nativeSubjectOf,
+  subjectOf,
 } from '#renderer/agent-tool-payloads.ts'
 
 /** A thread entry with every field but `kind`, `role`, `body` and `payload` held to a fixed default. */
@@ -316,5 +319,115 @@ describe('A Hemera tool call is drawn once', () => {
     expect(folded.inPlaceOf.get('n1')?.id).toBe('h1')
     expect(folded.inPlaceOf.has('n2')).toBe(false)
     expect(folded.inPlaceOf.get('n3')?.id).toBe('h3')
+  })
+})
+
+describe('Every tool shows its subject', () => {
+  const args = (value: Record<string, string>) => JSON.stringify(value)
+
+  test('the file, the folder, the query, the command and the run, and nothing for the rest', () => {
+    const runs = [{ id: 'run-7', name: 'check' }]
+    expect(subjectOf('fs_read', args({ path: 'notes.md' }))).toEqual({
+      text: 'notes.md',
+      path: 'notes.md',
+    })
+    expect(subjectOf('fs_write', args({ path: 'src/a.ts', content: 'x', key: 'k' }))?.text).toBe(
+      'src/a.ts',
+    )
+    expect(
+      subjectOf('fs_edit', args({ path: 'src/b.ts', old: 'a', new: 'b', key: 'k' }))?.path,
+    ).toBe('src/b.ts')
+    expect(subjectOf('fs_list', args({ path: 'src/billing' }))?.text).toBe('src/billing')
+    expect(subjectOf('fs_list', args({ path: '.' }))).toEqual({ text: 'root' })
+    expect(subjectOf('fs_list', '{}')).toEqual({ text: 'root' })
+    expect(subjectOf('search', args({ query: 'exportInvoices' }))?.text).toBe('"exportInvoices"')
+    expect(subjectOf('search', args({ query: 'todo', path: 'src' }))?.text).toBe('"todo" in src')
+    expect(subjectOf('commands_run', args({ name: 'check', key: 'k' }))?.text).toBe('check')
+    expect(subjectOf('commands_run', args({ line: 'pnpm test', key: 'k' }))?.text).toBe('pnpm test')
+    expect(subjectOf('commands_stop', args({ run: 'run-7' }), runs)?.text).toBe('check')
+    expect(subjectOf('commands_output', args({ run: 'run-7' }), runs)?.text).toBe('check')
+    expect(subjectOf('commands_list', '{}')).toBeUndefined()
+    expect(subjectOf('project_get', '{}')).toBeUndefined()
+    expect(subjectOf('session_get', '{}')).toBeUndefined()
+  })
+
+  test('a long line is cut on the line and whole in its title', () => {
+    const line = `node -e "${'x'.repeat(80)}"`
+    const subject = subjectOf('commands_run', args({ line, key: 'k' }))
+    expect(subject?.text.length).toBe(60)
+    expect(subject?.text.endsWith('…')).toBe(true)
+    expect(subject?.full).toBe(line)
+  })
+
+  test('a path is still read from arguments the bound cut short', () => {
+    expect(subjectOf('fs_write', '{"path":"src/index.ts","content":"trunc')).toEqual({
+      text: 'src/index.ts',
+      path: 'src/index.ts',
+    })
+  })
+
+  test('the drawn call carries the label, the mark and the subject', () => {
+    const entry = entryOf(
+      'hemera_tool_call',
+      'agent',
+      'Listed 3 entries',
+      JSON.stringify({
+        tool: 'fs_list',
+        state: 'completed',
+        caller: 'c',
+        paths: [],
+        arguments: args({ path: 'src' }),
+      }),
+    )
+    const drawn = hemeraToolCallOf(entry)
+    expect(drawn?.label).toBe('List folder')
+    expect(drawn?.mark).toBe('list-folder')
+    expect(drawn?.subject?.text).toBe('src')
+  })
+
+  test("an agent's own call is about its first file, else what its input names", () => {
+    const call = (
+      rawInput: string | null,
+      locations: { path: string; line: number | null }[] = [],
+    ) => ({
+      title: 'Bash',
+      locations,
+      rawInput: rawInput === null ? null : { text: rawInput },
+    })
+    expect(nativeSubjectOf('read', call(null, [{ path: '/w/a.ts', line: 4 }]))).toEqual({
+      text: '/w/a.ts:4',
+      path: '/w/a.ts',
+    })
+    expect(nativeSubjectOf('execute', call(args({ command: 'ls -la' })))?.text).toBe('ls -la')
+    expect(nativeSubjectOf('execute', call('{"command":["git","status"]}'))?.text).toBe(
+      'git status',
+    )
+    expect(nativeSubjectOf('search', call(args({ pattern: 'TODO' })))?.text).toBe('"TODO"')
+    expect(nativeSubjectOf('fetch', call(args({ url: 'https://example.com' })))?.text).toBe(
+      'https://example.com',
+    )
+    expect(nativeSubjectOf('execute', call(null))?.text).toBe('Bash')
+    expect(nativeSubjectOf('other', call(null))).toBeUndefined()
+  })
+
+  test("a question of Hemera's is headed by the label, what it names and what it asks", () => {
+    expect(
+      hemeraPermissionOf(
+        'fs_write',
+        'fs_write asks to act outside the Workspace: /home/k/outside.txt',
+        { named: '../outside.txt', resolved: '/home/k/outside.txt', line: null },
+      ),
+    ).toEqual({
+      label: 'Write file',
+      subject: '../outside.txt',
+      intent: 'asks to act outside the Workspace',
+    })
+    expect(
+      hemeraPermissionOf('commands_run', 'commands_run asks to run pnpm test in /w/app', {
+        named: 'app',
+        resolved: '/w/app',
+        line: 'pnpm test',
+      }),
+    ).toEqual({ label: 'Run command', subject: 'pnpm test', intent: 'asks to run in /w/app' })
   })
 })

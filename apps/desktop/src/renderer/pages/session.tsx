@@ -260,6 +260,14 @@ export function SessionPage({
   // A call to one of Hemera's tools is drawn once, as Hemera's block, where the agent reported
   // it: the agent's own report of it stays in the thread and is not drawn a second time (D6-06).
   const folded = foldedCallsOf(thread)
+  // The agent's reports of its calls, by the identifier it gave each: a question it asks about one
+  // is headed by that call's line.
+  const reported = new Map<string, SessionEntry>()
+  for (const entry of thread) {
+    const id = entry.correlationId ?? ''
+    if (entry.kind === 'tool_call' && id.startsWith('call:'))
+      reported.set(id.slice('call:'.length), entry)
+  }
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
@@ -271,6 +279,7 @@ export function SessionPage({
       runs: commandRuns,
       onOpenUrl,
       onStopRun,
+      reportedCall: (toolCallId) => reported.get(toolCallId),
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
