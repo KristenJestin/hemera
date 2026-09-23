@@ -977,8 +977,7 @@ export function Application() {
         <JournalPage
           projectName={active.name}
           entries={linesOf(journal.entries)}
-          // Only the filters the page offers are ever set, and it offers no Spec one.
-          filter={journal.kind === 'all' || journal.kind === 'spec' ? 'all' : journal.kind}
+          filter={journal.kind}
           byYou={journal.byYou}
           onFilterChange={(filter: JournalFilter) => {
             void filterJournal(active.id, { kind: filter })

@@ -143,9 +143,7 @@ export function lineOf(entry: JournalEntry, now = new Date()): JournalLine {
   const at = new Date(entry.occurredAt)
   return {
     sequence: entry.sequence,
-    // The design system's Journal has no Spec kind to draw: a Spec's step reads under the
-    // Project the Spec belongs to until it has one.
-    kind: entry.entityKind === 'spec' ? 'project' : entry.entityKind,
+    kind: entry.entityKind,
     label: labelOf(entry),
     day: dayOf(at, now),
     time: at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),

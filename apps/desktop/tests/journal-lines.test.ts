@@ -58,7 +58,7 @@ describe('The Journal shows each step', () => {
     ])
   })
 
-  test('a Spec’s step reads under its Project, the Journal having no Spec kind', () => {
-    expect(lineOf(step('spec.created', {})).kind).toBe('project')
+  test('a Spec’s step is drawn under the Spec kind, told apart from its Project', () => {
+    expect(lineOf(step('spec.created', {})).kind).toBe('spec')
   })
 })
