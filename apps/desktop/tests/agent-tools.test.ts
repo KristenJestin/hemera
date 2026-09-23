@@ -24,7 +24,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Fiber } from 'effect'
+import { Effect, Exit, Fiber } from 'effect'
 import { z } from 'zod'
 
 import {
@@ -1255,7 +1255,7 @@ describe('A delivery outside a turn is its own turn', () => {
 describe('A Session torn down with the application writes into an open database', () => {
   test('what the program scope does as it closes still meets the database', async () => {
     const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
-    let closing: string | null = null
+    let closing: boolean | null = null
 
     await toolApplication(dataFolder)(agent)(
       Effect.gen(function* () {
@@ -1268,13 +1268,13 @@ describe('A Session torn down with the application writes into an open database'
           threadOf(session.id).pipe(
             Effect.exit,
             Effect.map((exit) => {
-              closing = exit._tag
+              closing = Exit.isSuccess(exit)
             }),
           ),
         )
       }),
     )
 
-    expect(closing).toBe('Success')
+    expect(closing).toBe(true)
   })
 })
