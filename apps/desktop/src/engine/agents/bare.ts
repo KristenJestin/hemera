@@ -41,6 +41,8 @@ export type ClaudeCodeMeta = {
       readonly tools: readonly string[]
       /** The settings sources: no user, project or local file is read. */
       readonly settingSources: readonly string[]
+      /** Only the servers handed over in the session: none of the user's own MCP configuration. */
+      readonly strictMcpConfig: boolean
       readonly systemPrompt: {
         readonly type: 'custom'
         readonly prompt: string

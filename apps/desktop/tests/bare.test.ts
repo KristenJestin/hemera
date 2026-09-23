@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { z } from 'zod'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -22,7 +22,8 @@ import { claude } from '#engine/agents/adapters/claude.ts'
 import { codex } from '#engine/agents/adapters/codex.ts'
 import { opencode } from '#engine/agents/adapters/opencode.ts'
 import { fakeAgent } from '#engine/agents/fake.ts'
-import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { MachineEnvironment } from '#engine/agents/discovery.ts'
+import { AgentRuntime, NoNotices } from '#engine/agents/runtime.ts'
 import { aSessionOn, application } from './application.ts'
 
 const ADAPTERS = [claude, codex, opencode]
@@ -70,14 +71,10 @@ describe("A qualified agent has only Hemera's tools", () => {
     expect(options.env).toEqual({})
   })
 
-  test('the isolation Claude Code is pointed at is a directory of Hemera own', async () => {
+  test('Claude Code loads no MCP server but the ones handed to its session', async () => {
     const options = await Effect.runPromise(bareOptionsOf(claude, 'linux', input))
 
-    expect(options.meta?.claudeCode.options.env).toEqual({
-      CLAUDE_CONFIG_DIR: input.ownerDirectory,
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-      ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
-    })
+    expect(options.meta?.claudeCode.options.strictMcpConfig).toBe(true)
   })
 
   test('OpenCode is handed a catch-all deny, with its own namespace re-allowed', async () => {
@@ -256,6 +253,71 @@ describe('Codex is handed its bare configuration and stays unqualified', () => {
         'read_mcp_resource',
       ]) {
         expect(reason).toContain(residue)
+      }
+    } finally {
+      rmSync(places.data, { recursive: true, force: true })
+      rmSync(places.workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+/** A machine like the suites' own, whose environment is the one given. */
+const machineWith = (env: Readonly<Record<string, string>>) =>
+  Layer.succeed(MachineEnvironment, {
+    home: '/home/ana',
+    env,
+    locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
+    bundled: (packageName: string) =>
+      Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
+    readVersion: () => Effect.succeed('1.0.0'),
+    holds: () => Effect.succeed(true),
+  })
+
+/** What Claude Code's session was configured with on `_meta`, as far as its environment goes. */
+const CLAUDE_OPTIONS = z.object({
+  claudeCode: z.object({
+    options: z.object({
+      settingSources: z.array(z.string()),
+      strictMcpConfig: z.boolean(),
+      env: z.record(z.string(), z.string()),
+    }),
+  }),
+})
+
+describe("A bare Claude session still finds the user's login", () => {
+  test('its configuration directory is the one the user has, where the login is', async () => {
+    const places = folders()
+    const own = join(places.workspace, 'claude-config')
+    try {
+      for (const [name, env] of [
+        ['default', {}],
+        ['moved', { CLAUDE_CONFIG_DIR: own }],
+      ] as const) {
+        const agent = fakeAgent()
+        mkdirSync(join(places.data, name))
+        // oxlint-disable-next-line no-await-in-loop -- one run of the application per machine, one after the other
+        await application(join(places.data, name), NoNotices, machineWith(env))(agent)(
+          Effect.gen(function* () {
+            const runtime = yield* AgentRuntime
+            const session = yield* aSessionOn(places.workspace, 'claude')
+            yield* runtime.start(session.id)
+          }),
+        )
+
+        // The process is started with the user's own directory, or with none: never Hemera's.
+        expect(agent.environments[0]?.CLAUDE_CONFIG_DIR).toBe(name === 'moved' ? own : undefined)
+        const options = CLAUDE_OPTIONS.parse(JSON.parse(agent.answers.metas[0] ?? '{}'))
+        // Nor does the session move it: what the move was for is done by reading no settings
+        // file and no MCP server of the user's.
+        expect(options.claudeCode.options.env.CLAUDE_CONFIG_DIR).toBeUndefined()
+        expect(options.claudeCode.options.settingSources).toEqual([])
+        expect(options.claudeCode.options.strictMcpConfig).toBe(true)
+        // A question to the human can outlast the agent's default wait on a tool: ten minutes.
+        expect(options.claudeCode.options.env.MCP_TOOL_TIMEOUT).toBe('600000')
+        // So the login the agent reads is the one discovery found before the Session started.
+        expect(claude.loginFiles('/home/ana', env)).toEqual([
+          join(name === 'moved' ? own : join('/home/ana', '.claude'), '.credentials.json'),
+        ])
       }
     } finally {
       rmSync(places.data, { recursive: true, force: true })

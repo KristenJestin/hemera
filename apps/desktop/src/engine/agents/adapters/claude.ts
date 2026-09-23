@@ -33,6 +33,9 @@ import { type AgentAdapter, versionIn } from '../adapter.ts'
  * a note rather than starting on an account the user did not choose (D5-17).
  */
 
+/** How long this agent waits for one of Hemera's tools before it gives up on it: ten minutes. */
+export const TOOL_WAIT_MS = 600_000
+
 /** The two logins this adapter publishes when the machine has one still to do. */
 const LOGINS: ReadonlySet<string> = new Set(['claude-ai-login', 'console-login'])
 
@@ -61,10 +64,20 @@ export const claude: AgentAdapter = {
    * carries Hemera's server.
    *
    * What survives the means is managed and policy settings, which load whatever `settingSources`
-   * says (D6-09): the Context view names it, and nothing here pretends otherwise.
+   * says, and `~/.claude.json`, which is always read (D6-09): the Context view names them, and
+   * nothing here pretends otherwise.
+   *
+   * `CLAUDE_CONFIG_DIR` is left where the user has it. The login lives in it — `.credentials.json`
+   * wherever a file holds it — and `claude auth status` run with a directory of its own answers
+   * `loggedIn: false` on a machine that is signed in (checked
+   * on 23 September 2026, Windows, Claude Code 2.1.280). Nothing secret is copied or linked into
+   * a directory of Hemera's instead: what the move was for is done by `settingSources: []`, which
+   * reads none of the user's settings files, and `strictMcpConfig`, which loads none of the MCP
+   * servers they configured — only Hemera's.
    */
   bareMode: () => ({
-    means: 'session/new _meta: no built-in tool, no settings source, the base as the system prompt',
+    means:
+      'session/new _meta: no built-in tool, no settings source, no MCP server but Hemera, the base as the system prompt',
     base: 'system_prompt',
     qualified: true,
     options: (input) => ({
@@ -75,11 +88,15 @@ export const claude: AgentAdapter = {
             // makes this agent qualified rather than merely configured.
             tools: [],
             settingSources: [],
+            strictMcpConfig: true,
             systemPrompt: { type: 'custom', prompt: input.base, snapshot: true },
             env: {
-              CLAUDE_CONFIG_DIR: input.ownerDirectory,
               CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
               ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+              // A tool call can wait on the human — a path outside the root, a one-off command —
+              // for as long as they take to answer, and the agent's own limit must not end it
+              // first: ten minutes, as the prototype had it.
+              MCP_TOOL_TIMEOUT: String(TOOL_WAIT_MS),
             },
           },
         },
