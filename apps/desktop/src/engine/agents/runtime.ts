@@ -310,6 +310,15 @@ interface Live {
    * once more as settled, and the Journal still has its line.
    */
   readonly open: Map<string, Coalesced>
+  /**
+   * The keys whose entry has already been written as settled.
+   *
+   * A key can come back after its entry settled — the chunks a Stop leaves behind, or the
+   * `turn:<id>:<kind>` of an agent that names no message speaking again after a call — and it is
+   * still the same row: the Journal says once that it settled, and the writes after that are the
+   * row growing, not settling again.
+   */
+  readonly settled: Set<string>
   /** The fiber of the flush that is due, or null when this Session holds nothing. */
   timer: Fiber.Fiber<void> | null
 }
@@ -532,8 +541,8 @@ export const runtimeLayer = Layer.effect(
         for (const [key, chunk] of writing) {
           // A replayed entry is the history being read back rather than an entry settling now:
           // its row is one the Journal has already told its reader about, and a resume says
-          // nothing about it that the first turn did not say.
-          const settles = settled && chunk.origin === 'live'
+          // nothing about it that the first turn did not say. Nor does a row that settled once.
+          const settles = settled && chunk.origin === 'live' && !held.settled.has(key)
           const wrote = yield* Effect.result(
             writeNow(sessionId, {
               role: 'agent',
@@ -555,7 +564,10 @@ export const runtimeLayer = Layer.effect(
             )
             continue
           }
-          if (!settled && chunk.origin === 'live') held.open.set(key, chunk)
+          if (settles) held.settled.add(key)
+          else if (!settled && chunk.origin === 'live' && !held.settled.has(key)) {
+            held.open.set(key, chunk)
+          }
         }
       })
 
@@ -1347,6 +1359,7 @@ export const runtimeLayer = Layer.effect(
           pending: 0,
           chunks: new Map(),
           open: new Map(),
+          settled: new Set(),
           timer: null,
         }
         live.set(sessionId, started)

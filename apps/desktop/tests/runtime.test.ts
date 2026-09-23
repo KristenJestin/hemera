@@ -727,6 +727,44 @@ describe('A chunk write that fails', () => {
 })
 
 /**
+ * An entry whose key comes back after it settled (Decided 10 of #17).
+ *
+ * An agent that names no message speaks under `turn:<id>:message`, so what it says after a call is
+ * the same key, and the same row, as what it said before it. The row grows; it settled once, and
+ * the Journal says so once.
+ */
+describe('An entry settles once', () => {
+  test('An entry settles once even when its key comes back', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'reading ' },
+        { does: 'calls', call: { id: 'call-1', title: 'Read reader.ts', status: 'completed' } },
+        { does: 'says', text: 'done' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        expect((yield* runtime.prompt(session.id, 'read it')).stopReason).toBe('end_turn')
+
+        const answer = entryOf(
+          (yield* threadOf(session.id)).filter((entry) => entry.role === 'agent'),
+          'message',
+        )
+        expect(answer.body).toBe('reading done')
+        const lines = (yield* journalOf(session.id)).filter((line) => line.seq === answer.seq)
+        expect(lines.map((line) => line.type)).toEqual([
+          'session.entry_written',
+          'session.entry_settled',
+        ])
+      }),
+    )
+  })
+})
+
+/**
  * What an agent offers a Project's Home, before any Session holds it (design D5-17, D5-21).
  *
  * The composer of a Home chooses an agent and what that agent offers before there is a Session
