@@ -102,3 +102,32 @@ export {
   deliveryText,
 } from './domain/context.ts'
 export type { BaseReach, ContextReach, ContextSource } from './domain/context.ts'
+export {
+  InvalidVariableKeyError,
+  InvalidWorkspaceNameError,
+  RECIPE_KINDS,
+  RECIPE_SCOPES,
+  STEP_KINDS,
+  STEP_STATES,
+  WORKSPACE_STATES,
+  branchNameFor,
+  defaultBranchPrefix,
+  mergedEnvironment,
+  nextPending,
+  resumedSteps,
+  slugOf,
+  stepsFor,
+  variableKey,
+  workspaceName,
+  workspaceStateOf,
+} from './domain/workspace.ts'
+export type {
+  RecipeKind,
+  RecipeScope,
+  RecipeStep,
+  StepKind,
+  StepState,
+  Variables,
+  WorkspaceState,
+  WorkspaceStep,
+} from './domain/workspace.ts'

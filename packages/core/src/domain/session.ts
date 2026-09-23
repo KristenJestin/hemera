@@ -77,6 +77,8 @@ export const SESSION_ENTRY_KINDS = [
   'hemera_tool_call',
   'command_run',
   'context_delivery',
+  /** A command the agent proposed for the catalogue, waiting for a human's decision (D8-11). */
+  'command_proposal',
 ] as const
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number]
@@ -105,6 +107,12 @@ export interface Session {
    * a resumed thread is drawn from, rather than a claim that the thread was continued.
    */
   nativeState: NativeState
+  /**
+   * The Workspace this Session works in (D8-08), fixed once its agent has started.
+   *
+   * Null on a Session written before Workspaces were real, which is read as `main`.
+   */
+  workspaceId: string | null
   archivedAt: number | null
   createdAt: number
   /** When it was last written to — a message or a rename: what the list is sorted on. */
