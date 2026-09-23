@@ -76,6 +76,7 @@ import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { ToolPermissions } from '../tools/permissions.ts'
 import { ToolServer } from '../tools/server.ts'
+import { Variables } from '../workspaces/variables.ts'
 
 /** How long an agent is given to answer `session/cancel` before its process tree is stopped. */
 export const CANCEL_GRACE = Duration.seconds(10)
@@ -527,6 +528,8 @@ export const runtimeLayer = Layer.effect(
     const permissions = yield* ToolPermissions
     const heldWords = yield* HeldWords
     const pool = yield* Pool
+    // The variables of a Session's Workspace, which its agent is started with (D8-06).
+    const variables = yield* Variables
     // Where each agent's bare means is written: a directory of Hemera's, never the user's (D6-09).
     const directories = yield* AgentDirectories
 
@@ -1001,14 +1004,21 @@ export const runtimeLayer = Layer.effect(
       resolved: ResolvedAgent,
       cwd: string,
       bare: Readonly<Record<string, string>> = {},
+      given: Readonly<Record<string, string>> = {},
     ) => {
       // Built in statements rather than by spreading a conditional empty object, the way the
       // supervisor builds what it hands the host: an env that is not there is not a property.
       const options: AgentStartOptions = { cwd }
-      // What the bare means sets is on top of what the resolve named: the agent's own
-      // configuration directory is Hemera's, whatever the machine says it is (D6-09).
-      if (resolved.env !== undefined || Object.keys(bare).length > 0) {
-        options.env = { ...resolved.env, ...bare }
+      // The machine's environment as the resolve named it, then the variables of the Session's
+      // Workspace — the Project's overridden by the Workspace's (D8-06) — and what the bare means
+      // sets on top of all of it: the agent's own configuration directory is Hemera's, whatever
+      // the machine or a variable says it is, or the agent would leave its bare mode (D6-09).
+      if (
+        resolved.env !== undefined ||
+        Object.keys(given).length > 0 ||
+        Object.keys(bare).length > 0
+      ) {
+        options.env = { ...resolved.env, ...given, ...bare }
       }
       if (resolved.source === 'bundled') options.script = true
       return options
@@ -1461,9 +1471,19 @@ export const runtimeLayer = Layer.effect(
           ),
         )
         yield* attempt('preparing the agent', writtenFiles(directory, bare.files))
+        // What Hemera gives the agent of this Workspace, as it gives a run of it (D8-06).
+        const workspace = yield* attempt('reading the Workspace', sessions.workspace(sessionId))
+        const given = yield* attempt(
+          'reading the variables',
+          variables.givenFor(session.projectId, workspace.id),
+        )
         const process = yield* attempt(
           'starting the agent',
-          supervisor.start(resolved.command, resolved.args, startOptions(resolved, cwd, bare.env)),
+          supervisor.start(
+            resolved.command,
+            resolved.args,
+            startOptions(resolved, cwd, bare.env, given),
+          ),
         )
 
         // The token is minted for this process and for this Session, and it is the whole of what

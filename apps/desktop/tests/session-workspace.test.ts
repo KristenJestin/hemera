@@ -260,6 +260,34 @@ describe('A Project-scoped service is one instance for all', () => {
   })
 })
 
+describe('An agent is given the variables of its Workspace', () => {
+  test('PORT=3001 of login-form reaches the agent’s process, and its bare means stays on top', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
+
+    await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const sessions = yield* Sessions
+        const variables = yield* Variables
+        const { session, workspaceId } = yield* inLoginForm
+        yield* variables.set(session.projectId, null, 'PORT', '3000')
+        yield* variables.set(session.projectId, null, 'API_URL', 'http://localhost:4000')
+        yield* variables.set(session.projectId, workspaceId, 'PORT', '3001')
+        // A variable that would move the agent's own configuration is not given over its bare mode.
+        yield* variables.set(session.projectId, workspaceId, 'XDG_CONFIG_HOME', '/elsewhere')
+        const onOpenCode = yield* sessions.create(session.projectId, 'opencode', workspaceId)
+        yield* runtime.prompt(onOpenCode.id, 'hello')
+      }).pipe(Effect.provide(variablesLayer)),
+    )
+
+    const environment = agent.environments[0] ?? {}
+    expect(environment['PORT']).toBe('3001')
+    expect(environment['API_URL']).toBe('http://localhost:4000')
+    expect(environment['XDG_CONFIG_HOME']).not.toBe('/elsewhere')
+    expect(environment['XDG_CONFIG_HOME']).toContain(dataFolder)
+  })
+})
+
 describe('The Workspace is fixed once the agent has started', () => {
   test('a change is accepted before the first turn and refused after it', async () => {
     const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })

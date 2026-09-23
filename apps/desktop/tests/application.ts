@@ -197,7 +197,9 @@ export function application(
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(contextLayer),
-      Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer, gitLayer())),
+      Layer.provide(
+        Layer.mergeAll(server, commandsLayer, toolPermissionsLayer, gitLayer(), variablesLayer),
+      ),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
@@ -447,6 +449,7 @@ export function toolApplication(
     const services: Layer.Layer<ToolEngine> = runtimeLayer.pipe(
       Layer.provideMerge(tools),
       Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),
+      Layer.provide(variablesLayer),
       Layer.provideMerge(journalLayer),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(

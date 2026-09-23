@@ -234,6 +234,8 @@ function servicesOf(
       // What a Session is provided with, and the book of what is running on the engine's own
       // clock: it is what closes an agent nobody is talking to any more (D5-05).
       Layer.provideMerge(provisions),
+      // The variables of a Session's Workspace, which its agent is started with (D8-06).
+      Layer.provide(variablesLayer),
       Layer.provide(processes),
       Layer.provide(agents),
       Layer.provide(heldWordsLayer),
