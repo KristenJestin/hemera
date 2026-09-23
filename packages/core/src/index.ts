@@ -116,7 +116,6 @@ export {
   StaleSectionError,
   TASK_EXECUTORS,
   TaskCycleError,
-  UnknownSectionError,
   answerTo,
   answerWords,
   contractOf,

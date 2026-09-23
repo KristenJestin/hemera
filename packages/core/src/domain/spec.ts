@@ -240,13 +240,6 @@ export class StaleSectionError extends Error {
   }
 }
 
-export class UnknownSectionError extends Error {
-  constructor(name: string) {
-    super(`"${name}" is not a section of a Spec`)
-    this.name = 'UnknownSectionError'
-  }
-}
-
 /** An answer that names neither or both of an option and a text, or an option not offered. */
 export class InvalidAnswerError extends Error {
   constructor(reason: string) {
