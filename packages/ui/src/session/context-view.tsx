@@ -124,7 +124,8 @@ export function ContextView({
           </ul>
         )}
       </section>
-      {/* Folded by default: the count is what a reader checks, and the list is there when asked. */}
+      {/* Folded by default: the count is what a reader checks, and the list is there when
+          asked. */}
       <Disclosure
         summary={
           <span className="flex min-w-0 items-center gap-2">

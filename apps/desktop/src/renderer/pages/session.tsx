@@ -557,9 +557,9 @@ export function SessionPage({
           !drawn || context === null ? undefined : <ContextView {...contextListsOf(context)} />
         }
         // The tab it opens on follows what is happening: a command running opens on Commands,
-        // then the tab that has something, and Context when it was opened from the head. Keyed on it, so a command that starts while the
-        // Session is open brings the column to its commands, as opening the Session with one
-        // running would have (D6-12).
+        // then the tab that has something, and Context when it was opened from the head. Keyed
+        // on it, so a command that starts while the Session is open brings the column to its
+        // commands, as opening the Session with one running would have (D6-12).
         key={openingTabOf(commandRuns, tabs)}
         defaultTab={openingTabOf(commandRuns, tabs)}
       />
