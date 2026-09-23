@@ -16,6 +16,7 @@ import {
   ENGINE_REQUESTS,
   agentAvailabilitySchema,
   agentProviderSchema,
+  bareModeSchema,
   configOptionSchema,
   resumeStateSchema,
   sessionEntrySchema,
@@ -74,7 +75,12 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'claude auth login',
         installer: 'pnpm',
         latest: '2.2.0',
-        bareMode: { means: 'its own means', qualified: true, reason: null },
+        bareMode: {
+          means: 'its own means',
+          qualified: true,
+          reason: null,
+          private: 'its own sources',
+        },
       }).success,
     ).toBe(true)
 
@@ -89,7 +95,12 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'codex login',
         installer: 'unknown',
         latest: null,
-        bareMode: { means: 'its own means', qualified: true, reason: null },
+        bareMode: {
+          means: 'its own means',
+          qualified: true,
+          reason: null,
+          private: 'its own sources',
+        },
       }).success,
     ).toBe(true)
   })
@@ -106,7 +117,12 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'opencode auth login',
         installer: 'npm',
         latest: null,
-        bareMode: { means: 'its own means', qualified: true, reason: null },
+        bareMode: {
+          means: 'its own means',
+          qualified: true,
+          reason: null,
+          private: 'its own sources',
+        },
       }).success,
     ).toBe(true)
 
@@ -121,7 +137,12 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'opencode auth login',
         installer: 'npm',
         latest: null,
-        bareMode: { means: 'its own means', qualified: true, reason: null },
+        bareMode: {
+          means: 'its own means',
+          qualified: true,
+          reason: null,
+          private: 'its own sources',
+        },
       }).success,
     ).toBe(false)
   })
@@ -458,11 +479,26 @@ describe('An unqualified combination is refused with its reason', () => {
         means: "a config.toml in a directory of Hemera's",
         qualified: false,
         reason: 'apply_patch has no configuration key',
+        private: "the project's own .codex/config.toml still layers in",
       },
     }
     expect(agentAvailabilitySchema.safeParse(codex).success).toBe(true)
     // Nothing optional over this wire: an agent that said nothing about bare mode is refused.
     const { bareMode: _dropped, ...silent } = codex
     expect(agentAvailabilitySchema.safeParse(silent).success).toBe(false)
+  })
+})
+
+describe('What Hemera does not control is said under the agent', () => {
+  test('an agent says what its bare means leaves out of Hemera’s sight', () => {
+    const bareMode = {
+      means: 'session/new _meta',
+      qualified: true,
+      reason: null,
+      private: '~/.claude.json still loads; Hemera does not read it.',
+    }
+    expect(bareModeSchema.safeParse(bareMode).success).toBe(true)
+    const { private: _dropped, ...silent } = bareMode
+    expect(bareModeSchema.safeParse(silent).success).toBe(false)
   })
 })

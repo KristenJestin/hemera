@@ -78,6 +78,7 @@ export function availabilityOf(agent: DiscoveredAgent, latest: string | null): A
       means: bare.means,
       qualified: bare.qualified,
       reason: bare.qualified ? null : bare.reason,
+      private: bare.private,
     },
   }
 }

@@ -60,6 +60,7 @@ describe('An unqualified combination is refused with its reason', () => {
       means: declared.means,
       qualified: false,
       reason: declared.qualified ? null : declared.reason,
+      private: declared.private,
     })
     const row = codex === undefined ? null : bareRowOf(codex)
     expect(row?.qualified).toBe(false)

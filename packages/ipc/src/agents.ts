@@ -36,12 +36,15 @@ export type InstallerTool = z.infer<typeof installerToolSchema>
  *
  * `means` is how its own tools are taken away, in the agent's own terms. `reason` is the
  * adapter's sentence for a combination that is not qualified, and null for one that is: a
- * Session is not made on an agent that is not qualified, and this is why.
+ * Session is not made on an agent that is not qualified, and this is why. `private` is what the
+ * means does not reach — the agent's own sources that still load and that Hemera does not read —
+ * in one sentence, which Settings › Agents says under the agent (D6-09).
  */
 export const bareModeSchema = z.object({
   means: z.string(),
   qualified: z.boolean(),
   reason: z.string().nullable(),
+  private: z.string(),
 })
 
 export type BareModeState = z.infer<typeof bareModeSchema>
