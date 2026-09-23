@@ -74,6 +74,7 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'claude auth login',
         installer: 'pnpm',
         latest: '2.2.0',
+        bareMode: { means: 'its own means', qualified: true, reason: null },
       }).success,
     ).toBe(true)
 
@@ -88,6 +89,7 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'codex login',
         installer: 'unknown',
         latest: null,
+        bareMode: { means: 'its own means', qualified: true, reason: null },
       }).success,
     ).toBe(true)
   })
@@ -104,6 +106,7 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'opencode auth login',
         installer: 'npm',
         latest: null,
+        bareMode: { means: 'its own means', qualified: true, reason: null },
       }).success,
     ).toBe(true)
 
@@ -118,6 +121,7 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'opencode auth login',
         installer: 'npm',
         latest: null,
+        bareMode: { means: 'its own means', qualified: true, reason: null },
       }).success,
     ).toBe(false)
   })
@@ -423,5 +427,30 @@ describe('A change during a turn leaves at the next safe point', () => {
       ENGINE_EVENTS.delivery.safeParse({ event: 'delivery', sessionId: 'session-1', entry: null })
         .success,
     ).toBe(true)
+  })
+})
+
+describe('An unqualified combination is refused with its reason', () => {
+  test('an agent says whether it runs bare here, and why not when it does not', () => {
+    const codex = {
+      id: 'codex',
+      label: 'Codex',
+      found: true,
+      version: '1.12.0',
+      authenticated: true,
+      installHint: 'npm install -g @openai/codex',
+      loginHint: 'codex login',
+      installer: 'npm',
+      latest: null,
+      bareMode: {
+        means: "a config.toml in a directory of Hemera's",
+        qualified: false,
+        reason: 'apply_patch has no configuration key',
+      },
+    }
+    expect(agentAvailabilitySchema.safeParse(codex).success).toBe(true)
+    // Nothing optional over this wire: an agent that said nothing about bare mode is refused.
+    const { bareMode: _dropped, ...silent } = codex
+    expect(agentAvailabilitySchema.safeParse(silent).success).toBe(false)
   })
 })

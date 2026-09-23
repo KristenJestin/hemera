@@ -32,6 +32,21 @@ export const installerToolSchema = z.enum(['npm', 'pnpm', 'bun', 'brew', 'unknow
 export type InstallerTool = z.infer<typeof installerToolSchema>
 
 /**
+ * What an agent's adapter declares about running it bare on this platform (design D6-02).
+ *
+ * `means` is how its own tools are taken away, in the agent's own terms. `reason` is the
+ * adapter's sentence for a combination that is not qualified, and null for one that is: a
+ * Session is not made on an agent that is not qualified, and this is why.
+ */
+export const bareModeSchema = z.object({
+  means: z.string(),
+  qualified: z.boolean(),
+  reason: z.string().nullable(),
+})
+
+export type BareModeState = z.infer<typeof bareModeSchema>
+
+/**
  * One agent, as this machine answers for it (design D5-02, D5-17, D5-21).
  *
  * The agent, and never the adapter that may expose it: every name and every command on this wire
@@ -54,6 +69,9 @@ export type InstallerTool = z.infer<typeof installerToolSchema>
  * `latest` is the version published by the registry of `installer`, and it is null whenever
  * nobody asked: the list a Session is created from is read locally, and only the Agents section
  * goes to the network, when it is opened (D5-18).
+ *
+ * `bareMode` is what the adapter declares and not what the machine answered: it is read off
+ * Hemera's own adapter for this platform, so it is there whether or not the agent is (D6-02).
  */
 export const agentAvailabilitySchema = z.object({
   id: agentProviderSchema,
@@ -65,6 +83,7 @@ export const agentAvailabilitySchema = z.object({
   loginHint: z.string(),
   installer: installerToolSchema,
   latest: z.string().nullable(),
+  bareMode: bareModeSchema,
 })
 
 export type AgentAvailability = z.infer<typeof agentAvailabilitySchema>

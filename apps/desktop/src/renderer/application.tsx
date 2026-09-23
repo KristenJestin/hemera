@@ -82,6 +82,7 @@ import {
   subscribeToAgent,
   updateAgent,
 } from './agent-store.ts'
+import { bareRowOf } from './bare-mode.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
   archivedSessions,
@@ -860,6 +861,9 @@ export function Application() {
               loginHint: one.loginHint,
               installer: one.installer,
               latest: one.latest,
+              // What its adapter declares about running it bare here (D6-02): qualified or not,
+              // the means, and the adapter's own reason when it is not.
+              bare: bareRowOf(one),
             })),
             checked: agents.checked,
             updating,

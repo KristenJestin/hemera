@@ -20,6 +20,7 @@ import { Context, Data, Effect, Layer } from 'effect'
 
 import type { AgentAvailability, AgentProvider, AgentUpdate } from '@hemera/ipc'
 
+import { bareModeOf } from './bare.ts'
 import type { DiscoveredAgent } from './discovery.ts'
 import { ADAPTERS, Discovery } from './discovery.ts'
 import { AgentRegistry, AgentUpdater } from './installer.ts'
@@ -57,8 +58,12 @@ export class Agents extends Context.Service<Agents, AgentsService>()('Agents') {
  * Nothing is decided here: discovery has already said which command was found, where, and the
  * tool that put it there, so this is the same answer with the one field discovery never fills —
  * the version a registry publishes, which is `latest` and is null until somebody asks (D5-18).
+ *
+ * Its bare mode is the adapter's own declaration for the platform this engine runs on (D6-02):
+ * what the Agents section shows per agent, and what the Home's composer refuses an agent for.
  */
 export function availabilityOf(agent: DiscoveredAgent, latest: string | null): AgentAvailability {
+  const bare = bareModeOf(ADAPTERS[agent.id], globalThis.process.platform)
   return {
     id: agent.id,
     label: agent.label,
@@ -69,6 +74,11 @@ export function availabilityOf(agent: DiscoveredAgent, latest: string | null): A
     loginHint: agent.loginHint,
     installer: agent.installer,
     latest,
+    bareMode: {
+      means: bare.means,
+      qualified: bare.qualified,
+      reason: bare.qualified ? null : bare.reason,
+    },
   }
 }
 
