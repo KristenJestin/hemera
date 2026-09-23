@@ -1,5 +1,5 @@
 /**
- * The eleven tools, and the one door every call goes through (design D6-03, D6-04, D6-05).
+ * The twelve tools, and the one door every call goes through (design D6-03, D6-04, D6-05).
  *
  * A call arrives here as a name, a flat bag of arguments, and the set the Session was offered.
  * Nothing else about it is trusted: the name is checked against the catalogue, the arguments
@@ -21,6 +21,7 @@
 
 import {
   READ_PAGE_BYTES,
+  ROOT_REPOSITORY,
   SEARCH_MATCH_LIMIT,
   SEARCH_SCAN_BYTES,
   type SearchResult,
@@ -999,6 +1000,74 @@ export const toolCatalogueLayer: Layer.Layer<
             return completed(
               `stopped ${stopped.name}`,
               `${stopped.name} was stopped, and so was everything it started`,
+            )
+          }
+
+          case 'commands_propose': {
+            const { name, line, type, why } = call.arguments
+            // The folder is the root or one of the Project's repositories, as a catalogue
+            // command's is (D6-12): a proposal the human could not accept as it stands is refused.
+            const named = call.arguments.folder ?? ROOT_REPOSITORY
+            const folder =
+              named === '' || named === ROOT_REPOSITORY
+                ? null
+                : repositories.find((one) => one === named || one === `./${named}`)
+            if (folder === undefined) {
+              return failed(
+                `${named} is not a repository of ${projectName}`,
+                `a command runs at the Workspace root or in one of the Project's repositories: ${repositories.length === 0 ? 'it declares none' : repositories.join(', ')}`,
+              )
+            }
+            const catalogue = yield* answered(commands.list(projectId))
+            if (catalogue === undefined) {
+              return failed("could not read the Project's commands", 'the commands did not read')
+            }
+            if (catalogue.some((command) => command.name === name)) {
+              return failed(
+                `the catalogue already holds ${name}`,
+                `${name} is already a command of ${projectName}: run it with commands_run, or propose another name`,
+              )
+            }
+            // The proposal is an entry of the thread the human decides on, and nothing else: the
+            // agent has no write on the catalogue (D8-11). Its Journal line goes in the same
+            // transaction as the entry (D8-16).
+            const proposalId = crypto.randomUUID()
+            const written = yield* answered(
+              inThread(asked.sessionId, {
+                role: 'hemera',
+                kind: 'command_proposal',
+                body: name,
+                payload: JSON.stringify({
+                  proposalId,
+                  name,
+                  line,
+                  type,
+                  folder,
+                  why,
+                  state: 'pending',
+                }),
+                correlationId: `proposal:${proposalId}`,
+                state: 'pending',
+                events: [
+                  {
+                    type: 'command.proposed',
+                    entityKind: 'command',
+                    entityId: proposalId,
+                    source: 'system',
+                    author: 'agent',
+                    projectId,
+                    sessionId: asked.sessionId,
+                    payload: { name, type },
+                  },
+                ],
+              }),
+            )
+            if (written === undefined) {
+              return failed('the proposal was not written', 'the thread of this Session refused it')
+            }
+            return completed(
+              `proposed ${name} for the catalogue`,
+              'proposed: a human will decide in the Session; nothing is in the catalogue yet',
             )
           }
 

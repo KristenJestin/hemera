@@ -33,6 +33,7 @@ export const TOOL_NAMES = [
   'commands_run',
   'commands_output',
   'commands_stop',
+  'commands_propose',
   'project_get',
   'session_get',
 ] as const

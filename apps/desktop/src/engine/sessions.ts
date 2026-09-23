@@ -157,6 +157,11 @@ export interface ThreadWrite {
    * message grows chunk by chunk, and whoever wrote it last is the one that knows it has stopped.
    */
   readonly settled?: boolean
+  /**
+   * What the Journal records beside the entry, in the same transaction: a proposal and the
+   * `command.proposed` that says it was made are one write (D8-16).
+   */
+  readonly events?: readonly NewEvent[]
 }
 
 /**
@@ -1082,6 +1087,7 @@ export const sessionsLayer = Layer.effect(
               const events: NewEvent[] = []
               if (settled === undefined) events.push({ ...line, type: 'session.entry_written' })
               if (entry.settled === true) events.push({ ...line, type: 'session.entry_settled' })
+              events.push(...(entry.events ?? []))
 
               return {
                 result: { session, entry: entryOf(settledRow) },

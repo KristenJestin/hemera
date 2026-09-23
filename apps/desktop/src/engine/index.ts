@@ -29,6 +29,7 @@ import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
+import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
 import { type Context, contextLayer } from './context/service.ts'
 import { toolAccessLayer } from './tools/access.ts'
@@ -127,6 +128,7 @@ type EngineServices =
   | Discovery
   | Agents
   | Commands
+  | Proposals
   | Context
   | Database
   | SqliteClient
@@ -190,6 +192,9 @@ function servicesOf(
     journalLayer,
     rows,
     listed,
+    // What a human decides of the commands the agent proposed: the catalogue is written from
+    // there, on the very commands the tools run (D8-11).
+    proposalsLayer.pipe(Layer.provide(tools), Layer.provide(rows), Layer.provide(agents)),
     runtimeLayer.pipe(
       // Discovery is handed up rather than hidden: the settings page asks this process what the
       // machine has, and that question is answered without starting anything.

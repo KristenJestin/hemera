@@ -10,7 +10,13 @@
  * MCP is what carries them and a nested document is a document nobody validates twice.
  */
 
-import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, SEARCH_SCAN_BYTES, type ToolName } from '@hemera/core'
+import {
+  COMMAND_TYPES,
+  READ_PAGE_BYTES,
+  SEARCH_MATCH_LIMIT,
+  SEARCH_SCAN_BYTES,
+  type ToolName,
+} from '@hemera/core'
 import { z } from 'zod'
 
 import { OUTPUT_KEPT_BYTES } from '../commands/service.ts'
@@ -40,6 +46,10 @@ export type ParsedCall =
   | {
       readonly tool: 'commands_stop'
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['commands_stop']>
+    }
+  | {
+      readonly tool: 'commands_propose'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['commands_propose']>
     }
   | {
       readonly tool: 'project_get'
@@ -140,6 +150,20 @@ export const TOOL_ARGUMENTS = {
   commands_stop: z.object({
     run: z.string().min(1).optional().describe('which run; the only one running without it'),
   }),
+  // What a proposal carries (D8-11): what the catalogue entry would be, and why the agent thinks
+  // it is worth keeping, which is what the human reads before deciding.
+  commands_propose: z.object({
+    name: z.string().trim().min(1).describe('the name it would have in the catalogue'),
+    line: z.string().trim().min(1).describe('the line it runs'),
+    type: z
+      .enum(COMMAND_TYPES)
+      .describe('what it is for: serve stays up, the others end with an exit code'),
+    folder: z
+      .string()
+      .optional()
+      .describe('the repository of the Project it runs in; the Workspace root without it'),
+    why: z.string().trim().min(1).describe('why it is worth keeping, for the human who decides'),
+  }),
   project_get: z.object({}),
   session_get: z.object({}),
 } as const
@@ -158,6 +182,8 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   commands_output:
     'What a run of this Session has printed, whoever started it, bounded, the address it published, and how it ended if it has.',
   commands_stop: 'Stop a run and everything it started.',
+  commands_propose:
+    "Proposes a command worth keeping in the Project's catalogue. A human accepts or declines it in the Session; nothing enters the catalogue by this call.",
   project_get:
     'The Project this Session belongs to: its name, where its Workspace root is, and what it reads from.',
   session_get:
@@ -180,6 +206,7 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   commands_run: 'the catalogue, or a one-off line the user allows',
   commands_output: `the last ${OUTPUT_KEPT_BYTES / 1024} KiB a run printed`,
   commands_stop: 'a run of this Project, and all it started',
+  commands_propose: 'a proposal a human decides; nothing written to the catalogue',
   project_get: 'this Project',
   session_get: `this Session and its last ${THREAD_TAIL} entries`,
 }
@@ -244,6 +271,8 @@ export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision
       return decide(tool, read(TOOL_ARGUMENTS['commands_output'], raw))
     case 'commands_stop':
       return decide(tool, read(TOOL_ARGUMENTS['commands_stop'], raw))
+    case 'commands_propose':
+      return decide(tool, read(TOOL_ARGUMENTS['commands_propose'], raw))
     case 'project_get':
       return decide(tool, read(TOOL_ARGUMENTS['project_get'], raw))
     case 'session_get':
