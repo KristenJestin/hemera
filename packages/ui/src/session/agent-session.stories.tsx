@@ -161,13 +161,15 @@ const THREAD: ScrollerEntry[] = [
     content: (
       <HemeraToolCall
         tool="fs_read"
+        label="Read file"
+        mark="read-file"
+        subject={{ text: 'src/billing/export.ts', path: 'src/billing/export.ts' }}
         status="completed"
         summary="1 842 lines, 61 KiB"
         arguments={[
           { label: 'path', value: 'src/billing/export.ts' },
           { label: 'limit', value: '2 000 lines' },
         ]}
-        paths={['src/billing/export.ts']}
         ms={38}
         provenance={{
           session: 'CSV invoice export',
@@ -203,6 +205,7 @@ const THREAD: ScrollerEntry[] = [
       <ToolCallCard
         title="pnpm test --project=repository"
         kind="execute"
+        subject={{ text: 'pnpm test --project=repository' }}
         status="failed"
         output={'FAIL src/billing/export.test.ts\n  streams a large export\n'}
         error={
@@ -213,7 +216,15 @@ const THREAD: ScrollerEntry[] = [
   },
   {
     id: 'cancelled',
-    content: <ToolCallCard title="pnpm build" kind="execute" status="cancelled" input="cwd: ." />,
+    content: (
+      <ToolCallCard
+        title="pnpm build"
+        kind="execute"
+        subject={{ text: 'pnpm build' }}
+        status="cancelled"
+        input="cwd: ."
+      />
+    ),
   },
   {
     id: 'command',
@@ -525,7 +536,7 @@ export const Complete: Story = {
     )
     // A call to one of Hemera's own tools wears the mark of its kind, as a native call does, and
     // is announced as Hemera's, so it is not read as a native call.
-    await expect(canvas.getByRole('button', { name: /^Hemera fs_read/ })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: /^Hemera Read file/ })).toBeVisible()
     await expect(canvas.getByText('fs_read')).toBeVisible()
     // The command the agent started is a block of the thread, with the address one press away.
     await expect(canvas.getByText('pnpm dev')).toBeVisible()

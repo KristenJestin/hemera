@@ -48,11 +48,16 @@ import { Disclosure } from './disclosure.tsx'
  * not fold at all: no chevron, no press, nothing to open. A control that opens onto nothing is
  * a control that lied about having something there.
  *
- * The file a call touched is a press at the end of the row rather than the title itself: the
- * title is the fold, a control cannot live inside a control, and a link inside a button is a
- * link the keyboard walks over and a screen reader never announces. The row still folds
- * anywhere the pointer lands on it. The press sits on the fold's own line, beside the control,
- * so the body opening under it does not carry it along (trial of 23 September 2026).
+ * The line reads the way a Hemera call's does (recette 3 of 23 September 2026): the mark of the
+ * kind, what a reader calls it, what it is about, and the agent's own name for the tool, quieter,
+ * when the adapter gives one. The kind is the label — `Read file`, `Run command` — and a call of
+ * no kind is read by the title the agent gave it. What it is about is the subject: the file, the
+ * query, the command line.
+ *
+ * When the subject is the file a call touched and the reader can go there, the subject itself is
+ * the press, where it is read: a press at the end of the row was a second copy of the same path.
+ * The row still folds anywhere else the pointer lands on it, and the press is on the fold's own
+ * line, so the body opening under it does not carry it along (trial of 23 September 2026).
  */
 
 /**
@@ -82,16 +87,44 @@ const STATUS: Record<ToolStatus, { word: string; tone: StatusTone }> = {
   cancelled: { word: 'Cancelled', tone: 'cancelled' },
 }
 
-/** The line that is read: the mark of the kind, the title, and what the call is doing. */
+/** The line that is read: the mark of the kind, the label, the subject and where the call stands. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
-const TITLE = 'truncate text-muted-foreground'
+/** What the reader calls the call, in the colour of the thread; it gives way to nothing. */
+const LABEL = 'shrink-0 text-foreground'
 
-/** The file, shortened from its end rather than pushing the line off the card. */
-const PATH = 'min-w-0 truncate'
+/** A title standing in for a label, which is the agent's sentence and may be long. */
+const TITLE = 'min-w-0 truncate text-foreground'
 
-/** A command is read character by character, so it keeps the mono face it was written in. */
-const COMMAND = 'truncate font-mono text-muted-foreground'
+/**
+ * What the call is about, in the face a path, a query and a command are written in, shortened
+ * from its end rather than pushing the line off the card.
+ */
+const SUBJECT = 'min-w-0 truncate font-mono text-foreground'
+
+/** The press a subject becomes: it takes the pointer back from the summary it is drawn in. */
+const PRESS = 'pointer-events-auto flex min-w-0'
+
+/** The tool's own name, as the agent or the catalogue calls it: quieter, and smaller. */
+const NAME = 'shrink-0 font-mono text-xs text-muted-foreground'
+
+/** What a reader calls each kind of call; a call of no kind is read by its title. */
+const KIND_LABELS: Record<ToolKind, string | null> = {
+  read: 'Read file',
+  edit: 'Edit file',
+  delete: 'Delete file',
+  move: 'Move file',
+  search: 'Search',
+  execute: 'Run command',
+  think: 'Thinking',
+  fetch: 'Fetch',
+  other: null,
+}
+
+/** The label a call of this kind is read by, the title standing in for a call of no kind. */
+export function toolKindLabel(kind: ToolKind, title: string): string {
+  return KIND_LABELS[kind] ?? title
+}
 
 /** What the call returned, quieter than the line above it. */
 const BODY = 'flex flex-col gap-2 text-sm text-muted-foreground'
@@ -135,6 +168,60 @@ export type ToolKind =
  */
 export type ToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
 
+/** What a call is about, as its line shows it: a file, a folder, a query, a command line. */
+export interface ToolSubject {
+  /** What the line shows, already shortened. */
+  text: string
+  /** The whole of it, for the pointer that rests on it; `text` when left out. */
+  full?: string | undefined
+  /** The path it is, when it is one: the press a reader goes there with. */
+  path?: string | undefined
+}
+
+/**
+ * The subject on a call's line: plain text, or the press that goes to the file it names.
+ *
+ * The press is wrapped so that it takes the pointer back from the summary it is drawn over
+ * (`Disclosure`'s `holdsPress`); `pressable` is what the caller hands the fold as well.
+ */
+export function SubjectOnLine({
+  subject,
+  onOpen,
+}: {
+  subject: ToolSubject
+  onOpen?: ((path: string) => void) | undefined
+}): ReactNode {
+  const { text, full = text, path } = subject
+  if (path === undefined || onOpen === undefined) {
+    return (
+      <span className={SUBJECT} title={full}>
+        {text}
+      </span>
+    )
+  }
+  return (
+    <span className={PRESS}>
+      <Button
+        variant="link"
+        size="sm"
+        className="min-w-0"
+        title={full}
+        onClick={() => onOpen(path)}
+      >
+        <span className={SUBJECT}>{text}</span>
+      </Button>
+    </span>
+  )
+}
+
+/** Whether a subject is drawn as a press, which the fold has to know to lay its line out. */
+export function pressable(
+  subject: ToolSubject | undefined,
+  onOpen: ((path: string) => void) | undefined,
+): boolean {
+  return subject?.path !== undefined && onOpen !== undefined
+}
+
 /** A file the call touched, and where in it the call landed. */
 export interface ToolLocation {
   /** The absolute path, as the agent reported it. */
@@ -144,10 +231,16 @@ export interface ToolLocation {
 }
 
 export interface ToolCallCardProps {
-  /** What the call is called, as the agent wrote it. */
+  /** What the call is called, as the agent wrote it: the label of a call of no kind. */
   title: string
-  /** The kind, which decides the mark and nothing else. */
+  /** The kind, which decides the mark and the label. */
   kind: ToolKind
+  /**
+   * What the call is about. Left out, the first file it touched is, when it touched one.
+   */
+  subject?: ToolSubject | undefined
+  /** The tool's own name, when the adapter gives one: drawn quieter, after the subject. */
+  name?: string | undefined
   /**
    * Where the call is in its life.
    *
@@ -186,6 +279,8 @@ function at(location: ToolLocation): string {
 export function ToolCallCard({
   title,
   kind,
+  subject,
+  name,
   status,
   locations,
   error,
@@ -201,12 +296,24 @@ export function ToolCallCard({
   // said. The status plays no part in it.
   const [shown, setShown] = useState(defaultOpen)
   const first = locations?.[0]
+  const about = subject ?? (first === undefined ? undefined : { text: at(first), path: first.path })
+  // A press on the subject goes to the file as the agent reported it, with the line it named.
+  const open =
+    onOpenLocation === undefined
+      ? undefined
+      : (path: string) => onOpenLocation(locations?.find((one) => one.path === path) ?? { path })
   const sectioned = input !== undefined || output !== undefined
   const opens = sectioned || children !== undefined || error !== undefined
   const summary = (
     <span className={SUMMARY}>
-      <span className="flex shrink-0 text-muted-foreground">{MARKS[kind]}</span>
-      <span className={kind === 'execute' ? COMMAND : TITLE}>{title}</span>
+      <span className="flex shrink-0 text-muted-foreground" data-mark={kind}>
+        {MARKS[kind]}
+      </span>
+      <span className={KIND_LABELS[kind] === null ? TITLE : LABEL}>
+        {toolKindLabel(kind, title)}
+      </span>
+      {about !== undefined && <SubjectOnLine subject={about} onOpen={open} />}
+      {name !== undefined && <span className={NAME}>{name}</span>}
       <StatusDot status={tone} size="sm" label={word} />
     </span>
   )
@@ -219,18 +326,7 @@ export function ToolCallCard({
       open={shown}
       onOpenChange={setShown}
       summary={summary}
-      aside={
-        first !== undefined && onOpenLocation !== undefined ? (
-          <Button
-            variant="link"
-            size="sm"
-            className="min-w-0"
-            onClick={() => onOpenLocation(first)}
-          >
-            <span className={PATH}>{at(first)}</span>
-          </Button>
-        ) : undefined
-      }
+      holdsPress={pressable(about, open)}
     >
       {opens ? (
         <div className={BODY}>

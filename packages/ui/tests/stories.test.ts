@@ -254,8 +254,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
     // Neither `DialogClose` nor `Kbd` is a component of its own: the first is the dialog's own
     // way of saying that a button of the caller's closes it, the second is a keystroke drawn as
     // keys, which every component that shows one borrows, and `CardRow` is a row of a card and
-    // nothing outside one.
+    // nothing outside one. `toolKindLabel` is no component either: it is the words a native
+    // call's line is read by, which a permission card about that call is headed with as well.
     const parts = [
+      'toolKindLabel',
       'DialogClose',
       'Kbd',
       'TooltipProvider',

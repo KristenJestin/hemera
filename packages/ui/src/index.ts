@@ -252,6 +252,8 @@ export {
   type ToolKind,
   type ToolLocation,
   type ToolStatus,
+  type ToolSubject,
+  toolKindLabel,
 } from './activity/tool-call-card.tsx'
 export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
 export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
@@ -261,6 +263,7 @@ export {
   HemeraToolCall,
   type HemeraToolArgument,
   type HemeraToolCallProps,
+  type HemeraToolMark,
   type HemeraToolProvenance,
   type HemeraToolStatus,
 } from './activity/hemera-tool-call.tsx'

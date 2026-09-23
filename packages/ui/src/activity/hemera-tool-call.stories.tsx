@@ -2,18 +2,22 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { withinFrames } from '../../.storybook/reduced-motion.ts'
-import { HemeraToolCall, type HemeraToolProvenance } from './hemera-tool-call.tsx'
+import {
+  HemeraToolCall,
+  type HemeraToolMark,
+  type HemeraToolProvenance,
+} from './hemera-tool-call.tsx'
 
 /**
  * A call to a tool Hemera lent the agent (design D6-06).
  *
  * The stories are the states a call is read in: a read that is done and folded, the same call
  * opened by the reader, an edit, a write, a search that hit its limit, a call in flight, a call
- * that failed, a call Hemera refused, and a write waiting for the reader's decision, then one
- * story per mark a tool is drawn with. The line carries the mark of the kind of tool, as a native
- * call does, and no brand; the provenance under it is what tells this block from a native call
- * in the same turn, and the word `Hemera` is still what the line is announced by. Where the call
- * stands is the dot beside the tool.
+ * that failed, a call Hemera refused, and a write waiting for the reader's decision, then the
+ * whole catalogue, one line per tool. The line carries the tool's own mark, its label, what the
+ * call is about and the catalogue's name, quieter (recette 3 of 23 September 2026), and no brand;
+ * the provenance under it is what tells this block from a native call in the same turn, and the
+ * word `Hemera` is still what the line is announced by. Where the call stands is the dot.
  */
 const PROVENANCE: HemeraToolProvenance = {
   session: 'CSV invoice export',
@@ -28,19 +32,27 @@ const meta = {
   parameters: { layout: 'padded' },
   args: {
     tool: 'fs_read',
+    label: 'Read file',
+    mark: 'read-file',
+    subject: { text: 'src/billing/export.ts', path: 'src/billing/export.ts' },
     status: 'completed',
     summary: '4 812 bytes read from src/billing/export.ts, 1 of 1 page.',
     arguments: [
       { label: 'path', value: 'src/billing/export.ts' },
       { label: 'range', value: '0–262144' },
     ],
-    paths: ['src/billing/export.ts'],
     ms: 18,
     provenance: PROVENANCE,
     onOpenPath: fn(),
   },
   argTypes: {
     tool: { control: 'text', description: 'The tool, as the catalogue names it.' },
+    label: { control: 'text', description: 'What a reader calls the tool.' },
+    mark: { control: 'select', description: 'The tool’s own mark.' },
+    subject: {
+      control: 'object',
+      description: 'What the call is about; a path is the press that goes there.',
+    },
     status: {
       control: 'inline-radio',
       options: ['pending', 'in_progress', 'completed', 'failed', 'refused'],
@@ -48,11 +60,10 @@ const meta = {
     },
     summary: { control: 'text', description: 'What the call returned, in one line.' },
     arguments: { control: 'object', description: 'The arguments as they were bounded.' },
-    paths: { control: 'object', description: 'The paths the call touched.' },
     ms: { control: 'number', description: 'How long the call took.' },
     provenance: { control: 'object', description: 'The Session, the agent and the token id.' },
     error: { control: 'text', description: 'Why the call failed, or why it was refused.' },
-    onOpenPath: { control: false, description: 'What a press on a path does.' },
+    onOpenPath: { control: false, description: 'What a press on a subject that is a path does.' },
     children: { control: false, description: 'What the call returned, already drawn.' },
   },
 } satisfies Meta<typeof HemeraToolCall>
@@ -65,19 +76,28 @@ type Story = StoryObj<typeof meta>
 const A_FOLD = 30
 
 /**
- * The fold opening, with the path the call touched on its line (trial of 23 September 2026).
+ * The fold opening, with the path the call touched on its line (trials of 23 September 2026).
  *
  * The press on the path sat beside the whole fold and was centred on it, so it slid down the
  * block while the body opened under it. It is on the fold's own line now, the one line that
- * never moves, and pressing it goes to the path without opening the block.
+ * never moves, and pressing it goes to the path without opening the block. Since recette 3 it is
+ * the subject itself, where the line is read, and there is no second copy of it at the end.
  */
 export const AFoldOpening: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /fs_read/ })
+    const row = canvas.getByRole('button', { name: /Read file/ })
     const path = canvas.getByRole('button', { name: 'src/billing/export.ts' })
     // A press inside the fold's own button would be one the keyboard walks over.
     await expect(row.contains(path)).toBe(false)
+    // Once: the subject is the press, and nothing else on the line names the file.
+    await expect(canvas.getAllByText('src/billing/export.ts')).toHaveLength(1)
+    // Where it is read: after the label, before the catalogue's name.
+    const label = canvas.getByText('Read file').getBoundingClientRect()
+    const name = canvas.getByText('fs_read').getBoundingClientRect()
+    const at = path.getBoundingClientRect()
+    await expect(at.left).toBeGreaterThan(label.right)
+    await expect(at.right).toBeLessThanOrEqual(name.left)
     await userEvent.click(path)
     await expect(args.onOpenPath).toHaveBeenCalledWith('src/billing/export.ts')
     await expect(row, 'a press on the path opened the block').toHaveAttribute(
@@ -101,7 +121,7 @@ export const AFoldClosing: Story = {
   args: { defaultOpen: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /fs_read/ })
+    const row = canvas.getByRole('button', { name: /Read file/ })
     const path = canvas.getByRole('button', { name: 'src/billing/export.ts' })
     await expect(canvas.getByText('token 7f31c0')).toBeVisible()
     const open = path.getBoundingClientRect().top
@@ -119,26 +139,38 @@ export const AFoldClosing: Story = {
   },
 }
 
-/** A call that is done, folded: the mark of a read, the tool, the state, and the file it read. */
+/** A call that is done, folded: the mark, the label, the file it read, the tool, the state. */
 export const ReadFolded: Story = {
+  // A subject that is not a press, so the line is the fold's own button and nothing else.
+  args: { subject: { text: 'src/billing/export.ts' } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    // The line wears the mark of what the tool does, as a native call does, and no brand: the
-    // word `Hemera` is only heard, so the line reads "Hemera, the tool, where the call stands".
-    const row = canvas.getByRole('button', { name: 'Hemera fs_read Done' })
+    // The line wears the tool's own mark and no brand: the word `Hemera` is only heard, so the
+    // line reads "Hemera, what the tool does, what it did it to, where the call stands".
+    const row = canvas.getByRole('button', { name: 'Hemera Read file src/billing/export.ts Done' })
     const mark = row.querySelector('[data-mark]')
-    await expect(mark).toHaveAttribute('data-mark', 'read')
+    await expect(mark).toHaveAttribute('data-mark', 'read-file')
     await expect(mark?.querySelector('svg')).toBeVisible()
     await expect(canvas.queryByRole('img', { name: 'Hemera' })).toBeNull()
-    // The tool's name is mono and quiet, the tone a native call's title is drawn in.
+    // The label is read in the colour of the thread; the catalogue's name is mono, quieter and
+    // smaller, the tone the mark is drawn in.
+    const label = canvas.getByText('Read file')
     const tool = canvas.getByText('fs_read')
     await expect(tool).toBeVisible()
     await expect(getComputedStyle(tool).color).toBe(getComputedStyle(mark ?? tool).color)
+    await expect(getComputedStyle(label).color).not.toBe(getComputedStyle(tool).color)
+    await expect(parseFloat(getComputedStyle(tool).fontSize)).toBeLessThan(
+      parseFloat(getComputedStyle(label).fontSize),
+    )
+    // The subject is mono and in the colour of the thread, as a path is read.
+    const subject = canvas.getByText('src/billing/export.ts')
+    await expect(getComputedStyle(subject).fontFamily).toMatch(/mono|Fira/i)
+    await expect(getComputedStyle(subject).color).toBe(getComputedStyle(label).color)
     // Where it stands is a dot, and the word is only what the dot is announced by.
     await expect(canvas.getByRole('img', { name: 'Done' })).toBeVisible()
     await expect(canvas.queryByText('Done')).toBeNull()
     await expect(row).toHaveAttribute('aria-expanded', 'false')
-    await expect(canvas.getByText('src/billing/export.ts')).toBeVisible()
+    await expect(subject).toBeVisible()
   },
 }
 
@@ -147,7 +179,7 @@ export const ReadOpen: Story = {
   args: { defaultOpen: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /fs_read/ })
+    const row = canvas.getByRole('button', { name: /Read file/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText('0–262144')).toBeVisible()
     await expect(canvas.getByText('token 7f31c0')).toBeVisible()
@@ -159,17 +191,19 @@ export const ReadOpen: Story = {
 export const Written: Story = {
   args: {
     tool: 'fs_write',
+    label: 'Write file',
+    mark: 'write-file',
+    subject: { text: 'src/billing/export.test.ts', path: 'src/billing/export.test.ts' },
     summary: 'src/billing/export.test.ts written, 1 204 bytes.',
     arguments: [
       { label: 'path', value: 'src/billing/export.test.ts' },
       { label: 'key', value: 'write-export-test' },
     ],
-    paths: ['src/billing/export.test.ts'],
     ms: 9,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /fs_write/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /Write file/ }))
     await expect(canvas.getByText('write-export-test')).toBeVisible()
     await expect(canvas.getByText(/1 204 bytes/)).toBeVisible()
   },
@@ -179,18 +213,19 @@ export const Written: Story = {
 export const Edited: Story = {
   args: {
     tool: 'fs_edit',
+    label: 'Edit file',
+    mark: 'edit-file',
     summary: '1 occurrence replaced in src/billing/export.ts.',
     arguments: [
       { label: 'path', value: 'src/billing/export.ts' },
       { label: 'old', value: 'const lines = rows.map((row) => format(row))' },
       { label: 'new', value: 'for (const row of rows) await out.write(format(row))' },
     ],
-    paths: ['src/billing/export.ts'],
     ms: 12,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /fs_edit/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /Edit file/ }))
     await expect(canvas.getByText(/const lines = rows\.map/)).toBeVisible()
     await expect(canvas.getByText(/1 occurrence replaced/)).toBeVisible()
   },
@@ -200,17 +235,19 @@ export const Edited: Story = {
 export const SearchTruncated: Story = {
   args: {
     tool: 'search',
+    label: 'Search',
+    mark: 'search',
+    subject: { text: '"exportInvoices" in src/' },
     summary: '200 matches shown of more, 1 MiB scanned — cursor eyJvZmZzZXQiOjIwMH0.',
     arguments: [
       { label: 'query', value: 'exportInvoices' },
       { label: 'scope', value: 'src/' },
     ],
-    paths: [],
     ms: 64,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /search/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /Search/ }))
     await expect(canvas.getByText(/200 matches shown of more/)).toBeVisible()
     await expect(canvas.getByText(/1 MiB scanned/)).toBeVisible()
   },
@@ -220,16 +257,18 @@ export const SearchTruncated: Story = {
 export const Running: Story = {
   args: {
     tool: 'search',
+    label: 'Search',
+    mark: 'search',
+    subject: { text: '"exportInvoices"' },
     status: 'in_progress',
     summary: 'Searching for exportInvoices under src/.',
     arguments: [{ label: 'query', value: 'exportInvoices' }],
-    paths: [],
     ms: undefined,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('img', { name: 'Running' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: /search/ })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: /Search/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
@@ -243,14 +282,14 @@ export const Failed: Story = {
     status: 'failed',
     summary: 'Nothing read.',
     error: 'src/billing/export.csv does not exist.',
+    subject: { text: 'src/billing/export.csv', path: 'src/billing/export.csv' },
     arguments: [{ label: 'path', value: 'src/billing/export.csv' }],
-    paths: [],
     ms: 3,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('img', { name: 'Failed' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: /fs_read/ })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: /Read file/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
@@ -262,15 +301,17 @@ export const Failed: Story = {
 export const Refused: Story = {
   args: {
     tool: 'fs_write',
+    label: 'Write file',
+    mark: 'write-file',
+    subject: { text: '/etc/hosts', path: '/etc/hosts' },
     status: 'refused',
     summary: 'No effect: the Session does not offer fs_write.',
     error: 'The guard refused this call: fs_write is not in the set of this Session.',
     arguments: [{ label: 'path', value: '/etc/hosts' }],
-    paths: [],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /fs_write/ })
+    const row = canvas.getByRole('button', { name: /Write file/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByRole('img', { name: 'Refused' })).toBeVisible()
     await expect(canvas.getByText(/not in the set of this Session/)).toBeVisible()
@@ -286,15 +327,17 @@ export const Refused: Story = {
 export const WaitingForYou: Story = {
   args: {
     tool: 'fs_write',
+    label: 'Write file',
+    mark: 'write-file',
+    subject: { text: '/home/someone/notes.md', path: '/home/someone/notes.md' },
     status: 'pending',
     summary: 'Held: the permission block of this turn is asking the reader.',
     arguments: [{ label: 'path', value: '/home/someone/notes.md' }],
-    paths: [],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('img', { name: 'Waiting for you' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: /fs_write/ })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: /Write file/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
@@ -302,76 +345,60 @@ export const WaitingForYou: Story = {
 }
 
 /**
- * One story per mark: the tool, and the mark it is drawn with. The mark is a native call's for
- * what a native call also does, and the line holds no other picture than it and the dot.
+ * The catalogue, one line per tool, each as a call with realistic arguments would draw it:
+ * the tool, what a reader calls it, its mark, and what it is about.
  */
-function marked(tool: string, kind: string, summary: string): Story {
-  return {
-    args: { tool, summary, arguments: [], paths: [] },
-    play: async ({ canvasElement }) => {
-      const canvas = within(canvasElement)
-      const row = canvas.getByRole('button', { name: `Hemera ${tool} Done` })
-      const mark = row.querySelector('[data-mark]')
-      await expect(mark).toHaveAttribute('data-mark', kind)
-      await expect(mark?.querySelector('svg')).toBeVisible()
-      await expect(canvas.queryByRole('img', { name: 'Hemera' })).toBeNull()
-      // A command only looked at is drawn a step quieter than one that runs.
-      const opacity = Number(getComputedStyle(mark ?? row).opacity)
-      await expect(kind === 'quiet-terminal' ? opacity < 1 : opacity === 1).toBe(true)
-    },
-  }
-}
+const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | null, string])[] = [
+  ['fs_read', 'Read file', 'read-file', 'notes.md', 'Reading notes.md'],
+  ['fs_list', 'List folder', 'list-folder', 'src/billing', 'Listing src/billing'],
+  ['search', 'Search', 'search', '"exportInvoices" in src', 'Searching for exportInvoices'],
+  ['fs_write', 'Write file', 'write-file', 'src/billing/export.test.ts', 'Writing the test'],
+  ['fs_edit', 'Edit file', 'edit-file', 'src/billing/export.ts', 'Editing the export'],
+  ['commands_run', 'Run command', 'run-command', 'check', 'Running check'],
+  ['commands_stop', 'Stop command', 'stop-command', 'dev', 'Stopping dev'],
+  ['commands_list', 'List commands', 'list-commands', null, 'Reading the catalogue'],
+  ['commands_output', 'Command output', 'command-output', 'check', 'Reading the output of check'],
+  ['project_get', 'Project', 'project', null, 'Reading the Project'],
+  ['session_get', 'Session', 'session', null, 'Reading this Session'],
+]
 
-/** `fs_read` and `fs_list`: a read, the mark of a native read. */
-export const MarkRead: Story = marked('fs_list', 'read', '12 entries listed under src/billing.')
-
-/** `fs_write` and `fs_edit`: an edit, the mark of a native edit. */
-export const MarkEdit: Story = marked('fs_edit', 'edit', '1 occurrence replaced.')
-
-/** `search`: the mark of a native search. */
-export const MarkSearch: Story = marked('search', 'search', '3 matches for exportInvoices.')
-
-/** `commands_run` and `commands_stop`: a command started or stopped. */
-export const MarkTerminal: Story = marked('commands_run', 'terminal', 'check started.')
-
-/** `commands_list` and `commands_output`: a command only looked at, quieter. */
-export const MarkTerminalMuted: Story = marked(
-  'commands_output',
-  'quiet-terminal',
-  '40 lines of the output of check.',
-)
-
-/** `project_get` and `session_get`: what Hemera knows of the Project or the Session. */
-export const MarkInfo: Story = marked('project_get', 'info', 'The Project, its root and commands.')
-
-/** The catalogue as the thread reads it: one line per tool, with the state of the call. */
+/**
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): eleven tools, eleven
+ * marks and eleven labels, and what each call is about where it is about something. A mark per
+ * kind of tool drew `fs_list` as `fs_read` and the four commands as one.
+ */
 export const EveryTool: Story = {
-  args: { status: 'in_progress' },
+  args: { status: 'completed' },
   render: () => (
     <div className="flex flex-col gap-1">
-      {(
-        [
-          ['fs_read', 'Reading src/billing/export.ts'],
-          ['fs_write', 'Writing src/billing/export.test.ts'],
-          ['fs_edit', 'Editing src/billing/export.ts'],
-          ['fs_list', 'Listing src/billing'],
-          ['search', 'Searching for exportInvoices'],
-          ['commands_list', 'Reading the catalogue'],
-          ['commands_run', 'Running check'],
-          ['commands_output', 'Reading the output of check'],
-          ['commands_stop', 'Stopping check'],
-          ['project_get', 'Reading the Project'],
-          ['session_get', 'Reading this Session'],
-        ] as const
-      ).map(([tool, summary]) => (
+      {CATALOGUE.map(([tool, label, mark, subject, summary]) => (
         <HemeraToolCall
           key={tool}
           tool={tool}
-          status="in_progress"
+          label={label}
+          mark={mark}
+          subject={subject === null ? undefined : { text: subject }}
+          status="completed"
           summary={summary}
           provenance={PROVENANCE}
         />
       ))}
     </div>
   ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const marks = [...canvasElement.querySelectorAll('[data-mark]')]
+    await expect(marks).toHaveLength(11)
+    await expect(new Set(marks.map((mark) => mark.getAttribute('data-mark'))).size).toBe(11)
+    // Eleven pictures, and not one drawn twice.
+    const pictures = marks.map((mark) => mark.querySelector('svg')?.getAttribute('class') ?? '')
+    await expect(new Set(pictures).size).toBe(11)
+    for (const [tool, label, mark, subject] of CATALOGUE) {
+      const name = ['Hemera', label, subject, 'Done'].filter((word) => word !== null).join(' ')
+      const row = canvas.getByRole('button', { name })
+      expect(row.querySelector('[data-mark]')).toHaveAttribute('data-mark', mark)
+      expect(within(row).getByText(tool)).toBeVisible()
+      if (subject !== null) expect(within(row).getByText(subject)).toBeVisible()
+    }
+  },
 }

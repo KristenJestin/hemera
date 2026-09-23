@@ -1,10 +1,21 @@
 import type { ReactNode } from 'react'
 
-import { Button } from '../components/button/button.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
-import { IconInfoCircle, IconTerminal } from '../icons.ts'
+import {
+  IconFilePlus,
+  IconFileText,
+  IconFolder,
+  IconFolders,
+  IconListDetails,
+  IconMessages,
+  IconPencil,
+  IconPlayerPlay,
+  IconPlayerStop,
+  IconSearch,
+  IconTerminal2,
+} from '../icons.ts'
 import { Disclosure } from './disclosure.tsx'
-import { MARKS } from './tool-call-card.tsx'
+import { MARKS, SubjectOnLine, type ToolSubject, pressable } from './tool-call-card.tsx'
 
 /**
  * One call the agent made to a tool Hemera lent it (design D6-06).
@@ -13,11 +24,17 @@ import { MARKS } from './tool-call-card.tsx'
  * thread is no longer the agent's business alone: it is Hemera's, and the thread has to say so.
  * That is the whole reason this block is not `ToolCallCard` — the two sit side by side in one
  * turn and a reader must tell them apart. The line reads like a native call's — the mark of the
- * kind of tool, drawn as `ToolCallCard` draws it, then the tool's name in mono — and the
- * difference is the name itself and the provenance under it, which is what makes the call
+ * tool, what a reader calls it, what it is about, then the catalogue's name in mono, quieter —
+ * and the difference is the name itself and the provenance under it, which is what makes the call
  * accountable: which Session it was made in, which agent made it, and which token it carried
  * (D6-01). Hemera's own mark left the line (recette 2 of 23 September 2026): a brand on every
  * call was louder than the call; the word `Hemera` stays in what the line is announced by.
+ *
+ * Each tool wears a mark of its own and a label of its own (recette 3 of 23 September 2026): a
+ * mark per kind of tool drew `fs_list` as `fs_read` and the four commands as one, and a line
+ * read by `commands_output` is a line read by its plumbing. The label and the mark are the
+ * caller's to hand over — the catalogue is Hemera's, and this block knows nothing of it — and the
+ * code name stays on the line, quieter, for whoever reads the thread against the agent's log.
  *
  * Where a call stands is a dot, as it is on a native call, and not a word: the word is what the
  * dot is announced by.
@@ -42,53 +59,52 @@ const STATUS: Record<HemeraToolStatus, { word: string; tone: StatusTone }> = {
   refused: { word: 'Refused', tone: 'cancelled' },
 }
 
-/** The line that is read: whose call it is, the tool, and what the call is doing. */
+/** The line that is read: whose call it is, the tool, what it is about and where it stands. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
-/** How a Hemera tool is read at a glance: what it does to the Workspace, not whose it is. */
-type MarkKind = 'read' | 'edit' | 'search' | 'terminal' | 'quiet-terminal' | 'info'
-
 /**
- * The kind of each tool of the catalogue. A command that is only looked at — the catalogue, an
- * output — is the terminal of a command that runs, drawn quieter: nothing started or stopped.
+ * The mark of each tool, one picture per tool (recette 3 of 23 September 2026). The names are
+ * the ones Hemera's catalogue gives its tools (`@hemera/core`'s `ToolMark`), which this package
+ * cannot import and the application hands over.
  */
-const KINDS: ReadonlyMap<string, MarkKind> = new Map([
-  ['fs_read', 'read'],
-  ['fs_list', 'read'],
-  ['fs_write', 'edit'],
-  ['fs_edit', 'edit'],
-  ['search', 'search'],
-  ['commands_run', 'terminal'],
-  ['commands_stop', 'terminal'],
-  ['commands_list', 'quiet-terminal'],
-  ['commands_output', 'quiet-terminal'],
-  ['project_get', 'info'],
-  ['session_get', 'info'],
-])
+export type HemeraToolMark =
+  | 'read-file'
+  | 'list-folder'
+  | 'search'
+  | 'write-file'
+  | 'edit-file'
+  | 'run-command'
+  | 'stop-command'
+  | 'list-commands'
+  | 'command-output'
+  | 'project'
+  | 'session'
 
-/** The marks, the three a native call already has read from its own table. */
-const HEMERA_MARKS: Record<MarkKind, ReactNode> = {
-  read: MARKS.read,
-  edit: MARKS.edit,
-  search: MARKS.search,
-  terminal: <IconTerminal size="sm" aria-hidden="true" />,
-  'quiet-terminal': <IconTerminal size="sm" aria-hidden="true" />,
-  info: <IconInfoCircle size="sm" aria-hidden="true" />,
+const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
+  'read-file': <IconFileText size="sm" aria-hidden="true" />,
+  'list-folder': <IconFolder size="sm" aria-hidden="true" />,
+  search: <IconSearch size="sm" aria-hidden="true" />,
+  'write-file': <IconFilePlus size="sm" aria-hidden="true" />,
+  'edit-file': <IconPencil size="sm" aria-hidden="true" />,
+  'run-command': <IconPlayerPlay size="sm" aria-hidden="true" />,
+  'stop-command': <IconPlayerStop size="sm" aria-hidden="true" />,
+  'list-commands': <IconListDetails size="sm" aria-hidden="true" />,
+  'command-output': <IconTerminal2 size="sm" aria-hidden="true" />,
+  project: <IconFolders size="sm" aria-hidden="true" />,
+  session: <IconMessages size="sm" aria-hidden="true" />,
 }
 
 /** Where the mark sits on the line, in the tone a native call's mark is drawn in. */
 const MARK = 'flex shrink-0 text-muted-foreground'
 
-/** The mark of a command only looked at, a step quieter than one that runs. */
-const QUIET_MARK = 'flex shrink-0 text-muted-foreground opacity-60'
-
 /** Who the call is, for whatever reads the page rather than looks at it. */
 const WHOSE = 'sr-only'
 
-const TOOL = 'min-w-0 truncate font-mono text-muted-foreground'
+/** What a reader calls the tool, in the colour of the thread. */
+const NAMED = 'shrink-0 text-foreground'
 
-/** The path, shortened from its end rather than pushing the line off the block. */
-const PATH = 'min-w-0 truncate'
+/** The catalogue's name for the tool: quieter and smaller, after what the call is about. */
+const TOOL = 'shrink-0 font-mono text-xs text-muted-foreground'
 
 /** What the call answered, quieter than the line above it. */
 const ANSWER = 'text-sm text-muted-foreground'
@@ -132,13 +148,17 @@ export interface HemeraToolProvenance {
 export interface HemeraToolCallProps {
   /** The tool, as the catalogue names it: `fs_read`, `search`, `commands_run`. */
   tool: string
+  /** What a reader calls the tool: `Read file`, `Search`, `Run command`. */
+  label: string
+  /** The tool's own mark; a tool the catalogue does not know wears the mark of any call. */
+  mark?: HemeraToolMark | undefined
+  /** What the call is about, read from its arguments: the file, the query, the command. */
+  subject?: ToolSubject | undefined
   status: HemeraToolStatus
   /** What the call returned, in one line. */
   summary: string
   /** The arguments as they were bounded, in the order the tool declares them. */
   arguments?: readonly HemeraToolArgument[] | undefined
-  /** The paths the call touched, in the order it named them. */
-  paths?: readonly string[] | undefined
   /** How long the call took, once it is over. */
   ms?: number | undefined
   /** Where the call was made from: the Session, the agent and the token identifier. */
@@ -147,7 +167,7 @@ export interface HemeraToolCallProps {
   error?: string | undefined
   /** Whether a reader who has not touched it finds it open. */
   defaultOpen?: boolean | undefined
-  /** What a press on a path does: the reader goes there, which this block cannot do. */
+  /** What a press on a subject that is a path does: the reader goes there. */
   onOpenPath?: ((path: string) => void) | undefined
   /** What the call returned, handed over already drawn. */
   children?: ReactNode
@@ -157,10 +177,12 @@ export interface HemeraToolCallProps {
 
 export function HemeraToolCall({
   tool,
+  label,
+  mark,
+  subject,
   status,
   summary,
   arguments: args,
-  paths,
   ms,
   provenance,
   error,
@@ -175,35 +197,30 @@ export function HemeraToolCall({
   // reason a call was turned down is the whole of what a reader has to act on.
   const forced =
     status === 'in_progress' || status === 'failed' || status === 'pending' || status === 'refused'
-  const first = paths?.[0]
-  const kind = KINDS.get(tool)
   return (
     <Disclosure
       className={className}
       // Uncontrolled once the call is over: `undefined` hands the fold back to the reader.
       open={forced ? true : undefined}
       defaultOpen={defaultOpen}
+      // A subject that is a path is the press that goes there, where it is read: on the line that
+      // never moves, so the body opening under it does not carry it along (trials of 23 September
+      // 2026), and once rather than a second time at the end of the line.
+      holdsPress={pressable(subject, onOpenPath)}
       summary={
         <span className={SUMMARY}>
-          <span
-            className={kind === 'quiet-terminal' ? QUIET_MARK : MARK}
-            data-mark={kind ?? 'other'}
-          >
-            {kind === undefined ? MARKS.other : HEMERA_MARKS[kind]}
+          <span className={MARK} data-mark={mark ?? 'other'}>
+            {mark === undefined ? MARKS.other : HEMERA_MARKS[mark]}
           </span>
           <span className={WHOSE}>Hemera</span>
-          <span className={TOOL}>{tool}</span>
+          <span className={NAMED}>{label}</span>
+          {subject !== undefined && <SubjectOnLine subject={subject} onOpen={onOpenPath} />}
+          {/* Heard as the label already: the code name is for the eye that reads a log. */}
+          <span className={TOOL} aria-hidden="true">
+            {tool}
+          </span>
           <StatusDot status={tone} size="sm" label={word} />
         </span>
-      }
-      // The first path is on the line that never moves, beside the fold rather than in it: the
-      // body opening under it does not carry it along (trial of 23 September 2026).
-      aside={
-        first !== undefined && onOpenPath !== undefined ? (
-          <Button variant="link" size="sm" className="min-w-0" onClick={() => onOpenPath(first)}>
-            <span className={PATH}>{first}</span>
-          </Button>
-        ) : undefined
       }
     >
       {error !== undefined && <p className={status === 'refused' ? REFUSAL : FAILURE}>{error}</p>}

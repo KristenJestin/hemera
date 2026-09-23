@@ -43,12 +43,15 @@ import {
   IconDots as TablerDots,
   IconDotsFilled as TablerDotsFilled,
   IconFileText as TablerFileText,
+  IconFilePlus as TablerFilePlus,
   IconFileTextFilled as TablerFileTextFilled,
   IconFolder as TablerFolder,
   IconFolderFilled as TablerFolderFilled,
   IconFolderOpen as TablerFolderOpen,
   IconFolderOpenFilled as TablerFolderOpenFilled,
   IconFolderPlus as TablerFolderPlus,
+  IconFolders as TablerFolders,
+  IconFoldersFilled as TablerFoldersFilled,
   IconGitBranch as TablerGitBranch,
   IconHome as TablerHome,
   IconHomeFilled as TablerHomeFilled,
@@ -58,6 +61,8 @@ import {
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
   IconLayoutSidebarRight as TablerLayoutSidebarRight,
   IconLayoutSidebarRightFilled as TablerLayoutSidebarRightFilled,
+  IconListDetails as TablerListDetails,
+  IconListDetailsFilled as TablerListDetailsFilled,
   IconMessage as TablerMessage,
   IconMessageFilled as TablerMessageFilled,
   IconMessages as TablerMessages,
@@ -85,6 +90,7 @@ import {
   IconSun as TablerSun,
   IconSunFilled as TablerSunFilled,
   IconTerminal as TablerTerminal,
+  IconTerminal2 as TablerTerminal2,
   IconTimelineEvent as TablerTimelineEvent,
   IconTimelineEventFilled as TablerTimelineEventFilled,
   IconTrash as TablerTrash,
@@ -189,11 +195,15 @@ export const IconDeviceDesktop = catalogued(
   'IconDeviceDesktop',
 )
 export const IconDots = catalogued(TablerDotsFilled, TablerDots, 'IconDots')
+/* Tabler draws no solid file with a plus, and no solid second terminal further down: the outline
+   stands for both weights. */
+export const IconFilePlus = catalogued(TablerFilePlus, TablerFilePlus, 'IconFilePlus')
 export const IconFileText = catalogued(TablerFileTextFilled, TablerFileText, 'IconFileText')
 export const IconFolder = catalogued(TablerFolderFilled, TablerFolder, 'IconFolder')
 export const IconFolderOpen = catalogued(TablerFolderOpenFilled, TablerFolderOpen, 'IconFolderOpen')
 /* A folder with a plus in it has no solid twin; the outline is the folder either way. */
 export const IconFolderPlus = catalogued(TablerFolderPlus, TablerFolderPlus, 'IconFolderPlus')
+export const IconFolders = catalogued(TablerFoldersFilled, TablerFolders, 'IconFolders')
 export const IconGitBranch = catalogued(TablerGitBranch, TablerGitBranch, 'IconGitBranch')
 export const IconHome = catalogued(TablerHomeFilled, TablerHome, 'IconHome')
 export const IconInfoCircle = catalogued(TablerInfoCircleFilled, TablerInfoCircle, 'IconInfoCircle')
@@ -206,6 +216,11 @@ export const IconLayoutSidebarRight = catalogued(
   TablerLayoutSidebarRightFilled,
   TablerLayoutSidebarRight,
   'IconLayoutSidebarRight',
+)
+export const IconListDetails = catalogued(
+  TablerListDetailsFilled,
+  TablerListDetails,
+  'IconListDetails',
 )
 export const IconMessage = catalogued(TablerMessageFilled, TablerMessage, 'IconMessage')
 export const IconMessages = catalogued(TablerMessagesFilled, TablerMessages, 'IconMessages')
@@ -239,6 +254,7 @@ export const IconSun = catalogued(TablerSunFilled, TablerSun, 'IconSun')
 /* Tabler draws no solid prompt: the outline stands for both weights, which is what a prompt is
    anyway, a chevron and a line. */
 export const IconTerminal = catalogued(TablerTerminal, TablerTerminal, 'IconTerminal')
+export const IconTerminal2 = catalogued(TablerTerminal2, TablerTerminal2, 'IconTerminal2')
 export const IconTimelineEvent = catalogued(
   TablerTimelineEventFilled,
   TablerTimelineEvent,

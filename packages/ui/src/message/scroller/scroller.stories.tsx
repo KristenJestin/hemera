@@ -652,7 +652,7 @@ export const AFoldOpening: Story = {
     const { block } = underTheFold(canvasElement)
     const before = block.getBoundingClientRect().top
 
-    await userEvent.click(canvas.getByRole('button', { name: /Read src\/billing\/export\.ts/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /^Read file/ }))
 
     if (movesLess()) {
       // Asked for less movement, there is no journey to catch: the block is in its new place
@@ -699,7 +699,7 @@ export const AFoldWithoutMotion: Story = {
     const { block, carried } = underTheFold(canvasElement)
     const before = block.getBoundingClientRect().top
 
-    await userEvent.click(canvas.getByRole('button', { name: /Read src\/billing\/export\.ts/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /^Read file/ }))
 
     /*
      * Arrived, and arrived at once. The window is a fifth of a second, which is where the
