@@ -23,9 +23,10 @@ import { AgentMark } from './agent-mark.tsx'
  * **Nothing jumps.** The panel's box is the same while the agent's options are being read and
  * once they have landed, and the same on both of its stages. It opens upwards out of the
  * foot of a window, so a panel that grew as its answer arrived would push past the top of the
- * screen and be flipped to the other side under the hand that opened it. While `loading`, the
- * list that is already there stays where it is and a small indicator sits in the header: a
- * panel that replaced its list with a sentence is a panel that changed under the reader.
+ * screen and be flipped to the other side under the hand that opened it. While `loading`, a
+ * list that is already there stays where it is: a panel that replaced its list with a sentence
+ * is a panel that changed under the reader. Where there is no list yet — an agent just picked,
+ * whose models are still being asked for — the room the list will take says so, in its middle.
  *
  * **A mode is read whole.** "Ask before edits" and "Bypass permissions" are the agent's own
  * words; five of them across a row truncates every one into a guess. They are a list, one per
@@ -229,7 +230,10 @@ export const SEARCH =
   'flex shrink-0 items-center gap-2 rounded-md border border-input bg-muted px-2'
 
 export const QUERY =
-  'min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground'
+  'min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50'
+
+/** What the room of the model list says while the models are being asked for. */
+const WAITING = 'Loading models…'
 
 /** What stands where a list would be when there is none: the room, kept, and a word in it. */
 export const INSTEAD =
@@ -403,6 +407,12 @@ export function AgentList({
  *
  * `aria-controls` and `aria-activedescendant` name an element by its id, and a name that
  * resolves to nothing is a broken reference: where nothing matches, the field points at nothing.
+ *
+ * While the models are being asked for and none has arrived yet (third review of #18), the room
+ * of the list holds the indicator and says what it is waiting on, in the middle of it rather than
+ * as a dot in a corner beside the name of the agent: the list is where the eye goes, and an empty
+ * list with a dot somewhere else read as an agent that has no model. The field is off meanwhile —
+ * there is nothing yet to search.
  */
 export function ModelPicker({
   models,
@@ -448,6 +458,7 @@ export function ModelPicker({
   // highlight on whatever happens to have moved into that place.
   const selected = Math.min(active, Math.max(matching.length - 1, 0))
   const listed = matching.length > 0
+  const waiting = loading && models.length === 0
 
   return (
     <>
@@ -459,6 +470,7 @@ export function ModelPicker({
         <input
           autoFocus={autoFocus}
           ref={fieldRef}
+          disabled={waiting}
           className={QUERY}
           type="text"
           role="combobox"
@@ -503,9 +515,19 @@ export function ModelPicker({
         />
       </div>
       {matching.length === 0 ? (
-        // The room the list had, kept: while the agent is being read there is nothing to say,
-        // and the sentence only stands where the reader's own query is what emptied it.
-        <div className={INSTEAD}>{loading ? null : <span>{empty}</span>}</div>
+        // The room the list had, kept: while there is no model yet it is what is being waited
+        // on, and the sentence only stands where the reader's own query is what emptied it.
+        <div className={INSTEAD}>
+          {waiting ? (
+            <>
+              <Loading size="md" label={WAITING} />
+              {/* Said once: the indicator already carries it to whatever reads the page. */}
+              <span aria-hidden="true">{WAITING}</span>
+            </>
+          ) : (
+            <span>{empty}</span>
+          )}
+        </div>
       ) : (
         <div className={LIST} id={list} role="listbox" aria-label={listLabel}>
           {sectionsOf(matching).map((section) => (

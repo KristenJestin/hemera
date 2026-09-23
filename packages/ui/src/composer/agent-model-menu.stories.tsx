@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { AgentModelMenu } from './agent-model-menu.tsx'
@@ -190,10 +191,10 @@ export const AgentNotAvailableHere: Story = {
  * The agent's options being read, beside the same panel once they have landed.
  *
  * The panel used to show a single line — "Reading what this agent offers…" — in place of the
- * whole list, which made it a different panel from one second to the next; now the list that is
- * there stays there and a small indicator sits in the header beside the name of what is under
- * it. The two panels are opened in turn and measured: the same height and the same width, to
- * the pixel.
+ * whole list, which made it a different panel from one second to the next; now a list that is
+ * there stays there, searchable, and the indicator on the trigger is what says the agent is
+ * being read. The two panels are opened in turn and measured: the same height and the same
+ * width, to the pixel.
  */
 export const Loading: Story = {
   parameters: { controls: { disable: true } },
@@ -235,11 +236,18 @@ export const Loading: Story = {
     const [waiting, answered] = canvas.getAllByRole('button')
 
     await userEvent.click(waiting!)
-    // The list is still the list: the models the agent announced before are readable while the
-    // new ones are being read, and the indicator is what says so.
+    // The list is still the list: the models the agent announced before are readable, and
+    // searchable, while the new ones are being read, and the trigger's indicator says so. The
+    // wait in the middle of the room is for a list that is not there yet.
     const reading = await screen.findByRole('listbox', { name: 'Models of this agent' })
     await expect(within(reading).getAllByRole('option')).toHaveLength(5)
-    await expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument()
+    await expect(
+      screen.getByRole('status', { name: 'Reading what the agent offers' }),
+    ).toBeInTheDocument()
+    await expect(screen.queryByText('Loading models…')).toBeNull()
+    await expect(
+      screen.getByRole('combobox', { name: 'Search the models of this agent' }),
+    ).toBeEnabled()
     await expect(screen.queryByText(/Reading what this agent offers/)).toBeNull()
     const waitingBox = panelBox()
 
@@ -258,6 +266,138 @@ export const Loading: Story = {
     // and nothing about the panel.
     sameBox(answeredBox, waitingBox)
     await expect(screen.queryByRole('status', { name: 'Loading' })).toBeNull()
+  },
+}
+
+/**
+ * An agent just picked, whose models are still being asked for: there is no list yet.
+ *
+ * The room the list will take says so in its middle — the indicator and "Loading models…" —
+ * rather than a dot in the corner beside "Change" over an empty panel, which read as an agent
+ * with no model at all. The search field is off meanwhile: there is nothing yet to search.
+ */
+export const LoadingModels: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <div className="flex justify-end p-6">
+      <AgentModelMenu
+        agents={AGENTS}
+        agent="claude-code"
+        onAgentChange={fn()}
+        models={[]}
+        model={null}
+        onModelChange={fn()}
+        efforts={[]}
+        effort={null}
+        onEffortChange={fn()}
+        modes={[]}
+        mode={null}
+        onModeChange={fn()}
+        loading
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Claude Code/ }))
+
+    const said = await screen.findByText('Loading models…')
+    await waitFor(() => {
+      expect(said).toBeVisible()
+    })
+    const indicator = screen.getByRole('status', { name: 'Loading models…' })
+    await expect(
+      screen.getByRole('combobox', { name: 'Search the models of this agent' }),
+    ).toBeDisabled()
+    await expect(screen.queryByRole('listbox', { name: 'Models of this agent' })).toBeNull()
+    // No dot in the corner beside the agent any more: the wait is said once, where the list goes.
+    await expect(screen.queryByRole('status', { name: 'Loading' })).toBeNull()
+
+    // In the middle of the room the list will take, and that room is the list's whole height
+    // rather than a line hugging what it says.
+    const room = indicator.parentElement!.getBoundingClientRect()
+    const drawn = indicator.getBoundingClientRect()
+    await expect(drawn.left + drawn.width / 2).toBeCloseTo(room.left + room.width / 2, 0)
+    await expect(room.height).toBeGreaterThan(drawn.height * 6)
+    const middle = (drawn.top + said.getBoundingClientRect().bottom) / 2
+    await expect(Math.abs(middle - (room.top + room.height / 2))).toBeLessThan(2)
+  },
+}
+
+/** How long the page below takes to hear back from the agent it asked, in milliseconds. */
+const PROBE = 1200
+
+/**
+ * A page that asks an agent for its models the moment one is picked, and hears back a little
+ * later: the wait, then the list, in the same panel.
+ */
+function Probing(): ReactNode {
+  const [agent, setAgent] = useState<string | null>(null)
+  const [answered, setAnswered] = useState(false)
+  const [model, setModel] = useState<string | null>(null)
+  useEffect(() => {
+    if (agent === null) return undefined
+    const later = setTimeout(() => {
+      setAnswered(true)
+    }, PROBE)
+    return () => {
+      clearTimeout(later)
+    }
+  }, [agent])
+  return (
+    <div className="flex justify-end p-6">
+      <AgentModelMenu
+        agents={AGENTS}
+        agent={agent}
+        onAgentChange={(id) => {
+          setAgent(id)
+          setAnswered(false)
+        }}
+        models={answered ? CLAUDE_MODELS : []}
+        model={model}
+        onModelChange={setModel}
+        efforts={answered ? CLAUDE_EFFORTS : []}
+        effort={null}
+        onEffortChange={() => undefined}
+        modes={answered ? CLAUDE_MODES : []}
+        mode={null}
+        onModeChange={() => undefined}
+        loading={agent !== null && !answered}
+      />
+    </div>
+  )
+}
+
+/**
+ * The models arriving: the wait in the middle of the room gives way to the list, the search
+ * field comes back on and takes the caret, and the panel does not move a pixel on the way.
+ */
+export const ModelsLoaded: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => <Probing />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Choose an agent' }))
+    const agents = await screen.findByRole('listbox', { name: 'Agents' })
+    await userEvent.click(within(agents).getByRole('option', { name: /Claude Code/ }))
+
+    // Asked, not answered yet: the wait, and a field there is nothing to search with.
+    const field = screen.getByRole('combobox', { name: 'Search the models of this agent' })
+    await expect(field).toBeDisabled()
+    await expect(screen.getByRole('status', { name: 'Loading models…' })).toBeInTheDocument()
+    const waiting = panelBox()
+
+    // Answered: the list stands where the wait was, and the field is the reader's again.
+    const models = await screen.findByRole(
+      'listbox',
+      { name: 'Models of this agent' },
+      { timeout: PROBE * 3 },
+    )
+    await expect(within(models).getAllByRole('option')).toHaveLength(5)
+    await expect(screen.queryByRole('status', { name: 'Loading models…' })).toBeNull()
+    await expect(field).toBeEnabled()
+    await waitFor(() => {
+      expect(document.activeElement).toBe(field)
+    })
+    sameBox(panelBox(), waiting)
   },
 }
 
