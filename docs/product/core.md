@@ -531,9 +531,14 @@ the whole context. New Sessions directly use the updated instructions.
 The delivery modalities are specified since issue #18 (designs D6-07 and D6-08). The base reaches
 each agent once, at the start of the Session, by that agent's own means: through the system prompt
 where the agent takes one (Claude Code), and as an embedded resource of the first prompt elsewhere
-(Codex, OpenCode). The Project's instructions are the Workspace's `AGENTS.md`, which the agents
-read natively: Hemera does not send it, records its fingerprint when the Session starts and lists
-it as read natively. While a Session's agent runs, Hemera watches that file; a change is delivered
+(Codex, OpenCode). The Project's instructions are the Workspace's `AGENTS.md`, and whether an
+agent reads it itself under bare mode is its adapter's declaration. Codex does: Hemera does not
+send it, records its fingerprint when the Session starts and lists it as read natively. Claude Code
+does not (it reads `CLAUDE.md`, and with no settings source it reads nothing), nor does OpenCode
+(project instructions are skipped under `OPENCODE_DISABLE_PROJECT_CONFIG`): Hemera gives them the
+file at the start of the Session, as a resource of the first prompt, records its fingerprint and
+lists it as given at the start. A `CLAUDE.md` of the Workspace is never sent by Hemera. While a
+Session's agent runs, Hemera watches that file; a change is delivered
 at the next safe point — when the turn in progress ends, or at once between two turns — as a
 prompt of its own made of a Hemera marker and the new text as a resource. The thread records it as
 a delivery, never as a message of the user, and no new native session is opened for it. A change

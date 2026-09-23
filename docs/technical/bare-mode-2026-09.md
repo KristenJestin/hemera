@@ -118,6 +118,31 @@ no MCP server but Hemera's. What still loads, `~/.claude.json` and the managed a
 settings, is named as residue in the Context view (D6-09). Hemera also sends
 `strictMcpConfig: true`, `MCP_TOOL_TIMEOUT` in `env`, and `allowedTools` (below).
 
+### The Workspace's instructions under bare mode (added in lot 2b)
+
+Each adapter declares `readsAgentsFile`: whether the agent, run bare, still reads the Workspace's
+`AGENTS.md` itself.
+
+- **Claude Code: no.** Claude Code reads `CLAUDE.md`, never `AGENTS.md`, and `settingSources: []`
+  loads no project memory at all. The trial of 23 September 2026 showed it: a rule in `AGENTS.md`
+  ("End every answer with KESTREL") was ignored by a fresh Session while the Context view listed
+  the file as read natively. Hemera now gives the file at the start of the Session, as a resource
+  of the first prompt behind its marker, and the Context view lists it as `provided`, reached at
+  `session_start`.
+- **OpenCode: no.** `session/instruction.ts` (`systemPaths`, v1.18.30) looks for the project's
+  `AGENTS.md` only when `OPENCODE_DISABLE_PROJECT_CONFIG` is unset, which bare mode sets; the global
+  `AGENTS.md` it reads lives under `XDG_CONFIG_HOME`, which bare mode points at Hemera's directory.
+  Given at the start, like Claude Code.
+- **Codex: yes.** `codex-rs/core/src/agents_md.rs` collects every `AGENTS.md` from the project root
+  down to the working directory; `CODEX_HOME` moves only the global one, and Hemera's `config.toml`
+  does not set `project_doc_max_bytes`. Recorded as read natively and never sent. Codex Sessions are
+  refused in any case (below).
+
+A change of the file during a Session goes to every agent the same way, as a delivery between two
+turns. A `CLAUDE.md` in the Workspace is never sent by Hemera: Claude Code does not read it either
+under `settingSources: []`, but the rule that a native instruction file is not injected twice
+stands, and Hemera's one file of instructions is `AGENTS.md`.
+
 ### Permissions for Hemera's own tools (added in lot 2b)
 
 Emptying the built-ins does not stop Claude Code from asking about the MCP tools that remain.
