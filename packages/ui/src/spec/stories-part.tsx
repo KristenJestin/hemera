@@ -1,18 +1,18 @@
 import type { ReactNode } from 'react'
 
 import { InPlaceText } from './in-place-text.tsx'
-import type { StoryView } from './model.ts'
-import { StageHead } from './stage-head.tsx'
+import type { Mark, StoryView } from './model.ts'
+import { PartHead } from './part-head.tsx'
 
 /**
- * The stories of a Spec on the stage: each one sentence of who, what and why, with its ordered
- * criteria under it, edited in place the way a section is (lot 19, brief "Stage").
+ * The stories of the Spec document: each one sentence of who, what and why, with its ordered
+ * criteria under it, edited in place the way a section is (lot 19, brief revision 2).
  *
  * The order of the criteria is the order they are read in and the one the gate checks against:
  * they are numbered by the list itself and never by a field anybody maintains.
  */
 
-const ITEM = 'flex flex-col gap-1 border-t border-border py-3 first:border-t-0 first:pt-0.5'
+const ITEM = 'flex flex-col gap-1 border-t border-border py-3 first:border-t-0 first:pt-1'
 
 const ITEM_HEAD = 'flex items-baseline gap-2 text-sm font-semibold'
 
@@ -23,31 +23,30 @@ const CRITERIA =
 
 const PROSE = 'text-sm leading-relaxed'
 
-export interface StoriesStageProps {
+export interface StoriesPartProps {
   stories: StoryView[]
+  mark: Mark
   /** Whether the stories can be changed: a draft, at its current revision. */
   editable: boolean
-  /** What the line under the heading adds, when the panel has something to say about edits. */
+  /** What the facts add, when the panel has something to say about edits. */
   note?: string | undefined
   /** A story, once, with what changed in it. */
   onSaveStory: (story: StoryView) => void
 }
 
-export function StoriesStage({
+export function StoriesPart({
   stories,
+  mark,
   editable,
   note,
   onSaveStory,
-}: StoriesStageProps): ReactNode {
+}: StoriesPartProps): ReactNode {
   const criteria = stories.reduce((sum, story) => sum + story.criteria.length, 0)
-  const facts: ReactNode[] = [
-    `${stories.length} ${stories.length === 1 ? 'story' : 'stories'}`,
-    `${criteria} criteria`,
-  ]
+  const facts: ReactNode[] = [`${criteria} criteria`]
   if (note !== undefined) facts.push(note)
   return (
-    <div className="flex flex-col gap-2">
-      <StageHead title="Stories" facts={facts} />
+    <div className="flex flex-col gap-1.5">
+      <PartHead title={`Stories · ${stories.length}`} mark={mark} facts={facts} />
       {stories.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No story: this Spec is verified as a whole, by its verification.

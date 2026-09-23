@@ -359,34 +359,37 @@ export {
 } from './session/resume-fallback-banner.tsx'
 
 /**
- * The Spec panel of a `define` Session (lot 19): the head and its phase rail, the outline and
- * the stage that shows one piece at a time, the readiness at the foot, and the pieces a Session
- * reading, reworking or starting a Spec adds to it; with the thin Hemera line the thread draws
- * for what the agent was handed. View types only: the domain arrives with phase 1.
+ * The Spec panel of a `define` Session (lot 19, brief revision 2): a head that stays on top with
+ * the readiness, and the Spec as one document grouped by phase; the pieces a Session reading or
+ * reworking a Spec adds to it; and the three blocks of the thread — the thin Hemera line of what
+ * the agent was handed, a question of the Spec asked in the chat, and the agent proposing a Spec
+ * in a `free` Session. View types only: the domain arrives with phase 1.
  */
 export {
+  SpecDocument,
   SpecPanel,
-  SpecStage,
+  type SpecDocumentProps,
   type SpecPanelProps,
-  type SpecStageProps,
 } from './spec/spec-panel.tsx'
 export { SpecHead, type SpecHeadProps } from './spec/spec-head.tsx'
-export { PhaseRail, type PhaseRailProps } from './spec/phase-rail.tsx'
-export { SpecOutline, type OutlineRow, type SpecOutlineProps } from './spec/spec-outline.tsx'
-export { SectionStage, type SectionStageProps } from './spec/section-stage.tsx'
-export { StoriesStage, type StoriesStageProps } from './spec/stories-stage.tsx'
-export { TasksStage, type TasksStageProps } from './spec/tasks-stage.tsx'
-export { QuestionsStage, type QuestionsStageProps } from './spec/questions-stage.tsx'
+export { SectionPart, type SectionPartProps } from './spec/section-part.tsx'
+export { StoriesPart, type StoriesPartProps } from './spec/stories-part.tsx'
+export { TasksPart, type TasksPartProps } from './spec/tasks-part.tsx'
+export { QuestionsPart, type QuestionsPartProps } from './spec/questions-part.tsx'
 export { ReadinessBar, type ReadinessBarProps } from './spec/readiness-bar.tsx'
 export { ConflictBanner, type ConflictBannerProps } from './spec/conflict-banner.tsx'
 export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
 export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
-export { NoSpecYet, type NoSpecYetProps } from './spec/no-spec-yet.tsx'
 export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
+export { SpecQuestion, type SpecQuestionProps } from './spec/spec-question.tsx'
+export {
+  CreateSpecProposal,
+  type CreateSpecProposalProps,
+  type ProposalState,
+} from './spec/create-spec-proposal.tsx'
 export type {
   Author,
   ConflictView,
-  DraftSpecView,
   Executor,
   GateCheck,
   GateCheckView,
@@ -394,17 +397,19 @@ export type {
   PhaseName,
   PhaseState,
   PhaseView,
-  QuestionView,
   ReaderView,
   ReadinessItem,
   ReadinessView,
   RevisionView,
   SectionName,
   SectionView,
+  SpecAnswer,
+  SpecQuestionOption,
+  SpecQuestionView,
   SpecStatus,
+  SpecTarget,
   SpecType,
   SpecView,
-  StageItem,
   StoryView,
   TaskView,
 } from './spec/model.ts'

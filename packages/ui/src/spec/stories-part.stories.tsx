@@ -2,22 +2,25 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { STORIES } from './spec-fixtures.ts'
-import { StoriesStage } from './stories-stage.tsx'
+import { StoriesPart } from './stories-part.tsx'
 
-/** The stories of a Spec, each with its ordered criteria, edited in place like a section. */
+const MARKS = ['empty', 'agent', 'human', 'stale', 'conflict', 'writing']
+
+/** The stories of the Spec document, each with its ordered criteria, edited in place. */
 const meta = {
-  title: 'Blocks/Spec/StoriesStage',
-  component: StoriesStage,
+  title: 'Blocks/Spec/StoriesPart',
+  component: StoriesPart,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },
-  args: { stories: STORIES, editable: true, onSaveStory: fn() },
+  args: { stories: STORIES, mark: 'agent', editable: true, onSaveStory: fn() },
   argTypes: {
     stories: { control: 'object', description: 'The stories, in order, with their criteria.' },
+    mark: { control: 'select', options: MARKS, description: 'The mark in the margin.' },
     editable: { control: 'boolean', description: 'A draft at its current revision.' },
-    note: { control: 'text', description: 'What the meta line adds.' },
+    note: { control: 'text', description: 'What the facts add.' },
     onSaveStory: { description: 'A story, once, with what changed in it.' },
   },
-} satisfies Meta<typeof StoriesStage>
+} satisfies Meta<typeof StoriesPart>
 
 export default meta
 
@@ -27,7 +30,7 @@ type Story = StoryObj<typeof meta>
 export const Editable: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('2 stories')).toBeVisible()
+    await expect(canvas.getByRole('heading', { name: /^Stories · 2/ })).toBeVisible()
     await expect(canvas.getByText('5 criteria')).toBeVisible()
     const third = canvas.getByRole('textbox', { name: 'Criterion 3 of S1' })
     await userEvent.clear(third)
@@ -64,5 +67,5 @@ export const Frozen: Story = {
 
 /** No story: the Spec is verified as a whole. */
 export const Empty: Story = {
-  args: { stories: [] },
+  args: { stories: [], mark: 'empty' },
 }

@@ -1,7 +1,7 @@
 import { type ReactNode, type Ref, useEffect, useRef, useState } from 'react'
 
 /**
- * A text of the Spec, edited where it is read (lot 19, brief "Stage").
+ * A text of the Spec, edited where it is read (lot 19, the brief).
  *
  * It is a plain text area that looks like the rendered text until it has the focus: no Edit
  * button to find, no Save button to forget. The reader points at a sentence, the caret is in it;

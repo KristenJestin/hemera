@@ -27,7 +27,7 @@ const meta = {
   argTypes: {
     readiness: { control: 'object', description: 'The seven checks and what is left.' },
     frozenOn: { control: 'text', description: 'When a `ready` Spec was frozen.' },
-    onGoTo: { description: 'Puts the target of an item on the stage.' },
+    onGoTo: { description: 'Moves the focus of the document to the target of an item.' },
     onMarkReady: { description: 'The human click that freezes the Spec.' },
   },
 } satisfies Meta<typeof ReadinessBar>

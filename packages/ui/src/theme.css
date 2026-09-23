@@ -436,11 +436,6 @@
      is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
   --spacing-dialog-wide: 70vh;
 
-  /* How wide the outline of a Spec stands beside its stage (lot 19): wide enough for
-     `Expected outcome` in capitals with its mark and a count, narrow enough to leave the stage
-     the room a section is read in when the panel is under half of the window. */
-  --spacing-outline: 12.5rem;
-
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -859,6 +854,18 @@
 
 @utility thumb-dome {
   box-shadow: var(--knob);
+}
+
+/* How the part of a Spec that has the focus takes its soft highlight and gives it back (lot 19):
+   the background fades on the theme's `fast` step — the stage's cross-fade of the first brief,
+   now that the Spec is one document and the focus moves inside it rather than replacing it. */
+@utility highlight-motion {
+  transition-property: background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
 }
 
 /* What a chevron does while the list it opens is open: it turns over, so the control says

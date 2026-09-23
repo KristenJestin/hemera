@@ -4,10 +4,10 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import type { SectionView } from './model.ts'
 import { BUG, CONFLICT, GATE_FULL, SCOPE_MINE, STALE } from './spec-fixtures.ts'
-import { SectionStage } from './section-stage.tsx'
+import { SectionPart } from './section-part.tsx'
 
 /**
- * One section on the stage: its name, the meta line, and the text edited where it is read —
+ * One section of the Spec document: its mark, its name, the facts beside it, and the text edited where it is read —
  * saved when the caret leaves, `saved` in the meta line for a second, a preview of the Markdown
  * on the eye. Frozen, it is the text and a lock; in conflict, your text stays in the editor under
  * the banner.
@@ -17,7 +17,7 @@ function sectionOf(sections: SectionView[], name: SectionView['name']): SectionV
   return sections.find((section) => section.name === name)!
 }
 
-/** The stage with the section held, as the engine would hold it after a save. */
+/** The part with the section held, as the engine would hold it after a save. */
 function Held({
   section: initial,
   editable,
@@ -36,7 +36,7 @@ function Held({
   const [section, setSection] = useState(initial)
   return (
     <div className="max-w-xl">
-      <SectionStage
+      <SectionPart
         section={section}
         editable={editable}
         revision={revision}
@@ -73,7 +73,7 @@ function Held({
 }
 
 const meta = {
-  title: 'Blocks/Spec/SectionStage',
+  title: 'Blocks/Spec/SectionPart',
   component: Held,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },
@@ -103,7 +103,7 @@ type Story = StoryObj<typeof meta>
 export const ByTheAgent: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('heading', { name: 'Expected outcome' })).toBeVisible()
+    await expect(canvas.getByRole('heading', { name: /^Expected outcome/ })).toBeVisible()
     await expect(canvas.getByText('agent')).toBeVisible()
     await expect(canvas.getByText('v2')).toBeVisible()
     await expect(canvas.getByRole('textbox', { name: 'Expected outcome' })).toBeVisible()
@@ -164,7 +164,7 @@ export const Preview: Story = {
   args: { section: sectionOf(GATE_FULL.sections, 'behaviour') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const eye = canvas.getByRole('button', { name: 'Preview the Markdown' })
+    const eye = canvas.getByRole('button', { name: /^Preview .* as Markdown$/ })
     await userEvent.click(eye)
     await expect(eye).toHaveAttribute('aria-pressed', 'true')
     await expect(canvas.queryByRole('textbox')).toBeNull()
@@ -192,7 +192,7 @@ export const Frozen: Story = {
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.getByText('frozen')).toBeVisible()
     await expect(canvas.getByText('rev 2')).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: 'Preview the Markdown' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: /^Preview .* as Markdown$/ })).toBeNull()
   },
 }
 

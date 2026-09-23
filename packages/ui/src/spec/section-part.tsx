@@ -6,22 +6,22 @@ import { AgentText } from '../message/agent-text.tsx'
 import { ConflictBanner } from './conflict-banner.tsx'
 import { InPlaceText } from './in-place-text.tsx'
 import { SECTION_TITLES, type SectionView } from './model.ts'
-import { StageHead } from './stage-head.tsx'
+import { PartHead } from './part-head.tsx'
 
 /**
- * One section on the stage, edited where it is read (lot 19, brief "Stage"; D7-12).
+ * One section of the Spec document, edited where it is read (lot 19, brief revision 2; D7-12).
  *
  * The text is the editor: it looks like the rendered text until the caret is in it, and it is
  * saved when the caret leaves. A save by you is written with your provenance and goes to the
- * agent with its next turn, which the meta line says in so many words. The eye at the end of
- * that line shows the Markdown rendered, for the paragraph with a list or a code span in it.
+ * agent with its next turn, which the facts beside the heading say in so many words. The eye at
+ * the end of them shows the Markdown rendered, for the paragraph with a list or a code span.
  *
  * A section that is not editable — a `ready` Spec, an older revision — is drawn as the text it
- * is, with a lock in the meta line and no editing look at all. A section in conflict keeps your
+ * is, with a lock among the facts and no editing look at all. A section in conflict keeps your
  * text in the editor and says so in a banner inside the section; nothing of yours is lost.
  */
 
-const NOTE = 'mt-2.5 text-xs text-muted-foreground'
+const NOTE = 'mt-1 text-xs text-muted-foreground'
 
 const THEIRS = 'flex flex-col gap-1 rounded-md border border-border bg-surface-body px-3 py-2'
 
@@ -29,11 +29,11 @@ const THEIRS_HEAD = 'text-xs font-medium text-muted-foreground'
 
 const WARN = 'text-warning-muted-foreground'
 
-export interface SectionStageProps {
+export interface SectionPartProps {
   section: SectionView
   /** Whether the text can be changed: a draft, at its current revision. */
   editable: boolean
-  /** The revision shown, which the meta line of a frozen section names. */
+  /** The revision shown, which the facts of a frozen section name. */
   revision: number
   /** Your text, once, when the caret leaves it changed. */
   onSave: (body: string) => void
@@ -43,14 +43,14 @@ export interface SectionStageProps {
   onDiscardMine: () => void
 }
 
-export function SectionStage({
+export function SectionPart({
   section,
   editable,
   revision,
   onSave,
   onApplyMine,
   onDiscardMine,
-}: SectionStageProps): ReactNode {
+}: SectionPartProps): ReactNode {
   const [previewing, setPreviewing] = useState(false)
   const [saves, setSaves] = useState(0)
   const [comparing, setComparing] = useState(false)
@@ -64,9 +64,10 @@ export function SectionStage({
   const title = SECTION_TITLES[section.name]
   const reading = !editable || previewing
   return (
-    <div className="flex flex-col gap-2">
-      <StageHead
+    <div className="flex flex-col gap-1.5">
+      <PartHead
         title={title}
+        mark={section.mark}
         facts={factsOf(section, editable, revision)}
         saves={saves}
         end={
@@ -75,7 +76,7 @@ export function SectionStage({
               variant="ghost"
               size="sm"
               icon={<IconEye size="sm" />}
-              aria-label="Preview the Markdown"
+              aria-label={`Preview ${title} as Markdown`}
               aria-pressed={previewing}
               onClick={() => setPreviewing(!previewing)}
             />
@@ -110,7 +111,7 @@ export function SectionStage({
         <InPlaceText
           label={title}
           value={section.body}
-          rows={3}
+          rows={2}
           placeholder="Nothing written yet. Write it here, or let the agent."
           onCommit={(body) => {
             onSave(body)
@@ -123,7 +124,7 @@ export function SectionStage({
   )
 }
 
-/** What the meta line says of a section: who, which version, and what is about to happen. */
+/** What the facts say of a section: who, which version, and what is about to happen. */
 function factsOf(section: SectionView, editable: boolean, revision: number): ReactNode[] {
   const who = section.author === 'human' ? 'you' : 'agent'
   if (section.conflict !== undefined && editable) {
@@ -140,7 +141,7 @@ function factsOf(section: SectionView, editable: boolean, revision: number): Rea
     ]
   }
   if (section.author === null) {
-    return section.mark === 'writing' ? ['agent', 'writing'] : ['not written yet']
+    return section.mark === 'writing' ? ['agent', 'writing…'] : ['not written yet']
   }
   if (section.copiedFrom !== undefined) {
     return [
@@ -151,7 +152,7 @@ function factsOf(section: SectionView, editable: boolean, revision: number): Rea
       </span>,
     ]
   }
-  if (section.mark === 'writing') return [who, `v${section.version}`, 'writing']
+  if (section.mark === 'writing') return [who, 'writing…']
   if (section.pendingForAgent === true) {
     return [who, `v${section.version}`, 'sent to the agent next turn']
   }

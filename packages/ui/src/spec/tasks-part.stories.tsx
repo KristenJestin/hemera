@@ -2,20 +2,22 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, within } from 'storybook/test'
 
 import { TASKS } from './spec-fixtures.ts'
-import { TasksStage } from './tasks-stage.tsx'
+import { TasksPart } from './tasks-part.tsx'
 
-/** The tasks of a Spec: what each waits on, what it covers, and who runs it. */
+const MARKS = ['empty', 'agent', 'human', 'stale', 'conflict', 'writing']
+
+/** The tasks of the Spec document: what each waits on, what it covers, and who runs it. */
 const meta = {
-  title: 'Blocks/Spec/TasksStage',
-  component: TasksStage,
+  title: 'Blocks/Spec/TasksPart',
+  component: TasksPart,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },
-  args: { tasks: TASKS },
+  args: { tasks: TASKS, mark: 'agent' },
   argTypes: {
     tasks: { control: 'object', description: 'The tasks, in order.' },
-    stale: { control: 'boolean', description: 'Stale after a rework.' },
+    mark: { control: 'select', options: MARKS, description: 'The mark in the margin.' },
   },
-} satisfies Meta<typeof TasksStage>
+} satisfies Meta<typeof TasksPart>
 
 export default meta
 
@@ -25,7 +27,8 @@ type Story = StoryObj<typeof meta>
 export const Filled: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('4 tasks, 1 for you')).toBeVisible()
+    await expect(canvas.getByRole('heading', { name: /^Tasks · 4/ })).toBeVisible()
+    await expect(canvas.getByText('1 for you')).toBeVisible()
     const last = canvas.getByText('The file imports into the ledger').closest('li')!
     await expect(within(last).getByText('after T2')).toBeVisible()
     await expect(within(last).getByText('covers S2')).toBeVisible()
@@ -33,16 +36,21 @@ export const Filled: Story = {
   },
 }
 
-/** Before Decompose: no task, and the line says when they come. */
+/** Before Decompose: no task, and the facts say when they come. */
 export const BeforeDecompose: Story = {
-  args: { tasks: [] },
+  args: { tasks: [], mark: 'empty' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await expect(canvas.getByText('after decompose')).toBeVisible()
     await expect(canvas.getByText(/Tasks are written in Decompose/)).toBeVisible()
   },
 }
 
 /** Copied by a rework, and stale until Decompose is declared again. */
 export const Stale: Story = {
-  args: { stale: true },
+  args: { mark: 'stale' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('stale after the rework')).toBeVisible()
+  },
 }

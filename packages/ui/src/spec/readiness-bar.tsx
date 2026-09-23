@@ -4,7 +4,7 @@ import { Fragment, type ReactNode } from 'react'
 import { Button } from '../components/button/button.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { FILL_STEP, crossfade, fill, instant, useTransition } from '../motion.ts'
-import type { GateCheckView, ReadinessView, StageItem } from './model.ts'
+import type { GateCheckView, ReadinessView, SpecTarget } from './model.ts'
 
 /**
  * How far the Spec is from `ready`, at the foot of the panel (lot 19, brief "Foot"; D7-10).
@@ -12,7 +12,7 @@ import type { GateCheckView, ReadinessView, StageItem } from './model.ts'
  * Not a list of errors: a thin bar of seven segments, one per check of the gate, filled in the
  * success colour where the check passes. A failing segment names itself under the pointer and
  * under the keyboard. Under the bar, one sentence — `2 things before ready: a task for S2, the
- * credit-note question` — whose items are links that put their target on the stage.
+ * credit-note question` — whose items are links that take the document to their target.
  *
  * When every check passes the sentence becomes `Ready to freeze` and `Mark ready` appears. It is
  * never drawn disabled: a button that cannot be pressed is a question it does not answer, and
@@ -51,8 +51,8 @@ export interface ReadinessBarProps {
   readiness: ReadinessView
   /** A frozen Spec says when it was frozen instead of what is left. */
   frozenOn?: string | undefined
-  /** Puts the target of an item on the stage. */
-  onGoTo: (target: StageItem) => void
+  /** Moves the focus of the document to the target of an item. */
+  onGoTo: (target: SpecTarget) => void
   /** The human click that freezes the Spec. */
   onMarkReady: () => void
 }
@@ -151,7 +151,7 @@ function Sentence({
   onGoTo,
 }: {
   readiness: ReadinessView
-  onGoTo: (target: StageItem) => void
+  onGoTo: (target: SpecTarget) => void
 }): ReactNode {
   const { todo } = readiness
   const named = todo.slice(0, NAMED)

@@ -364,23 +364,23 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ContextView',
       'BareModeState',
       'CommandList',
-      // Lot 19: the Spec panel of a `define` Session, its pieces, and the Hemera line of the
-      // thread that says what the agent was handed.
+      // Lot 19: the Spec panel of a `define` Session as a document, its parts, and the three
+      // blocks of the thread: what the agent was handed, a question of the Spec asked in the
+      // chat, and the agent proposing a Spec in a `free` Session.
       'SpecPanel',
-      'SpecStage',
+      'SpecDocument',
       'SpecHead',
-      'PhaseRail',
-      'SpecOutline',
-      'SectionStage',
-      'StoriesStage',
-      'TasksStage',
-      'QuestionsStage',
+      'SectionPart',
+      'StoriesPart',
+      'TasksPart',
+      'QuestionsPart',
       'ReadinessBar',
       'ConflictBanner',
       'ReaderBar',
       'ReworkDialog',
-      'NoSpecYet',
       'MissionBrief',
+      'SpecQuestion',
+      'CreateSpecProposal',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
