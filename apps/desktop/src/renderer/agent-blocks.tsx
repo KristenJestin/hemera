@@ -105,6 +105,15 @@ const choiceSchema = z.object({
 const permissionSchema = z.object({
   toolCallId: z.string(),
   options: z.array(choiceSchema),
+  /**
+   * What one of Hemera's own tools asks about, beside the agent's own questions (D6-05): the
+   * tool, the place it would act on as the path resolves, the root it is outside of, and the
+   * line a one-off command would run. Absent from a question the agent asked itself.
+   */
+  tool: z.string().optional(),
+  resolved: z.string().optional(),
+  root: z.string().optional(),
+  line: z.string().nullable().optional(),
 })
 
 const decisionSchema = z.object({
@@ -338,6 +347,28 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   if (entry.kind === 'permission_request') {
     const read = readPayload(permissionSchema, entry.payload)
     if (read === null) return null
+    // A question of Hemera's own tools (D6-05): the tool by its name, the place it would act on
+    // as the path resolves and the root it leaves, the line a one-off would run. Its two options
+    // are this call's only — nothing is remembered, so there is no "always" to offer.
+    if (read.tool !== undefined && read.resolved !== undefined) {
+      return (
+        <PermissionRequest
+          toolName={read.tool}
+          intent={entry.body}
+          parameters={[
+            { label: 'Resolved path', value: read.resolved },
+            { label: 'Outside', value: read.root ?? 'the Workspace root' },
+          ]}
+          command={read.line ?? read.resolved}
+          options={read.options.map((option) => ({
+            optionId: option.optionId,
+            name: option.name,
+            kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
+          }))}
+          onDecide={context.onDecide}
+        />
+      )
+    }
     return (
       <PermissionRequest
         toolName={entry.body}

@@ -28,8 +28,11 @@ export interface OutsideRequest {
   readonly root: string
 }
 
-/** What the human said, and what an unanswered question never is. */
-export type OutsideAnswer = 'allowed' | 'refused'
+/**
+ * What the human said, or that nobody will: a question the turn was stopped under, or whose
+ * Session ended, is cancelled rather than answered — the call it blocks ends, and nothing acts.
+ */
+export type OutsideAnswer = 'allowed' | 'refused' | 'cancelled'
 
 export interface ToolPermissionsService {
   /** Waits for the human, for as long as they take. */

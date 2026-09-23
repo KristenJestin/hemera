@@ -1251,6 +1251,10 @@ export const runtimeLayer = Layer.effect(
      */
     const letGo = (sessionId: string): Effect.Effect<void> =>
       Effect.gen(function* () {
+        // A question a tool of Hemera's was asking has nobody left to act on its answer: it is
+        // cancelled, and the block it drew in the thread closes with it (D6-05).
+        const outside = yield* permissions.waiting(sessionId)
+        if (outside !== null) yield* permissions.answer(outside, 'cancelled')
         yield* access.revoked(sessionId)
         yield* commands.stopped(sessionId).pipe(Effect.ignore)
         yield* pool.forgotten(sessionId)
@@ -1926,10 +1930,10 @@ export const runtimeLayer = Layer.effect(
     const stop = (sessionId: string) =>
       Effect.gen(function* () {
         // A question one of Hemera's own tools is waiting on holds the turn just as still as the
-        // agent's own, and the Stop ends it the way it ends that one: refused, so the call it
-        // blocks answers rather than waiting for ever (D6-05).
+        // agent's own, and the Stop ends it the way it ends that one: cancelled, so the call it
+        // blocks answers rather than waiting for ever, and nothing acts (D6-05).
         const outside = yield* permissions.waiting(sessionId)
-        if (outside !== null) yield* permissions.answer(outside, 'refused')
+        if (outside !== null) yield* permissions.answer(outside, 'cancelled')
 
         const held = live.get(sessionId)
         const turn = turns.get(sessionId)

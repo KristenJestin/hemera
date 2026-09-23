@@ -48,7 +48,7 @@ import {
   parseCall,
 } from './arguments.ts'
 import { type RefusedPathError, resolveInside } from './paths.ts'
-import { ToolPermissions } from './permissions.ts'
+import { type OutsideAnswer, ToolPermissions } from './permissions.ts'
 import { type Page, type ReadRange, numbered, readPage } from './read.ts'
 import { searchIn } from './search.ts'
 
@@ -439,14 +439,18 @@ export const toolCatalogueLayer: Layer.Layer<
           named: where,
           root,
         })
-        yield* request(answer === 'allowed' ? 'decided' : 'refused')
+        // A question nobody will answer — the turn was stopped, the Session ended — is closed as
+        // the block of D5-09 closes one: cancelled, with no option chosen (D6-05).
+        const closed: Record<OutsideAnswer, { state: string; said: string }> = {
+          allowed: { state: 'decided', said: `you allowed ${asked.tool} to act on ${where}` },
+          refused: { state: 'refused', said: `you refused ${asked.tool} on ${where}` },
+          cancelled: { state: 'cancelled', said: 'Stopped' },
+        }
+        yield* request(closed[answer].state)
         yield* inThread(asked.sessionId, {
           role: 'user',
           kind: 'permission_decision',
-          body:
-            answer === 'allowed'
-              ? `you allowed ${asked.tool} to act on ${where}`
-              : `you refused ${asked.tool} on ${where}`,
+          body: closed[answer].said,
           payload: JSON.stringify({
             toolCallId: id,
             optionId: answer === 'allowed' ? 'allowed' : null,
@@ -456,8 +460,14 @@ export const toolCatalogueLayer: Layer.Layer<
             answer,
           }),
           correlationId: `decision:${id}`,
-          state: answer === 'allowed' ? 'completed' : 'refused',
+          state: answer === 'allowed' ? 'completed' : answer,
         }).pipe(Effect.catch(() => Effect.void))
+        if (answer === 'cancelled') {
+          return {
+            allowed: false as const,
+            reason: `the question about ${where} was cancelled: the turn stopped before the user answered`,
+          }
+        }
         if (answer === 'refused') {
           return {
             allowed: false as const,

@@ -156,3 +156,39 @@ export const NothingToRefuseWith: Story = {
     await expect(args.onDecide).not.toHaveBeenCalled()
   },
 }
+
+/**
+ * One of Hemera's own tools asking before it acts outside the Workspace root (design D6-05).
+ *
+ * The same block as the agent's own questions, drawn from the place the path resolves to and the
+ * root it leaves: two options, for this call only, because nothing is remembered and there is no
+ * "always" to give.
+ */
+export const HemeraToolOutsideTheRoot: Story = {
+  args: {
+    toolName: 'fs_write',
+    intent: 'fs_write asks to act outside the Workspace: /home/ana/notes/todo.md',
+    parameters: [
+      { label: 'Resolved path', value: '/home/ana/notes/todo.md' },
+      { label: 'Outside', value: '/home/ana/atlas' },
+    ],
+    command: '/home/ana/notes/todo.md',
+    options: [
+      { optionId: 'allowed', kind: 'allow_once', name: 'Allow once' },
+      { optionId: 'refused', kind: 'reject_once', name: 'Refuse' },
+    ],
+    // Nothing is remembered, so there is no "always" and no time it would be remembered for.
+    scope: undefined,
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('fs_write')).toBeVisible()
+    await expect(canvas.getAllByText('/home/ana/notes/todo.md').length).toBeGreaterThan(0)
+    // No "always": the two answers are about this call.
+    await expect(canvas.queryByText(/always/i)).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Allow once' }))
+    await expect(args.onDecide).toHaveBeenCalledWith(
+      expect.objectContaining({ optionId: 'allowed' }),
+    )
+  },
+}
