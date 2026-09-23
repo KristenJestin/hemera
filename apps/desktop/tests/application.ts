@@ -44,8 +44,8 @@ import { openProfile } from '#engine/migrate.ts'
 import { preferencesLayer } from '#engine/preferences.ts'
 import type { Preferences } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
-import { Sessions, sessionsLayer } from '#engine/sessions.ts'
-import { databaseLayer } from '#engine/storage/database.ts'
+import { Sessions, sessionsLayer, type ThreadWrite } from '#engine/sessions.ts'
+import { DatabaseError, databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
 import type { ToolAccess } from '#engine/tools/access.ts'
@@ -109,9 +109,6 @@ export function watching() {
   }
 }
 
-/** Nothing to write a diagnostic line to: a suite reads the thread, not the engine's stderr. */
-const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
-
 /**
  * The tools of an engine whose suite never calls one.
  *
@@ -125,6 +122,49 @@ const server = Layer.succeed(ToolServer, {
   forAgent: () => 'http://127.0.0.1:1/mcp',
 })
 
+/**
+ * A storage that fails when a suite says so, and the diagnostic the engine writes to.
+ *
+ * A write of the thread is a transaction on a file, and a file can refuse one — a full disk, a
+ * database another process holds. What a suite arms here is the next write that matches, failed
+ * once as the database would fail it; every other write goes through. What the runtime puts in the
+ * diagnostic is kept in `diagnosed`, which is how a suite sees a failure that was not its caller's.
+ */
+export function failing() {
+  const armed: ((entry: ThreadWrite) => boolean)[] = []
+  const diagnosed: string[] = []
+  return {
+    diagnosed,
+    /** The next write of the thread that matches fails, once. */
+    nextWrite: (matches: (entry: ThreadWrite) => boolean) => {
+      armed.push(matches)
+    },
+    sessions: Layer.effect(
+      Sessions,
+      Effect.gen(function* () {
+        const real = yield* Sessions
+        return {
+          ...real,
+          write: (id: string, entry: ThreadWrite) => {
+            const at = armed.findIndex((matches) => matches(entry))
+            if (at === -1) return real.write(id, entry)
+            armed.splice(at, 1)
+            return Effect.fail(
+              new DatabaseError({ doing: 'writing the entry', cause: 'disk full' }),
+            )
+          },
+        }
+      }),
+    ).pipe(Layer.provide(sessionsLayer)),
+    sink: Layer.succeed(StderrSink, {
+      write: (line: string) =>
+        Effect.sync(() => {
+          diagnosed.push(line)
+        }),
+    }),
+  }
+}
+
 /** A run of the application over one scripted agent, on one data folder. */
 export function application(
   dataFolder: string,
@@ -134,6 +174,8 @@ export function application(
   // stopped is dead, so a suite about a restart hands over its own supervisor and says which
   // fake each start answers with.
   supervisor?: Layer.Layer<ProcessSupervisor>,
+  // A storage that never fails, unless the suite is about one that does.
+  storage: ReturnType<typeof failing> = failing(),
 ) {
   return (agent: FakeAgent) => {
     // The runtime is built on the very same services the suite reads with — `provideMerge` hands
@@ -154,14 +196,14 @@ export function application(
       Layer.provideMerge(contextLayer),
       Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer)),
       Layer.provideMerge(
-        Layer.mergeAll(projectsLayer, sessionsLayer, preferencesLayer).pipe(
+        Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
         ),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(supervisor ?? fakeSupervisor(agent)),
       Layer.provide(notices),
-      Layer.provide(sink),
+      Layer.provide(storage.sink),
       // The pool reads the clock the suite moves, because it is the engine's own clock: five
       // idle minutes are a `TestClock.adjust` here rather than five minutes of waiting (D5-05).
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
@@ -381,6 +423,9 @@ export function toolApplication(
   dataFolder: string,
   written: string[] = [],
   environment: Layer.Layer<MachineEnvironment> = machine,
+  // A storage that never fails, unless the suite is about one that does; its diagnostic is not
+  // the one read here, which is `written`.
+  storage: ReturnType<typeof failing> = failing(),
 ) {
   return (agent: FakeAgent, ...others: readonly FakeAgent[]) => {
     const lines = Layer.succeed(StderrSink, {
@@ -400,7 +445,7 @@ export function toolApplication(
       Layer.provideMerge(contextLayer),
       Layer.provideMerge(journalLayer),
       Layer.provideMerge(
-        Layer.mergeAll(projectsLayer, sessionsLayer, preferencesLayer).pipe(
+        Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
         ),
       ),

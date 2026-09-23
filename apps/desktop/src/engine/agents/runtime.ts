@@ -332,6 +332,23 @@ interface Live {
    * of it.
    */
   readonly chunks: Map<string, Coalesced>
+  /**
+   * What the timer wrote of an entry that has not settled yet, by the same key.
+   *
+   * The timer can write the whole of a message in the pause an agent takes before its next step,
+   * and then nothing of it is held when that step settles it: kept here, the entry is written
+   * once more as settled, and the Journal still has its line.
+   */
+  readonly open: Map<string, Coalesced>
+  /**
+   * The keys whose entry has already been written as settled.
+   *
+   * A key can come back after its entry settled — the chunks a Stop leaves behind, or the
+   * `turn:<id>:<kind>` of an agent that names no message speaking again after a call — and it is
+   * still the same row: the Journal says once that it settled, and the writes after that are the
+   * row growing, not settling again.
+   */
+  readonly settledKeys: Set<string>
   /** The fiber of the flush that is due, or null when this Session holds nothing. */
   timer: Fiber.Fiber<void> | null
   /**
@@ -580,21 +597,41 @@ export const runtimeLayer = Layer.effect(
      */
     const flush = (sessionId: string, held: Live, settled: boolean) =>
       Effect.gen(function* () {
-        const writing = [...held.chunks]
+        // What the timer wrote and nothing has settled comes first: its row is already there, so
+        // writing it again moves nothing in the thread, and a settling flush has to reach it.
+        const writing = [...(settled ? new Map([...held.open, ...held.chunks]) : held.chunks)]
         held.chunks.clear()
+        if (settled) held.open.clear()
         for (const [key, chunk] of writing) {
-          yield* writeNow(sessionId, {
-            role: 'agent',
-            kind: chunk.kind,
-            body: chunk.body,
-            correlationId: key,
-            turnId: chunk.turnId,
-            origin: chunk.origin,
-            // A replayed entry is the history being read back rather than an entry settling now:
-            // its row is one the Journal has already told its reader about, and a resume says
-            // nothing about it that the first turn did not say.
-            settled: settled && chunk.origin === 'live',
-          })
+          // A replayed entry is the history being read back rather than an entry settling now:
+          // its row is one the Journal has already told its reader about, and a resume says
+          // nothing about it that the first turn did not say. Nor does a row that settled once.
+          const settles = settled && chunk.origin === 'live' && !held.settledKeys.has(key)
+          const wrote = yield* Effect.result(
+            writeNow(sessionId, {
+              role: 'agent',
+              kind: chunk.kind,
+              body: chunk.body,
+              correlationId: key,
+              turnId: chunk.turnId,
+              origin: chunk.origin,
+              settled: settles,
+            }),
+          )
+          // A write that failed loses the text of this flush, as it did when each chunk was
+          // written where it landed: it goes to the diagnostic rather than failing whatever is
+          // written after it, and the next chunk of the entry carries the whole text again. Held
+          // for another attempt, it could land after the entry that follows it.
+          if (Result.isFailure(wrote)) {
+            yield* diagnostic.write(
+              `session ${sessionId}: the text of ${key} was dropped: ${wrote.failure.message}`,
+            )
+            continue
+          }
+          if (settles) held.settledKeys.add(key)
+          else if (!settled && chunk.origin === 'live' && !held.settledKeys.has(key)) {
+            held.open.set(key, chunk)
+          }
         }
       })
 
@@ -689,7 +726,10 @@ export const runtimeLayer = Layer.effect(
           })
           return
         }
-        if (!held.chunks.has(key) && held.chunks.size > 0) yield* flush(sessionId, held, true)
+        const other = (heldKey: string) => heldKey !== key
+        if ([...held.chunks.keys(), ...held.open.keys()].some(other)) {
+          yield* flush(sessionId, held, true)
+        }
         held.chunks.set(key, chunk)
         yield* armFlush(sessionId, held)
       })
@@ -712,8 +752,14 @@ export const runtimeLayer = Layer.effect(
               yield* Effect.sleep(CHUNK_FLUSH)
               yield* flush(sessionId, held, false)
             }
-            held.timer = null
-          }).pipe(Effect.ignore),
+          }).pipe(
+            // However the loop ends, the next chunk held has to find no timer and arm one.
+            Effect.ensuring(
+              Effect.sync(() => {
+                held.timer = null
+              }),
+            ),
+          ),
         )
       })
 
@@ -1464,6 +1510,8 @@ export const runtimeLayer = Layer.effect(
           window: null,
           pending: 0,
           chunks: new Map(),
+          open: new Map(),
+          settledKeys: new Set(),
           timer: null,
           settled: Deferred.makeUnsafe<void>(),
         }

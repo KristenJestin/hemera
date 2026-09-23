@@ -47,7 +47,17 @@ import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { ToolAccess } from '#engine/tools/access.ts'
 import { ToolServer } from '#engine/tools/server.ts'
-import { aSessionOn, gated, held, pause, threadOf, toolApplication, until } from './application.ts'
+import {
+  aSessionOn,
+  failing,
+  gated,
+  held,
+  machine,
+  pause,
+  threadOf,
+  toolApplication,
+  until,
+} from './application.ts'
 
 let dataFolder: string
 let workspace: string
@@ -1249,6 +1259,51 @@ describe('A delivery outside a turn is its own turn', () => {
     expect(
       entries.filter((entry) => entry.role === 'user' && entry.kind === 'message'),
     ).toHaveLength(1)
+  })
+})
+
+/**
+ * A delivery turn whose answer could not be written (Decided 10 of #17, D6-08).
+ *
+ * What the agent answered a delivery with is flushed before the entry that closes its turn, and a
+ * write of the thread can fail. The answer is dropped and the diagnostic says so; the turn still
+ * ends with its `turn` entry, or the thread would show a delivery that never finished.
+ */
+describe('A delivery turn survives a failed chunk write', () => {
+  test('A delivery turn survives a failed chunk write', async () => {
+    writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')
+    const agent = fakeAgent({
+      steps: [{ does: 'says', text: 'done' }],
+      answersDelivery: [{ does: 'says', text: 'Noted: brief, and why.' }],
+    })
+    const storage = failing()
+    storage.nextWrite(
+      (entry) => entry.kind === 'message' && entry.body === 'Noted: brief, and why.',
+    )
+    const written: string[] = []
+
+    const entries = await toolApplication(dataFolder, written, machine, storage)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'start')
+        writeFileSync(join(workspace, AGENTS_FILE), 'Be brief, and say why.\n')
+        return yield* until(
+          threadOf(session.id),
+          (thread) => thread.filter((entry) => entry.kind === 'turn').length === 2,
+        )
+      }),
+    )
+
+    const delivery = entries.filter((entry) => entry.kind === 'turn')[1]
+    expect(JSON.parse(delivery?.payload ?? '{}')).toEqual({
+      stopReason: 'end_turn',
+      kind: 'delivery',
+    })
+    // The answer is the one thing missing from the turn, and the diagnostic names it.
+    const inside = entries.filter((entry) => entry.turnId === delivery?.turnId)
+    expect(inside.map((entry) => entry.kind)).toEqual(['context_delivery', 'turn'])
+    expect(written.filter((line) => line.includes('was dropped'))).toHaveLength(1)
   })
 })
 

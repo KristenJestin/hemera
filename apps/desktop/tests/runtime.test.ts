@@ -20,7 +20,13 @@ import { MachineEnvironment } from '#engine/agents/discovery.ts'
 import { HeldWords } from '#engine/agents/held.ts'
 import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
-import { AgentRuntime, CANCEL_GRACE, CHUNK_FLUSH, TEXT_LIMIT } from '#engine/agents/runtime.ts'
+import {
+  AgentRuntime,
+  CANCEL_GRACE,
+  CHUNK_FLUSH,
+  NoNotices,
+  TEXT_LIMIT,
+} from '#engine/agents/runtime.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Preferences } from '#engine/preferences.ts'
 import { Projects } from '#engine/projects.ts'
@@ -30,6 +36,7 @@ import {
   application,
   aSession,
   entryOf,
+  failing,
   gated,
   held as heldGate,
   heldInThread,
@@ -685,6 +692,184 @@ describe('What an agent holds is written before a call or a run', () => {
         )
         expect(said.body).toBe('reading the reader first, then the project')
         expect(said.seq).toBeLessThan(call.seq)
+      }),
+    )
+  })
+})
+
+/**
+ * An entry the timer wrote whole, and nothing held of it when it settles (Decided 10 of #17).
+ *
+ * An agent pauses between the end of a message and what it does next, and the timer writes the
+ * message in that pause: by the time the call comes, the coalescer holds nothing of it. The
+ * message is over all the same, and the Journal says so once.
+ */
+describe('A message the timer wrote whole still settles', () => {
+  test('the call that follows it settles the message it was written before', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'the reader opens the project', messageId: 'msg-1' },
+        { does: 'calls', call: { id: 'call-1', title: 'Read reader.ts', status: 'completed' } },
+      ],
+      between: gate.between,
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'what does it do'))
+
+        // The timer writes the whole message while the agent is held at the gate.
+        yield* heldInThread(session.id, (held) =>
+          held.some((entry) => entry.correlationId === 'msg-1:message'),
+        )
+        gate.carryOn()
+        expect((yield* Fiber.join(running)).stopReason).toBe('end_turn')
+
+        const answer = entryOf(
+          (yield* threadOf(session.id)).filter((entry) => entry.role === 'agent'),
+          'message',
+        )
+        expect(answer.body).toBe('the reader opens the project')
+        const lines = (yield* journalOf(session.id)).filter((line) => line.seq === answer.seq)
+        expect(lines.map((line) => line.type)).toEqual([
+          'session.entry_written',
+          'session.entry_settled',
+        ])
+      }),
+    )
+  })
+})
+
+/**
+ * A write of the thread that fails in the coalescer (Decided 10 of #17).
+ *
+ * What the agent streamed is written in front of whatever comes after it, so a flush that fails
+ * would otherwise be the failure of the call, the question or the end of the turn that asked for
+ * it. It fails alone, as a chunk written where it landed used to: its text is dropped, the
+ * diagnostic says so, and the next chunk of the entry writes the whole of it again.
+ */
+describe('A chunk write that fails', () => {
+  test('A chunk write that fails does not fail the call that follows', async () => {
+    const storage = failing()
+    storage.nextWrite((entry) => entry.kind === 'message')
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'the reader opens the project', messageId: 'msg-1' },
+        { does: 'calls', call: { id: 'call-1', title: 'Read reader.ts', status: 'completed' } },
+      ],
+    })
+
+    await application(dataFolder, NoNotices, machine, undefined, storage)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        // The clock never moves: the call is what flushes the message, and that write fails.
+        expect((yield* runtime.prompt(session.id, 'what does it do')).stopReason).toBe('end_turn')
+
+        const entries = yield* threadOf(session.id)
+        expect(entryOf(entries, 'tool_call').correlationId).toBe('call:call-1')
+        expect(entryOf(entries, 'turn').state).toBe('end_turn')
+        // Dropped, and said so: the message had no chunk after the one that failed.
+        expect(entries.filter((entry) => entry.correlationId === 'msg-1:message')).toHaveLength(0)
+        const dropped = storage.diagnosed.filter((line) => line.includes('was dropped'))
+        expect(dropped).toHaveLength(1)
+        expect(dropped[0]).toContain('msg-1:message')
+      }),
+    )
+  })
+
+  test('A timer whose write failed arms again', async () => {
+    const storage = failing()
+    storage.nextWrite((entry) => entry.kind === 'message')
+    // The agent is held after its first chunk, and again after its second.
+    const first = heldGate()
+    const second = heldGate()
+    let seen = 0
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'the reader opens ', messageId: 'msg-1' },
+        { does: 'says', text: 'the project', messageId: 'msg-1' },
+        { does: 'calls', call: { id: 'call-1', title: 'Read reader.ts', status: 'completed' } },
+      ],
+      between: () => {
+        seen += 1
+        if (seen === 2) return first.promise
+        if (seen === 3) return second.promise
+        return Promise.resolve()
+      },
+    })
+
+    await application(dataFolder, NoNotices, machine, undefined, storage)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'what does it do'))
+
+        // The timer's write of the first chunk fails.
+        // The engine's other lines — how the agent was started — are not what is counted.
+        const dropped = () => storage.diagnosed.filter((line) => line.includes('was dropped'))
+        for (let look = 0; look < 40 && dropped().length === 0; look++) {
+          yield* pause(5)
+          yield* TestClock.adjust(CHUNK_FLUSH)
+        }
+        expect(dropped()).toHaveLength(1)
+
+        // The second chunk is written by a timer of its own, while the agent is still held.
+        first.carryOn()
+        const entries = yield* heldInThread(session.id, (thread) =>
+          thread.some((entry) => entry.correlationId === 'msg-1:message'),
+        )
+        expect(
+          entryOf(
+            entries.filter((entry) => entry.role === 'agent'),
+            'message',
+          ).body,
+        ).toBe('the reader opens the project')
+        expect(entries.some((entry) => entry.kind === 'tool_call')).toBe(false)
+
+        second.carryOn()
+        expect((yield* Fiber.join(running)).stopReason).toBe('end_turn')
+      }),
+    )
+  })
+})
+
+/**
+ * An entry whose key comes back after it settled (Decided 10 of #17).
+ *
+ * An agent that names no message speaks under `turn:<id>:message`, so what it says after a call is
+ * the same key, and the same row, as what it said before it. The row grows; it settled once, and
+ * the Journal says so once.
+ */
+describe('An entry settles once', () => {
+  test('An entry settles once even when its key comes back', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'reading ' },
+        { does: 'calls', call: { id: 'call-1', title: 'Read reader.ts', status: 'completed' } },
+        { does: 'says', text: 'done' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        expect((yield* runtime.prompt(session.id, 'read it')).stopReason).toBe('end_turn')
+
+        const answer = entryOf(
+          (yield* threadOf(session.id)).filter((entry) => entry.role === 'agent'),
+          'message',
+        )
+        expect(answer.body).toBe('reading done')
+        const lines = (yield* journalOf(session.id)).filter((line) => line.seq === answer.seq)
+        expect(lines.map((line) => line.type)).toEqual([
+          'session.entry_written',
+          'session.entry_settled',
+        ])
       }),
     )
   })
