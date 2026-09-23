@@ -237,7 +237,7 @@ It must be **nested**, never dotted. The adapter adds a `features` table of its 
 
 `baseInstructions` and `developerInstructions` of `thread/start` would not have done it: the skills block is a fragment of its own, beside them. What is still not reachable is discovery itself, and a skill added during a Session is disabled only at the next open. The upstream ask is a `skills.enabled = false` (or `skills.roots = []`) key that skips discovery, or a `thread/start` flag that turns the skills extension off for a thread, as `environments: []` does for tools.
 
-`CODEX_HOME` is left where the user has it, so the login is theirs and Hemera never touches a file of theirs. The price: Codex still reads their `config.toml` (model, profiles, hooks) beneath Hemera's overrides, their global `AGENTS.md`, and the trusted project's `.codex/config.toml`, and still lists their skills. That is the agent's private part in the Context view.
+`CODEX_HOME` is left where the user has it, so the login is theirs and Hemera never touches a file of theirs. The price: Codex still reads their `config.toml` (model, profiles, hooks) beneath Hemera's overrides, their global `AGENTS.md`, and the trusted project's `.codex/config.toml`, and still lists their skills. That is the agent's private part, said under it in Settings › Agents.
 
 ### What stays
 
