@@ -66,3 +66,28 @@ describe('An unqualified combination is refused with its reason', () => {
     expect(await opened.bridge.invoke('sessions.list', { projectId: project.id })).toEqual([])
   })
 })
+
+describe("A qualified agent has only Hemera's tools", () => {
+  test('the diagnostic says it started bare and was handed the MCP server, and not the token', async () => {
+    opened = await openWindow(dataFolder, fakeAgent({ steps: [{ does: 'says', text: 'ok' }] }))
+    const project = await opened.bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: workspace,
+    })
+    const session = await opened.bridge.invoke('sessions.create', {
+      projectId: project.id,
+      provider: 'opencode',
+    })
+    await opened.bridge.invoke('agents.prompt', { sessionId: session.id, text: 'hello' })
+
+    const started = opened.written.filter((line) =>
+      line.startsWith('agents: OpenCode started bare'),
+    )
+    expect(started).toHaveLength(1)
+    expect(started[0]).toContain(`for Session ${session.id}`)
+    expect(started[0]).toContain(bareModeOf(ADAPTERS.opencode, process.platform).means)
+    expect(started[0]).toMatch(/Hemera's MCP server handed at http:\/\/127\.0\.0\.1:\d+ as \S+$/)
+    expect(started[0]).not.toContain('Bearer')
+  })
+})

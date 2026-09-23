@@ -66,7 +66,7 @@ import { HeldWords } from './held.ts'
 import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
-import { ProcessSupervisor, type SupervisedProcess } from './supervisor.ts'
+import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
 import { Commands } from '../commands/service.ts'
 import { Context as AgentContext } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
@@ -493,6 +493,9 @@ export const runtimeLayer = Layer.effect(
     const discovery = yield* Discovery
     const supervisor = yield* ProcessSupervisor
     const notices = yield* AgentNotices
+    // The engine's diagnostic: how an agent was started is what a trial per agent and platform
+    // reads back, and a package started from an icon has no console to print it to (D6-02).
+    const diagnostic = yield* StderrSink
     // What a Session's agent is lent: a token of its own, the address the tools are served on,
     // what it was provided with, the commands it started and the book of who is live (D6-01,
     // D6-07, D6-12, D5-05).
@@ -1402,6 +1405,11 @@ export const runtimeLayer = Layer.effect(
             headers: [{ name: 'Authorization', value: `Bearer ${granted.token}` }],
           },
         ]
+        // How this agent was started, said once: bare by its own means, and handed Hemera's tools
+        // at the loopback address under the token's digest — never the token itself (D6-01).
+        yield* diagnostic.write(
+          `agents: ${resolved.adapter.label} started bare for Session ${sessionId} (${mode.means}); Hemera's MCP server handed at ${server.origin} as ${granted.id}`,
+        )
 
         const queue = yield* Queue.unbounded<AgentEvent>()
         const connection = yield* attempt(
