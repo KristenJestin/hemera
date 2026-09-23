@@ -120,6 +120,7 @@ const SURFACES = {
     'workspace-card',
     'preparation-steps',
     'create-workspace-dialog',
+    'workspace-list',
   ],
 }
 
@@ -171,6 +172,7 @@ const NAMED_STATES = new Map([
     'workspace/preparation-steps',
     ['Pending', 'Running', 'Done', 'Skipped', 'Failed', 'LinkRefused', 'RunFailed'],
   ],
+  ['workspace/workspace-list', ['MainOnly', 'Filled', 'Creating', 'Keyboard']],
 ])
 
 function storiesIn(path: string): string[] {
@@ -409,6 +411,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'WorkspaceCard',
       'CreateWorkspaceDialog',
       'PreparationSteps',
+      'WorkspaceList',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

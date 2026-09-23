@@ -395,3 +395,4 @@ export {
 } from './workspace/model.ts'
 export { PreparationSteps, type PreparationStepsProps } from './workspace/preparation-steps.tsx'
 export { WorkspaceCard, type WorkspaceCardProps } from './workspace/workspace-card.tsx'
+export { WorkspaceList, type WorkspaceListProps } from './workspace/workspace-list.tsx'
