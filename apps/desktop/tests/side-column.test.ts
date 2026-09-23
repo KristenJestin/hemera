@@ -18,7 +18,13 @@ import type { CommandRun, ContextView } from '@hemera/ipc'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
-import { contextListsOf, openingTabOf, panelRunsOf } from '#renderer/side-column.ts'
+import {
+  contextListsOf,
+  hasSideColumn,
+  openingTabOf,
+  panelRunsOf,
+  sideTabsOf,
+} from '#renderer/side-column.ts'
 import { contextOf, listenToTools, readContext, runCommand, runsOf } from '#renderer/tools-store.ts'
 
 import { type OpenWindow, install, openWindow } from './window.ts'
@@ -70,9 +76,55 @@ describe('The agent starts the app and the user opens it', () => {
   })
 
   test('a Session with a command running opens on its commands', () => {
-    expect(openingTabOf([aRun('r1', '/a', 'running', 'c1')])).toBe('commands')
-    expect(openingTabOf([aRun('r1', '/a', 'exited', 'c1')])).toBe('activity')
-    expect(openingTabOf([])).toBe('activity')
+    const done = aRun('r1', '/a', 'exited', 'c1')
+    const tabs = sideTabsOf(1, 0, [done], null)
+    expect(openingTabOf([aRun('r1', '/a', 'running', 'c1')], tabs)).toBe('commands')
+    expect(openingTabOf([done], tabs)).toBe('activity')
+    // With nothing done yet, the tab that has something is the one it opens on.
+    expect(openingTabOf([done], sideTabsOf(0, 0, [done], null))).toBe('commands')
+  })
+})
+
+/** What the engine answers of a Session's context, with the sources and the catalogue given. */
+function aView(
+  provided: ContextView['provided'][number]['kind'][],
+  commands: ContextView['commands'] = [],
+): ContextView {
+  return {
+    provided: provided.map((kind) => ({
+      kind,
+      path: kind === 'base' ? '' : 'AGENTS.md',
+      fingerprint: 'f'.repeat(64),
+      deliveredAt: '2026-09-23T08:00:00.000Z',
+      reached: kind === 'base' ? 'embedded_resource' : 'read_natively',
+    })),
+    tools: [{ name: 'fs_read', bound: '256 KiB' }],
+    commands,
+    private: [],
+  }
+}
+
+describe('No side column on a Session that has nothing to show', () => {
+  test('the base alone, no plan, no file, no run and no catalogue draw no column', () => {
+    const tabs = sideTabsOf(0, 0, [], aView(['base']))
+    expect(tabs).toEqual({ activity: false, commands: false, context: false })
+    expect(hasSideColumn(tabs)).toBe(false)
+    expect(hasSideColumn(sideTabsOf(0, 0, [], null))).toBe(false)
+  })
+
+  test('each tab that has something draws it, and the column opens on that tab', () => {
+    const plan = sideTabsOf(2, 0, [], aView(['base']))
+    expect(plan.activity).toBe(true)
+    expect(openingTabOf([], plan)).toBe('activity')
+
+    const catalogue = sideTabsOf(0, 0, [], aView(['base'], [{ name: 'check', line: 'pnpm check' }]))
+    expect(catalogue.commands).toBe(true)
+    expect(openingTabOf([], catalogue)).toBe('commands')
+
+    const instructions = sideTabsOf(0, 0, [], aView(['base', 'native']))
+    expect(instructions.context).toBe(true)
+    expect(openingTabOf([], instructions)).toBe('context')
+    expect(hasSideColumn(instructions)).toBe(true)
   })
 })
 

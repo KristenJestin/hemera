@@ -40,7 +40,13 @@ import {
 } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { whenOf } from '../journal-lines.ts'
-import { contextListsOf, openingTabOf, panelRunsOf } from '../side-column.ts'
+import {
+  contextListsOf,
+  hasSideColumn,
+  openingTabOf,
+  panelRunsOf,
+  sideTabsOf,
+} from '../side-column.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -370,6 +376,11 @@ export function SessionPage({
   const plan = planOf(thread)
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
+  // Which tabs have something to show, and whether the column is drawn at all (#40's decision:
+  // no empty side column). Once it is drawn, the Commands panel and the Context view go with it
+  // whatever they hold: the panel is also where a one-off line is run from.
+  const tabs = sideTabsOf(plan.length, touched.length, commandRuns, context)
+  const drawn = hasSideColumn(tabs)
 
   return (
     /*
@@ -515,9 +526,9 @@ export function SessionPage({
       </div>
       {/*
         The column stands beside the thread and not under it, and it is the width the thread gave
-        up for it. A Session whose agent has sent neither a plan nor a file draws no column at all
-        (review of #40, defect 3): `Plan 0 of 0` and `Files 0` take that width and say nothing with
-        it. The box is the page's and the emptiness is the column's — there is no wrapper here, so
+        up for it. A Session none of whose tabs has anything — no plan, no file, no run, no
+        catalogue, nothing provided beyond the base — draws no column at all (review of #40,
+        defect 3): empty tabs take that width and say nothing with it. The box is the page's and the emptiness is the column's — there is no wrapper here, so
         a column that draws nothing leaves the width where it was.
       */}
       <SessionSideColumn
@@ -528,7 +539,7 @@ export function SessionPage({
         // the thread's blocks read, and the line a one-off is run from. A Session nothing
         // answers has no agent to lend a command to, and no tab for one.
         commands={
-          session.provider === null ? undefined : (
+          !drawn || session.provider === null ? undefined : (
             <CommandsPanel
               runs={panelRunsOf(commandRuns, root)}
               onStop={onStopRun}
@@ -538,12 +549,15 @@ export function SessionPage({
           )
         }
         // What the agent is working from, in three lists (D6-10), once the engine has said it.
-        context={context === null ? undefined : <ContextView {...contextListsOf(context)} />}
-        // The tab it opens on follows what is happening: a command running opens on Commands.
-        // Keyed on it, so a command that starts while the Session is open brings the column to
-        // its commands, as opening the Session with one running would have (D6-12).
-        key={openingTabOf(commandRuns)}
-        defaultTab={openingTabOf(commandRuns)}
+        context={
+          !drawn || context === null ? undefined : <ContextView {...contextListsOf(context)} />
+        }
+        // The tab it opens on follows what is happening: a command running opens on Commands,
+        // then the tab that has something. Keyed on it, so a command that starts while the
+        // Session is open brings the column to its commands, as opening the Session with one
+        // running would have (D6-12).
+        key={openingTabOf(commandRuns, tabs)}
+        defaultTab={openingTabOf(commandRuns, tabs)}
       />
     </div>
   )

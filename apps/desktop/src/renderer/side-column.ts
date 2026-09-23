@@ -48,11 +48,46 @@ export function panelRunsOf(runs: readonly CommandRun[], root: string): CommandP
 }
 
 /**
- * The tab a Session opens on, which follows what is happening in it (D6-12): a Session with a
- * command running opens on its commands, every other one on what it has been doing.
+ * Which of the three tabs has something to show (review of #40, defect 3; D6-10, D6-12).
+ *
+ * Activity has a plan or a file the turn touched; Commands has a run of this Session or a
+ * catalogue to run from; Context has a source beyond the base — the Workspace's `AGENTS.md` or a
+ * delivery. The base alone is every Session's, and says nothing a reader came to the column for.
  */
-export function openingTabOf(runs: readonly CommandRun[]): SideColumnTab {
-  return runs.some((run) => run.state === 'running') ? 'commands' : 'activity'
+export interface SideTabs {
+  activity: boolean
+  commands: boolean
+  context: boolean
+}
+
+export function sideTabsOf(
+  plan: number,
+  files: number,
+  runs: readonly CommandRun[],
+  view: ContextView | null,
+): SideTabs {
+  return {
+    activity: plan > 0 || files > 0,
+    commands: runs.length > 0 || (view?.commands.length ?? 0) > 0,
+    context: view?.provided.some((one) => one.kind !== 'base') ?? false,
+  }
+}
+
+/** Whether the column is drawn at all: a column whose three tabs are empty is not (#40). */
+export function hasSideColumn(tabs: SideTabs): boolean {
+  return tabs.activity || tabs.commands || tabs.context
+}
+
+/**
+ * The tab a Session opens on, which follows what is happening in it (D6-12): a command running
+ * opens on its commands, then what the agent has been doing, then whichever tab has something.
+ */
+export function openingTabOf(runs: readonly CommandRun[], tabs: SideTabs): SideColumnTab {
+  if (runs.some((run) => run.state === 'running')) return 'commands'
+  if (tabs.activity) return 'activity'
+  if (tabs.commands) return 'commands'
+  if (tabs.context) return 'context'
+  return 'activity'
 }
 
 /** How a source reached the agent, in the words the Context view says it with. */

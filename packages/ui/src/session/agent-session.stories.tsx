@@ -481,6 +481,8 @@ export const Complete: Story = {
   render: () => <Page />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    // A Session with a plan, files, runs and sources draws its column beside the thread.
+    await expect(canvas.getByRole('complementary')).toBeVisible()
     // The plan is the column's, and the thread does not repeat it.
     await expect(canvas.getByText('2 of 4')).toBeVisible()
     // The column is the state: the plan the agent works to, and the files the turn touched.
@@ -617,6 +619,9 @@ export const NoColumn: Story = {
   render: () => <Page plan={[]} touched={[]} commands={null} context={null} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    // No column at all: not an empty box, not three tabs with nothing under them.
+    expect(canvas.queryByRole('complementary')).toBeNull()
+    expect(canvas.queryByRole('tab', { name: 'Activity' })).toBeNull()
     expect(canvas.queryByText('2 of 4')).toBeNull()
     expect(canvas.queryByText('Files')).toBeNull()
     // The thread and its foot are still the page, and the head is still its head: the thread is
