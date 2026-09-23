@@ -648,8 +648,12 @@ describe('Travaux parallèles', () => {
         const sessions = yield* Sessions
         const first = yield* sessionIn(project.id)
         const second = yield* sessionIn(project.id)
+        // Dates are ISO text to the millisecond: two acts in the same millisecond tie on both
+        // `last_written_at` and `created_at`, and a tie comes back in no given order.
+        yield* Effect.sleep('2 millis')
         yield* sessions.append(second.id, 'Written last')
         const earlier = yield* sessions.list(project.id)
+        yield* Effect.sleep('2 millis')
         yield* sessions.rename(first.id, 1, 'Back to the top')
         return [[first.id, second.id], earlier, yield* sessions.list(project.id)] as const
       }),
