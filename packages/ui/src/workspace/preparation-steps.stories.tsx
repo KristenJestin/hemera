@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { useState } from 'react'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import type { PreparationStepLine, StepState } from './model.ts'
-import { PreparationSteps } from './preparation-steps.tsx'
+import { PreparationSteps, type PreparationStepsProps } from './preparation-steps.tsx'
 
 /**
  * The preparation of `login-form` (D8-05), on fixtures.
@@ -43,8 +44,23 @@ const RUN_FAILED = [
   ' ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with "frozen-lockfile" because pnpm-lock.yaml is not up to date with sources/api/package.json',
 ].join('\n')
 
-const COPY_SKIPPED =
-  'Nothing copied: ./sources/api already has a .env, left as it is; main has no .env in ./sources/front.'
+/** `.env` is in `main/sources/api` and already in the Workspace's; `main/sources/front` has none. */
+const COPY_KEPT = 'sources/api: kept as it was; sources/front: no source'
+
+/** A second copy whose source is absent everywhere: nothing to copy, so the step is skipped. */
+const COPY_NONE = 'sources/api: no source; sources/front: no source'
+
+/** The recipe with one more copy, of a file `main` does not have at all. */
+const WITH_A_MISSING_SOURCE = stepsAt(['done', 'done', 'done', 'done', 'done'], {
+  at: 2,
+  text: COPY_KEPT,
+}).toSpliced(3, 0, {
+  id: 'copy-env-local',
+  kind: 'copy',
+  target: '.env.local in repositories',
+  state: 'skipped',
+  message: COPY_NONE,
+})
 
 const meta = {
   tags: ['autodocs', 'new'],
@@ -116,17 +132,21 @@ export const Done: Story = {
 
 // Scenario "A copy never overwrites and skips a missing source".
 async function aCopyNeverOverwritesAndSkipsAMissingSource({ canvasElement }: Context) {
-  const copy = rowsIn(canvasElement)[2]!
-  await expect(copy).toHaveTextContent('Skipped')
-  await expect(within(copy).getByText(COPY_SKIPPED)).toBeVisible()
+  const rows = rowsIn(canvasElement)
+  // `.env`: the existing file kept, the missing source passed over, and the step done.
+  await expect(rows[2]).toHaveTextContent('copy .env in repositories')
+  await expect(stateOf(rows[2]!)).toBe('Done')
+  await expect(within(rows[2]!).getByText(COPY_KEPT)).toBeVisible()
+  // `.env.local`: no source anywhere, so nothing was copied and the step is skipped.
+  await expect(rows[3]).toHaveTextContent('copy .env.local in repositories')
+  await expect(stateOf(rows[3]!)).toBe('Skipped')
+  await expect(within(rows[3]!).getByText(COPY_NONE)).toBeVisible()
   await expect(within(canvasElement).queryByText('Failed')).toBeNull()
 }
 
-/** The copy found nothing to write: an existing file is left alone, a missing source skipped. */
+/** A copy that kept what was there and skipped a missing source, and one with no source at all. */
 export const Skipped: Story = {
-  args: {
-    steps: stepsAt(['done', 'done', 'skipped', 'done', 'done'], { at: 2, text: COPY_SKIPPED }),
-  },
+  args: { steps: WITH_A_MISSING_SOURCE },
   play: aCopyNeverOverwritesAndSkipsAMissingSource,
 }
 
@@ -179,4 +199,69 @@ export const RunFailed: Story = {
     steps: stepsAt(['done', 'done', 'done', 'done', 'failed'], { at: 4, text: RUN_FAILED }),
   },
   play: aRunStepFailsOnANonZeroExit,
+}
+
+/**
+ * Before: the run was done in an earlier pass, the first worktree's folder has since been
+ * removed by hand, and Git refused the second. After Resume, the engine's re-check turns the
+ * missing one back to `pending`, retries the failed one, and keeps the others (D8-05).
+ */
+const BEFORE_RESUME = stepsAt(['done', 'failed', 'done', 'done', 'done'], {
+  at: 1,
+  text: GIT_REFUSED,
+})
+
+const AFTER_RESUME = stepsAt(['pending', 'pending', 'done', 'done', 'done'])
+
+/** The steps as the engine hands them back: what it answers once Resume is pressed. */
+function Resuming({ steps, onResume, ...rest }: PreparationStepsProps) {
+  const [shown, setShown] = useState(steps)
+  return (
+    <PreparationSteps
+      {...rest}
+      steps={shown}
+      onResume={() => {
+        onResume?.()
+        setShown(AFTER_RESUME)
+      }}
+    />
+  )
+}
+
+// Scenario "Resuming re-checks before retrying".
+async function resumingReChecksBeforeRetrying({ canvasElement, args }: Context) {
+  args.onResume?.mockClear()
+  await userEvent.click(within(canvasElement).getByRole('button', { name: 'Resume' }))
+  await expect(args.onResume).toHaveBeenCalledTimes(1)
+  await waitFor(() => {
+    expect(rowsIn(canvasElement).map(stateOf)).toEqual([
+      'Pending',
+      'Pending',
+      'Done',
+      'Done',
+      'Done',
+    ])
+  })
+  // The run that was done stays done: it is not run again.
+  await expect(rowsIn(canvasElement)[4]).toHaveTextContent('run install')
+  await expect(within(canvasElement).queryByRole('button', { name: 'Resume' })).toBeNull()
+}
+
+/** Resume pressed: the removed worktree is redone, the failed one retried, the run kept. */
+export const Resumed: Story = {
+  args: { steps: BEFORE_RESUME },
+  render: (args) => <Resuming {...args} />,
+  play: resumingReChecksBeforeRetrying,
+}
+
+/** The one control of the list, Resume, reached and pressed with the keyboard. */
+export const Keyboard: Story = {
+  args: { steps: stepsAt(['done', 'failed'], { at: 1, text: GIT_REFUSED }) },
+  play: async ({ canvasElement, args }) => {
+    args.onResume?.mockClear()
+    await userEvent.tab()
+    await expect(within(canvasElement).getByRole('button', { name: 'Resume' })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onResume).toHaveBeenCalledTimes(1)
+  },
 }

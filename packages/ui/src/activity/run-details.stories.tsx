@@ -96,9 +96,21 @@ async function aRunShowsWhatItRan({ canvasElement }: PlayContext) {
   await expect(canvas.getByText('Exited 0')).toBeVisible()
 }
 
+// Scenario: "A command's folder resolves inside the Workspace"
+async function aCommandsFolderResolvesInsideTheWorkspace({ canvasElement }: PlayContext) {
+  const canvas = within(canvasElement)
+  // The run says which Workspace it is in, and its folder is that Workspace's `sources/api`.
+  await expect(canvas.getByText('login-form')).toBeVisible()
+  await expect(canvas.getByText(FOLDER)).toBeVisible()
+  await expect(FOLDER.endsWith('/login-form/sources/api')).toBe(true)
+}
+
 /** A `test` command that ended clean: everything it was given and everything it gave back. */
 export const Ended: Story = {
-  play: aRunShowsWhatItRan,
+  play: async (context) => {
+    await aRunShowsWhatItRan(context)
+    await aCommandsFolderResolvesInsideTheWorkspace(context)
+  },
 }
 
 /** Still running: no exit code yet, and the output keeps its bottom. */

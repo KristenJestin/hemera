@@ -133,10 +133,14 @@ export const Proposed: Story = {
 async function aLocationWithoutARepositoryGetsNoWorktree({ args }: Context) {
   args.onCreate.mockClear()
   const dialog = within(document.body).getByRole('dialog')
+  // The location is shown, says why, and cannot be ticked: no base, no branch, no worktree.
   const docs = within(dialog).getByRole('checkbox', { name: /\.\/docs/ })
+  const docsRow = within(docs.closest('li')!)
+  await expect(docsRow.getByText('./docs')).toBeVisible()
+  await expect(docsRow.getByText('no repository in main')).toBeVisible()
   await expect(docs).toBeDisabled()
   await expect(docs).not.toBeChecked()
-  await expect(within(dialog).getByText('no repository in main')).toBeVisible()
+  await expect(docsRow.queryByRole('textbox')).toBeNull()
   // The front was left out by hand: its base and branch go quiet, and it is not handed over.
   await expect(
     rowOf(dialog, './sources/front').getByRole('textbox', { name: 'Branch' }),

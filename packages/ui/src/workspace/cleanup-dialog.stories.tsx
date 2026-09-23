@@ -94,7 +94,10 @@ async function cleanupIsRefusedWhileAServiceRunsOrGitRefuses({ args }: Context) 
   await expect(dialog.getByRole('alert')).toHaveTextContent(args.refusal ?? '')
   await expect(dialog.getByText('Nothing was removed.')).toBeVisible()
   await expect(dialog.queryByRole('button', { name: 'Clean up' })).toBeNull()
-  await expect(dialog.getAllByRole('button', { name: 'Close' }).length).toBeGreaterThan(0)
+  // The footer's own Close, which says it in words: the corner's cross is named Close too.
+  const close = dialog.getByText('Close', { selector: 'button' })
+  await userEvent.click(close)
+  await expect(args.onOpenChange).toHaveBeenCalledWith(false)
 }
 
 /** Refused while a service of the Workspace runs: the reason, and Close. */

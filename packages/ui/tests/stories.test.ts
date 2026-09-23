@@ -164,7 +164,7 @@ const NAMED_STATES = new Map([
   ],
   [
     'workspace/workspace-card',
-    ['Main', 'Preparing', 'Ready', 'Failed', 'Cleaned', 'Loading', 'GitError'],
+    ['Main', 'PickedFolder', 'Preparing', 'Ready', 'Failed', 'Cleaned', 'Loading', 'GitError'],
   ],
   [
     'workspace/create-workspace-dialog',
@@ -172,7 +172,17 @@ const NAMED_STATES = new Map([
   ],
   [
     'workspace/preparation-steps',
-    ['Pending', 'Running', 'Done', 'Skipped', 'Failed', 'LinkRefused', 'RunFailed'],
+    [
+      'Pending',
+      'Running',
+      'Done',
+      'Skipped',
+      'Failed',
+      'Resumed',
+      'LinkRefused',
+      'RunFailed',
+      'Keyboard',
+    ],
   ],
   ['workspace/workspace-list', ['MainOnly', 'Filled', 'Creating', 'Keyboard']],
   [

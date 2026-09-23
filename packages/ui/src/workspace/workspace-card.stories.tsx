@@ -135,9 +135,22 @@ async function eachRepositoryShowsItsBranchCommitAndChanges({ canvasElement }: C
   await expect(front.getByText('clean')).toBeVisible()
 }
 
+// Scenario "A dedicated Workspace assembles one worktree per repository".
+async function aDedicatedWorkspaceAssemblesOneWorktreePerRepository({ canvasElement }: Context) {
+  const canvas = within(canvasElement)
+  await expect(canvas.getByText('HEM-7')).toBeVisible()
+  const repositories = within(canvas.getByRole('list', { name: 'Repositories of login-form' }))
+  await expect(repositories.getAllByRole('listitem')).toHaveLength(2)
+  await expect(repositories.getAllByText('hemera/HEM-7-login-form')).toHaveLength(2)
+  await expect(canvas.getByText('Ready')).toBeVisible()
+}
+
 /** Every repository read: its branch, its short commit, and what has changed in it. */
 export const Ready: Story = {
-  play: eachRepositoryShowsItsBranchCommitAndChanges,
+  play: async (context) => {
+    await aDedicatedWorkspaceAssemblesOneWorktreePerRepository(context)
+    await eachRepositoryShowsItsBranchCommitAndChanges(context)
+  },
 }
 
 /** A step failed: the Workspace offers to resume, and says nothing more than its state here. */

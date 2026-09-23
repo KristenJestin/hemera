@@ -141,7 +141,20 @@ export const PortConflict: Story = {
   play: aPortConflictNamesItsHolder,
 }
 
-/** The conflict found after the fact: the process ended on "address already in use". */
+const NO_PORTLESS = 'portless was not found on the PATH'
+
+// Scenario: "Portless is refused when it is not installed"
+async function portlessIsRefusedWhenItIsNotInstalled({ canvasElement }: PlayContext) {
+  const auth = rowOf(canvasElement, 'auth', 'main')
+  await expect(auth.getByText(NO_PORTLESS)).toBeVisible()
+  await expect(auth.getByText('Failed')).toBeVisible()
+  await expect(auth.queryByRole('button', { name: /^Stop/ })).toBeNull()
+}
+
+/**
+ * Two launches that did not hold: the conflict found after the fact — the process ended on
+ * "address already in use" — and a Portless command refused because `portless` is missing.
+ */
 export const Failed: Story = {
   args: {
     services: [
@@ -153,15 +166,17 @@ export const Failed: Story = {
         message: 'Error: listen EADDRINUSE: address already in use :::3000',
         portConflict: { port: 3000, holderRun: 'dev', holderWorkspace: 'main' },
       },
+      { ...AUTH, state: 'failed', url: undefined, readiness: undefined, message: NO_PORTLESS },
     ],
   },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText('Failed')).toBeVisible()
+  play: async (context) => {
+    const dev = rowOf(context.canvasElement, 'dev', 'login-form')
+    await expect(dev.getByText('Failed')).toBeVisible()
     await expect(
-      canvas.getByText('Error: listen EADDRINUSE: address already in use :::3000'),
+      dev.getByText('Error: listen EADDRINUSE: address already in use :::3000'),
     ).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: /^Stop/ })).toBeNull()
+    await expect(dev.queryByRole('button', { name: /^Stop/ })).toBeNull()
+    await portlessIsRefusedWhenItIsNotInstalled(context)
   },
 }
 
