@@ -5,7 +5,7 @@
  * The channels are the engine's use cases relayed as they are: what is under test is what a page
  * asking `commands.*` and `context.read` is answered, over the whole engine on the fake agent —
  * the catalogue the settings edit, the runs the Commands panel starts, reads and stops, and the
- * three lists of the Context view. Each suite is named after the scenario of the issue it plays.
+ * two lists of the Context view. Each suite is named after the scenario of the issue it plays.
  */
 
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'

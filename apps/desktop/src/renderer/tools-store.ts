@@ -147,7 +147,7 @@ export function contextOf(sessionId: string | null): ContextView | null {
   return state.contexts.get(sessionId) ?? null
 }
 
-/** Reads the Context view of a Session: the three lists of D6-10. */
+/** Reads the Context view of a Session: what it was provided, and what it may consult (D6-10). */
 export async function readContext(sessionId: string): Promise<void> {
   try {
     const view = await window.hemera.invoke('context.read', { sessionId })
