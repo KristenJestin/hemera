@@ -166,7 +166,7 @@ function frameOf(box: HTMLElement): HTMLElement {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
@@ -174,7 +174,7 @@ const meta = {
   args: {
     value: '',
     files: [],
-    workspaces: ['main'],
+    workspaces: [{ name: 'main' }],
     action: 'Start chat',
     placeholder: 'Ask anything, think out loud, or describe what you want to do…',
     onValueChange: fn(),
@@ -188,7 +188,15 @@ const meta = {
   argTypes: {
     value: { control: 'text', description: 'What is written; the page holds it.' },
     files: { control: 'object', description: 'The files attached, as paths of the Workspace.' },
-    workspaces: { control: 'object', description: 'The Workspaces on offer; lot 4 has one.' },
+    workspaces: {
+      control: 'object',
+      description: 'The Workspaces in state ready, main first.',
+    },
+    workspaceFixed: {
+      control: 'boolean',
+      description: 'Whether the agent has started, which fixes the Workspace.',
+      table: { defaultValue: { summary: 'false' } },
+    },
     action: {
       control: 'text',
       description: 'The word on the button that sends.',

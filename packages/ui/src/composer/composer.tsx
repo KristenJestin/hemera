@@ -8,6 +8,7 @@ import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
 import { MentionMenu, mentionOptionId } from './mention-menu.tsx'
 import { PromptInput, type PromptShape } from './prompt-input.tsx'
+import type { WorkspaceChoice } from './workspace-pill.tsx'
 
 /**
  * The composer: what a Session is started from, and what is written into one (design D4b-02,
@@ -60,10 +61,12 @@ export interface ComposerProps {
    * behind it has.
    */
   onPickFiles?: (() => Promise<string[]>) | undefined
-  /** The Workspaces on offer; this lot has one, and lot 7 brings the others. */
-  workspaces?: string[] | undefined
+  /** The Workspaces in state `ready`, `main` first, filtered and ordered by the caller (D8-08). */
+  workspaces?: WorkspaceChoice[] | undefined
   workspace?: string | undefined
   onWorkspaceChange?: ((workspace: string) => void) | undefined
+  /** Whether the agent has started, which fixes the Workspace (D8-08). */
+  workspaceFixed?: boolean | undefined
   /** The word on the button that sends: `Start chat` on the Home. */
   action?: string | undefined
   /**
@@ -131,9 +134,10 @@ export function Composer({
   onFilesChange,
   onSearchFiles,
   onPickFiles,
-  workspaces = ['main'],
+  workspaces = [{ name: 'main' }],
   workspace,
   onWorkspaceChange,
+  workspaceFixed = false,
   action = 'Start chat',
   sendDisabledReason,
   variant = 'hero',
@@ -160,7 +164,7 @@ export function Composer({
    */
   const [stopPressed, setStopPressed] = useState(false)
   if (!running && stopPressed) setStopPressed(false)
-  const [chosen, setChosen] = useState(workspaces[0] ?? 'main')
+  const [chosen, setChosen] = useState(workspaces[0]?.name ?? 'main')
   const current = workspace ?? chosen
   // What names the entries of the mention band, so the box can point at the one the arrows are
   // on: the band takes no focus, and this is the only thing that tells a reader who cannot see
@@ -341,6 +345,7 @@ export function Composer({
             <ComposerActions
               workspaces={workspaces}
               workspace={current}
+              workspaceFixed={workspaceFixed}
               onWorkspaceChange={(next) => {
                 setChosen(next)
                 onWorkspaceChange?.(next)

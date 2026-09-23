@@ -5,7 +5,7 @@ import { Button } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { IconArrowUp, IconPencil, IconPlayerStop } from '../icons.ts'
 import { PRESSED_COMPACT, arrival, useTransition } from '../motion.ts'
-import { WorkspacePill } from './workspace-pill.tsx'
+import { type WorkspaceChoice, WorkspacePill } from './workspace-pill.tsx'
 
 /**
  * The foot of the composer: which Workspace is being written about, and what sending does.
@@ -29,10 +29,12 @@ import { WorkspacePill } from './workspace-pill.tsx'
 const MORPH = 'relative flex size-icon-md items-center justify-center'
 
 export interface ComposerActionsProps {
-  /** The Workspaces on offer; this lot has one, and lot 7 brings the others. */
-  workspaces: string[]
+  /** The Workspaces in state `ready`, `main` first (D8-08). */
+  workspaces: WorkspaceChoice[]
   workspace: string
   onWorkspaceChange: (workspace: string) => void
+  /** Whether the agent has started, which fixes the Workspace (D8-08). */
+  workspaceFixed?: boolean | undefined
   /** Whether there is anything to send at all. */
   ready: boolean
   /** Whether a send is in flight, which is what the arrow morphs into. */
@@ -75,6 +77,7 @@ export function ComposerActions({
   workspaces,
   workspace,
   onWorkspaceChange,
+  workspaceFixed = false,
   ready,
   sending,
   running = false,
@@ -99,6 +102,7 @@ export function ComposerActions({
         workspaces={workspaces}
         workspace={workspace}
         onWorkspaceChange={onWorkspaceChange}
+        fixed={workspaceFixed}
       />
       <span className="ml-auto flex items-center gap-2">
         {spec && (

@@ -155,6 +155,7 @@ export {
   type MentionMenuProps,
   type PromptInputProps,
   type PromptShape,
+  type WorkspaceChoice,
   type WorkspacePillProps,
 } from './composer/index.ts'
 
