@@ -378,6 +378,7 @@ export type {
   VariableLine,
 } from './workspace/services-model.ts'
 /** The Workspace and its preparation (lot 20). */
+export { CleanupDialog, type CleanupDialogProps } from './workspace/cleanup-dialog.tsx'
 export {
   CreateWorkspaceDialog,
   type CreateWorkspaceDialogProps,

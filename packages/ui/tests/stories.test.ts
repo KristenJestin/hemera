@@ -113,14 +113,16 @@ const SURFACES = {
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
-  // Lot 20: what a Workspace is made of, one file per line (a1 and a2 each added theirs).
+  // Lot 20: what a Workspace is made of: the card, its creation, its preparation, the list of a
+  // Project's Workspaces and their cleanup, the variables and the services.
   workspace: [
+    'workspace-card',
+    'create-workspace-dialog',
+    'preparation-steps',
+    'workspace-list',
+    'cleanup-dialog',
     'variables-editor',
     'service-list',
-    'workspace-card',
-    'preparation-steps',
-    'create-workspace-dialog',
-    'workspace-list',
   ],
 }
 
@@ -173,6 +175,10 @@ const NAMED_STATES = new Map([
     ['Pending', 'Running', 'Done', 'Skipped', 'Failed', 'LinkRefused', 'RunFailed'],
   ],
   ['workspace/workspace-list', ['MainOnly', 'Filled', 'Creating', 'Keyboard']],
+  [
+    'workspace/cleanup-dialog',
+    ['Confirm', 'RefusedRunningService', 'RefusedGit', 'RefusedBuildSession', 'Keyboard'],
+  ],
 ])
 
 function storiesIn(path: string): string[] {
@@ -412,6 +418,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'CreateWorkspaceDialog',
       'PreparationSteps',
       'WorkspaceList',
+      'CleanupDialog',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
