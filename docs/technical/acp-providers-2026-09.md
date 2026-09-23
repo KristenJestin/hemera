@@ -256,9 +256,11 @@ platform `qualified` flag is what those declarations say; the real trials of pha
   waiting on the human is cut short neither for its length nor for its silence.
   `CLAUDE_CONFIG_DIR` is left where the user has it: the login lives there, and a directory of
   Hemera's reads as signed out. Managed and policy settings and `~/.claude.json` still load.
-- **OpenCode** (qualified): `OPENCODE_CONFIG_CONTENT` with a primary agent of Hemera's as
-  `default_agent`, `permission: { "*": "deny", "hemera_*": "allow" }`, `build` and `plan` disabled;
-  `XDG_CONFIG_HOME` pointed at a directory of Hemera's and `OPENCODE_DISABLE_PROJECT_CONFIG=1`.
+- **OpenCode** (qualified on Windows; not yet on Linux, where it has not run bare — see
+  [`bare-mode-2026-09.md`](bare-mode-2026-09.md) §5): `OPENCODE_CONFIG_CONTENT` with a primary
+  agent of Hemera's as `default_agent`, `permission: { "*": "deny", "hemera_*": "allow" }`,
+  `build` and `plan` disabled; `XDG_CONFIG_HOME` pointed at a directory of Hemera's and
+  `OPENCODE_DISABLE_PROJECT_CONFIG=1`.
   The wildcard is matched case-insensitively on Windows. The base goes as an embedded resource of
   the first prompt. `$HOME/.opencode`, managed configuration and a remote `.well-known/opencode`
   still load.

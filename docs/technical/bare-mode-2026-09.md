@@ -371,7 +371,23 @@ MCP is the only viable channel. One thing to watch: the **MCP-over-ACP** RFD (`d
 
 Only a live trial can settle these.
 
-**Claude Code**
+**Claude Code** — run bare by the Linux trial of 23 September 2026 (Arch Linux under Wayland,
+Claude Code 2.1.280 signed in, adapter `claude-agent-acp` 0.79.0, model `haiku`), qualified on
+Linux with the three fixes it brought.
+- Six scenarios passed, through Hemera's window: a read of `notes.md`; a request for its Bash tool,
+  answered with Hemera's tools alone (asked for its tool names, it gave the eleven `mcp__hemera__*`
+  and nothing else); `fs_write` inside the root without a question and outside it after an Allow;
+  a one-off `git status` refused; `AGENTS.md` changed while idle and delivered on a turn of its
+  own; a Stop while a question waited, which withdrew it. No permission of Claude Code's own stood
+  in front of Hemera's, the base reached it as its system prompt, and quitting left no `claude`
+  process behind. A second run through a symlinked root allowed a one-off `ls -la` and answered a
+  question after 330 s.
+- The three fixes: the idle timeout of §1 (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, which aborted a
+  silent call after 300 s); a question withdrawn when the agent reports the call it gave up on as
+  failed, where it stayed decidable for a call nobody waited on; a decided question drawn as
+  decided when a thread is read back, where it was drawn waiting with its buttons.
+- So the agent loop does run end-to-end with zero built-ins, on Linux. Not run on macOS; nothing
+  looked at by a human beyond the DOM and two screenshots.
 - Whether the `claude_code` system-prompt preset prunes its tool-describing sections when
   `tools: []` (the prompt is inside the bundled CLI binary). Docs are silent.
 - Whether the agent loop actually runs end-to-end with zero built-ins. The adapter's test
@@ -390,7 +406,16 @@ Only a live trial can settle these.
   Codex. Every upgrade of Codex or of the adapter needs the trial again, and an upgrade of the
   adapter needs the patch rewritten against its `dist/index.js`.
 
-**OpenCode**
+**OpenCode** — qualified on Windows, **not qualified on Linux**: its adapter declares "not run on
+Linux yet: no signed-in OpenCode on the qualification machine", which the Agents section shows
+under it and a Session on it is refused with. Nothing in the means depends on the platform; the
+flag says where it ran bare, and it has not run on Linux. The Linux trial of 23 September 2026
+found OpenCode 1.17.13 not signed in, and its free tier refused ("OpenCode 1.18.0 or newer is
+required"); what it could check held: discovery, the refusal before any process, and the reads of
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` without a write. The flag is flipped
+after a run of the six scenarios with a signed-in OpenCode 1.18 or later. Worth a look then:
+1.17.13 announced `opencode-login` at `initialize` even with an `auth.json` present, and
+`isAuthenticated` reads any announced method as "not signed in".
 - Whether `XDG_CONFIG_HOME` really redirects `Global.Path.config` at runtime (it follows from
   the `xdg-basedir` import, but was not executed).
 - Whether an MCP server registered at runtime is torn down on `session/close` — `closeClient`
