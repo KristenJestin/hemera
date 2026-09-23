@@ -552,7 +552,7 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
     expect(seen.whileRunning.message).toBe('the service dev of login-form is running')
     expect(seen.whileChanged).toBeInstanceOf(CleanupRefusedError)
     expect(seen.whileChanged.message).toMatch(
-      /^fatal: .*sources\/front.* contains modified or untracked files/,
+      /^fatal: .*sources[\\/]front.* contains modified or untracked files/,
     )
     expect(seen.events).toHaveLength(2)
     // Nothing was removed: both worktrees are there, and the Workspace is still ready.
