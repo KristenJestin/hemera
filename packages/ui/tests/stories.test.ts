@@ -369,6 +369,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // chat, and the agent proposing a Spec in a `free` Session.
       'SpecPanel',
       'SpecDocument',
+      'SpecPart',
+      'SpecStage',
+      'SpecRail',
       'SpecHead',
       'SectionPart',
       'StoriesPart',

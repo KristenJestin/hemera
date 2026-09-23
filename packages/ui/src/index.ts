@@ -361,16 +361,22 @@ export {
 /**
  * The Spec panel of a `define` Session (lot 19, brief revision 2): a head that stays on top with
  * the readiness, and the Spec as one document grouped by phase; the pieces a Session reading or
- * reworking a Spec adds to it; and the three blocks of the thread — the thin Hemera line of what
+ * reworking a Spec adds to it, the rail that shows one part at a time; and the three blocks of the thread — the thin Hemera line of what
  * the agent was handed, a question of the Spec asked in the chat, and the agent proposing a Spec
  * in a `free` Session. View types only: the domain arrives with phase 1.
  */
 export {
   SpecDocument,
   SpecPanel,
+  SpecPart,
+  SpecStage,
   type SpecDocumentProps,
   type SpecPanelProps,
+  type SpecPartHandlers,
+  type SpecPartProps,
+  type SpecStageProps,
 } from './spec/spec-panel.tsx'
+export { SpecRail, type RailGroup, type RailRow, type SpecRailProps } from './spec/spec-rail.tsx'
 export { SpecHead, type SpecHeadProps } from './spec/spec-head.tsx'
 export { SectionPart, type SectionPartProps } from './spec/section-part.tsx'
 export { StoriesPart, type StoriesPartProps } from './spec/stories-part.tsx'

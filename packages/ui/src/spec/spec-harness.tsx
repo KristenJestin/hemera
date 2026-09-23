@@ -179,6 +179,7 @@ export interface LiveSpecPanelProps extends SpecActions {
   spec: SpecView
   reader?: ReaderView | undefined
   defaultReworkOpen?: boolean | undefined
+  defaultShowAll?: boolean | undefined
 }
 
 /** The panel over a held Spec, for the stories that show the panel alone. */
@@ -186,6 +187,7 @@ export function LiveSpecPanel({
   spec: initial,
   reader: initialReader,
   defaultReworkOpen,
+  defaultShowAll,
   ...on
 }: LiveSpecPanelProps): ReactNode {
   const { spec, reader, actions } = useLiveSpec(initial, initialReader, on)
@@ -194,6 +196,7 @@ export function LiveSpecPanel({
       spec={spec}
       reader={reader}
       defaultReworkOpen={defaultReworkOpen}
+      defaultShowAll={defaultShowAll}
       onSaveSection={actions.onSaveSection}
       onApplyMine={actions.onApplyMine}
       onDiscardMine={actions.onDiscardMine}

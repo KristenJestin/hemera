@@ -86,10 +86,10 @@ export function PartHead({ title, mark, facts, saves = 0, end }: PartHeadProps):
   return (
     <div className={HEAD}>
       <StateMark mark={mark} />
-      <h4 className={HEADING}>
+      <h3 className={HEADING}>
         {title}
         <span className="sr-only">{`, ${MARK_WORDS[mark]}`}</span>
-      </h4>
+      </h3>
       <p className={META}>
         {facts.map((fact, index) => (
           // A fact is a position in the line, and two of them can say the same word.

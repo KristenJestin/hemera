@@ -7,8 +7,8 @@ import { BUG, MAINTENANCE, MID_PLAN } from './spec-fixtures.ts'
 
 /**
  * The Spec panel alone, as it stands beside the chat: a head that stays on top — the key, the
- * sentence, the readiness — and the Spec under it as one document grouped by phase, the part the
- * agent writes highlighted and scrolled to. The screens of the brief are drawn in their Session,
+ * sentence, the readiness — and under it the rail beside a stage that shows one part at a time,
+ * following the agent until a row is chosen; `Show all` puts the whole document back. The screens of the brief are drawn in their Session,
  * under `Surfaces/Session/Define`; these are the panel's own states and paths.
  */
 const meta = {
@@ -42,6 +42,10 @@ const meta = {
     spec: { control: 'object', description: 'The Spec as the panel draws it.' },
     reader: { control: 'object', description: 'Present when this Session reads the draft.' },
     defaultReworkOpen: { control: 'boolean', description: 'Whether Rework starts open.' },
+    defaultShowAll: {
+      control: 'boolean',
+      description: 'Whether the stage starts on the whole document.',
+    },
   },
 } satisfies Meta<typeof LiveSpecPanel>
 
@@ -50,19 +54,23 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * A feature being planned: three groups, `Plan` open and breathing, the plan being written
- * highlighted as the part the agent is on, and no phase rail and no outline.
+ * A feature being planned: the rail beside one part, the stage following the agent onto the plan
+ * it writes, and no phase rail and no long document.
  */
 export const Feature: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'Shape' })).toBeVisible()
-    await expect(canvas.getByRole('region', { name: 'Plan' })).toBeVisible()
-    await expect(canvas.getByRole('region', { name: 'Decompose' })).toBeVisible()
-    await expect(canvas.getByRole('heading', { name: /^Plan ?, open/ })).toBeVisible()
+    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
+    await expect(within(rail).getByRole('group', { name: 'Plan' })).toHaveTextContent('open')
+    await expect(canvas.getByRole('button', { name: 'Plan, being written' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
+    await expect(within(stage).getByRole('heading', { name: /^Plan/ })).toBeVisible()
+    // One part at a time: nothing of the other parts is on the stage.
+    await expect(within(stage).queryByRole('heading', { name: /^Problem/ })).toBeNull()
     await expect(canvas.queryByText('Prototype')).toBeNull()
-    const plan = canvasElement.querySelector('[data-part="plan"]')!
-    await expect(plan).toHaveAttribute('aria-current', 'location')
     await expect(
       canvas.getByRole('group', { name: /^Readiness ?, 3 of 7 checks pass/ }),
     ).toBeVisible()
@@ -75,8 +83,8 @@ export const Bug: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: /^Reproduction/ })).toBeVisible()
-    await expect(canvas.queryByRole('heading', { name: /^Behaviour/ })).toBeNull()
-    await expect(canvas.queryByRole('heading', { name: /^Stories/ })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: /^Behaviour/ })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: /^Stories/ })).toBeNull()
   },
 }
 
@@ -86,20 +94,40 @@ export const Maintenance: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: /^Invariants/ })).toBeVisible()
-    await expect(canvas.queryByRole('heading', { name: /^Behaviour/ })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: /^Behaviour/ })).toBeNull()
   },
 }
 
-/** A link of the readiness sentence moves the focus to its target and scrolls to it. */
+/**
+ * A row of the rail pins the stage: the chosen part stays on it, and the plan the agent writes
+ * keeps breathing in the rail.
+ */
+export const RowChosen: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /^Scope/ }))
+    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
+    await expect(within(stage).getByRole('heading', { name: /^Scope/ })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: /^Scope/ })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    await expect(canvas.getByRole('button', { name: 'Plan, being written' })).not.toHaveAttribute(
+      'aria-current',
+    )
+  },
+}
+
+/** A link of the readiness sentence puts its target on the stage. */
 export const LinkFollowed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'the credit-note question' }))
-    const questions = canvasElement.querySelector('[data-part="questions"]')!
-    await expect(questions).toHaveAttribute('aria-current', 'location')
-    await waitFor(() => expect(questions).toBeVisible())
-    await expect(canvasElement.querySelector('[data-part="plan"]')).not.toHaveAttribute(
+    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
+    await expect(within(stage).getByRole('heading', { name: /^Questions/ })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: /^Questions/ })).toHaveAttribute(
       'aria-current',
+      'true',
     )
   },
 }
@@ -108,7 +136,28 @@ export const LinkFollowed: Story = {
 export const QuestionLinked: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /^Questions/ }))
     await userEvent.click(canvas.getByRole('button', { name: /^Answer in the chat: Credit notes/ }))
     await expect(args.onGoToQuestion).toHaveBeenCalledWith('q-credit-notes')
+  },
+}
+
+/**
+ * `Show all`: the whole document on the stage, grouped by phase, the part on the stage
+ * highlighted; a row of the rail then only scrolls to its part.
+ */
+export const ShowAll: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Show all' }))
+    const document = await canvas.findByRole('region', { name: 'Document of ATL-7' })
+    await expect(within(document).getByRole('region', { name: 'Shape' })).toBeVisible()
+    await expect(within(document).getByRole('heading', { name: /^Problem/ })).toBeInTheDocument()
+    await userEvent.click(canvas.getByRole('button', { name: /^Tasks/ }))
+    const tasks = canvasElement.querySelector('[data-part="tasks"]')!
+    await expect(tasks).toHaveAttribute('aria-current', 'location')
+    await waitFor(() => expect(tasks).toBeVisible())
+    await userEvent.click(canvas.getByRole('button', { name: 'Show all' }))
+    await expect(canvas.getByRole('region', { name: 'Stage of ATL-7' })).toBeVisible()
   },
 }
