@@ -118,6 +118,7 @@ const SURFACES = {
     'variables-editor',
     'service-list',
     'workspace-card',
+    'preparation-steps',
   ],
 }
 
@@ -160,6 +161,10 @@ const NAMED_STATES = new Map([
   [
     'workspace/workspace-card',
     ['Main', 'Preparing', 'Ready', 'Failed', 'Cleaned', 'Loading', 'GitError'],
+  ],
+  [
+    'workspace/preparation-steps',
+    ['Pending', 'Running', 'Done', 'Skipped', 'Failed', 'LinkRefused', 'RunFailed'],
   ],
 ])
 
@@ -397,6 +402,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // preparation step by step, the Workspaces of a Project, and the cleanup that keeps the
       // branches.
       'WorkspaceCard',
+      'PreparationSteps',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

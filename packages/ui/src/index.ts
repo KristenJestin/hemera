@@ -389,4 +389,5 @@ export {
   type WorkspaceRow,
   type WorkspaceState,
 } from './workspace/model.ts'
+export { PreparationSteps, type PreparationStepsProps } from './workspace/preparation-steps.tsx'
 export { WorkspaceCard, type WorkspaceCardProps } from './workspace/workspace-card.tsx'
