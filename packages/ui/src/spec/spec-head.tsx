@@ -79,7 +79,9 @@ export function SpecHead({
             />
           )}
           {ready && (
-            <Button size="sm" onClick={onRework}>
+            // The height of the picker beside it, which is a menu's own trigger: two controls of
+            // two heights at the end of one line read as two lines.
+            <Button onClick={onRework}>
               <IconRefresh size="sm" />
               Rework
             </Button>

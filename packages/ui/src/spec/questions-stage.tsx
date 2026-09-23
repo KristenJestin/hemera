@@ -102,7 +102,8 @@ function Question({
             }}
           />
         ) : (
-          <span className="mt-1 flex">
+          // The link's own padding given back, so its word starts where the question does.
+          <span className="mt-1 -ml-2 flex">
             <Button variant="link" size="sm" onClick={() => setAnswering(true)}>
               Answer…
             </Button>
