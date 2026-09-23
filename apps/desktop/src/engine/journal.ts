@@ -54,6 +54,8 @@ export interface NewEvent {
   projectId?: string | null
   /** The Session the event is about, for what happens inside one (design D4b-04). */
   sessionId?: string | null
+  /** The Spec the event is about: a Workspace made for one, and what happens to it (D8-16). */
+  specId?: string | null
   payload?: EventPayload
 }
 
@@ -87,6 +89,7 @@ export function record(
         seenAt: event.author === 'human' ? occurredAt : null,
         projectId: event.projectId ?? null,
         sessionId: event.sessionId ?? null,
+        specId: event.specId ?? null,
         payload: JSON.stringify(event.payload ?? {}),
       })),
     )

@@ -49,6 +49,9 @@ import type { Sessions } from './sessions.ts'
 import { engineStatusLayer } from './status.ts'
 import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
+import { gitLayer } from './git.ts'
+import { type Recipe, recipeLayer } from './workspaces/recipe.ts'
+import { type Workspaces, WorkspacesRoot, workspacesLayer } from './workspaces/workspaces.ts'
 import type { Database, SqliteClient } from './storage/database.ts'
 
 /** The file the data folder keeps its database in. */
@@ -130,6 +133,8 @@ type EngineServices =
   | Commands
   | Proposals
   | Context
+  | Workspaces
+  | Recipe
   | Database
   | SqliteClient
 
@@ -185,6 +190,12 @@ function servicesOf(
   const provisions = Layer.mergeAll(contextLayer.pipe(Layer.provide(rows)), poolLayer).pipe(
     Layer.provide(clockLayer),
   )
+  // The Workspaces of the Projects, over the machine's `git`, made under the data folder unless a
+  // Project names a folder of its own (D8-02, D8-03).
+  const workspaces = Layer.mergeAll(workspacesLayer, recipeLayer).pipe(
+    Layer.provide(gitLayer()),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
+  )
 
   return Layer.mergeAll(
     preferencesLayer,
@@ -195,6 +206,7 @@ function servicesOf(
     // What a human decides of the commands the agent proposed: the catalogue is written from
     // there, on the very commands the tools run (D8-11).
     proposalsLayer.pipe(Layer.provide(tools), Layer.provide(rows), Layer.provide(agents)),
+    workspaces,
     runtimeLayer.pipe(
       // Discovery is handed up rather than hidden: the settings page asks this process what the
       // machine has, and that question is answered without starting anything.
