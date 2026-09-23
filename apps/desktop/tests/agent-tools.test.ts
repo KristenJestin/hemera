@@ -54,7 +54,8 @@ let workspace: string
 
 beforeEach(() => {
   dataFolder = mkdtempSync(join(tmpdir(), 'hemera-agent-tools-'))
-  workspace = mkdtempSync(join(tmpdir(), 'hemera-agent-workspace-'))
+  // The Workspace as the disk spells it, which is how a Project keeps its root.
+  workspace = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-agent-workspace-')))
 })
 
 afterEach(() => {
@@ -437,7 +438,7 @@ describe('A write outside the root asks the human', () => {
       const asked = questionsIn(entries)
       expect(asked).toHaveLength(1)
       const where = z.object({ resolved: z.string() }).parse(JSON.parse(asked[0]?.payload ?? '{}'))
-      expect(where.resolved.startsWith(realpathSync(outside))).toBe(true)
+      expect(where.resolved.startsWith(realpathSync.native(outside))).toBe(true)
       expect(existsSync(join(outside, 'notes.md'))).toBe(false)
     } finally {
       rmSync(join(workspace, 'elsewhere'), { recursive: true, force: true })

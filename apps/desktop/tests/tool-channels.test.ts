@@ -26,7 +26,7 @@ let opened: OpenWindow | null = null
 
 beforeEach(() => {
   dataFolder = mkdtempSync(join(tmpdir(), 'hemera-tool-channels-'))
-  workspace = realpathSync(mkdtempSync(join(tmpdir(), 'hemera-tool-channels-workspace-')))
+  workspace = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-tool-channels-workspace-')))
 })
 
 afterEach(async () => {

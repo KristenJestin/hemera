@@ -53,8 +53,10 @@ let root: string
 
 beforeEach(() => {
   folder = join(tmpdir(), `hemera-tools-${String(Date.now())}-${String(Math.random())}`)
+  mkdirSync(join(folder, 'workspace'), { recursive: true })
+  // The Workspace as the disk spells it, which is how a Project keeps its root.
+  folder = realpathSync.native(folder)
   root = join(folder, 'workspace')
-  mkdirSync(root, { recursive: true })
 })
 
 afterEach(() => {
@@ -589,7 +591,7 @@ describe('A write outside the root asks the human', () => {
       }),
     )
 
-    const where = join(realpathSync(folder), 'elsewhere.txt')
+    const where = join(realpathSync.native(folder), 'elsewhere.txt')
     expect(human.asked).toHaveLength(1)
     expect(human.asked[0]?.named).toBe(where)
     const asked = seen.entries.find((entry) => entry.kind === 'permission_request')

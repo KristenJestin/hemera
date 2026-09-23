@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import {
   type Project as DomainProject,
   InvalidProjectNameError,
@@ -95,6 +96,22 @@ export class Projects extends Context.Service<Projects, ProjectsService>()('Proj
 
 /** What any change to an existing Project can be refused with. */
 type Refusal = DatabaseError | StaleVersionError | UnknownProjectError
+
+/**
+ * A Workspace path as the filesystem itself spells it: links followed, and on Windows the long
+ * form of a DOS short name (`RUNNER~1`) and the case the folders were created with.
+ *
+ * The tools judge a path by where it really is (D6-05), and a root kept in another spelling of
+ * the same place is a root every path inside it reads as leaving. A path that does not exist
+ * (yet) is kept as it was given.
+ */
+function canonical(path: string): string {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return path
+  }
+}
 
 /** The date every row of one mutation shares, so a Project and its event agree on when. */
 function now(): string {
@@ -269,6 +286,7 @@ export const projectsLayer = Layer.effect(
               const id = crypto.randomUUID()
               const written = now()
               const name = yield* named(asked.name)
+              const mainPath = canonical(asked.mainPath)
               yield* transaction
                 .insert(projects)
                 .values({ id, name, tone: asked.tone, createdAt: written, updatedAt: written })
@@ -281,7 +299,7 @@ export const projectsLayer = Layer.effect(
                   id: crypto.randomUUID(),
                   projectId: id,
                   name: MAIN_WORKSPACE,
-                  path: asked.mainPath,
+                  path: mainPath,
                   createdAt: written,
                 })
                 .pipe(Effect.mapError(failed('writing the Workspace')))
@@ -297,7 +315,7 @@ export const projectsLayer = Layer.effect(
                 updatedAt: Date.parse(written),
                 archivedAt: null,
                 version: 1,
-                mainPath: asked.mainPath,
+                mainPath,
                 repositories: [],
               }
               return {
@@ -310,7 +328,7 @@ export const projectsLayer = Layer.effect(
                     source: 'ui',
                     author: 'human',
                     projectId: id,
-                    payload: { name, tone: asked.tone, mainPath: asked.mainPath },
+                    payload: { name, tone: asked.tone, mainPath },
                   },
                 ],
               } satisfies Mutation<Project>
@@ -348,10 +366,11 @@ export const projectsLayer = Layer.effect(
           ),
         ),
 
-      moveMain: (id, version, path) =>
+      moveMain: (id, version, moved) =>
         withDatabase(
           mutate('moving the main Workspace', (transaction) =>
             Effect.gen(function* () {
+              const path = canonical(moved)
               yield* bump(transaction, id, version, {})
               yield* transaction
                 .update(workspaces)

@@ -6,7 +6,7 @@
  * what the second one takes back — a native handle, the directory it ran in, and the thread.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -24,7 +24,8 @@ let opened: ReturnType<typeof application>
 
 beforeEach(() => {
   dataFolder = mkdtempSync(join(tmpdir(), 'hemera-resume-'))
-  workingDirectory = mkdtempSync(join(tmpdir(), 'hemera-workspace-'))
+  // The Workspace as the disk spells it, which is how a Project keeps its root.
+  workingDirectory = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-workspace-')))
   opened = application(dataFolder)
 })
 
@@ -263,7 +264,7 @@ describe('A Session is taken back by its agent', () => {
     )
 
     // The folder this Session ran in is gone, and the Project has moved elsewhere.
-    const elsewhere = mkdtempSync(join(tmpdir(), 'hemera-elsewhere-'))
+    const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-elsewhere-')))
     rmSync(workingDirectory, { recursive: true, force: true })
     mkdirSync(elsewhere, { recursive: true })
 

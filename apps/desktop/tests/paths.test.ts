@@ -88,7 +88,7 @@ describe('a path inside the root', () => {
     const door = counted()
     const settled = await resolveInside(root, 'src/new-file.ts', door.realpathOf)
 
-    expect(settled).toBe(join(realpathSync(root), 'src', 'new-file.ts'))
+    expect(settled).toBe(join(realpathSync.native(root), 'src', 'new-file.ts'))
   })
 
   it('that is a link leading out of the root is outside, where it leads', async () => {
@@ -98,6 +98,8 @@ describe('a path inside the root', () => {
     const refusal = await refusalOf('out/secret.txt', realpath)
 
     expect(refusal?.why).toBe('outside')
-    expect(refusal?.resolved).toBe(join(realpathSync(join(folder, 'elsewhere')), 'secret.txt'))
+    expect(refusal?.resolved).toBe(
+      join(realpathSync.native(join(folder, 'elsewhere')), 'secret.txt'),
+    )
   })
 })
