@@ -229,6 +229,10 @@ declared in `packages/ipc/src/engine.ts` — and never opens the file itself.
 The engine holds the agents as well, under `apps/desktop/src/engine/agents/`: the ACP client, the
 supervisor of the agent processes, what the machine has installed and the adapter of each agent.
 An agent is started, stopped and asked from there, and its thread is written from there.
+The Spec lives beside them, under `apps/desktop/src/engine/specs/`: the Spec, its revisions,
+sections and phases, the ready gate and the write right. Every write checks that the Spec is a
+draft on its current revision and, for an agent, that its Session holds the write right, and
+records its Journal line in the same transaction.
 
 `data` and `engine` are the names the code uses; `Profile` is the word the interface keeps for
 the same folder, in the settings, in the Journal filter and on the `profile` events the engine

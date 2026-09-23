@@ -214,7 +214,8 @@ This base separates the queryable metadata from the written content:
 - `title`, `slug`, `type`, `status` and the relations are structured data known to
   Hemera;
 - `problem`, `expected_outcome`, `scope` and `verification` are four rich, editable
-  sections, not a decomposition into many atomic fields.
+  sections, not a decomposition into many atomic fields. Each is a row of `spec_sections`,
+  versioned on its own and carrying its last author, `human` or `agent`, and Session.
 
 This structure lets the agent evolve a section as a coherent whole and
 the user read the Spec as a document, while letting Hemera drive its identity, its
@@ -253,7 +254,7 @@ the state and the useful constraints; it does not have to orchestrate these inte
 
 The `Spec` is the durable identity and carries its live state. A `spec_revisions` table keeps
 the versions of its complete contract. A revision is a relational aggregate made up of its
-main row, its `UserStory` items and their acceptance criteria. The revision carries
+main row, its sections, its `UserStory` items and their acceptance criteria. The revision carries
 no status of its own: the life cycle belongs to the Spec.
 
 Only the current revision of a `draft` Spec is editable. Moving the Spec from `draft` to
@@ -268,8 +269,9 @@ The agent can write into the new draft once the human action has been performed.
 
 The only return to `draft` starts from the `ready` state. The `ready → draft` transition
 necessarily creates a new revision: in a single transaction, the backend copies the
-current revision, its `UserStory` items and their criteria, points `current_revision_id` to
-the copy, then places the Spec in `draft`. The previous revision remains intact.
+current revision, its sections, its `UserStory` items and their criteria, points
+`current_revision_id` to the copy, then places the Spec in `draft`. The previous revision
+remains intact.
 
 This transition relies on a dedicated business operation of full cloning, not on a series
 of independent writes exposed to clients. The product action targets the Spec, for example
@@ -278,9 +280,9 @@ and not exposed as an MCP tool to the agent. The backend:
 
 1. checks that the Spec is still `ready` and still points to the expected revision;
 2. creates the next revision with a new number and the creation metadata;
-3. copies all the contractual content and all the child rows;
-4. assigns new IDs to the copied `UserStory` items and criteria while keeping their relations
-   and their order;
+3. copies all the contractual content, its sections with their versions, and all the child rows;
+4. assigns new IDs to the copied sections, `UserStory` items and criteria while keeping their
+   relations and their order;
 5. switches `current_revision_id` and the Spec's status to `draft`;
 6. records the reopening event and the reason, if any.
 
@@ -304,12 +306,15 @@ The logical schema retained is:
 ```text
 specs
 - id
+- project_id
 - key
 - slug
 - status
-- priority
+- priority nullable
 - workspace_id nullable
 - current_revision_id
+- writer_session_id nullable
+- content_version
 - created_at
 - updated_at
 
@@ -319,18 +324,25 @@ spec_revisions
 - number
 - title
 - type
-- problem
-- expected_outcome
-- scope
-- verification
-- change_summary
-- change_reason
+- change_summary nullable
+- change_reason nullable
 - created_by
+- attested_content_version nullable
 - created_at
+
+spec_sections
+- id
+- revision_id
+- name
+- body
+- version
+- author
+- session_id nullable
+- updated_at
 
 user_stories
 - id
-- spec_revision_id
+- revision_id
 - title
 - narrative
 - priority nullable
@@ -338,10 +350,27 @@ user_stories
 
 acceptance_criteria
 - id
-- user_story_id
+- story_id
 - body
 - rank
+
+task_sets          id, revision_id, kind (`contract`)
+spec_tasks         id, task_set_id, title, result, type, executor, criteria, rank
+task_dependencies  task_id, depends_on_id
+task_stories       task_id, story_id
+spec_questions     id, revision_id, body, blocking, phase nullable, raised_by, options,
+                   answer_option_id nullable, answer_text nullable, resolved_at nullable,
+                   created_at
+spec_phases        id, revision_id, phase, state, summary nullable, assumptions, basis,
+                   protocol_version, declared_at nullable
+spec_edit_buffers  spec_id, name, body, base_version, updated_at
 ```
+
+A section belongs to a single `SpecRevision`, once per name. Its name comes from a closed
+set: the base `problem`, `expected_outcome`, `scope` and `verification`, then `plan`, and the
+section of each type, `behaviour` for a `feature`, `reproduction` for a `bug` and `invariants`
+for a `maintenance`. Every write to a section bumps its `version` and the Spec's
+`content_version`.
 
 A `UserStory` belongs directly to a single `SpecRevision`. An acceptance criterion
 belongs directly to a single `UserStory`. The relation to the Spec is deduced through the
@@ -379,9 +408,9 @@ entire build and the execution of a `TaskSet` represents a modification pass. An
 interrupted pass remains observable through its task executions without an additional cycle entity.
 
 When a new revision is created, the backend copies in a single transaction the
-`spec_revisions` row, its `user_stories` rows and their `acceptance_criteria` rows. The copies
-receive new IDs. There is no story identity spanning revisions and no
-second versioning mechanism. A possible future need to trace the origin of a copy
+`spec_revisions` row, its `spec_sections` rows, its `user_stories` rows and their
+`acceptance_criteria` rows. The copies receive new IDs. There is no story identity spanning
+revisions and no second versioning mechanism. A possible future need to trace the origin of a copy
 could add a lineage link, but it does not belong to the current core.
 
 The content is therefore not an opaque JSON snapshot. A native list is stored as
@@ -389,9 +418,9 @@ SQL child rows. A JSON field remains possible later for flexible data that has n
 an identity of its own nor a direct relation with other objects.
 
 The result of the `plan` phase is not a standalone entity. It directly complements the
-revision with a rich `plan` field, which gathers the technical approach, the impacts, the
+revision with a rich `plan` section, which gathers the technical approach, the impacts, the
 decisions, the constraints and the risks. The phase can also refine the existing
-`verification` field. This form avoids a parallel table and versioning cycle:
+`verification` section. This form avoids a parallel table and versioning cycle:
 the content is frozen with the rest of the revision.
 
 The native prototype is postponed to a later delivery. Its phase is defined but
@@ -652,8 +681,21 @@ The user can also directly modify the content of a `draft` Spec from this panel,
 including during a discussion with the agent. Hemera records these modifications with their
 human provenance and signals them to the agent of the `define` Session concerned so that it
 takes them into account. The content remains locked from `ready` on, in accordance with the revision rules.
-The details of the editor and the coordination of human and agent modifications remain to be
-designed.
+
+The panel edits one Markdown text area per section, with a preview toggle, and structured rows
+for the stories, criteria, tasks and questions. A save carries the version of the section it was
+opened on. If the section has moved since, the save is refused: the unsaved text is kept in a
+buffer, one per section of the Spec, that survives a relaunch, and the panel offers to compare
+the two texts, to apply the human's text on the current one as a new human write, or to discard
+it. Last-writer-wins is refused: a conflict never loses an unsaved human text. The agent's writes
+carry their base version the same way and are refused on a mismatch. A human edit reaches the
+writer Session's agent at its next safe point, between two turns, never in the middle of one.
+
+A question of the Spec is asked in the chat, where it is answered. The agent offers its answers
+as options, one of them recommended, and the user picks one or writes their own; a question
+with no option takes a text only. The answer is written beside the question in the thread,
+resolves it, and reaches the agent at its next safe point like a human edit. The questions part
+of the Spec is the register of what was asked and what was decided.
 
 Presentation examples:
 
@@ -976,24 +1018,30 @@ delivery; `domain_events` separately keeps its history.
 A Session without a mission can receive its first mission in place, without creating a new
 thread. It can in particular become `define` or `build`.
 
-Moving from `free` to `define` does not automatically create an empty Spec. The
-`define` Session then chooses to create a Spec or to absorb its work into an existing Spec.
-A `define` Session launched directly from a Spec is, on the other hand, attached to it from its
-creation.
+Moving from `free` to `define` never leaves a Session without its Spec. The agent of a `free`
+Session proposes a Spec, a title and a type, in the thread; when the user accepts it, Hemera
+creates the Spec, makes the Session its writer and switches it to `define` in one transaction,
+keeping the thread. A `define` Session opened from a Spec, in the list of a Project's Specs, is
+attached to it from its creation: it writes the draft when nobody does, and reads it otherwise.
+
+Until the agent has Hemera's Spec tools, it proposes with one line of its answer,
+`<!-- hemera:propose-spec title="…" type="feature|bug|maintenance" -->`. An HTML comment is what
+a Markdown reader shows nothing of, and a line of its own is what an agent writes reliably;
+Hemera takes the line out of the message and shows the proposal in its place. The
+`spec_propose` tool replaces this line once the agent is offered it.
 
 Moving from `free` to `build` is only possible if the Session is first attached to an
 existing Spec. Without a Spec, the user must remain in free discussion or go through
 `define` to create or absorb the necessary Spec.
 
-Among the specialised missions, only `define` can begin without a Spec, since its
-responsibility is precisely to create one or to absorb its work into an existing
-Spec. The `build` mission requires a linked Spec.
+Among the specialised missions, only `define` is reached from a free discussion without an
+existing Spec, since its responsibility is precisely to create one. The `build` mission
+requires a linked Spec.
 
 Once its first mission is assigned, the Session no longer changes mission. Moving from
 `define` to `build` creates a new Session.
 
-Attachment to a Spec remains independent of the mission: a Session without a mission can
-also join a Spec while remaining a free discussion.
+Attachment to a Spec remains a relation of its own, stored apart from the mission.
 
 The end of a `define` Session is determined by the Spec itself: when the Spec moves to
 the `ready` state from that Session, Hemera offers to create a new `build` Session linked
