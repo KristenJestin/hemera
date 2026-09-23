@@ -112,7 +112,9 @@ export const TOOL_ARGUMENTS = {
     folder: z
       .string()
       .optional()
-      .describe('where to run it: a repository of the Project, or a path in the Workspace'),
+      .describe(
+        'where to run a one-off line: a repository of the Project, or a path in the Workspace; a catalogue command runs in its own folder',
+      ),
     key: KEY.describe('an idempotency key, so a retry does not start it twice'),
     timeout: z
       .number()

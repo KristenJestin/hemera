@@ -813,7 +813,24 @@ export const toolCatalogueLayer: Layer.Layer<
                 `the catalogue holds ${known === '' ? 'nothing' : known}`,
               )
             }
-            const where = call.arguments.folder ?? entry?.folder ?? null
+            // A catalogue command runs where the user declared it (D6-12): the folder is part of
+            // the command, and an agent that names another one is told so rather than obeyed.
+            const declared = (folder: string | null | undefined) =>
+              folder === null || folder === undefined || folder === '' || folder === '.'
+                ? '.'
+                : folder
+            if (
+              entry !== undefined &&
+              call.arguments.folder !== undefined &&
+              declared(call.arguments.folder) !== declared(entry.folder)
+            ) {
+              const home = entry.folder ?? 'the Workspace root'
+              return failed(
+                `${entry.name} runs in ${home}, not in ${call.arguments.folder}`,
+                `the folder of a catalogue command is the Project's: ${entry.name} runs in ${home}. Send no folder to run it there, or a \`line\` to run something else where you need it`,
+              )
+            }
+            const where = entry?.folder ?? call.arguments.folder ?? null
             const folder = where === null || where === '' || where === '.' ? '.' : where
             // A catalogue command is the user's own line, and inside the root it runs on its own.
             // A one-off is a line the agent wrote: whatever folder it names, the human sees the

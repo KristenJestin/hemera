@@ -949,6 +949,46 @@ describe('A catalogue command inside the root runs on its own', () => {
   })
 })
 
+describe("A catalogue command's folder is the Project's", () => {
+  it('is refused with the folder it runs in when the agent names another, and nothing starts', async () => {
+    const human = humanSaying('allowed')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        yield* commands.save(
+          {
+            projectId: session.projectId,
+            name: 'hello',
+            line: 'node -e console.log(1)',
+            kind: 'utility',
+            folder: null,
+          },
+          false,
+        )
+        const elsewhere = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { name: 'hello', folder: folder, key: 'cat-2' },
+        })
+        const same = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { name: 'hello', folder: '.', key: 'cat-3' },
+        })
+        return { elsewhere, same, recent: yield* commands.recent(session.sessionId) }
+      }),
+    )
+
+    expect(seen.elsewhere.ok).toBe(false)
+    expect(seen.elsewhere.text).toContain('hello runs in the Workspace root')
+    expect(human.asked).toHaveLength(0)
+    // Its own folder named again is no override: it runs, once.
+    expect(seen.same.ok).toBe(true)
+    expect(seen.recent).toHaveLength(1)
+  })
+})
+
 describe('A run asked for before its Session ended', () => {
   it('does not start once the Session has ended, even if the human then allows it', async () => {
     // The Session ends while the human is being asked: its token is revoked and its runs are
