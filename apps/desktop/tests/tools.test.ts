@@ -221,7 +221,7 @@ describe('every tool name is one the model APIs accept', () => {
   })
 })
 
-describe('a read inside the Workspace root', () => {
+describe('A read inside the Workspace goes through on its own', () => {
   it('returns the content, and the call is an entry of the thread and a line of the Journal', async () => {
     fileInRoot('notes.md', 'the answer is 42\n')
     const human = humanSaying()
@@ -256,7 +256,7 @@ describe('a read inside the Workspace root', () => {
   })
 })
 
-describe('a tool the Session was not offered', () => {
+describe('A tool not offered is refused all the same', () => {
   it('is refused with a reason, and the refusal is recorded like any call', async () => {
     const human = humanSaying()
     const seen = await engine(human)(
@@ -281,7 +281,7 @@ describe('a tool the Session was not offered', () => {
   })
 })
 
-describe('a name Hemera has no tool for', () => {
+describe('No human-only action is reachable', () => {
   it('is refused, which is how an action reserved to the human stays unreachable', async () => {
     const seen = await engine(humanSaying())(
       Effect.gen(function* () {
@@ -299,7 +299,7 @@ describe('a name Hemera has no tool for', () => {
   })
 })
 
-describe('the same write twice', () => {
+describe('The same write twice has one effect', () => {
   it('happens once, and the second call answers what the first one did', async () => {
     const human = humanSaying()
     const seen = await engine(human)(
@@ -328,7 +328,7 @@ describe('the same write twice', () => {
   })
 })
 
-describe('an edit whose old text is not unique', () => {
+describe('An edit needs a unique match', () => {
   it('writes nothing and says how many matches were found', async () => {
     fileInRoot('twice.txt', 'same\nother\nsame\n')
     const human = humanSaying()
@@ -366,7 +366,7 @@ describe('an edit whose old text is not unique', () => {
   })
 })
 
-describe('a file larger than one page', () => {
+describe('A long read is paginated', () => {
   it('is read in a page, and the answer says which bytes and where the next page starts', async () => {
     const body = 'x'.repeat(READ_PAGE_BYTES + 1024)
     fileInRoot('long.txt', body)
@@ -466,7 +466,7 @@ describe('a file read in pages', () => {
   })
 })
 
-describe('a search that would exceed a limit', () => {
+describe('A search is bounded and says so', () => {
   it('stops at the match limit, says which limit it hit, and offers a cursor', async () => {
     const lines = Array.from({ length: SEARCH_MATCH_LIMIT + 20 }, () => 'needle in a line')
     fileInRoot('many.txt', `${lines.join('\n')}\n`)
@@ -546,7 +546,7 @@ describe('the commands of a Project', () => {
   })
 })
 
-describe('a one-off command naming a folder outside the root', () => {
+describe('A command outside the Workspace asks the human', () => {
   it('asks the human before anything runs, and starts nothing when they refuse', async () => {
     const human = humanSaying('refused')
     const seen = await engine(human)(
@@ -571,7 +571,7 @@ describe('a one-off command naming a folder outside the root', () => {
   })
 })
 
-describe('a write outside the root', () => {
+describe('A write outside the root asks the human', () => {
   it('asks the human about the place it leads to, not the text the agent wrote', async () => {
     const human = humanSaying('allowed')
     const seen = await engine(human)(

@@ -125,7 +125,7 @@ describe('The base is provided once, by the agent’s means', () => {
   })
 })
 
-describe('A new Session starts from the current instructions', () => {
+describe('A native instruction file is not injected twice', () => {
   test('AGENTS.md is read by the agent itself and never sent', async () => {
     instructions('Be brief.\n')
     const agent = answering()
