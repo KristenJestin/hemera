@@ -251,8 +251,9 @@ platform `qualified` flag is what those declarations say; the real trials of pha
 
 - **Claude Code** (qualified): `session/new._meta.claudeCode.options` with `tools: []`,
   `settingSources: []`, `strictMcpConfig: true`, a custom `systemPrompt` carrying Hemera's base,
-  and an `env` with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `ENABLE_CLAUDEAI_MCP_SERVERS=false` and
-  `MCP_TOOL_TIMEOUT` at ten minutes, so a tool call waiting on the human is not cut short.
+  and an `env` with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `ENABLE_CLAUDEAI_MCP_SERVERS=false`, and
+  `MCP_TOOL_TIMEOUT` and `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` at ten minutes, so a tool call
+  waiting on the human is cut short neither for its length nor for its silence.
   `CLAUDE_CONFIG_DIR` is left where the user has it: the login lives there, and a directory of
   Hemera's reads as signed out. Managed and policy settings and `~/.claude.json` still load.
 - **OpenCode** (qualified): `OPENCODE_CONFIG_CONTENT` with a primary agent of Hemera's as
