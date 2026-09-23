@@ -8,7 +8,16 @@
  * links are made by.
  */
 
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -324,6 +333,42 @@ describe('A link that the system refuses is a failed step', () => {
     expect(lstatSync(link).isSymbolicLink()).toBe(true)
     expect(readFileSync(link, 'utf8')).toBe('# Atlas\n')
   })
+})
+
+describe('A link is a junction for a folder and a symbolic link for a file on Windows', () => {
+  /** The reparse tag Windows gives a link: a junction is a mount point, a symbolic link its own. */
+  const tagOf = (path: string) =>
+    /Reparse Tag Value : (0x[0-9a-f]+)/i.exec(
+      execFileSync('fsutil', ['reparsepoint', 'query', path], { encoding: 'utf8' }),
+    )?.[1]
+
+  it.runIf(process.platform === 'win32')(
+    'links main’s folder as a junction and its file as a symbolic link, on Windows',
+    async () => {
+      writeFileSync(join(main, 'CLAUDE.md'), '# Atlas\n')
+      mkdirSync(join(main, 'shared'))
+      writeFileSync(join(main, 'shared', 'notes.md'), 'shared\n')
+
+      const prepared = await workspaceEngine(folder)(
+        Effect.gen(function* () {
+          const preparation = yield* Preparation
+          const workspace = yield* createdWith([
+            LINK_CLAUDE,
+            { kind: 'link', path: 'shared', scope: 'root', commandId: null },
+          ])
+          return yield* preparation.prepare(workspace.id)
+        }),
+      )
+
+      expect(prepared.state).toBe('ready')
+      const file = join(prepared.path, 'CLAUDE.md')
+      const shared = join(prepared.path, 'shared')
+      expect(tagOf(file)).toBe('0xa000000c')
+      expect(tagOf(shared)).toBe('0xa0000003')
+      expect(readFileSync(file, 'utf8')).toBe('# Atlas\n')
+      expect(readFileSync(join(shared, 'notes.md'), 'utf8')).toBe('shared\n')
+    },
+  )
 })
 
 describe('A run step fails on a non-zero exit', () => {
