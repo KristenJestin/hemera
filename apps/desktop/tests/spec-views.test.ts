@@ -523,7 +523,7 @@ describe('Stories, tasks and questions are named the way the document reads them
   })
 
   test('a story edited in place is written back with every other story as it was', () => {
-    const edited = storiesWith(decomposed, CREDIT_EDITED, ['export', 'credit'])
+    const edited = storiesWith(decomposed, CREDIT_EDITED)
     expect(edited).toEqual([
       {
         id: 'export',
@@ -542,9 +542,9 @@ describe('Stories, tasks and questions are named the way the document reads them
     ])
   })
 
-  test('a story edited while the list moved is not written over another', () => {
+  test('a story edited while the list moved is written onto its own story', () => {
     // `S2` was the credit notes when the edit began; a story put in front of them since has
-    // made the credit notes `S3`, and `S2` another story.
+    // made the credit notes `S3`, and `S2` another story, which keeps its own text.
     const moved = {
       ...decomposed,
       stories: [
@@ -560,7 +560,17 @@ describe('Stories, tasks and questions are named the way the document reads them
         decomposed.stories[1]!,
       ],
     }
-    expect(storiesWith(moved, CREDIT_EDITED, ['export', 'credit'])).toBe(null)
+    const written = storiesWith(moved, CREDIT_EDITED)
+    expect(written?.map((one) => [one.id, one.narrative])).toEqual([
+      ['export', 'As an accountant…'],
+      ['refund', ''],
+      ['credit', 'Kept with their invoice number.'],
+    ])
+  })
+
+  test('a story taken away while it was edited is not written at all', () => {
+    const gone = { ...decomposed, stories: [decomposed.stories[0]!] }
+    expect(storiesWith(gone, CREDIT_EDITED)).toBe(null)
   })
 })
 

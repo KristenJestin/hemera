@@ -466,13 +466,13 @@ describe('A story is written back onto the story it was edited in', () => {
   })
   const edited = { id: 'credit', key: 'S2', title: 'credit', narrative: 'Mine.', criteria: [] }
 
-  test('a story edited in the list it was opened on is written, the others as they were', async () => {
+  test('a story edited in place is written, the others as they were', async () => {
     reads(2)
     answers.set('specs.read', stories(['export', 'credit']))
     await openSpec('spec-7')
     answers.set('specs.writeStories', stories(['export', 'credit']))
 
-    expect(await saveStory('writer', edited, ['export', 'credit'])).toBe(true)
+    expect(await saveStory('writer', edited)).toBe(true)
 
     expect(argumentOf('specs.writeStories')).toEqual({
       specId: 'spec-7',
@@ -490,13 +490,30 @@ describe('A story is written back onto the story it was edited in', () => {
     })
   })
 
-  test('a story edited while the list moved is not written over another', async () => {
+  test('a story edited while the list moved is written onto its own story', async () => {
     reads(2)
     answers.set('specs.read', stories(['export', 'refund', 'credit']))
     await openSpec('spec-7')
+    answers.set('specs.writeStories', stories(['export', 'refund', 'credit']))
+
+    expect(await saveStory('writer', edited)).toBe(true)
+
+    expect(argumentOf('specs.writeStories')).toMatchObject({
+      stories: [
+        { id: 'export', narrative: 'The export story.' },
+        { id: 'refund', narrative: 'The refund story.' },
+        { id: 'credit', narrative: 'Mine.' },
+      ],
+    })
+  })
+
+  test('a story taken away while it was edited is not written at all', async () => {
+    reads(2)
+    answers.set('specs.read', stories(['export']))
+    await openSpec('spec-7')
     asked = []
 
-    expect(await saveStory('writer', edited, ['export', 'credit'])).toBe(false)
+    expect(await saveStory('writer', edited)).toBe(false)
 
     expect(names()).not.toContain('specs.writeStories')
     expect(names()).toContain('specs.read')

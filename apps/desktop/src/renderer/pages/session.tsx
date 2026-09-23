@@ -1,5 +1,5 @@
-import { useRef, useState, useSyncExternalStore } from 'react'
-import type { FocusEvent, ReactNode } from 'react'
+import { useState, useSyncExternalStore } from 'react'
+import type { ReactNode } from 'react'
 
 import type {
   CommandRun,
@@ -46,7 +46,6 @@ import {
   createSpec,
   discardMine,
   markReady,
-  readSpecAgain,
   rework,
   saveSection,
   saveStory,
@@ -258,8 +257,6 @@ export function SessionPage({
   const [detailsOpen, setDetailsOpen] = useState(false)
   /** The proposals `Not now` was pressed on: this window's answer, which nothing keeps. */
   const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set())
-  /** The stories as the list read when a story's text took the caret: what `S2` means then. */
-  const openedStories = useRef<readonly string[] | null>(null)
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
   const spec =
@@ -273,11 +270,6 @@ export function SessionPage({
         })
   const versionOf = (name: SectionName): number =>
     spec?.sections.find((one) => one.name === name)?.version ?? 0
-  const noteOpened = (event: FocusEvent<HTMLElement>): void => {
-    if (!(event.target instanceof HTMLTextAreaElement) || spec === null) return
-    const part = event.target.closest('[data-part]')?.getAttribute('data-part')
-    if (part === 'stories') openedStories.current = defined?.stories.map((one) => one.id) ?? null
-  }
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -647,10 +639,7 @@ export function SessionPage({
         begins with the agent's proposal in the thread (D7-07).
       */}
       {session.mission === 'define' && spec !== null && defined !== null && (
-        <div
-          className="min-h-0 min-w-0 basis-9/20 border-l border-border"
-          onFocusCapture={noteOpened}
-        >
+        <div className="min-h-0 min-w-0 basis-9/20 border-l border-border">
           <SpecPanel
             spec={spec}
             reader={readerOf(defined, session.id, sessions)}
@@ -659,12 +648,7 @@ export function SessionPage({
             onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
             onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
             onDiscardMine={(name) => void discardMine(name)}
-            onSaveStory={(story) => {
-              const stories = openedStories.current
-              openedStories.current = null
-              if (stories === null) void readSpecAgain()
-              else void saveStory(session.id, story, stories)
-            }}
+            onSaveStory={(story) => void saveStory(session.id, story)}
             onGoToQuestion={goToQuestion}
             onMarkReady={() => void markReady(session.id)}
             onRework={(reason) => void rework(session.id, reason)}

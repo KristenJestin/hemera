@@ -51,9 +51,8 @@ const EMPTY: SpecState = {
   refusal: null,
 }
 
-/** What a story edit is refused with when the list moved under it. */
-const MOVED =
-  'The stories changed while you were editing one: your edit was not saved. Write it again.'
+/** What a story edit is refused with when its story was taken away meanwhile. */
+const GONE = 'The story you were editing is gone: your edit was not saved.'
 
 /** How many lines of the Spec's Journal are read, which is the most one page may hold. */
 const JOURNAL_PAGE = 200
@@ -145,11 +144,6 @@ export async function openSpec(specId: string): Promise<void> {
   await refresh(specId)
 }
 
-/** Reads the open Spec again, as it is now: what a save refused before it was sent asks for. */
-export async function readSpecAgain(): Promise<void> {
-  if (shown !== null) await refresh(shown)
-}
-
 export function closeSpec(): void {
   shown = null
   replace(EMPTY)
@@ -228,21 +222,17 @@ export async function discardMine(name: SectionName): Promise<boolean> {
 }
 
 /**
- * Writes back a story edited in place, all the stories of the revision with it (D7-12): keyed by
- * its place in `opened`, the list of story ids the edit began on. A list that moved since is not
- * written over — the edit would land on another story — and is read again instead.
+ * Writes back a story edited in place, all the stories of the revision with it (D7-12), onto the
+ * story of its id wherever it stands now. A story taken away since is not written at all, and
+ * the Spec is read again instead.
  */
-export async function saveStory(
-  sessionId: string,
-  changed: StoryView,
-  opened: readonly string[],
-): Promise<boolean> {
+export async function saveStory(sessionId: string, changed: StoryView): Promise<boolean> {
   const specId = shown
   const current = state.snapshot
   if (specId === null || current === null) return false
-  const stories = storiesWith(current, changed, opened)
+  const stories = storiesWith(current, changed)
   if (stories === null) {
-    replace({ ...state, refusal: MOVED })
+    replace({ ...state, refusal: GONE })
     await refresh(specId)
     return false
   }

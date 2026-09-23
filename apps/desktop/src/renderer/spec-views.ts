@@ -449,23 +449,17 @@ export function readerOf(
  * The stories of the revision as a write replaces them, with one of them changed: every story
  * is written, in its order, the one edited carrying its new narrative and criteria.
  *
- * A story is keyed by its place (`S2`), and a place is only a story in the list it was read in:
- * `opened` is that list, the ids in the order the edit began on. The key is resolved through it,
- * and when the revision's stories are no longer that list — one added, removed or moved while
- * the text was being edited — nothing is answered: writing it would put one story's text on
- * another.
+ * The story edited is the one of its id, wherever it stands now: a story added or moved while
+ * its text was being edited changes its place, never which story the edit lands on. A story
+ * gone since has nothing to land on, and nothing is answered.
  */
 export function storiesWith(
   snapshot: SpecSnapshot,
   changed: StoryView,
-  opened: readonly string[],
 ): ChannelArguments<'specs.writeStories'>['stories'] | null {
-  const now = snapshot.stories.map((story) => story.id)
-  if (now.length !== opened.length || now.some((id, at) => id !== opened[at])) return null
-  const edited = opened[Number(changed.key.slice(1)) - 1]
-  if (edited === undefined) return null
+  if (!snapshot.stories.some((story) => story.id === changed.id)) return null
   return snapshot.stories.map((story) => {
-    const mine = story.id === edited
+    const mine = story.id === changed.id
     return {
       id: story.id,
       title: mine ? changed.title : story.title,
