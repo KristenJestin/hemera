@@ -34,7 +34,7 @@ import { existsSync } from 'node:fs'
 
 import type { McpServer } from '@agentclientprotocol/sdk'
 
-import type { AgentProvider, Session, SessionEntry, SessionEntryOrigin } from '@hemera/core'
+import type { AgentProvider, Session, SessionEntryOrigin } from '@hemera/core'
 import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice } from '@hemera/ipc'
 
 import {
