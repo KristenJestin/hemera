@@ -154,9 +154,10 @@ describe('A copy never overwrites and skips a missing source', () => {
     const copied = seen.steps[2]
     expect(copied?.state).toBe('done')
     expect(copied?.message).toBe('sources/api: kept as it was; sources/front: no source')
-    expect(readFileSync(join(seen.prepared.path, 'sources', 'api', '.env'), 'utf8')).toBe(
-      'PORT=from-the-branch\n',
-    )
+    // The worktree's own checkout, with the line ends the machine's Git gives it (CRLF under
+    // Windows' `core.autocrlf`), and never main's copy.
+    const kept = readFileSync(join(seen.prepared.path, 'sources', 'api', '.env'), 'utf8')
+    expect(kept.replaceAll('\r\n', '\n')).toBe('PORT=from-the-branch\n')
     expect(existsSync(join(seen.prepared.path, 'sources', 'front', '.env'))).toBe(false)
     expect(seen.prepared.state).toBe('ready')
   })
