@@ -58,6 +58,7 @@ export {
   SEARCH_MATCH_LIMIT,
   SEARCH_SCAN_BYTES,
   SEARCH_SKIPS_LISTED,
+  TOOL_LABELS,
   TOOL_NAMES,
   admitTool,
   hemeraToolNamed,
@@ -69,6 +70,8 @@ export type {
   SearchLimit,
   SearchResult,
   SearchSkip,
+  ToolLabel,
+  ToolMark,
   ToolName,
 } from './domain/tools.ts'
 export {

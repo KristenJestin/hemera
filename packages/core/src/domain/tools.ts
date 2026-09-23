@@ -39,6 +39,50 @@ export const TOOL_NAMES = [
 
 export type ToolName = (typeof TOOL_NAMES)[number]
 
+/**
+ * The mark a tool is drawn with in the thread: one per tool, so that two tools never share a
+ * picture (recette 3 of 23 September 2026). The design system holds the icon of each; this is
+ * the name both ends agree on.
+ */
+export type ToolMark =
+  | 'read-file'
+  | 'list-folder'
+  | 'search'
+  | 'write-file'
+  | 'edit-file'
+  | 'run-command'
+  | 'stop-command'
+  | 'list-commands'
+  | 'command-output'
+  | 'project'
+  | 'session'
+
+/** What a reader calls a tool, and the mark it wears. */
+export interface ToolLabel {
+  readonly label: string
+  readonly mark: ToolMark
+}
+
+/**
+ * What a reader calls each tool, and the mark it wears.
+ *
+ * The catalogue's name is the agent's word and stays on the line, quieter; the label is the
+ * reader's, and it is what the line is read by.
+ */
+export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
+  fs_read: { label: 'Read file', mark: 'read-file' },
+  fs_list: { label: 'List folder', mark: 'list-folder' },
+  search: { label: 'Search', mark: 'search' },
+  fs_write: { label: 'Write file', mark: 'write-file' },
+  fs_edit: { label: 'Edit file', mark: 'edit-file' },
+  commands_run: { label: 'Run command', mark: 'run-command' },
+  commands_stop: { label: 'Stop command', mark: 'stop-command' },
+  commands_list: { label: 'List commands', mark: 'list-commands' },
+  commands_output: { label: 'Command output', mark: 'command-output' },
+  project_get: { label: 'Project', mark: 'project' },
+  session_get: { label: 'Session', mark: 'session' },
+}
+
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
 export const READ_PAGE_BYTES = 256 * 1024
 
