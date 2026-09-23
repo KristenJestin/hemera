@@ -88,6 +88,25 @@ export const Full: Story = {
   },
 }
 
+/**
+ * An obsolete request refused: the Spec changed between the gate shown and the click, so it was
+ * not frozen; the bar is read again and says why, under the sentence.
+ */
+export const Refused: Story = {
+  args: {
+    readiness: {
+      ...FULL_GATE,
+      refused:
+        'ATL-7 changed since its gate was shown: read the gate again before marking it ready.',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('alert')).toHaveTextContent(/changed since its gate was shown/)
+    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeVisible()
+  },
+}
+
 /** Frozen: the bar full, and the sentence says since when. */
 export const Frozen: Story = {
   args: { readiness: FULL_GATE, frozenOn: '23 Sep' },

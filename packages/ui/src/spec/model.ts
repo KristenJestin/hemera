@@ -204,6 +204,12 @@ export interface ReadinessView {
   checks: GateCheckView[]
   /** What is left, in the order the sentence says it. Empty when every check passes. */
   todo: ReadinessItem[]
+  /**
+   * What the last `Mark ready` was refused with, in the engine's words: the Spec changed since
+   * the gate was shown, and the bar now shows it as it is (D7-10, "An obsolete request is
+   * refused").
+   */
+  refused?: string | undefined
 }
 
 /** A revision as the picker lists it. */

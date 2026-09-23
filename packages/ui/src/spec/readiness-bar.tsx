@@ -44,6 +44,8 @@ const LINK =
 
 const OK = 'font-semibold text-success-muted-foreground'
 
+const REFUSED = 'text-sm text-destructive-muted-foreground'
+
 /** How many items the sentence names before it says `and 2 more`. */
 const NAMED = 3
 
@@ -113,6 +115,11 @@ export function ReadinessBar({
           )}
         </AnimatePresence>
       </div>
+      {readiness.refused !== undefined && (
+        <p role="alert" className={REFUSED}>
+          {readiness.refused}
+        </p>
+      )}
     </div>
   )
 }
