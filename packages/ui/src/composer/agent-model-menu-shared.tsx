@@ -79,9 +79,9 @@ export interface EffortChoice {
    * an agent that says nothing keeps its `Default` entry and marks nothing. A list holding a
    * `Default` beside the level it names would be offering the same thing twice.
    *
-   * It is not the model's default and the scale draws no rule for it: Claude advises one level
-   * for every model, where each model puts a Session on a level of its own — which is what the
-   * scale marks, handed over as `defaultId` (probe of 22 September 2026).
+   * It is the level the scale draws its rule at, handed over as `defaultId`: the level the agent
+   * announces it is on is whatever its own settings put every model on, and says nothing of what
+   * any of them defaults to (trial of 23 September 2026).
    */
   recommended?: boolean | undefined
 }
@@ -99,8 +99,8 @@ export interface EffortProps {
   effort: string | null
   onEffortChange: (id: string) => void
   /**
-   * The level the model on screen puts a Session on by itself: where the rule is drawn and where
-   * the scale opens while nothing is set. Null where nobody knows it — no rule, then.
+   * The level the agent recommends: where the rule is drawn and where the scale opens while
+   * nothing is set. Null where the agent recommends none — no rule, then.
    */
   defaultId?: string | null | undefined
   disabled?: boolean | undefined
@@ -128,7 +128,7 @@ export interface AgentModelMenuProps {
   efforts: EffortChoice[]
   effort: string | null
   onEffortChange: (id: string) => void
-  /** The level the chosen model defaults to, which the scale marks (`EffortProps.defaultId`). */
+  /** The level the agent recommends, which the scale marks (`EffortProps.defaultId`). */
   effortDefault?: string | null | undefined
   /** The modes of the chosen agent; empty when it announced none, and then no row at all. */
   modes: ModeChoice[]
@@ -162,7 +162,7 @@ const SEPARATOR = ' · '
  */
 export const ADVISED_SAID = 'recommended'
 
-/** What the level a model puts a Session on by itself is called, on the scale. */
+/** What the level the agent recommends is called, on the scale. */
 export const DEFAULT_SAID = 'default'
 
 /** The same word beside a level's name, which is how a scale writes it. */
@@ -170,7 +170,7 @@ export const DEFAULT_BESIDE = ` ${SEPARATOR.trim()} ${DEFAULT_SAID}`
 
 /**
  * What a scale says it stands on: the agent's word for the level, its sentence, and whether it
- * is the model's default — read as one phrase by whoever cannot see the rule.
+ * is the default — read as one phrase by whoever cannot see the rule.
  */
 export function levelSaid(level: EffortChoice | undefined, defaultId?: string | null): string {
   if (level === undefined) return 'Not set'

@@ -43,16 +43,15 @@ import {
  * ends. The notches are marks and answer the pointer through the scale itself, because a notch
  * that took the focus would be a second control inside a control that already has a role.
  *
- * **The model's own default is a rule across the track**, at that level's notch, and never a
- * notch of its own (decision of 22 September 2026). It is the level the model puts a Session on
- * by itself — `Xhigh` for Opus, `High` for Fable — handed over as `defaultId`, and it moves when
- * the model does; what the agent *advises* (`recommended`) is one generic level for every model
- * and draws nothing here (probe of 22 September 2026). A thin accent line laid across the scale
- * is read the way the red line on a dial is read — this is where it sits by itself — without
- * offering a value of its own; the word `default` is said beside the level's own name while
- * that level is the one standing, and in `aria-valuetext` for whoever cannot see the line. It
- * is also where the scale opens: handed nothing at all, it rests on the model's default,
- * because that is what the next turn would run at.
+ * **The default is a rule across the track**, at that level's notch, and never a notch of its
+ * own (decision of 22 September 2026). It is the level the agent recommends, handed over as
+ * `defaultId`, and there is no rule at all where the agent recommends none. The level the agent
+ * announces it is on is not it: that is whatever the agent's own settings put every model on
+ * (trial of 23 September 2026). A thin accent line laid across the scale is read the way the
+ * red line on a dial is read — this is where it is meant to sit — without offering a value of
+ * its own; the word `default` is said beside the level's own name while that level is the one
+ * standing, and in `aria-valuetext` for whoever cannot see the line. It is also where the scale
+ * opens: handed nothing at all, it rests on the default, the one level the agent named.
  *
  * **`Default` is not a notch.** An agent that never said which level its `Default` stands for
  * leaves it announced as a value like any other, and a scale cannot place a level whose meaning
@@ -118,7 +117,7 @@ const SAID = 'text-center text-xs text-balance text-muted-foreground'
 const UNSHOWN = 'invisible'
 
 /**
- * And the word beside a level's name when it is the model's default: quiet, because the name is
+ * And the word beside a level's name when it is the default: quiet, because the name is
  * what is being set and this is a thing said about it.
  */
 const DEFAULT_WORD = 'text-muted-foreground'
@@ -199,7 +198,7 @@ const DOT = 'relative size-1 rounded-full bg-input'
 const DOT_DONE = 'bg-primary-foreground'
 
 /**
- * The level the model defaults to: a rule drawn across the track at its notch.
+ * The level the agent recommends: a rule drawn across the track at its notch.
  *
  * Wider than the notch it replaces and than the track it crosses, so it reads as a line laid
  * over the scale rather than as a fat dot — which is the whole difference between a mark and a
@@ -405,10 +404,10 @@ export function EffortSlider({
   const here = levels.findIndex((one) => one.id === effort)
   /** The level whose word is over the track: what is set, `Default` included. */
   const shown: EffortChoice | undefined = efforts.find((one) => one.id === effort)
-  /** The model's default, which is where the scale opens and where the rule is drawn. */
+  /** The default, which is where the scale opens and where the rule is drawn. */
   const defaulted = levels.findIndex((one) => one.id === defaultId)
   /**
-   * Which notch the thumb rests on: the level that is set, the model's default while nothing
+   * Which notch the thumb rests on: the level that is set, the default while nothing
    * is, and the foot of the track for an unresolved `Default` or a default nobody knows.
    */
   const standing = here === -1 && shown === undefined ? defaulted : here
@@ -509,7 +508,7 @@ export function EffortSlider({
         {efforts.map((one) => (
           <span key={one.id} className={cn(LAID, LEVEL, one.id !== said?.id && UNSHOWN)}>
             {one.label}
-            {/* The model's default, said beside its name and quietly: a thing said about the
+            {/* The default, said beside its name and quietly: a thing said about the
                 level, never an entry of its own. */}
             {one.id === defaultId && <span className={DEFAULT_WORD}>{DEFAULT_BESIDE}</span>}
           </span>
