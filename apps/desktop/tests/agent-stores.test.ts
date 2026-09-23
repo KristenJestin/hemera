@@ -594,7 +594,7 @@ function homeDefault(projectId: string): string | null {
   return effortDefaultOf(offeringOf(projectId, 'claude').options)
 }
 
-describe('La règle du curseur marque le défaut du modèle', () => {
+describe('The rule of the scale marks the recommended level', () => {
   test('The default bar follows the recommended value, not the announced one', async () => {
     // Claude Code announces the effort its own settings set on every model it is switched to,
     // Xhigh here, whatever the model's default is (trial of 23 September 2026).

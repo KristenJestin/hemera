@@ -390,7 +390,7 @@ export const Modes: Story = {
 }
 
 /**
- * **The default**, on the scale, beside what the agent advises in the list.
+ * **The recommended level**, ruled on the scale, beside what the agent advises in the list.
  *
  * There is no `Default` anywhere here. The agent named the model its default resolves to, so
  * that row is gone and `Opus 4.5` carries one quiet word at the end of its line instead. The
@@ -398,7 +398,7 @@ export const Modes: Story = {
  * accent rule across the track is, where the slider opens, and what `default` is said beside —
  * once, and never beside a second word of its own.
  */
-export const DefaultOfTheModel: Story = {
+export const RecommendedLevel: Story = {
   args: {
     agent: 'claude-code',
     model: 'fable',
@@ -436,16 +436,16 @@ export const DefaultOfTheModel: Story = {
 }
 
 /**
- * **The rule follows the model's announcement, not the level it is on**: each model announces
- * its own efforts, and the rule stands at the one it advises, or nowhere when it advises none —
- * or the scale goes altogether with a model that announces no effort at all.
+ * **The rule stays on the recommendation**, never on the level the agent is on: each model
+ * announces its own efforts, and the rule stands at the one it advises, or nowhere when it
+ * advises none — or the scale goes altogether with a model that announces no effort at all.
  *
  * The page answers like the engine: Claude Code is on `Xhigh`, because its own settings put
  * every model there (trial of 23 September 2026), and advises `Medium`. The rule never goes
  * where the agent is, nor where the reader clicked. And the thumb is on its notch the moment
  * the panel opens, which is the trial of 22 September 2026.
  */
-export const RuleFollowsTheModel: Story = {
+export const RuleStaysOnTheRecommendation: Story = {
   args: { agent: 'claude-code', model: 'fable', effort: 'xhigh' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)

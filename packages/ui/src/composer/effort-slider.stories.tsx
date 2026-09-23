@@ -282,7 +282,7 @@ export const Keyboard: Story = {
  * are the scale, the thumb waits at the foot of the track, and the word above it reads
  * `Default` with the agent's own sentence under it until a level is chosen.
  */
-export const DefaultOfTheModel: Story = {
+export const RecommendedAndUnresolved: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <div className="flex items-start gap-8">
