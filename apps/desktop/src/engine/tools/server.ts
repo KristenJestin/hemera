@@ -53,6 +53,14 @@ const PATH = '/mcp'
 /** What a caller that is not allowed is told, and everything it is told. */
 const REFUSED = { error: 'unauthorized' }
 
+/**
+ * The largest request read, token or not: 16 MiB, well above a write of a large file.
+ *
+ * The body is read whole before the token is — the MCP adapter builds a request out of it — so
+ * without a bound any process of this machine could make the engine hold hundreds of megabytes.
+ */
+const BODY_LIMIT_BYTES = 16 * 1024 * 1024
+
 export interface ToolServerService {
   /** Where this engine's tools are served: `http://127.0.0.1:<port>`. */
   readonly origin: string
@@ -244,6 +252,13 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
       const listener: Server = createServer((request, response) => {
         if (!allowedHost(request, response)) return
         if (!allowedOrigin(request, response)) return
+        // A body said to be larger than any call is refused before a byte of it is read.
+        if (Number(request.headers['content-length'] ?? 0) > BODY_LIMIT_BYTES) {
+          response.writeHead(413, { 'content-type': 'application/json', connection: 'close' })
+          response.end(JSON.stringify({ error: 'too large' }))
+          request.destroy()
+          return
+        }
         void nodeHandler(asNodeRequest(request), asNodeResponse(response))
       })
 
@@ -289,7 +304,26 @@ function asNodeRequest(request: IncomingMessage): NodeIncomingMessageLike {
     method: request.method ?? 'GET',
     url: request.url ?? '/',
     headers: request.headers,
-    [Symbol.asyncIterator]: () => request[Symbol.asyncIterator](),
+    [Symbol.asyncIterator]: () => bounded(request),
+  }
+}
+
+/**
+ * The body of a request, chunk by chunk, up to `BODY_LIMIT_BYTES`: a body sent without a length,
+ * or longer than the one it announced, is cut there and its connection closed, so what is read
+ * of it is never more than the bound.
+ */
+async function* bounded(request: IncomingMessage): AsyncGenerator<Buffer> {
+  let read = 0
+  for await (const chunk of request) {
+    // SAFETY: a request without an encoding set streams Buffers, and this one never sets one.
+    const bytes = chunk as Buffer
+    read += bytes.length
+    if (read > BODY_LIMIT_BYTES) {
+      request.destroy()
+      return
+    }
+    yield bytes
   }
 }
 

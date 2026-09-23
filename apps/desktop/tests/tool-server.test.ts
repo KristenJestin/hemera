@@ -488,6 +488,52 @@ describe('a request from a web page', () => {
   })
 })
 
+describe('A request larger than any call', () => {
+  it('is refused by its size before its token is read', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        return yield* Effect.promise(async () => {
+          const response = await fetch(`${server.origin}/mcp`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+            },
+            body: 'x'.repeat(17 * 1024 * 1024),
+          }).catch(() => null)
+          return response?.status ?? null
+        })
+      }),
+    )
+
+    // Refused, or cut off before the answer: either way it was never read whole.
+    expect(seen === 413 || seen === null).toBe(true)
+  })
+})
+
+describe('the diagnostics of many refused accesses', () => {
+  it('are a few lines and a count, and a name cannot forge a line of its own', async () => {
+    const written: string[] = []
+    await engine(
+      noQuestions,
+      written,
+    )(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        yield* Effect.forEach(
+          Array.from({ length: 30 }, (_, index) => index),
+          (index) => toolCall(server, 'f'.repeat(43), index, 'fs_read\nforged line', {}),
+        )
+      }),
+    )
+
+    const refusals = written.filter((line) => line.includes('refused'))
+    expect(refusals.length).toBeLessThanOrEqual(20)
+    for (const line of written) expect(line).not.toContain('\n')
+  })
+})
+
 describe('the diagnostics of a refused access', () => {
   it('name the Session and the tool, and never the token', async () => {
     const written: string[] = []

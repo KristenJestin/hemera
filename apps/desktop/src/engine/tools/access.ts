@@ -77,6 +77,12 @@ export class ToolAccess extends Context.Service<ToolAccess, ToolAccessService>()
 /** How much of a digest is enough to name a grant without naming the secret. */
 const DIGEST_CHARACTERS = 12
 
+/** How many refused accesses are written in a minute; the rest are counted, and said later. */
+const REFUSALS_LOGGED = 20
+
+/** The minute those are counted over. */
+const REFUSAL_WINDOW_MS = 60_000
+
 /** How many revoked grants are remembered, so a refusal can name the Session a token served. */
 const REVOKED_KEPT = 256
 
@@ -104,6 +110,9 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
     const revokedSessions = new Map<string, string>()
 
     const write = (line: string) => sink.write(`tools: ${line}`)
+
+    /** The minute refusals are being counted in, and what was said and left out of it. */
+    const refusals = { since: 0, written: 0, left: 0 }
 
     const forget = (sessionId: string) =>
       Effect.sync(() => {
@@ -157,7 +166,29 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
 
       live: (sessionId) => Effect.sync(() => bySession.has(sessionId)),
 
-      refusedAccess: (line) => write(line),
+      refusedAccess: (line) =>
+        Effect.suspend(() => {
+          // Anything on this machine can knock: a flood of refused requests is a few lines and a
+          // count, not a log that grows as fast as it is written to.
+          const now = Date.now()
+          if (now - refusals.since >= REFUSAL_WINDOW_MS) {
+            refusals.since = now
+            refusals.written = 0
+          }
+          if (refusals.written >= REFUSALS_LOGGED) {
+            refusals.left += 1
+            return Effect.void
+          }
+          refusals.written += 1
+          const left = refusals.left
+          refusals.left = 0
+          // What a caller sent is part of the line — the tool it named — and a control character
+          // in it would forge a line of its own.
+          const clean = line.replace(/\p{Cc}/gu, ' ')
+          return write(
+            left === 0 ? clean : `${clean} (${left} refused request(s) before it were not logged)`,
+          )
+        }),
     }
   }),
 )
