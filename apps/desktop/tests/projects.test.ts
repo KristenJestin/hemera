@@ -15,7 +15,11 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
-import { InvalidProjectNameError, InvalidRepositoryPathError } from '@hemera/core'
+import {
+  InvalidProjectNameError,
+  InvalidRepositoryPathError,
+  InvalidSpecPrefixError,
+} from '@hemera/core'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { SqliteClient, databaseLayer } from '#engine/storage/database.ts'
@@ -324,6 +328,86 @@ describe('Un Projet inconnu', () => {
     )
 
     expect(raised).toBeInstanceOf(StaleVersionError)
+  })
+})
+
+describe('The Spec prefix comes from the Project name and can be changed', () => {
+  test('a created Project takes the prefix its name gives', async () => {
+    const [hemera, keyRoad] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        return [
+          yield* projects.create({ name: 'Hemera', tone: 'primary', mainPath: '/tmp/hemera' }),
+          yield* projects.create({ name: 'Key Road', tone: 'primary', mainPath: '/tmp/key-road' }),
+        ] as const
+      }),
+    )
+
+    expect(hemera.specPrefix).toBe('HEM')
+    expect(keyRoad.specPrefix).toBe('KR')
+  })
+
+  test('a prefix given at creation is kept', async () => {
+    const project = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        return yield* projects.create({
+          name: 'Key Road',
+          tone: 'primary',
+          mainPath: '/tmp/key-road',
+          specPrefix: 'KEYR',
+        })
+      }),
+    )
+
+    expect(project.specPrefix).toBe('KEYR')
+  })
+
+  test('a changed prefix is written, read back and journalled', async () => {
+    const [project, listed, payload] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* projects.create({
+          name: 'Key Road',
+          tone: 'primary',
+          mainPath: '/tmp/key-road',
+        })
+        const changed = yield* projects.update({
+          id: one.id,
+          version: one.version,
+          specPrefix: 'KEYR',
+        })
+        const sql = yield* SqliteClient
+        const events = yield* sql<{ payload: string }>`
+          SELECT payload FROM domain_events WHERE type = 'project.updated'`
+        return [changed, yield* projects.list(), events[0]?.payload] as const
+      }),
+    )
+
+    expect(project.specPrefix).toBe('KEYR')
+    expect(listed[0]?.specPrefix).toBe('KEYR')
+    expect(JSON.parse(payload ?? '{}')).toMatchObject({ specPrefix: 'KEYR' })
+  })
+
+  test('a prefix that is not 2 to 4 upper-case letters is refused, and nothing changes', async () => {
+    const [raised, listed] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* projects.create({
+          name: 'Key Road',
+          tone: 'primary',
+          mainPath: '/tmp/key-road',
+        })
+        const refused = yield* Effect.flip(
+          projects.update({ id: one.id, version: one.version, specPrefix: 'k' }),
+        )
+        return [refused, yield* projects.list()] as const
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(InvalidSpecPrefixError)
+    expect(listed[0]?.specPrefix).toBe('KR')
+    expect(listed[0]?.version).toBe(1)
   })
 })
 

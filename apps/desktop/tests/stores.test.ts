@@ -36,6 +36,7 @@ function project(id: string, name: string, version = 1): Project {
     version,
     mainPath: `/tmp/${id}`,
     repositories: [],
+    specPrefix: 'SPEC',
   }
 }
 
@@ -52,6 +53,10 @@ function entry(sequence: number, projectId: string | null): JournalEntry {
     projectId,
     payload: {},
     seenAt: null,
+    sessionId: null,
+    specId: null,
+    revisionId: null,
+    phaseId: null,
   }
 }
 

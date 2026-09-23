@@ -26,6 +26,7 @@ import type {
   EmptyTitleError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
+  InvalidSpecPrefixError,
   NoAgentError,
 } from '@hemera/core'
 
@@ -346,6 +347,7 @@ export type Refusal =
   | InvalidCursorError
   | InvalidProjectNameError
   | InvalidRepositoryPathError
+  | InvalidSpecPrefixError
   | EmptyMessageError
   | EmptyTitleError
   | NoAgentError

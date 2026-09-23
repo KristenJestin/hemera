@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   DEFINE_PROTOCOL,
   InvalidAnswerError,
+  InvalidSpecPrefixError,
   InvalidSpecTitleError,
   SpecNotWritableError,
   TaskCycleError,
@@ -21,6 +22,7 @@ import {
   readyGate,
   slugOf,
   specKey,
+  specPrefix,
   specPrefixFrom,
   staleAfterWrite,
   taskGraph,
@@ -480,6 +482,14 @@ describe('Key prefix, key and slug', () => {
     ['2026 — ?', 'SPEC'],
   ])('%p gives the prefix %p', (name, prefix) => {
     expect(specPrefixFrom(name)).toBe(prefix)
+  })
+
+  test('a chosen prefix takes 2 to 4 upper-case Latin letters', () => {
+    expect(specPrefix('KEYR')).toBe('KEYR')
+    expect(specPrefix('KR')).toBe('KR')
+    for (const refused of ['k', 'K', 'kr', 'KEYRO', 'K1', 'ÉO', '']) {
+      expect(() => specPrefix(refused)).toThrow(InvalidSpecPrefixError)
+    }
   })
 
   test('the key is the prefix and the number', () => {

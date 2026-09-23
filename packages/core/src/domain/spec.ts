@@ -696,6 +696,20 @@ export function specPrefixFrom(projectName: string): string {
   return prefix.length >= 2 ? prefix.toUpperCase() : DEFAULT_SPEC_PREFIX
 }
 
+/** A Spec key prefix that is not 2 to 4 upper-case Latin letters (Decided 2). */
+export class InvalidSpecPrefixError extends Error {
+  constructor(readonly prefix: string) {
+    super(`the Spec key prefix "${prefix}" is refused: it takes 2 to 4 upper-case letters, A to Z`)
+    this.name = 'InvalidSpecPrefixError'
+  }
+}
+
+/** A Spec key prefix chosen in the Project settings, refused unless 2 to 4 of A to Z (D7-02). */
+export function specPrefix(value: string): string {
+  if (!/^[A-Z]{2,4}$/.test(value)) throw new InvalidSpecPrefixError(value)
+  return value
+}
+
 /** The human key of the `n`-th Spec of a Project (D7-02). */
 export function specKey(prefix: string, n: number): string {
   return `${prefix}-${n}`
