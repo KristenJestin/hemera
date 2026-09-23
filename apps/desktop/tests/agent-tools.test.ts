@@ -40,6 +40,7 @@ import {
 
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { createCommand } from '#engine/commands/panel.ts'
 import { Commands } from '#engine/commands/service.ts'
 import { Context as AgentContext } from '#engine/context/service.ts'
 import { Journal } from '#engine/journal.ts'
@@ -971,6 +972,33 @@ describe('The catalogue is edited and read', () => {
     ])
     // And the agent reads the same command, with its kind and the folder it runs in.
     expect(agent.answers.used[0]?.text).toContain('test-api  check  in api  pnpm test')
+  })
+})
+
+describe('A command saved in the settings is listed to the agent at once', () => {
+  test('saved after the Session opened, through the settings, the next call lists it', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'uses', call: 'commands_list', arguments: {} }] })
+
+    await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        // What the settings page sends: the Project on screen, the root as no folder at all.
+        yield* createCommand({
+          projectId: session.projectId,
+          name: 'check',
+          line: 'bun run check',
+          kind: 'check',
+          folder: null,
+        })
+        yield* runtime.prompt(session.id, 'what can I run?')
+      }),
+    )
+
+    expect(agent.answers.used[0]?.isError).toBe(false)
+    expect(agent.answers.used[0]?.text).toContain(
+      'check  check  in the Workspace root  bun run check',
+    )
   })
 })
 
