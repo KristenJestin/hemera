@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { withinFrames } from '../../.storybook/reduced-motion.ts'
 import { HemeraToolCall, type HemeraToolProvenance } from './hemera-tool-call.tsx'
 
 /**
@@ -56,6 +57,64 @@ const meta = {
 export default meta
 
 type Story = StoryObj<typeof meta>
+
+/** How many frames a fold is watched for: the better part of the journey of the spring. */
+const A_FOLD = 30
+
+/**
+ * The fold opening, with the path the call touched on its line (trial of 23 September 2026).
+ *
+ * The press on the path sat beside the whole fold and was centred on it, so it slid down the
+ * block while the body opened under it. It is on the fold's own line now, the one line that
+ * never moves, and pressing it goes to the path without opening the block.
+ */
+export const AFoldOpening: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /fs_read/ })
+    const path = canvas.getByRole('button', { name: 'src/billing/export.ts' })
+    // A press inside the fold's own button would be one the keyboard walks over.
+    await expect(row.contains(path)).toBe(false)
+    await userEvent.click(path)
+    await expect(args.onOpenPath).toHaveBeenCalledWith('src/billing/export.ts')
+    await expect(row, 'a press on the path opened the block').toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+
+    const closed = path.getBoundingClientRect().top
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    const moved = () => Math.abs(path.getBoundingClientRect().top - closed) > 0.5
+    await expect(await withinFrames(moved, A_FOLD), 'the path slid while the block opened').toBe(
+      false,
+    )
+    await expect(canvas.getByText('token 7f31c0')).toBeVisible()
+  },
+}
+
+/** The fold closing: the path stays on its line while the body folds away under it. */
+export const AFoldClosing: Story = {
+  args: { defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /fs_read/ })
+    const path = canvas.getByRole('button', { name: 'src/billing/export.ts' })
+    await expect(canvas.getByText('token 7f31c0')).toBeVisible()
+    const open = path.getBoundingClientRect().top
+    const moved = () => Math.abs(path.getBoundingClientRect().top - open) > 0.5
+
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await expect(await withinFrames(moved, A_FOLD), 'the path slid while the block closed').toBe(
+      false,
+    )
+    await waitFor(() => {
+      expect(canvas.queryByText('token 7f31c0')).toBeNull()
+    })
+    await expect(moved()).toBe(false)
+  },
+}
 
 /** A call that is done, folded: the tool, the state, and the file it read. */
 export const ReadFolded: Story = {

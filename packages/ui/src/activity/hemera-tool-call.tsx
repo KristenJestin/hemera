@@ -1,4 +1,3 @@
-import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
 import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
@@ -35,16 +34,13 @@ const STATUS: Record<HemeraToolStatus, { word: string; tone: NonNullable<BadgePr
   refused: { word: 'Refused', tone: 'warning' },
 }
 
-/** The row: the fold, and the first path the call touched at its end. */
-const ROW = 'flex w-full min-w-0 items-center gap-2'
-
-/** The fold takes the room that is left, so a long tool name shortens rather than runs on. */
-const FOLDING = 'min-w-0 flex-1'
-
 /** The line that is read: whose call it is, the tool, and what the call is doing. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
 const TOOL = 'min-w-0 truncate font-mono text-foreground'
+
+/** The path, shortened from its end rather than pushing the line off the block. */
+const PATH = 'min-w-0 truncate'
 
 /** What the call answered, quieter than the line above it. */
 const ANSWER = 'text-sm text-muted-foreground'
@@ -133,45 +129,47 @@ export function HemeraToolCall({
     status === 'in_progress' || status === 'failed' || status === 'pending' || status === 'refused'
   const first = paths?.[0]
   return (
-    <div className={cn(ROW, className)}>
-      <Disclosure
-        className={FOLDING}
-        // Uncontrolled once the call is over: `undefined` hands the fold back to the reader.
-        open={forced ? true : undefined}
-        defaultOpen={defaultOpen}
-        summary={
-          <span className={SUMMARY}>
-            <Badge tone="primary">Hemera</Badge>
-            <span className={TOOL}>{tool}</span>
-            <Badge tone={tone}>{word}</Badge>
-          </span>
-        }
-      >
-        {error !== undefined && <p className={status === 'refused' ? REFUSAL : FAILURE}>{error}</p>}
-        <p className={ANSWER}>{summary}</p>
-        {args !== undefined && args.length > 0 && (
-          <dl className={ARGUMENTS}>
-            {args.map((argument) => (
-              <div key={argument.label} className={PAIR}>
-                <dt className={LABEL}>{argument.label}</dt>
-                <dd className={VALUE}>{argument.value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        <div className={FOOT}>
-          <span>{provenance.session}</span>
-          <span>{provenance.agent}</span>
-          <span>{`token ${provenance.token}`}</span>
-          {ms !== undefined && <span>{`${ms} ms`}</span>}
-        </div>
-        {children}
-      </Disclosure>
-      {first !== undefined && onOpenPath !== undefined && (
-        <Button variant="link" size="sm" className="shrink-0" onClick={() => onOpenPath(first)}>
-          {first}
-        </Button>
+    <Disclosure
+      className={className}
+      // Uncontrolled once the call is over: `undefined` hands the fold back to the reader.
+      open={forced ? true : undefined}
+      defaultOpen={defaultOpen}
+      summary={
+        <span className={SUMMARY}>
+          <Badge tone="primary">Hemera</Badge>
+          <span className={TOOL}>{tool}</span>
+          <Badge tone={tone}>{word}</Badge>
+        </span>
+      }
+      // The first path is on the line that never moves, beside the fold rather than in it: the
+      // body opening under it does not carry it along (trial of 23 September 2026).
+      aside={
+        first !== undefined && onOpenPath !== undefined ? (
+          <Button variant="link" size="sm" className="min-w-0" onClick={() => onOpenPath(first)}>
+            <span className={PATH}>{first}</span>
+          </Button>
+        ) : undefined
+      }
+    >
+      {error !== undefined && <p className={status === 'refused' ? REFUSAL : FAILURE}>{error}</p>}
+      <p className={ANSWER}>{summary}</p>
+      {args !== undefined && args.length > 0 && (
+        <dl className={ARGUMENTS}>
+          {args.map((argument) => (
+            <div key={argument.label} className={PAIR}>
+              <dt className={LABEL}>{argument.label}</dt>
+              <dd className={VALUE}>{argument.value}</dd>
+            </div>
+          ))}
+        </dl>
       )}
-    </div>
+      <div className={FOOT}>
+        <span>{provenance.session}</span>
+        <span>{provenance.agent}</span>
+        <span>{`token ${provenance.token}`}</span>
+        {ms !== undefined && <span>{`${ms} ms`}</span>}
+      </div>
+      {children}
+    </Disclosure>
   )
 }

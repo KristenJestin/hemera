@@ -67,6 +67,44 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/** How many frames a fold is watched for: the better part of the journey of the spring. */
+const A_FOLD = 30
+
+/**
+ * The fold opening, with the file the call touched on its line (trial of 23 September 2026).
+ *
+ * The press on the file sat beside the whole fold and was centred on it, so it slid down the
+ * card while the body opened under it. It is on the fold's own line now, the one line that never
+ * moves, and pressing it goes to the file without opening the card.
+ */
+export const AFoldOpening: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const path = canvas.getByRole('button', { name: 'packages/ui/src/session/session.tsx:42' })
+    // A press inside the fold's own button would be one the keyboard walks over.
+    await expect(row.contains(path)).toBe(false)
+    await userEvent.click(path)
+    await expect(args.onOpenLocation).toHaveBeenCalledWith({
+      path: 'packages/ui/src/session/session.tsx',
+      line: 42,
+    })
+    await expect(row, 'a press on the file opened the card').toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+
+    const closed = path.getBoundingClientRect().top
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    const moved = () => Math.abs(path.getBoundingClientRect().top - closed) > 0.5
+    await expect(await withinFrames(moved, A_FOLD), 'the file slid while the card opened').toBe(
+      false,
+    )
+    await expect(canvas.getByText('Input')).toBeVisible()
+  },
+}
+
 /**
  * The fold closing, which is the fold opening played backwards (trial of 22 September 2026).
  *
@@ -81,7 +119,10 @@ export const AFoldClosing: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const path = canvas.getByRole('button', { name: 'packages/ui/src/session/session.tsx:42' })
     await expect(canvas.getByText('Input')).toBeVisible()
+    const open = path.getBoundingClientRect().top
+    const moved = () => Math.abs(path.getBoundingClientRect().top - open) > 0.5
 
     await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'false')
@@ -96,10 +137,15 @@ export const AFoldClosing: Story = {
     // Mid-exit: the row already says it is closed, and the body is still in the page folding
     // away. A body that vanished under the press would fail here.
     await expect(canvas.getByText('Input')).toBeInTheDocument()
+    // The file stays on its line the whole way: it was centred on the card and slid with it.
+    await expect(await withinFrames(moved, A_FOLD), 'the file slid while the card closed').toBe(
+      false,
+    )
 
     await waitFor(() => {
       expect(canvas.queryByText('Input')).toBeNull()
     })
+    await expect(moved()).toBe(false)
   },
 }
 

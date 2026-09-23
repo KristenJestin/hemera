@@ -1,4 +1,3 @@
-import { cn } from 'cn'
 import { type ReactNode, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
@@ -52,7 +51,8 @@ import { Disclosure } from './disclosure.tsx'
  * The file a call touched is a press at the end of the row rather than the title itself: the
  * title is the fold, a control cannot live inside a control, and a link inside a button is a
  * link the keyboard walks over and a screen reader never announces. The row still folds
- * anywhere the pointer lands on it.
+ * anywhere the pointer lands on it. The press sits on the fold's own line, beside the control,
+ * so the body opening under it does not carry it along (trial of 23 September 2026).
  */
 
 /** How a call is read at a glance: the kind is the mark, the status is the colour of the dot. */
@@ -79,19 +79,13 @@ const STATUS: Record<ToolStatus, { word: string; tone: StatusTone }> = {
   cancelled: { word: 'Cancelled', tone: 'cancelled' },
 }
 
-/** The row: the fold, and the file it touched at its end. */
-const ROW = 'flex w-full min-w-0 items-center gap-2'
-
-/** The block that folds takes the room that is left, so a long title shortens rather than runs on. */
-const FOLDING = 'min-w-0 flex-1'
-
 /** The line that is read: the mark of the kind, the title, and what the call is doing. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
-/** A row that does not fold, drawn exactly where the one that folds would have been. */
-const FLAT = 'flex w-full items-center gap-2 px-1 py-0.5 text-left text-sm'
-
 const TITLE = 'truncate text-muted-foreground'
+
+/** The file, shortened from its end rather than pushing the line off the card. */
+const PATH = 'min-w-0 truncate'
 
 /** A command is read character by character, so it keeps the mono face it was written in. */
 const COMMAND = 'truncate font-mono text-muted-foreground'
@@ -214,37 +208,40 @@ export function ToolCallCard({
     </span>
   )
   return (
-    <div className={cn(ROW, className)}>
+    <Disclosure
+      className={className}
+      // Controlled from here, always: the fold is a state of the *call*, and a state held
+      // inside the fold is a state lost the moment the row goes from having nothing to open
+      // to having a body — which is what every call does on its first answer.
+      open={shown}
+      onOpenChange={setShown}
+      summary={summary}
+      aside={
+        first !== undefined && onOpenLocation !== undefined ? (
+          <Button
+            variant="link"
+            size="sm"
+            className="min-w-0"
+            onClick={() => onOpenLocation(first)}
+          >
+            <span className={PATH}>{at(first)}</span>
+          </Button>
+        ) : undefined
+      }
+    >
       {opens ? (
-        <Disclosure
-          className={FOLDING}
-          // Controlled from here, always: the fold is a state of the *call*, and a state held
-          // inside the fold is a state lost the moment the row goes from having nothing to open
-          // to having a body — which is what every call does on its first answer.
-          open={shown}
-          onOpenChange={setShown}
-          summary={summary}
-        >
-          <div className={BODY}>
-            {error !== undefined && <p className={ERROR}>{error}</p>}
-            {sectioned && (
-              <>
-                <Section head="Input" body={input} />
-                <Section head="Output" body={output} />
-              </>
-            )}
-            {children}
-          </div>
-        </Disclosure>
-      ) : (
-        <span className={cn(FOLDING, FLAT)}>{summary}</span>
-      )}
-      {first !== undefined && onOpenLocation !== undefined && (
-        <Button variant="link" size="sm" className="shrink-0" onClick={() => onOpenLocation(first)}>
-          {at(first)}
-        </Button>
-      )}
-    </div>
+        <div className={BODY}>
+          {error !== undefined && <p className={ERROR}>{error}</p>}
+          {sectioned && (
+            <>
+              <Section head="Input" body={input} />
+              <Section head="Output" body={output} />
+            </>
+          )}
+          {children}
+        </div>
+      ) : undefined}
+    </Disclosure>
   )
 }
 

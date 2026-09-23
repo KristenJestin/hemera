@@ -39,12 +39,26 @@ import { arrival, collapse, expand, instant, morph, useTransition } from '../mot
  * 22 September 2026).
  */
 
+/**
+ * The line: the control, and what the block offers beside it. Nothing below it ever moves it,
+ * which is why a press of the block's own lives here rather than beside the whole fold: a press
+ * centred on a block that grows is a press that slides while it opens (trial of 23 September
+ * 2026).
+ */
+const LINE = 'flex w-full min-w-0 items-center gap-2'
+
 /** The row, which is the control: it answers the pointer anywhere on its width. */
 const TRIGGER =
-  'flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm outline-none select-none focus-ring hover:bg-accent'
+  'flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm outline-none select-none focus-ring hover:bg-accent'
 
 /** The line when there is nothing to open: the trigger's own box, with none of its answers. */
-const FLAT = 'flex w-full items-center gap-2 px-1 py-0.5 text-sm'
+const FLAT = 'flex min-w-0 flex-1 items-center gap-2 px-1 py-0.5 text-sm'
+
+/**
+ * What the block offers at the end of its line: it gives way before the summary does, and never
+ * takes more than half of the line from it.
+ */
+const ASIDE = 'ml-auto flex max-w-1/2 min-w-0 shrink justify-end'
 
 /** The mark of the fold, at the end of the row where the eye ends up rather than where it starts. */
 const CHEVRON = 'ml-auto flex shrink-0 items-center justify-center text-muted-foreground'
@@ -62,6 +76,14 @@ const BODY = 'pt-1 pb-0.5 pl-8'
 export interface DisclosureProps {
   /** The line read while the body is closed, handed over already drawn. */
   summary: ReactNode
+  /**
+   * A press of the block's own at the end of its line: the file a call touched.
+   *
+   * On the line and outside the control, because a control cannot hold a control: a button
+   * inside the fold's button is one the keyboard walks over and a screen reader never announces,
+   * and a press on it would fold the block as well.
+   */
+  aside?: ReactNode
   /**
    * What the block holds; drawn only while it is open.
    *
@@ -88,6 +110,7 @@ export interface DisclosureProps {
 
 export function Disclosure({
   summary,
+  aside,
   children,
   open,
   defaultOpen = false,
@@ -121,33 +144,39 @@ export function Disclosure({
       {children === undefined ? (
         // Nothing to open, so nothing to press: the line is the row, drawn in the same fold a
         // block with a body wears.
-        <span className={FLAT}>{summary}</span>
+        <div className={LINE}>
+          <span className={FLAT}>{summary}</span>
+          {aside !== undefined && <span className={ASIDE}>{aside}</span>}
+        </div>
       ) : (
         <>
-          <button
-            type="button"
-            className={TRIGGER}
-            aria-expanded={shown}
-            // Named only while it is there: a reference that resolves to nothing is a broken one,
-            // and the body is taken out of the page once it has finished folding.
-            aria-controls={shown ? body : undefined}
-            // A controlled block is the caller's answer: the reader's press is reported and the
-            // shown state stays whatever the caller said.
-            onClick={() => {
-              setAsked(!shown)
-              onOpenChange?.(!shown)
-            }}
-          >
-            {summary}
-            <motion.span
-              aria-hidden="true"
-              className={CHEVRON}
-              animate={{ rotate: shown ? 180 : 0 }}
-              transition={transition}
+          <div className={LINE}>
+            <button
+              type="button"
+              className={TRIGGER}
+              aria-expanded={shown}
+              // Named only while it is there: a reference that resolves to nothing is a broken one,
+              // and the body is taken out of the page once it has finished folding.
+              aria-controls={shown ? body : undefined}
+              // A controlled block is the caller's answer: the reader's press is reported and the
+              // shown state stays whatever the caller said.
+              onClick={() => {
+                setAsked(!shown)
+                onOpenChange?.(!shown)
+              }}
             >
-              <IconChevronDown size="sm" />
-            </motion.span>
-          </button>
+              {summary}
+              <motion.span
+                aria-hidden="true"
+                className={CHEVRON}
+                animate={{ rotate: shown ? 180 : 0 }}
+                transition={transition}
+              >
+                <IconChevronDown size="sm" />
+              </motion.span>
+            </button>
+            {aside !== undefined && <span className={ASIDE}>{aside}</span>}
+          </div>
           {/*
             The room under the row, which is what opens and what closes. `AnimatePresence` is
             the whole of the fix of 22 September 2026: without it the body is taken out of the
