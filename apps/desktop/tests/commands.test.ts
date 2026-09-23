@@ -15,7 +15,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Result } from 'effect'
 import type { Scope } from 'effect'
 
 import {
@@ -374,7 +374,7 @@ describe('A run whose end cannot be recorded', () => {
       }),
     )
 
-    expect(seen.stopped._tag).toBe('Success')
+    expect(Result.isSuccess(seen.stopped)).toBe(true)
     expect(seen.lines.some((line) => line.includes('was not recorded'))).toBe(true)
   })
 })
