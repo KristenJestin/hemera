@@ -98,6 +98,7 @@ export {
   deliveryText,
 } from './domain/context.ts'
 export type { BaseReach, ContextReach, ContextSource } from './domain/context.ts'
+export {
   BASE_SECTIONS,
   DEFAULT_SPEC_PREFIX,
   DEFINE_PROTOCOL,
