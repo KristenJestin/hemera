@@ -389,6 +389,19 @@ describe('An old revision is readable and not editable', () => {
     expect(view.now).toBe('Revision 1 · read only, as it was frozen')
     expect(view.sections.some((one) => one.conflict !== undefined)).toBe(false)
     expect(view.readiness.todo).toEqual([])
+    expect(view.replacedBy).toBe(2)
+  })
+
+  test('the current revision is replaced by none, and a ready one offers its Rework', () => {
+    const frozen = snapshot()
+    const view = specViewOf({
+      snapshot: { ...frozen, spec: { ...frozen.spec, status: 'ready' } },
+      revisions: [frozen.revision],
+      buffers: [],
+      journal: [],
+    })
+    expect(view.status).toBe('ready')
+    expect(view.replacedBy).toBe(undefined)
   })
 
   test('a ready Spec whose line the Journal page did not hold froze when it last changed', () => {

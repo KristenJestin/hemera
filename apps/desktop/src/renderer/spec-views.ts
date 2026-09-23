@@ -428,6 +428,11 @@ export function specViewOf({ snapshot, revisions, buffers, journal }: SpecReadin
     frozenOn: isEditable(snapshot)
       ? undefined
       : dayOf(frozenAt(snapshot.revision, snapshot, revisions, journal)),
+    // An older revision offers no Rework, which the engine would refuse: only the current one
+    // can be reworked (D7-05).
+    replacedBy: isCurrent(snapshot)
+      ? undefined
+      : revisions.find((one) => one.id === snapshot.spec.currentRevisionId)?.number,
   }
 }
 
