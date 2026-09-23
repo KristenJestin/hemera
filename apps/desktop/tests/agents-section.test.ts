@@ -32,7 +32,7 @@ afterEach(async () => {
   rmSync(dataFolder, { recursive: true, force: true })
 })
 
-describe('A qualified agent has only Hemera\'s tools', () => {
+describe("A qualified agent has only Hemera's tools", () => {
   test('its row says it runs bare, and by which means', async () => {
     opened = await openWindow(dataFolder, fakeAgent())
     install(opened.bridge)
