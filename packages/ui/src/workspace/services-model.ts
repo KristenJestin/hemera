@@ -5,6 +5,8 @@
  * rows onto, and nothing here decides anything.
  */
 
+import type { CommandScope } from '../activity/command-type.ts'
+
 /**
  * One environment variable, as the Project or a Workspace sets it (D8-06).
  *
@@ -18,4 +20,47 @@ export interface VariableLine {
   readonly overrides?: string | undefined
   /** On a Workspace: true for a Project variable shown here because it applies, not set on the Workspace. */
   readonly inherited?: boolean | undefined
+}
+
+/**
+ * Where a published address stands (D8-09): `starting` until it answers, `ready` once it has
+ * answered anything at all, and `unanswered` after a minute of silence — still starting, and
+ * said so rather than given up on.
+ */
+export type Readiness = 'starting' | 'ready' | 'unanswered'
+
+/** A port another running run of the Project already holds (D8-09). */
+export interface PortConflict {
+  readonly port: number
+  /** The holder's command name. */
+  readonly holderRun: string
+  /** The Workspace the holder runs in. */
+  readonly holderWorkspace: string
+}
+
+/**
+ * One `serve` run, as the services of a Workspace list it (D8-08, D8-09, D8-10).
+ *
+ * Whoever started it: a service the agent started is a process the reader can see and stop.
+ */
+export interface ServiceLine {
+  /** The run's own id: what stops this instance and no other. */
+  readonly id: string
+  readonly name: string
+  /** The Workspace the run is in. */
+  readonly workspace: string
+  /** The folder it runs in, as the system writes it. */
+  readonly folder: string
+  /** One instance per Workspace, or one for the whole Project, run in `main` (D8-07). */
+  readonly scope: CommandScope
+  readonly state: 'running' | 'stopped' | 'failed'
+  /** The address its output published, once it published one. */
+  readonly url?: string | undefined
+  readonly readiness?: Readiness | undefined
+  readonly portConflict?: PortConflict | undefined
+  /** Whether the line runs through Portless, which names the address itself (D8-10). */
+  readonly portless?: boolean | undefined
+  /** What a failed run said, as it said it. */
+  readonly message?: string | undefined
+  readonly startedBy: 'agent' | 'user'
 }

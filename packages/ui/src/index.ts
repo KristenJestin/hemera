@@ -369,4 +369,10 @@ export {
 
 /** The variables, the services and the details of a run of a Workspace (lot 20). */
 export { VariablesEditor, type VariablesEditorProps } from './workspace/variables-editor.tsx'
-export type { VariableLine } from './workspace/services-model.ts'
+export { ServiceList, type ServiceListProps } from './workspace/service-list.tsx'
+export type {
+  PortConflict,
+  Readiness,
+  ServiceLine,
+  VariableLine,
+} from './workspace/services-model.ts'
