@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import type {
@@ -36,6 +36,7 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
+import { answerQuestion, createSpec, specSnapshot, subscribeToSpec } from '../spec-store.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -206,6 +207,10 @@ export function SessionPage({
   const [attempted, setAttempted] = useState<string | null>(null)
   /** Whether the reader has the Session details open: only the head's button opens them. */
   const [detailsOpen, setDetailsOpen] = useState(false)
+  /** The proposals `Not now` was pressed on: this window's answer, which nothing keeps. */
+  const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set())
+  const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
+  const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -280,6 +285,15 @@ export function SessionPage({
       onOpenUrl,
       onStopRun,
       reportedCall: (toolCallId) => reported.get(toolCallId),
+      spec: {
+        thread,
+        specId: session.specId,
+        specKey: defined?.spec.key,
+        declined,
+        onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
+        onCreate: (title, type) => void createSpec(session.id, type, title),
+        onDecline: (entryId) => setDeclined(new Set([...declined, entryId])),
+      },
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).

@@ -108,6 +108,7 @@ import {
   subscribeToSessions,
   writeMessage,
 } from './sessions-store.ts'
+import { closeSpec, listenToSpecs, openSpec } from './spec-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -381,6 +382,7 @@ export function Application() {
   /** The two halves of `open` that effects may depend on, which are not the same every render. */
   const openId = open?.id ?? null
   const provider = open?.provider ?? null
+  const openSpecId = open?.specId ?? null
 
   // Everything the window shows about the data folder, asked for once it is open.
   useEffect(() => {
@@ -479,6 +481,26 @@ export function Application() {
   // And the runs, heard on the same channel: a command a Session started while another was on
   // screen has moved on by the time the reader comes back to it (D6-12).
   useEffect(() => listenToTools(), [])
+
+  // A Spec is written by whoever holds its right and read live by every Session on it (D7-11).
+  // A Spec step can change a Session too — accepting a proposal makes it `define`, a Session is
+  // opened on a Spec — so the Sessions of the Project in front are read again with it.
+  useEffect(
+    () =>
+      listenToSpecs((projectId) => {
+        if (projectId === shellState().activeProjectId) void readSessions(projectId)
+      }),
+    [],
+  )
+
+  // The Spec of the Session on screen, opened when that Session defines one (D7-07).
+  useEffect(() => {
+    if (openSpecId === null) {
+      closeSpec()
+      return
+    }
+    void openSpec(openSpecId)
+  }, [openSpecId])
 
   // The list the sidebar draws is read again when a Session gets its first entry: the engine
   // writes the user's own message as part of the prompt (design D5-11), and that message is what
