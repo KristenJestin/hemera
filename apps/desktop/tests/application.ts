@@ -144,9 +144,11 @@ export function application(
       | SqliteClient
       | TestClock.TestClock
       | HeldWords
+      | AgentContext
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
-      Layer.provide(Layer.mergeAll(server, contextLayer, commandsLayer, toolPermissionsLayer)),
+      Layer.provideMerge(contextLayer),
+      Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer)),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, sessionsLayer, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
@@ -176,6 +178,7 @@ export function application(
         | SqliteClient
         | TestClock.TestClock
         | HeldWords
+        | AgentContext
         | Scope.Scope
       >,
     ) =>

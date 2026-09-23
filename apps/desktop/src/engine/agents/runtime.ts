@@ -38,6 +38,7 @@ import {
   type AgentProvider,
   type BaseReach,
   CONTEXT_BASE,
+  contextUri,
   type Session,
   type SessionEntryOrigin,
 } from '@hemera/core'
@@ -50,6 +51,7 @@ import {
   type AgentOption,
   type PermissionAnswer,
   type PermissionQuestion,
+  type Provision,
   type SessionMeta,
   type ToolCallContentBlock,
   type ToolCallLocation,
@@ -284,6 +286,11 @@ interface Live {
    * conversation it cannot answer, and a turn is what a prompt is.
    */
   context: string | null
+  /**
+   * What Hemera provides in front of the next prompt, as resources behind its marker: the base,
+   * on an agent that takes it there (D6-07). Handed over once, then emptied.
+   */
+  provisions: readonly Provision[]
   /** Why that context had to be rebuilt, in the agent's own terms; null when it did not. */
   why: string | null
   /**
@@ -1416,6 +1423,7 @@ export const runtimeLayer = Layer.effect(
           nativeSessionId: '',
           death: null,
           context: null,
+          provisions: [],
           why: null,
           window: null,
           pending: 0,
@@ -1506,8 +1514,10 @@ export const runtimeLayer = Layer.effect(
      *
      * `Context.start` records the two: the base, word for word, and the fingerprint of the
      * `AGENTS.md` the agent reads itself — which is never sent, because sending a text the agent
-     * already has is saying it twice. The base rides on the first prompt rather than on a turn of
-     * its own: it is a provision, not something to answer.
+     * already has is saying it twice. The base reaches the agent by its adapter's means: the
+     * system prompt Claude Code was handed at `session/new`, or an embedded resource on the
+     * first prompt of the others — never a turn of its own: it is a provision, not something to
+     * answer.
      */
     const provide = (sessionId: string, held: Live): Effect.Effect<AgentRuntimeError | null> =>
       Effect.gen(function* () {
@@ -1515,8 +1525,10 @@ export const runtimeLayer = Layer.effect(
           attempt('providing the context', context.start(sessionId)),
         )
         if (Result.isFailure(started)) return started.failure
-        const base = started.success.base
-        held.context = held.context === null ? base : `${base}\n\n${held.context}`
+        held.provisions =
+          held.base === 'embedded_resource'
+            ? [{ uri: contextUri(''), text: started.success.base, mimeType: 'text/plain' }]
+            : []
         return null
       })
 
@@ -1813,20 +1825,36 @@ export const runtimeLayer = Layer.effect(
                   path: delivered.record.path,
                   fingerprint: delivered.record.fingerprint,
                   deliveredAt: delivered.record.deliveredAt,
+                  reached: delivered.record.reached,
                 }),
                 correlationId: `delivery:${delivered.record.fingerprint}`,
                 turnId: null,
               })
+              // A prompt of its own, made of the marker and the new text as a resource and of
+              // nothing the user said: the agent is handed a change, not a message (D6-08).
+              yield* attempt(
+                'delivering the context',
+                held.connection.prompt('', [
+                  {
+                    uri: contextUri(delivered.record.path),
+                    text: delivered.content,
+                    mimeType: 'text/markdown',
+                  },
+                ]),
+              )
             }
 
-            // The base first, then what changed, then what the user asked: a provision is read
-            // before the instructions that amend it, and both before the turn they are provided
-            // for.
-            const provided = [held.context, delivered?.text ?? null].filter((one) => one !== null)
-            const sent = [...provided, text].join('\n\n')
+            // What the agent is provided goes in front of what the user asked: the base, as a
+            // resource, on the first prompt of an agent with no system prompt to take it (D6-07),
+            // and the conversation rebuilt for an agent that lost its own (D5-07).
+            const sent = [held.context, text].filter((one) => one !== null).join('\n\n')
+            const provisions = held.provisions
             held.context = null
+            held.provisions = []
 
-            const outcome = yield* Effect.result(attempt('prompting', held.connection.prompt(sent)))
+            const outcome = yield* Effect.result(
+              attempt('prompting', held.connection.prompt(sent, provisions)),
+            )
             if (Result.isSuccess(outcome)) {
               const answered = outcome.success
               // What is in the thread is read before the window is: the announcement travels as a

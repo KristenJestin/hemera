@@ -21,10 +21,18 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AGENTS_FILE, CONTEXT_BASE, deliveryText } from '@hemera/core'
+import {
+  AGENTS_FILE,
+  type BaseReach,
+  CONTEXT_BASE,
+  type ContextReach,
+  deliveryText,
+} from '@hemera/core'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Context as EffectContext, Effect, Layer } from 'effect'
 
+import { bareModeOf } from '../agents/bare.ts'
+import { ADAPTERS } from '../agents/discovery.ts'
 import { Projects, UnknownProjectError } from '../projects.ts'
 import { Sessions, UnknownSessionError } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
@@ -33,13 +41,22 @@ import { type ContextDeliveryKind, contextDeliveries } from '../storage/schema.t
 /** How a source of the provided context is named, in the table and under the same name in a view. */
 export type DeliveryKind = ContextDeliveryKind
 
-/** One thing a Session was provided, as the Context view lists it. */
-export interface Delivery {
+/** One thing a Session was provided, as its row records it. */
+interface Recorded {
   readonly kind: DeliveryKind
   /** The file it came from, and `''` for the base, which is not a file. */
   readonly path: string
   readonly fingerprint: string
   readonly deliveredAt: string
+}
+
+/** One thing a Session was provided, as the Context view lists it. */
+export interface Delivery extends Recorded {
+  /**
+   * How it reached the agent (D6-10): the base by its agent's means, `AGENTS.md` read by the agent
+   * itself, a change as a delivery prompt of its own between two turns.
+   */
+  readonly reached: ContextReach
 }
 
 /** What a Session is given when it starts. */
@@ -56,12 +73,16 @@ export interface Pending {
   readonly fingerprint: string
   /** The text as it is handed over: the marker, and the instructions as they now read. */
   readonly text: string
+  /** The instructions as they now read, which is what a delivery carries as its resource. */
+  readonly content: string
 }
 
 /** What a delivery leaves behind: what to hand over, and what to record in the thread. */
 export interface Delivered {
   readonly record: Delivery
   readonly text: string
+  /** The instructions as they now read, without the marker: the resource of the delivery. */
+  readonly content: string
 }
 
 /** What this service provides a Session, and what it can be refused with. */
@@ -190,7 +211,7 @@ export const contextLayer = Layer.effect(
     }
 
     /** Everything a Session was provided, oldest first: what the Context view lists. */
-    const rowsOf = (sessionId: string): Effect.Effect<Delivery[], DatabaseError> =>
+    const rowsOf = (sessionId: string): Effect.Effect<Recorded[], DatabaseError> =>
       withDatabase(
         database
           .select({
@@ -249,7 +270,7 @@ export const contextLayer = Layer.effect(
       kind: DeliveryKind,
       path: string,
       fingerprint: string,
-    ): Effect.Effect<Delivery | null, DatabaseError> =>
+    ): Effect.Effect<Recorded | null, DatabaseError> =>
       withDatabase(
         database
           .insert(contextDeliveries)
@@ -307,6 +328,7 @@ export const contextLayer = Layer.effect(
           path: AGENTS_FILE,
           fingerprint: instructions.fingerprint,
           text: deliveryText(instructions.text),
+          content: instructions.text,
         }
       })
 
@@ -316,9 +338,57 @@ export const contextLayer = Layer.effect(
         if (waiting === null) return null
         const written = yield* record(sessionId, 'instructions', waiting.path, waiting.fingerprint)
         if (written === null) return null
-        return { record: written, text: waiting.text }
+        return {
+          record: { ...written, reached: 'delivery_prompt' as const },
+          text: waiting.text,
+          content: waiting.content,
+        }
       })
 
-    return { start, pending, deliver, provided: rowsOf }
+    /**
+     * How the base reaches the agent of this Session: by the means its adapter declares, on the
+     * platform this engine runs on (D6-07). A Session with no agent yet has been given nothing, and
+     * reads as the means of the agents that have no system prompt to take it.
+     */
+    const baseReachOf = (sessionId: string): Effect.Effect<BaseReach, Refusal> =>
+      sessions.one(sessionId).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof UnknownSessionError
+            ? cause
+            : new DatabaseError({ doing: 'reading the Session of what it was provided', cause }),
+        ),
+        Effect.map(({ session }) =>
+          session.provider === null
+            ? 'embedded_resource'
+            : bareModeOf(ADAPTERS[session.provider], process.platform).base,
+        ),
+      )
+
+    const provided = (sessionId: string): Effect.Effect<Delivery[], Refusal> =>
+      Effect.gen(function* () {
+        const base = yield* baseReachOf(sessionId)
+        const rows = yield* rowsOf(sessionId)
+        const reachOf = (kind: DeliveryKind): ContextReach => {
+          switch (kind) {
+            case 'base':
+              return base
+            case 'native':
+              return 'read_natively'
+            case 'instructions':
+              return 'delivery_prompt'
+          }
+        }
+        return rows.map(
+          (row): Delivery => ({
+            kind: row.kind,
+            path: row.path,
+            fingerprint: row.fingerprint,
+            deliveredAt: row.deliveredAt,
+            reached: reachOf(row.kind),
+          }),
+        )
+      })
+
+    return { start, pending, deliver, provided }
   }),
 )

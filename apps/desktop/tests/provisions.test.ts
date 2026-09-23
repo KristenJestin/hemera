@@ -14,13 +14,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect } from 'effect'
+import { z } from 'zod'
 
-import { AGENTS_FILE, CONTEXT_BASE, DELIVERY_MARKER } from '@hemera/core'
+import { AGENTS_FILE, CONTEXT_BASE, DELIVERY_MARKER, contextUri } from '@hemera/core'
 
+import { bareModeOf } from '#engine/agents/bare.ts'
+import { claude } from '#engine/agents/adapters/claude.ts'
+import { codex } from '#engine/agents/adapters/codex.ts'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { Context as AgentContext } from '#engine/context/service.ts'
 import { ToolAccess } from '#engine/tools/access.ts'
-import { application, aSession, threadOf } from './application.ts'
+import { application, aSession, aSessionOn, threadOf } from './application.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -45,25 +50,78 @@ const instructions = (text: string): void => {
 /** An agent that answers every turn with one line, which is all these suites need of it. */
 const answering = () => fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
 
+/** What Claude Code reads its system prompt from, on the `_meta` of `session/new`. */
+const SYSTEM_PROMPT = z.object({
+  claudeCode: z.object({
+    options: z.object({
+      systemPrompt: z.object({ type: z.literal('custom'), prompt: z.string() }),
+    }),
+  }),
+})
+
 describe('The base is provided once, by the agent’s means', () => {
-  test('it rides on the first prompt of the Session and on no other', async () => {
+  test('on Claude Code, through the system prompt, and never in a prompt', async () => {
     const agent = answering()
 
-    await opened(agent)(
+    const provided = await opened(agent)(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime
-        const session = yield* aSession(workingDirectory)
+        const context = yield* AgentContext
+        const session = yield* aSessionOn(workingDirectory, 'claude')
 
         yield* runtime.prompt(session.id, 'start on the reader')
         yield* runtime.prompt(session.id, 'carry on')
-
-        // The base is in front of what the user asked, word for word, and the second turn is the
-        // user's own text and nothing else: a provision is given once per session.
-        expect(agent.answers.prompts[0]?.startsWith(CONTEXT_BASE)).toBe(true)
-        expect(agent.answers.prompts[0]).toContain('start on the reader')
-        expect(agent.answers.prompts[1]).toBe('carry on')
+        return yield* context.provided(session.id)
       }),
     )
+
+    // Handed once, with the session, as the system prompt Claude Code takes on `_meta`.
+    const meta = SYSTEM_PROMPT.parse(JSON.parse(agent.answers.metas[0] ?? '{}'))
+    expect(meta.claudeCode.options.systemPrompt.prompt).toBe(CONTEXT_BASE)
+    // So the prompts are the user's own text, and nothing else.
+    expect(agent.answers.prompts).toEqual(['start on the reader', 'carry on'])
+    expect(agent.answers.blocks.flat().some((block) => block.type === 'resource')).toBe(false)
+    // And the Context view lists it as provided, and says how it reached the agent.
+    const base = provided.find((one) => one.kind === 'base')
+    expect(base?.reached).toBe('system_prompt')
+  })
+
+  test('on OpenCode, as an embedded resource of the first prompt, behind the marker', async () => {
+    const agent = answering()
+
+    const provided = await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const context = yield* AgentContext
+        const session = yield* aSessionOn(workingDirectory, 'opencode')
+
+        yield* runtime.prompt(session.id, 'start on the reader')
+        yield* runtime.prompt(session.id, 'carry on')
+        return yield* context.provided(session.id)
+      }),
+    )
+
+    // Nothing on `_meta`: this agent has no system prompt to hand it through.
+    expect(agent.answers.metas).toEqual([null])
+    // The first prompt: Hemera's marker, the base as a resource, then what the user asked.
+    expect(agent.answers.blocks[0]).toEqual([
+      { type: 'text', text: DELIVERY_MARKER },
+      {
+        type: 'resource',
+        resource: { uri: contextUri(''), mimeType: 'text/plain', text: CONTEXT_BASE },
+      },
+      { type: 'text', text: 'start on the reader' },
+    ])
+    // The second one is the user's text alone: a provision is given once per session.
+    expect(agent.answers.blocks[1]).toEqual([{ type: 'text', text: 'carry on' }])
+    const base = provided.find((one) => one.kind === 'base')
+    expect(base?.reached).toBe('embedded_resource')
+  })
+
+  test('Codex, were it qualified, would take it the way OpenCode does', () => {
+    // Codex opens no Session (D6-02); what it declares is what a trial of it runs with.
+    expect(bareModeOf(codex, 'linux').base).toBe('embedded_resource')
+    expect(bareModeOf(claude, 'linux').base).toBe('system_prompt')
   })
 })
 
@@ -105,11 +163,21 @@ describe('A change during a turn leaves at the next safe point', () => {
         yield* runtime.prompt(session.id, 'carry on')
 
         // Nothing reached the agent while the first turn was running, and the change left at the
-        // one moment nothing is in flight: in front of the next prompt, as its own text.
+        // one moment nothing is in flight: before the next prompt, as a prompt of its own made of
+        // the marker and the new text as a resource — then the user's prompt, untouched.
         expect(agent.answers.prompts[0]).not.toContain(DELIVERY_MARKER)
-        expect(agent.answers.prompts[1]).toContain(DELIVERY_MARKER)
-        expect(agent.answers.prompts[1]).toContain('Be brief, and say why.')
-        expect(agent.answers.prompts[1]).toContain('carry on')
+        expect(agent.answers.blocks[1]).toEqual([
+          { type: 'text', text: DELIVERY_MARKER },
+          {
+            type: 'resource',
+            resource: {
+              uri: contextUri(AGENTS_FILE),
+              mimeType: 'text/markdown',
+              text: 'Be brief, and say why.\n',
+            },
+          },
+        ])
+        expect(agent.answers.prompts[2]).toBe('carry on')
 
         const delivered = (yield* threadOf(session.id)).filter(
           (entry) => entry.kind === 'context_delivery',

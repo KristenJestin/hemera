@@ -35,6 +35,7 @@ import {
   type SessionConfigSelectOptions,
 } from '@agentclientprotocol/sdk'
 import { Data, Effect } from 'effect'
+import { DELIVERY_MARKER } from '@hemera/core'
 import { z } from 'zod'
 
 import { type AgentAdapter } from './adapter.ts'
@@ -318,8 +319,18 @@ export interface AgentConnection {
     mcpServers: readonly McpServer[],
     meta?: SessionMeta,
   ) => Effect.Effect<void, AgentProtocolError>
-  /** Sends one turn and waits for the agent to be done with it. */
-  readonly prompt: (text: string) => Effect.Effect<PromptOutcome, AgentProtocolError>
+  /**
+   * Sends one turn and waits for the agent to be done with it.
+   *
+   * What Hemera provides goes in front of the text, as embedded resources behind its marker
+   * (D6-07, D6-08): the base on an agent with no system prompt to hand it through, a change of
+   * the instructions between two turns. A prompt of provisions alone, with an empty text, is a
+   * delivery — no word of the user's is in it.
+   */
+  readonly prompt: (
+    text: string,
+    provided?: readonly Provision[],
+  ) => Effect.Effect<PromptOutcome, AgentProtocolError>
   /** Asks the agent to stop what it is doing; its answer to the turn is `cancelled`. */
   readonly cancel: () => Effect.Effect<void, AgentProtocolError>
 }
@@ -333,6 +344,35 @@ export interface ConnectionOptions {
   readonly adapter: AgentAdapter
   readonly onEvent: (event: AgentEvent) => void
   readonly onPermission: (question: PermissionQuestion) => Promise<PermissionAnswer>
+}
+
+/** One text Hemera provides an agent, named by the address it is known by (D6-07). */
+export interface Provision {
+  readonly uri: string
+  readonly text: string
+  readonly mimeType: string
+}
+
+/**
+ * The blocks of one prompt: Hemera's marker and what it provides, then the user's text.
+ *
+ * A provision is an embedded resource on an agent that advertised `embeddedContext`, which the
+ * three do; on one that did not, it is the same text in a text block under its address, because
+ * a resource the agent said it cannot read is a provision that never arrived. The marker comes
+ * first either way, so what Hemera provided is never read as the user's words (D6-08).
+ */
+function blocksOf(text: string, provided: readonly Provision[], embeds: boolean): ContentBlock[] {
+  const blocks: ContentBlock[] = []
+  if (provided.length > 0) blocks.push({ type: 'text', text: DELIVERY_MARKER })
+  for (const one of provided) {
+    blocks.push(
+      embeds
+        ? { type: 'resource', resource: { uri: one.uri, mimeType: one.mimeType, text: one.text } }
+        : { type: 'text', text: `${one.uri}\n${one.text}` },
+    )
+  }
+  if (text !== '') blocks.push({ type: 'text', text })
+  return blocks
 }
 
 /**
@@ -721,6 +761,9 @@ export function connect(
       name: method.name,
     }))
 
+    // Whether a provision can be handed over as a resource, as the agent said at `initialize`.
+    const embeds = handshake.agentCapabilities?.promptCapabilities?.embeddedContext === true
+
     const named = (value: string, what: string): Effect.Effect<string, AgentProtocolError> =>
       sessionId === null
         ? Effect.fail(new AgentProtocolError({ what, cause: 'no session has been opened' }))
@@ -818,7 +861,7 @@ export function connect(
           announced = optionsOf(answered.configOptions)
         }),
 
-      prompt: (text) =>
+      prompt: (text, provided = []) =>
         Effect.gen(function* () {
           const open = sessionId
           if (open === null) {
@@ -830,7 +873,7 @@ export function connect(
             try: () =>
               connection.prompt({
                 sessionId: open,
-                prompt: [{ type: 'text', text }],
+                prompt: blocksOf(text, provided, embeds),
               }),
             catch: (cause) => new AgentProtocolError({ what: 'prompt', cause: String(cause) }),
           })

@@ -785,6 +785,8 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         protocolVersion: PROTOCOL_VERSION,
         agentCapabilities: {
           loadSession: script.continues === true,
+          // What the three agents advertise, and what a provision of Hemera's is carried by (D6-07).
+          promptCapabilities: { embeddedContext: true },
           // Advertised unless the script says otherwise, and whether the answer is an error is the
           // script's: the fallback a refused resume forces is a path Hemera has to walk, and a
           // capability it never sees is a path no test can reach. `advertisesResume: false` is that
