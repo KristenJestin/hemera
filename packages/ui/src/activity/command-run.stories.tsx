@@ -29,7 +29,7 @@ const CHECK_OUTPUT = [
 ].join('\n')
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/CommandRun',
   component: CommandRun,
   parameters: { layout: 'padded' },

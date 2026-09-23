@@ -108,7 +108,7 @@ const AGENTS: SettingsProps['agents'] = {
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Settings',
   component: Settings,
   render: (args) => <Controlled {...args} />,

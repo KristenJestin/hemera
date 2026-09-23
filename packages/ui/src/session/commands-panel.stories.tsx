@@ -33,7 +33,7 @@ const CHECK: CommandPanelRun = {
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Session/CommandsPanel',
   component: CommandsPanel,
   parameters: { layout: 'padded' },

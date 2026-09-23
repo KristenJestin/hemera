@@ -45,7 +45,7 @@ function Harness(props: Omit<SessionDetailsProps, 'open' | 'onOpenChange'>): Rea
 const meta = {
   title: 'Blocks/Session/SessionDetails',
   component: Harness,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     plan: [
