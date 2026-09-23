@@ -51,7 +51,7 @@ import {
 import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discovery.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
-import { ProcessSupervisor, type SupervisedProcess } from './supervisor.ts'
+import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
@@ -467,6 +467,7 @@ export const runtimeLayer = Layer.effect(
     const supervisor = yield* ProcessSupervisor
     const notices = yield* AgentNotices
     const pool = yield* Pool
+    const diagnostic = yield* StderrSink
 
     /**
      * The scope the engine gave this layer: the lifetime every fiber and process here lives in.
@@ -529,19 +530,32 @@ export const runtimeLayer = Layer.effect(
         held.chunks.clear()
         if (settled) held.open.clear()
         for (const [key, chunk] of writing) {
+          // A replayed entry is the history being read back rather than an entry settling now:
+          // its row is one the Journal has already told its reader about, and a resume says
+          // nothing about it that the first turn did not say.
+          const settles = settled && chunk.origin === 'live'
+          const wrote = yield* Effect.result(
+            writeNow(sessionId, {
+              role: 'agent',
+              kind: chunk.kind,
+              body: chunk.body,
+              correlationId: key,
+              turnId: chunk.turnId,
+              origin: chunk.origin,
+              settled: settles,
+            }),
+          )
+          // A write that failed loses the text of this flush, as it did when each chunk was
+          // written where it landed: it goes to the diagnostic rather than failing whatever is
+          // written after it, and the next chunk of the entry carries the whole text again. Held
+          // for another attempt, it could land after the entry that follows it.
+          if (Result.isFailure(wrote)) {
+            yield* diagnostic.write(
+              `session ${sessionId}: the text of ${key} was dropped: ${wrote.failure.message}`,
+            )
+            continue
+          }
           if (!settled && chunk.origin === 'live') held.open.set(key, chunk)
-          yield* writeNow(sessionId, {
-            role: 'agent',
-            kind: chunk.kind,
-            body: chunk.body,
-            correlationId: key,
-            turnId: chunk.turnId,
-            origin: chunk.origin,
-            // A replayed entry is the history being read back rather than an entry settling now:
-            // its row is one the Journal has already told its reader about, and a resume says
-            // nothing about it that the first turn did not say.
-            settled: settled && chunk.origin === 'live',
-          })
         }
       })
 
@@ -652,8 +666,14 @@ export const runtimeLayer = Layer.effect(
               yield* Effect.sleep(CHUNK_FLUSH)
               yield* flush(sessionId, held, false)
             }
-            held.timer = null
-          }).pipe(Effect.ignore),
+          }).pipe(
+            // However the loop ends, the next chunk held has to find no timer and arm one.
+            Effect.ensuring(
+              Effect.sync(() => {
+                held.timer = null
+              }),
+            ),
+          ),
         )
       })
 

@@ -19,6 +19,7 @@ import type { Discovery } from '#engine/agents/discovery.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
+import { StderrSink } from '#engine/agents/supervisor.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
@@ -78,6 +79,7 @@ function running<A, E>(
     }),
     fakeSupervisor(fakeAgent()),
     NoNotices,
+    Layer.succeed(StderrSink, { write: () => Effect.void }),
   )
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very
   // same ones: `provideMerge` hands them up rather than hiding them.
