@@ -1,3 +1,4 @@
+import { TOOL_NAMES } from '@hemera/core'
 import type { CommandRun, SessionEntry } from '@hemera/ipc'
 import type { CommandKind, CommandState, HemeraToolArgument, HemeraToolStatus } from '@hemera/ui'
 import { z } from 'zod'
@@ -168,4 +169,74 @@ export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | n
   if (read === null) return null
   const short = read.fingerprint.slice(0, FINGERPRINT_CHARACTERS)
   return { id: entry.id, body: `${entry.body} (${short})` }
+}
+
+/** What the agent reports of a call, as far as telling one of Hemera's apart goes. */
+const reportedCallSchema = z.object({ call: z.object({ title: z.string() }) })
+
+/**
+ * The tool of Hemera's a native call names, or null for one of the agent's own (D6-06).
+ *
+ * Every agent reports the calls it makes, Hemera's included, as its own `tool_call`: the name is
+ * the tool's under the agent's prefix — `mcp__hemera__fs_read` on Claude Code and Codex,
+ * `hemera_fs_read` on OpenCode — or the bare name. Such a call is the same call as the
+ * `hemera_tool_call` entry Hemera writes for it, seen from the other end.
+ */
+export function hemeraToolNamed(title: string): string | null {
+  const bare = title
+    .replace(/^mcp__hemera__/i, '')
+    .replace(/^hemera_/i, '')
+    .toLowerCase()
+  return TOOL_NAMES.find((name) => name === bare) ?? null
+}
+
+/** The tool of Hemera's an entry is about, whichever end reported it, or null. */
+function hemeraToolOf(entry: SessionEntry): string | null {
+  if (entry.kind === 'hemera_tool_call') return hemeraToolCallOf(entry)?.tool ?? null
+  if (entry.kind !== 'tool_call') return null
+  return hemeraToolNamed(readPayload(reportedCallSchema, entry.payload)?.call.title ?? '')
+}
+
+/** What the thread draws once for each of Hemera's calls rather than twice (D6-06). */
+export interface FoldedCalls {
+  /** Hemera's entries drawn in the place of the agent's report of them, not where they stand. */
+  readonly hidden: ReadonlySet<string>
+  /** The entry drawn in the place of an agent's report: Hemera's own, once it was written. */
+  readonly inPlaceOf: ReadonlyMap<string, SessionEntry>
+}
+
+/**
+ * Pairs each agent's report of a Hemera call with the entry Hemera wrote for it (D6-06).
+ *
+ * The call is drawn once, as Hemera's block — distinct from a native call, which is the point —
+ * and in the place where the agent reported it, which is when it happened. The agent's entry is
+ * kept in the thread and in the Journal; only its drawing is folded. Nothing names one from the
+ * other, so they are paired in order, tool by tool: the first report of `fs_read` with the
+ * first entry Hemera wrote for `fs_read`. A report whose entry Hemera has not written yet — the call
+ * is still running, and Hemera writes when it answers — is drawn as Hemera's block in the state
+ * the agent reports.
+ */
+export function foldedCallsOf(entries: readonly SessionEntry[]): FoldedCalls {
+  const reported = new Map<string, SessionEntry[]>()
+  const written = new Map<string, SessionEntry[]>()
+  for (const entry of entries) {
+    const tool = hemeraToolOf(entry)
+    if (tool === null) continue
+    const into = entry.kind === 'tool_call' ? reported : written
+    const held = into.get(tool)
+    if (held === undefined) into.set(tool, [entry])
+    else held.push(entry)
+  }
+  const hidden = new Set<string>()
+  const inPlaceOf = new Map<string, SessionEntry>()
+  for (const [tool, reports] of reported) {
+    const own = written.get(tool) ?? []
+    for (const [index, report] of reports.entries()) {
+      const answer = own[index]
+      if (answer === undefined) continue
+      hidden.add(answer.id)
+      inPlaceOf.set(report.id, answer)
+    }
+  }
+  return { hidden, inPlaceOf }
 }

@@ -13,7 +13,13 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
 
-import { commandRunOf, contextDeliveryOf, hemeraToolCallOf } from '#renderer/agent-tool-payloads.ts'
+import {
+  commandRunOf,
+  contextDeliveryOf,
+  foldedCallsOf,
+  hemeraToolCallOf,
+  hemeraToolNamed,
+} from '#renderer/agent-tool-payloads.ts'
 
 /** A thread entry with every field but `kind`, `role`, `body` and `payload` held to a fixed default. */
 function entryOf(
@@ -182,5 +188,88 @@ describe('The agent starts the app and the user opens it', () => {
     })
     // And a run of another entry is not this one's.
     expect(commandRunOf(entry, [{ ...pushed, id: 'run-2' }])?.url).toBeUndefined()
+  })
+})
+
+describe('A Hemera tool call is drawn once', () => {
+  /** The agent's own report of a call, as the runtime stores it under `tool_call`. */
+  const reported = (id: string, title: string, status: string): SessionEntry => ({
+    ...entryOf(
+      'tool_call',
+      'agent',
+      title,
+      JSON.stringify({
+        call: {
+          title,
+          kind: 'other',
+          status,
+          locations: [],
+          content: [],
+          rawInput: null,
+          rawOutput: null,
+        },
+      }),
+    ),
+    id,
+  })
+  /** The entry Hemera writes for one of its calls once it has answered it. */
+  const answered = (id: string, tool: string): SessionEntry => ({
+    ...entryOf(
+      'hemera_tool_call',
+      'agent',
+      'read notes.md',
+      JSON.stringify({
+        tool,
+        state: 'completed',
+        caller: 'acf1119ed715',
+        paths: [],
+        arguments: '{}',
+      }),
+    ),
+    id,
+  })
+
+  test("the agent's report of it is recognised under each agent's prefix", () => {
+    expect(hemeraToolNamed('hemera_fs_read')).toBe('fs_read')
+    expect(hemeraToolNamed('mcp__hemera__commands_run')).toBe('commands_run')
+    expect(hemeraToolNamed('search')).toBe('search')
+    // A native call is not one of Hemera's, whatever it is called.
+    expect(hemeraToolNamed('Read')).toBeNull()
+    expect(hemeraToolNamed('mcp__github__search_code')).toBeNull()
+  })
+
+  test("Hemera's block is drawn where the agent reported the call, and not a second time", () => {
+    // The OpenCode trial of 23 September 2026: the agent's `hemera_fs_read`, then Hemera's entry.
+    const thread = [reported('native', 'hemera_fs_read', 'completed'), answered('own', 'fs_read')]
+    const folded = foldedCallsOf(thread)
+
+    expect(folded.hidden).toEqual(new Set(['own']))
+    expect(folded.inPlaceOf.get('native')?.id).toBe('own')
+    // Both stay in the thread: only the drawing is folded.
+    expect(thread).toHaveLength(2)
+  })
+
+  test('while Hemera has not answered, the report stands on its own, in the state it reports', () => {
+    const folded = foldedCallsOf([reported('native', 'hemera_fs_read', 'in_progress')])
+
+    expect(folded.hidden.size).toBe(0)
+    expect(folded.inPlaceOf.has('native')).toBe(false)
+  })
+
+  test('two calls of one tool pair in order, and a native call is left alone', () => {
+    const thread = [
+      reported('n1', 'hemera_fs_read', 'completed'),
+      reported('shell', 'bash', 'completed'),
+      answered('h1', 'fs_read'),
+      reported('n2', 'hemera_fs_read', 'completed'),
+      answered('h2', 'fs_read'),
+    ]
+    const folded = foldedCallsOf(thread)
+
+    expect([...folded.inPlaceOf].map(([at, own]) => [at, own.id])).toEqual([
+      ['n1', 'h1'],
+      ['n2', 'h2'],
+    ])
+    expect(folded.inPlaceOf.has('shell')).toBe(false)
   })
 })

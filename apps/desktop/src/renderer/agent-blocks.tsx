@@ -5,6 +5,7 @@ import {
   DecisionSummary,
   DiffBlock,
   HemeraToolCall,
+  type HemeraToolStatus,
   MessageGroup,
   PermissionRequest,
   StoppedTurn,
@@ -23,7 +24,12 @@ import {
 import type { ReactNode } from 'react'
 import { z } from 'zod'
 
-import { commandRunOf, contextDeliveryOf, hemeraToolCallOf } from './agent-tool-payloads.ts'
+import {
+  commandRunOf,
+  contextDeliveryOf,
+  hemeraToolCallOf,
+  hemeraToolNamed,
+} from './agent-tool-payloads.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -264,6 +270,21 @@ function countsOf(oldText: string | null, newText: string) {
   return { added: after.length - head - tail, removed: before.length - head - tail }
 }
 
+/** The states of Hemera's block a report of the agent can be in, before Hemera answered. */
+const REPORTED_STATES: readonly HemeraToolStatus[] = [
+  'pending',
+  'in_progress',
+  'completed',
+  'failed',
+]
+
+/** How the agent's report of one of Hemera's calls stands, in the block's words. */
+function reportedStatus(status: string | null): HemeraToolStatus {
+  // A call the turn was stopped under did not answer: the block has no word for a stop.
+  if (status === 'cancelled') return 'failed'
+  return among(REPORTED_STATES, status, 'pending')
+}
+
 /** Which Session block an entry is, when the thread is read in order. */
 export interface AgentContext {
   /** When this render happened, so a line about time is written once. */
@@ -310,6 +331,20 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const read = readPayload(callPayloadSchema, entry.payload)
     if (read === null) return null
     const { call } = read
+    // One of Hemera's own calls, reported by the agent before Hemera answered it: drawn as
+    // Hemera's block, in the state the agent reports, until Hemera's entry takes its place.
+    const hemera = hemeraToolNamed(call.title)
+    if (hemera !== null) {
+      return (
+        <HemeraToolCall
+          tool={hemera}
+          status={reportedStatus(call.status)}
+          summary={call.title}
+          provenance={{ session: entry.sessionId, agent: 'agent', token: '' }}
+          defaultOpen={false}
+        />
+      )
+    }
     const said = textOf(call.content)
     // What came back is the tool's own answer where it gave one, and what it attached where it
     // did not. What it was called with is the raw input, and the attached text stands in for it

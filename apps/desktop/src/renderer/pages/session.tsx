@@ -39,6 +39,7 @@ import {
   type ModelDefaults,
 } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
+import { foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import {
   contextListsOf,
@@ -269,11 +270,14 @@ export function SessionPage({
    */
   const byLine = new Map(runs.map((run, index) => [run.lines[0]?.id ?? '', index]))
   const byEntry = new Map<string, ScrollerEntry>()
+  // A call to one of Hemera's tools is drawn once, as Hemera's block, where the agent reported
+  // it: the agent's own report of it stays in the thread and is not drawn a second time (D6-06).
+  const folded = foldedCallsOf(thread)
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
-    if (entry === undefined) continue
+    if (entry === undefined || folded.hidden.has(entry.id)) continue
     const next = thread[at + 1]
-    const block = drawEntry(entry, {
+    const block = drawEntry(folded.inPlaceOf.get(entry.id) ?? entry, {
       now,
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
