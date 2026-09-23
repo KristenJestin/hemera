@@ -1,15 +1,15 @@
 /**
  * A Spec snapshot as the Spec panel draws it (design D7-01, D7-05, D7-08, D7-10, D7-11, D7-12).
  *
- * The mapping is pure: a snapshot, its gate, its revisions, its buffers and its Journal in, the
+ * The mapping is pure: a snapshot, its revisions, its buffers and its Journal in, the
  * view of `@hemera/ui` out — one sentence of what is happening, a mark per part, the readiness
  * as seven checks and the things left before ready.
  */
 
 import { describe, expect, test } from 'vite-plus/test'
 
+import type { GateFailure } from '@hemera/core'
 import type {
-  GateFailure,
   JournalEntry,
   PhaseId,
   PhaseState,
@@ -277,15 +277,12 @@ describe('A conflict keeps the human’s text', () => {
 
 describe('The unavailable prototype does not block', () => {
   test('each engine check is drawn under the bar’s name, failing with what fails', () => {
-    const readiness = readinessOf(snapshot(), {
-      contentVersion: 3,
-      failures: [
-        failure('type_contract', 'expected_outcome', 'the expected_outcome section is missing'),
-        failure('blocking_question', 'q', 'a blocking question is open: Which date?'),
-        failure('phase', 'shape', 'the shape phase is open, not finished'),
-        failure('attestation', 'rev-1', 'the agent has not attested the contract'),
-      ],
-    })
+    const readiness = readinessOf(snapshot(), [
+      failure('type_contract', 'expected_outcome', 'the expected_outcome section is missing'),
+      failure('blocking_question', 'q', 'a blocking question is open: Which date?'),
+      failure('phase', 'shape', 'the shape phase is open, not finished'),
+      failure('attestation', 'rev-1', 'the agent has not attested the contract'),
+    ])
     expect(readiness.checks.map((one) => [one.check, one.passed])).toEqual([
       ['contract', false],
       ['references', true],
@@ -299,19 +296,16 @@ describe('The unavailable prototype does not block', () => {
   })
 
   test('the things left are links to where each is fixed, the attestation without one', () => {
-    const readiness = readinessOf(snapshot(), {
-      contentVersion: 3,
-      failures: [
-        failure('type_contract', 'expected_outcome'),
-        failure('type_contract', 'title'),
-        failure('coverage', 'tasks'),
-        failure('blocking_question', 'q1'),
-        failure('blocking_question', 'q2'),
-        failure('phase', 'plan'),
-        failure('phase', 'decompose'),
-        failure('attestation', 'rev-1'),
-      ],
-    })
+    const readiness = readinessOf(snapshot(), [
+      failure('type_contract', 'expected_outcome'),
+      failure('type_contract', 'title'),
+      failure('coverage', 'tasks'),
+      failure('blocking_question', 'q1'),
+      failure('blocking_question', 'q2'),
+      failure('phase', 'plan'),
+      failure('phase', 'decompose'),
+      failure('attestation', 'rev-1'),
+    ])
     expect(readiness.todo).toEqual([
       { label: 'the expected outcome', target: 'expected_outcome' },
       { label: 'the title' },
@@ -335,22 +329,35 @@ describe('The unavailable prototype does not block', () => {
         },
       ],
     })
-    const readiness = readinessOf(covered, {
-      contentVersion: 3,
-      failures: [failure('coverage', 'story-1'), failure('coverage', 'story-1')],
-    })
+    const readiness = readinessOf(covered, [
+      failure('coverage', 'story-1'),
+      failure('coverage', 'story-1'),
+    ])
     expect(readiness.todo).toEqual([
       { label: 'criteria for S1', target: 'stories' },
       { label: 'a task for S1', target: 'tasks' },
     ])
   })
 
+  test('the readiness is the ready gate of the very snapshot on screen', () => {
+    // Shaping has just begun: sections of the contract empty, no task, `shape` open, nothing
+    // attested — and no question, no link, no cycle to fail.
+    expect(readinessOf(snapshot()).checks.map((one) => [one.check, one.passed])).toEqual([
+      ['contract', false],
+      ['references', true],
+      ['coverage', false],
+      ['cycle', true],
+      ['questions', true],
+      ['phases', false],
+      ['attestation', false],
+    ])
+  })
+
   test('a frozen revision passed its gate, and is drawn with every check passing', () => {
     const frozen = snapshot()
-    const readiness = readinessOf(
-      { ...frozen, spec: { ...frozen.spec, status: 'ready' } },
-      { contentVersion: 3, failures: [failure('attestation', 'rev-1')] },
-    )
+    const readiness = readinessOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } }, [
+      failure('attestation', 'rev-1'),
+    ])
     expect(readiness.checks.every((one) => one.passed)).toBe(true)
     expect(readiness.todo).toEqual([])
   })
@@ -386,7 +393,6 @@ describe('An old revision is readable and not editable', () => {
     }
     const view = specViewOf({
       snapshot: old,
-      gate: { contentVersion: 3, failures: [failure('attestation', 'rev-2')] },
       revisions,
       buffers: [kept],
       journal: [ready('2026-09-22T10:00:00.000Z', 'rev-1')],
@@ -402,7 +408,6 @@ describe('An old revision is readable and not editable', () => {
     const frozen = snapshot()
     const view = specViewOf({
       snapshot: { ...frozen, spec: { ...frozen.spec, status: 'ready' } },
-      gate: { contentVersion: 3, failures: [] },
       revisions: [frozen.revision],
       buffers: [],
       journal: [],
@@ -479,7 +484,6 @@ describe('Stories, tasks and questions are named the way the document reads them
   test('stories are S1, S2 and tasks T1, T2, by their order, with what they wait on and cover', () => {
     const view = specViewOf({
       snapshot: decomposed,
-      gate: { contentVersion: 3, failures: [] },
       revisions: [decomposed.revision],
       buffers: [],
       journal: [],
@@ -513,7 +517,6 @@ describe('Stories, tasks and questions are named the way the document reads them
   test('a question keeps its options and its answer, and one of no phase reads under shape', () => {
     const view = specViewOf({
       snapshot: decomposed,
-      gate: { contentVersion: 3, failures: [] },
       revisions: [decomposed.revision],
       buffers: [],
       journal: [],

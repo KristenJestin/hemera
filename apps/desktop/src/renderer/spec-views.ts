@@ -1,9 +1,7 @@
-import { contractOf, focusOf, sectionOwner } from '@hemera/core'
+import { type GateFailure, contractOf, focusOf, readyGate, sectionOwner } from '@hemera/core'
 import type {
   ChannelArguments,
-  ChannelResponse,
   EditBuffer,
-  GateFailure,
   JournalEntry,
   PhaseId,
   SectionName,
@@ -35,7 +33,7 @@ import type {
  *
  * The design system mirrors nothing of the domain: its view says what is shown, already decided —
  * one sentence of what is happening, a mark per part, the readiness as seven segments and the
- * things left before ready. This is where a snapshot, its gate, its revisions, its edit buffers
+ * things left before ready. This is where a snapshot, its revisions, its edit buffers
  * and its Journal become that. Pure, and free of what `@hemera/ui` runs when it loads, so it is
  * tested on Node.
  */
@@ -43,7 +41,6 @@ import type {
 /** Everything a Spec view is read from: the store's answers, as they came. */
 export interface SpecReading {
   snapshot: SpecSnapshot
-  gate: ChannelResponse<'specs.gate'>
   revisions: readonly SpecRevision[]
   buffers: readonly EditBuffer[]
   /** The Spec's lines of the Journal, newest first. */
@@ -358,14 +355,17 @@ function todoOf(snapshot: SpecSnapshot, failures: readonly GateFailure[]): Readi
 }
 
 /**
- * The readiness of the revision shown (D7-10): the engine's gate, check by check, each failing
- * one naming what fails. A frozen revision passed its gate when it was frozen, and is drawn so.
+ * The readiness of the revision shown (D7-10): the ready gate of `@hemera/core`, run on the very
+ * snapshot on screen — so what it says and the content version "Mark ready" is sent with are one
+ * reading — check by check, each failing one naming what fails. A frozen revision passed its
+ * gate when it was frozen, and is drawn so. `failed` is what the gate answers of the snapshot,
+ * handed in by a test that looks at one check.
  */
 export function readinessOf(
   snapshot: SpecSnapshot,
-  gate: ChannelResponse<'specs.gate'>,
+  failed: readonly GateFailure[] = readyGate(snapshot),
 ): ReadinessView {
-  const failures = isEditable(snapshot) ? gate.failures : []
+  const failures = isEditable(snapshot) ? failed : []
   return {
     checks: GATE_ORDER.map((check) => {
       const failing = failures.filter((failure) => CHECKS[failure.check] === check)
@@ -419,7 +419,7 @@ export function revisionsOf(
 }
 
 /** The whole view of the panel. */
-export function specViewOf({ snapshot, gate, revisions, buffers, journal }: SpecReading): SpecView {
+export function specViewOf({ snapshot, revisions, buffers, journal }: SpecReading): SpecView {
   return {
     key: snapshot.spec.key,
     title: snapshot.revision.title,
@@ -438,7 +438,7 @@ export function specViewOf({ snapshot, gate, revisions, buffers, journal }: Spec
     questions: snapshot.questions.map(questionOf),
     questionsMark:
       snapshot.questions.length === 0 ? 'empty' : (snapshot.questions.at(-1)?.raisedBy ?? 'agent'),
-    readiness: readinessOf(snapshot, gate),
+    readiness: readinessOf(snapshot),
     frozenOn: isEditable(snapshot)
       ? undefined
       : dayOf(frozenAt(snapshot.revision, snapshot, revisions, journal)),

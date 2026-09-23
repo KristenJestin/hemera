@@ -261,11 +261,10 @@ export function SessionPage({
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
   const spec =
-    defined === null || stored.gate === null
+    defined === null
       ? null
       : specViewOf({
           snapshot: defined,
-          gate: stored.gate,
           revisions: stored.revisions,
           buffers: stored.buffers,
           journal: stored.journal,

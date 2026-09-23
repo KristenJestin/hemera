@@ -334,7 +334,6 @@ export function answer(
     if (decision.name === 'specs.read') {
       return yield* specs.read(decision.argument.specId, decision.argument.revision)
     }
-    if (decision.name === 'specs.gate') return yield* specs.gate(decision.argument.specId)
     if (decision.name === 'specs.revisions') return yield* specs.revisions(decision.argument.specId)
     if (decision.name === 'specs.create') return yield* specs.create(decision.argument)
     if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)

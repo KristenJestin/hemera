@@ -240,7 +240,6 @@ describe('The Spec use cases are declared and relayed', () => {
     const names = [
       'specs.list',
       'specs.read',
-      'specs.gate',
       'specs.revisions',
       'specs.writeSection',
       'specs.writeStories',

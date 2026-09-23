@@ -200,7 +200,7 @@ export const specPhaseSchema = z.object({
 
 export type SpecPhase = z.infer<typeof specPhaseSchema>
 
-/** One revision of one Spec: what the panel draws and the gate reads. */
+/** One revision of one Spec: what the panel draws and the ready gate reads. */
 export const specSnapshotSchema = z.object({
   spec: specSchema,
   revision: specRevisionSchema,
@@ -215,23 +215,6 @@ export const specSnapshotSchema = z.object({
 })
 
 export type SpecSnapshot = z.infer<typeof specSnapshotSchema>
-
-/** One failed check of the ready gate (D7-10). */
-export const gateFailureSchema = z.object({
-  check: z.enum([
-    'type_contract',
-    'references',
-    'coverage',
-    'cycle',
-    'blocking_question',
-    'phase',
-    'attestation',
-  ]),
-  target: z.string(),
-  message: z.string(),
-})
-
-export type GateFailure = z.infer<typeof gateFailureSchema>
 
 /** A section edited in the panel and not saved yet, kept across a restart (D7-12). */
 export const editBufferSchema = z.object({
@@ -261,10 +244,6 @@ export const SPEC_REQUESTS = {
   'specs.read': {
     arguments: z.object({ specId: z.string(), revision: z.number().int().positive().optional() }),
     response: specSnapshotSchema,
-  },
-  'specs.gate': {
-    arguments: z.object({ specId: z.string() }),
-    response: z.object({ failures: z.array(gateFailureSchema), contentVersion: z.number() }),
   },
   'specs.revisions': {
     arguments: z.object({ specId: z.string() }),

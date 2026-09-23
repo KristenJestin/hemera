@@ -1,5 +1,4 @@
 import type {
-  ChannelResponse,
   EditBuffer,
   EngineEvent,
   JournalEntry,
@@ -16,7 +15,7 @@ import { storiesWith } from './spec-views.ts'
  * The Spec a `define` Session shows beside its chat (design D7-07, D7-10, D7-11, D7-12).
  *
  * Like every store of this window, it holds what the engine answered and nothing else: after
- * each act the Spec, its gate, its revisions, its edit buffers and its Journal are read again
+ * each act the Spec, its revisions, its edit buffers and its Journal are read again
  * rather than patched here. The engine pushes `spec.changed` for every write, whoever made it —
  * the agent, another Session, the human in another panel — and the Spec on screen is read again
  * when it is about that one.
@@ -32,8 +31,6 @@ export interface SpecState {
   revision: number | null
   /** Every revision of the open Spec, as the engine lists them. */
   revisions: SpecRevision[]
-  /** The ready gate of the current revision, and the content version it was read on (D7-10). */
-  gate: ChannelResponse<'specs.gate'> | null
   /** The human texts kept after a refused save (D7-12). */
   buffers: EditBuffer[]
   /** The Spec's lines of the Journal, newest first: `spec.ready` says when a revision froze. */
@@ -46,7 +43,6 @@ const EMPTY: SpecState = {
   snapshot: null,
   revision: null,
   revisions: [],
-  gate: null,
   buffers: [],
   journal: [],
   refusal: null,
@@ -84,12 +80,11 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-/** Reads the open Spec, its gate, its revisions, its buffers and its Journal again. */
+/** Reads the open Spec, its revisions, its buffers and its Journal again. */
 async function reload(specId: string): Promise<void> {
   const picked = state.revision
-  const [current, gate, revisions, buffers] = await Promise.all([
+  const [current, revisions, buffers] = await Promise.all([
     window.hemera.invoke('specs.read', { specId }),
-    window.hemera.invoke('specs.gate', { specId }),
     window.hemera.invoke('specs.revisions', { specId }),
     window.hemera.invoke('specs.buffers.read', { specId }),
   ])
@@ -103,7 +98,7 @@ async function reload(specId: string): Promise<void> {
     limit: JOURNAL_PAGE,
   })
   if (shown !== specId) return
-  replace({ ...state, snapshot, gate, revisions, buffers, journal: journal.entries })
+  replace({ ...state, snapshot, revisions, buffers, journal: journal.entries })
 }
 
 /** Reads the open Spec again, keeping a failed read as the refusal on screen. */
@@ -260,17 +255,18 @@ export async function answerQuestion(
 }
 
 /**
- * "Mark ready", made against the revision and the content version the gate was read on
- * (D7-10). A Spec that changed since refuses it, and the gate is read again.
+ * "Mark ready", made against the revision and the content version of the snapshot the
+ * readiness was computed from, which is the one on screen (D7-10). A Spec that changed since
+ * refuses it, and is read again.
  */
 export async function markReady(): Promise<boolean> {
-  const { snapshot, gate } = state
-  if (snapshot === null || gate === null) return false
+  const { snapshot } = state
+  if (snapshot === null) return false
   return await acting(async (specId) => {
     await window.hemera.invoke('specs.markReady', {
       specId,
       expectedRevisionId: snapshot.spec.currentRevisionId,
-      expectedContentVersion: gate.contentVersion,
+      expectedContentVersion: snapshot.spec.contentVersion,
     })
   })
 }

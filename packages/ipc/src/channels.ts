@@ -86,7 +86,6 @@ export const CHANNELS = {
   // The Specs, relayed the same way: the panel reads and writes them as the human (D7-04).
   'specs.list': ENGINE_REQUESTS['specs.list'],
   'specs.read': ENGINE_REQUESTS['specs.read'],
-  'specs.gate': ENGINE_REQUESTS['specs.gate'],
   'specs.revisions': ENGINE_REQUESTS['specs.revisions'],
   'specs.create': ENGINE_REQUESTS['specs.create'],
   'specs.openSession': ENGINE_REQUESTS['specs.openSession'],

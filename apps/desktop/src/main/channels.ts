@@ -215,7 +215,6 @@ const RELAYED = [
   // The Specs, all of them the engine's to answer (D7-01).
   'specs.list',
   'specs.read',
-  'specs.gate',
   'specs.revisions',
   'specs.create',
   'specs.openSession',

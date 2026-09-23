@@ -109,7 +109,6 @@ export {
   SPEC_REQUESTS,
   acceptanceCriterionSchema,
   editBufferSchema,
-  gateFailureSchema,
   missionSchema,
   phaseIdSchema,
   phaseStateSchema,
@@ -136,7 +135,6 @@ export {
 export type {
   AcceptanceCriterion,
   EditBuffer,
-  GateFailure,
   Mission,
   PhaseId,
   PhaseState,

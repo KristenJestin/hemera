@@ -92,7 +92,6 @@ describe('Appel typé nominal', () => {
       // The Specs, relayed to the engine the same way.
       'specs.list',
       'specs.read',
-      'specs.gate',
       'specs.revisions',
       'specs.create',
       'specs.openSession',
@@ -190,7 +189,6 @@ describe('Cas d’usage nommés du process dédié', () => {
       'sessions.read',
       'specs.list',
       'specs.read',
-      'specs.gate',
       'specs.revisions',
       'specs.create',
       'specs.openSession',

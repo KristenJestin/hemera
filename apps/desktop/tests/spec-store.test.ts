@@ -99,7 +99,6 @@ let stop: () => void = () => undefined
 /** The answers of an open Spec whose `scope` is at `version`, with the buffers kept. */
 function reads(version: number, buffers: EditBuffer[] = [], writer = 'writer'): void {
   answers.set('specs.read', snapshot(version, writer))
-  answers.set('specs.gate', { failures: [], contentVersion: version })
   answers.set('specs.revisions', [snapshot(version).revision])
   answers.set('specs.buffers.read', buffers)
   answers.set('journal.read', { entries: [], nextBefore: null })
@@ -151,7 +150,7 @@ afterEach(() => {
 })
 
 describe('A Spec is opened with everything the panel draws', () => {
-  test('its revision, its gate, its revisions, its buffers and its Journal', async () => {
+  test('its revision, its revisions, its buffers and its Journal', async () => {
     reads(2)
 
     await openSpec('spec-7')
@@ -159,13 +158,12 @@ describe('A Spec is opened with everything the panel draws', () => {
     expect(names().toSorted()).toEqual([
       'journal.read',
       'specs.buffers.read',
-      'specs.gate',
       'specs.read',
       'specs.revisions',
     ])
     expect(argumentOf('journal.read')).toEqual({ projectId: 'atlas', specId: 'spec-7', limit: 200 })
     expect(specSnapshot().snapshot?.spec.key).toBe('ATL-7')
-    expect(specSnapshot().gate?.contentVersion).toBe(2)
+    expect(specSnapshot().snapshot?.spec.contentVersion).toBe(2)
   })
 })
 
@@ -188,7 +186,7 @@ describe('A human edit is recorded and reaches the agent', () => {
         baseVersion: 2,
       },
     })
-    expect(names()).toContain('specs.gate')
+    expect(names()).toContain('specs.read')
     expect(specSnapshot().refusal).toBeNull()
   })
 })
@@ -275,7 +273,7 @@ describe('A conflict keeps the human’s text', () => {
 })
 
 describe('An obsolete request is refused', () => {
-  test('Mark ready sends the revision and the content version the gate was read on', async () => {
+  test('Mark ready sends the revision and the content version of the snapshot on screen', async () => {
     reads(4)
     await openSpec('spec-7')
     answers.set('specs.markReady', snapshot(4))
@@ -289,7 +287,7 @@ describe('An obsolete request is refused', () => {
     })
   })
 
-  test('a refused click keeps the refusal and reads the gate again', async () => {
+  test('a refused click keeps the refusal and reads the Spec again', async () => {
     reads(4)
     await openSpec('spec-7')
     answers.set(
@@ -301,8 +299,8 @@ describe('An obsolete request is refused', () => {
 
     expect(await markReady()).toBe(false)
 
-    expect(names()).toContain('specs.gate')
-    expect(specSnapshot().gate?.contentVersion).toBe(5)
+    expect(names()).toContain('specs.read')
+    expect(specSnapshot().snapshot?.spec.contentVersion).toBe(5)
     expect(specSnapshot().refusal).toBe(
       'ATL-7 changed since its gate was shown: read the gate again.',
     )
