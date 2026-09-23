@@ -1,7 +1,7 @@
 /**
  * What Hemera provides to an agent, and how a change of it reaches it (design D6-07 … D6-10).
  *
- * The provided context is the base and the Project's instructions. The base is three sentences
+ * The provided context is the base and the Project's instructions. The base is four sentences
  * the agent is given once, at the start of the Session, by whatever means its adapter has: the
  * system prompt on Claude Code, an embedded resource in the first prompt on Codex and OpenCode.
  * The instructions are the Workspace's `AGENTS.md`. An agent that reads it itself, even bare, is
@@ -26,8 +26,9 @@ export const AGENTS_FILE = 'AGENTS.md'
  */
 export const CONTEXT_BASE = [
   'You are working inside Hemera, a desktop cockpit for agents.',
-  'Use the tools Hemera lends you — they are the only ones you have — and prefer them to any habit of your own: reading, writing, searching and running commands all go through them.',
+  'Use the tools Hemera lends you — they are the only ones you have — and prefer them to any habit of your own: reading and writing files, searching and running commands all go through them.',
   'Everything they do is recorded, and an action outside the workspace root is decided by the user, never by you: a refusal is an answer, not an obstacle.',
+  'The conversation you are in is already in your context: answer from it, and do not call `session_get` to read it again; a tool is for what you do not already have.',
 ].join('\n')
 
 /** Where a source of the context came from, which is what the Context view lists it under. */

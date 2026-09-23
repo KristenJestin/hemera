@@ -1,7 +1,7 @@
 /**
  * What an agent is provided, and how a change of it reaches it (D6-07, D6-08).
  *
- * The base is `CONTEXT_BASE`, the three sentences every Session is given once, by whatever means
+ * The base is `CONTEXT_BASE`, the four sentences every Session is given once, by whatever means
  * its adapter has. The Project's instructions are the `AGENTS.md` at the root of the Workspace.
  * Whether the agent reads it itself is its adapter's declaration, since bare mode can keep it
  * from reading it. An agent that reads it is not sent it — that would be a second injection of a
