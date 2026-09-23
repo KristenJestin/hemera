@@ -66,9 +66,11 @@ export type BareModeState = z.infer<typeof bareModeSchema>
  * `installHint` is the one sentence that says how to get the agent, and `loginHint` the command
  * that signs it in, which the page offers when it is not signed in.
  *
- * `latest` is the version published by the registry of `installer`, and it is null whenever
- * nobody asked: the list a Session is created from is read locally, and only the Agents section
- * goes to the network, when it is opened (D5-18).
+ * `latest` is the version published for the agent — Homebrew's formula for a `brew` install, the
+ * npm registry for any other, `unknown` included — and it is null whenever nobody asked or the
+ * registry answered nothing: the list a Session is created from is read locally, and only the
+ * Agents section goes to the network, when it is opened (D5-18). The installer decides whether
+ * an update is offered, never whether the version is read.
  *
  * `bareMode` is what the adapter declares and not what the machine answered: it is read off
  * Hemera's own adapter for this platform, so it is there whether or not the agent is (D6-02).

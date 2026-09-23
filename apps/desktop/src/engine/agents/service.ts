@@ -5,9 +5,9 @@
  * questions rather than one. `list` is local and answers in milliseconds: which commands the
  * machine has, what version each prints, and the tool that put it there. `check` is the same
  * answer with one more field filled in, and it is the only thing in this file that leaves the
- * machine — it reads the registry of each agent's own installer, which is why it is asked for
- * when the section is opened and never on a schedule, and why a registry that says nothing
- * leaves a version unknown rather than making the section fail.
+ * machine — it reads what was published for every agent that is found, whatever installed it,
+ * which is why it is asked for when the section is opened and never on a schedule, and why a
+ * registry that says nothing leaves a version unknown rather than making the section fail.
  *
  * `update` is the one thing here that changes the machine, and it happens only because somebody
  * pressed a button. It runs the tool that installed the agent — never a command of Hemera's own,
@@ -108,8 +108,10 @@ export const agentsLayer = Layer.effect(
             found,
             (agent) =>
               Effect.gen(function* () {
-                const asked = agent.found && agent.installer !== 'unknown'
-                const latest = asked
+                // A read, so the installer does not decide it: a command nothing here can place
+                // is still one whose version the section compares with what was published. The
+                // installer gates `update`, below, and nothing else.
+                const latest = agent.found
                   ? yield* registry.latest(ADAPTERS[agent.id], agent.installer)
                   : null
                 return availabilityOf(agent, latest)
