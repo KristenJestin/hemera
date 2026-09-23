@@ -36,7 +36,7 @@ export function panelRunsOf(runs: readonly CommandRun[], root: string): CommandP
     id: run.id,
     name: run.name,
     command: run.line,
-    kind: run.type,
+    type: run.type,
     state: run.state === 'exited' ? 'finished' : run.state,
     folder: folderOf(run.cwd, root),
     output: run.output,

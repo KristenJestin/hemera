@@ -14,32 +14,33 @@ function lineOf(command: Command): CommandLine {
     id: command.name,
     name: command.name,
     command: command.line,
-    kind: command.type,
+    lineWindows: command.lineWindows,
+    lineLinux: command.lineLinux,
+    type: command.type,
+    scope: command.scope,
+    portless: command.portless,
     folder: command.folder ?? '.',
   }
 }
 
-/** What the engine writes a command from: the fields a row edits, and the others as they are. */
+/** What the engine writes a command from: every field the row edits (D8-07, D8-10). */
 type CommandWrite = Pick<
   Command,
   'name' | 'line' | 'lineWindows' | 'lineLinux' | 'type' | 'folder' | 'scope' | 'portless'
 >
 
-/**
- * A row as the engine writes it. What the row does not show — the per-system lines, the scope,
- * Portless — is kept as the catalogue holds it, and a new command takes the defaults (D8-07).
- */
-function writeOf(line: CommandLine, held: Command | undefined): CommandWrite {
+/** A row as the engine writes it. */
+function writeOf(line: CommandLine): CommandWrite {
   return {
     name: line.name,
     line: line.command,
-    lineWindows: held?.lineWindows ?? null,
-    lineLinux: held?.lineLinux ?? null,
-    type: line.kind,
+    lineWindows: line.lineWindows,
+    lineLinux: line.lineLinux,
+    type: line.type,
     // The row's `.` is the Workspace root, which the engine is told as no folder at all.
     folder: line.folder === '.' ? null : line.folder,
-    scope: held?.scope ?? 'workspace',
-    portless: held?.portless ?? false,
+    scope: line.scope,
+    portless: line.portless,
   }
 }
 
@@ -94,16 +95,8 @@ export function ProjectSettingsPage({
         onAddRepository={onAddRepository}
         onRemoveRepository={onRemoveRepository}
         commands={commands.map(lineOf)}
-        onAddCommand={async (line) => await onSaveCommand(writeOf(line, undefined), false)}
-        onUpdateCommand={async (line) =>
-          await onSaveCommand(
-            writeOf(
-              line,
-              commands.find((one) => one.name === line.name),
-            ),
-            true,
-          )
-        }
+        onAddCommand={async (line) => await onSaveCommand(writeOf(line), false)}
+        onUpdateCommand={async (line) => await onSaveCommand(writeOf(line), true)}
         onRemoveCommand={onRemoveCommand}
         onArchive={onArchive}
       />

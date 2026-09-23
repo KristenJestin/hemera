@@ -1,8 +1,8 @@
 import { COMMAND_TYPES, TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
 import type { CommandRun, SessionEntry } from '@hemera/ipc'
 import type {
-  CommandKind,
   CommandState,
+  CommandType,
   HemeraToolArgument,
   HemeraToolStatus,
   ToolKind,
@@ -280,7 +280,7 @@ export interface CommandRunDrawn {
   readonly runId: string | null
   readonly name: string
   readonly command: string
-  readonly kind: CommandKind
+  readonly type: CommandType
   readonly state: CommandState
   readonly folder: string
   readonly url: string | undefined
@@ -313,7 +313,7 @@ export function commandRunOf(
     runId: runId ?? null,
     name,
     command: line,
-    kind: type,
+    type,
     state: state === 'exited' ? 'finished' : state,
     folder: cwd,
     url: url ?? undefined,

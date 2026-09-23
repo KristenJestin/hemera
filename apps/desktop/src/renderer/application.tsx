@@ -599,7 +599,13 @@ export function Application() {
       .then((found) => {
         if (!asking) return
         setRepositories(
-          found.map((one) => ({ path: one.path, branch: one.git, exists: one.exists })),
+          found.map((one) => ({
+            path: one.path,
+            branch: one.git,
+            exists: one.exists,
+            // D8-04: read from the Project once phase 2 wires `included_by_default`.
+            includedByDefault: true,
+          })),
         )
       })
       .catch(unanswered('repositories.status'))
@@ -609,7 +615,14 @@ export function Application() {
       .invoke('workspace.folders', { root })
       .then((found) => {
         if (!asking) return
-        setFolders(found.map((one) => ({ path: one.path, branch: one.git, exists: one.exists })))
+        setFolders(
+          found.map((one) => ({
+            path: one.path,
+            branch: one.git,
+            exists: one.exists,
+            includedByDefault: true,
+          })),
+        )
       })
       .catch(unanswered('workspace.folders'))
     return () => {
@@ -966,7 +979,14 @@ export function Application() {
     if (shell.activeEntryId === PROJECT_SETTINGS_ENTRY && current !== null) {
       return (
         <ProjectSettingsPage
-          project={{ name: current.name, tone: current.tone, mainPath: current.mainPath }}
+          project={{
+            name: current.name,
+            tone: current.tone,
+            mainPath: current.mainPath,
+            // D8-02: the Workspaces folder and the branch prefix are wired by phase 2.
+            workspacesRoot: null,
+            branchPrefix: null,
+          }}
           repositories={repositories}
           onSave={async (draft: ProjectDraft) => {
             const renamed = await renameProject(current, { name: draft.name, tone: draft.tone })

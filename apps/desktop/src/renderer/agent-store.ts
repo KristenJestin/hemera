@@ -254,7 +254,7 @@ export function activityOf(
   // on purpose and is not what the turn is doing once it has started.
   const command = [...running].reverse().find((entry) => entry.kind === 'command_run')
   const run = command === undefined ? null : commandRunOf(command)
-  if (run !== null && run.state === 'running' && run.kind !== 'serve') {
+  if (run !== null && run.state === 'running' && run.type !== 'serve') {
     return { state: 'running', detail: `Running ${run.name}`, thought }
   }
 
