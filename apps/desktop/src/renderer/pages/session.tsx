@@ -1,12 +1,20 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 
-import type { CommandRun, ConfigOption, Session, SessionEntry } from '@hemera/ipc'
+import type {
+  CommandRun,
+  ConfigOption,
+  ContextView as Provided,
+  Session,
+  SessionEntry,
+} from '@hemera/ipc'
 import {
   ActivityRow,
   AgentModelMenu,
   BlockedBanner,
+  CommandsPanel,
   Composer,
+  ContextView,
   MessageDaySeparator,
   MessageGroup,
   MessageScroller,
@@ -32,6 +40,7 @@ import {
 } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { whenOf } from '../journal-lines.ts'
+import { contextListsOf, openingTabOf, panelRunsOf } from '../side-column.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -158,6 +167,12 @@ export interface SessionPageProps {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** The Workspace root, which is what a run's folder is said relative to. */
+  root: string
+  /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
+  onRunCommand: (line: string) => void
+  /** What this Session was provided, may consult, and keeps to its agent; null until read. */
+  context: Provided | null
 }
 
 export function SessionPage({
@@ -187,6 +202,9 @@ export function SessionPage({
   commandRuns,
   onOpenUrl,
   onStopRun,
+  root,
+  onRunCommand,
+  context,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -502,7 +520,31 @@ export function SessionPage({
         it. The box is the page's and the emptiness is the column's — there is no wrapper here, so
         a column that draws nothing leaves the width where it was.
       */}
-      <SessionSideColumn plan={plan} files={touched} onSelectFile={onOpenFile} />
+      <SessionSideColumn
+        plan={plan}
+        files={touched}
+        onSelectFile={onOpenFile}
+        // The commands of a Session with an agent, whoever started them (D6-12): the same runs
+        // the thread's blocks read, and the line a one-off is run from. A Session nothing
+        // answers has no agent to lend a command to, and no tab for one.
+        commands={
+          session.provider === null ? undefined : (
+            <CommandsPanel
+              runs={panelRunsOf(commandRuns, root)}
+              onStop={onStopRun}
+              onOpenUrl={onOpenUrl}
+              onRun={onRunCommand}
+            />
+          )
+        }
+        // What the agent is working from, in three lists (D6-10), once the engine has said it.
+        context={context === null ? undefined : <ContextView {...contextListsOf(context)} />}
+        // The tab it opens on follows what is happening: a command running opens on Commands.
+        // Keyed on it, so a command that starts while the Session is open brings the column to
+        // its commands, as opening the Session with one running would have (D6-12).
+        key={openingTabOf(commandRuns)}
+        defaultTab={openingTabOf(commandRuns)}
+      />
     </div>
   )
 }

@@ -1,7 +1,7 @@
-import type { CommandRun, EngineEvent } from '@hemera/ipc'
+import type { CommandRun, ContextView, EngineEvent } from '@hemera/ipc'
 
 /**
- * The runs of the Sessions this window has open (design D6-12).
+ * The runs and the Context view of the Sessions this window has open (design D6-10, D6-12).
  *
  * A run is one process Hemera owns, whoever started it: the agent through its tool, the user
  * through the Commands panel. The thread holds one entry per run, written when it starts and when
@@ -9,17 +9,23 @@ import type { CommandRun, EngineEvent } from '@hemera/ipc'
  * as the run itself, pushed whole as it changes, and is kept here. The thread's block and the
  * panel both read a run from here, so they show the same state, address and output.
  *
+ * The Context view is read rather than pushed: what a Session was provided changes with a turn —
+ * the base goes with the first prompt — and when a change of `AGENTS.md` is delivered, and the
+ * engine says both; a Session whose view the window holds is read again then (D6-10).
+ *
  * Nothing is decided here: a run is stored as the engine pushed it or answered it, and a refusal
  * is the engine's sentence.
  */
 export interface ToolsState {
   /** The runs of each Session, oldest first, as the engine last said them. */
   runs: ReadonlyMap<string, readonly CommandRun[]>
+  /** The Context view of each Session the window has read one for. */
+  contexts: ReadonlyMap<string, ContextView>
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
 }
 
-const EMPTY: ToolsState = { runs: new Map(), refusal: null }
+const EMPTY: ToolsState = { runs: new Map(), contexts: new Map(), refusal: null }
 
 const listeners = new Set<() => void>()
 
@@ -79,8 +85,14 @@ export function listenToTools(): () => void {
   if (listening) return () => undefined
   listening = true
   const stop = window.hemera.on((event: EngineEvent) => {
-    if (event.event !== 'run') return
-    holding(event.sessionId, withRun(runsOf(event.sessionId), event.run))
+    if (event.event === 'run') {
+      holding(event.sessionId, withRun(runsOf(event.sessionId), event.run))
+      return
+    }
+    // What a Session was provided may have changed: a turn carried the base with its first
+    // prompt, or a change of the Workspace's instructions was delivered. A view held is read again.
+    const provided = event.event === 'delivery' || event.event === 'turn'
+    if (provided && state.contexts.has(event.sessionId)) void readContext(event.sessionId)
   })
   return () => {
     listening = false
@@ -97,6 +109,44 @@ export async function readRuns(sessionId: string): Promise<void> {
     const known = new Set(answered.map((one) => one.id))
     const since = runsOf(sessionId).filter((one) => !known.has(one.id))
     holding(sessionId, [...answered, ...since])
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/**
+ * Runs a command of the catalogue by name, or a one-off line, from the Commands panel (D6-12).
+ *
+ * The user's own act: nothing is asked, the run is the same one the agent would have started,
+ * and a one-off does not enter the catalogue. Answers the refusal's sentence, or null.
+ */
+export async function runCommand(
+  sessionId: string,
+  asked: { readonly name: string } | { readonly line: string },
+): Promise<string | null> {
+  try {
+    const run = await window.hemera.invoke('commands.run', { sessionId, ...asked })
+    holding(sessionId, withRun(runsOf(sessionId), run))
+    return null
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+    return message(cause)
+  }
+}
+
+/** The Context view of a Session, or null until it was read. */
+export function contextOf(sessionId: string | null): ContextView | null {
+  if (sessionId === null) return null
+  return state.contexts.get(sessionId) ?? null
+}
+
+/** Reads the Context view of a Session: the three lists of D6-10. */
+export async function readContext(sessionId: string): Promise<void> {
+  try {
+    const view = await window.hemera.invoke('context.read', { sessionId })
+    const contexts = new Map(state.contexts)
+    contexts.set(sessionId, view)
+    replace({ ...state, contexts })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }

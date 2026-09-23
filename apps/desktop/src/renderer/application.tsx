@@ -83,7 +83,15 @@ import {
   updateAgent,
 } from './agent-store.ts'
 import { bareRowOf, offeredOf } from './bare-mode.ts'
-import { listenToTools, readRuns, stopRun, subscribeToTools, toolsSnapshot } from './tools-store.ts'
+import {
+  listenToTools,
+  readContext,
+  readRuns,
+  runCommand,
+  stopRun,
+  subscribeToTools,
+  toolsSnapshot,
+} from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
   archivedSessions,
@@ -502,6 +510,13 @@ export function Application() {
     if (openId === null) return
     void readRuns(openId)
   }, [openId])
+
+  // And what it was provided, for its Context tab: read when it is opened, and again by the store
+  // whenever a turn ends or a change of the Workspace's instructions is delivered (D6-10).
+  useEffect(() => {
+    if (openId === null || provider === null) return
+    void readContext(openId)
+  }, [openId, provider])
 
   // What this machine has, read when the window opens. The Home's composer picks the agent a
   // Session is made with, and a list that arrived only once the Settings had been opened would
@@ -1021,6 +1036,14 @@ export function Application() {
             window.open(url, '_blank', 'noopener')
           }}
           onStopRun={(runId) => void stopRun(open.id, runId)}
+          root={current?.mainPath ?? ''}
+          context={tools.contexts.get(open.id) ?? null}
+          // A line that names a command of the catalogue runs that command, in its folder; any
+          // other line is a one-off, run in the Workspace root and not added to the catalogue.
+          onRunCommand={(line) => {
+            const known = tools.contexts.get(open.id)?.commands.some((one) => one.name === line)
+            void runCommand(open.id, known === true ? { name: line } : { line })
+          }}
         />
       )
     }
