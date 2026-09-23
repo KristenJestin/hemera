@@ -19,7 +19,9 @@ import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
 import {
+  columnDrawn,
   contextListsOf,
+  contextReachable,
   hasSideColumn,
   openingTabOf,
   panelRunsOf,
@@ -144,6 +146,44 @@ describe('No side column until a tab has something', () => {
     const tabs = sideTabsOf(0, 0, [], aView(['base', 'provided']))
 
     expect(openingTabOf([], tabs)).toBe('context')
+  })
+})
+
+describe('The Context is reached from the head while no column is drawn', () => {
+  test('a fresh Session offers the head button once its context is known, and draws no column', () => {
+    const tabs = sideTabsOf(0, 0, [], aView(['base', 'provided']))
+    const drawn = columnDrawn(tabs, false)
+
+    expect(drawn).toBe(false)
+    expect(contextReachable(drawn, aView(['base', 'provided']))).toBe(true)
+  })
+
+  test('no head button before the engine has said what the context is', () => {
+    expect(contextReachable(columnDrawn(sideTabsOf(0, 0, [], null), false), null)).toBe(false)
+  })
+
+  test('the column opened from the head is drawn, and the head button goes', () => {
+    const view = aView(['base', 'provided'])
+    const drawn = columnDrawn(sideTabsOf(0, 0, [], view), true)
+
+    expect(drawn).toBe(true)
+    expect(contextReachable(drawn, view)).toBe(false)
+  })
+
+  test('a column drawn for a tab that has something offers no head button', () => {
+    const view = aView(['base', 'provided', 'instructions'])
+    const drawn = columnDrawn(sideTabsOf(0, 0, [], view), false)
+
+    expect(drawn).toBe(true)
+    expect(contextReachable(drawn, view)).toBe(false)
+  })
+
+  test('once opened from the head the column stays, whatever its tabs hold', () => {
+    const empty = sideTabsOf(0, 0, [], aView(['base']))
+    const planned = sideTabsOf(2, 0, [], aView(['base']))
+
+    expect(columnDrawn(empty, true)).toBe(true)
+    expect(columnDrawn(planned, true)).toBe(true)
   })
 })
 

@@ -80,6 +80,22 @@ export function hasSideColumn(tabs: SideTabs): boolean {
 }
 
 /**
+ * Whether the page draws the column: when a tab has something, or when the reader opened it from
+ * the Session's head — and then it stays, whatever its tabs hold, until the Session is left.
+ */
+export function columnDrawn(tabs: SideTabs, asked: boolean): boolean {
+  return asked || hasSideColumn(tabs)
+}
+
+/**
+ * Whether the head offers its Context button: while no column stands beside the thread, and once
+ * the engine has said what the Context is. With the column drawn, its own tab is the way there.
+ */
+export function contextReachable(drawn: boolean, view: ContextView | null): boolean {
+  return !drawn && view !== null
+}
+
+/**
  * The tab a Session opens on, which follows what is happening in it (D6-12): a command running
  * opens on its commands, then what the agent has been doing, then whichever tab has something.
  * A column none of whose tabs has anything is one the reader opened from the head, for its

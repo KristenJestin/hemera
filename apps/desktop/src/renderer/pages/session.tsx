@@ -36,8 +36,9 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import {
+  columnDrawn,
   contextListsOf,
-  hasSideColumn,
+  contextReachable,
   openingTabOf,
   panelRunsOf,
   sideTabsOf,
@@ -379,7 +380,7 @@ export function SessionPage({
   // the Commands panel and the Context view go with it whatever they hold: the panel is also
   // where a one-off line is run from.
   const tabs = sideTabsOf(plan.length, touched.length, commandRuns, context)
-  const drawn = hasSideColumn(tabs) || contextAsked
+  const drawn = columnDrawn(tabs, contextAsked)
 
   return (
     /*
@@ -406,7 +407,9 @@ export function SessionPage({
             archiveDisabled={thread.length === 0}
             // The way to the Context while no column stands beside the thread, once the engine
             // has said what it is; the column's own tab is the way once it is drawn.
-            onOpenContext={drawn || context === null ? undefined : () => setContextAsked(true)}
+            onOpenContext={
+              contextReachable(drawn, context) ? () => setContextAsked(true) : undefined
+            }
           />
         </div>
         {/*
