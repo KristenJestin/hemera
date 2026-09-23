@@ -282,7 +282,7 @@ describe('A conflict keeps the human’s text', () => {
   })
 })
 
-describe('The unavailable prototype does not block', () => {
+describe('The readiness bar says what is left', () => {
   test('each engine check is drawn under the bar’s name, failing with what fails', () => {
     const readiness = readinessOf(snapshot(), [
       failure('type_contract', 'expected_outcome', 'the expected_outcome section is missing'),
