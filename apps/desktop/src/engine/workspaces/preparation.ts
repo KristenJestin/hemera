@@ -216,6 +216,19 @@ function outcomeOf(placed: readonly { label: string; result: Placed }[]): Outcom
   return { state: 'skipped', message }
 }
 
+/** How much of a failure's first line a Journal line keeps. */
+const HEADLINE_CHARACTERS = 200
+
+/**
+ * What the Journal says of a failed step: the first line of its message, bounded (D8-16). The
+ * whole message — a command's output, which may hold anything it printed, a secret included —
+ * stays on the step, where it is read.
+ */
+function headline(message: string | null): string | null {
+  if (message === null) return null
+  return (message.split('\n')[0] ?? '').slice(0, HEADLINE_CHARACTERS)
+}
+
 /** The steps with one of them replaced, every other kept as the very same object. */
 function replaced(steps: readonly WorkspaceStep[], changed: WorkspaceStep): WorkspaceStep[] {
   return steps.map((step) => (step.id === changed.id ? changed : step))
@@ -545,7 +558,12 @@ export const preparationLayer = Layer.effect(
             workspaceEvent(
               place.workspace,
               `workspace.step_${ended.state}`,
-              { kind: next.kind, target: next.target, message: ended.message },
+              {
+                kind: next.kind,
+                target: next.target,
+                state: ended.state,
+                message: ended.state === 'failed' ? headline(ended.message) : null,
+              },
               'hemera',
             ),
           ])

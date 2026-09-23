@@ -423,3 +423,51 @@ describe('One preparation of a Workspace runs at a time', () => {
     expect(shown(seen.steps).map((step) => step[2])).toEqual(['done', 'done', 'done'])
   })
 })
+
+describe('A step’s output stays off its Journal line', () => {
+  /** The step events of the Workspace, as their payloads. */
+  const stepEvents = Effect.gen(function* () {
+    const sql = yield* SqliteClient
+    const rows = yield* sql<{ payload: string }>`
+      SELECT payload FROM domain_events WHERE type LIKE 'workspace.step_%' ORDER BY sequence`
+    return rows.map((row) => JSON.parse(row.payload))
+  })
+
+  it('says a run that succeeded without what it printed', async () => {
+    const events = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspace = yield* createdWith([{ run: node("console.log('TOKEN=secret-value')") }])
+        yield* preparation.prepare(workspace.id)
+        return yield* stepEvents
+      }),
+    )
+
+    expect(events).toEqual([
+      { kind: 'worktree', target: API, state: 'done', message: null },
+      { kind: 'worktree', target: FRONT, state: 'done', message: null },
+      { kind: 'run', target: 'install', state: 'done', message: null },
+    ])
+  })
+
+  it('says a failure by the first line of its message, and keeps the rest on the step', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspace = yield* createdWith([
+          { run: node("console.log('TOKEN=secret-value');process.exit(1)") },
+        ])
+        yield* preparation.prepare(workspace.id)
+        return { events: yield* stepEvents, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    expect(seen.events.at(-1)).toEqual({
+      kind: 'run',
+      target: 'install',
+      state: 'failed',
+      message: 'exit 1',
+    })
+    expect(seen.steps[2]?.message).toBe('exit 1\nTOKEN=secret-value')
+  })
+})
