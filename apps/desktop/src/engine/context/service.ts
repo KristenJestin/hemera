@@ -378,15 +378,13 @@ export const contextLayer = Layer.effect(
               return 'delivery_prompt'
           }
         }
-        return rows.map(
-          (row): Delivery => ({
-            kind: row.kind,
-            path: row.path,
-            fingerprint: row.fingerprint,
-            deliveredAt: row.deliveredAt,
-            reached: reachOf(row.kind),
-          }),
-        )
+        return rows.map((row): Delivery => ({
+          kind: row.kind,
+          path: row.path,
+          fingerprint: row.fingerprint,
+          deliveredAt: row.deliveredAt,
+          reached: reachOf(row.kind),
+        }))
       })
 
     return { start, pending, deliver, provided }
