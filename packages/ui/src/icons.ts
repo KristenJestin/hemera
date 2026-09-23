@@ -61,13 +61,17 @@ import {
   IconInfoCircle as TablerInfoCircle,
   IconInfoCircleFilled as TablerInfoCircleFilled,
   IconLayoutSidebar as TablerLayoutSidebar,
+  IconLayoutList as TablerLayoutList,
+  IconLayoutListFilled as TablerLayoutListFilled,
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
+  IconListCheck as TablerListCheck,
   IconListDetails as TablerListDetails,
   IconListDetailsFilled as TablerListDetailsFilled,
   IconLock as TablerLock,
   IconLockFilled as TablerLockFilled,
   IconMessage as TablerMessage,
   IconMessageFilled as TablerMessageFilled,
+  IconMessageQuestion as TablerMessageQuestion,
   IconMessages as TablerMessages,
   IconMessagesFilled as TablerMessagesFilled,
   IconMoon as TablerMoon,
@@ -217,6 +221,8 @@ export const IconLayoutSidebar = catalogued(
   TablerLayoutSidebar,
   'IconLayoutSidebar',
 )
+export const IconLayoutList = catalogued(TablerLayoutListFilled, TablerLayoutList, 'IconLayoutList')
+export const IconListCheck = catalogued(TablerListCheck, TablerListCheck, 'IconListCheck')
 export const IconListDetails = catalogued(
   TablerListDetailsFilled,
   TablerListDetails,
@@ -224,6 +230,11 @@ export const IconListDetails = catalogued(
 )
 export const IconLock = catalogued(TablerLockFilled, TablerLock, 'IconLock')
 export const IconMessage = catalogued(TablerMessageFilled, TablerMessage, 'IconMessage')
+export const IconMessageQuestion = catalogued(
+  TablerMessageQuestion,
+  TablerMessageQuestion,
+  'IconMessageQuestion',
+)
 export const IconMessages = catalogued(TablerMessagesFilled, TablerMessages, 'IconMessages')
 export const IconMoon = catalogued(TablerMoonFilled, TablerMoon, 'IconMoon')
 export const IconPaperclip = catalogued(TablerPaperclip, TablerPaperclip, 'IconPaperclip')
