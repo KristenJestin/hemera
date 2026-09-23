@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 
-import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
+import { IconBrandHemera } from '../icons.ts'
 import { Disclosure } from './disclosure.tsx'
 
 /**
@@ -10,14 +11,18 @@ import { Disclosure } from './disclosure.tsx'
  * Since this lot the agent runs bare and works through Hemera's own tools, so a call in the
  * thread is no longer the agent's business alone: it is Hemera's, and the thread has to say so.
  * That is the whole reason this block is not `ToolCallCard` — the two sit side by side in one
- * turn and a reader must tell them apart at a glance. The word `Hemera` on the line is that
- * difference, and the provenance under it is what makes the call accountable: which Session it
+ * turn and a reader must tell them apart at a glance. Hemera's mark on the line is that
+ * difference, drawn where and as large as an agent's mark is, and named `Hemera` for whatever
+ * reads the page; the provenance under it is what makes the call accountable: which Session it
  * was made in, which agent made it, and which token it carried (D6-01).
  *
- * A refused call is a call like any other, recorded like any other, so it wears a state of its
- * own rather than an error: nothing failed, Hemera said no. The reason is read on the line it
- * left, and the body stays open, because a refusal nobody can read is a refusal that will be
- * asked again.
+ * Where a call stands is a dot, as it is on a native call, and not a word: the word is what the
+ * dot is announced by.
+ *
+ * A refused call is a call like any other, recorded like any other, so it is not drawn as an
+ * error: nothing failed, Hemera said no, and nothing ran — it wears the dot of a call nobody
+ * ran. The reason is read on the line it left, and the body stays open, because a refusal
+ * nobody can read is a refusal that will be asked again.
  *
  * What is open, and what the reader may fold, follows the rule of a native call: a call in
  * flight is what the reader is waiting on, a call that failed is when the details matter, and a
@@ -25,17 +30,20 @@ import { Disclosure } from './disclosure.tsx'
  * Everything else folds.
  */
 
-/** What a call is doing, which is the word on its line. */
-const STATUS: Record<HemeraToolStatus, { word: string; tone: NonNullable<BadgeProps['tone']> }> = {
-  pending: { word: 'Waiting for you', tone: 'warning' },
-  in_progress: { word: 'Running', tone: 'info' },
+/** Where a call stands, in the word the dot is announced by and the tone it is drawn in. */
+const STATUS: Record<HemeraToolStatus, { word: string; tone: StatusTone }> = {
+  pending: { word: 'Waiting for you', tone: 'pending' },
+  in_progress: { word: 'Running', tone: 'running' },
   completed: { word: 'Done', tone: 'success' },
-  failed: { word: 'Failed', tone: 'destructive' },
-  refused: { word: 'Refused', tone: 'warning' },
+  failed: { word: 'Failed', tone: 'failure' },
+  refused: { word: 'Refused', tone: 'cancelled' },
 }
 
 /** The line that is read: whose call it is, the tool, and what the call is doing. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
+
+/** Where the mark sits on the line; it carries its own colours. */
+const MARK = 'flex shrink-0'
 
 const TOOL = 'min-w-0 truncate font-mono text-foreground'
 
@@ -136,9 +144,11 @@ export function HemeraToolCall({
       defaultOpen={defaultOpen}
       summary={
         <span className={SUMMARY}>
-          <Badge tone="primary">Hemera</Badge>
+          <span className={MARK}>
+            <IconBrandHemera size="md" role="img" aria-label="Hemera" />
+          </span>
           <span className={TOOL}>{tool}</span>
-          <Badge tone={tone}>{word}</Badge>
+          <StatusDot status={tone} size="sm" label={word} />
         </span>
       }
       // The first path is on the line that never moves, beside the fold rather than in it: the

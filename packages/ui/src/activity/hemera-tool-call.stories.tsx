@@ -8,9 +8,10 @@ import { HemeraToolCall, type HemeraToolProvenance } from './hemera-tool-call.ts
  * A call to a tool Hemera lent the agent (design D6-06).
  *
  * The stories are the states a call is read in: a read that is done and folded, the same call
- * opened by the reader, an edit, a write, a search that hit its limit, a call Hemera refused,
- * and a write waiting for the reader's decision. The `Hemera` mark and the provenance line are
- * what tell this block from a native tool call in the same turn, so both are on every story.
+ * opened by the reader, an edit, a write, a search that hit its limit, a call in flight, a call
+ * that failed, a call Hemera refused, and a write waiting for the reader's decision. The `Hemera`
+ * mark and the provenance line are what tell this block from a native tool call in the same
+ * turn, so both are on every story; where the call stands is the dot beside the tool.
  */
 const PROVENANCE: HemeraToolProvenance = {
   session: 'CSV invoice export',
@@ -120,10 +121,20 @@ export const AFoldClosing: Story = {
 export const ReadFolded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    // The mark is the whole difference from a native call, so it is read on the line.
-    await expect(canvas.getByText('Hemera')).toBeVisible()
+    // The mark is the whole difference from a native call, so it is read on the line, and heard
+    // as the word it stands for: the line reads "Hemera, the tool, where the call stands".
+    const mark = canvas.getByRole('img', { name: 'Hemera' })
+    await expect(mark).toBeVisible()
+    // Two tones, the tint pair of a badge: the square in the muted fill, the `H` on it.
+    const [square, letter] = [...mark.querySelectorAll('path')].map(
+      (path) => getComputedStyle(path).fill,
+    )
+    await expect(square).not.toBe(letter)
     await expect(canvas.getByText('fs_read')).toBeVisible()
-    const row = canvas.getByRole('button', { name: /fs_read/ })
+    const row = canvas.getByRole('button', { name: 'Hemera fs_read Done' })
+    // Where it stands is a dot, and the word is only what the dot is announced by.
+    await expect(canvas.getByRole('img', { name: 'Done' })).toBeVisible()
+    await expect(canvas.queryByText('Done')).toBeNull()
     await expect(row).toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.getByText('src/billing/export.ts')).toBeVisible()
   },
@@ -203,6 +214,48 @@ export const SearchTruncated: Story = {
   },
 }
 
+/** A call in flight: the dot that moves, and the body open on what the reader is waiting on. */
+export const Running: Story = {
+  args: {
+    tool: 'search',
+    status: 'in_progress',
+    summary: 'Searching for exportInvoices under src/.',
+    arguments: [{ label: 'query', value: 'exportInvoices' }],
+    paths: [],
+    ms: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('img', { name: 'Running' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: /search/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+  },
+}
+
+/** A call that failed: the dot says so, and the reason is the first line of the open body. */
+export const Failed: Story = {
+  args: {
+    tool: 'fs_read',
+    status: 'failed',
+    summary: 'Nothing read.',
+    error: 'src/billing/export.csv does not exist.',
+    arguments: [{ label: 'path', value: 'src/billing/export.csv' }],
+    paths: [],
+    ms: 3,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('img', { name: 'Failed' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: /fs_read/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    await expect(canvas.getByText(/does not exist/)).toBeVisible()
+  },
+}
+
 /** A call Hemera refused: nothing ran, and the reason is on the line, not behind a fold. */
 export const Refused: Story = {
   args: {
@@ -217,7 +270,7 @@ export const Refused: Story = {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /fs_write/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
-    await expect(canvas.getByText('Refused')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Refused' })).toBeVisible()
     await expect(canvas.getByText(/not in the set of this Session/)).toBeVisible()
     await userEvent.click(row)
     await expect(row, 'a refusal folds away under the reader\u2019s hand').toHaveAttribute(
@@ -238,7 +291,7 @@ export const WaitingForYou: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Waiting for you')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Waiting for you' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: /fs_write/ })).toHaveAttribute(
       'aria-expanded',
       'true',
