@@ -30,7 +30,7 @@ export interface StoriesPartProps {
   editable: boolean
   /** What the facts add, when the panel has something to say about edits. */
   note?: string | undefined
-  /** A story, once, with what changed in it. */
+  /** A story, once, with what changed in it; its `id` says which, whatever its place now. */
   onSaveStory: (story: StoryView) => void
 }
 
@@ -54,7 +54,9 @@ export function StoriesPart({
       ) : (
         <ul aria-label="Stories">
           {stories.map((story) => (
-            <li key={story.key} className={ITEM}>
+            // Keyed by the story, not its place: a story arriving above the one being edited
+            // moves the editor with its story instead of handing it the new one's text.
+            <li key={story.id} className={ITEM}>
               <p className={ITEM_HEAD}>
                 <span className={KEY}>{story.key}</span>
                 {story.title}

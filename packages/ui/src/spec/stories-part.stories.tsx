@@ -1,8 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import type { StoryView } from './model.ts'
 import { STORIES } from './spec-fixtures.ts'
-import { StoriesPart } from './stories-part.tsx'
+import { StoriesPart, type StoriesPartProps } from './stories-part.tsx'
 
 const MARKS = ['empty', 'agent', 'human', 'stale', 'conflict', 'writing']
 
@@ -62,6 +64,52 @@ export const Frozen: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.getByRole('list', { name: 'Criteria of S2' })).toBeVisible()
+  },
+}
+
+/** The story the agent adds on top of the list, while the caret is in one of the others. */
+const ADDED: StoryView = {
+  id: 'story-archived-months',
+  key: 'S1',
+  title: 'Archived months',
+  narrative: 'As an accountant, I export a month already closed, so that an audit gets its file.',
+  criteria: ['A closed month exports as it was closed.'],
+}
+
+/** The list, with the agent adding a story above the others as soon as the caret goes in. */
+function AddedAbove(props: StoriesPartProps): ReactNode {
+  const [stories, setStories] = useState(props.stories)
+  return (
+    <div
+      onFocusCapture={() => {
+        if (stories.some((one) => one.id === ADDED.id)) return
+        setStories([ADDED, ...stories.map((one, at) => ({ ...one, key: `S${at + 2}` }))])
+      }}
+    >
+      <StoriesPart {...props} stories={stories} />
+    </div>
+  )
+}
+
+/**
+ * A story added above the one being edited: the editor moves down with its story, now `S3`, and
+ * the edit is handed back on that story's own id — never onto the new `S2`.
+ */
+export const AddedWhileEditing: Story = {
+  render: (args) => <AddedAbove {...args} />,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('textbox', { name: 'Narrative of S2' }))
+    await expect(canvas.getByRole('textbox', { name: 'Narrative of S3' })).toHaveFocus()
+    await userEvent.keyboard('{Control>}{End}{/Control} Refunds included.')
+    await userEvent.tab()
+    await expect(args.onSaveStory).toHaveBeenCalledTimes(1)
+    await expect(args.onSaveStory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: STORIES[1]!.id,
+        narrative: expect.stringContaining('Refunds included.'),
+      }),
+    )
   },
 }
 

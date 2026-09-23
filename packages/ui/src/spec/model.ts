@@ -94,6 +94,11 @@ export interface SectionView {
 
 /** A story (core.md, "Spec"): one sentence of actor, need and benefit, and ordered criteria. */
 export interface StoryView {
+  /**
+   * The story itself, whatever its place: an edit is handed back on it, so a story added or moved
+   * while its text was being edited never receives another story's text.
+   */
+  id: string
   /** `S1`, `S2`: how tasks and questions point at it. */
   key: string
   title: string

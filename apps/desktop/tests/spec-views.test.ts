@@ -406,6 +406,7 @@ describe('An old revision is readable and not editable', () => {
 
 /** The credit-note story, `S2`, with its narrative and criteria edited in place. */
 const CREDIT_EDITED = {
+  id: 'credit',
   key: 'S2',
   title: 'Credit notes',
   narrative: 'Kept with their invoice number.',

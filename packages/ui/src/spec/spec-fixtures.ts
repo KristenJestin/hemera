@@ -113,6 +113,7 @@ const PLAN_WRITING: SectionView = {
 
 export const STORIES: StoryView[] = [
   {
+    id: 'story-export-a-month',
     key: 'S1',
     title: 'Export a month',
     narrative:
@@ -124,6 +125,7 @@ export const STORIES: StoryView[] = [
     ],
   },
   {
+    id: 'story-credit-notes',
     key: 'S2',
     title: 'Credit notes in the same file',
     narrative:

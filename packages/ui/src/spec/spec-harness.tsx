@@ -92,7 +92,7 @@ export function useLiveSpec(
       on.onSaveStory(story)
       setSpec((now) => ({
         ...now,
-        stories: now.stories.map((one) => (one.key === story.key ? story : one)),
+        stories: now.stories.map((one) => (one.id === story.id ? story : one)),
         storiesMark: 'human',
       }))
     },

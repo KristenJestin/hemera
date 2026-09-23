@@ -464,7 +464,7 @@ describe('A story is written back onto the story it was edited in', () => {
       rank: String(at),
     })),
   })
-  const edited = { key: 'S2', title: 'credit', narrative: 'Mine.', criteria: [] }
+  const edited = { id: 'credit', key: 'S2', title: 'credit', narrative: 'Mine.', criteria: [] }
 
   test('a story edited in the list it was opened on is written, the others as they were', async () => {
     reads(2)

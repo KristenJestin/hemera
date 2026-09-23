@@ -180,6 +180,7 @@ export function sectionsOf(snapshot: SpecSnapshot, buffers: readonly EditBuffer[
 function storiesOf(snapshot: SpecSnapshot): StoryView[] {
   const keys = storyKeys(snapshot)
   return snapshot.stories.map((story) => ({
+    id: story.id,
     key: keys.get(story.id) ?? '',
     title: story.title,
     narrative: story.narrative,
