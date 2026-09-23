@@ -661,7 +661,9 @@ possible in the Session. A `define` Session can for example produce a prototype,
 a `build` Session can perform an intermediate code review.
 
 - A `free` Session remains a chat without an imposed work structure.
-- A `define` Session keeps the chat in the centre and allows opening the live Spec beside it.
+- A `define` Session keeps the chat in the centre and the live Spec beside it, in the place of
+  the side column; its header reads its mission, its agent and the key of its Spec. A `free`
+  Session offers no Spec of its own: one begins with its agent's proposal in the thread.
 - An active `build` Session puts task progress and execution activity in the centre.
   The chat remains accessible without taking up all the space.
 - When a `build` is finished or requests an intervention, the chat can take back the
