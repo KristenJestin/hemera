@@ -268,6 +268,14 @@ export async function pressIn(area: string, name: string): Promise<void> {
   await browser.pause(300)
 }
 
+/**
+ * Puts a part of a Spec on its panel's stage, the way a hand picks it in the rail: the stage
+ * shows one part at a time, and a part that is not on it is not on the page at all.
+ */
+export async function showPart(key: string, part: string): Promise<void> {
+  await pressIn(`nav[aria-label="Parts of ${key}"]`, part)
+}
+
 /** What the region this selector finds says, or an empty string when there is none. */
 export async function region(selector: string): Promise<string> {
   return await browser.execute(

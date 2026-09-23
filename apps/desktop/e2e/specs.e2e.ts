@@ -36,6 +36,7 @@ import {
   press,
   pressIn,
   region,
+  showPart,
   shows,
   sidebar,
   textOf,
@@ -260,6 +261,7 @@ describe('A question is asked and answered in the chat', () => {
     )
     await awaits(QUESTION)
     await browser.pause(800)
+    await showPart(KEY, 'Questions')
 
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 1 open')
@@ -299,6 +301,7 @@ describe('A question is asked and answered in the chat', () => {
 describe('A conflict keeps the human’s text', () => {
   it('refuses a save on a section written since it was opened, and keeps the text', async () => {
     const { id, specId } = await sessionOf(ASKED)
+    await showPart(KEY, 'Scope')
     await typeIn('Scope', MINE)
     await rewriteScope(specId ?? '', id, THEIRS)
     await leave('Scope')
@@ -382,6 +385,7 @@ describe('Mark ready is offered only once the checks pass', () => {
 describe('A conflict keeps the human’s text across a relaunch', () => {
   it('keeps a text refused on its way, for the next start to find', async () => {
     const { id, specId } = await sessionOf(OPENED)
+    await showPart(KEY, 'Scope')
     await typeIn('Scope', KEPT)
     await rewriteScope(specId ?? '', id, THEIRS_AGAIN)
     await leave('Scope')

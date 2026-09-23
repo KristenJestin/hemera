@@ -17,7 +17,7 @@
 import { browser, expect } from '@wdio/globals'
 
 import { PROPOSAL, PROPOSE } from './agent/script.ts'
-import { awaits, control, press, pressIn, region, textOf } from './hand.ts'
+import { awaits, control, press, pressIn, region, showPart, textOf } from './hand.ts'
 
 /** The first Session of `specs.e2e.ts`, which is the title it is listed under. */
 const ASKED = `The CSV export drops the date. ${PROPOSE}`
@@ -32,14 +32,14 @@ const KEPT = 'Every CSV export of the billing module.'
 
 const PANEL = `section[aria-label="Spec ${KEY}"]`
 
-/** The heading of a phase's group in the document, which says its state to a screen reader. */
+/** The heading of a phase's group in the rail, which says its state to a screen reader. */
 async function phaseHeading(phase: string): Promise<string> {
   return await browser.execute(
     (scope: string, name: string) =>
-      [...(document.querySelector(scope)?.querySelectorAll('h3') ?? [])]
+      [...(document.querySelector(scope)?.querySelectorAll('[role="group"] > p') ?? [])]
         .map((one) => one.textContent ?? '')
         .find((text) => text.startsWith(name)) ?? '',
-    PANEL,
+    `nav[aria-label="Parts of ${KEY}"]`,
     phase,
   )
 }
@@ -67,6 +67,7 @@ describe('Phases survive a restart', () => {
 
 describe('A conflict keeps the human’s text', () => {
   it('still holds the text refused before the restart, and lets it go on Discard mine', async () => {
+    await showPart(KEY, 'Scope')
     expect(await region(PANEL)).toContain('Your text was written on v3; the section is at v4.')
     expect(await textOf('Scope, your text')).toBe(KEPT)
 
