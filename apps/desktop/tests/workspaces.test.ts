@@ -446,10 +446,10 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
 
 describe('Cleanup is refused while a service runs or Git refuses', () => {
   it('names the running service, then Git’s own message, and removes nothing', async () => {
-    const api = join(main, 'sources', 'api')
-    writeFileSync(join(api, 'tracked.txt'), 'one\n')
-    git(api, 'add', 'tracked.txt')
-    git(api, 'commit', '-q', '-m', 'tracked')
+    const front = join(main, 'sources', 'front')
+    writeFileSync(join(front, 'tracked.txt'), 'one\n')
+    git(front, 'add', 'tracked.txt')
+    git(front, 'commit', '-q', '-m', 'tracked')
 
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
@@ -485,8 +485,9 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
         const whileRunning = yield* Effect.flip(workspaces.cleanup(workspace.id))
         yield* commands.stop(session.id, running.id)
 
-        // A tracked file changed in the first worktree: Git refuses to remove it.
-        writeFileSync(join(workspace.path, 'sources', 'api', 'tracked.txt'), 'changed\n')
+        // A tracked file changed in the second worktree: Git refuses to remove it, and the first,
+        // which it would have removed, is not removed either.
+        writeFileSync(join(workspace.path, 'sources', 'front', 'tracked.txt'), 'changed\n')
         const whileChanged = yield* Effect.flip(workspaces.cleanup(workspace.id))
         const sql = yield* SqliteClient
         const events = yield* sql<{ payload: string }>`
@@ -505,7 +506,9 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
     expect(seen.whileRunning).toBeInstanceOf(CleanupRefusedError)
     expect(seen.whileRunning.message).toBe('the service dev of login-form is running')
     expect(seen.whileChanged).toBeInstanceOf(CleanupRefusedError)
-    expect(seen.whileChanged.message).toMatch(/^fatal: .*contains modified or untracked files/)
+    expect(seen.whileChanged.message).toMatch(
+      /^fatal: .*sources\/front.* contains modified or untracked files/,
+    )
     expect(seen.events).toHaveLength(2)
     // Nothing was removed: both worktrees are there, and the Workspace is still ready.
     expect(existsSync(join(seen.workspace.path, 'sources', 'api', '.git'))).toBe(true)

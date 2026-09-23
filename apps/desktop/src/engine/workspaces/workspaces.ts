@@ -711,8 +711,32 @@ export const workspacesLayer = Layer.effect(
             .from(workspaceRepositories)
             .where(eq(workspaceRepositories.workspaceId, id))
             .pipe(Effect.mapError(failed('reading the worktrees')))
-          // One worktree at a time, in order, and the first refusal stops the rest: Git refuses
-          // per worktree, and what it already removed stays removed, which the reason says.
+          // Every worktree is checked before any is removed (D8-14): one that Git would refuse to
+          // remove — changed or untracked files — refuses the whole cleanup, with nothing removed.
+          // Git's words are asked of that worktree alone: `worktree remove` refuses a changed one
+          // before it deletes anything, which is the very rule the check applies.
+          for (const record of records) {
+            const repository = join(main, record.relativePath)
+            const worktree = join(row.path, record.relativePath)
+            if (!existsSync(worktree)) continue
+            const checked = yield* git.status(worktree).pipe(
+              Effect.map((status) => ({
+                dirty: status.staged + status.unstaged + status.untracked > 0,
+                refused: null,
+              })),
+              Effect.catch((said) => Effect.succeed({ dirty: true, refused: said.message })),
+            )
+            if (!checked.dirty) continue
+            const refused =
+              checked.refused ??
+              (yield* git.worktreeRemove(repository, worktree).pipe(
+                Effect.as(null),
+                Effect.catch((said) => Effect.succeed(said.message)),
+              ))
+            if (refused !== null) return yield* refuseCleanup(row, refused)
+          }
+          // Then one at a time, in order. Git may still refuse one for a reason of its own — a
+          // locked worktree — and what it already removed stays removed, which the reason says.
           const removed: string[] = []
           for (const record of records) {
             const repository = join(main, record.relativePath)
