@@ -47,13 +47,13 @@ import {
   readSpecAgain,
   rework,
   saveSection,
-  saveStories,
+  saveStory,
   selectRevision,
   specSnapshot,
   subscribeToSpec,
   takeOver,
 } from '../spec-store.ts'
-import { openedOn, readerOf, specViewOf, storiesWith } from '../spec-views.ts'
+import { openedOn, readerOf, specViewOf } from '../spec-views.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -256,6 +256,8 @@ export function SessionPage({
    * caret went into.
    */
   const opened = useRef(new Map<SectionName, number>())
+  /** The stories as the list read when a story's text took the caret: what `S2` means then. */
+  const openedStories = useRef<readonly string[] | null>(null)
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
   const spec =
@@ -275,6 +277,7 @@ export function SessionPage({
     const part = event.target.closest('[data-part]')?.getAttribute('data-part')
     const section = openedOn(spec.sections, part)
     if (section !== null) opened.current.set(section.name, section.version)
+    if (part === 'stories') openedStories.current = defined?.stories.map((one) => one.id) ?? null
   }
 
   const write = async (body: string): Promise<string | null> => {
@@ -659,7 +662,12 @@ export function SessionPage({
             }}
             onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
             onDiscardMine={(name) => void discardMine(name)}
-            onSaveStory={(story) => void saveStories(session.id, storiesWith(defined, story))}
+            onSaveStory={(story) => {
+              const stories = openedStories.current
+              openedStories.current = null
+              if (stories === null) void readSpecAgain()
+              else void saveStory(session.id, story, stories)
+            }}
             onGoToQuestion={goToQuestion}
             onMarkReady={() => void markReady()}
             onRework={(reason) => void rework(reason)}

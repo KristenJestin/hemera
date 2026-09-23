@@ -1,5 +1,4 @@
 import type {
-  ChannelArguments,
   ChannelResponse,
   EditBuffer,
   EngineEvent,
@@ -9,6 +8,9 @@ import type {
   SpecSnapshot,
   SpecType,
 } from '@hemera/ipc'
+import type { StoryView } from '@hemera/ui'
+
+import { storiesWith } from './spec-views.ts'
 
 /**
  * The Spec a `define` Session shows beside its chat (design D7-07, D7-10, D7-11, D7-12).
@@ -49,6 +51,10 @@ const EMPTY: SpecState = {
   journal: [],
   refusal: null,
 }
+
+/** What a story edit is refused with when the list moved under it. */
+const MOVED =
+  'The stories changed while you were editing one: your edit was not saved. Write it again.'
 
 /** How many lines of the Spec's Journal are read, which is the most one page may hold. */
 const JOURNAL_PAGE = 200
@@ -214,13 +220,27 @@ export async function discardMine(name: SectionName): Promise<boolean> {
   })
 }
 
-/** Replaces the stories of the current revision with these, in order. */
-export async function saveStories(
+/**
+ * Writes back a story edited in place, all the stories of the revision with it (D7-12): keyed by
+ * its place in `opened`, the list of story ids the edit began on. A list that moved since is not
+ * written over — the edit would land on another story — and is read again instead.
+ */
+export async function saveStory(
   sessionId: string,
-  stories: ChannelArguments<'specs.writeStories'>['stories'],
+  changed: StoryView,
+  opened: readonly string[],
 ): Promise<boolean> {
-  return await acting(async (specId) => {
-    await window.hemera.invoke('specs.writeStories', { specId, sessionId, stories })
+  const specId = shown
+  const current = state.snapshot
+  if (specId === null || current === null) return false
+  const stories = storiesWith(current, changed, opened)
+  if (stories === null) {
+    replace({ ...state, refusal: MOVED })
+    await refresh(specId)
+    return false
+  }
+  return await acting(async (id) => {
+    await window.hemera.invoke('specs.writeStories', { specId: id, sessionId, stories })
   })
 }
 

@@ -21,6 +21,7 @@ import {
   openSpec,
   rework,
   saveSection,
+  saveStory,
   selectRevision,
   specSnapshot,
   takeOver,
@@ -442,5 +443,57 @@ describe('A refusal stays with the Session it was made in', () => {
     forgetSpecRefusal()
 
     expect(specSnapshot().refusal).toBeNull()
+  })
+})
+
+describe('A story is written back onto the story it was edited in', () => {
+  const stories = (ids: string[]): SpecSnapshot => ({
+    ...snapshot(2),
+    stories: ids.map((id, at) => ({
+      id,
+      revisionId: 'rev-1',
+      title: id,
+      narrative: `The ${id} story.`,
+      priority: null,
+      rank: String(at),
+    })),
+  })
+  const edited = { key: 'S2', title: 'credit', narrative: 'Mine.', criteria: [] }
+
+  test('a story edited in the list it was opened on is written, the others as they were', async () => {
+    reads(2)
+    answers.set('specs.read', stories(['export', 'credit']))
+    await openSpec('spec-7')
+    answers.set('specs.writeStories', stories(['export', 'credit']))
+
+    expect(await saveStory('writer', edited, ['export', 'credit'])).toBe(true)
+
+    expect(argumentOf('specs.writeStories')).toEqual({
+      specId: 'spec-7',
+      sessionId: 'writer',
+      stories: [
+        {
+          id: 'export',
+          title: 'export',
+          narrative: 'The export story.',
+          priority: null,
+          criteria: [],
+        },
+        { id: 'credit', title: 'credit', narrative: 'Mine.', priority: null, criteria: [] },
+      ],
+    })
+  })
+
+  test('a story edited while the list moved is not written over another', async () => {
+    reads(2)
+    answers.set('specs.read', stories(['export', 'refund', 'credit']))
+    await openSpec('spec-7')
+    asked = []
+
+    expect(await saveStory('writer', edited, ['export', 'credit'])).toBe(false)
+
+    expect(names()).not.toContain('specs.writeStories')
+    expect(names()).toContain('specs.read')
+    expect(specSnapshot().refusal).toContain('your edit was not saved')
   })
 })

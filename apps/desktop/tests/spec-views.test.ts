@@ -412,6 +412,14 @@ describe('An old revision is readable and not editable', () => {
   })
 })
 
+/** The credit-note story, `S2`, with its narrative and criteria edited in place. */
+const CREDIT_EDITED = {
+  key: 'S2',
+  title: 'Credit notes',
+  narrative: 'Kept with their invoice number.',
+  criteria: ['Negative rows.', 'Same number.'],
+}
+
 describe('Stories, tasks and questions are named the way the document reads them', () => {
   const decomposed = snapshot({
     stories: [
@@ -524,12 +532,7 @@ describe('Stories, tasks and questions are named the way the document reads them
   })
 
   test('a story edited in place is written back with every other story as it was', () => {
-    const edited = storiesWith(decomposed, {
-      key: 'S2',
-      title: 'Credit notes',
-      narrative: 'Kept with their invoice number.',
-      criteria: ['Negative rows.', 'Same number.'],
-    })
+    const edited = storiesWith(decomposed, CREDIT_EDITED, ['export', 'credit'])
     expect(edited).toEqual([
       {
         id: 'export',
@@ -546,6 +549,27 @@ describe('Stories, tasks and questions are named the way the document reads them
         criteria: ['Negative rows.', 'Same number.'],
       },
     ])
+  })
+
+  test('a story edited while the list moved is not written over another', () => {
+    // `S2` was the credit notes when the edit began; a story put in front of them since has
+    // made the credit notes `S3`, and `S2` another story.
+    const moved = {
+      ...decomposed,
+      stories: [
+        decomposed.stories[0]!,
+        {
+          id: 'refund',
+          revisionId: 'rev-1',
+          title: 'Refunds',
+          narrative: '',
+          priority: null,
+          rank: 'ab',
+        },
+        decomposed.stories[1]!,
+      ],
+    }
+    expect(storiesWith(moved, CREDIT_EDITED, ['export', 'credit'])).toBe(null)
   })
 })
 
