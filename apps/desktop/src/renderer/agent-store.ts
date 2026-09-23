@@ -11,7 +11,6 @@ import type {
 } from '@hemera/ipc'
 import type { ActivityState } from '@hemera/ui'
 
-import { modelDefaultsAfter, NO_DEFAULTS, type ModelDefaults } from './agent-options.ts'
 import { commandRunOf } from './agent-tool-payloads.ts'
 
 /**
@@ -74,25 +73,16 @@ export interface AgentOffering {
   options: readonly ConfigOption[]
   refusal: string | null
   loading: boolean
-  /** What this composer learned of its models' own default efforts, from the answers. */
-  modelDefaults: ModelDefaults
 }
 
 /** What an agent nobody has asked yet offers: nothing, for no reason, and not being asked. */
-const UNASKED: AgentOffering = {
-  options: [],
-  refusal: null,
-  loading: false,
-  modelDefaults: NO_DEFAULTS,
-}
+const UNASKED: AgentOffering = { options: [], refusal: null, loading: false }
 
 export interface AgentState {
   /** What has been pushed, per Session, since it was last read. */
   sessions: ReadonlyMap<string, AgentSessionState>
   /** What each agent offers, per Session, as its own handshake answered. */
   options: ReadonlyMap<string, readonly ConfigOption[]>
-  /** What each Session learned of its models' own default efforts (`ModelDefaults`). */
-  modelDefaults: ReadonlyMap<string, ModelDefaults>
   /**
    * What each agent offers a Project no Session holds yet, keyed `projectId:provider` (D5-17).
    *
@@ -112,7 +102,6 @@ export interface AgentState {
 const EMPTY: AgentState = {
   sessions: new Map(),
   options: new Map(),
-  modelDefaults: new Map(),
   offerings: new Map(),
   agents: [],
   checked: false,
@@ -305,31 +294,6 @@ export function optionsOf(sessionId: string | null): readonly ConfigOption[] {
   return state.options.get(sessionId) ?? []
 }
 
-/** What a Session learned of its models' own default efforts, which is nothing at first. */
-export function modelDefaultsOf(sessionId: string | null): ModelDefaults {
-  if (sessionId === null) return NO_DEFAULTS
-  return state.modelDefaults.get(sessionId) ?? NO_DEFAULTS
-}
-
-/**
- * Hands what a Home's composer learned over to the Session it has just made (D5-17).
- *
- * The engine starts that Session on the choices made in the Home, an effort pinned there
- * included, so the Session's first announcement is not the model's own landing: read on its
- * own, it would teach the pin as the model's default. The Session starts from what the Home knew.
- */
-export function carryModelDefaults(
-  projectId: string,
-  provider: AgentProvider,
-  sessionId: string,
-): void {
-  const held = state.offerings.get(`${projectId}:${provider}`)
-  if (held === undefined) return
-  const modelDefaults = new Map(state.modelDefaults)
-  modelDefaults.set(sessionId, held.modelDefaults)
-  replace({ ...state, modelDefaults })
-}
-
 /** What a refusal says, without the shape of whatever carried it. */
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
@@ -418,24 +382,13 @@ export function listenToAgents(): () => void {
  * Read when the Session is opened and after an option is changed: an agent announces its models
  * and its modes when it starts, and what it is on now is the agent's own answer and not a value
  * this window remembers.
- *
- * `setOptionId` is the option whose change this read answers, and null for a plain read: what
- * each model defaults to is read off the answers until an effort is pinned (`modelDefaultsAfter`).
  */
-export async function readOptions(
-  sessionId: string,
-  setOptionId: string | null = null,
-): Promise<void> {
+export async function readOptions(sessionId: string): Promise<void> {
   try {
     const answered = await window.hemera.invoke('agents.options', { sessionId })
     const options = new Map(state.options)
     options.set(sessionId, answered.options)
-    const modelDefaults = new Map(state.modelDefaults)
-    modelDefaults.set(
-      sessionId,
-      modelDefaultsAfter(modelDefaultsOf(sessionId), answered.options, setOptionId),
-    )
-    replace({ ...state, options, modelDefaults, refusal: null })
+    replace({ ...state, options, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }
@@ -462,21 +415,12 @@ function offering(key: string, next: AgentOffering): void {
   replace({ ...state, offerings })
 }
 
-/**
- * The offer an answer carries: what the agent announced, or the sentence it was refused with,
- * and what the composer has learned of its models' defaults with that answer — from what it knew
- * before and the option the answer is to, null for the first offer (`modelDefaultsAfter`).
- */
-function offered(
-  answer: AgentOffer,
-  held: ModelDefaults,
-  setOptionId: string | null,
-): AgentOffering {
+/** The offer an answer carries: what the agent announced, or the sentence it was refused with. */
+function offered(answer: AgentOffer): AgentOffering {
   return {
     options: answer.options,
     refusal: answer.refusal === null ? null : answer.refusal.message,
     loading: false,
-    modelDefaults: modelDefaultsAfter(held, answer.options, setOptionId),
   }
 }
 
@@ -494,7 +438,7 @@ export async function offerAgent(projectId: string, provider: AgentProvider): Pr
   offering(key, { ...UNASKED, loading: true })
   try {
     const answer = await window.hemera.invoke('agents.offer', { projectId, provider })
-    offering(key, offered(answer, NO_DEFAULTS, null))
+    offering(key, offered(answer))
   } catch (cause) {
     offering(key, { ...UNASKED, refusal: message(cause) })
   }
@@ -524,7 +468,7 @@ export async function setOffered(
       optionId,
       value,
     })
-    offering(key, offered(answer, held.modelDefaults, optionId))
+    offering(key, offered(answer))
   } catch (cause) {
     offering(key, { ...held, refusal: message(cause), loading: false })
   }
@@ -593,7 +537,7 @@ export async function chooseOption(
 ): Promise<void> {
   try {
     await window.hemera.invoke('agents.setOption', { sessionId, optionId, value })
-    await readOptions(sessionId, optionId)
+    await readOptions(sessionId)
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }

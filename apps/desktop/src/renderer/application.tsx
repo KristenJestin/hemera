@@ -71,8 +71,6 @@ import {
   listenToAgents,
   loadAgents,
   offerAgent,
-  carryModelDefaults,
-  modelDefaultsOf,
   offeringOf,
   optionsOf,
   readOptions,
@@ -1022,7 +1020,6 @@ export function Application() {
           agent={agentOf(open.id)}
           agents={runsOn(open, agents.agents)}
           options={optionsOf(open.id)}
-          modelDefaults={modelDefaultsOf(open.id)}
           onWrite={async (body) => await writeInto(open.id, body)}
           onSay={(text) => void say(open.id, text)}
           onStop={() => void stopTurn(open.id)}
@@ -1112,9 +1109,6 @@ export function Application() {
           const asked = providerOf(chosen)
           const made = await startSession(active.id, asked)
           if (made === null) return sessionsSnapshot().refusal
-          // What the Home learned of its models' defaults goes with it: the Session starts on the
-          // effort pinned there, which its own first answer would otherwise teach as a default.
-          if (asked !== null) carryModelDefaults(active.id, asked, made.id)
           goTo(made.id)
           // The thread is read before the agent is spoken to: the message the engine writes as
           // part of the prompt then lands on a thread that is already on screen (D5-11).
