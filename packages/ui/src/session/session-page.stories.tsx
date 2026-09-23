@@ -317,7 +317,7 @@ export const NoMessageYet: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getByText('Nothing written yet')).toBeInTheDocument()
     expect(canvas.queryByRole('log')).toBeNull()
-    // Nor a side column: a Session with nothing to show in any of its tabs draws none (#40).
+    // Nor a column beside the thread: the Session details are a dialog the reader opens (#18).
     expect(canvas.queryByRole('complementary')).toBeNull()
     // The way in is the composer: the box is there, named by what it asks for, and empty.
     const box = canvas.getByRole('textbox', { name: 'Write to this Session…' })

@@ -31,7 +31,7 @@ import { CommandRun } from '../activity/command-run.tsx'
 import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
 import { CommandsPanel } from './commands-panel.tsx'
 import { ContextView } from './context-view.tsx'
-import { SessionSideColumn, type TouchedFile } from './session-side-column.tsx'
+import { SessionDetails, type SessionDetailsTab, type TouchedFile } from './session-details.tsx'
 import { StoppedTurn } from './stopped-turn.tsx'
 
 /**
@@ -39,7 +39,7 @@ import { StoppedTurn } from './stopped-turn.tsx'
  *
  * Every other story here shows one surface at a time; this one is the surface the reader
  * actually has, and it is the one the lot is judged on: the head, a thread carrying each kind of
- * block an agent reports, the column that holds what is a state rather than an event, and the
+ * block an agent reports, the details that hold what is a state rather than an event, and the
  * box the next turn is written in, with what the Session runs on at the end of its own row. A
  * block that reads well alone and badly here is a block that reads badly.
  *
@@ -260,7 +260,7 @@ const THREAD: ScrollerEntry[] = [
   },
 ]
 
-/** What the column of this Session holds: the runs it has made, and what it works from. */
+/** What the details of this Session hold: the runs it has made, and what it works from. */
 const COMMANDS = (
   <CommandsPanel
     runs={[
@@ -307,8 +307,8 @@ const CONTEXT = (
 )
 
 /**
- * The Context view of a Session nothing has gone into yet, which is what the head's button opens
- * the column on before the first message: the tools are lent already.
+ * The Context view of a Session nothing has gone into yet, which is what the details open on
+ * before the first message: the tools are lent already.
  */
 const FRESH_CONTEXT = (
   <ContextView
@@ -322,16 +322,14 @@ const FRESH_CONTEXT = (
 )
 
 interface PageProps {
-  /** The plan the column stands beside the thread with, and the files the turn has touched. */
+  /** The plan the agent works to, and the files the turn has touched. */
   plan?: PlanEntry[] | undefined
   touched?: TouchedFile[] | undefined
-  /**
-   * What the column holds beside them, handed over already drawn. `null` is the Session the
-   * page has nothing to hand it — no command has run and there is nothing to work from — and
-   * then the column stands on its plan and its files alone.
-   */
+  /** What the details hold beside them, handed over already drawn. */
   commands?: ReactNode
   context?: ReactNode
+  /** The tab the details open on, which the renderer reads from what is happening. */
+  openOn?: SessionDetailsTab | undefined
   /** Whether nothing has been written yet: no thread, no turn running, nothing spent. */
   fresh?: boolean | undefined
 }
@@ -349,13 +347,12 @@ function Page({
   touched = TOUCHED,
   commands = COMMANDS,
   context = CONTEXT,
+  openOn = 'commands',
   fresh = false,
 }: PageProps): ReactNode {
-  // The column the reader opened from the head, which stays open for as long as the Session is:
-  // the same state the renderer's page holds.
-  const [asked, setAsked] = useState(false)
-  const drawn =
-    asked || plan.length > 0 || touched.length > 0 || commands !== null || context !== null
+  // Whether the reader has the details open: the same state the renderer's page holds, and only
+  // the head's button sets it.
+  const [details, setDetails] = useState(false)
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [agent, setAgent] = useState<string | null>('claude-code')
@@ -365,11 +362,9 @@ function Page({
   return (
     <TooltipProvider>
       {/*
-        One column, and the side column beside it (review of #40, defect 2). The head, the thread
-        and the composer share one width and one left edge: a composer centred in the whole window
-        while the thread was centred in what the column left over is exactly what put them out of
-        line. The column stands beside all three, and it is not opened at all when it holds
-        nothing — the thread keeps its width and its line (defect 3).
+        One column (review of #40, defect 2): the head, the thread and the composer share one width
+        and one left edge, and nothing stands beside them — the details are a dialog the reader
+        opens from the head (second review of #18).
       */}
       <div className="flex h-screen min-h-0 bg-background text-foreground">
         <div className="flex min-h-0 flex-1 flex-col">
@@ -383,8 +378,8 @@ function Page({
               onCancelEditing={fn()}
               onArchive={fn()}
               archiveDisabled={fresh}
-              // What the agent works from, one press away while no column stands beside the thread.
-              onOpenContext={drawn ? undefined : () => setAsked(true)}
+              // What the turn has done, what the Session runs and what the agent works from.
+              onOpenDetails={() => setDetails(true)}
             />
           </div>
           {fresh ? (
@@ -468,19 +463,15 @@ function Page({
             />
           </div>
         </div>
-        {/* Opened from the head, the column shows its Commands panel and the Context view the
-            way the page hands them over whenever it is drawn, and it opens on the Context. */}
-        <SessionSideColumn
+        <SessionDetails
+          open={details}
+          onOpenChange={setDetails}
           plan={plan}
           files={touched}
           onSelectFile={fn()}
-          commands={
-            commands ??
-            (asked ? <CommandsPanel runs={[]} onStop={fn()} onOpenUrl={fn()} onRun={fn()} /> : null)
-          }
-          context={context ?? (asked ? FRESH_CONTEXT : null)}
-          defaultTab={asked ? 'context' : undefined}
-          focusSelectedTab={asked}
+          commands={commands}
+          context={context}
+          defaultTab={openOn}
         />
       </div>
     </TooltipProvider>
@@ -516,16 +507,13 @@ export const Complete: Story = {
   render: () => <Page />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    // A Session with a plan, files, runs and a delivery draws its column beside the thread, and
-    // the head offers no second way to it.
-    const column = canvas.getByRole('complementary')
-    await expect(column).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: 'Context' })).toBeNull()
-    // The plan is the column's, and the thread does not repeat it.
-    await expect(canvas.getByText('2 of 4')).toBeVisible()
-    // The column is the state: the plan the agent works to, and the files the turn touched.
-    await expect(canvas.getByText('Files')).toBeVisible()
-    await expect(canvas.getAllByText('src/billing/export.ts').length).toBeGreaterThan(0)
+    // A Session with a plan, files, runs and a delivery draws nothing beside its thread: no
+    // column, no tab strip, and no dialog until the reader asks for one.
+    expect(canvas.queryByRole('complementary')).toBeNull()
+    expect(canvas.queryByRole('tab')).toBeNull()
+    expect(within(document.body).queryByRole('dialog')).toBeNull()
+    // The plan is the details', and the thread does not repeat it.
+    expect(canvas.queryByText('2 of 4')).toBeNull()
     // The change is read in the language of its file, which is what the extension bought. The
     // grammar of that language is a module loaded on demand, so the first diff of a session waits
     // for it: on a cold machine that load is slower than the default patience of a wait.
@@ -544,15 +532,40 @@ export const Complete: Story = {
     await expect(
       canvas.getAllByRole('button', { name: 'http://localhost:5173/' }).length,
     ).toBeGreaterThan(0)
-    // And the column says what the Session runs and what it works from, on their own tabs.
-    await userEvent.click(canvas.getByRole('tab', { name: 'Commands' }))
-    await expect(canvas.getByText('1 running')).toBeVisible()
-    await userEvent.click(canvas.getByRole('tab', { name: 'Context' }))
-    await expect(canvas.getByText('Instructions')).toBeVisible()
-    await expect(canvas.getByText('Last change')).toBeVisible()
-    // Whatever the tab, the column never scrolls sideways (trial of 23 September 2026).
-    await expect(column.scrollWidth, 'the column scrolls sideways').toBe(column.clientWidth)
-    await userEvent.click(canvas.getByRole('tab', { name: 'Activity' }))
+    // The head's button opens the details, on the Commands tab since a command is running.
+    const button = canvas.getByRole('button', { name: 'Session details' })
+    await userEvent.click(button)
+    const dialog = await waitFor(() =>
+      within(document.body).getByRole('dialog', { name: 'Session details' }),
+    )
+    // It rises into place from transparent: what is read inside is read once it can be seen.
+    await waitFor(() => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+    })
+    const details = within(dialog)
+    await expect(details.getByRole('tab', { name: 'Commands' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(details.getByText('1 running')).toBeVisible()
+    // What the agent works from, on its own tab.
+    await userEvent.click(details.getByRole('tab', { name: 'Context' }))
+    await expect(details.getByText('Instructions')).toBeVisible()
+    await expect(details.getByText('Last change')).toBeVisible()
+    // The plan the agent works to, and the files the turn touched.
+    await userEvent.click(details.getByRole('tab', { name: 'Activity' }))
+    await expect(details.getByText('2 of 4')).toBeVisible()
+    await expect(details.getByText('Files')).toBeVisible()
+    // Whatever the tab, the details never scroll sideways (trial of 23 September 2026).
+    await expect(dialog.scrollWidth, 'the details scroll sideways').toBe(dialog.clientWidth)
+    // Escape closes them, and the focus is back on the button that opened them.
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    await waitFor(() => {
+      expect(document.activeElement).toBe(button)
+    })
     // The agent is waiting for an answer, and the turn it is in can be stopped.
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
     // One Stop on the command run, one on the box, and one on the strip that says why the box
@@ -650,39 +663,57 @@ export const Complete: Story = {
 }
 
 /**
- * A fresh Session: nothing written, no plan, no file touched, no command run, nothing delivered —
- * and no column at all (#40's rule, back after the trial of 23 September 2026).
+ * A fresh Session: nothing written, no plan, no file touched, no command run, nothing delivered.
  *
- * The tools are lent and the base will go in with the first message, but neither is a reason to
- * take a third of the window: the column is not drawn, and the thread keeps its width. What the
- * agent works from is one press away at the end of the head's line, and the column that press
- * opens stays, on its Context tab.
+ * Nothing stands beside the thread, and the thread keeps its width. The details are one press
+ * away at the end of the head's line all the same, and with no tab holding anything they open on
+ * the Context: the tools are lent already, and the base goes in with the first message.
  */
 export const Empty: Story = {
-  render: () => <Page fresh plan={[]} touched={[]} commands={null} context={null} />,
+  render: () => (
+    <Page
+      fresh
+      plan={[]}
+      touched={[]}
+      commands={<CommandsPanel runs={[]} onStop={fn()} onOpenUrl={fn()} onRun={fn()} />}
+      context={FRESH_CONTEXT}
+      openOn="context"
+    />
+  ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     // No column at all: not an empty box, not three tabs with nothing under them.
     expect(canvas.queryByRole('complementary')).toBeNull()
     expect(canvas.queryByRole('tab')).toBeNull()
     await expect(canvas.getByText('Nothing written yet')).toBeVisible()
-    // The Context is reached from the head, and the column opens on it.
-    await userEvent.click(canvas.getByRole('button', { name: 'Context' }))
-    await expect(canvas.getByRole('complementary')).toBeVisible()
-    const tab = canvas.getByRole('tab', { name: 'Context' })
-    await expect(tab).toHaveAttribute('aria-selected', 'true')
-    // The button pressed has gone, and the focus went with the press to the tab it opened.
+    // The details are reached from the head, and open on the Context.
+    await userEvent.click(canvas.getByRole('button', { name: 'Session details' }))
+    const dialog = await waitFor(() =>
+      within(document.body).getByRole('dialog', { name: 'Session details' }),
+    )
+    // It rises into place from transparent: what is read inside is read once it can be seen.
     await waitFor(() => {
-      expect(document.activeElement).toBe(tab)
+      expect(getComputedStyle(dialog).opacity).toBe('1')
     })
-    await expect(canvas.getByText('Nothing has gone to the agent yet.')).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tools · 2' })).toBeVisible()
+    const details = within(dialog)
+    await expect(details.getByRole('tab', { name: 'Context' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(details.getByText('Nothing has gone to the agent yet.')).toBeVisible()
+    await expect(details.getByRole('button', { name: 'Tools · 2' })).toBeVisible()
     // The two other tabs say they have nothing yet, rather than showing an empty panel.
-    await userEvent.click(canvas.getByRole('tab', { name: 'Activity' }))
-    await expect(canvas.getByText('No plan and no file touched in this Session yet.')).toBeVisible()
-    await userEvent.click(canvas.getByRole('tab', { name: 'Commands' }))
-    await expect(canvas.getByText('No command has run in this Session.')).toBeVisible()
-    // The column is the way to the Context from now on, so the head's button has gone.
-    expect(canvas.queryByRole('button', { name: 'Context' })).toBeNull()
+    await userEvent.click(details.getByRole('tab', { name: 'Activity' }))
+    await expect(
+      details.getByText('No plan and no file touched in this Session yet.'),
+    ).toBeVisible()
+    await userEvent.click(details.getByRole('tab', { name: 'Commands' }))
+    await expect(details.getByText('No command has run in this Session.')).toBeVisible()
+    // The close button closes them, and the head's button is still there.
+    await userEvent.click(details.getByRole('button', { name: 'Close' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    await expect(canvas.getByRole('button', { name: 'Session details' })).toBeVisible()
   },
 }

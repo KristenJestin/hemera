@@ -10,8 +10,8 @@ import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import {
   IconArchive,
-  IconBrain,
   IconDots,
+  IconLayoutSidebarRight,
   IconMessages,
   IconPencil,
   IconRestore,
@@ -118,13 +118,12 @@ export interface SessionHeaderProps {
    */
   archiveDisabled?: boolean | undefined
   /**
-   * Opens the column beside the thread on its Context tab, when the column is not drawn.
+   * Opens the Session's details: its plan and files, its commands, and what its agent works from.
    *
-   * A Session none of whose tabs has anything draws no column (#40), and what the agent works from
-   * would be out of reach with it: this is the way to it, at the end of the head's line. Left out
-   * while the column is there, since its own tab is the way then.
+   * They are a dialog the reader opens and never a column beside the thread (second review of
+   * #18), and this is the one way to them, at the end of the head's line.
    */
-  onOpenContext?: (() => void) | undefined
+  onOpenDetails?: (() => void) | undefined
 }
 
 /**
@@ -154,7 +153,7 @@ export function SessionHeader({
   onCancelEditing,
   onArchive,
   archiveDisabled = false,
-  onOpenContext,
+  onOpenDetails,
 }: SessionHeaderProps): ReactNode {
   const titleControl = useRef<HTMLButtonElement>(null)
   const wasEditing = useRef(false)
@@ -205,14 +204,14 @@ export function SessionHeader({
         <p className={SUB}>{`${projectName} · ${meta}`}</p>
       </div>
       <div className={ACTIONS}>
-        {onOpenContext !== undefined && (
-          <Tooltip label="Context">
+        {onOpenDetails !== undefined && (
+          <Tooltip label="Session details">
             <IconButton
               variant="ghost"
               size="sm"
-              icon={<IconBrain size="sm" />}
-              aria-label="Context"
-              onClick={onOpenContext}
+              icon={<IconLayoutSidebarRight size="sm" />}
+              aria-label="Session details"
+              onClick={onOpenDetails}
             />
           </Tooltip>
         )}

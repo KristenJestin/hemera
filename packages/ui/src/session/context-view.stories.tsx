@@ -8,8 +8,8 @@ import { ContextView } from './context-view.tsx'
  *
  * One story per state of the instructions — nothing gone yet, `AGENTS.md` given at the start,
  * read by the agent, missing, and changed since — and one with the tools unfolded. Each is drawn
- * at the width of the side column it lives in, since that width is what every row has to read
- * whole at (trial of 23 September 2026).
+ * at the width of a sidebar, narrower than the Session details it lives in: a row that reads whole
+ * there reads whole in the dialog (trial of 23 September 2026).
  */
 
 /** The base, as it reaches an agent with no system prompt to take it. */
@@ -42,7 +42,7 @@ const meta = {
   title: 'Blocks/Session/ContextView',
   component: ContextView,
   parameters: { layout: 'padded' },
-  // The width of the side column's content, which is the width the view is read at.
+  // The narrowest width the view is read at: a sidebar's.
   decorators: [
     (Story) => (
       <div className="w-sidebar px-4">

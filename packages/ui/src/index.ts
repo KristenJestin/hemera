@@ -325,11 +325,11 @@ export {
   type PlanStatus,
 } from './session/plan-panel.tsx'
 export {
-  SessionSideColumn,
-  type SessionSideColumnProps,
-  type SideColumnTab,
+  SessionDetails,
+  type SessionDetailsProps,
+  type SessionDetailsTab,
   type TouchedFile,
-} from './session/session-side-column.tsx'
+} from './session/session-details.tsx'
 export {
   CommandsPanel,
   type CommandPanelRun,

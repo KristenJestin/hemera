@@ -56,6 +56,8 @@ import {
   IconInfoCircleFilled as TablerInfoCircleFilled,
   IconLayoutSidebar as TablerLayoutSidebar,
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
+  IconLayoutSidebarRight as TablerLayoutSidebarRight,
+  IconLayoutSidebarRightFilled as TablerLayoutSidebarRightFilled,
   IconMessage as TablerMessage,
   IconMessageFilled as TablerMessageFilled,
   IconMessages as TablerMessages,
@@ -199,6 +201,11 @@ export const IconLayoutSidebar = catalogued(
   TablerLayoutSidebarFilled,
   TablerLayoutSidebar,
   'IconLayoutSidebar',
+)
+export const IconLayoutSidebarRight = catalogued(
+  TablerLayoutSidebarRightFilled,
+  TablerLayoutSidebarRight,
+  'IconLayoutSidebarRight',
 )
 export const IconMessage = catalogued(TablerMessageFilled, TablerMessage, 'IconMessage')
 export const IconMessages = catalogued(TablerMessagesFilled, TablerMessages, 'IconMessages')

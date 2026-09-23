@@ -328,7 +328,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // HEM-17: a turn with an agent, from the call it makes to the gate it stops at. The blocks
       // of a turn (its calls, its thoughts, its console, its changes), the permission card and
       // the line an answer leaves, what the agent advertises and the reader sets, the agents this
-      // machine has, and what a Session says about itself beside its thread.
+      // machine has, and what a Session says about itself in its details.
       'Disclosure',
       'ThoughtBlock',
       'ToolCallCard',
@@ -350,12 +350,12 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
-      'SessionSideColumn',
+      'SessionDetails',
       'StoppedTurn',
       'ResumeFallbackBanner',
       // HEM-18: Hemera lends the agent its own tools. A call to one of them is a block of the
       // thread with the mark that tells it from a native call, a command it runs is a block of
-      // its own, and the Session says what it runs and what it works from beside the thread.
+      // its own, and the Session says what it runs and what it works from in its details.
       'HemeraToolCall',
       'CommandRun',
       'CommandsPanel',

@@ -1,40 +1,35 @@
-import { cn } from 'cn'
-import { type ReactNode, useEffect, useRef } from 'react'
+import type { ReactNode } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
+import { Dialog } from '../components/dialog/dialog.tsx'
 import { Tabs } from '../components/tabs/tabs.tsx'
 import { IconActivity, IconBrain, IconCommand, IconFolderOpen } from '../icons.ts'
 import { PlanPanel, type PlanEntry } from './plan-panel.tsx'
 
 /**
- * What the session has been doing, beside it (design D17-17, D6-10 and D6-12).
+ * What the session has been doing, one press away (design D17-17, D6-10 and D6-12).
  *
  * Three questions a reader has while an agent works, and none of them belongs in the thread: the
  * plan it is working to and the files it has touched, the commands it runs, and what it is
  * working from. All three are states rather than events — the thread already carries every call
- * that touched them — so they live here, where they are read once and checked on, and where
- * growing them does not push the conversation down the page.
+ * that touched them — so they are read here, on purpose, and growing them does not push the
+ * conversation down the page.
  *
- * They are three tabs and not three stacked panels because a column that grows downwards is a
- * column the reader scrolls, and what a reader scrolls past is what they stop reading. The plan
- * keeps the tab it had, since it is what a Session is watched through; the Commands panel and
- * the Context view arrive as the tab beside it (D6-12, D6-10), and the tab a Session opens on
- * follows what is happening in it — a Session with a server running opens on its commands.
+ * A centred dialog and not a column beside the thread (second review of #18): a column took a third
+ * of the window from the thread whenever one of its tabs had something, and came and went with
+ * what the agent did. The dialog opens when the reader asks for it, from the Session's head, and
+ * nothing the agent does opens it by itself: a plan, a run or a permission that arrives updates
+ * the thread and, while the dialog is open, the tab it concerns. It is as wide as the thread, its
+ * content scrolls inside it, and Escape, its close button and a click outside all close it.
  *
- * The column is not a second inbox and carries nothing that arrived: what is listed here is what
- * the turn has done, and a file is listed because a call named it.
+ * Three tabs and not three stacked panels, because a reader who comes back to a Session where a
+ * command is running wants that tab, not a scroll; the tab it opens on is the page's to say.
+ *
+ * Nothing here is a second inbox: what is listed is what the turn has done, and a file is listed
+ * because a call named it.
  */
-/**
- * The column is a box of its own: the width of a side column, the line that separates it from the
- * thread, and the room for what it holds. It is not something a caller adds — a component restyled
- * from outside is what the lint refuses — and the border is the column's rather than the page's,
- * since the page draws no wrapper around it: a column with nothing to show leaves no box behind
- * (review of #40, defect 3).
- */
-const COLUMN =
-  'flex w-sidebar shrink-0 flex-col gap-2 overflow-y-auto border-l border-border px-4 py-6'
 
 const FILES = 'flex flex-col gap-1 pt-1'
 
@@ -58,10 +53,13 @@ export interface TouchedFile {
   removed: number
 }
 
-/** The tab the column opens on, which is the one a reader came back for. */
-export type SideColumnTab = 'activity' | 'commands' | 'context'
+/** The tab the details open on, which is the one a reader came back for. */
+export type SessionDetailsTab = 'activity' | 'commands' | 'context'
 
-export interface SessionSideColumnProps {
+export interface SessionDetailsProps {
+  /** Whether the dialog is open. The page holds it: only the reader opens it. */
+  open: boolean
+  onOpenChange: (open: boolean) => void
   /** The plan as the agent last sent it. */
   plan: readonly PlanEntry[]
   /** The files the turn has touched. */
@@ -70,63 +68,28 @@ export interface SessionSideColumnProps {
   commands?: ReactNode
   /** The Context view of this Session, handed over already drawn. */
   context?: ReactNode
-  /** The tab it opens on. The plan's, unless the Session says otherwise. */
-  defaultTab?: SideColumnTab | undefined
+  /** The tab it opens on, each time it opens. The plan's, unless the Session says otherwise. */
+  defaultTab?: SessionDetailsTab | undefined
   /** Opens one of them, when the reader presses its path. */
   onSelectFile?: ((path: string) => void) | undefined
-  /**
-   * Whether the tab it opens on takes the focus when the column is drawn.
-   *
-   * For the column the reader opened from the Session's head: the button pressed goes away with
-   * the press, and the focus it held would fall back to the page. It goes to the tab the column
-   * opened on instead, which is what the press asked for.
-   */
-  focusSelectedTab?: boolean | undefined
-  /** Where the column sits; never how it looks. */
-  className?: string | undefined
 }
 
-/**
- * Whether anything stands beside the thread (review of #40, defect 3).
- *
- * The rule is the column's own and not the page's: a page that decided it for itself would be a
- * second place for it to drift, and the width the column takes is taken from the thread. The plan
- * and the files are the two the column can count, and a Commands panel or a Context view is handed
- * over only by a caller that has one to show: being handed either of them is the answer for those
- * two, so a Session that has run a command keeps its column.
- */
-function hasSideColumn({ plan, files, commands, context }: SessionSideColumnProps): boolean {
-  const hasCommands = commands !== null && commands !== undefined
-  const hasContext = context !== null && context !== undefined
-  return plan.length > 0 || files.length > 0 || hasCommands || hasContext
-}
-
-export function SessionSideColumn({
+export function SessionDetails({
+  open,
+  onOpenChange,
   plan,
   files,
   commands,
   context,
   defaultTab = 'activity',
   onSelectFile,
-  focusSelectedTab = false,
-  className,
-}: SessionSideColumnProps): ReactNode {
-  const column = useRef<HTMLElement>(null)
-  useEffect(() => {
-    if (!focusSelectedTab) return
-    column.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
-  }, [focusSelectedTab])
-  // Nothing to show, nothing to draw: the column is not rendered and the thread keeps its
-  // width, since it is the column's own box that is missing and there is no wrapper around it.
-  if (!hasSideColumn({ plan, files, commands, context })) return null
+}: SessionDetailsProps): ReactNode {
   return (
-    <aside ref={column} className={cn(COLUMN, className)}>
-      {/* The icons alone: three labelled tabs are wider than the column, and a strip wider than
-          its column is a column that scrolls sideways (trial of 23 September 2026). Each tab is
-          still named by its label, which the tooltip says under the hand. */}
+    <Dialog title="Session details" size="wide" open={open} onOpenChange={onOpenChange}>
+      {/* The dialog's content is mounted when it opens, so the tab it opens on is read then:
+          what happens while it is open changes what a tab holds, never which tab is shown. */}
       <Tabs
         label="What this Session is doing"
-        iconsOnly
         defaultValue={defaultTab}
         items={[
           {
@@ -135,8 +98,8 @@ export function SessionSideColumn({
             icon: <IconActivity size="sm" />,
             panel: (
               <>
-                {/* A column opened from the head can have nothing here yet, and says so like its
-                    two other tabs rather than showing an empty panel. */}
+                {/* A Session can have nothing here yet, and says so like the two other tabs
+                    rather than showing an empty panel. */}
                 {plan.length === 0 && files.length === 0 ? (
                   <p className={NOTHING}>No plan and no file touched in this Session yet.</p>
                 ) : null}
@@ -168,7 +131,7 @@ export function SessionSideColumn({
                               }}
                             >
                               {/* One line, cut at its end rather than clipped: a path is one
-                                  word, and the link holds it to the column's width. */}
+                                  word, and the link holds it to the dialog's width. */}
                               <span className="min-w-0 truncate">{file.path}</span>
                             </Button>
                           )}
@@ -202,6 +165,6 @@ export function SessionSideColumn({
           },
         ]}
       />
-    </aside>
+    </Dialog>
   )
 }
