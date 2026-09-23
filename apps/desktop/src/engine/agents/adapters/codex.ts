@@ -61,6 +61,9 @@ const BARE_CONFIG = {
   agents: { enabled: false },
   // `skills__list` and `skills__read`, and the orchestrator's own MCP tools.
   orchestrator: { skills: { enabled: false }, mcp: { enabled: false } },
+  // The index of the user's skills, and the bundled ones, stay out of the prompt. Discovery itself has
+  // no key; the patch disables every skill found by its path, so a `$name` mention injects nothing.
+  skills: { include_instructions: false, bundled: { enabled: false } },
   // Nested and not dotted: the adapter adds a `features` table of its own to every thread, and a
   // `features.x` key beside it is lost (tried on codex-acp 1.12.0, codex-cli 0.154.0).
   features: {

@@ -231,6 +231,10 @@ const CODEX_CONFIG = z.object({
   tools: z.record(z.string(), z.object({ enabled: z.boolean() })),
   agents: z.object({ enabled: z.boolean() }),
   orchestrator: z.object({ skills: z.object({ enabled: z.boolean() }) }),
+  skills: z.object({
+    include_instructions: z.boolean(),
+    bundled: z.object({ enabled: z.boolean() }),
+  }),
   features: z.record(z.string(), z.boolean()),
 })
 
@@ -256,6 +260,8 @@ describe("A bare Codex offers only Hemera's tools", () => {
     })
     expect(config.agents.enabled).toBe(false)
     expect(config.orchestrator.skills.enabled).toBe(false)
+    // No index of the user's skills in the prompt, and no bundled skill.
+    expect(config.skills).toEqual({ include_instructions: false, bundled: { enabled: false } })
     for (const feature of [
       'shell_tool',
       'unified_exec',
