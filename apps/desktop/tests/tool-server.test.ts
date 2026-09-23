@@ -350,6 +350,30 @@ describe("A call carries the agent's own identifier of it", () => {
     const call = seen.find((entry) => entry.kind === 'hemera_tool_call')
     expect(JSON.parse(call?.payload ?? '{}')).toMatchObject({ callId: 'toolu_01' })
   })
+
+  it("reads the id Hemera's patch of Codex's adapter sends, which its report carries too", async () => {
+    fileInRoot('inside.md', 'inside the root\n')
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const sessions = yield* Sessions
+        const held = yield* aSessionWithAToken
+        yield* toolCall(
+          server,
+          held.granted.token,
+          1,
+          'fs_read',
+          { path: 'inside.md' },
+          { 'hemera/callId': 'exec-2c9eedea' },
+        )
+        const page = yield* sessions.read(held.session.id)
+        return page.entries
+      }),
+    )
+
+    const call = seen.find((entry) => entry.kind === 'hemera_tool_call')
+    expect(JSON.parse(call?.payload ?? '{}')).toMatchObject({ callId: 'exec-2c9eedea' })
+  })
 })
 
 describe('An agent that stops waiting for a call', () => {

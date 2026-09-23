@@ -354,14 +354,22 @@ function asNodeResponse(response: ServerResponse): NodeServerResponseLike {
 
 /**
  * Where an agent names its own identifier of a call in the request's `_meta`: Claude Code sends
- * the `tool_use` id it reports the call under.
+ * the `tool_use` id it reports the call under, and Hemera's patch of Codex's adapter the id of
+ * the dynamic tool call, which is the `toolCallId` its report of the call carries.
  */
-const CALL_ID = z.object({ 'claudecode/toolUseId': z.string().min(1) })
+const CALL_ID = z
+  .union([
+    z.object({ 'claudecode/toolUseId': z.string().min(1) }),
+    z.object({ 'hemera/callId': z.string().min(1) }),
+  ])
+  .transform((meta) =>
+    'claudecode/toolUseId' in meta ? meta['claudecode/toolUseId'] : meta['hemera/callId'],
+  )
 
 /** The agent's identifier of a call, when its request carries one. */
 function callIdIn(meta: RequestMeta | undefined): string | null {
   const read = CALL_ID.safeParse(meta)
-  return read.success ? read.data['claudecode/toolUseId'] : null
+  return read.success ? read.data : null
 }
 
 /**
@@ -417,7 +425,7 @@ async function refusalOf(
     key: keyIn(argumentsRead),
     offered: grant.offered,
     caller: grant.id,
-    callId: meta?.['claudecode/toolUseId'] ?? null,
+    callId: meta ?? null,
   }
   // A tool this Session was not offered is not registered for it: the server answers it as a name
   // it does not know, and the guard says which of the two it is.
