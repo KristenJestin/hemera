@@ -39,6 +39,7 @@ import {
   columnDrawn,
   contextListsOf,
   contextReachable,
+  focusesOpeningTab,
   openingTabOf,
   panelRunsOf,
   sideTabsOf,
@@ -565,6 +566,9 @@ export function SessionPage({
         // commands, as opening the Session with one running would have (D6-12).
         key={openingTabOf(commandRuns, tabs)}
         defaultTab={openingTabOf(commandRuns, tabs)}
+        // Opened from the head, the column takes the focus the head's button had: that button
+        // goes away with the press.
+        focusSelectedTab={focusesOpeningTab(tabs, contextAsked)}
       />
     </div>
   )

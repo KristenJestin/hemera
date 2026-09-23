@@ -22,6 +22,7 @@ import {
   columnDrawn,
   contextListsOf,
   contextReachable,
+  focusesOpeningTab,
   hasSideColumn,
   openingTabOf,
   panelRunsOf,
@@ -176,6 +177,15 @@ describe('The Context is reached from the head while no column is drawn', () => 
 
     expect(drawn).toBe(true)
     expect(contextReachable(drawn, view)).toBe(false)
+  })
+
+  test('the column opened from the head takes the focus the pressed button had', () => {
+    expect(focusesOpeningTab(sideTabsOf(0, 0, [], aView(['base', 'provided'])), true)).toBe(true)
+  })
+
+  test('a column that comes to hold something does not take the focus back', () => {
+    expect(focusesOpeningTab(sideTabsOf(2, 0, [], aView(['base'])), true)).toBe(false)
+    expect(focusesOpeningTab(sideTabsOf(2, 0, [], aView(['base'])), false)).toBe(false)
   })
 
   test('once opened from the head the column stays, whatever its tabs hold', () => {

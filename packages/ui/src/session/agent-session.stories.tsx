@@ -480,6 +480,7 @@ function Page({
           }
           context={context ?? (asked ? FRESH_CONTEXT : null)}
           defaultTab={asked ? 'context' : undefined}
+          focusSelectedTab={asked}
         />
       </div>
     </TooltipProvider>
@@ -667,10 +668,12 @@ export const Empty: Story = {
     // The Context is reached from the head, and the column opens on it.
     await userEvent.click(canvas.getByRole('button', { name: 'Context' }))
     await expect(canvas.getByRole('complementary')).toBeVisible()
-    await expect(canvas.getByRole('tab', { name: 'Context' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    )
+    const tab = canvas.getByRole('tab', { name: 'Context' })
+    await expect(tab).toHaveAttribute('aria-selected', 'true')
+    // The button pressed has gone, and the focus went with the press to the tab it opened.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(tab)
+    })
     await expect(canvas.getByText('Nothing has gone to the agent yet.')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Tools · 2' })).toBeVisible()
     // The two other tabs say they have nothing yet, rather than showing an empty panel.

@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect, useRef } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
 import { Badge } from '../components/badge/badge.tsx'
@@ -74,6 +74,14 @@ export interface SessionSideColumnProps {
   defaultTab?: SideColumnTab | undefined
   /** Opens one of them, when the reader presses its path. */
   onSelectFile?: ((path: string) => void) | undefined
+  /**
+   * Whether the tab it opens on takes the focus when the column is drawn.
+   *
+   * For the column the reader opened from the Session's head: the button pressed goes away with
+   * the press, and the focus it held would fall back to the page. It goes to the tab the column
+   * opened on instead, which is what the press asked for.
+   */
+  focusSelectedTab?: boolean | undefined
   /** Where the column sits; never how it looks. */
   className?: string | undefined
 }
@@ -100,13 +108,19 @@ export function SessionSideColumn({
   context,
   defaultTab = 'activity',
   onSelectFile,
+  focusSelectedTab = false,
   className,
 }: SessionSideColumnProps): ReactNode {
+  const column = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!focusSelectedTab) return
+    column.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
+  }, [focusSelectedTab])
   // Nothing to show, nothing to draw: the column is not rendered and the thread keeps its
   // width, since it is the column's own box that is missing and there is no wrapper around it.
   if (!hasSideColumn({ plan, files, commands, context })) return null
   return (
-    <aside className={cn(COLUMN, className)}>
+    <aside ref={column} className={cn(COLUMN, className)}>
       {/* The icons alone: three labelled tabs are wider than the column, and a strip wider than
           its column is a column that scrolls sideways (trial of 23 September 2026). Each tab is
           still named by its label, which the tooltip says under the hand. */}

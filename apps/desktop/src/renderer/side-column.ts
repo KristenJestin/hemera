@@ -88,6 +88,16 @@ export function columnDrawn(tabs: SideTabs, asked: boolean): boolean {
 }
 
 /**
+ * Whether the column hands the focus to the tab it opens on: when the reader opened it from the
+ * head, whose button went away with the press, and only while that press is the reason it is
+ * drawn — a column that later comes to hold a plan or a run does not take the focus back from
+ * wherever the reader has gone since.
+ */
+export function focusesOpeningTab(tabs: SideTabs, asked: boolean): boolean {
+  return asked && !hasSideColumn(tabs)
+}
+
+/**
  * Whether the head offers its Context button: while no column stands beside the thread, and once
  * the engine has said what the Context is. With the column drawn, its own tab is the way there.
  */
