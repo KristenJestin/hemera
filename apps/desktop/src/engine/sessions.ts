@@ -1,9 +1,9 @@
 /**
  * The Sessions of a Project: the thread the user writes, and nothing else answers it (D4b-02).
  *
- * A Session belongs to a Project and to nothing more — no Spec, no Workspace — and archiving is
- * the only way one ends. There is no `delete` here and there is no use case that could be made
- * to: the absence is the guarantee (design D4b-06).
+ * A Session belongs to a Project, may define a Spec (design D7-07) and has no Workspace, and
+ * archiving is the only way one ends. There is no `delete` here and there is no use case that
+ * could be made to: the absence is the guarantee (design D4b-06).
  *
  * Every change goes through `mutate`, so the entry, the title it may have proposed, the date the
  * Session was last written and the event that says so are one transaction. That is the whole of
@@ -16,6 +16,7 @@
 
 import {
   type AgentProvider,
+  type Mission,
   type NativeState,
   type Session as DomainSession,
   type SessionEntry as DomainSessionEntry,
@@ -273,8 +274,10 @@ function sessionOf(row: typeof sessions.$inferSelect): Session {
     // SAFETY: the same, for the check on `native_state`: it admits exactly the states the
     // domain declares.
     nativeState: row.nativeState as NativeState,
-    // This lot writes one kind of Session; a mission is what HEM-48 gives a Session here.
-    mission: 'free',
+    // SAFETY: the same, for the check on `mission`: it admits exactly the missions the domain
+    // declares (design D7-07).
+    mission: row.mission as Mission,
+    specId: row.specId,
     archivedAt: row.archivedAt === null ? null : Date.parse(row.archivedAt),
     createdAt: Date.parse(row.createdAt),
     lastWrittenAt: Date.parse(row.lastWrittenAt),
@@ -463,7 +466,9 @@ export const sessionsLayer = Layer.effect(
                 projectId,
                 title: NEW_SESSION_TITLE,
                 titleSource: 'derived',
+                // The column defaults: a Session starts free and defines no Spec (design D7-07).
                 mission: 'free',
+                specId: null,
                 // With the row rather than by a second mutation a moment later: the choice is
                 // made before the Session exists, in the composer that starts it, and the agent
                 // is what it is written with.

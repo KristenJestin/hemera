@@ -7,7 +7,8 @@
  *
  * Lot 3 gave it what the application knows about itself; lot 4 adds the domain — the Projects,
  * their working environments and the journal every change is written to (design D4-04). The
- * Sessions are lot 5's.
+ * Sessions are lot 5's; the Specs, their revisions and the mission of a Session are lot 19's
+ * (design D7-01, D7-07).
  *
  * Two conventions run through all of it. An identifier is a `crypto.randomUUID()` in a text
  * column, because an identifier the database hands out is one that cannot be decided before the
@@ -17,9 +18,11 @@
 
 import { sql } from 'drizzle-orm'
 import {
+  type AnySQLiteColumn,
   check,
   index,
   integer,
+  primaryKey,
   sqliteTable,
   text,
   unique,
@@ -29,10 +32,18 @@ import {
 import {
   AGENT_PROVIDERS,
   COMMAND_KINDS,
+  MISSIONS,
   NATIVE_STATES,
+  PHASE_IDS,
+  PHASE_STATES,
   PROJECT_TONES,
+  SECTION_NAMES,
   SESSION_ENTRY_KINDS,
   SESSION_ENTRY_ORIGINS,
+  SPEC_ACTORS,
+  SPEC_STATUSES,
+  SPEC_TYPES,
+  TASK_EXECUTORS,
 } from '@hemera/core'
 
 /**
@@ -85,6 +96,9 @@ function oneOf(values: readonly string[]): string {
  * `archived_at` is how a project ends, and it is a date that can be cleared. `version` is
  * incremented by every mutation and compared inside the transaction, so two windows editing the
  * same project refuse the second write instead of losing it.
+ *
+ * `spec_prefix` and `next_spec_number` mint the key of its next Spec, `PREFIX-n`, in the
+ * transaction that creates it (design D7-02): a counter per project, never reused.
  */
 export const projects = sqliteTable(
   'projects',
@@ -92,6 +106,8 @@ export const projects = sqliteTable(
     id: text('id').primaryKey(),
     name: text('name').notNull(),
     tone: text('tone').notNull(),
+    specPrefix: text('spec_prefix').notNull().default('SPEC'),
+    nextSpecNumber: integer('next_spec_number').notNull().default(1),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     archivedAt: text('archived_at'),
@@ -151,9 +167,11 @@ export const SESSION_ENTRY_ROLES = ['user', 'agent', 'hemera'] as const
 /**
  * A Session: the thread of work of a project, and what it is called (design D4b-01, D4b-03).
  *
- * It is attached to a Project and to nothing else — no Spec, no Workspace — and `free` is the
- * absence of a mission rather than a column: this lot writes one kind of Session, and a column
- * holding one value is a column that lies about having a choice.
+ * It is attached to a Project, and since lot 19 it carries a mission and the Spec it defines
+ * (design D7-07): a Session is `free` with no Spec, or `define` with the Spec it was switched
+ * onto when the human accepted the agent's proposal, or was opened on. `briefed_at` is when the
+ * last mission brief was composed, so the human edits and answers after it are those "since the
+ * last turn".
  *
  * The title is proposed from the first message and belongs to the engine, because the rule
  * that derives it is one rule: derived in the renderer, it would be two machines with two
@@ -190,6 +208,9 @@ export const sessions = sqliteTable(
     nativeSessionId: text('native_session_id'),
     nativeState: text('native_state').notNull().default('none'),
     cwd: text('cwd'),
+    mission: text('mission').notNull().default('free'),
+    specId: text('spec_id').references((): AnySQLiteColumn => specs.id),
+    briefedAt: text('briefed_at'),
     createdAt: text('created_at').notNull(),
     lastWrittenAt: text('last_written_at').notNull(),
     archivedAt: text('archived_at'),
@@ -209,6 +230,7 @@ export const sessions = sqliteTable(
       'session_native_state_is_known',
       sql`${table.nativeState} IN (${sql.raw(oneOf(NATIVE_STATES))})`,
     ),
+    check('session_mission_is_known', sql`${table.mission} IN (${sql.raw(oneOf(MISSIONS))})`),
     // The list of a Project is read in one order, and it is this one: the index is the query.
     index('session_by_project').on(table.projectId, table.lastWrittenAt),
   ],
@@ -409,8 +431,8 @@ export const contextDeliveries = sqliteTable(
   ],
 )
 
-/** What an event is about. `session` is declared now and filled by lot 5. */
-export const ENTITY_KINDS = ['project', 'profile', 'session'] as const
+/** What an event is about. `session` is lot 5's, `spec` lot 19's (design D7-13). */
+export const ENTITY_KINDS = ['project', 'profile', 'session', 'spec'] as const
 
 /** Where an event came from: the user acting, or the application doing its work. */
 export const EVENT_SOURCES = ['ui', 'system'] as const
@@ -467,5 +489,279 @@ export const domainEvents = sqliteTable(
     index('event_by_project').on(table.projectId, table.sequence),
     index('event_by_session').on(table.sessionId, table.sequence),
     index('event_unseen').on(table.seenAt),
+  ],
+)
+
+/**
+ * A Spec: what a project intends to build, relational rather than a document (design D7-01).
+ *
+ * `key` is `PREFIX-n`, minted from the project's counter in the creating transaction and unique
+ * inside the project (D7-02); the slug follows the first title. A Spec needs no Workspace.
+ * `content_version` is bumped by every write and is what an attestation and a "Mark ready" click
+ * are made against.
+ *
+ * `current_revision_id` has no foreign key: a Spec and its first revision are written in one
+ * transaction and each names the other, and a cycle of references is one SQLite and Drizzle
+ * would both have to be talked round. The use case keeps it right.
+ */
+export const specs = sqliteTable(
+  'specs',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    slug: text('slug').notNull(),
+    status: text('status').notNull(),
+    priority: text('priority'),
+    workspaceId: text('workspace_id'),
+    currentRevisionId: text('current_revision_id').notNull(),
+    /** The one Session whose agent may write the draft (D7-11). */
+    writerSessionId: text('writer_session_id').references((): AnySQLiteColumn => sessions.id),
+    contentVersion: integer('content_version').notNull().default(0),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('spec_status_is_known', sql`${table.status} IN (${sql.raw(oneOf(SPEC_STATUSES))})`),
+    unique('spec_key_in_project').on(table.projectId, table.key),
+    index('spec_by_project').on(table.projectId),
+  ],
+)
+
+/**
+ * One revision of a Spec: its title and type, and why it was opened (design D7-01).
+ *
+ * Only the current revision of a draft is written; a reopening copies it whole into the next
+ * number, so an old revision stays readable as it was.
+ */
+export const specRevisions = sqliteTable(
+  'spec_revisions',
+  {
+    id: text('id').primaryKey(),
+    specId: text('spec_id')
+      .notNull()
+      .references(() => specs.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    title: text('title').notNull(),
+    type: text('type').notNull(),
+    changeSummary: text('change_summary'),
+    changeReason: text('change_reason'),
+    createdBy: text('created_by').notNull(),
+    /** The `content_version` the agent attested the contract on, if it did. */
+    attestedContentVersion: integer('attested_content_version'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    check('revision_type_is_known', sql`${table.type} IN (${sql.raw(oneOf(SPEC_TYPES))})`),
+    check(
+      'revision_created_by_is_known',
+      sql`${table.createdBy} IN (${sql.raw(oneOf(SPEC_ACTORS))})`,
+    ),
+    unique('revision_number_in_spec').on(table.specId, table.number),
+  ],
+)
+
+/**
+ * A section of a revision, one row per name, each with its own version (design D7-01, D7-12).
+ *
+ * The version is what a conflict and a stale phase are decided on, so it belongs to the section
+ * and not to the Spec; the author and the Session say who wrote it last.
+ */
+export const specSections = sqliteTable(
+  'spec_sections',
+  {
+    id: text('id').primaryKey(),
+    revisionId: text('revision_id')
+      .notNull()
+      .references(() => specRevisions.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    body: text('body').notNull().default(''),
+    version: integer('version').notNull().default(1),
+    author: text('author').notNull(),
+    sessionId: text('session_id'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('section_name_is_known', sql`${table.name} IN (${sql.raw(oneOf(SECTION_NAMES))})`),
+    check('section_author_is_known', sql`${table.author} IN (${sql.raw(oneOf(SPEC_ACTORS))})`),
+    unique('section_once_in_revision').on(table.revisionId, table.name),
+  ],
+)
+
+/** A user story of a revision, ordered by rank (design D7-01). */
+export const userStories = sqliteTable('user_stories', {
+  id: text('id').primaryKey(),
+  revisionId: text('revision_id')
+    .notNull()
+    .references(() => specRevisions.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  narrative: text('narrative').notNull(),
+  priority: text('priority'),
+  rank: text('rank').notNull(),
+})
+
+/** An acceptance criterion of a story, ordered by rank (design D7-01). */
+export const acceptanceCriteria = sqliteTable('acceptance_criteria', {
+  id: text('id').primaryKey(),
+  storyId: text('story_id')
+    .notNull()
+    .references(() => userStories.id, { onDelete: 'cascade' }),
+  body: text('body').notNull(),
+  rank: text('rank').notNull(),
+})
+
+/** The kinds of task set a revision holds; `contract` is the only one written (design D7-01). */
+export const TASK_SET_KINDS = ['contract'] as const
+
+/** A set of tasks of a revision (design D7-01). */
+export const taskSets = sqliteTable(
+  'task_sets',
+  {
+    id: text('id').primaryKey(),
+    revisionId: text('revision_id')
+      .notNull()
+      .references(() => specRevisions.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+  },
+  (table) => [
+    check('task_set_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(TASK_SET_KINDS))})`),
+  ],
+)
+
+/** A task of a set, ordered by rank, done by an agent or a human (design D7-01). */
+export const specTasks = sqliteTable(
+  'spec_tasks',
+  {
+    id: text('id').primaryKey(),
+    taskSetId: text('task_set_id')
+      .notNull()
+      .references(() => taskSets.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    result: text('result').notNull(),
+    type: text('type').notNull(),
+    executor: text('executor').notNull(),
+    criteria: text('criteria').notNull(),
+    rank: text('rank').notNull(),
+  },
+  (table) => [
+    check('task_executor_is_known', sql`${table.executor} IN (${sql.raw(oneOf(TASK_EXECUTORS))})`),
+  ],
+)
+
+/** `task_id` depends on `depends_on_id`; the graph is checked by the domain (design D7-01). */
+export const taskDependencies = sqliteTable(
+  'task_dependencies',
+  {
+    taskId: text('task_id')
+      .notNull()
+      .references(() => specTasks.id, { onDelete: 'cascade' }),
+    dependsOnId: text('depends_on_id')
+      .notNull()
+      .references(() => specTasks.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.taskId, table.dependsOnId] })],
+)
+
+/** `task_id` covers `story_id` (design D7-01). */
+export const taskStories = sqliteTable(
+  'task_stories',
+  {
+    taskId: text('task_id')
+      .notNull()
+      .references(() => specTasks.id, { onDelete: 'cascade' }),
+    storyId: text('story_id')
+      .notNull()
+      .references(() => userStories.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.taskId, table.storyId] })],
+)
+
+/**
+ * A question raised on a revision, blocking the gate or not, and its answer (design D7-01).
+ *
+ * `options` is a JSON array of the answers offered, `{ id, label, recommended? }`, read whole
+ * with the question and never searched. The answer is one of them or a text of the human's own,
+ * one of the two columns filled once `resolved_at` is.
+ */
+export const specQuestions = sqliteTable(
+  'spec_questions',
+  {
+    id: text('id').primaryKey(),
+    revisionId: text('revision_id')
+      .notNull()
+      .references(() => specRevisions.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    blocking: integer('blocking', { mode: 'boolean' }).notNull(),
+    phase: text('phase'),
+    raisedBy: text('raised_by').notNull(),
+    options: text('options').notNull().default('[]'),
+    answerOptionId: text('answer_option_id'),
+    answerText: text('answer_text'),
+    resolvedAt: text('resolved_at'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    check(
+      'question_phase_is_known',
+      sql`${table.phase} IS NULL OR ${table.phase} IN (${sql.raw(oneOf(PHASE_IDS))})`,
+    ),
+    check(
+      'question_raised_by_is_known',
+      sql`${table.raisedBy} IN (${sql.raw(oneOf(SPEC_ACTORS))})`,
+    ),
+  ],
+)
+
+/**
+ * The durable execution of the define protocol, one row per phase and revision (design D7-08).
+ *
+ * The protocol itself lives in code; this is where it stands. `assumptions` is a JSON array of
+ * the open assumptions and `basis` a JSON object of the section versions the phase was declared
+ * on, read whole and never searched, so they are JSON rather than tables.
+ */
+export const specPhases = sqliteTable(
+  'spec_phases',
+  {
+    id: text('id').primaryKey(),
+    revisionId: text('revision_id')
+      .notNull()
+      .references(() => specRevisions.id, { onDelete: 'cascade' }),
+    phase: text('phase').notNull(),
+    state: text('state').notNull(),
+    summary: text('summary'),
+    assumptions: text('assumptions').notNull().default('[]'),
+    basis: text('basis').notNull().default('{}'),
+    protocolVersion: integer('protocol_version').notNull(),
+    declaredAt: text('declared_at'),
+  },
+  (table) => [
+    check('phase_is_known', sql`${table.phase} IN (${sql.raw(oneOf(PHASE_IDS))})`),
+    check('phase_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(PHASE_STATES))})`),
+    unique('phase_once_in_revision').on(table.revisionId, table.phase),
+  ],
+)
+
+/**
+ * A human text a conflict refused, kept until it is applied or discarded (design D7-12).
+ *
+ * One per section and Spec, persisted so a relaunch keeps it: a conflict never loses what the
+ * human typed. `base_version` is the section version the text was written against.
+ */
+export const specEditBuffers = sqliteTable(
+  'spec_edit_buffers',
+  {
+    specId: text('spec_id')
+      .notNull()
+      .references(() => specs.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    body: text('body').notNull(),
+    baseVersion: integer('base_version').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('buffer_name_is_known', sql`${table.name} IN (${sql.raw(oneOf(SECTION_NAMES))})`),
+    primaryKey({ columns: [table.specId, table.name] }),
   ],
 )
