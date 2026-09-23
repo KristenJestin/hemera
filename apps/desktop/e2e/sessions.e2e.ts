@@ -20,11 +20,14 @@
  * starts a second instance on the data folder this one wrote (`wdio.conf.ts`, `CONTINUED`).
  */
 
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { browser, expect } from '@wdio/globals'
 
 import { fakeWorkspace } from './agent/install.ts'
-import { AGENT, ANSWERS, MODELS, THOUGHTS } from './agent/script.ts'
-import { addProject, awaits, control, press, shows, sidebar, strike, write } from './hand.ts'
+import { AGENT, ANSWERS, MODELS, NOTES, READ_ANSWER, THOUGHTS } from './agent/script.ts'
+import { addProject, awaits, control, fill, press, shows, sidebar, strike, write } from './hand.ts'
 
 /**
  * Somewhere for the Project to point at, which is also where the agent is started.
@@ -35,6 +38,12 @@ import { addProject, awaits, control, press, shows, sidebar, strike, write } fro
  * the folder it ran in.
  */
 const SOURCES = fakeWorkspace('sessions')
+
+// A file of the Workspace for the agent to read through Hemera's tools (D6-11).
+writeFileSync(join(SOURCES, NOTES), 'The invoice date comes from the order.\n')
+
+/** A check the Project's catalogue holds, which the Commands panel starts (D6-12). */
+const CHECK = `"${process.execPath}" -e "console.log('checked')"`
 
 /** What is asked of the agent, which is the message the thread opens with. */
 const ASKED = 'The CSV export drops the invoice date.'
@@ -147,6 +156,56 @@ describe('Agent and model are shown', () => {
     // the model it is on, which is one of those the agent published.
     expect(await shows('opencode')).toBe(true)
     expect(await shows(MODELS[1].name)).toBe(true)
+  })
+})
+
+describe('A read inside the Workspace goes through on its own', () => {
+  it("reads a Workspace file through Hemera's tool, drawn as a Hemera call in the thread", async () => {
+    await write(`Read ${NOTES}, please.`)
+    await press('Send')
+
+    // The agent called Hemera's `fs_read` over MCP, inside the root: no question was asked, and
+    // the thread draws the call as Hemera's, beside the agent's own answer.
+    await awaits(READ_ANSWER)
+    expect(await shows('fs_read')).toBe(true)
+    const marked = await browser.execute(() =>
+      [...document.querySelectorAll('span')].some((one) => one.textContent === 'Hemera'),
+    )
+    expect(marked).toBe(true)
+    expect(await shows('Allow once')).toBe(false)
+  })
+})
+
+describe('The agent starts the app and the user opens it', () => {
+  it('starts a command of the catalogue from the Commands panel, and shows how it ended', async () => {
+    // The catalogue is the Project's: the command is added in its settings.
+    await press('Project settings')
+    await browser.pause(600)
+    await fill('Command name', 'check')
+    await fill('Command line', CHECK)
+    await press('Add a command')
+    await awaits('Workspace root')
+
+    // Back in the Session, the Commands tab runs it by name.
+    await press(NAMED)
+    await browser.pause(900)
+    // The tab of the side column, pressed as a hand presses it: the pointer, not a click event.
+    const tabs = await browser.$$('[role="tab"]')
+    for (const tab of tabs) {
+      // oxlint-disable-next-line no-await-in-loop -- the tabs are read one after the other, in order
+      if ((await tab.getText()).includes('Commands')) {
+        // oxlint-disable-next-line no-await-in-loop -- the one found is pressed, then the loop ends
+        await tab.click()
+        break
+      }
+    }
+    await browser.pause(400)
+    await fill('Run a line', 'check')
+    await press('Run')
+
+    // One process, run by Hemera in the Workspace root: it ends on its own with its exit code,
+    // in the panel and in the thread alike.
+    await awaits('Exited 0')
   })
 })
 

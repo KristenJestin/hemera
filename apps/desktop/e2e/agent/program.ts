@@ -24,7 +24,7 @@ import {
   type FakeScript,
   type FakeStep,
 } from '../../src/engine/agents/fake.ts'
-import { MODEL_OPTION, VERSION, modelOption, turnOf } from './script.ts'
+import { MODEL_OPTION, NOTES, READ_ANSWER, VERSION, modelOption, turnOf } from './script.ts'
 
 // The version is the first thing the machine is asked, and it is asked of the command itself:
 // discovery starts it with `--version` before any session exists.
@@ -35,6 +35,9 @@ if (process.argv.includes('--version')) {
 
 /** How many prompts this process has been sent. */
 let turn = 0
+
+/** What the last prompt said, which is what decides whether this turn reads a file. */
+let asked = ''
 
 /**
  * The peer, once it is built: the script reads it back to know what has happened to it.
@@ -68,10 +71,21 @@ const script: FakeScript = {
   configOptions: [MODEL_OPTION],
   // What it is on after a choice, which is the only thing that says a choice was taken.
   onChoice: (choice) => [choice.id === MODEL_OPTION.id ? modelOption(choice.value) : MODEL_OPTION],
-  onPrompt: () => {
+  // It connects to the MCP server it is handed, as a real agent does, and lists Hemera's tools:
+  // the one it calls is chosen by the prompt, after the session was opened (D6-11).
+  listsTools: true,
+  onPrompt: (text) => {
     turn += 1
+    asked = text
   },
   get steps(): readonly FakeStep[] {
+    // A prompt that names the notes is a read through Hemera's own tool, then an answer.
+    if (asked.includes(NOTES)) {
+      return [
+        { does: 'uses', call: 'fs_read', arguments: { path: NOTES } },
+        { does: 'says', text: READ_ANSWER, messageId: `read-${RUN}-${String(turn)}` },
+      ]
+    }
     const said = turnOf(turn + (continued() ? 1 : 0))
     const id = `${RUN}-${String(turn)}`
     // A thought and an answer, in that order and under two different kinds: the thread folds the
