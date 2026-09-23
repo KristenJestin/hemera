@@ -436,6 +436,11 @@
      is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
   --spacing-dialog-wide: 70vh;
 
+  /* How wide the outline of a Spec stands beside its stage (lot 19): wide enough for
+     `Expected outcome` in capitals with its mark and a count, narrow enough to leave the stage
+     the room a section is read in when the panel is under half of the window. */
+  --spacing-outline: 12.5rem;
+
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
