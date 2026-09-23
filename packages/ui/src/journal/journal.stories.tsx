@@ -90,6 +90,44 @@ const ENTRIES: JournalLine[] = [
   },
 ]
 
+/** A Spec's steps, each its own line under the Spec kind (lot 19, D7-13). */
+const SPEC_STEPS: JournalLine[] = [
+  {
+    sequence: 71,
+    kind: 'spec',
+    label: 'Spec ATL-7 marked ready',
+    day: 'Today',
+    time: '16:20',
+    author: 'human',
+    target: { label: 'CSV invoice export', onOpen: opened },
+  },
+  {
+    sequence: 70,
+    kind: 'spec',
+    label: 'Phase decompose finished',
+    day: 'Today',
+    time: '16:12',
+    author: 'agent',
+  },
+  {
+    sequence: 69,
+    kind: 'spec',
+    label: 'scope written by human · v3',
+    day: 'Today',
+    time: '15:47',
+    author: 'human',
+  },
+  {
+    sequence: 68,
+    kind: 'spec',
+    label: 'Spec ATL-7 “Export invoices as CSV” created',
+    day: 'Today',
+    time: '15:30',
+    author: 'human',
+    target: { label: 'CSV invoice export', onOpen: opened },
+  },
+]
+
 /** The page the engine would answer for a filter, which is what the story hands back. */
 function matching(entries: JournalLine[], filter: JournalFilter, byYou: boolean): JournalLine[] {
   return entries.filter(
@@ -136,7 +174,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Journal',
   component: Journal,
   render: (args) => <Controlled {...args} />,
@@ -157,7 +195,7 @@ const meta = {
     entries: { control: 'object', description: 'The page as it stands, newest first.' },
     filter: {
       control: 'inline-radio',
-      options: ['all', 'project', 'session', 'profile'],
+      options: ['all', 'project', 'session', 'spec', 'profile'],
       description: 'Which entity is wanted.',
     },
     byYou: { control: 'boolean', description: 'Whether only what the user did is wanted.' },
@@ -228,6 +266,31 @@ export const Filters: Story = {
     expect(canvas.getAllByRole('listitem')).toHaveLength(
       ENTRIES.filter((one) => one.author === 'human').length,
     )
+  },
+}
+
+/**
+ * A Spec's steps: each is a line of its own kind, told apart from the Project's, and the `Specs`
+ * filter asks for them alone (lot 19, "The Journal shows each step").
+ */
+export const SpecSteps: Story = {
+  args: { entries: [...SPEC_STEPS, ...ENTRIES] },
+  play: async ({ canvasElement, args }) => {
+    args.onFilterChange.mockClear()
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Spec ATL-7 marked ready')).toBeVisible()
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Specs' }))
+    await waitFor(() => {
+      expect(canvas.getAllByRole('listitem')).toHaveLength(SPEC_STEPS.length)
+    })
+    expect(args.onFilterChange).toHaveBeenCalledWith('spec')
+    expect(canvas.getAllByText('spec')).toHaveLength(SPEC_STEPS.length)
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Project' }))
+    await waitFor(() => {
+      expect(canvas.queryByText('Spec ATL-7 marked ready')).toBeNull()
+    })
   },
 }
 
