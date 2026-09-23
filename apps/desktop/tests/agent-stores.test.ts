@@ -361,6 +361,13 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
     const died = reported('e3', 'turn', 'The agent stopped running.', 'interrupted')
     expect(activityOf([said, call, died])).toEqual({ state: 'failed' })
   })
+
+  test('A refused prompt is a failed turn, not a stopped one', () => {
+    const said = entry('e1', 'user', 'Read the notes')
+    const refused = reported('e2', 'turn', 'The agent could not answer.', 'failed')
+
+    expect(activityOf([said, refused])).toEqual({ state: 'failed' })
+  })
 })
 
 describe('Le tour tourne dès que la question est écrite', () => {

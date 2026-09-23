@@ -196,6 +196,12 @@ export const stopReasonSchema = z.enum([
    * the two it is showing (design D5-12).
    */
   'interrupted',
+  /**
+   * Hemera's own, for a turn the agent answered with an error rather than a stop reason: its
+   * provider refused the request, most often. Never `cancelled`, which is a Stop someone pressed;
+   * the agent's sentence is the `note` written beside it.
+   */
+  'failed',
 ])
 
 export type StopReason = z.infer<typeof stopReasonSchema>

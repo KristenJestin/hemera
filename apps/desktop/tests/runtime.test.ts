@@ -1340,3 +1340,34 @@ describe('The composer’s choices are kept per Project', () => {
     )
   })
 })
+
+describe('A refused prompt is a failed turn, not a stopped one', () => {
+  test("the turn ends failed, and the provider's sentence is written beside it", async () => {
+    const refusal =
+      "Internal error: Error from provider (Console): OpenCode's free tier can only be used from within OpenCode"
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'on it' }], failsPrompt: refusal })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+
+        const report = yield* runtime.prompt(session.id, 'read the notes')
+        expect(report.stopReason).toBe('failed')
+
+        const entries = yield* threadOf(session.id)
+        const turn = entryOf(entries, 'turn')
+        expect(turn.state).toBe('failed')
+        expect(turn.body).toBe('The agent could not answer.')
+        // The sentence is the agent's own, without the name of an error class in front of it,
+        // and it belongs to the turn it ended.
+        const note = entryOf(entries, 'note')
+        expect(note.body).toBe(refusal)
+        expect(note.turnId).toBe(turn.turnId)
+        // Nobody pressed Stop: nothing of the turn says it was stopped.
+        expect(entries.some((entry) => entry.state === 'cancelled')).toBe(false)
+        expect(agent.answers.cancels).toBe(0)
+      }),
+    )
+  })
+})

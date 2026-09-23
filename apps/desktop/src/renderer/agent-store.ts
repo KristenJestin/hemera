@@ -177,13 +177,14 @@ export function hasEnded(activity: Activity): boolean {
 /**
  * How a turn ended, from the stop reason its `turn` entry carries.
  *
- * `cancelled` is the user's Stop, and `interrupted` is the agent gone from under the turn — the
- * one ending Hemera wrote rather than the agent. Every other reason is an agent that answered and
+ * `cancelled` is the user's Stop, `interrupted` is the agent gone from under the turn, and
+ * `failed` is an agent that answered with an error — the two endings Hemera wrote rather than the
+ * agent. Every other reason is an agent that answered and
  * stopped where it chose to, which is a turn that is done.
  */
 function endOf(stopReason: string | null): ActivityState {
   if (stopReason === 'cancelled') return 'stopped'
-  if (stopReason === 'interrupted') return 'failed'
+  if (stopReason === 'interrupted' || stopReason === 'failed') return 'failed'
   return 'done'
 }
 

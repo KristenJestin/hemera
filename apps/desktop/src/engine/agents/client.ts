@@ -875,7 +875,13 @@ export function connect(
                 sessionId: open,
                 prompt: blocksOf(text, provided, embeds),
               }),
-            catch: (cause) => new AgentProtocolError({ what: 'prompt', cause: String(cause) }),
+            // The agent's own sentence, without the name of the error class in front of it: a
+            // provider's refusal is what the thread shows of a turn that failed.
+            catch: (cause) =>
+              new AgentProtocolError({
+                what: 'prompt',
+                cause: cause instanceof Error ? cause.message : String(cause),
+              }),
           })
           return { stopReason: answered.stopReason, usage: usageOf(answered.usage) }
         }),

@@ -128,6 +128,7 @@ export type TurnStopReason =
   | 'refusal'
   | 'cancelled'
   | 'interrupted'
+  | 'failed'
 
 /** What a turn ended with, and what it cost. */
 export interface TurnReport {
@@ -466,6 +467,7 @@ const STOP_TEXT: Record<TurnStopReason, string> = {
   refusal: 'The agent refused to continue.',
   cancelled: 'The turn was stopped.',
   interrupted: 'The agent stopped running.',
+  failed: 'The agent could not answer.',
 }
 
 /** What the composer calls an option's value, for the decision line. */
@@ -1985,9 +1987,7 @@ export const runtimeLayer = Layer.effect(
         held.context = null
         held.provisions = []
 
-        const outcome = yield* Effect.result(
-          attempt('prompting', held.connection.prompt(sent, provisions)),
-        )
+        const outcome = yield* Effect.result(held.connection.prompt(sent, provisions))
         if (Result.isSuccess(outcome)) {
           const answered = outcome.success
           // What is in the thread is read before the window is: the announcement travels as a
@@ -2025,10 +2025,16 @@ export const runtimeLayer = Layer.effect(
           } satisfies TurnReport
         }
 
-        // The agent never answered: either the process died under the turn, or Hemera stopped
-        // an agent that would not stop. The thread keeps everything it received either way.
-        const stopReason = turn.closed ?? (held.death === null ? 'cancelled' : 'interrupted')
+        // The agent did not answer with a stop reason: the user's Stop ended an agent that would
+        // not stop, the process died under the turn, or the agent answered with an error — its
+        // provider refused the request. The last is a turn that failed, never one that was
+        // stopped, and the agent's own sentence is written beside it. The thread keeps
+        // everything it received either way.
+        const stopReason = turn.closed ?? (held.death === null ? 'failed' : 'interrupted')
         yield* drained(sessionId, held)
+        if (stopReason === 'failed') {
+          yield* note(sessionId, turn, outcome.failure.cause, 'prompt_failed')
+        }
         yield* closeTurn(sessionId, turn, stopReason)
         return { stopReason, usage: null } satisfies TurnReport
       }).pipe(

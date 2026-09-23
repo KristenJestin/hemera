@@ -19,6 +19,7 @@
 import {
   AgentSideConnection,
   PROTOCOL_VERSION,
+  RequestError,
   ndJsonStream,
   type Agent as AcpAgent,
   type ContentBlock,
@@ -206,6 +207,11 @@ export interface FakeScript {
   readonly ignoresCancel?: boolean
   /** What it answers a turn with. */
   readonly stopReason?: StopReason
+  /**
+   * The sentence an error response to `session/prompt` carries, once the steps are said: an
+   * agent whose provider refused the request, as OpenCode answers a model it will not serve.
+   */
+  readonly failsPrompt?: string
   /**
    * What the turn is accounted as using, in the SDK's shape.
    *
@@ -881,6 +887,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         else answers.optionIds.push(answered.outcome.optionId)
       }
       if (cancelled) return { stopReason: 'cancelled' }
+      if (script.failsPrompt !== undefined) throw new RequestError(-32_603, script.failsPrompt)
       const answer: PromptResponse = { stopReason: script.stopReason ?? 'end_turn' }
       if (script.usage !== undefined) answer.usage = script.usage
       return answer
