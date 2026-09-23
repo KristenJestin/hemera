@@ -406,6 +406,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // its own, and the Session says what it runs and what it works from in its details.
       'HemeraToolCall',
       'CommandRun',
+      'CommandProposal',
       'CommandsPanel',
       'ContextView',
       'BareModeState',

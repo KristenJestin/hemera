@@ -277,6 +277,12 @@ export {
   type HemeraToolStatus,
 } from './activity/hemera-tool-call.tsx'
 export { CommandRun, type CommandRunProps, type CommandState } from './activity/command-run.tsx'
+/** A command the agent proposes for the catalogue, and the human's answer (D8-11). */
+export {
+  CommandProposal,
+  type CommandProposalProps,
+  type ProposalState,
+} from './activity/command-proposal.tsx'
 /** The seven types of a command and the icon the design system fixes for each (D8-07). */
 export {
   COMMAND_SCOPES,
