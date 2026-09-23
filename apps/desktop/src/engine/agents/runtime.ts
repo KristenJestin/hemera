@@ -76,6 +76,8 @@ import { Context as AgentContext } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
+import { briefFor } from '../specs/brief.ts'
+import { Database } from '../storage/database.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { ToolPermissions } from '../tools/permissions.ts'
 import { ToolServer } from '../tools/server.ts'
@@ -532,6 +534,7 @@ export const runtimeLayer = Layer.effect(
     const pool = yield* Pool
     // Where each agent's bare means is written: a directory of Hemera's, never the user's (D6-09).
     const directories = yield* AgentDirectories
+    const database = yield* Database
 
     /**
      * The scope the engine gave this layer: the lifetime every fiber and process here lives in.
@@ -2230,10 +2233,29 @@ export const runtimeLayer = Layer.effect(
         // delivery, and the user's prompt is not sent after it.
         if (turn.closed !== null) return yield* stoppedBefore(turn.closed)
 
+        // A `define` turn opens with its mission brief (D7-09): folded in the thread as a
+        // Hemera entry, and sent ahead of the user's text, never as a message of theirs.
+        const brief = yield* attempt(
+          'composing the mission brief',
+          briefFor(sessionId).pipe(Effect.provideService(Database, database)),
+        )
+        if (brief !== null) {
+          yield* write(sessionId, {
+            role: 'hemera',
+            kind: 'mission_brief',
+            body: brief.block,
+            payload: JSON.stringify({ phase: brief.phase }),
+            correlationId: `brief:${turn.id}`,
+            turnId: turn.id,
+          })
+        }
+
         // What the agent is provided goes in front of what the user asked: the base, as a
         // resource, on the first prompt of an agent with no system prompt to take it (D6-07),
-        // and the conversation rebuilt for an agent that lost its own (D5-07).
-        const sent = [held.context, text].filter((one) => one !== null).join('\n\n')
+        // and the conversation rebuilt for an agent that lost its own (D5-07); then the brief.
+        const sent = [held.context, brief?.block ?? null, text]
+          .filter((one) => one !== null)
+          .join('\n\n')
         const provisions = held.provisions
         held.context = null
         held.provisions = []
