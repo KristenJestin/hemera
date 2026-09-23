@@ -80,8 +80,17 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
+/**
+ * How many reads of the Spec were started. Reads overlap — a write's own and the one its
+ * `spec.changed` sets off — and answer in no set order: a read overtaken by a later one never
+ * lands, so what is on screen is never older than what was read last.
+ */
+let started = 0
+
 /** Reads the open Spec, its revisions, its buffers and its Journal again. */
 async function reload(specId: string): Promise<void> {
+  started += 1
+  const ticket = started
   const picked = state.revision
   const [current, revisions, buffers] = await Promise.all([
     window.hemera.invoke('specs.read', { specId }),
@@ -97,7 +106,7 @@ async function reload(specId: string): Promise<void> {
     specId,
     limit: JOURNAL_PAGE,
   })
-  if (shown !== specId) return
+  if (shown !== specId || ticket !== started) return
   replace({ ...state, snapshot, revisions, buffers, journal: journal.entries })
 }
 

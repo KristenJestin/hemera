@@ -88,6 +88,9 @@ let asked: { name: string; argument: { revision?: number } }[] = []
 /** What the bridge answers, per channel: a value, or an error to throw. */
 let answers: Map<string, SpecSnapshot | EditBuffer[] | Error | object>
 
+/** While set, a `specs.read` answers what it was asked for only once this settles. */
+let holding: Promise<void> | null = null
+
 /** What the engine would push; set once the store listens. */
 let push: (event: EngineEvent) => void = () => undefined
 
@@ -118,6 +121,7 @@ async function settled(): Promise<void> {
 beforeEach(() => {
   asked = []
   told = []
+  holding = null
   answers = new Map()
   // The one place a test reaches into the page: the preload is not there, so the bridge is.
   Object.defineProperty(globalThis, 'window', {
@@ -131,6 +135,7 @@ beforeEach(() => {
             argument.revision === undefined
               ? answers.get(name)
               : answers.get(`${name}@${String(argument.revision)}`)
+          if (holding !== null && name === 'specs.read') await holding
           if (answer instanceof Error) throw answer
           return await Promise.resolve(answer)
         },
@@ -493,5 +498,28 @@ describe('A story is written back onto the story it was edited in', () => {
     expect(names()).not.toContain('specs.writeStories')
     expect(names()).toContain('specs.read')
     expect(specSnapshot().refusal).toContain('your edit was not saved')
+  })
+})
+
+describe('An older read of the Spec never replaces a newer one', () => {
+  test('a read answered after a later one is dropped', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    let release: () => void = () => undefined
+    holding = new Promise((resolve) => {
+      release = resolve
+    })
+    reads(3)
+    push({ event: 'spec.changed', specId: 'spec-7', projectId: 'atlas' })
+    holding = null
+    reads(4)
+    push({ event: 'spec.changed', specId: 'spec-7', projectId: 'atlas' })
+    await settled()
+    expect(specSnapshot().snapshot?.spec.contentVersion).toBe(4)
+
+    release()
+    await settled()
+
+    expect(specSnapshot().snapshot?.spec.contentVersion).toBe(4)
   })
 })
