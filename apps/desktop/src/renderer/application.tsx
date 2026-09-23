@@ -85,7 +85,10 @@ import {
 import { bareRowOf, offeredOf } from './bare-mode.ts'
 import {
   listenToTools,
+  readCatalogue,
   readContext,
+  removeCommand,
+  saveCommand,
   readRuns,
   runCommand,
   stopRun,
@@ -510,6 +513,14 @@ export function Application() {
     if (openId === null) return
     void readRuns(openId)
   }, [openId])
+
+  // The catalogue of the Project whose settings are open, read when they are opened: the agent
+  // may have been told of a command the page has not heard of, and the list is the engine's.
+  const settingsOf = shell.activeEntryId === PROJECT_SETTINGS_ENTRY ? (current?.id ?? null) : null
+  useEffect(() => {
+    if (settingsOf === null) return
+    void readCatalogue(settingsOf)
+  }, [settingsOf])
 
   // And what it was provided, for its Context tab: read when it is opened, and again by the store
   // whenever a turn ends or a change of the Workspace's instructions is delivered (D6-10).
@@ -982,6 +993,11 @@ export function Application() {
             return went ? null : projectsSnapshot().refusal
           }}
           onRemoveRepository={(path) => void removeRepository(current, path)}
+          commands={tools.catalogues.get(current.id) ?? []}
+          onSaveCommand={async (command, existing) =>
+            await saveCommand({ projectId: current.id, ...command }, existing)
+          }
+          onRemoveCommand={(name) => void removeCommand(current.id, name)}
           onArchive={() => void archiveProject(current)}
         />
       )

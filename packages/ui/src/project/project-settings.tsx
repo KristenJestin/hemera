@@ -9,7 +9,15 @@ import { Input } from '../components/field/field.tsx'
 import { Select } from '../components/select/select.tsx'
 import { useAppForm } from '../form/app-form.ts'
 import { projectFormSchema, relativePathSchema } from '../form/schemas.ts'
-import { IconArchive, IconCommand, IconFolder, IconGitBranch, IconPlus, IconX } from '../icons.ts'
+import {
+  IconArchive,
+  IconCommand,
+  IconFolder,
+  IconGitBranch,
+  IconPencil,
+  IconPlus,
+  IconX,
+} from '../icons.ts'
 import { causeOf } from './project-dialog.tsx'
 import type { CommandKind } from '../activity/command-run.tsx'
 import type { ProjectDraft, RepositoryLine } from './model.ts'
@@ -67,8 +75,10 @@ export interface ProjectSettingsProps {
    * engine yet is a page whose catalogue is empty, not a page without a catalogue.
    */
   commands?: readonly CommandLine[] | undefined
-  /** What the Project turned out to hold, offered as the folder a command runs in. */
+  /** Adds a command; the message it answers is shown under the form, and what was typed stays. */
   onAddCommand?: ((command: CommandLine) => Promise<string | null>) | undefined
+  /** Rewrites a command the catalogue holds, found by its name; answers like `onAddCommand`. */
+  onUpdateCommand?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemoveCommand?: ((id: string) => void) | undefined
   onArchive: () => void
 }
@@ -86,6 +96,7 @@ export function ProjectSettings({
   onRemoveRepository,
   commands = [],
   onAddCommand,
+  onUpdateCommand,
   onRemoveCommand,
   onArchive,
 }: ProjectSettingsProps): ReactNode {
@@ -152,8 +163,11 @@ export function ProjectSettings({
 
       <CommandList
         commands={commands}
-        folders={folders}
+        // A command runs in the Workspace root or in one of the Project's repositories (D6-12):
+        // the declared ones are what is offered, and nothing else is accepted.
+        folders={repositories}
         onAdd={onAddCommand}
+        onUpdate={onUpdateCommand}
         onRemove={onRemoveCommand}
       />
 
@@ -360,12 +374,15 @@ export function CommandList({
   commands,
   folders = [],
   onAdd,
+  onUpdate,
   onRemove,
 }: {
   commands: readonly CommandLine[]
-  /** The folders of the Project, offered rather than asked for. */
+  /** The repositories of the Project, offered as the folder a command runs in. */
   folders?: readonly RepositoryLine[] | undefined
   onAdd?: ((command: CommandLine) => Promise<string | null>) | undefined
+  /** Rewrites the command of the same name; its row's pencil puts it in the form first. */
+  onUpdate?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemove?: ((id: string) => void) | undefined
 }): ReactNode {
   const [name, setName] = useState('')
@@ -373,20 +390,42 @@ export function CommandList({
   const [folder, setFolder] = useState('')
   const [kind, setKind] = useState<CommandKind>('utility')
   const [refusal, setRefusal] = useState<string | null>(null)
+  /**
+   * The command being edited, by name, or null when the form adds one.
+   *
+   * A command is found by its name, which is what the agent asks for: the name is kept while the
+   * line, the kind and the folder are rewritten, and a new name is a new command.
+   */
+  const [editing, setEditing] = useState<string | null>(null)
 
-  const add = async () => {
-    const said = await onAdd?.({
+  const clear = () => {
+    setName('')
+    setCommand('')
+    setFolder('')
+    setKind('utility')
+    setEditing(null)
+  }
+
+  const submit = async () => {
+    const drafted: CommandLine = {
       id: name.trim(),
       name: name.trim(),
       command: command.trim(),
       kind,
       folder: folder.trim() === '' ? '.' : folder.trim(),
-    })
-    setRefusal(said ?? null)
-    if (said === null || said === undefined) {
-      setName('')
-      setCommand('')
     }
+    const said = await (editing === null ? onAdd : onUpdate)?.(drafted)
+    setRefusal(said ?? null)
+    if (said === null || said === undefined) clear()
+  }
+
+  const edit = (one: CommandLine) => {
+    setName(one.name)
+    setCommand(one.command)
+    setKind(one.kind)
+    setFolder(one.folder === '.' ? '' : one.folder)
+    setRefusal(null)
+    setEditing(one.name)
   }
 
   return (
@@ -413,6 +452,15 @@ export function CommandList({
                 </span>
                 <Badge tone="neutral">{one.kind}</Badge>
                 <Badge tone="neutral">{one.folder === '.' ? 'Workspace root' : one.folder}</Badge>
+                {onUpdate === undefined ? null : (
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<IconPencil size="sm" />}
+                    aria-label={`Edit ${one.name}`}
+                    onClick={() => edit(one)}
+                  />
+                )}
                 {onRemove === undefined ? null : (
                   <IconButton
                     variant="ghost"
@@ -437,6 +485,8 @@ export function CommandList({
               placeholder="check"
               value={name}
               onValueChange={setName}
+              // What is edited is found by its name: the name stays while the rest is rewritten.
+              disabled={editing !== null}
             />
             <Input
               label="Command line"
@@ -469,15 +519,30 @@ export function CommandList({
             suggestions={folders.map((one) => ({ value: one.path }))}
             emptyLabel="The Workspace holds no folder yet."
             action={
-              <Button
-                variant="secondary"
-                className="shrink-0"
-                disabled={name.trim() === '' || command.trim() === ''}
-                onClick={() => void add()}
-              >
-                <IconPlus size="sm" />
-                Add a command
-              </Button>
+              editing === null ? (
+                <Button
+                  variant="secondary"
+                  className="shrink-0"
+                  disabled={name.trim() === '' || command.trim() === ''}
+                  onClick={() => void submit()}
+                >
+                  <IconPlus size="sm" />
+                  Add a command
+                </Button>
+              ) : (
+                <span className="flex shrink-0 gap-2">
+                  <Button variant="ghost" onClick={clear}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={command.trim() === ''}
+                    onClick={() => void submit()}
+                  >
+                    Save {editing}
+                  </Button>
+                </span>
+              )
             }
           />
         </>

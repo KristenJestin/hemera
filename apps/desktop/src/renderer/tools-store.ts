@@ -1,4 +1,4 @@
-import type { CommandRun, ContextView, EngineEvent } from '@hemera/ipc'
+import type { Command, CommandKind, CommandRun, ContextView, EngineEvent } from '@hemera/ipc'
 
 /**
  * The runs and the Context view of the Sessions this window has open (design D6-10, D6-12).
@@ -21,11 +21,18 @@ export interface ToolsState {
   runs: ReadonlyMap<string, readonly CommandRun[]>
   /** The Context view of each Session the window has read one for. */
   contexts: ReadonlyMap<string, ContextView>
+  /** The catalogue of each Project the settings have read, oldest first. */
+  catalogues: ReadonlyMap<string, readonly Command[]>
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
 }
 
-const EMPTY: ToolsState = { runs: new Map(), contexts: new Map(), refusal: null }
+const EMPTY: ToolsState = {
+  runs: new Map(),
+  contexts: new Map(),
+  catalogues: new Map(),
+  refusal: null,
+}
 
 const listeners = new Set<() => void>()
 
@@ -157,6 +164,59 @@ export async function stopRun(sessionId: string, runId: string): Promise<void> {
   try {
     const stopped = await window.hemera.invoke('commands.stop', { sessionId, runId })
     holding(sessionId, withRun(runsOf(sessionId), stopped))
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/** The catalogue of a Project, oldest first; empty until it was read. */
+export function catalogueOf(projectId: string | null): readonly Command[] {
+  if (projectId === null) return []
+  return state.catalogues.get(projectId) ?? []
+}
+
+/** Reads the catalogue of a Project, which is what its settings list (D6-12). */
+export async function readCatalogue(projectId: string): Promise<void> {
+  try {
+    const read = await window.hemera.invoke('commands.list', { projectId })
+    const catalogues = new Map(state.catalogues)
+    catalogues.set(projectId, read)
+    replace({ ...state, catalogues })
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/** A command as the settings write it: `folder` null for the Workspace root. */
+export interface CommandDraft {
+  readonly projectId: string
+  readonly name: string
+  readonly line: string
+  readonly kind: CommandKind
+  readonly folder: string | null
+}
+
+/**
+ * Adds a command to the catalogue, or rewrites the one of the same name.
+ *
+ * Answers the engine's sentence when it refuses — a name the catalogue already holds, a folder
+ * that is not one of the Project's repositories — and null once the catalogue was read again.
+ */
+export async function saveCommand(draft: CommandDraft, existing: boolean): Promise<string | null> {
+  try {
+    await window.hemera.invoke(existing ? 'commands.update' : 'commands.create', draft)
+    await readCatalogue(draft.projectId)
+    return null
+  } catch (cause) {
+    return message(cause)
+  }
+}
+
+/** Takes a command out of the catalogue, by its name. What it already ran is not touched. */
+export async function removeCommand(projectId: string, name: string): Promise<void> {
+  try {
+    await window.hemera.invoke('commands.remove', { projectId, name })
+    await readCatalogue(projectId)
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }

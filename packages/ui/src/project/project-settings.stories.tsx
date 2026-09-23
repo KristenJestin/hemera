@@ -43,8 +43,8 @@ const COMMANDS: CommandLine[] = [
 /**
  * What the disk holds under the root: the declared paths, and folders that are not repositories.
  *
- * The page offers these when a command's folder is written: a folder is a folder whether or not a
- * repository was declared in it.
+ * The page offers these when a repository is declared. A command's folder is offered among the
+ * declared repositories only: it runs in the Workspace root or in one of them (D6-12).
  */
 const FOLDERS: RepositoryLine[] = [
   ...REPOSITORIES,
@@ -76,6 +76,7 @@ function Controlled({
   onAddRepository,
   onRemoveRepository,
   onAddCommand,
+  onUpdateCommand,
   onRemoveCommand,
   ...rest
 }: ProjectSettingsProps & Extra) {
@@ -111,6 +112,12 @@ function Controlled({
           setCatalogue([...catalogue, command])
           return null
         }}
+        onUpdateCommand={async (command) => {
+          await onUpdateCommand?.(command)
+          if (commandRefusal !== null) return commandRefusal
+          setCatalogue(catalogue.map((one) => (one.name === command.name ? command : one)))
+          return null
+        }}
         onRemoveCommand={(id) => {
           onRemoveCommand?.(id)
           setCatalogue(catalogue.filter((one) => one.id !== id))
@@ -137,6 +144,7 @@ const meta = {
     commands: COMMANDS,
     onSave: fn(async () => await Promise.resolve(null)),
     onAddCommand: fn(async () => await Promise.resolve(null)),
+    onUpdateCommand: fn(async () => await Promise.resolve(null)),
     onRemoveCommand: fn(),
     onBrowse: fn(async () => await Promise.resolve('/home/someone/Projects/atlas-2')),
     onAddRepository: fn(async () => await Promise.resolve(null)),
@@ -166,6 +174,7 @@ const meta = {
     },
     onSave: { action: 'saved' },
     onAddCommand: { action: 'command added' },
+    onUpdateCommand: { action: 'command updated' },
     onRemoveCommand: { action: 'command removed' },
     onBrowse: { action: 'folder picked' },
     onAddRepository: { action: 'repository added' },
@@ -412,5 +421,40 @@ export const CommandFolderIsARepository: Story = {
         folder: './sources/api',
       })
     })
+  },
+}
+
+/**
+ * Scenario « The catalogue is edited and read »: a command of the catalogue is edited in place.
+ * Its name is what it is found by, so the name stays and the line, the kind and the folder are
+ * rewritten.
+ */
+export const ACommandIsEdited: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onUpdateCommand?.mockClear()
+    const canvas = within(canvasElement)
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Edit dev' }))
+    const name = canvas.getByRole('textbox', { name: 'Command name' })
+    expect(name).toHaveValue('dev')
+    expect(name).toBeDisabled()
+    const line = canvas.getByRole('textbox', { name: 'Command line' })
+    expect(line).toHaveValue('pnpm dev')
+    await userEvent.clear(line)
+    await userEvent.type(line, 'pnpm dev --host')
+    await userEvent.click(canvas.getByRole('button', { name: 'Save dev' }))
+
+    await waitFor(() => {
+      expect(args.onUpdateCommand).toHaveBeenCalledWith({
+        id: 'dev',
+        name: 'dev',
+        command: 'pnpm dev --host',
+        kind: 'app',
+        folder: './sources/front',
+      })
+    })
+    expect(canvas.getByText('pnpm dev --host')).toBeInTheDocument()
+    // The form is back to adding one.
+    expect(canvas.getByRole('button', { name: 'Add a command' })).toBeInTheDocument()
   },
 }
