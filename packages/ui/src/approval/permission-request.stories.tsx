@@ -12,7 +12,7 @@ import { PermissionRequest } from './permission-request.tsx'
 const meta = {
   title: 'Blocks/Session/PermissionRequest',
   component: PermissionRequest,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     toolName: 'Edit',
@@ -27,6 +27,8 @@ const meta = {
   },
   argTypes: {
     toolName: { control: 'text', description: 'The tool the agent wants to use.' },
+    label: { control: 'text', description: 'What a reader calls the tool, as its line says it.' },
+    subject: { control: 'text', description: 'What the call is about: the path, the command.' },
     intent: { control: 'text', description: 'What the call would do, in one sentence.' },
     options: { control: 'object', description: 'What the agent offers; never invented here.' },
     scope: { control: 'text', description: 'How long an “always” answer is remembered.' },
@@ -162,12 +164,15 @@ export const NothingToRefuseWith: Story = {
  *
  * The same block as the agent's own questions, drawn from the place the path resolves to and the
  * root it leaves: two options, for this call only, because nothing is remembered and there is no
- * "always" to give.
+ * "always" to give. The head reads the way the call's line does (recette 3 of 23 September 2026):
+ * the label, the path as the agent named it, and what it asks.
  */
 export const HemeraToolOutsideTheRoot: Story = {
   args: {
     toolName: 'fs_write',
-    intent: 'fs_write asks to act outside the Workspace: /home/ana/notes/todo.md',
+    label: 'Write file',
+    subject: '../notes/todo.md',
+    intent: 'asks to act outside the Workspace',
     parameters: [
       { label: 'Resolved path', value: '/home/ana/notes/todo.md' },
       { label: 'Outside', value: '/home/ana/atlas' },
@@ -182,7 +187,16 @@ export const HemeraToolOutsideTheRoot: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('fs_write')).toBeVisible()
+    // One line: the label, what it is about, and what it asks; no code name, no second sentence.
+    const head = canvas.getByText('Write file').parentElement
+    await expect(head?.textContent).toBe(
+      'Write file../notes/todo.mdasks to act outside the WorkspaceWaiting for you',
+    )
+    await expect(canvas.queryByText('fs_write')).toBeNull()
+    await expect(getComputedStyle(canvas.getByText('../notes/todo.md')).fontFamily).toMatch(
+      /mono|Fira/i,
+    )
+    await expect(canvas.getByRole('group', { name: 'Permission for Write file' })).toBeVisible()
     await expect(canvas.getAllByText('/home/ana/notes/todo.md').length).toBeGreaterThan(0)
     // No "always": the two answers are about this call.
     await expect(canvas.queryByText(/always/i)).toBeNull()
@@ -190,5 +204,25 @@ export const HemeraToolOutsideTheRoot: Story = {
     await expect(args.onDecide).toHaveBeenCalledWith(
       expect.objectContaining({ optionId: 'allowed' }),
     )
+  },
+}
+
+/**
+ * An agent's own question, headed by the line of the call it is about (recette 3 of
+ * 23 September 2026): the label of the call's kind and the file it would change.
+ */
+export const AgentCallWithItsSubject: Story = {
+  args: {
+    toolName: 'Edit session.tsx',
+    label: 'Edit file',
+    subject: 'src/session/session.tsx',
+    intent: 'asks for your permission',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Edit file')).toBeVisible()
+    await expect(canvas.getByText('src/session/session.tsx')).toBeVisible()
+    await expect(canvas.getByText('asks for your permission')).toBeVisible()
+    await expect(canvas.queryByText('Edit session.tsx')).toBeNull()
   },
 }

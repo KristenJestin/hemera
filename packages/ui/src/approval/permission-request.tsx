@@ -23,6 +23,11 @@ import { IconAlertTriangle } from '../icons.ts'
  * stealing the caret from a half-written sentence is how a prompt stops being finished. The
  * arrows walk the options from inside the card, Escape takes the refusal, and Enter is the
  * focused button's own press.
+ *
+ * The head reads the way the call's own line does (recette 3 of 23 September 2026): what a reader
+ * calls the tool, what it is about, and what it asks — "Write file ../outside.txt asks to act
+ * outside the Workspace" — rather than the tool's code name above a sentence that repeats it.
+ * Without a label, the tool's name heads the card and the sentence stands under it, as before.
  */
 const CARD = 'flex flex-col gap-2 rounded-lg border border-warning bg-warning-muted p-3'
 
@@ -33,6 +38,12 @@ const ICON = 'flex shrink-0 text-warning-muted-foreground'
 
 /** What the call would do, in the agent's own sentence. */
 const INTENT = 'text-sm text-muted-foreground'
+
+/** What the call is about, on the head: the face a path and a command are written in. */
+const SUBJECT = 'min-w-0 truncate font-mono font-normal'
+
+/** What the call asks, on the head after what it is about: read, not announced. */
+const ASKS = 'min-w-0 truncate font-normal text-muted-foreground'
 
 /** The parameters that decide the answer: a label, and the value it holds. */
 const PARAMETERS = 'flex flex-col gap-1 text-sm'
@@ -71,7 +82,14 @@ export interface PermissionParameter {
 export interface PermissionRequestProps {
   /** The tool the agent wants to use, as the agent names it. */
   toolName: string
-  /** What the call would do, in one sentence. */
+  /**
+   * What a reader calls the tool — `Write file`, `Run command` — as the call's own line says it.
+   * Given, the head reads the label, the subject and the intent as one line.
+   */
+  label?: string | undefined
+  /** What the call is about: the path as the agent named it, the command line. */
+  subject?: string | undefined
+  /** What the call would do, in one sentence; with a label, what it asks: `asks to …`. */
   intent: string
   /** The parameters that decide the answer, if any. */
   parameters?: readonly PermissionParameter[] | undefined
@@ -117,6 +135,8 @@ const TREATMENT: Record<PermissionOptionKind, 'primary' | 'secondary' | 'ghost'>
 
 export function PermissionRequest({
   toolName,
+  label,
+  subject,
   intent,
   parameters,
   command,
@@ -165,7 +185,7 @@ export function PermissionRequest({
   return (
     <div
       role="group"
-      aria-label={`Permission for ${toolName}`}
+      aria-label={`Permission for ${label ?? toolName}`}
       className={cn(CARD, className)}
       onKeyDown={onKeyDown}
     >
@@ -173,10 +193,22 @@ export function PermissionRequest({
         <span aria-hidden="true" className={ICON}>
           <IconAlertTriangle size="sm" />
         </span>
-        {toolName}
+        {label === undefined ? (
+          toolName
+        ) : (
+          <>
+            <span className="shrink-0">{label}</span>
+            {subject !== undefined && (
+              <span className={SUBJECT} title={subject}>
+                {subject}
+              </span>
+            )}
+            <span className={ASKS}>{intent}</span>
+          </>
+        )}
         <Badge tone="warning">Waiting for you</Badge>
       </div>
-      <p className={INTENT}>{intent}</p>
+      {label === undefined && <p className={INTENT}>{intent}</p>}
       {parameters === undefined || parameters.length === 0 ? null : (
         <dl className={PARAMETERS}>
           {parameters.map((parameter) => (
