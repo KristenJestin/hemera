@@ -259,6 +259,7 @@ describe('Un tour de l’agent, conduit par le client', () => {
       {
         toolCallId: 'call-2',
         title: 'Run the tests',
+        tool: 'Run the tests',
         options: [{ id: 'allow-once', name: 'Allow once', kind: 'allow_once' }],
       },
     ])

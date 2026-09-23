@@ -408,6 +408,7 @@ describe('Une permission demandée en cours de tour', () => {
       {
         toolCallId: 'call-2',
         title: 'Run the tests',
+        tool: 'Run the tests',
         options: [
           { id: 'allow-once', name: 'Allow once', kind: 'allow_once' },
           { id: 'allow-always', name: 'Always allow', kind: 'allow_always' },
