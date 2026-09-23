@@ -94,6 +94,13 @@ function ruleOf(effort: HTMLElement): string | null {
   return rule?.closest('[data-step]')?.getAttribute('data-step') ?? null
 }
 
+/** Where an element stands inside another, which the other's own movement does not change. */
+function placeIn(element: Element, frame: Element) {
+  const box = element.getBoundingClientRect()
+  const around = frame.getBoundingClientRect()
+  return { left: box.left - around.left, top: box.top - around.top, width: box.width }
+}
+
 /** Every prop as a control, and the four answers wired to a page that behaves like the engine. */
 export const Playground: Story = {}
 
@@ -437,6 +444,46 @@ export const RecommendedLevel: Story = {
     )
     await expect(within(effort).getByText('· default')).toBeVisible()
     await expect(within(effort).queryByText(/recommended/)).toBeNull()
+  },
+}
+
+/**
+ * **The word stays put when its row is chosen.** The check of the chosen model has a slot on
+ * every row, empty until the row is chosen, so the `recommended` beside `Opus 4.5` stands
+ * exactly where it stood before the row was taken: a mark that made its own room pushed the word
+ * aside under the hand (recette of 23 September 2026).
+ */
+export const RecommendedStaysPut: Story = {
+  args: {
+    agent: 'claude-code',
+    model: 'fable',
+    models: ADVISED_MODELS,
+    efforts: CLAUDE_EFFORTS,
+    modes: CLAUDE_MODES,
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Fable/ }))
+
+    const list = await screen.findByRole('listbox', { name: 'Models of this agent' })
+    const advised = within(list).getByRole('option', { name: 'Opus 4.5 recommended' })
+    await waitFor(() => {
+      expect(advised).toBeVisible()
+    })
+    const word = within(advised).getByText('recommended')
+    const before = placeIn(word, advised)
+
+    await userEvent.click(advised)
+    await expect(args.onModelChange).toHaveBeenCalledWith('opus-4-5')
+    await waitFor(() => {
+      expect(advised).toHaveAttribute('aria-selected', 'true')
+    })
+    await expect(advised.querySelector('svg')).not.toBeNull()
+    // Read against its own row, so the panel still settling from its opening moves nothing.
+    const after = placeIn(word, advised)
+    await expect(after.left).toBeCloseTo(before.left, 1)
+    await expect(after.top).toBeCloseTo(before.top, 1)
+    await expect(after.width).toBeCloseTo(before.width, 1)
   },
 }
 

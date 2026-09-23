@@ -211,6 +211,9 @@ export const ITEM_ACTIVE = 'bg-accent text-accent-foreground'
 
 export const STATE = 'text-xs text-muted-foreground'
 
+/** Where a row's check stands, held open whether the row is chosen or not. */
+const CHECK_SLOT = 'flex size-icon-sm shrink-0 items-center justify-center'
+
 /** One provider's models, held together so the group is read as one. */
 const GROUP = 'flex flex-col gap-0.5'
 
@@ -561,7 +564,9 @@ export function ModelGroup({
       {/* The model the agent itself advises, said beside it and quietly: it is the one the
           `Default` entry used to stand for, and it is a word about this row rather than a row. */}
       {one.recommended === true && <span className={STATE}>{ADVISED_SAID}</span>}
-      {one.id === chosen && <IconCheck size="sm" />}
+      {/* The check has its slot on every row, empty or not: a mark that only took room once
+          its row was chosen pushed the word before it aside under the hand. */}
+      <span className={CHECK_SLOT}>{one.id === chosen && <IconCheck size="sm" />}</span>
     </button>
   ))
 
