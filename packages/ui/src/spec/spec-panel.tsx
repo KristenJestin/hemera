@@ -118,6 +118,7 @@ export function SpecPanel({
           status={spec.status}
           revision={spec.revision}
           revisions={spec.revisions}
+          superseded={spec.replacedBy !== undefined}
           onPickRevision={onPickRevision}
           onRework={() => setReworking(true)}
         />
@@ -125,6 +126,7 @@ export function SpecPanel({
         <ReadinessBar
           readiness={spec.readiness}
           frozenOn={spec.frozenOn}
+          replacedBy={spec.replacedBy}
           onGoTo={choose}
           onMarkReady={onMarkReady}
         />

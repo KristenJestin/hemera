@@ -246,6 +246,11 @@ export interface SpecView {
   readiness: ReadinessView
   /** When it was frozen, already written: `23 Sep`. Present on a `ready` Spec only. */
   frozenOn?: string | undefined
+  /**
+   * The current revision, when the one shown is an older one (D7-05): it is read as it was
+   * frozen, and it offers no Rework — only the current revision of a Spec can be reworked.
+   */
+  replacedBy?: number | undefined
 }
 
 /** How each section is named in the document. */

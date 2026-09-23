@@ -352,6 +352,18 @@ export const READY: SpecView = {
 }
 
 /**
+ * The same Spec, its older revision 1 picked: read as it was frozen, with no editor and no
+ * Rework, since only the current revision can be reworked (D7-05).
+ */
+export const OLDER_REVISION: SpecView = {
+  ...READY,
+  revision: 1,
+  now: 'Revision 1 · read only, as it was frozen',
+  frozenOn: '22 Sep',
+  replacedBy: 2,
+}
+
+/**
  * Screen 6 · the same draft read from a second Session while the writer's agent splits the
  * tasks: three are written, and S2 has none yet.
  */

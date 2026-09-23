@@ -29,6 +29,7 @@ const meta = {
     status: { control: 'inline-radio', options: ['draft', 'ready'] },
     revision: { control: 'number', description: 'The revision shown.' },
     revisions: { control: 'object', description: 'Every revision, newest first.' },
+    superseded: { control: 'boolean', description: 'Whether an older revision is shown.' },
     onPickRevision: { description: 'Shows another revision.' },
     onRework: { description: 'Opens the rework of a `ready` Spec.' },
   },
@@ -81,6 +82,24 @@ export const Ready: Story = {
     await expect(args.onPickRevision).toHaveBeenCalledWith(1)
     await userEvent.click(canvas.getByRole('button', { name: 'Rework' }))
     await expect(args.onRework).toHaveBeenCalled()
+  },
+}
+
+/** An older revision picked: the picker to go back, and no `Rework` — it is not the current one. */
+export const OlderRevision: Story = {
+  args: {
+    status: 'ready',
+    revision: 1,
+    superseded: true,
+    revisions: [
+      { number: 2, detail: 'current, frozen' },
+      { number: 1, detail: 'read only · 22 Sep' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'rev 1' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
   },
 }
 

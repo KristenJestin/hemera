@@ -3,7 +3,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { LiveSpecPanel } from './spec-harness.tsx'
-import { BUG, MAINTENANCE, MID_PLAN } from './spec-fixtures.ts'
+import { BUG, MAINTENANCE, MID_PLAN, OLDER_REVISION } from './spec-fixtures.ts'
 
 /**
  * The Spec panel alone, as it stands beside the chat: a head that stays on top — the key, the
@@ -159,5 +159,21 @@ export const ShowAll: Story = {
     await waitFor(() => expect(tasks).toBeVisible())
     await userEvent.click(canvas.getByRole('button', { name: 'Show all' }))
     await expect(canvas.getByRole('region', { name: 'Stage of ATL-7' })).toBeVisible()
+  },
+}
+
+/**
+ * An older revision picked: shown as it was frozen, with no editor, no `Rework` and no
+ * `Mark ready`, and the sentence says which revision replaced it.
+ */
+export const OlderRevision: Story = {
+  args: { spec: OLDER_REVISION },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Revision 1 · read only, as it was frozen')).toBeVisible()
+    await expect(canvas.getByText(/revision 2 replaced it/)).toBeVisible()
+    await expect(canvas.queryByRole('textbox')).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
   },
 }

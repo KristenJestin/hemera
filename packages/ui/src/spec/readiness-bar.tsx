@@ -51,6 +51,8 @@ export interface ReadinessBarProps {
   readiness: ReadinessView
   /** A frozen Spec says when it was frozen instead of what is left. */
   frozenOn?: string | undefined
+  /** An older revision says which one replaced it instead of offering to rework it. */
+  replacedBy?: number | undefined
   /** Moves the focus of the document to the target of an item. */
   onGoTo: (target: SpecTarget) => void
   /** The human click that freezes the Spec. */
@@ -60,6 +62,7 @@ export interface ReadinessBarProps {
 export function ReadinessBar({
   readiness,
   frozenOn,
+  replacedBy,
   onGoTo,
   onMarkReady,
 }: ReadinessBarProps): ReactNode {
@@ -83,7 +86,11 @@ export function ReadinessBar({
       </div>
       <div className={SAY}>
         {frozenOn !== undefined ? (
-          <span>{`Frozen on ${frozenOn} · nothing changes until you rework it`}</span>
+          <span>
+            {replacedBy === undefined
+              ? `Frozen on ${frozenOn} · nothing changes until you rework it`
+              : `Frozen on ${frozenOn} · read only, revision ${replacedBy} replaced it`}
+          </span>
         ) : full ? (
           <span className={OK}>Ready to freeze</span>
         ) : (

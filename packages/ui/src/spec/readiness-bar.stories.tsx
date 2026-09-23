@@ -97,3 +97,15 @@ export const Frozen: Story = {
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
   },
 }
+
+/** An older revision: frozen too, and the sentence names the revision that replaced it. */
+export const Replaced: Story = {
+  args: { readiness: FULL_GATE, frozenOn: '22 Sep', replacedBy: 2 },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText('Frozen on 22 Sep · read only, revision 2 replaced it'),
+    ).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+  },
+}

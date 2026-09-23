@@ -37,6 +37,8 @@ export interface SpecHeadProps {
   revision: number
   /** Every revision, newest first. */
   revisions: RevisionView[]
+  /** Whether the revision shown is an older one, which is read only and cannot be reworked. */
+  superseded?: boolean | undefined
   /** Shows another revision; an older one is read only. */
   onPickRevision: (revision: number) => void
   /** Opens the rework of a `ready` Spec. */
@@ -50,10 +52,12 @@ export function SpecHead({
   status,
   revision,
   revisions,
+  superseded = false,
   onPickRevision,
   onRework,
 }: SpecHeadProps): ReactNode {
   const ready = status === 'ready'
+  const reworkable = ready && !superseded
   return (
     <div className={HEAD}>
       <span className={KEY}>{specKey}</span>
@@ -65,7 +69,7 @@ export function SpecHead({
           {status}
         </span>
       </span>
-      {(revisions.length > 1 || ready) && (
+      {(revisions.length > 1 || reworkable) && (
         <span className={END}>
           {revisions.length > 1 && (
             <Menu
@@ -78,7 +82,7 @@ export function SpecHead({
               ]}
             />
           )}
-          {ready && (
+          {reworkable && (
             // The height of the picker beside it, which is a menu's own trigger: two controls of
             // two heights at the end of one line read as two lines.
             <Button onClick={onRework}>
