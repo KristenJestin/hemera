@@ -288,6 +288,54 @@ describe('An agent is given the variables of its Workspace', () => {
   })
 })
 
+describe('A variable set on main applies to a Session on main', () => {
+  test('PORT set on main’s own row is given to a run from a Session that chose no Workspace', async () => {
+    const agent = fakeAgent({
+      steps: [{ does: 'uses', call: 'commands_run', arguments: { name: 'port', key: 'p1' } }],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const sessions = yield* Sessions
+        const commands = yield* Commands
+        const variables = yield* Variables
+        const runtime = yield* AgentRuntime
+        const project = yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: main })
+        const own = yield* sessions.mainOf(project.id)
+        yield* variables.set(project.id, own.id, 'PORT', '3002')
+        yield* commands.save(
+          {
+            projectId: project.id,
+            name: 'port',
+            line: `"${process.execPath}" -e "console.log('port=' + process.env.PORT)"`,
+            lineWindows: null,
+            lineLinux: null,
+            type: 'script',
+            folder: null,
+            scope: 'workspace',
+            portless: false,
+          },
+          false,
+        )
+        // A Session that chose no Workspace works in main, by main's own row.
+        const session = yield* sessions.create(project.id, 'claude')
+        yield* runtime.prompt(session.id, 'which port?')
+        return {
+          own,
+          workspace: yield* sessions.workspace(session.id),
+          run: (yield* commands.recent(session.id))[0],
+        }
+      }).pipe(Effect.provide(variablesLayer)),
+    )
+
+    expect(seen.workspace.id).toBe(seen.own.id)
+    expect(seen.run?.workspaceId).toBe(seen.own.id)
+    expect(seen.run?.environment).toEqual({ PORT: '3002' })
+    expect(seen.run?.output).toContain('port=3002')
+  })
+})
+
 describe('The Workspace is fixed once the agent has started', () => {
   test('a change is accepted before the first turn and refused after it', async () => {
     const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })

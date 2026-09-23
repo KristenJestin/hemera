@@ -98,8 +98,11 @@ export class WorkspaceFixedError extends Error {
  * that Workspace holds, relative to its root.
  */
 export interface SessionWorkspace {
-  /** The Workspace's identifier, and null for a Session that chose none, which works in `main`. */
-  readonly id: string | null
+  /**
+   * The Workspace's own row: `main`'s for a Session that chose none, so the variables set on
+   * `main` are the ones it is given (D8-06).
+   */
+  readonly id: string
   readonly name: string
   readonly path: string
   readonly repositories: readonly string[]
@@ -919,8 +922,7 @@ export const sessionsLayer = Layer.effect(
               .pipe(Effect.mapError(failed('reading the Session')))
             const row = rows[0]
             if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
-            const described = yield* describedWorkspace(row.projectId, row.workspaceId)
-            return { ...described, id: row.workspaceId }
+            return yield* describedWorkspace(row.projectId, row.workspaceId)
           }),
         ),
 
