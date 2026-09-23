@@ -78,7 +78,14 @@ export interface GitService {
    * stops a cleanup (D8-14).
    */
   readonly worktreeRemove: (cwd: string, path: string) => Effect.Effect<void, Refusal>
-  /** Forgets the worktrees whose folder is gone, which Git otherwise holds as still there. */
+  /**
+   * Forgets the worktrees whose folder is gone, which Git otherwise holds as still there.
+   *
+   * Repository-wide: it also forgets a stale worktree the user made themselves, whose folder is
+   * gone too (one that is locked is kept). It is kept all the same, because it is the one way
+   * every Git the user may have forgets a worktree whose folder is missing: a redone worktree and
+   * a cleanup of a worktree that was never made both need that, and nothing narrower.
+   */
   readonly worktreePrune: (cwd: string) => Effect.Effect<void, Refusal>
   readonly branchExists: (cwd: string, branch: string) => Effect.Effect<boolean, Refusal>
   /** Whether Git takes a name as a branch name: `check-ref-format --branch` (D8-04). */
