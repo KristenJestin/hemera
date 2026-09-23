@@ -126,7 +126,7 @@ describe('The base is provided once, by the agent’s means', () => {
 })
 
 describe('A native instruction file is not injected twice', () => {
-  test('AGENTS.md is read by the agent itself and never sent', async () => {
+  test('AGENTS.md goes once to an agent that does not read it, and never again unchanged', async () => {
     instructions('Be brief.\n')
     const agent = answering()
 
@@ -136,15 +136,35 @@ describe('A native instruction file is not injected twice', () => {
         const session = yield* aSession(workingDirectory)
 
         yield* runtime.prompt(session.id, 'start on the reader')
+        yield* runtime.prompt(session.id, 'carry on')
 
-        // The file was there when the Session started, so it is what the agent read itself:
-        // nothing of it crosses, and nothing was delivered.
-        expect(agent.answers.prompts[0]).not.toContain('Be brief.')
-        expect(agent.answers.prompts[0]).not.toContain(DELIVERY_MARKER)
+        // Claude Code reads no instruction file bare: the file crosses once, with the first
+        // prompt, and an unchanged file is nothing to deliver after that.
+        const resources = agent.answers.blocks.map((blocks) =>
+          blocks.filter((block) => block.type === 'resource'),
+        )
+        expect(resources[0]).toHaveLength(1)
+        expect(resources[1]).toHaveLength(0)
         const entries = yield* threadOf(session.id)
         expect(entries.filter((entry) => entry.kind === 'context_delivery')).toHaveLength(0)
       }),
     )
+  })
+
+  test('a CLAUDE.md of the Workspace is never sent', async () => {
+    instructions('Be brief.\n')
+    writeFileSync(join(workingDirectory, 'CLAUDE.md'), 'Answer in French.\n')
+    const agent = answering()
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'start on the reader')
+      }),
+    )
+
+    expect(JSON.stringify(agent.answers.blocks)).not.toContain('Answer in French.')
   })
 })
 
@@ -162,10 +182,11 @@ describe('A change during a turn leaves at the next safe point', () => {
         instructions('Be brief, and say why.\n')
         yield* runtime.prompt(session.id, 'carry on')
 
-        // Nothing reached the agent while the first turn was running, and the change left at the
-        // one moment nothing is in flight: before the next prompt, as a prompt of its own made of
-        // the marker and the new text as a resource — then the user's prompt, untouched.
-        expect(agent.answers.prompts[0]).not.toContain(DELIVERY_MARKER)
+        // Nothing reached the agent while the first turn was running — its first prompt carries
+        // the file as the Session started with it — and the change left at the one moment nothing
+        // is in flight: before the next prompt, as a prompt of its own made of the marker and the
+        // new text as a resource — then the user's prompt, untouched.
+        expect(JSON.stringify(agent.answers.blocks[0])).not.toContain('say why')
         expect(agent.answers.blocks[1]).toEqual([
           { type: 'text', text: DELIVERY_MARKER },
           {
