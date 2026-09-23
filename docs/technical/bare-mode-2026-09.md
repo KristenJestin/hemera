@@ -116,7 +116,19 @@ would mean handling a secret that is not Hemera's. What the move was for is done
 `settingSources: []` reads none of the user's settings files, and `strictMcpConfig: true` loads
 no MCP server but Hemera's. What still loads, `~/.claude.json` and the managed and policy
 settings, is named as residue under the agent in Settings › Agents (D6-09). Hemera also sends
-`strictMcpConfig: true`, `MCP_TOOL_TIMEOUT` in `env`, and `allowedTools` (below).
+`strictMcpConfig: true`, `MCP_TOOL_TIMEOUT` and `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` in `env`, both
+at ten minutes, and `allowedTools` (below).
+
+The two timeouts are not the same limit. `MCP_TOOL_TIMEOUT` bounds the whole call; Claude Code
+2.1 also aborts a call that sends no response and no progress for 300 s, and a Hemera call waiting
+on the human's permission sends nothing until they answer. The Linux trial of 23 September 2026
+(Claude Code 2.1.280, adapter 0.79.0) hit it with `MCP_TOOL_TIMEOUT` alone: a `commands_run` left
+waiting came back after exactly 300 s with `MCP server "hemera" tool "commands_run" sent no
+response or progress for 300s; aborting. If this server is configured in your MCP settings, set a
+per-server "timeout" (ms) to allow longer silent runs for just this server; otherwise set
+CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT (ms) globally (0 disables).` Hemera's server reaches the adapter
+as an ACP `http` entry of `session/new.mcpServers`, which has no per-server `timeout`, so
+`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` is the lever that lifts it.
 
 ### The Workspace's instructions under bare mode (added in lot 2b)
 
