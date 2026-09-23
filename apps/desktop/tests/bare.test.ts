@@ -9,7 +9,7 @@
  * them in the three agents' own sources.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
@@ -17,7 +17,7 @@ import { z } from 'zod'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { AGENT_PROVIDERS } from '#engine/agents/adapter.ts'
-import { bareModeOf, bareOptionsOf } from '#engine/agents/bare.ts'
+import { bareModeOf, bareOptionsOf, writtenFiles } from '#engine/agents/bare.ts'
 import { claude } from '#engine/agents/adapters/claude.ts'
 import { codex } from '#engine/agents/adapters/codex.ts'
 import { opencode } from '#engine/agents/adapters/opencode.ts'
@@ -208,6 +208,55 @@ describe('An unqualified combination is refused with its reason', () => {
       // Refused before anything was written or started for it.
       expect(agent.starts).toEqual([])
       expect(existsSync(join(places.data, 'agents', 'codex'))).toBe(false)
+    } finally {
+      rmSync(places.data, { recursive: true, force: true })
+      rmSync(places.workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Codex is handed its bare configuration and stays unqualified', () => {
+  test('the config.toml of the spike, in a CODEX_HOME of Hemera, and the residue as the reason', async () => {
+    const places = folders()
+    try {
+      const mode = bareModeOf(codex, process.platform)
+      const options = mode.options({ ownerDirectory: join(places.data, 'codex'), base: 'the base' })
+      // Its home is Hemera's, and the configuration is written into it, as the process reads it.
+      expect(options.env).toEqual({ CODEX_HOME: join(places.data, 'codex') })
+      expect(options.meta).toBeUndefined()
+      await Effect.runPromise(writtenFiles(join(places.data, 'codex'), options.files))
+      const written = readFileSync(join(places.data, 'codex', 'config.toml'), 'utf8')
+      expect(written).toContain('web_search = "disabled"')
+      for (const table of ['[tools.update_plan]', '[tools.experimental_request_user_input]']) {
+        expect(written).toContain(`${table}\nenabled = false`)
+      }
+      for (const feature of [
+        'shell_tool',
+        'view_image',
+        'sleep_tool',
+        'request_permissions_tool',
+        'token_budget',
+        'deferred_executor',
+        'code_mode',
+        'multi_agent',
+        'multi_agent_v2',
+        'image_generation',
+        'standalone_web_search',
+        'tool_suggest',
+      ]) {
+        expect(written).toMatch(new RegExp(`^${feature} = false$`, 'm'))
+      }
+      // And it is still not qualified: two families of tools have no switch at all.
+      expect(mode.qualified).toBe(false)
+      const reason = reasonOf(codex, process.platform)
+      for (const residue of [
+        'apply_patch',
+        'list_mcp_resources',
+        'list_mcp_resource_templates',
+        'read_mcp_resource',
+      ]) {
+        expect(reason).toContain(residue)
+      }
     } finally {
       rmSync(places.data, { recursive: true, force: true })
       rmSync(places.workspace, { recursive: true, force: true })

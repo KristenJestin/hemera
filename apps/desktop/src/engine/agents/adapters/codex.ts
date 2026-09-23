@@ -35,6 +35,41 @@ import { type AgentAdapter, versionIn } from '../adapter.ts'
 /** The method Codex offers whether or not the machine is signed in. */
 const ALWAYS_OFFERED = 'api-key'
 
+/**
+ * The `config.toml` of a bare Codex, from the spike (`docs/technical/bare-mode-2026-09.md` §2).
+ *
+ * Every tool a switch can turn off, turned off: the hosted web search, the shell, the image
+ * viewer, the sleep and clock tools, the permission and budget tools, the deferred executor, code
+ * mode, the two generations of sub-agents, image generation, the standalone web search, the tool
+ * suggestions, the plan and the question to the user. What is left once it is read is
+ * `apply_patch` and the three MCP resource tools, which no key reaches.
+ */
+const BARE_CONFIG = [
+  'web_search = "disabled"',
+  '',
+  '[tools.update_plan]',
+  'enabled = false',
+  '',
+  '[tools.experimental_request_user_input]',
+  'enabled = false',
+  '',
+  '[features]',
+  'shell_tool = false',
+  'view_image = false',
+  'sleep_tool = false',
+  'current_time_reminder = false',
+  'request_permissions_tool = false',
+  'token_budget = false',
+  'deferred_executor = false',
+  'code_mode = false',
+  'multi_agent = false',
+  'multi_agent_v2 = false',
+  'image_generation = false',
+  'standalone_web_search = false',
+  'tool_suggest = false',
+  '',
+].join('\n')
+
 export const codex: AgentAdapter = {
   id: 'codex',
   label: 'Codex',
@@ -57,6 +92,12 @@ export const codex: AgentAdapter = {
    * what can be turned off, and two families of tools have no switch at all. So this agent is not
    * qualified, and a Session on it is refused before anything is written or started (D6-02): the
    * options are declared for the trial that may qualify it, never handed to a Session.
+   *
+   * Moving `CODEX_HOME` moves the login with it: `auth.json` lives there, and `codex login status`
+   * run with a `CODEX_HOME` of its own answers "Not logged in" on a machine that is (checked on
+   * 23 September 2026, Windows, codex-cli 0.154.0). A trial that qualifies Codex has to settle
+   * that first — the same keys through `CODEX_CONFIG` over the user's own home, which keeps their
+   * `config.toml` layered in — before a Session is opened on it.
    */
   bareMode: () => ({
     means:
@@ -65,7 +106,7 @@ export const codex: AgentAdapter = {
     options: (input) => ({
       meta: undefined,
       env: { CODEX_HOME: input.ownerDirectory },
-      files: [],
+      files: [{ name: 'config.toml', content: BARE_CONFIG }],
     }),
     qualified: false,
     reason:
