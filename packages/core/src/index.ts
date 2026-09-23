@@ -75,18 +75,23 @@ export type {
   ToolName,
 } from './domain/tools.ts'
 export {
-  COMMAND_KINDS,
+  COMMAND_SCOPES,
+  COMMAND_TYPES,
   DuplicateCommandNameError,
   EmptyCommandLineError,
   EmptyCommandNameError,
-  UnknownCommandKindError,
+  UnknownCommandScopeError,
+  UnknownCommandTypeError,
   addressIn,
-  commandKind,
   commandLine,
   commandName,
+  commandScope,
+  commandType,
   joinsRunningRun,
+  lineFor,
+  portOf,
 } from './domain/commands.ts'
-export type { Command, CommandKind } from './domain/commands.ts'
+export type { Command, CommandScope, CommandType } from './domain/commands.ts'
 export {
   AGENTS_FILE,
   CONTEXT_BASE,

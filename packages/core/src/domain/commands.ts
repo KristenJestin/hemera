@@ -1,21 +1,45 @@
 /**
- * The commands of a Project, and the one process each of them becomes (design D6-12).
+ * The commands of a Project, and the one process each of them becomes (design D6-12, D8-07).
  *
- * A command is a name the agent asks for and a line that runs: `app` for what stays up and
- * publishes an address, `check` for what verifies and ends with an exit code, `utility` for
- * everything else. The folder is optional and means the Workspace root when it is absent, or
- * one of the Project's repositories when it is there — never a path outside both.
+ * A command is a name the agent asks for and a line that runs, typed by what it is for: `serve`
+ * for what stays up and publishes an address, and `test`, `lint`, `build`, `configure`, `debug`
+ * and `script` for what ends with an exit code. The folder is optional and means the Workspace
+ * root when it is absent, or one of the Project's repositories when it is there — never a path
+ * outside both. A command may carry a line of its own for Windows and for Linux; the machine
+ * runs its own when it is set and the default line otherwise (D8-07). `scope` says whether a
+ * `serve` command runs once per Workspace or once for the whole Project.
  *
- * Two of the rules live here because they are rules and not plumbing: an `app` command that is
- * already running is returned rather than started again, and the address a reader sees is the
- * first one the output names. Everything else about a command — starting it, keeping its output,
- * stopping its tree — belongs to the engine, which owns the process.
+ * Three of the rules live here because they are rules and not plumbing: a `serve` command that
+ * is already running is returned rather than started again, the line a machine runs is its own
+ * variant when it has one, and the address a reader sees is the first one the output names —
+ * a loopback address or a `*.localhost` name such as Portless prints (D8-09). Everything else
+ * about a command — starting it, keeping its output, stopping its tree — belongs to the engine,
+ * which owns the process.
  */
 
-/** What a command is for, which decides whether a second run starts a second process. */
-export const COMMAND_KINDS = ['app', 'check', 'utility'] as const
+/**
+ * What a command is for (D8-07): the design system draws each with the icon it fixes, and the
+ * type decides whether a second run starts a second process.
+ */
+export const COMMAND_TYPES = [
+  'serve',
+  'test',
+  'lint',
+  'build',
+  'configure',
+  'debug',
+  'script',
+] as const
 
-export type CommandKind = (typeof COMMAND_KINDS)[number]
+export type CommandType = (typeof COMMAND_TYPES)[number]
+
+/**
+ * Where a `serve` command runs (D8-07): once per Workspace, or once for the Project, in `main`.
+ * Meaningless for the other types, which run where they are asked.
+ */
+export const COMMAND_SCOPES = ['workspace', 'project'] as const
+
+export type CommandScope = (typeof COMMAND_SCOPES)[number]
 
 /**
  * A command of the catalogue, as the Project settings hold it and as the agent reads it.
@@ -27,10 +51,18 @@ export interface Command {
   readonly id: string
   readonly projectId: string
   readonly name: string
-  /** The line that runs, as the user typed it. */
+  /** The line that runs, as the user typed it: the default, for a machine with none of its own. */
   readonly line: string
-  readonly kind: CommandKind
+  /** The line Windows runs instead of the default one, null when it runs the default (D8-07). */
+  readonly lineWindows: string | null
+  /** The line Linux runs instead of the default one, and null when it runs the default (D8-07). */
+  readonly lineLinux: string | null
+  readonly type: CommandType
   readonly folder: string | null
+  /** Once per Workspace or once for the Project: what a `serve` run joins (D8-07). */
+  readonly scope: CommandScope
+  /** Whether the line runs through Portless, which names its address (D8-10). */
+  readonly portless: boolean
   readonly createdAt: number
 }
 
@@ -48,10 +80,17 @@ export class EmptyCommandLineError extends Error {
   }
 }
 
-export class UnknownCommandKindError extends Error {
+export class UnknownCommandTypeError extends Error {
   constructor(candidate: string) {
-    super(`a command is app, check or utility, and ${candidate} is none of them`)
-    this.name = 'UnknownCommandKindError'
+    super(`a command is serve, test, lint, build, configure, debug or script; ${candidate} is none`)
+    this.name = 'UnknownCommandTypeError'
+  }
+}
+
+export class UnknownCommandScopeError extends Error {
+  constructor(candidate: string) {
+    super(`a command runs once per workspace or once per project, and ${candidate} is neither`)
+    this.name = 'UnknownCommandScopeError'
   }
 }
 
@@ -76,26 +115,51 @@ export function commandLine(candidate: string): string {
   return line
 }
 
-/** The kind of a command, refusing a word the catalogue has never heard of. */
-export function commandKind(candidate: string): CommandKind {
-  const kind = COMMAND_KINDS.find((known) => known === candidate)
-  if (kind === undefined) throw new UnknownCommandKindError(candidate)
-  return kind
+/** The type of a command, refusing a word the catalogue has never heard of. */
+export function commandType(candidate: string): CommandType {
+  const type = COMMAND_TYPES.find((known) => known === candidate)
+  if (type === undefined) throw new UnknownCommandTypeError(candidate)
+  return type
+}
+
+/** The scope of a command, refusing a word the catalogue has never heard of. */
+export function commandScope(candidate: string): CommandScope {
+  const scope = COMMAND_SCOPES.find((known) => known === candidate)
+  if (scope === undefined) throw new UnknownCommandScopeError(candidate)
+  return scope
+}
+
+/**
+ * The line this machine runs (D8-07): its own variant when the command has one, the default
+ * line otherwise. `platform` is Node's own word for the system — `win32`, `linux`, `darwin`.
+ */
+export function lineFor(
+  command: Pick<Command, 'line' | 'lineWindows' | 'lineLinux'>,
+  platform: string,
+): string {
+  if (platform === 'win32') return command.lineWindows ?? command.line
+  if (platform === 'linux') return command.lineLinux ?? command.line
+  return command.line
 }
 
 /**
  * Whether a run of this command starts a process, or hands back the one already running.
  *
- * True for an `app` command that is running and for nothing else: a `check` or a `utility` run
- * twice is two runs, because a check that was not run again would answer from a memory nobody
- * asked it for. That is the whole of the rule, and the engine owns both halves of it.
+ * True for a `serve` command that is running and for nothing else (D8-07): a `test` or a
+ * `script` run twice is two runs, because a test that was not run again would answer from a
+ * memory nobody asked it for. Which running run is "the" one — the Workspace's or the
+ * Project's — is the scope's, and the engine asks it before asking this.
  */
-export function joinsRunningRun(kind: CommandKind, running: boolean): boolean {
-  return kind === 'app' && running
+export function joinsRunningRun(type: CommandType, running: boolean): boolean {
+  return type === 'serve' && running
 }
 
-/** An address of this machine: its name, its loopback addresses, or every interface. */
-const ADDRESS = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d{2,5})\b/
+/**
+ * An address of this machine: its name, its loopback addresses, or every interface, with a
+ * port; or a `<name>.localhost` host — what Portless prints — whose port is optional (D8-09).
+ */
+const ADDRESS =
+  /https?:\/\/(?:(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{2,5}\b|[a-zA-Z0-9][a-zA-Z0-9.-]*\.localhost(?::\d{2,5})?\b)/
 
 /**
  * The colour and cursor codes a terminal program writes around its text.
@@ -110,4 +174,10 @@ const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
 export function addressIn(output: string): string | null {
   const found = ADDRESS.exec(output.replace(ANSI, ''))
   return found === null ? null : found[0]
+}
+
+/** The port an address names, and null when it names none — a Portless name without one. */
+export function portOf(url: string): number | null {
+  const found = /^https?:\/\/(?:\[[^\]]*\]|[^/:]+):(\d+)/.exec(url)
+  return found === null ? null : Number(found[1])
 }
