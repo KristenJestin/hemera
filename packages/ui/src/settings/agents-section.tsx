@@ -178,7 +178,9 @@ export function AgentsSection({
                   )}
                   {agent.authenticated ? null : <Pair label="To sign in">{agent.loginHint}</Pair>}
                 </dl>
-                {agent.bare === undefined ? null : <BareFold bare={agent.bare} />}
+                {agent.bare === undefined ? null : (
+                  <BareFold agent={agent.name} bare={agent.bare} />
+                )}
                 {update === null ? null : (
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
@@ -233,12 +235,17 @@ function Pair({ label, children }: { label: string; children: ReactNode }): Reac
  * The line is what a reader needs to know at a glance — this agent runs with Hemera's tools only,
  * or it is not available here — and the fold is the sentence behind it, which is long and read
  * once: what the agent still keeps out of Hemera's sight, or the adapter's reason for refusing it.
+ *
+ * The agent's name is part of the control's name and not of the line: the eye reads the line under
+ * the agent's header, and whoever walks the page from control to control hears three folds that
+ * would otherwise all say the same words.
  */
-function BareFold({ bare }: { bare: BareMode }): ReactNode {
+function BareFold({ agent, bare }: { agent: string; bare: BareMode }): ReactNode {
   return (
     <Disclosure
       summary={
         <span className={NOTE}>
+          <span className="sr-only">{`${agent}: `}</span>
           {bare.qualified ? "Runs with Hemera's tools only" : 'Not available here'}
         </span>
       }

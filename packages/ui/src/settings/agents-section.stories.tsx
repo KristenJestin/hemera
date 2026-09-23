@@ -280,10 +280,14 @@ export const CouldNotCheck: Story = {
  * keeps out of Hemera's sight — its own sources, which Hemera names and does not read.
  */
 export const RunsWithHemerasToolsOnly: Story = {
-  args: { agents: [CLAUDE] },
+  args: { agents: [CLAUDE, OPENCODE] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const fold = canvas.getByRole('button', { name: /Runs with Hemera's tools only/ })
+    // Two folds with the same line, told apart by whoever does not see the header above each.
+    await expect(
+      canvas.getByRole('button', { name: "OpenCode: Runs with Hemera's tools only" }),
+    ).toBeInTheDocument()
+    const fold = canvas.getByRole('button', { name: "Claude Code: Runs with Hemera's tools only" })
     await expect(fold).toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.queryByText(/~\/\.claude\.json/)).not.toBeInTheDocument()
 
@@ -300,7 +304,7 @@ export const NotAvailableHere: Story = {
   args: { agents: [CODEX] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const fold = canvas.getByRole('button', { name: /Not available here/ })
+    const fold = canvas.getByRole('button', { name: 'Codex: Not available here' })
     await expect(fold).toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.queryByText(/apply_patch/)).not.toBeInTheDocument()
 
