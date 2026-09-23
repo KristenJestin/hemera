@@ -1,21 +1,24 @@
 /**
- * The services of a Project: `serve` runs per Workspace or per Project, their readiness and the
- * ports they hold (D8-07, D8-08, D8-09).
+ * The services of a Project: `serve` runs per Workspace or per Project, their readiness, the
+ * ports they hold, and Portless (D8-07, D8-08, D8-09, D8-10).
  *
  * Each suite is named after a scenario of the Spec section `services`. Nothing is mocked: the
  * runs are real children of this machine that print an address and stay up, as a dev server
  * does, over the real engine on a database in a temporary folder; an address that answers is a
  * real HTTP server of a child, listening when the child decides to. The second Workspace is a
- * row written as its creation would leave it, `ready`, with a folder of its own.
+ * row written as its creation would leave it, `ready`, with a folder of its own. The real
+ * `portless` is never run: a machine without it is a `PATH` of an empty folder, and one with it
+ * is a script of the suite standing in for it.
  */
 
-import { mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { type AddressInfo, createServer } from 'node:net'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
-import { Commands, ReadinessSettings } from '#engine/commands/service.ts'
+import { hostLookup } from '#engine/commands/line.ts'
+import { Commands, ProgramLookup, ReadinessSettings } from '#engine/commands/service.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { Database } from '#engine/storage/database.ts'
 import { workspaces } from '#engine/storage/schema.ts'
@@ -29,6 +32,10 @@ import {
   scratch,
   until,
 } from './commands-engine.ts'
+
+/** Where programs are looked for in `folder` alone: a machine whose `PATH` is that folder. */
+const onlyIn = (folder: string) =>
+  Layer.succeed(ProgramLookup, (cwd: string) => ({ ...hostLookup(cwd), path: folder }))
 
 /** A dedicated Workspace of the Project, `ready`, in a folder beside `main`. */
 const loginForm = (projectId: string) =>
@@ -308,4 +315,76 @@ describe('A port conflict names its holder', () => {
     expect(seen.died.state).toBe('failed')
     expect(seen.died.portConflict).toEqual(conflict)
   })
+})
+
+describe('Portless is refused when it is not installed', () => {
+  it('refuses the launch naming portless, and starts nothing', async () => {
+    const empty = join(scratch.folder, 'bin')
+    mkdirSync(empty)
+    const marker = join(scratch.root, 'started')
+    const seen = await engine(onlyIn(empty))(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        // What the line would leave behind, had anything run it.
+        const line = `"${process.execPath}" -e "require('fs').writeFileSync('started','')"`
+        const run = yield* commands.run(
+          request(session, { name: 'dev', line, type: 'serve', portless: true }),
+        )
+        const lines = yield* runLines(session.projectId)
+        return { run, lines: lines.map((one) => one.type) }
+      }),
+    )
+
+    expect(seen.run.state).toBe('failed')
+    expect(seen.run.output).toBe('portless was not found on the PATH: nothing was started')
+    expect(seen.run.pid).toBeNull()
+    expect(existsSync(marker)).toBe(false)
+    // Ended at once: never started, so never said to have started (D8-16).
+    expect(seen.lines).toEqual(['command.run_ended'])
+  })
+})
+
+describe('A Portless command runs through portless under its Workspace name', () => {
+  it.runIf(process.platform !== 'win32')(
+    'runs portless <workspace>-<name> <line>, reads its address, and names no conflict',
+    async () => {
+      // A stand-in for `portless`: it prints the address the real one would, then runs the line.
+      const bin = join(scratch.folder, 'bin')
+      mkdirSync(bin)
+      writeFileSync(
+        join(bin, 'portless'),
+        '#!/bin/sh\necho "https://$1.localhost"\nshift\nexec "$@"\n',
+      )
+      chmodSync(join(bin, 'portless'), 0o755)
+      const line = `"${process.execPath}" -e "console.log(process.argv.slice(1).join('|'));setInterval(()=>{},1000)" two words`
+      const seen = await engine(onlyIn(bin))(
+        Effect.gen(function* () {
+          const { workspace, inLoginForm } = yield* twoWorkspaces
+          const commands = yield* Commands
+          const started = yield* commands.run(
+            request(inLoginForm, {
+              name: 'Dev',
+              line,
+              type: 'serve',
+              portless: true,
+              cwd: workspace.path,
+              workspaceId: workspace.id,
+              workspaceName: workspace.name,
+            }),
+          )
+          return yield* until(
+            commands.output(inLoginForm.sessionId, started.id),
+            (view) => view.url !== null && view.output.includes('two|words'),
+          )
+        }),
+      )
+
+      expect(seen.line).toBe(`portless login-form-dev ${line}`)
+      expect(seen.state).toBe('running')
+      expect(seen.url).toBe('https://login-form-dev.localhost')
+      expect(seen.output).toContain('two|words')
+      expect(seen.portConflict).toBeNull()
+    },
+  )
 })

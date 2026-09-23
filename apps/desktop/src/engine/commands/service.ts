@@ -21,6 +21,11 @@
  * is written when it starts and rewritten when it ends, so a panel reopened after a restart
  * reads what was run and how it ended — and the Session's thread gets that same run as one
  * entry that changes state, because a run shows in the panel and in the thread (D6-12).
+ *
+ * A run belongs to a Workspace (D8-08) and runs the machine's own line of its command (D8-07): a
+ * `serve` joins the one running in its Workspace, or the Project's one when its scope says so; the
+ * address it publishes is requested until it answers, and its port is compared with the Project's
+ * other runs, whose holder is named (D8-09); a Portless command runs through `portless` (D8-10).
  */
 
 import {
@@ -38,6 +43,7 @@ import {
   MAIN_WORKSPACE,
   mergedEnvironment,
   portOf,
+  slugOf,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
@@ -56,7 +62,7 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { hostLookup, invocationOf } from './line.ts'
+import { type Lookup, findOnPath, hostLookup, invocationOf } from './line.ts'
 
 /** How many runs `recent` hands back: what a panel draws, oldest ones out of sight. */
 const RECENT_RUNS = 8
@@ -144,6 +150,14 @@ function portInUse(output: string): number | null {
  */
 export const Platform = Context.Reference<string>('CommandsPlatform', {
   defaultValue: () => globalThis.process.platform,
+})
+
+/**
+ * Where a program is looked for, for a line run in a folder: this process's `PATH` by default,
+ * and another one for a suite that needs a machine without `portless` (D8-10).
+ */
+export const ProgramLookup = Context.Reference<(cwd: string) => Lookup>('CommandsProgramLookup', {
+  defaultValue: () => hostLookup,
 })
 
 /** A run was asked for by an identifier nothing of this Project answers to. */
@@ -397,6 +411,8 @@ interface Live {
   readonly workspaceId: string | null
   readonly workspaceName: string
   readonly environment: Record<string, string>
+  /** Whether it runs through Portless, whose address holds no port of its own (D8-10). */
+  readonly portless: boolean
   /** Who asked for it: the agent through its tool, or the user through the panel. */
   readonly startedBy: 'agent' | 'user'
   readonly startedAt: string
@@ -455,6 +471,7 @@ export const commandsLayer = Layer.effect(
     const scope = yield* Effect.scope
     const platform = yield* Platform
     const readiness = yield* ReadinessSettings
+    const lookupIn = yield* ProgramLookup
     const live = new Map<string, Live>()
 
     /** An effect that needs a scope, run in the engine's: everything it starts dies with it. */
@@ -756,6 +773,7 @@ export const commandsLayer = Layer.effect(
           other !== id &&
           one.projectId === projectId &&
           one.state === 'running' &&
+          !one.portless &&
           one.url !== null &&
           portOf(one.url) === port,
       )
@@ -779,7 +797,8 @@ export const commandsLayer = Layer.effect(
      */
     const checkAddress = (id: string, record: Live, url: string) =>
       Effect.gen(function* () {
-        const port = portOf(url)
+        // A Portless address is the proxy's: no port of the run's own to conflict (D8-10).
+        const port = record.portless ? null : portOf(url)
         const conflict = port === null ? null : holderOf(id, record.projectId, port)
         if (conflict !== null) {
           record.portConflict = conflict
@@ -974,7 +993,13 @@ export const commandsLayer = Layer.effect(
           const id = crypto.randomUUID()
           const startedAt = new Date().toISOString()
           // The machine's own line when the command has one, and the run keeps the line it ran.
-          const line = lineFor(asked, platform)
+          const own = lineFor(asked, platform)
+          const lookup = lookupIn(asked.cwd)
+          // A Portless command runs as `portless <name> <line>`, the name being its Workspace's
+          // and its own, and `portless` is looked for before anything starts (D8-10).
+          const named = slugOf(`${asked.workspaceName}-${asked.name}`)
+          const portless = asked.portless ? findOnPath('portless', lookup, platform) : null
+          const line = asked.portless ? `portless ${named} ${own}` : own
           const record: Live = {
             sessionId: asked.sessionId,
             projectId: asked.projectId,
@@ -988,6 +1013,7 @@ export const commandsLayer = Layer.effect(
             workspaceId: asked.workspaceId,
             workspaceName: asked.workspaceName,
             environment: asked.environment,
+            portless: asked.portless,
             startedBy: asked.startedBy,
             startedAt,
             state: 'running',
@@ -1008,10 +1034,26 @@ export const commandsLayer = Layer.effect(
           }
           live.set(id, record)
 
+          // Refused by name, and nothing started: the box says Portless, and there is none.
+          if (asked.portless && portless === null) {
+            record.state = 'failed'
+            record.kept = 'portless was not found on the PATH: nothing was started'
+            record.endedAt = startedAt
+            yield* writeRow(id, record, 'command.run_ended')
+            yield* Deferred.succeed(record.ended, undefined)
+            live.delete(id)
+            return viewOf(id, record)
+          }
+
           // A line is run and not interpreted: what it names is the program, and the rest are
           // its arguments, a quoted one staying one. A line that needs a shell — a pipeline, a
-          // variable — is a line the user writes in a script and names here.
-          const invocation = invocationOf(line, platform, hostLookup(asked.cwd))
+          // variable — is a line the user writes in a script and names here. Portless is started
+          // where it was found, so what runs is what was checked.
+          const invocation = invocationOf(
+            portless === null ? own : `"${portless}" ${named} ${own}`,
+            platform,
+            lookup,
+          )
           if (invocation === null) {
             record.state = 'failed'
             record.kept = `Hemera has nothing to run: the line of ${asked.name} is empty`
@@ -1128,7 +1170,7 @@ export const commandsLayer = Layer.effect(
                   // test may well print the words and pass.
                   if (record.type === 'serve' && !record.stopping && IN_USE.test(record.kept)) {
                     record.state = 'failed'
-                    const port = portInUse(record.kept)
+                    const port = record.portless ? null : portInUse(record.kept)
                     const conflict = port === null ? null : holderOf(id, record.projectId, port)
                     if (conflict !== null) record.portConflict = conflict
                   }

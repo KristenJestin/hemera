@@ -11,7 +11,7 @@
  * The escaping is the one `cross-spawn` has used for years (MIT), reduced to what is needed here.
  */
 
-import { existsSync, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, statSync } from 'node:fs'
 import { extname, isAbsolute, join, normalize } from 'node:path'
 
 /** What is started for a line: a program, its arguments, and how Windows must receive them. */
@@ -101,6 +101,29 @@ function resolveOnWindows(program: string, lookup: Lookup): string | null {
       const candidate = folder === '' ? `${program}${extension}` : join(folder, program + extension)
       if (existsSync(candidate) && statSync(candidate).isFile()) return candidate
     }
+  }
+  return null
+}
+
+/** Whether a file is there and this process may execute it. */
+function executable(candidate: string): boolean {
+  try {
+    accessSync(candidate, constants.X_OK)
+    return statSync(candidate).isFile()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Where a program is along the `PATH`, and null when it is nowhere on it (D8-10): on POSIX the
+ * first file of that name in a folder of the `PATH` that may be executed, on Windows the file
+ * `cmd.exe` would run for that name.
+ */
+export function findOnPath(program: string, lookup: Lookup, platform: string): string | null {
+  if (platform === 'win32') return resolveOnWindows(program, lookup)
+  for (const folder of lookup.path.split(':')) {
+    if (folder !== '' && executable(join(folder, program))) return join(folder, program)
   }
   return null
 }
