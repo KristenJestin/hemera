@@ -113,6 +113,11 @@ const SURFACES = {
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
+  // Lot 20: what a Workspace is made of, one file per line so that each piece adds its own.
+  workspace: [
+    // The variables of a Project and of a Workspace over it (D8-06).
+    'variables-editor',
+  ],
 }
 
 /**
@@ -136,6 +141,7 @@ const ALWAYS = ['Playground', 'Variants', 'States']
  */
 const NAMED_STATES = new Map([
   ['composer/composer', ['Playground', 'Empty', 'Ready', 'Sending', 'Blocked']],
+  ['workspace/variables-editor', ['Project', 'Workspace', 'Empty', 'Keyboard']],
 ])
 
 function storiesIn(path: string): string[] {
@@ -364,6 +370,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ContextView',
       'BareModeState',
       'CommandList',
+      // Lot 20: the variables, the services and the details of a run of a Workspace.
+      'VariablesEditor',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

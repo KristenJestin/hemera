@@ -366,3 +366,7 @@ export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
 } from './session/resume-fallback-banner.tsx'
+
+/** The variables, the services and the details of a run of a Workspace (lot 20). */
+export { VariablesEditor, type VariablesEditorProps } from './workspace/variables-editor.tsx'
+export type { VariableLine } from './workspace/services-model.ts'
