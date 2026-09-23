@@ -734,3 +734,39 @@ export function slugOf(title: string): string {
     .replace(/^-+|-+$/g, '')
   return slug.length > 0 ? slug : 'spec'
 }
+
+/** A Spec the agent of a `free` Session proposes to create, and its answer without the marker. */
+export interface SpecProposal {
+  title: string
+  type: SpecType
+  /** The agent's text with the marker line taken out. */
+  text: string
+}
+
+/** The marker line: an HTML comment, which a Markdown reader shows nothing of. */
+const PROPOSAL_MARKER = /^[ \t]*<!--\s*hemera:propose-spec\b(.*?)-->[ \t]*(?:\r?\n|$)/m
+
+/** One `name="value"` of the marker; a value holds no double quote. */
+const PROPOSAL_ATTRIBUTE = /(\w+)="([^"]*)"/g
+
+/**
+ * The Spec the agent proposes in its answer, if it does (D7-07).
+ *
+ * Until the agent has a `spec_propose` tool, a `free` Session's agent proposes a Spec with one
+ * line of its answer, `<!-- hemera:propose-spec title="…" type="feature|bug|maintenance" -->`.
+ * The line is Hemera's, not the reader's: it is taken out of the text, and the proposal is what
+ * the thread shows. A marker with no title or a type that is not one of the three proposes
+ * nothing and is left as it is.
+ */
+export function proposalIn(text: string): SpecProposal | null {
+  const found = PROPOSAL_MARKER.exec(text)
+  if (found === null) return null
+  const attributes = new Map(
+    [...(found[1] ?? '').matchAll(PROPOSAL_ATTRIBUTE)].map((match) => [match[1], match[2]]),
+  )
+  const title = attributes.get('title')?.trim() ?? ''
+  const type = SPEC_TYPES.find((one) => one === attributes.get('type'))
+  if (title.length === 0 || type === undefined) return null
+  const rest = text.slice(0, found.index) + text.slice(found.index + found[0].length)
+  return { title, type, text: rest.trim() }
+}

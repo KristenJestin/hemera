@@ -44,6 +44,8 @@ import {
   hemeraToolNamed,
   type Session,
   type SessionEntryOrigin,
+  type SpecProposal,
+  proposalIn,
 } from '@hemera/core'
 import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice } from '@hemera/ipc'
 
@@ -582,6 +584,30 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
+     * The Spec the agent of a `free` Session proposed, as the entry the human accepts or not
+     * (D7-07), written after the message it was proposed in once that message has settled.
+     *
+     * This is a seam: until the agent has Hemera's `spec_propose` tool, it proposes with a marker
+     * line in its answer, `<!-- hemera:propose-spec title="…" type="…" -->`, which `proposalIn`
+     * reads and the message is written without. The tool replaces the marker and this reading.
+     */
+    const propose = (sessionId: string, key: string, turnId: string | null, said: SpecProposal) =>
+      Effect.gen(function* () {
+        const { session } = yield* attempt('reading the Session', sessions.one(sessionId))
+        // A Session that already defines a Spec is not offered another.
+        if (session.mission !== 'free') return
+        yield* writeNow(sessionId, {
+          role: 'hemera',
+          kind: 'spec_proposal',
+          body: said.title,
+          payload: JSON.stringify({ title: said.title, type: said.type }),
+          correlationId: `proposal:${key}`,
+          turnId,
+          settled: true,
+        })
+      })
+
+    /**
      * Writes what the agent said and the thread does not hold yet (Decided 10 of #17).
      *
      * `settled` is the caller's word on the entry: the chunks of a message that is over — the
@@ -607,11 +633,14 @@ export const runtimeLayer = Layer.effect(
           // its row is one the Journal has already told its reader about, and a resume says
           // nothing about it that the first turn did not say. Nor does a row that settled once.
           const settles = settled && chunk.origin === 'live' && !held.settledKeys.has(key)
+          // The marker of a Spec proposal is Hemera's and never the reader's (D7-07).
+          const proposal =
+            chunk.kind === 'message' && chunk.origin === 'live' ? proposalIn(chunk.body) : null
           const wrote = yield* Effect.result(
             writeNow(sessionId, {
               role: 'agent',
               kind: chunk.kind,
-              body: chunk.body,
+              body: proposal?.text ?? chunk.body,
               correlationId: key,
               turnId: chunk.turnId,
               origin: chunk.origin,
@@ -631,6 +660,14 @@ export const runtimeLayer = Layer.effect(
           if (settles) held.settledKeys.add(key)
           else if (!settled && chunk.origin === 'live' && !held.settledKeys.has(key)) {
             held.open.set(key, chunk)
+          }
+          if (settles && proposal !== null) {
+            const proposed = yield* Effect.result(propose(sessionId, key, chunk.turnId, proposal))
+            if (Result.isFailure(proposed)) {
+              yield* diagnostic.write(
+                `session ${sessionId}: the Spec proposed in ${key} was dropped: ${proposed.failure.message}`,
+              )
+            }
           }
         }
       })
