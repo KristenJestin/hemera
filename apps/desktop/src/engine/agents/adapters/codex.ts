@@ -36,39 +36,55 @@ import { type AgentAdapter, versionIn } from '../adapter.ts'
 const ALWAYS_OFFERED = 'api-key'
 
 /**
- * The `config.toml` of a bare Codex, from the spike (`docs/technical/bare-mode-2026-09.md` §2).
+ * What a bare Codex is configured with, through `CODEX_CONFIG` (`docs/technical/bare-mode-2026-09.md` §2).
  *
- * Every tool a switch can turn off, turned off: the hosted web search, the shell, the image
- * viewer, the sleep and clock tools, the permission and budget tools, the deferred executor, code
- * mode, the two generations of sub-agents, image generation, the standalone web search, the tool
- * suggestions, the plan and the question to the user. What is left once it is read is
- * `apply_patch` and the three MCP resource tools, which no key reaches.
+ * The adapter reads that variable once, as a JSON object, and merges it into every `thread/start`,
+ * `thread/resume` and `thread/fork` exactly like `-c` on the command line: the user's
+ * `CODEX_HOME`, where their login lives, is left where it is. Every tool a switch can turn off is
+ * turned off — the hosted web search, the shell, the image viewer, the sleep and clock tools, the
+ * permission and budget tools, the deferred executor, code mode, the two generations of
+ * sub-agents, image generation, the standalone web search, the tool suggestions, the apps, the
+ * plugins, the goals, the browser and the computer, the plan and the question to the user, the
+ * sub-agents the model's catalogue asks for and the skill tools. What no key reaches —
+ * `apply_patch` and the three MCP resource tools — is removed by the patch of the adapter, through
+ * `_meta` below. Code mode is the model's catalogue's too: its `exec` is a V8 isolate with no file
+ * system, network or process, and it reaches exactly the tools above (tried on 23 September 2026).
  */
-const BARE_CONFIG = [
-  'web_search = "disabled"',
-  '',
-  '[tools.update_plan]',
-  'enabled = false',
-  '',
-  '[tools.experimental_request_user_input]',
-  'enabled = false',
-  '',
-  '[features]',
-  'shell_tool = false',
-  'view_image = false',
-  'sleep_tool = false',
-  'current_time_reminder = false',
-  'request_permissions_tool = false',
-  'token_budget = false',
-  'deferred_executor = false',
-  'code_mode = false',
-  'multi_agent = false',
-  'multi_agent_v2 = false',
-  'image_generation = false',
-  'standalone_web_search = false',
-  'tool_suggest = false',
-  '',
-].join('\n')
+const BARE_CONFIG = {
+  web_search: 'disabled',
+  approval_policy: 'on-request',
+  tools: {
+    update_plan: { enabled: false },
+    experimental_request_user_input: { enabled: false },
+  },
+  // The sub-agent tools follow the model's catalogue unless `[agents]` turns them off.
+  agents: { enabled: false },
+  // `skills__list` and `skills__read`, and the orchestrator's own MCP tools.
+  orchestrator: { skills: { enabled: false }, mcp: { enabled: false } },
+  // Nested and not dotted: the adapter adds a `features` table of its own to every thread, and a
+  // `features.x` key beside it is lost (tried on codex-acp 1.12.0, codex-cli 0.154.0).
+  features: {
+    shell_tool: false,
+    unified_exec: false,
+    view_image: false,
+    sleep_tool: false,
+    current_time_reminder: false,
+    request_permissions_tool: false,
+    token_budget: false,
+    deferred_executor: false,
+    code_mode: false,
+    multi_agent: false,
+    multi_agent_v2: false,
+    image_generation: false,
+    standalone_web_search: false,
+    tool_suggest: false,
+    apps: false,
+    plugins: false,
+    goals: false,
+    browser_use: false,
+    computer_use: false,
+  },
+}
 
 export const codex: AgentAdapter = {
   id: 'codex',
@@ -88,33 +104,38 @@ export const codex: AgentAdapter = {
 
   isAuthenticated: (methods) => methods.every((method) => method.id === ALWAYS_OFFERED),
   /**
-   * Codex's means is a configuration file, and it is not enough: about fourteen switches turn off
-   * what can be turned off, and two families of tools have no switch at all. So this agent is not
-   * qualified, and a Session on it is refused before anything is written or started (D6-02): the
-   * options are declared for the trial that may qualify it, never handed to a Session.
+   * Codex's means is Hemera's patch of its adapter (`patches/`), and the configuration above.
    *
-   * Moving `CODEX_HOME` moves the login with it: `auth.json` lives there, and `codex login status`
-   * run with a `CODEX_HOME` of its own answers "Not logged in" on a machine that is (checked on
-   * 23 September 2026, Windows, codex-cli 0.154.0). A trial that qualifies Codex has to settle
-   * that first — the same keys through `CODEX_CONFIG` over the user's own home, which keeps their
-   * `config.toml` layered in — before a Session is opened on it.
+   * The session is opened with `_meta.hemera`, and the patched adapter starts its thread with no
+   * environment — `environments: []` on `thread/start` and on every `turn/start`, which removes
+   * the shell, `apply_patch` and the image viewer together — and with the tools of Hemera's MCP
+   * server handed to Codex as dynamic tools (`hemera_fs_read`, …) rather than as an MCP server:
+   * with no MCP server at all, the three MCP resource tools are never registered. A call comes back
+   * through `item/tool/call` and the adapter forwards it to Hemera's server, with the token the
+   * session was handed. The MCP servers of the user's own configuration are turned off by name.
+   * Both fields are experimental in `codex app-server`: they were tried on codex-cli 0.154.0, and a
+   * Codex upgrade needs the trial again.
+   *
+   * `CODEX_HOME` is left where the user has it. The login lives in it — `auth.json`, or the keyring
+   * entry keyed by its path — and `codex login status` run with a directory of its own answers
+   * "Not logged in" on a machine that is (checked on 23 September 2026, Windows, codex-cli 0.154.0).
+   * So Codex still reads the user's own `config.toml` beneath Hemera's overrides; what it keeps of
+   * it is its private part.
    */
   bareMode: () => ({
     means:
-      "a config.toml in a directory of Hemera's: about fourteen switches, from web_search to shell_tool, view_image, sleep_tool, multi_agent and code_mode",
+      "Hemera's patch of the adapter: no environment, Hemera's tools as dynamic tools, CODEX_CONFIG turning off web search, the feature tools and the user's MCP servers",
     base: 'embedded_resource',
     // Codex collects every AGENTS.md from the project root down to its working directory
-    // (`codex-rs/core/src/agents_md.rs`); CODEX_HOME moves only its global one.
+    // (`codex-rs/core/src/agents_md.rs`), and the patch leaves that alone.
     readsAgentsFile: true,
     private:
-      "the project's own .codex/config.toml still layers in over Hemera's; Hemera does not read it.",
-    options: (input) => ({
-      meta: undefined,
-      env: { CODEX_HOME: input.ownerDirectory },
-      files: [{ name: 'config.toml', content: BARE_CONFIG }],
+      "the user's own config.toml under Hemera's overrides, their ~/.codex/AGENTS.md, skills and hooks, and the project's .codex/config.toml still load; Hemera does not read them.",
+    options: () => ({
+      meta: { hemera: { bare: true, toolServer: 'hemera' } },
+      env: { CODEX_CONFIG: JSON.stringify(BARE_CONFIG) },
+      files: [],
     }),
-    qualified: false,
-    reason:
-      'apply_patch has no configuration key — it is gated by the model catalog — and list_mcp_resources, list_mcp_resource_templates and read_mcp_resource appear as soon as an MCP server exists, which bare mode requires. Hemera would not see those calls, so this Session is not opened.',
+    qualified: true,
   }),
 }

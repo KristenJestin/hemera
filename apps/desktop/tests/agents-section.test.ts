@@ -18,6 +18,7 @@ import { bareModeOf } from '#engine/agents/bare.ts'
 import { agentSnapshot, loadAgents } from '#renderer/agent-store.ts'
 import { bareRowOf } from '#renderer/bare-mode.ts'
 
+import { withUnqualifiedCodex } from './unqualified.ts'
 import { type OpenWindow, install, openWindow } from './window.ts'
 
 let dataFolder: string
@@ -50,24 +51,25 @@ describe("A qualified agent has only Hemera's tools", () => {
 })
 
 describe('An unqualified combination is refused with its reason', () => {
-  test('its row says it does not run bare, in the words its adapter declares', async () => {
-    opened = await openWindow(dataFolder, fakeAgent())
-    install(opened.bridge)
-    await loadAgents()
+  test('its row says it does not run bare, in the words its adapter declares', () =>
+    withUnqualifiedCodex(async () => {
+      opened = await openWindow(dataFolder, fakeAgent())
+      install(opened.bridge)
+      await loadAgents()
 
-    const declared = bareModeOf(ADAPTERS.codex, process.platform)
-    const codex = agentSnapshot().agents.find((one) => one.id === 'codex')
-    expect(declared.qualified).toBe(false)
-    expect(codex?.bareMode).toEqual({
-      means: declared.means,
-      qualified: false,
-      reason: declared.qualified ? null : declared.reason,
-      private: declared.private,
-    })
-    const row = codex === undefined ? null : bareRowOf(codex)
-    expect(row).toEqual({
-      qualified: false,
-      reason: `${declared.qualified ? 'unreachable' : declared.reason} Means tried: ${declared.means}.`,
-    })
-  })
+      const declared = bareModeOf(ADAPTERS.codex, process.platform)
+      const codex = agentSnapshot().agents.find((one) => one.id === 'codex')
+      expect(declared.qualified).toBe(false)
+      expect(codex?.bareMode).toEqual({
+        means: declared.means,
+        qualified: false,
+        reason: declared.qualified ? null : declared.reason,
+        private: declared.private,
+      })
+      const row = codex === undefined ? null : bareRowOf(codex)
+      expect(row).toEqual({
+        qualified: false,
+        reason: `${declared.qualified ? 'unreachable' : declared.reason} Means tried: ${declared.means}.`,
+      })
+    }))
 })

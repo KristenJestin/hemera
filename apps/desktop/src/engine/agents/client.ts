@@ -39,13 +39,13 @@ import { DELIVERY_MARKER } from '@hemera/core'
 import { z } from 'zod'
 
 import { type AgentAdapter } from './adapter.ts'
-import type { ClaudeCodeMeta } from './bare.ts'
+import type { ClaudeCodeMeta, CodexMeta } from './bare.ts'
 
 /**
- * What a session is opened with on `_meta`, beside the servers: the options of the one agent
- * that reads its bare mode there (D6-02). Carried by the three ways into a session alike.
+ * What a session is opened with on `_meta`, beside the servers: the options of the agents that
+ * read their bare mode there (D6-02). Carried by the three ways into a session alike.
  */
-export type SessionMeta = ClaudeCodeMeta
+export type SessionMeta = ClaudeCodeMeta | CodexMeta
 
 /** Where Claude Code names the tool a permission is about, beside a title made for reading. */
 const CLAUDE_TOOL = z.object({ claudeCode: z.object({ toolName: z.string() }) })

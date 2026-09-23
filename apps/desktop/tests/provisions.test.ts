@@ -118,8 +118,8 @@ describe('The base is provided once, by the agent’s means', () => {
     expect(base?.reached).toBe('embedded_resource')
   })
 
-  test('Codex, were it qualified, would take it the way OpenCode does', () => {
-    // Codex opens no Session (D6-02); what it declares is what a trial of it runs with.
+  test('Codex takes it the way OpenCode does', () => {
+    // Its adapter hands the base to no system prompt, even patched: it goes with the first prompt.
     expect(bareModeOf(codex, 'linux').base).toBe('embedded_resource')
     expect(bareModeOf(claude, 'linux').base).toBe('system_prompt')
   })

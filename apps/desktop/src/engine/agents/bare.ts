@@ -3,13 +3,12 @@
  * D6-09).
  *
  * There is no native mode and no toggle. Every Session is bare, or it is not opened at all, and
- * the means belongs to each agent: one reads its options out of `session/new`'s `_meta`, the
- * other two take them from the environment and a directory of Hemera's own. What each adapter
+ * the means belongs to each agent: Claude Code reads its options out of `session/new`'s `_meta`,
+ * Codex reads them there and from its environment through Hemera's patch of its adapter, and
+ * OpenCode takes them from the environment and a directory of Hemera's own. What each adapter
  * declares is that means, and the answer to the only question that matters here — whether the
- * means removes *every* tool the agent ships. Claude Code and OpenCode answer yes; Codex answers
- * no, and the residue it keeps is the reason its Sessions are refused. Codex still declares the
- * options its means is made of: they are what a trial of it runs with, and what the refusal
- * says was not enough — never what a Session is opened with.
+ * means removes *every* tool the agent ships. An agent that answers no is refused, with the
+ * residue it keeps as the reason.
  *
  * The declarations come from the spike `docs/technical/bare-mode-2026-09.md` (21 September 2026),
  * which read them in the three agents' own sources. Until the phase 3 trial per agent and
@@ -56,6 +55,22 @@ export type ClaudeCodeMeta = {
   }
 }
 
+/**
+ * What Codex's adapter reads out of `session/new`'s `_meta`, as Hemera's patch of it adds (D6-02).
+ *
+ * `@agentclientprotocol/codex-acp` reads no option there by itself: the patch under `patches/`
+ * runs a session that carries this with no environment — no shell, no `apply_patch`, no image
+ * viewer — and hands it the tools of the MCP server named `toolServer` as dynamic tools rather
+ * than as an MCP server, so the three MCP resource tools are never registered either.
+ */
+export type CodexMeta = {
+  readonly hemera: {
+    readonly bare: true
+    /** The server of `mcpServers` whose tools Codex is handed directly, and answered through. */
+    readonly toolServer: string
+  }
+}
+
 /** A file the means is made of, written into Hemera's directory for the agent before it starts. */
 export type BareFile = {
   /** Its name inside that directory. */
@@ -65,8 +80,8 @@ export type BareFile = {
 
 /** What an agent is handed so that it runs bare, per agent and per platform (D6-02, D6-09). */
 export type BareOptions = {
-  /** What `session/new` carries on `_meta`, for the agent that reads its options there. */
-  readonly meta: ClaudeCodeMeta | undefined
+  /** What `session/new` carries on `_meta`, for the agents that read their options there. */
+  readonly meta: ClaudeCodeMeta | CodexMeta | undefined
   /** What the process is started with, on top of the environment it already has. */
   readonly env: Readonly<Record<string, string>>
   /** What is written into Hemera's directory for this agent before its process starts. */

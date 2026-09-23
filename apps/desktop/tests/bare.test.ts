@@ -1,5 +1,5 @@
 /**
- * Bare mode: the means of each agent, and the Session an unqualified one does not get
+ * Bare mode: the means of each agent, and the Session an unqualified one would not get
  * (design D6-02, D6-09).
  *
  * The two scenarios of the Spec are played here against what the adapters declare, on both
@@ -9,15 +9,15 @@
  * them in the three agents' own sources.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect, Layer } from 'effect'
 import { z } from 'zod'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { AGENT_PROVIDERS } from '#engine/agents/adapter.ts'
-import { bareModeOf, bareOptionsOf, writtenFiles } from '#engine/agents/bare.ts'
+import { AGENT_PROVIDERS, type AgentAdapter } from '#engine/agents/adapter.ts'
+import { type BareOptions, bareModeOf, bareOptionsOf } from '#engine/agents/bare.ts'
 import { claude } from '#engine/agents/adapters/claude.ts'
 import { codex } from '#engine/agents/adapters/codex.ts'
 import { opencode } from '#engine/agents/adapters/opencode.ts'
@@ -25,11 +25,12 @@ import { fakeAgent } from '#engine/agents/fake.ts'
 import { MachineEnvironment } from '#engine/agents/discovery.ts'
 import { AgentRuntime, NoNotices } from '#engine/agents/runtime.ts'
 import { aSessionOn, application } from './application.ts'
+import { RESIDUE, unqualified, withUnqualifiedCodex } from './unqualified.ts'
 
 const ADAPTERS = [claude, codex, opencode]
 
 /** What a refused agent declares it keeps, or a test that named a qualified one by mistake. */
-const reasonOf = (adapter: (typeof ADAPTERS)[number], platform: NodeJS.Platform): string => {
+const reasonOf = (adapter: AgentAdapter, platform: NodeJS.Platform): string => {
   const mode = bareModeOf(adapter, platform)
   if (mode.qualified) throw new Error(`${adapter.id} is qualified: it declares no reason`)
   return mode.reason
@@ -37,6 +38,12 @@ const reasonOf = (adapter: (typeof ADAPTERS)[number], platform: NodeJS.Platform)
 
 /** The two a machine can be, asked from whichever one this is. */
 const PLATFORMS: readonly NodeJS.Platform[] = ['linux', 'win32']
+
+/** What Claude Code is handed on `_meta`, of which it is the only reader of these options. */
+const claudeOptionsOf = (options: BareOptions) =>
+  options.meta !== undefined && 'claudeCode' in options.meta
+    ? options.meta.claudeCode.options
+    : undefined
 
 /** A Session's own directory, and the base the Context provides (D6-07). */
 const input = {
@@ -50,19 +57,18 @@ describe("A qualified agent has only Hemera's tools", () => {
     expect(ADAPTERS.map((adapter) => adapter.id)).toEqual([...AGENT_PROVIDERS])
   })
 
-  test('Claude Code and OpenCode are the two that can be emptied, on both platforms', () => {
+  test('the three agents can be emptied, on both platforms', () => {
     for (const platform of PLATFORMS) {
-      expect(bareModeOf(claude, platform).qualified).toBe(true)
-      expect(bareModeOf(opencode, platform).qualified).toBe(true)
+      for (const adapter of ADAPTERS) expect(bareModeOf(adapter, platform).qualified).toBe(true)
     }
   })
 
   test('Claude Code is handed no built-in tool and no settings source', async () => {
     const options = await Effect.runPromise(bareOptionsOf(claude, 'linux', input))
 
-    expect(options.meta?.claudeCode.options.tools).toEqual([])
-    expect(options.meta?.claudeCode.options.settingSources).toEqual([])
-    expect(options.meta?.claudeCode.options.systemPrompt).toEqual({
+    expect(claudeOptionsOf(options)?.tools).toEqual([])
+    expect(claudeOptionsOf(options)?.settingSources).toEqual([])
+    expect(claudeOptionsOf(options)?.systemPrompt).toEqual({
       type: 'custom',
       prompt: input.base,
       snapshot: true,
@@ -74,13 +80,13 @@ describe("A qualified agent has only Hemera's tools", () => {
   test('Claude Code loads no MCP server but the ones handed to its session', async () => {
     const options = await Effect.runPromise(bareOptionsOf(claude, 'linux', input))
 
-    expect(options.meta?.claudeCode.options.strictMcpConfig).toBe(true)
+    expect(claudeOptionsOf(options)?.strictMcpConfig).toBe(true)
   })
 
   test("Claude Code runs Hemera's tools without asking its own permission for them", async () => {
     const options = await Effect.runPromise(bareOptionsOf(claude, 'linux', input))
 
-    expect(options.meta?.claudeCode.options.allowedTools).toEqual(['mcp__hemera__*'])
+    expect(claudeOptionsOf(options)?.allowedTools).toEqual(['mcp__hemera__*'])
   })
 
   test('OpenCode is handed a catch-all deny, with its own namespace re-allowed', async () => {
@@ -122,13 +128,13 @@ describe("A qualified agent has only Hemera's tools", () => {
 })
 
 describe('An unqualified combination is refused with its reason', () => {
-  test('Codex opens no Session, on either platform', async () => {
+  test('an agent that keeps a tool opens no Session, on either platform', async () => {
     // The refusal is the answer, and there is nothing to hand over: flipping the effect is what
     // proves no options were built at all, on either platform.
     const refused = await Promise.all(
       PLATFORMS.map((platform) => {
-        expect(bareModeOf(codex, platform).qualified).toBe(false)
-        return Effect.runPromise(Effect.flip(bareOptionsOf(codex, platform, input)))
+        expect(bareModeOf(unqualified, platform).qualified).toBe(false)
+        return Effect.runPromise(Effect.flip(bareOptionsOf(unqualified, platform, input)))
       }),
     )
 
@@ -139,13 +145,12 @@ describe('An unqualified combination is refused with its reason', () => {
   })
 
   test('the reason shown is the one the adapter declares, and it names the residue', async () => {
-    const refused = await Effect.runPromise(Effect.flip(bareOptionsOf(codex, 'linux', input)))
+    const refused = await Effect.runPromise(Effect.flip(bareOptionsOf(unqualified, 'linux', input)))
 
-    expect(refused.reason).toBe(reasonOf(codex, 'linux'))
-    expect(refused.reason).toContain('apply_patch')
-    expect(refused.reason).toContain('read_mcp_resource')
+    expect(refused.reason).toBe(reasonOf(unqualified, 'linux'))
+    expect(refused.reason).toBe(RESIDUE)
     // The means travels with the refusal, because the window shows both.
-    expect(refused.means).toBe(bareModeOf(codex, 'linux').means)
+    expect(refused.means).toBe(bareModeOf(unqualified, 'linux').means)
   })
 })
 
@@ -195,19 +200,21 @@ describe("A qualified agent has only Hemera's tools", () => {
 })
 
 describe('An unqualified combination is refused with its reason', () => {
-  test('a Session on Codex starts nothing, and the refusal is the reason Codex declares', async () => {
+  test('a Session on an agent that keeps a tool starts nothing, and says its reason', async () => {
     const places = folders()
     const agent = fakeAgent()
     try {
-      const refused = await application(places.data)(agent)(
-        Effect.gen(function* () {
-          const runtime = yield* AgentRuntime
-          const session = yield* aSessionOn(places.workspace, 'codex')
-          return yield* Effect.flip(runtime.start(session.id))
-        }),
+      const refused = await withUnqualifiedCodex(() =>
+        application(places.data)(agent)(
+          Effect.gen(function* () {
+            const runtime = yield* AgentRuntime
+            const session = yield* aSessionOn(places.workspace, 'codex')
+            return yield* Effect.flip(runtime.start(session.id))
+          }),
+        ),
       )
 
-      expect(refused.message).toContain(reasonOf(codex, process.platform))
+      expect(refused.message).toContain(RESIDUE)
       // Refused before anything was written or started for it.
       expect(agent.starts).toEqual([])
       expect(existsSync(join(places.data, 'agents', 'codex'))).toBe(false)
@@ -218,52 +225,62 @@ describe('An unqualified combination is refused with its reason', () => {
   })
 })
 
-describe('Codex is handed its bare configuration and stays unqualified', () => {
-  test('the config.toml of the spike, in a CODEX_HOME of Hemera, and the residue as the reason', async () => {
-    const places = folders()
-    try {
-      const mode = bareModeOf(codex, process.platform)
-      const options = mode.options({ ownerDirectory: join(places.data, 'codex'), base: 'the base' })
-      // Its home is Hemera's, and the configuration is written into it, as the process reads it.
-      expect(options.env).toEqual({ CODEX_HOME: join(places.data, 'codex') })
-      expect(options.meta).toBeUndefined()
-      await Effect.runPromise(writtenFiles(join(places.data, 'codex'), options.files))
-      const written = readFileSync(join(places.data, 'codex', 'config.toml'), 'utf8')
-      expect(written).toContain('web_search = "disabled"')
-      for (const table of ['[tools.update_plan]', '[tools.experimental_request_user_input]']) {
-        expect(written).toContain(`${table}\nenabled = false`)
-      }
-      for (const feature of [
-        'shell_tool',
-        'view_image',
-        'sleep_tool',
-        'request_permissions_tool',
-        'token_budget',
-        'deferred_executor',
-        'code_mode',
-        'multi_agent',
-        'multi_agent_v2',
-        'image_generation',
-        'standalone_web_search',
-        'tool_suggest',
-      ]) {
-        expect(written).toMatch(new RegExp(`^${feature} = false$`, 'm'))
-      }
-      // And it is still not qualified: two families of tools have no switch at all.
-      expect(mode.qualified).toBe(false)
-      const reason = reasonOf(codex, process.platform)
-      for (const residue of [
-        'apply_patch',
-        'list_mcp_resources',
-        'list_mcp_resource_templates',
-        'read_mcp_resource',
-      ]) {
-        expect(reason).toContain(residue)
-      }
-    } finally {
-      rmSync(places.data, { recursive: true, force: true })
-      rmSync(places.workspace, { recursive: true, force: true })
+/** The configuration a bare Codex is handed through `CODEX_CONFIG`, as far as these suites read it. */
+const CODEX_CONFIG = z.object({
+  web_search: z.string(),
+  tools: z.record(z.string(), z.object({ enabled: z.boolean() })),
+  agents: z.object({ enabled: z.boolean() }),
+  orchestrator: z.object({ skills: z.object({ enabled: z.boolean() }) }),
+  features: z.record(z.string(), z.boolean()),
+})
+
+describe("A bare Codex offers only Hemera's tools", () => {
+  test("its session asks the patched adapter for no environment and for Hemera's tools", async () => {
+    const options = await Effect.runPromise(bareOptionsOf(codex, 'linux', input))
+
+    // What the patch of the adapter reads: no environment, and the tools of the server named.
+    expect(options.meta).toEqual({ hemera: { bare: true, toolServer: 'hemera' } })
+    // Nothing is written for it: the configuration travels in the environment.
+    expect(options.files).toEqual([])
+    expect(Object.keys(options.env)).toEqual(['CODEX_CONFIG'])
+  })
+
+  test('every tool a switch reaches is switched off, in the shape the adapter keeps', async () => {
+    const options = await Effect.runPromise(bareOptionsOf(codex, 'linux', input))
+    const config = CODEX_CONFIG.parse(JSON.parse(options.env.CODEX_CONFIG ?? '{}'))
+
+    expect(config.web_search).toBe('disabled')
+    expect(config.tools).toEqual({
+      update_plan: { enabled: false },
+      experimental_request_user_input: { enabled: false },
+    })
+    expect(config.agents.enabled).toBe(false)
+    expect(config.orchestrator.skills.enabled).toBe(false)
+    for (const feature of [
+      'shell_tool',
+      'unified_exec',
+      'view_image',
+      'sleep_tool',
+      'request_permissions_tool',
+      'token_budget',
+      'deferred_executor',
+      'code_mode',
+      'multi_agent',
+      'multi_agent_v2',
+      'image_generation',
+      'standalone_web_search',
+      'tool_suggest',
+      'apps',
+      'plugins',
+      'goals',
+      'browser_use',
+      'computer_use',
+    ]) {
+      expect(config.features[feature]).toBe(false)
     }
+    // Nested, never dotted: the adapter adds a `features` table of its own to every thread, and a
+    // dotted `features.x` beside it is lost.
+    expect(Object.keys(config).some((key) => key.includes('.'))).toBe(false)
   })
 })
 
@@ -289,6 +306,53 @@ const CLAUDE_OPTIONS = z.object({
       env: z.record(z.string(), z.string()),
     }),
   }),
+})
+
+/** The one field of Codex's `_meta` these suites read. */
+const CODEX_META = z.object({ hemera: z.object({ bare: z.literal(true), toolServer: z.string() }) })
+
+describe("A bare Codex keeps the user's login", () => {
+  test('its home is the one the user has, and its configuration comes through CODEX_CONFIG', async () => {
+    const places = folders()
+    const own = join(places.workspace, 'codex-home')
+    try {
+      for (const [name, env] of [
+        ['default', {}],
+        ['moved', { CODEX_HOME: own }],
+      ] as const) {
+        const agent = fakeAgent()
+        mkdirSync(join(places.data, name))
+        // oxlint-disable-next-line no-await-in-loop -- one run of the application per machine, one after the other
+        await application(join(places.data, name), NoNotices, machineWith(env))(agent)(
+          Effect.gen(function* () {
+            const runtime = yield* AgentRuntime
+            const session = yield* aSessionOn(places.workspace, 'codex')
+            yield* runtime.start(session.id)
+          }),
+        )
+
+        // The process runs on the user's own home, or on none named: never on Hemera's.
+        const environment = agent.environments[0] ?? {}
+        expect(environment.CODEX_HOME).toBe(name === 'moved' ? own : undefined)
+        expect(environment.CODEX_CONFIG).toBeDefined()
+        // Hemera's directory for the agent holds nothing the agent reads.
+        expect(existsSync(join(places.data, name, 'agents', 'codex', 'config.toml'))).toBe(false)
+        // The session carries what the patched adapter reads, beside Hemera's server.
+        expect(CODEX_META.parse(JSON.parse(agent.answers.metas[0] ?? '{}')).hemera).toEqual({
+          bare: true,
+          toolServer: 'hemera',
+        })
+        expect(agent.answers.mcpServers[0]?.map((server) => server.name)).toEqual(['hemera'])
+        // So the login the agent reads is the one discovery found before the Session started.
+        expect(codex.loginFiles('/home/ana', env)).toEqual([
+          join(name === 'moved' ? own : join('/home/ana', '.codex'), 'auth.json'),
+        ])
+      }
+    } finally {
+      rmSync(places.data, { recursive: true, force: true })
+      rmSync(places.workspace, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("A bare Claude session still finds the user's login", () => {
