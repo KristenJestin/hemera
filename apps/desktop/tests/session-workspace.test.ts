@@ -18,6 +18,7 @@ import { z } from 'zod'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { runFromPanel } from '#engine/commands/panel.ts'
 import { Commands } from '#engine/commands/service.ts'
 import { Projects } from '#engine/projects.ts'
 import {
@@ -28,6 +29,7 @@ import {
 } from '#engine/sessions.ts'
 import { Database } from '#engine/storage/database.ts'
 import { workspaces } from '#engine/storage/schema.ts'
+import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { threadOf, toolApplication, until } from './application.ts'
 
 let dataFolder: string
@@ -174,6 +176,87 @@ describe("A command's folder resolves inside the Workspace", () => {
     expect(runs[0]?.cwd).toBe(join(loginForm, 'sources', 'api'))
     expect(runs[0]?.workspaceId).not.toBeNull()
     expect(runs[0]?.output).toContain(join(loginForm, 'sources', 'api'))
+  })
+})
+
+describe('A Project-scoped service is one instance for all', () => {
+  test('auth asked from login-form runs in main with main’s variables, and main joins it', async () => {
+    const running = (key: string) => [
+      { does: 'uses' as const, call: 'commands_run', arguments: { name: 'auth', key } },
+    ]
+    // One agent per Session: a Session on login-form, then one on main.
+    const fromLoginForm = fakeAgent({ steps: running('auth-1') })
+    const fromMain = fakeAgent({ steps: running('auth-2') })
+
+    const seen = await toolApplication(dataFolder)(fromLoginForm, fromMain)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const commands = yield* Commands
+        const sessions = yield* Sessions
+        const variables = yield* Variables
+        const { session, workspaceId } = yield* inLoginForm
+        // The Project sets PORT, and login-form sets it over: main's run is given the Project's.
+        yield* variables.set(session.projectId, null, 'PORT', '3000')
+        yield* variables.set(session.projectId, workspaceId, 'PORT', '3001')
+        yield* commands.save(
+          {
+            projectId: session.projectId,
+            name: 'auth',
+            line: `"${process.execPath}" -e "console.log(process.cwd());setInterval(()=>{},1000)"`,
+            lineWindows: null,
+            lineLinux: null,
+            type: 'serve',
+            folder: './sources/api',
+            scope: 'project',
+            portless: false,
+          },
+          false,
+        )
+        yield* runtime.prompt(session.id, 'start auth')
+        const onMain = yield* sessions.create(session.projectId, 'claude')
+        yield* runtime.prompt(onMain.id, 'start auth too')
+        return {
+          first: (yield* commands.running(session.id))[0],
+          running: yield* commands.runningOf(session.projectId),
+          main: yield* sessions.mainOf(session.projectId),
+        }
+      }).pipe(Effect.provide(variablesLayer)),
+    )
+
+    expect(seen.running).toHaveLength(1)
+    expect(seen.first?.cwd).toBe(join(main, 'sources', 'api'))
+    expect(seen.first?.workspaceName).toBe('main')
+    expect(seen.first?.workspaceId).toBe(seen.main.id)
+    expect(seen.first?.environment).toEqual({ PORT: '3000' })
+    expect(fromMain.answers.used[0]?.text).toContain('already running')
+    expect(fromMain.answers.used[0]?.text).toContain(seen.first?.id ?? 'no run')
+  })
+
+  test('auth run from the panel of a login-form Session runs in main', async () => {
+    const run = await toolApplication(dataFolder)(fakeAgent())(
+      Effect.gen(function* () {
+        const commands = yield* Commands
+        const { session } = yield* inLoginForm
+        yield* commands.save(
+          {
+            projectId: session.projectId,
+            name: 'auth',
+            line: `"${process.execPath}" -e "setInterval(()=>{},1000)"`,
+            lineWindows: null,
+            lineLinux: null,
+            type: 'serve',
+            folder: null,
+            scope: 'project',
+            portless: false,
+          },
+          false,
+        )
+        return yield* runFromPanel(session.id, 'auth', undefined)
+      }).pipe(Effect.provide(variablesLayer)),
+    )
+
+    expect(run.cwd).toBe(main)
+    expect(run.workspaceName).toBe('main')
   })
 })
 

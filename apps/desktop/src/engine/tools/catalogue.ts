@@ -28,6 +28,7 @@ import {
   TOOL_NAMES,
   type ToolName,
   admitTool,
+  runsInMain,
 } from '@hemera/core'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -857,14 +858,23 @@ export const toolCatalogueLayer: Layer.Layer<
             }
             const where = entry?.folder ?? call.arguments.folder ?? null
             const folder = where === null || where === '' || where === '.' ? '.' : where
+            // A Project-scoped service is one instance for all, in `main`, whichever Workspace
+            // this Session works in (D8-07): its folder resolves under `main`, not here.
+            const home =
+              entry !== undefined && runsInMain(entry)
+                ? yield* answered(sessions.mainOf(projectId))
+                : workspace
+            if (home === undefined) {
+              return failed("could not read the Project's main", 'the Workspace main did not read')
+            }
             // A catalogue command is the user's own line, and inside the root it runs on its own.
             // A one-off is a line the agent wrote: whatever folder it names, the human sees the
             // line and decides before anything runs (D5-09) — one question, not one per rule.
             const inside =
               entry !== undefined
                 ? folder === '.'
-                  ? { allowed: true as const, path: root }
-                  : yield* allowed(asked, root, folder)
+                  ? { allowed: true as const, path: home.path }
+                  : yield* allowed(asked, home.path, folder)
                 : yield* Effect.gen(function* () {
                     const place = yield* placeOf(root, folder)
                     if (place.inside === null) {
@@ -906,11 +916,11 @@ export const toolCatalogueLayer: Layer.Layer<
                 portless: entry?.portless ?? false,
                 folder: folder === '.' ? null : folder,
                 cwd: inside.path,
-                // D8-08: the run belongs to the Session's Workspace, which names it too.
-                workspaceId: workspace.id,
-                workspaceName: workspace.name,
-                // D8-06: the Project's variables overridden by the Workspace's, kept on the run.
-                environment: (yield* answered(variables.givenFor(projectId, workspace.id))) ?? {},
+                // D8-08: the run belongs to the Workspace it runs in, which names it too.
+                workspaceId: home.id,
+                workspaceName: home.name,
+                // D8-06: the Project's variables overridden by that Workspace's, kept on the run.
+                environment: (yield* answered(variables.givenFor(projectId, home.id))) ?? {},
                 startedBy: 'agent',
               }),
             )

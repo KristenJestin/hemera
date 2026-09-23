@@ -19,6 +19,7 @@ import {
   commandLine,
   commandName,
   repositoryPath,
+  runsInMain,
 } from '@hemera/core'
 import { Effect } from 'effect'
 
@@ -171,13 +172,15 @@ export const runFromPanel = (
     // The run belongs to the Session's Workspace (D8-08), with the variables Hemera gives it:
     // the Project's, overridden by the Workspace's (D8-06).
     const workspace = yield* sessions.workspace(sessionId)
-    const environment = yield* variables.givenFor(project.id, workspace.id)
     const name = named?.trim() ?? ''
     const line = written?.trim() ?? ''
     if (name !== '') {
       const catalogue = yield* commands.list(project.id)
       const entry = catalogue.find((one) => one.name === name)
       if (entry === undefined) return yield* Effect.fail(new UnknownCommandError(name))
+      // A Project-scoped service is one instance for all, in `main`, whichever Workspace this
+      // Session works in (D8-07), with `main`'s variables.
+      const home = runsInMain(entry) ? yield* sessions.mainOf(project.id) : workspace
       return yield* commands.run({
         sessionId,
         projectId: project.id,
@@ -191,10 +194,10 @@ export const runFromPanel = (
         portless: entry.portless,
         folder: entry.folder,
         // The folder of a command resolves under the Workspace the run is in (D8-07).
-        cwd: entry.folder === null ? workspace.path : join(workspace.path, entry.folder),
-        workspaceId: workspace.id,
-        workspaceName: workspace.name,
-        environment,
+        cwd: entry.folder === null ? home.path : join(home.path, entry.folder),
+        workspaceId: home.id,
+        workspaceName: home.name,
+        environment: yield* variables.givenFor(project.id, home.id),
         startedBy: 'user',
       })
     }
@@ -215,7 +218,7 @@ export const runFromPanel = (
       cwd: workspace.path,
       workspaceId: workspace.id,
       workspaceName: workspace.name,
-      environment,
+      environment: yield* variables.givenFor(project.id, workspace.id),
       startedBy: 'user',
     })
   })

@@ -155,6 +155,15 @@ export function joinsRunningRun(type: CommandType, running: boolean): boolean {
 }
 
 /**
+ * Whether a command runs in `main` whichever Workspace asks for it (D8-07): a `serve` scoped to
+ * the Project is one instance for all, and its place is `main`. The scope means nothing for the
+ * other types, which run where they are asked.
+ */
+export function runsInMain(command: Pick<Command, 'type' | 'scope'>): boolean {
+  return command.type === 'serve' && command.scope === 'project'
+}
+
+/**
  * An address of this machine: its name, its loopback addresses, or every interface, with a
  * port; or a `<name>.localhost` host — what Portless prints — whose port is optional (D8-09).
  */

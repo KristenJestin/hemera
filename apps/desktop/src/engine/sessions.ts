@@ -254,6 +254,11 @@ export interface SessionsService {
    */
   readonly workspace: (id: string) => Effect.Effect<SessionWorkspace, Refusal>
   /**
+   * The Project's `main`, by its own row (D8-07): where a Project-scoped service runs, whichever
+   * Workspace the Session asking for it works in.
+   */
+  readonly mainOf: (projectId: string) => Effect.Effect<SessionWorkspace, DatabaseError>
+  /**
    * Records what the agent itself handed back: the handle of its native session, the directory
    * it ran in, and how far that handle is still worth anything (design D5-06).
    *
@@ -517,6 +522,54 @@ export const sessionsLayer = Layer.effect(
         if (workspace.state !== 'ready') {
           return yield* Effect.fail(new WorkspaceNotReadyError(workspace.name, workspace.state))
         }
+      })
+
+    /**
+     * A Workspace of a Project as a Session works in it (D8-08): its row — `main` for null, which
+     * is also what a Session written before Workspaces were real reads as — and the repositories
+     * it holds.
+     */
+    const describedWorkspace = (projectId: string, workspaceId: string | null) =>
+      Effect.gen(function* () {
+        const found = yield* database
+          .select()
+          .from(workspaces)
+          .where(
+            workspaceId === null
+              ? and(eq(workspaces.projectId, projectId), eq(workspaces.name, MAIN_WORKSPACE))
+              : eq(workspaces.id, workspaceId),
+          )
+          .limit(1)
+          .pipe(Effect.mapError(failed('reading the Workspace')))
+        const workspace = found[0]
+        if (workspace === undefined) {
+          return yield* Effect.fail(
+            new DatabaseError({ doing: 'reading the Workspace', cause: 'it has no row' }),
+          )
+        }
+        // A dedicated Workspace holds the worktrees it was made with; `main` and a folder the
+        // user picked hold the repositories the Project declares.
+        const worktrees = yield* database
+          .select({ path: workspaceRepositories.relativePath })
+          .from(workspaceRepositories)
+          .where(eq(workspaceRepositories.workspaceId, workspace.id))
+          .orderBy(asc(workspaceRepositories.relativePath))
+          .pipe(Effect.mapError(failed('reading the worktrees')))
+        const declared =
+          worktrees.length > 0
+            ? worktrees
+            : yield* database
+                .select({ path: projectRepositories.relativePath })
+                .from(projectRepositories)
+                .where(eq(projectRepositories.projectId, projectId))
+                .orderBy(asc(projectRepositories.rank))
+                .pipe(Effect.mapError(failed('reading the repositories')))
+        return {
+          id: workspace.id,
+          name: workspace.name,
+          path: workspace.path,
+          repositories: declared.map((one) => one.path),
+        } satisfies SessionWorkspace
       })
 
     return {
@@ -866,51 +919,12 @@ export const sessionsLayer = Layer.effect(
               .pipe(Effect.mapError(failed('reading the Session')))
             const row = rows[0]
             if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
-            // Null is `main`, and so is a Session written before Workspaces were real (D8-08).
-            const found = yield* database
-              .select()
-              .from(workspaces)
-              .where(
-                row.workspaceId === null
-                  ? and(
-                      eq(workspaces.projectId, row.projectId),
-                      eq(workspaces.name, MAIN_WORKSPACE),
-                    )
-                  : eq(workspaces.id, row.workspaceId),
-              )
-              .limit(1)
-              .pipe(Effect.mapError(failed('reading the Workspace')))
-            const workspace = found[0]
-            if (workspace === undefined) {
-              return yield* Effect.fail(
-                new DatabaseError({ doing: 'reading the Workspace', cause: 'it has no row' }),
-              )
-            }
-            // A dedicated Workspace holds the worktrees it was made with; `main` and a folder the
-            // user picked hold the repositories the Project declares.
-            const worktrees = yield* database
-              .select({ path: workspaceRepositories.relativePath })
-              .from(workspaceRepositories)
-              .where(eq(workspaceRepositories.workspaceId, workspace.id))
-              .orderBy(asc(workspaceRepositories.relativePath))
-              .pipe(Effect.mapError(failed('reading the worktrees')))
-            const declared =
-              worktrees.length > 0
-                ? worktrees
-                : yield* database
-                    .select({ path: projectRepositories.relativePath })
-                    .from(projectRepositories)
-                    .where(eq(projectRepositories.projectId, row.projectId))
-                    .orderBy(asc(projectRepositories.rank))
-                    .pipe(Effect.mapError(failed('reading the repositories')))
-            return {
-              id: row.workspaceId,
-              name: workspace.name,
-              path: workspace.path,
-              repositories: declared.map((one) => one.path),
-            } satisfies SessionWorkspace
+            const described = yield* describedWorkspace(row.projectId, row.workspaceId)
+            return { ...described, id: row.workspaceId }
           }),
         ),
+
+      mainOf: (projectId) => withDatabase(describedWorkspace(projectId, null)),
 
       recordNative: (id, native) =>
         withDatabase(

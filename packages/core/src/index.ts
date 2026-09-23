@@ -88,6 +88,7 @@ export {
   commandScope,
   commandType,
   joinsRunningRun,
+  runsInMain,
   lineFor,
   portOf,
 } from './domain/commands.ts'

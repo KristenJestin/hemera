@@ -571,6 +571,7 @@ describe('Aucune suppression proposée', () => {
       'chooseWorkspace',
       'create',
       'list',
+      'mainOf',
       'one',
       'read',
       'recordNative',
