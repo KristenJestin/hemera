@@ -28,12 +28,16 @@ export function bareRowOf(agent: AgentAvailability): BareMode {
  *
  * An agent is offered when a Session could be made on it: it is installed, signed in, and its
  * combination is qualified here. One that is not is drawn and cannot be picked, and the hint is
- * the way out of it in the engine's own words — the command that installs it, the adapter's
- * reason it cannot run bare, the command that signs it in — which is the one thing the reader
- * can act on, and the same sentence `sessions.create` refuses it with.
+ * the way out of it in the engine's own words — the command that installs it, the command that
+ * signs it in — which is the one thing the reader can act on.
+ *
+ * An agent that cannot run bare has nothing the reader can type, so its hint is one line and not
+ * the adapter's reason: that reason is a paragraph, and a menu entry that carried it was an entry
+ * nobody could read the list past. It stays whole in Settings › Agents, under the agent, and in
+ * the refusal `sessions.create` answers with.
  */
 export function offeredOf(agent: AgentAvailability): OfferedAgent {
-  const { qualified, reason } = agent.bareMode
+  const { qualified } = agent.bareMode
   const offered: OfferedAgent = {
     id: agent.id,
     name: agent.label,
@@ -43,8 +47,7 @@ export function offeredOf(agent: AgentAvailability): OfferedAgent {
     signedIn: agent.authenticated,
   }
   if (!agent.found) offered.hint = agent.installHint
-  else if (!qualified)
-    offered.hint = `${agent.label} cannot run without its own tools here: ${reason ?? ''}`
+  else if (!qualified) offered.hint = 'Not available here'
   else if (!agent.authenticated) offered.hint = agent.loginHint
   return offered
 }

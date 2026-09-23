@@ -34,7 +34,7 @@ import type { ModelChoice } from './agent-model-menu-shared.tsx'
  * of it, and what is left under it is the panel's own surface.
  */
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/AgentModelMenu',
   component: AgentModelMenu,
   render: (args) => <Controlled {...args} render={(props) => <AgentModelMenu {...props} />} />,
@@ -143,6 +143,34 @@ export const AgentNotSignedIn: Story = {
     await waitFor(() => {
       expect(screen.getByRole('listbox', { name: 'Agents' })).toBeVisible()
     })
+  },
+}
+
+/**
+ * An agent this machine has and that cannot run here: drawn, off, and one line under its name.
+ *
+ * Its adapter's reason is a paragraph, and the menu is where an agent is picked rather than where
+ * that paragraph is read: the entry says it is not available here and nothing more, and the
+ * reason stays whole under the agent in the settings. Off the same way a signed-out agent is —
+ * `aria-disabled`, still an entry of the list, and a press that answers nothing.
+ */
+export const AgentNotAvailableHere: Story = {
+  args: {
+    agents: AGENTS.map((one) =>
+      one.id === 'codex' ? { ...one, available: false, hint: 'Not available here' } : one,
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose an agent' }))
+
+    const list = await screen.findByRole('listbox', { name: 'Agents' })
+    const off = within(list).getByRole('option', { name: /Codex/ })
+    await expect(off).toHaveTextContent(/^Codex\s*Not available here$/)
+    await expect(off).toHaveAttribute('aria-disabled', 'true')
+
+    await userEvent.click(off)
+    await expect(args.onAgentChange).not.toHaveBeenCalled()
   },
 }
 
