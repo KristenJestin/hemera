@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..a0180930b90ea78bf846f2d8f7cda772073d415f 100644
+index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18f4ccf866 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -28159,6 +28159,99 @@ function isUnknownRecord(value) {
@@ -183,7 +183,17 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..a0180930b90ea78bf846f2d8f7cda772
      return await this.sendRequest({ method: "turn/start", params });
    }
    async runTurn(params, onTurnStarted) {
-@@ -32721,6 +32839,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+@@ -31868,6 +31986,9 @@ var TitleGenerator = class {
+   }
+   async generateAndPersist(userPromptText) {
+     if (!userPromptText.trim()) return;
++    // Hemera patch: the title runs on a thread of its own, with the user's full configuration and an
++    // environment; a bare session starts none (Hemera names its Sessions itself).
++    if (hemeraBareThreads.has(this.mainThreadId)) return;
+     const { thread: epThread } = await this.client.threadStart({
+       cwd: this.cwd,
+       ephemeral: true
+@@ -32721,6 +32842,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
      if (this.providerUpdate !== null) {
        await this.providerUpdate;
      }
@@ -191,7 +201,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..a0180930b90ea78bf846f2d8f7cda772
      logger.log("Loading session...", { sessionId: params.sessionId });
      const {
        sessionId,
-@@ -32745,6 +32864,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+@@ -32745,6 +32867,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
      if (this.providerUpdate !== null) {
        await this.providerUpdate;
      }
@@ -199,7 +209,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..a0180930b90ea78bf846f2d8f7cda772
      logger.log("Resuming session...", { sessionId: params.sessionId });
      const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
      logger.log("Session resumed", {
-@@ -32855,6 +32975,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+@@ -32855,6 +32978,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
      if (this.providerUpdate !== null) {
        await this.providerUpdate;
      }
