@@ -2,10 +2,12 @@
  * What an agent is provided, and how a change of it reaches it (D6-07, D6-08).
  *
  * The base is `CONTEXT_BASE`, the three sentences every Session is given once, by whatever means
- * its adapter has. The Project's instructions are the `AGENTS.md` at the root of the Workspace,
- * which the three agents read themselves: the fingerprint of what was there at the start is
- * recorded, and the Context view says the file was read natively rather than sent. Sending it
- * would be a second injection of a text the agent already has.
+ * its adapter has. The Project's instructions are the `AGENTS.md` at the root of the Workspace.
+ * Whether the agent reads it itself is its adapter's declaration, since bare mode can keep it
+ * from reading it. An agent that reads it is not sent it — that would be a second injection of a
+ * text it already has — and the Context view says the file was read natively. An agent that does
+ * not is given it at the start of the Session, and the view says so. Either way the fingerprint
+ * of what was there at the start is recorded, and a later change goes the same way to both.
  *
  * A change during a Session is not a prompt either. It waits, and is handed over between two
  * turns as its own text carrying the marker that says who wrote it. What decides whether there is
@@ -56,7 +58,8 @@ interface Recorded {
 export interface Delivery extends Recorded {
   /**
    * How it reached the agent (D6-10): the base by its agent's means, `AGENTS.md` read by the agent
-   * itself, a change as a delivery prompt of its own between two turns.
+   * itself or given at the start of the Session, a change as a delivery prompt of its own between
+   * two turns.
    */
   readonly reached: ContextReach
 }
@@ -66,7 +69,15 @@ export interface Started {
   /** Word for word what the adapter hands the agent once. */
   readonly base: string
   /** The instructions as they stood, and their fingerprint; null without the file. */
-  readonly instructions: { readonly path: string; readonly fingerprint: string } | null
+  readonly instructions: {
+    readonly path: string
+    readonly fingerprint: string
+    /**
+     * The text Hemera hands the agent at the start, for an agent that does not read the file
+     * itself; null for one that does, which is never sent it.
+     */
+    readonly given: string | null
+  } | null
 }
 
 /** What waits for the next safe point. */
@@ -198,6 +209,7 @@ export const contextLayer = Layer.effect(
       switch (kind) {
         case 'base':
         case 'native':
+        case 'provided':
         case 'instructions':
           return kind
         default:
@@ -231,7 +243,8 @@ export const contextLayer = Layer.effect(
       )
 
     /**
-     * The fingerprint of the instructions a Session was last given, read natively or delivered.
+     * The fingerprint of the instructions a Session was last given: read natively, given at the
+     * start, or delivered.
      *
      * The last one and not any one: a file edited A, B, then A again has changed back, and the
      * agent holds B until it is told. Rows of one moment are told apart by their insertion order.
@@ -245,7 +258,7 @@ export const contextLayer = Layer.effect(
             and(
               eq(contextDeliveries.sessionId, sessionId),
               eq(contextDeliveries.path, AGENTS_FILE),
-              inArray(contextDeliveries.kind, ['native', 'instructions']),
+              inArray(contextDeliveries.kind, ['native', 'provided', 'instructions']),
             ),
           )
           .orderBy(desc(contextDeliveries.deliveredAt), desc(sql`rowid`))
@@ -256,9 +269,9 @@ export const contextLayer = Layer.effect(
     /**
      * Records one thing given to a Session, and says whether it is new.
      *
-     * A base or a native file already recorded is not written a second time: the unique index
-     * over the Session, the kind, the path and the fingerprint is the rule for those two, and
-     * null here is something the agent already has. A delivery is always written.
+     * A base or a file the Session started with already recorded is not written a second time:
+     * the unique index over the Session, the kind, the path and the fingerprint is the rule for
+     * those, and null here is something the agent already has. A delivery is always written.
      */
     const record = (
       sessionId: string,
@@ -298,16 +311,45 @@ export const contextLayer = Layer.effect(
         }),
       )
 
+    /**
+     * Whether the agent of this Session reads `AGENTS.md` itself under its bare mode, as its
+     * adapter declares (D6-07). A Session with no agent yet reads as one that does not: it is
+     * given the file rather than assumed to have it.
+     */
+    const readsItself = (sessionId: string): Effect.Effect<boolean, Refusal> =>
+      sessions.one(sessionId).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof UnknownSessionError
+            ? cause
+            : new DatabaseError({ doing: 'reading the Session of what it starts with', cause }),
+        ),
+        Effect.map(({ session }) =>
+          session.provider === null
+            ? false
+            : bareModeOf(ADAPTERS[session.provider], process.platform).readsAgentsFile,
+        ),
+      )
+
     const start = (sessionId: string): Effect.Effect<Started, Refusal> =>
       Effect.gen(function* () {
         const root = yield* rootOf(sessionId)
         const instructions = yield* instructionsOf(root)
         yield* record(sessionId, 'base', '', fingerprintOf(CONTEXT_BASE))
         if (instructions === null) return { base: CONTEXT_BASE, instructions: null }
-        yield* record(sessionId, 'native', AGENTS_FILE, instructions.fingerprint)
+        const reads = yield* readsItself(sessionId)
+        yield* record(
+          sessionId,
+          reads ? 'native' : 'provided',
+          AGENTS_FILE,
+          instructions.fingerprint,
+        )
         return {
           base: CONTEXT_BASE,
-          instructions: { path: AGENTS_FILE, fingerprint: instructions.fingerprint },
+          instructions: {
+            path: AGENTS_FILE,
+            fingerprint: instructions.fingerprint,
+            given: reads ? null : instructions.text,
+          },
         }
       })
 
@@ -337,7 +379,7 @@ export const contextLayer = Layer.effect(
       Effect.gen(function* () {
         const written = yield* record(sessionId, 'instructions', given.path, given.fingerprint)
         // A delivery row is always new — the unique index leaves them out — so this is the row
-        // just written; a base or a native file never reaches here.
+        // just written; a base or the file a Session started with never reaches here.
         const row = written ?? {
           kind: 'instructions' as const,
           path: given.path,
@@ -376,6 +418,8 @@ export const contextLayer = Layer.effect(
               return base
             case 'native':
               return 'read_natively'
+            case 'provided':
+              return 'session_start'
             case 'instructions':
               return 'delivery_prompt'
           }

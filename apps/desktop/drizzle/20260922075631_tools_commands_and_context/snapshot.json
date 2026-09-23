@@ -1312,7 +1312,7 @@
       "table": "command_runs"
     },
     {
-      "value": "\"kind\" IN ('base', 'native', 'instructions')",
+      "value": "\"kind\" IN ('base', 'native', 'provided', 'instructions')",
       "name": "delivery_kind_is_known",
       "entityType": "checks",
       "table": "context_deliveries"

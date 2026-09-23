@@ -1,12 +1,13 @@
 /**
  * What Hemera provides to an agent, and how a change of it reaches it (design D6-07 … D6-10).
  *
- * The provided context is the base and nothing else: the Project's instructions are the
- * Workspace's `AGENTS.md`, which the three agents read natively, so Hemera never sends it — it
- * records its fingerprint and says in the Context view that it was read natively. The base is
- * three sentences the agent is given once, at the start of the Session, by whatever means its
- * adapter has: the system prompt on Claude Code, an embedded resource in the first prompt on
- * Codex and OpenCode.
+ * The provided context is the base and the Project's instructions. The base is three sentences
+ * the agent is given once, at the start of the Session, by whatever means its adapter has: the
+ * system prompt on Claude Code, an embedded resource in the first prompt on Codex and OpenCode.
+ * The instructions are the Workspace's `AGENTS.md`. An agent that reads it itself, even bare, is
+ * not sent it: Hemera records its fingerprint and says it was read natively. One whose bare mode
+ * keeps it from reading it (Claude Code, OpenCode) is given it at the start of the Session, as a
+ * resource of the first prompt. Its adapter declares which.
  *
  * A change of `AGENTS.md` is not a prompt: it leaves between two turns as an identifiable
  * delivery — the new text as a resource, and a marker saying who sent it — so that a thread
@@ -52,13 +53,15 @@ export function deliveryText(instructions: string): string {
  *
  * The base goes through the system prompt where the agent has one to hand over — Claude Code's
  * `_meta.systemPrompt` — and as an embedded resource in the first prompt everywhere else; the
- * Workspace's `AGENTS.md` is read by the agent itself; a change of it goes as a prompt of its own,
- * made of the marker and the new text as a resource, between two turns (D6-07, D6-08).
+ * Workspace's `AGENTS.md` is read by the agent itself, or given at the start of the Session to an
+ * agent that does not read it bare; a change of it goes as a prompt of its own, made of the marker
+ * and the new text as a resource, between two turns (D6-07, D6-08).
  */
 export const CONTEXT_REACHES = [
   'system_prompt',
   'embedded_resource',
   'read_natively',
+  'session_start',
   'delivery_prompt',
 ] as const
 

@@ -108,6 +108,14 @@ export type BareMode = {
    */
   readonly base: BaseReach
   /**
+   * Whether the agent, run by this means, still reads the Workspace's `AGENTS.md` itself (D6-07).
+   *
+   * When it does, Hemera records the file's fingerprint and never sends it: that would be a second
+   * injection. When the means keeps it from reading it, Hemera gives it the file at the start of
+   * the Session, as a resource of the first prompt.
+   */
+  readonly readsAgentsFile: boolean
+  /**
    * What the agent keeps that Hemera does not see, in one sentence: the sources its means does
    * not reach (D6-09). The Context view lists it as the agent's private part, and claims nothing
    * about what the model retained (D6-10).

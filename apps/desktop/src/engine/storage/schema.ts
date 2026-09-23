@@ -282,8 +282,11 @@ export const COMMAND_RUN_STATES = ['running', 'exited', 'failed', 'stopped'] as 
 
 export type RunState = (typeof COMMAND_RUN_STATES)[number]
 
-/** What a delivery of the context was: the base, the record of a native read, or a change. */
-export const CONTEXT_DELIVERY_KINDS = ['base', 'native', 'instructions'] as const
+/**
+ * What a delivery of the context was: the base, the record of a native read, the file given at
+ * the start to an agent that does not read it, or a change.
+ */
+export const CONTEXT_DELIVERY_KINDS = ['base', 'native', 'provided', 'instructions'] as const
 
 export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
 
@@ -369,14 +372,16 @@ export const commandRuns = sqliteTable(
 /**
  * What the agent was provided, and when (D6-07, D6-08).
  *
- * Three kinds of row, and they are the three answers the Context view gives. `base` is the
+ * Four kinds of row, and they are the four answers the Context view gives. `base` is the
  * session's own start: the sentences every Session is given once, by whatever means its agent
  * has. `native` is not a delivery at all — it is the record that `AGENTS.md` was read by the
  * agent itself, with its fingerprint, which is why the view can say it was read natively rather
- * than sent. `instructions` is a change of that file delivered between two turns.
+ * than sent. `provided` is that file given by Hemera at the start of the Session, to an agent
+ * whose bare mode keeps it from reading it. `instructions` is a change of that file delivered
+ * between two turns.
  *
- * The fingerprint is what makes a delivery identifiable. The base and the natively read file are
- * recorded once per Session and fingerprint, which the unique index enforces. A delivery is not
+ * The fingerprint is what makes a delivery identifiable. The base and the file as the Session
+ * started with it are recorded once per Session and fingerprint, which the unique index enforces. A delivery is not
  * held to that: a file edited A, then B, then back to A is delivered each time it changes, and
  * what decides that is the last fingerprint given, not every one ever given.
  */

@@ -30,7 +30,7 @@ CREATE TABLE `context_deliveries` (
 	`fingerprint` text NOT NULL,
 	`delivered_at` text NOT NULL,
 	CONSTRAINT `fk_context_deliveries_session_id_sessions_id_fk` FOREIGN KEY (`session_id`) REFERENCES `sessions`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "delivery_kind_is_known" CHECK("kind" IN ('base', 'native', 'instructions'))
+	CONSTRAINT "delivery_kind_is_known" CHECK("kind" IN ('base', 'native', 'provided', 'instructions'))
 );
 --> statement-breakpoint
 CREATE TABLE `project_commands` (

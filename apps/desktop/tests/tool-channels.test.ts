@@ -216,7 +216,7 @@ describe('The view lists the sources with their provenance', () => {
 
     expect(view.provided.map((one) => [one.kind, one.path, one.reached])).toEqual([
       ['base', '', 'embedded_resource'],
-      ['native', AGENTS_FILE, 'read_natively'],
+      ['provided', AGENTS_FILE, 'session_start'],
     ])
     expect(view.provided[1]?.fingerprint).toMatch(/^[0-9a-f]{64}$/)
     expect(view.tools.map((one) => one.name)).toEqual([...TOOL_NAMES])

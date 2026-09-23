@@ -134,6 +134,10 @@ export const opencode: AgentAdapter = {
         ? "OPENCODE_CONFIG_CONTENT: a primary agent of Hemera's, a catch-all deny with the hemera_* namespace re-allowed, build and plan disabled — matched case-insensitively on Windows"
         : "OPENCODE_CONFIG_CONTENT: a primary agent of Hemera's, a catch-all deny with the hemera_* namespace re-allowed, build and plan disabled",
     base: 'embedded_resource',
+    // OpenCode finds the project's AGENTS.md only when OPENCODE_DISABLE_PROJECT_CONFIG is unset
+    // (`session/instruction.ts`, `systemPaths`), and its global one moves with XDG_CONFIG_HOME
+    // into Hemera's directory: bare, it reads neither.
+    readsAgentsFile: false,
     private:
       '$HOME/.opencode, its managed configuration and a remote .well-known/opencode still load; Hemera does not read them.',
     qualified: true,

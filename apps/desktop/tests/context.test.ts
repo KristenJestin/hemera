@@ -104,8 +104,8 @@ describe('what a Session is provided', () => {
 
     expect(seen.started.base).toEqual(CONTEXT_BASE)
     expect(seen.started.instructions?.path).toEqual(AGENTS_FILE)
-    expect(seen.provided.map((one) => one.kind).sort()).toEqual(['base', 'native'])
-    const file = seen.provided.find((one) => one.kind === 'native')
+    expect(seen.provided.map((one) => one.kind).sort()).toEqual(['base', 'provided'])
+    const file = seen.provided.find((one) => one.kind === 'provided')
     expect(file?.fingerprint).toMatch(/^[0-9a-f]{64}$/)
   })
 
@@ -238,5 +238,87 @@ describe('what a Session is provided', () => {
     expect(seen.again?.fingerprint).toBe(seen.first?.fingerprint)
     expect(seen.first?.before).toBe(seen.started.instructions?.fingerprint)
     expect(seen.provided.filter((one) => one.kind === 'instructions')).toHaveLength(0)
+  })
+})
+
+/** A Session of the suite's Workspace on the agent named, as the Home's composer makes one. */
+const openedOn = (provider: 'claude' | 'codex') =>
+  Effect.gen(function* () {
+    const project = yield* (yield* Projects).create({
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: root,
+    })
+    const session = yield* (yield* Sessions).create(project.id, provider)
+    return session.id
+  })
+
+describe('An agent that does not read AGENTS.md itself is given it at session start', () => {
+  it('hands Claude Code the file as it stands, lists it as given then, and queues nothing', async () => {
+    instructions('End every answer with the word KESTREL.\n')
+
+    const seen = await given(
+      Effect.gen(function* () {
+        const sessionId = yield* openedOn('claude')
+        const context = yield* Context
+        const started = yield* context.start(sessionId)
+        return {
+          started,
+          provided: yield* context.provided(sessionId),
+          pending: yield* context.pending(sessionId),
+        }
+      }),
+    )
+
+    expect(seen.started.instructions?.given).toBe('End every answer with the word KESTREL.\n')
+    expect(seen.provided.map((one) => [one.kind, one.path, one.reached])).toEqual([
+      ['base', '', 'system_prompt'],
+      ['provided', AGENTS_FILE, 'session_start'],
+    ])
+    // Given at the start is given: the same file is not a change to deliver again.
+    expect(seen.pending).toBeNull()
+  })
+})
+
+describe('An agent that reads AGENTS.md itself is not given it twice', () => {
+  it('records Codex reading the file natively and hands it nothing', async () => {
+    instructions('Be brief.\n')
+
+    const seen = await given(
+      Effect.gen(function* () {
+        const sessionId = yield* openedOn('codex')
+        const context = yield* Context
+        const started = yield* context.start(sessionId)
+        return {
+          started,
+          provided: yield* context.provided(sessionId),
+          pending: yield* context.pending(sessionId),
+        }
+      }),
+    )
+
+    expect(seen.started.instructions?.given).toBeNull()
+    expect(seen.provided.map((one) => [one.kind, one.path, one.reached])).toEqual([
+      ['base', '', 'embedded_resource'],
+      ['native', AGENTS_FILE, 'read_natively'],
+    ])
+    expect(seen.pending).toBeNull()
+  })
+
+  it('never sends a CLAUDE.md of the Workspace, to any agent', async () => {
+    instructions('Be brief.\n')
+    writeFileSync(join(root, 'CLAUDE.md'), 'Answer in French.\n')
+
+    const seen = await given(
+      Effect.gen(function* () {
+        const sessionId = yield* openedOn('claude')
+        const context = yield* Context
+        const started = yield* context.start(sessionId)
+        return { started, provided: yield* context.provided(sessionId) }
+      }),
+    )
+
+    expect(seen.started.instructions?.given).not.toContain('French')
+    expect(seen.provided.map((one) => one.path)).not.toContain('CLAUDE.md')
   })
 })

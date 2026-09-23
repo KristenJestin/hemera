@@ -79,6 +79,9 @@ export const claude: AgentAdapter = {
     means:
       'session/new _meta: no built-in tool, no settings source, no MCP server but Hemera, the base as the system prompt',
     base: 'system_prompt',
+    // Claude Code reads CLAUDE.md, not AGENTS.md, and with no settings source it reads neither:
+    // the Workspace's instructions reach it only if Hemera gives them.
+    readsAgentsFile: false,
     private:
       'its managed and policy settings and ~/.claude.json still load; Hemera does not read them.',
     qualified: true,

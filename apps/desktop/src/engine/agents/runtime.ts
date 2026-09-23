@@ -1542,11 +1542,12 @@ export const runtimeLayer = Layer.effect(
      * What a session that has just been opened is provided with (design D6-07).
      *
      * `Context.start` records the two: the base, word for word, and the fingerprint of the
-     * `AGENTS.md` the agent reads itself — which is never sent, because sending a text the agent
-     * already has is saying it twice. The base reaches the agent by its adapter's means: the
-     * system prompt Claude Code was handed at `session/new`, or an embedded resource on the
-     * first prompt of the others — never a turn of its own: it is a provision, not something to
-     * answer.
+     * Workspace's `AGENTS.md`. The base reaches the agent by its adapter's means: the system
+     * prompt Claude Code was handed at `session/new`, or an embedded resource on the first prompt
+     * of the others. The file is sent only to an agent whose bare mode keeps it from reading it,
+     * as a resource of the first prompt; one that reads it itself is never sent it, because
+     * sending a text the agent already has is saying it twice. Neither is a turn of its own: it
+     * is a provision, not something to answer.
      */
     const provide = (sessionId: string, held: Live): Effect.Effect<AgentRuntimeError | null> =>
       Effect.gen(function* () {
@@ -1554,10 +1555,19 @@ export const runtimeLayer = Layer.effect(
           attempt('providing the context', context.start(sessionId)),
         )
         if (Result.isFailure(started)) return started.failure
-        held.provisions =
-          held.base === 'embedded_resource'
-            ? [{ uri: contextUri(''), text: started.success.base, mimeType: 'text/plain' }]
-            : []
+        const { base, instructions } = started.success
+        const provisions: Provision[] = []
+        if (held.base === 'embedded_resource') {
+          provisions.push({ uri: contextUri(''), text: base, mimeType: 'text/plain' })
+        }
+        if (instructions !== null && instructions.given !== null) {
+          provisions.push({
+            uri: contextUri(instructions.path),
+            text: instructions.given,
+            mimeType: 'text/markdown',
+          })
+        }
+        held.provisions = provisions
         return null
       })
 

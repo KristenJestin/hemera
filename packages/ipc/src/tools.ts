@@ -68,18 +68,20 @@ export type CommandRun = z.infer<typeof commandRunSchema>
 
 /**
  * How something provided reached the agent (design D6-07, D6-10): the base by the agent's own
- * means, `AGENTS.md` read by the agent itself, a change as a delivery prompt between two turns.
+ * means, `AGENTS.md` read by the agent itself or given at the start of the Session, a change as a
+ * delivery prompt between two turns.
  */
 export const contextReachSchema = z.enum([
   'system_prompt',
   'embedded_resource',
   'read_natively',
+  'session_start',
   'delivery_prompt',
 ])
 
 /** One thing a Session was provided, oldest first, as the Context view lists it. */
 export const providedSchema = z.object({
-  kind: z.enum(['base', 'native', 'instructions']),
+  kind: z.enum(['base', 'native', 'provided', 'instructions']),
   /** The file it came from, and `''` for the base, which is not one. */
   path: z.string(),
   fingerprint: z.string(),

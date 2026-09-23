@@ -114,7 +114,7 @@ describe('A change during a turn leaves at the next safe point', () => {
     ).toBe(true)
     expect(contextOf(session.id)?.provided.map((one) => [one.kind, one.reached])).toEqual([
       ['base', 'embedded_resource'],
-      ['native', 'read_natively'],
+      ['provided', 'session_start'],
       ['instructions', 'delivery_prompt'],
     ])
   })

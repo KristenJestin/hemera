@@ -591,6 +591,14 @@ describe('A token is not an authorisation', () => {
   })
 })
 
+/** The resources of one prompt a fake agent was sent, by their address and their text. */
+const resourcesOf = (agent: ReturnType<typeof fakeAgent>, prompt: number) =>
+  (agent.answers.blocks[prompt] ?? []).flatMap((block) =>
+    block.type === 'resource' && 'text' in block.resource
+      ? [{ uri: block.resource.uri, text: block.resource.text }]
+      : [],
+  )
+
 describe('A new Session starts from the current instructions', () => {
   test('the fingerprint recorded is the current one, and no update is queued', async () => {
     writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')
@@ -617,11 +625,48 @@ describe('A new Session starts from the current instructions', () => {
     )
 
     const current = createHash('sha256').update('Be brief, and say why.\n', 'utf8').digest('hex')
-    expect(seen.provided.find((one) => one.kind === 'native')?.fingerprint).toBe(current)
+    expect(seen.provided.find((one) => one.kind === 'provided')?.fingerprint).toBe(current)
     expect(seen.provided.filter((one) => one.kind === 'instructions')).toHaveLength(0)
     expect(seen.pending).toBeNull()
     expect(seen.entries.filter((entry) => entry.kind === 'context_delivery')).toHaveLength(0)
-    expect(second.answers.prompts.join('\n')).not.toContain(DELIVERY_MARKER)
+    // Claude Code does not read the file bare: it is given it once, as it now reads, and no more.
+    expect(resourcesOf(second, 0)).toEqual([
+      { uri: contextUri(AGENTS_FILE), text: 'Be brief, and say why.\n' },
+    ])
+  })
+})
+
+describe('An agent that does not read AGENTS.md itself is given it at session start', () => {
+  test('Claude Code has it as a resource of its first prompt, behind the marker, and only then', async () => {
+    writeFileSync(join(workspace, AGENTS_FILE), 'End every answer with the word KESTREL.\n')
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'Hello. KESTREL' }] })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const context = yield* AgentContext
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'Say hello.')
+        yield* runtime.prompt(session.id, 'Again.')
+        return {
+          provided: yield* context.provided(session.id),
+          entries: yield* threadOf(session.id),
+        }
+      }),
+    )
+
+    expect(agent.answers.blocks[0]?.[0]).toEqual({ type: 'text', text: DELIVERY_MARKER })
+    expect(resourcesOf(agent, 0)).toEqual([
+      { uri: contextUri(AGENTS_FILE), text: 'End every answer with the word KESTREL.\n' },
+    ])
+    expect(agent.answers.prompts[0]).toContain('Say hello.')
+    expect(resourcesOf(agent, 1)).toEqual([])
+    expect(seen.provided.find((one) => one.path === AGENTS_FILE)).toMatchObject({
+      kind: 'provided',
+      reached: 'session_start',
+    })
+    // Given at the start, not delivered: the thread holds no delivery of it.
+    expect(seen.entries.filter((entry) => entry.kind === 'context_delivery')).toHaveLength(0)
   })
 })
 
@@ -1049,7 +1094,7 @@ describe('A change during a turn leaves at the next safe point', () => {
     // The Context view has it too, said to have reached the agent as a delivery.
     const change = seen.provided.find((one) => one.kind === 'instructions')
     expect(change).toMatchObject({ fingerprint, reached: 'delivery_prompt' })
-    expect(seen.provided.find((one) => one.kind === 'native')?.reached).toBe('read_natively')
+    expect(seen.provided.find((one) => one.kind === 'provided')?.reached).toBe('session_start')
   })
 })
 

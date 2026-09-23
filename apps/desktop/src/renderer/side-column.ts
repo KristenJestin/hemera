@@ -101,6 +101,7 @@ const REACHED: Record<ContextView['provided'][number]['reached'], string> = {
   system_prompt: 'through its system prompt',
   embedded_resource: 'as a resource of the first prompt',
   read_natively: 'read by the agent itself',
+  session_start: 'given at the start of the Session',
   delivery_prompt: 'delivered between two turns',
 }
 
@@ -108,6 +109,7 @@ const REACHED: Record<ContextView['provided'][number]['reached'], string> = {
 const LISTED_AS: Record<ContextView['provided'][number]['kind'], ContextEntry['kind']> = {
   base: 'base',
   native: 'file',
+  provided: 'file',
   instructions: 'delivery',
 }
 

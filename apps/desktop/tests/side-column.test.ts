@@ -182,6 +182,27 @@ describe('The view lists the sources with their provenance', () => {
       { name: 'OpenCode', sentence: 'its own configuration still loads.' },
     ])
   })
+
+  test('the file Hemera gave at the start is listed as a file, said to be given then', () => {
+    const view: ContextView = {
+      provided: [
+        {
+          kind: 'provided',
+          path: 'AGENTS.md',
+          fingerprint: 'd'.repeat(64),
+          deliveredAt: '2026-09-23T08:00:00.000Z',
+          reached: 'session_start',
+        },
+      ],
+      tools: [],
+      commands: [],
+      private: [],
+    }
+
+    const lists = contextListsOf(view)
+    expect(lists.provided.map((one) => [one.kind, one.label])).toEqual([['file', 'AGENTS.md']])
+    expect(lists.provided[0]?.detail).toBe(`given at the start of the Session · ${'d'.repeat(12)}`)
+  })
 })
 
 describe('A one-off command shows and is not promoted', () => {
@@ -230,7 +251,7 @@ describe('A one-off command shows and is not promoted', () => {
       // oxlint-disable-next-line no-await-in-loop -- a poll: each look waits for the one before it
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    expect(contextOf(session.id)?.provided.map((one) => one.kind)).toEqual(['base', 'native'])
+    expect(contextOf(session.id)?.provided.map((one) => one.kind)).toEqual(['base', 'provided'])
 
     const line = `"${process.execPath}" -e "console.log('once')"`
     expect(await runCommand(session.id, { line })).toBeNull()
