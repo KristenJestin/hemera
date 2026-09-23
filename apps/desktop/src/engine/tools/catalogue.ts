@@ -504,13 +504,38 @@ export const toolCatalogueLayer: Layer.Layer<
           }).pipe(Effect.catch(() => Effect.void))
 
         yield* request('pending')
-        const answer = yield* permissions.askOutside({
-          id,
-          sessionId: asked.sessionId,
-          tool: asked.tool,
-          named: where,
-          root,
-        })
+        const answer = yield* permissions
+          .askOutside({
+            id,
+            sessionId: asked.sessionId,
+            tool: asked.tool,
+            named: where,
+            root,
+          })
+          .pipe(
+            // The agent stopped waiting for the call: the question is withdrawn, and the block it
+            // drew closes with a word saying why rather than staying open on nothing.
+            Effect.onInterrupt(() =>
+              Effect.gen(function* () {
+                yield* request('cancelled')
+                yield* inThread(asked.sessionId, {
+                  role: 'hemera',
+                  kind: 'permission_decision',
+                  body: 'Withdrawn: the agent stopped waiting for this call',
+                  payload: JSON.stringify({
+                    toolCallId: id,
+                    optionId: null,
+                    tool: asked.tool,
+                    named,
+                    resolved: where,
+                    answer: 'withdrawn',
+                  }),
+                  correlationId: `decision:${id}`,
+                  state: 'cancelled',
+                }).pipe(Effect.catch(() => Effect.void))
+              }),
+            ),
+          )
         // A question nobody will answer — the turn was stopped, the Session ended — is closed as
         // the block of D5-09 closes one: cancelled, with no option chosen (D6-05).
         const closed: Record<OutsideAnswer, { state: string; said: string }> = {
@@ -575,7 +600,7 @@ export const toolCatalogueLayer: Layer.Layer<
 
     /** One filesystem call, as an answer rather than as a thrown error. */
     const attempt = <A>(
-      run: () => Promise<A>,
+      run: (signal: AbortSignal) => Promise<A>,
     ): Effect.Effect<
       { readonly ok: true; readonly value: A } | { readonly ok: false; readonly reason: string }
     > =>
@@ -728,12 +753,13 @@ export const toolCatalogueLayer: Layer.Layer<
                 ? { allowed: true as const, path: root }
                 : yield* allowed(asked, root, call.arguments.path)
             if (!within.allowed) return failed(within.reason, within.reason)
-            const found = yield* attempt(() =>
+            const found = yield* attempt((signal) =>
               searchIn({
                 root,
                 query: call.arguments.query,
                 path: relative(root, within.path) === '' ? null : relative(root, within.path),
                 cursor: call.arguments.cursor ?? null,
+                signal,
               }),
             )
             if (!found.ok) return failed(`the search did not run`, found.reason)
@@ -849,11 +875,15 @@ export const toolCatalogueLayer: Layer.Layer<
               started.state === 'running'
             const run = waits
               ? ((yield* answered(
-                  commands.awaited(
-                    asked.sessionId,
-                    started.id,
-                    call.arguments.timeout ?? RUN_WAIT_MS,
-                  ),
+                  commands
+                    .awaited(asked.sessionId, started.id, call.arguments.timeout ?? RUN_WAIT_MS)
+                    .pipe(
+                      // Started for this call and waited for by it: an agent that stopped waiting
+                      // leaves nobody to read it, and it is stopped rather than left behind.
+                      Effect.onInterrupt(() =>
+                        commands.stop(asked.sessionId, started.id).pipe(Effect.ignore),
+                      ),
+                    ),
                 )) ?? started)
               : started
             const tail = run.output.split('\n').slice(-40).join('\n')
@@ -1033,7 +1063,21 @@ export const toolCatalogueLayer: Layer.Layer<
             answer,
             answer.ok ? 'completed' : 'failed',
           )
-        })
+        }).pipe(
+          // The agent gave up on the call — its request was aborted — and what the call was
+          // doing stopped with it. It is still a call: it is written down, as one that failed.
+          Effect.onInterrupt(() =>
+            note(
+              asked,
+              'failed',
+              failed(
+                'the agent stopped waiting for this call',
+                'the request was cancelled before the call ended',
+              ),
+              made,
+            ),
+          ),
+        )
         if (asked.key === null) return yield* run
 
         const key = asked.key

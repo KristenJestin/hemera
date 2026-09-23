@@ -111,6 +111,19 @@ describe('A search is bounded and says so, however large what it walks', () => {
     expect(result.hits).toEqual([{ path: 'many/z.txt', line: 1, text: 'needle' }])
   })
 
+  test('stops when its caller gave up on it', async () => {
+    writeFileSync(join(root, 'a.txt'), 'needle\n')
+    const abort = new AbortController()
+    abort.abort()
+
+    const ended = await searchIn({ root, query: 'needle', signal: abort.signal }).then(
+      () => 'answered',
+      () => 'stopped',
+    )
+
+    expect(ended).toBe('stopped')
+  })
+
   test('names a file it passed over, and why', async () => {
     writeFileSync(join(root, 'image.bin'), Buffer.from([0x6e, 0x65, 0x00, 0x01, 0x02]))
     writeFileSync(join(root, 'text.txt'), 'needle\n')

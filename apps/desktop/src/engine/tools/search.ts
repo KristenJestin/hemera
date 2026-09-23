@@ -39,6 +39,8 @@ export interface SearchRequest {
   readonly path?: string | null
   /** Where the previous call stopped, as it handed it back. */
   readonly cursor?: string | null
+  /** Aborted when the caller gave up: the search stops where it is and answers nothing more. */
+  readonly signal?: AbortSignal
 }
 
 /** Folders that are never walked: what Git keeps, and what no search should ever read. */
@@ -92,6 +94,7 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
   let spent = false
 
   for await (const file of filesUnder(start, request.root, ignored, resumePath)) {
+    request.signal?.throwIfAborted()
     const rel = relative(request.root, file).split(sep).join('/')
     if (!resumed) {
       if (resumePath !== null && rel !== resumePath && !after(rel, resumePath)) continue
@@ -102,7 +105,14 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
       break
     }
     // The cursor names the last line the previous call examined, so this one starts after it.
-    const ended = await scanFile(file, rel, rel === resumePath ? resumeLine : 0, query, progress)
+    const ended = await scanFile(
+      file,
+      rel,
+      rel === resumePath ? resumeLine : 0,
+      query,
+      progress,
+      request.signal,
+    )
     if (progress.stoppedBy !== null) break
     if (ended && progress.scanned >= SEARCH_SCAN_BYTES) spent = true
   }
@@ -143,6 +153,7 @@ async function scanFile(
   from: number,
   query: string,
   progress: Progress,
+  signal: AbortSignal | undefined,
 ): Promise<boolean> {
   let carry = ''
   let index = 0
@@ -161,6 +172,7 @@ async function scanFile(
   const stream = createReadStream(file, { encoding: 'utf8', highWaterMark: CHUNK_BYTES })
   try {
     for await (const chunk of stream) {
+      signal?.throwIfAborted()
       const text = String(chunk)
       // A NUL byte in the first chunk is what a binary file looks like read as text, and a
       // search that returned matches inside a bundle would be a search nobody trusts.
@@ -184,6 +196,7 @@ async function scanFile(
       }
     }
   } catch {
+    signal?.throwIfAborted()
     // A file that cannot be read — gone since it was listed, or not ours to open — is said to
     // have been passed over rather than left out without a word.
     skip(progress, rel, 'unreadable')

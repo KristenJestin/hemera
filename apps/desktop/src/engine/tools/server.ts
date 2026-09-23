@@ -141,6 +141,8 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
               context: ServerContext,
             ) => {
               const argumentsRead = flatArguments(Object.entries(argumentsSent ?? {}))
+              // The request's own signal: an agent that gives up on a call — its timeout, its
+              // cancel, a connection closed — stops what the call was doing (D6-05).
               const outcome = await Effect.runPromise(
                 catalogue.call({
                   sessionId: grant.sessionId,
@@ -152,6 +154,7 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
                   // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
                   callId: callIdIn(context.mcpReq._meta),
                 }),
+                { signal: context.mcpReq.signal },
               )
               return {
                 content: [{ type: 'text' as const, text: outcome.text }],

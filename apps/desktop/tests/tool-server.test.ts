@@ -327,6 +327,53 @@ describe("A call carries the agent's own identifier of it", () => {
   })
 })
 
+describe('An agent that stops waiting for a call', () => {
+  it('withdraws the question it was waiting on, and the call is written down as failed', async () => {
+    const human = humanHolding()
+    const seen = await engine(human.service)(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const sessions = yield* Sessions
+        const held = yield* aSessionWithAToken
+        const abort = new AbortController()
+        const request = fetch(`${server.origin}/mcp`, {
+          method: 'POST',
+          signal: abort.signal,
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            authorization: `Bearer ${held.granted.token}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name: 'fs_read', arguments: { path: join(folder, 'elsewhere.md') } },
+          }),
+        }).catch(() => null)
+        yield* Effect.promise(() => human.asked)
+        // The agent's own timeout: it closes the request while the human has not answered.
+        abort.abort()
+        yield* Effect.promise(() => request)
+        const settled = (entries: readonly { kind: string; state: string | null }[]) =>
+          entries.some((entry) => entry.kind === 'hemera_tool_call')
+        let entries = (yield* sessions.read(held.session.id)).entries
+        for (let tries = 0; tries < 200 && !settled(entries); tries += 1) {
+          yield* Effect.sleep('25 millis')
+          entries = (yield* sessions.read(held.session.id)).entries
+        }
+        return entries
+      }),
+    )
+
+    const question = seen.find((entry) => entry.kind === 'permission_request')
+    expect(question?.state).toBe('cancelled')
+    const decision = seen.find((entry) => entry.kind === 'permission_decision')
+    expect(decision?.body).toContain('Withdrawn')
+    expect(seen.find((entry) => entry.kind === 'hemera_tool_call')?.state).toBe('failed')
+  })
+})
+
 describe('two calls of one Session at the same time', () => {
   it('are each answered on their own request, one of them waiting on the human', async () => {
     fileInRoot('inside.md', 'inside the root\n')
