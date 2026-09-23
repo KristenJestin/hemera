@@ -45,6 +45,8 @@ export interface SpecReading {
   buffers: readonly EditBuffer[]
   /** The Spec's lines of the Journal, newest first. */
   journal: readonly JournalEntry[]
+  /** What the last "Mark ready" was refused with, which the readiness bar says. */
+  readyRefused?: string | null | undefined
 }
 
 const PHASES: readonly PhaseId[] = ['shape', 'plan', 'decompose', 'prototype']
@@ -405,7 +407,13 @@ export function revisionsOf(
 }
 
 /** The whole view of the panel. */
-export function specViewOf({ snapshot, revisions, buffers, journal }: SpecReading): SpecView {
+export function specViewOf({
+  snapshot,
+  revisions,
+  buffers,
+  journal,
+  readyRefused,
+}: SpecReading): SpecView {
   return {
     key: snapshot.spec.key,
     title: snapshot.revision.title,
@@ -424,7 +432,7 @@ export function specViewOf({ snapshot, revisions, buffers, journal }: SpecReadin
     questions: snapshot.questions.map(questionOf),
     questionsMark:
       snapshot.questions.length === 0 ? 'empty' : (snapshot.questions.at(-1)?.raisedBy ?? 'agent'),
-    readiness: readinessOf(snapshot),
+    readiness: { ...readinessOf(snapshot), refused: readyRefused ?? undefined },
     frozenOn: isEditable(snapshot)
       ? undefined
       : dayOf(frozenAt(snapshot.revision, snapshot, revisions, journal)),

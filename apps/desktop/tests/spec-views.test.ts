@@ -348,6 +348,18 @@ describe('The readiness bar says what is left', () => {
     expect(readiness.checks.every((one) => one.passed)).toBe(true)
     expect(readiness.todo).toEqual([])
   })
+
+  test('an obsolete request refused is said by the bar, and nothing is said otherwise', () => {
+    const reading = {
+      snapshot: snapshot(),
+      revisions: [snapshot().revision],
+      buffers: [],
+      journal: [],
+    }
+    const said = 'ATL-7 changed since its gate was shown: read the gate again.'
+    expect(specViewOf({ ...reading, readyRefused: said }).readiness.refused).toBe(said)
+    expect(specViewOf({ ...reading, readyRefused: null }).readiness.refused).toBe(undefined)
+  })
 })
 
 describe('An old revision is readable and not editable', () => {

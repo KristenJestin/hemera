@@ -267,6 +267,7 @@ export function SessionPage({
           revisions: stored.revisions,
           buffers: stored.buffers,
           journal: stored.journal,
+          readyRefused: stored.readyRefused,
         })
   const versionOf = (name: SectionName): number =>
     spec?.sections.find((one) => one.name === name)?.version ?? 0

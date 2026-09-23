@@ -39,6 +39,11 @@ export interface SpecState {
   journal: JournalEntry[]
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
+  /**
+   * What the last "Mark ready" was refused with, or null: said by the readiness bar it was
+   * pressed on rather than under the thread, and forgotten with the next act that goes through.
+   */
+  readyRefused: string | null
 }
 
 const EMPTY: SpecState = {
@@ -49,6 +54,7 @@ const EMPTY: SpecState = {
   buffers: [],
   journal: [],
   refusal: null,
+  readyRefused: null,
 }
 
 /** What a story edit is refused with when its story was taken away meanwhile. */
@@ -132,7 +138,7 @@ async function acting(act: (specId: string) => Promise<void>): Promise<boolean> 
     await refresh(specId)
     return false
   }
-  replace({ ...state, refusal: null })
+  replace({ ...state, refusal: null, readyRefused: null })
   await refresh(specId)
   return true
 }
@@ -259,20 +265,28 @@ export async function answerQuestion(
 /**
  * "Mark ready", made against the revision and the content version of the snapshot the
  * readiness was computed from, which is the one on screen (D7-10). A Spec that changed since
- * refuses it, and is read again. The Session is the one whose panel the click came from, which
- * the Journal line names (D7-13).
+ * refuses it, and is read again; the refusal is kept for the readiness bar to say. The Session
+ * is the one whose panel the click came from, which the Journal line names (D7-13).
  */
 export async function markReady(sessionId: string): Promise<boolean> {
   const { snapshot } = state
-  if (snapshot === null) return false
-  return await acting(async (specId) => {
+  const specId = shown
+  if (snapshot === null || specId === null) return false
+  try {
     await window.hemera.invoke('specs.markReady', {
       specId,
       expectedRevisionId: snapshot.spec.currentRevisionId,
       expectedContentVersion: snapshot.spec.contentVersion,
       sessionId,
     })
-  })
+  } catch (cause) {
+    replace({ ...state, readyRefused: message(cause) })
+    await refresh(specId)
+    return false
+  }
+  replace({ ...state, refusal: null, readyRefused: null })
+  await refresh(specId)
+  return true
 }
 
 /**

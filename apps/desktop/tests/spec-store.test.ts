@@ -293,7 +293,7 @@ describe('An obsolete request is refused', () => {
     })
   })
 
-  test('a refused click keeps the refusal and reads the Spec again', async () => {
+  test('a refused click keeps the refusal for the readiness bar and reads the Spec again', async () => {
     reads(4)
     await openSpec('spec-7')
     answers.set(
@@ -307,9 +307,23 @@ describe('An obsolete request is refused', () => {
 
     expect(names()).toContain('specs.read')
     expect(specSnapshot().snapshot?.spec.contentVersion).toBe(5)
-    expect(specSnapshot().refusal).toBe(
+    expect(specSnapshot().readyRefused).toBe(
       'ATL-7 changed since its gate was shown: read the gate again.',
     )
+    // Said by the bar it was pressed on, and not a second time under the thread.
+    expect(specSnapshot().refusal).toBe(null)
+  })
+
+  test('the next act that goes through forgets the refused click', async () => {
+    reads(4)
+    await openSpec('spec-7')
+    answers.set('specs.markReady', new Error('ATL-7 changed since its gate was shown.'))
+    await markReady('writer')
+    answers.set('specs.transferWrite', snapshot(4))
+
+    expect(await takeOver('reader')).toBe(true)
+
+    expect(specSnapshot().readyRefused).toBe(null)
   })
 })
 
