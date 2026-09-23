@@ -99,7 +99,7 @@ export interface AgentOnTheMachine {
    *
    * Asked of the adapter and not guessed from the agent. Drawn as one folded line: an agent that
    * runs with Hemera's tools only opens on what it still keeps out of Hemera's sight, one that
-   * does not opens on why, and on what would change it where something would.
+   * does not opens on why.
    */
   bare?: BareMode | undefined
 }
@@ -115,12 +115,8 @@ export type BareMode =
   | {
       /** This agent cannot run here: a Session is not opened on it. */
       qualified: false
-      /** Why it cannot. */
+      /** Why it cannot, in its adapter's words. */
       reason: string
-      /** What would qualify it, said only where something would. */
-      remedy?: string | undefined
-      /** When the adapter last answered, as it records the date itself. */
-      checkedAt?: string | undefined
     }
 
 export interface AgentsSectionProps {
@@ -251,21 +247,10 @@ function BareFold({ agent, bare }: { agent: string; bare: BareMode }): ReactNode
       }
     >
       <p className={NOTE}>
-        {bare.qualified ? `Hemera does not control: ${bare.private}` : whyNot(bare)}
+        {bare.qualified ? `Hemera does not control: ${bare.private}` : bare.reason}
       </p>
     </Disclosure>
   )
-}
-
-/**
- * Why an agent cannot run here, whole.
- *
- * The reason, then what would change it, then the date it was last true — in that order, because
- * that is the order a reader asks in.
- */
-function whyNot(bare: Extract<BareMode, { qualified: false }>): string {
-  const said = [bare.reason, bare.remedy].filter((part) => part !== undefined).join(' ')
-  return bare.checkedAt === undefined ? said : `${said} Checked ${bare.checkedAt}.`
 }
 
 /** The three answers, which are read off what the machine said rather than stored beside it. */
