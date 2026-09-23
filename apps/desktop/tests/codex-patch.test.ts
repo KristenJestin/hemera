@@ -55,7 +55,10 @@ const results = {
   initialize: () => ({ userAgent: 'fake', codexHome: 'unused', platformFamily: 'unix', platformOs: 'linux' }),
   'account/read': () => ({ account: { type: 'chatgpt', email: 'nobody@example.invalid', planType: 'plus' }, requiresOpenaiAuth: true }),
   'config/read': () => ({ config: { mcp_servers: { user_server: { command: 'user-server' } } }, layers: [] }),
-  'skills/list': () => ({ data: [] }),
+  'skills/list': (params) => ({ data: [{ cwd: (params.cwds ?? [''])[0], errors: [], skills: [
+    { name: 'deploy', description: '', path: '/home/ana/.agents/skills/deploy/SKILL.md', scope: 'user', enabled: true, pluginId: null },
+    { name: 'review', description: '', path: '/work/.agents/skills/review/SKILL.md', scope: 'repo', enabled: true, pluginId: null },
+  ] }] }),
   'model/list': () => ({ data: [{ id: 'fake', model: 'fake', displayName: 'Fake', description: '', hidden: false,
     supportedReasoningEfforts: [{ reasoningEffort: 'low', description: '' }], defaultReasoningEffort: 'low',
     inputModalities: ['text'], isDefault: true }], nextCursor: null }),
@@ -105,6 +108,10 @@ const THREAD_START = z.object({
   config: z.object({
     features: z.record(z.string(), z.boolean()),
     mcp_servers: z.record(z.string(), z.object({ enabled: z.boolean() })).optional(),
+    skills: z.object({
+      include_instructions: z.boolean(),
+      config: z.array(z.object({ path: z.string(), enabled: z.boolean() })),
+    }),
   }),
   environments: z.array(z.unknown()),
   dynamicTools: z.array(z.object({ type: z.string(), name: z.string(), inputSchema: z.unknown() })),
@@ -282,6 +289,13 @@ describe("A bare Codex offers only Hemera's tools", () => {
       // them: the user's own server is turned off by name, and Hemera's is not there at all.
       expect(started.dynamicTools.map((tool) => tool.name)).toEqual(['hemera_fs_read'])
       expect(started.config.mcp_servers).toEqual({ user_server: { enabled: false } })
+      // No index of the skills, and every skill Codex found is disabled by its path, so a `$name`
+      // mention injects nothing either.
+      expect(started.config.skills.include_instructions).toBe(false)
+      expect(started.config.skills.config).toEqual([
+        { path: '/home/ana/.agents/skills/deploy/SKILL.md', enabled: false },
+        { path: '/work/.agents/skills/review/SKILL.md', enabled: false },
+      ])
       expect(started.config.features.shell_tool).toBe(false)
       // Every turn says it again, which is what a resumed thread needs.
       const turns = lines.filter((one) => one.method === 'turn/start')

@@ -1,8 +1,8 @@
 diff --git a/dist/index.js b/dist/index.js
-index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18f4ccf866 100644
+index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..dce5fef0a11ee0cb365d5584bd1f56048345c436 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -28159,6 +28159,99 @@ function isUnknownRecord(value) {
+@@ -28159,6 +28159,109 @@ function isUnknownRecord(value) {
    return typeof value === "object" && value !== null && !Array.isArray(value);
  }
  
@@ -78,7 +78,17 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
 +async function hemeraBareConfig(client, config, cwd) {
 +  const own = await client.getConfigMcpServerNames(cwd);
 +  const off = Object.fromEntries([...own].map((name) => [name, { enabled: false }]));
-+  return { ...config, mcp_servers: { ...off, ...config.mcp_servers ?? {} } };
++  // Every skill Codex finds for this cwd is disabled by its path: with the index already off
++  // (skills.include_instructions), a $name mention then injects nothing either. Codex lists them;
++  // nothing here reads a skill.
++  const listed = await client.listSkills({ cwds: [cwd] });
++  const skills = (listed?.data ?? []).flatMap((entry) => entry.skills ?? []).map((skill) => ({ path: skill.path, enabled: false }));
++  const ownSkills = config.skills ?? {};
++  return {
++    ...config,
++    mcp_servers: { ...off, ...config.mcp_servers ?? {} },
++    skills: { ...ownSkills, config: [...ownSkills.config ?? [], ...skills] }
++  };
 +}
 +async function hemeraToolCall(params) {
 +  const server = hemeraBareThreads.get(params.threadId);
@@ -102,7 +112,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
  // src/CodexAcpClient.ts
  var CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
  var OPENAI_PROVIDER_ID = "openai";
-@@ -28530,9 +28623,15 @@ var CodexAcpClient = class {
+@@ -28530,9 +28633,15 @@ var CodexAcpClient = class {
    async resumeSession(request, onSubscribed) {
      const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
      await this.refreshSkills(request.cwd, additionalDirectories);
@@ -119,7 +129,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
        cwd: request.cwd,
        modelProvider: await this.getResumeModelProvider(),
        threadId: request.sessionId
-@@ -28565,9 +28664,15 @@ var CodexAcpClient = class {
+@@ -28565,9 +28674,15 @@ var CodexAcpClient = class {
    async loadSession(request, onSubscribed) {
      const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
      await this.refreshSkills(request.cwd, additionalDirectories);
@@ -136,7 +146,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
        cwd: request.cwd,
        modelProvider: await this.getResumeModelProvider(),
        threadId: request.sessionId
-@@ -28596,11 +28701,19 @@ var CodexAcpClient = class {
+@@ -28596,11 +28711,19 @@ var CodexAcpClient = class {
    async newSession(request) {
      const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
      await this.refreshSkills(request.cwd, additionalDirectories);
@@ -157,7 +167,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
      const codexModels = await this.fetchAvailableModels();
      if (codexModels.length === 0) {
        throw new Error("Codex did not return any models");
-@@ -28617,6 +28730,7 @@ var CodexAcpClient = class {
+@@ -28617,6 +28740,7 @@ var CodexAcpClient = class {
      };
    }
    async closeSession(sessionId) {
@@ -165,7 +175,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
      try {
        await this.codexClient.threadUnsubscribe({ threadId: sessionId });
      } finally {
-@@ -29301,6 +29415,8 @@ var CodexAppServerClient = class {
+@@ -29301,6 +29425,8 @@ var CodexAppServerClient = class {
        }
        return await handler.handleUserInput(params);
      });
@@ -174,7 +184,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
    }
    onApprovalRequest(threadId, handler) {
      this.approvalHandlers.set(threadId, handler);
-@@ -29317,6 +29433,8 @@ var CodexAppServerClient = class {
+@@ -29317,6 +29443,8 @@ var CodexAppServerClient = class {
      return await this.sendRequest({ method: "initialize", params });
    }
    async turnStart(params) {
@@ -183,7 +193,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
      return await this.sendRequest({ method: "turn/start", params });
    }
    async runTurn(params, onTurnStarted) {
-@@ -31868,6 +31986,9 @@ var TitleGenerator = class {
+@@ -31868,6 +31996,9 @@ var TitleGenerator = class {
    }
    async generateAndPersist(userPromptText) {
      if (!userPromptText.trim()) return;
@@ -193,7 +203,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
      const { thread: epThread } = await this.client.threadStart({
        cwd: this.cwd,
        ephemeral: true
-@@ -32721,6 +32842,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+@@ -32721,6 +32852,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
      if (this.providerUpdate !== null) {
        await this.providerUpdate;
      }
@@ -201,7 +211,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
      logger.log("Loading session...", { sessionId: params.sessionId });
      const {
        sessionId,
-@@ -32745,6 +32867,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+@@ -32745,6 +32877,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
      if (this.providerUpdate !== null) {
        await this.providerUpdate;
      }
@@ -209,7 +219,7 @@ index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..3d5cca7fcb303dd99b01f74cd13bec18
      logger.log("Resuming session...", { sessionId: params.sessionId });
      const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
      logger.log("Session resumed", {
-@@ -32855,6 +32978,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+@@ -32855,6 +32988,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
      if (this.providerUpdate !== null) {
        await this.providerUpdate;
      }
