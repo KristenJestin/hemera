@@ -47,6 +47,9 @@ const BRANCH = 'atlas/HEM-7-login-form'
 /** A line of `node` itself, reached without the `PATH`: a line is run, not interpreted. */
 const node = (code: string) => `"${process.execPath}" -e "${code}"`
 
+/** A path written in a quoted string of that code: a Windows path's backslashes doubled. */
+const quoted = (path: string) => path.replaceAll('\\', '\\\\')
+
 const COPY_ENV: RecipeEdit = { kind: 'copy', path: '.env', scope: 'repositories', commandId: null }
 const LINK_CLAUDE: RecipeEdit = { kind: 'link', path: 'CLAUDE.md', scope: 'root', commandId: null }
 
@@ -89,7 +92,7 @@ const createdWith = (recipe: readonly (RecipeEdit | { run: string })[]) =>
 /** A run that holds until the file `release` appears: a step caught in the middle of itself. */
 const heldUntil = (release: string) =>
   node(
-    `const f=require('fs');const t=setInterval(()=>{if(f.existsSync('${release}'))clearInterval(t)},20)`,
+    `const f=require('fs');const t=setInterval(()=>{if(f.existsSync('${quoted(release)}'))clearInterval(t)},20)`,
   )
 
 /** The steps of a Workspace as the engine reads them. */
@@ -190,7 +193,7 @@ describe('A failed step keeps what succeeded', () => {
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([
-          { run: node(`require('fs').appendFileSync('${count}','x')`) },
+          { run: node(`require('fs').appendFileSync('${quoted(count)}','x')`) },
         ])
         // Between the creation and the preparation, somebody made the branch in front.
         git(join(main, 'sources', 'front'), 'branch', BRANCH)
@@ -230,7 +233,7 @@ describe('Resuming re-checks before retrying', () => {
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([
-          { run: node(`require('fs').appendFileSync('${count}','x')`) },
+          { run: node(`require('fs').appendFileSync('${quoted(count)}','x')`) },
         ])
         git(front, 'branch', BRANCH)
         yield* preparation.prepare(workspace.id)
@@ -398,7 +401,7 @@ describe('One preparation of a Workspace runs at a time', () => {
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([
-          { run: node(`require('fs').appendFileSync('${count}','x')`) },
+          { run: node(`require('fs').appendFileSync('${quoted(count)}','x')`) },
         ])
         git(front, 'branch', BRANCH)
         yield* preparation.prepare(workspace.id)
