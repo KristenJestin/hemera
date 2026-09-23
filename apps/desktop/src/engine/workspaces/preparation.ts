@@ -439,6 +439,9 @@ export const preparationLayer = Layer.effect(
     /**
      * Writes the steps that changed and the state of the Workspace they make, with their events,
      * in one transaction; and `workspace.ready` the moment it becomes ready (D8-16).
+     *
+     * The state is read again inside the transaction: a Workspace cleaned up meanwhile stays
+     * `cleaned`, nothing of the preparation is written over it, and the preparation stops.
      */
     const persist = (
       place: Place,
@@ -450,6 +453,15 @@ export const preparationLayer = Layer.effect(
       withDatabase(
         mutate('writing the preparation', (transaction) =>
           Effect.gen(function* () {
+            const current = yield* transaction
+              .select({ state: workspaces.state })
+              .from(workspaces)
+              .where(eq(workspaces.id, place.workspace.id))
+              .pipe(Effect.mapError(failed('reading the Workspace')))
+            if (current[0]?.state === 'cleaned') {
+              const cleaned: WorkspaceState = 'cleaned'
+              return { result: cleaned, events: [] }
+            }
             for (const [index, step] of after.entries()) {
               if (step === before[index]) continue
               yield* transaction
@@ -497,6 +509,7 @@ export const preparationLayer = Layer.effect(
             ),
           )
         for (;;) {
+          if (stored === 'cleaned') break
           if (steps.some((step) => step.state === 'failed' || step.state === 'running')) break
           const next = nextPending(steps)
           if (next === null) break
@@ -513,7 +526,7 @@ export const preparationLayer = Layer.effect(
         }
         // A Workspace whose steps were all skipped from its creation is ready without running
         // any: its state is what its steps say.
-        if (workspaceStateOf(steps) !== stored) yield* advance(steps, [])
+        if (stored !== 'cleaned' && workspaceStateOf(steps) !== stored) yield* advance(steps, [])
         return yield* workspacesService.one(id)
       })
 

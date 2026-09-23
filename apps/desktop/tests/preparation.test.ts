@@ -12,13 +12,14 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
 
 import { SqliteClient } from '#engine/storage/database.ts'
 import { LinkRefusedError, Links, Preparation } from '#engine/workspaces/preparation.ts'
 import { Recipe, type RecipeEdit } from '#engine/workspaces/recipe.ts'
-import { Workspaces } from '#engine/workspaces/workspaces.ts'
+import { CleanupRefusedError, Workspaces } from '#engine/workspaces/workspaces.ts'
 
+import { until } from './application.ts'
 import { git } from './repositories.ts'
 import { atlas, atlasMain, saved, workspaceEngine } from './workspace-engine.ts'
 
@@ -79,6 +80,12 @@ const createdWith = (recipe: readonly (RecipeEdit | { run: string })[]) =>
         })),
     })
   })
+
+/** A run that holds until the file `release` appears: a step caught in the middle of itself. */
+const heldUntil = (release: string) =>
+  node(
+    `const f=require('fs');const t=setInterval(()=>{if(f.existsSync('${release}'))clearInterval(t)},20)`,
+  )
 
 /** The steps of a Workspace as the engine reads them. */
 const stepsOf = (workspaceId: string) =>
@@ -325,5 +332,55 @@ describe('A run step fails on a non-zero exit', () => {
     expect(install?.state).toBe('failed')
     expect(install?.message).toBe('exit 1\nnope')
     expect(seen.prepared.state).toBe('failed')
+  })
+})
+
+describe('A cleanup and a preparation never overlap', () => {
+  it('refuses a cleanup asked during a run step, and the Workspace ends as the preparation does', async () => {
+    const release = join(folder, 'release')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspaces = yield* Workspaces
+        const workspace = yield* createdWith([{ run: heldUntil(release) }])
+        const preparing = yield* Effect.forkScoped(preparation.prepare(workspace.id))
+        const during = yield* until(stepsOf(workspace.id), (steps) => steps[2]?.state === 'running')
+        const refused = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        writeFileSync(release, '')
+        const prepared = yield* Fiber.join(preparing)
+        return { during, refused, prepared, after: yield* workspaces.one(workspace.id) }
+      }),
+    )
+
+    expect(seen.during[2]?.state).toBe('running')
+    expect(seen.refused).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.refused.message).toBe('the Workspace login-form is being prepared')
+    expect(seen.prepared.state).toBe('ready')
+    expect(seen.after.state).toBe('ready')
+    expect(existsSync(join(seen.after.path, 'sources', 'api', '.git'))).toBe(true)
+  })
+
+  it('writes nothing over a Workspace that was cleaned up while a step ran', async () => {
+    const release = join(folder, 'release')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspaces = yield* Workspaces
+        const workspace = yield* createdWith([{ run: heldUntil(release) }])
+        const preparing = yield* Effect.forkScoped(preparation.prepare(workspace.id))
+        yield* until(stepsOf(workspace.id), (steps) => steps[2]?.state === 'running')
+        // Whatever cleaned it — another engine, a hand on the database — it is cleaned now.
+        const sql = yield* SqliteClient
+        yield* sql`UPDATE workspaces SET state = 'cleaned' WHERE id = ${workspace.id}`
+        writeFileSync(release, '')
+        yield* Fiber.join(preparing)
+        const events = yield* sql<{ type: string }>`
+          SELECT type FROM domain_events WHERE type = 'workspace.ready'`
+        return { after: yield* workspaces.one(workspace.id), events }
+      }),
+    )
+
+    expect(seen.after.state).toBe('cleaned')
+    expect(seen.events).toEqual([])
   })
 })

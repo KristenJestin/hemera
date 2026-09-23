@@ -678,16 +678,20 @@ export const workspacesLayer = Layer.effect(
           // A Workspace made on a folder of the user's has no step: that folder is theirs, and a
           // cleanup that deleted it would delete their work (D8-02, D8-14).
           const steps = yield* database
-            .select({ id: workspaceSteps.id })
+            .select({ state: workspaceSteps.state })
             .from(workspaceSteps)
             .where(eq(workspaceSteps.workspaceId, id))
-            .limit(1)
             .pipe(Effect.mapError(failed('reading the steps')))
           if (steps.length === 0) {
             return yield* refuseCleanup(
               row,
               `${row.name} is a folder of yours: Hemera cleans up only the Workspaces it made`,
             )
+          }
+          // A preparation under way is writing into the folder a cleanup would delete: the two
+          // never overlap, and the preparation is let to end first (D8-05, D8-14).
+          if (row.state === 'preparing' || steps.some((step) => step.state === 'running')) {
+            return yield* refuseCleanup(row, `the Workspace ${row.name} is being prepared`)
           }
           const running = yield* database
             .select({ name: commandRuns.name })
