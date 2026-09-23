@@ -15,7 +15,7 @@ import { Effect } from 'effect'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
-import { aSession, application, heldInThread } from './application.ts'
+import { aSession, application, heldInThread, threadOf } from './application.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -30,17 +30,15 @@ afterEach(() => {
   rmSync(workingDirectory, { recursive: true, force: true })
 })
 
+/** The answer that proposes a Spec, with its marker line. */
+const PROPOSAL = {
+  does: 'says',
+  text: 'You want the Journal to leave the application.\n<!-- hemera:propose-spec title="Export the Journal" type="feature" -->\nShall I write it down?',
+  messageId: 'msg-1',
+} as const
+
 /** An agent that proposes a Spec in its answer; a fake is started once, so one per run. */
-const proposing = () =>
-  fakeAgent({
-    steps: [
-      {
-        does: 'says',
-        text: 'You want the Journal to leave the application.\n<!-- hemera:propose-spec title="Export the Journal" type="feature" -->\nShall I write it down?',
-        messageId: 'msg-1',
-      },
-    ],
-  })
+const proposing = () => fakeAgent({ steps: [PROPOSAL] })
 
 describe('The agent’s proposal in its answer becomes a proposal entry, stripped from the message', () => {
   test('a free Session gets the proposal after the message, and the message no marker', async () => {
@@ -80,5 +78,35 @@ describe('The agent’s proposal in its answer becomes a proposal entry, strippe
       }),
     )
     expect(thread.some((entry) => entry.kind === 'spec_proposal')).toBe(false)
+  })
+})
+
+describe('The marker stays out of a message replayed on resume', () => {
+  test('a history sent back by session/load leaves the message clean and one proposal', async () => {
+    const run = application(dataFolder)
+    let sessionId = ''
+    await run(proposing())(
+      Effect.gen(function* () {
+        const session = yield* aSession(workingDirectory)
+        sessionId = session.id
+        yield* (yield* AgentRuntime).prompt(session.id, 'the Journal should export')
+        yield* heldInThread(session.id, (entries) => entries.some((entry) => entry.kind === 'turn'))
+      }),
+    )
+
+    // An agent that cannot resume sends its history back, marker included.
+    const loading = fakeAgent({ advertisesResume: false, continues: true, history: [PROPOSAL] })
+    const thread = await run(loading)(
+      Effect.gen(function* () {
+        yield* (yield* AgentRuntime).resume(sessionId)
+        return yield* threadOf(sessionId)
+      }),
+    )
+    expect(loading.answers.loads).toBe(1)
+    const messages = thread.filter((entry) => entry.role === 'agent' && entry.kind === 'message')
+    expect(messages.map((entry) => entry.body)).toEqual([
+      'You want the Journal to leave the application.\nShall I write it down?',
+    ])
+    expect(thread.filter((entry) => entry.kind === 'spec_proposal')).toHaveLength(1)
   })
 })

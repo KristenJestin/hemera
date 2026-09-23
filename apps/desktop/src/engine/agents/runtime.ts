@@ -636,9 +636,9 @@ export const runtimeLayer = Layer.effect(
           // its row is one the Journal has already told its reader about, and a resume says
           // nothing about it that the first turn did not say. Nor does a row that settled once.
           const settles = settled && chunk.origin === 'live' && !held.settledKeys.has(key)
-          // The marker of a Spec proposal is Hemera's and never the reader's (D7-07).
-          const proposal =
-            chunk.kind === 'message' && chunk.origin === 'live' ? proposalIn(chunk.body) : null
+          // The marker of a Spec proposal is Hemera's and never the reader's (D7-07): taken out of
+          // a replayed message too, whose proposal the thread already holds.
+          const proposal = chunk.kind === 'message' ? proposalIn(chunk.body) : null
           const wrote = yield* Effect.result(
             writeNow(sessionId, {
               role: 'agent',
