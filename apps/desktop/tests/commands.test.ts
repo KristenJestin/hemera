@@ -389,14 +389,17 @@ describe('The machine runs its own variant', () => {
     mkdirSync(join(scratch.root, 'scripts'))
     writeFileSync(join(scratch.root, 'scripts', 'seed.sh'), '#!/bin/sh\necho seeded\n')
     chmodSync(join(scratch.root, 'scripts', 'seed.sh'), 0o755)
+    // And the Windows line a batch file of the Workspace, which runs through `cmd.exe`.
+    writeFileSync(join(scratch.root, 'scripts', 'seed.cmd'), '@echo seeded on windows\r\n')
 
     const linux = await ranOn('linux')
     const windows = await ranOn('win32')
 
     expect(linux.line).toBe('./scripts/seed.sh')
     expect(windows.line).toBe('scripts\\seed.cmd')
-    // The Linux one ran for real where it can: the line kept is the line that ran.
+    // Each ran for real where it can: the line kept is the line that ran.
     if (process.platform === 'linux') expect(linux.output).toContain('seeded')
+    if (process.platform === 'win32') expect(windows.output).toContain('seeded on windows')
   })
 })
 
