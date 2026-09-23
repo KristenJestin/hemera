@@ -127,9 +127,13 @@ describe('The agent and its tools work in the Workspace', () => {
 
     // The agent was opened in the Workspace's folder, which is what its Session keeps.
     expect(seen.one.native.cwd).toBe(loginForm)
-    // And its context names that Workspace, its path and its repositories.
+    // And its context names that Workspace, its path and its repositories, inside the JSON the
+    // agent is handed (where a Windows path's backslashes are escaped).
     expect(agent.answers.metas[0]).toContain(
-      `Workspace: login-form at ${loginForm} (repositories: ./sources/api)`,
+      JSON.stringify(`Workspace: login-form at ${loginForm} (repositories: ./sources/api)`).slice(
+        1,
+        -1,
+      ),
     )
     // A relative path reads the worktree's file, not main's.
     expect(agent.answers.used[0]?.isError).toBe(false)
