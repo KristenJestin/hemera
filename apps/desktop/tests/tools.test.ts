@@ -28,6 +28,7 @@ import {
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { NoNotices } from '#engine/agents/notices.ts'
 import { Commands, commandsLayer } from '#engine/commands/service.ts'
 import { Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -133,6 +134,8 @@ function engine(human: Human) {
     ),
     Layer.provide(processes),
     Layer.provide(heldWordsLayer),
+    // Nobody is watching: these suites read the thread and the runs, not what was pushed.
+    Layer.provide(NoNotices),
   )
   return <A, E>(program: Effect.Effect<A, E, Engine | Scope.Scope>): Promise<A> =>
     Effect.runPromise(

@@ -103,6 +103,8 @@ export const codex: AgentAdapter = {
     means:
       "a config.toml in a directory of Hemera's: about fourteen switches, from web_search to shell_tool, view_image, sleep_tool, multi_agent and code_mode",
     base: 'embedded_resource',
+    private:
+      "the project's own .codex/config.toml still layers in over Hemera's; Hemera does not read it.",
     options: (input) => ({
       meta: undefined,
       env: { CODEX_HOME: input.ownerDirectory },

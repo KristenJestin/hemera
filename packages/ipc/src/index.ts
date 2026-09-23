@@ -93,3 +93,13 @@ export type {
   StopReason,
   ToolCallStatus,
 } from './agents.ts'
+export {
+  commandKindSchema,
+  commandRunSchema,
+  commandSchema,
+  contextReachSchema,
+  contextViewSchema,
+  providedSchema,
+  runStateSchema,
+} from './tools.ts'
+export type { Command, CommandKind, CommandRun, ContextView, Provided, RunState } from './tools.ts'

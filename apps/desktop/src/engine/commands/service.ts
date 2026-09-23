@@ -37,6 +37,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
 
 import { HeldWords } from '../agents/held.ts'
+import { AgentNotices } from '../agents/notices.ts'
 import { ProcessSupervisor } from '../agents/supervisor.ts'
 import { Sessions } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
@@ -55,6 +56,12 @@ export const OUTPUT_KEPT_BYTES = 64 * 1024
  * exit can be reported before the last of what it printed has been read.
  */
 const DRAIN_MS = 100
+
+/**
+ * How often a run that is printing is pushed to the window (D6-12): often enough for a panel to
+ * read as live, and not once per line of a build that prints thousands of them.
+ */
+const PUSH_EVERY_MS = 200
 
 /** How long a run has to die quietly before its tree is taken down. */
 const GRACE_MS = 5_000
@@ -210,6 +217,8 @@ interface Live {
   stopping: boolean
   /** Completed once the end of the run has been written: what a stop waits for. */
   readonly ended: Deferred.Deferred<void>
+  /** Whether a push of what it printed is already due, so a burst of lines is one push. */
+  pushing: boolean
 }
 
 /**
@@ -229,6 +238,9 @@ export const commandsLayer = Layer.effect(
     // service joins on: what a run writes is one entry of the Session's thread.
     const thread = yield* Sessions
     const held = yield* HeldWords
+    // The window watching the Session: the entry a run writes and the run itself are pushed to
+    // it as they change, so the thread and the Commands panel are drawn from what arrives.
+    const notices = yield* AgentNotices
     /** The engine's own scope: everything started here dies when the engine does. */
     const scope = yield* Effect.scope
     const live = new Map<string, Live>()
@@ -322,7 +334,7 @@ export const commandsLayer = Layer.effect(
       held
         .flushed(one.sessionId)
         .pipe(
-          Effect.andThen(
+          Effect.andThen(() =>
             thread.write(one.sessionId, {
               role: 'hemera',
               kind: 'command_run',
@@ -346,6 +358,7 @@ export const commandsLayer = Layer.effect(
               state: one.state,
             }),
           ),
+          Effect.tap((written) => Effect.sync(() => notices.wrote(one.sessionId, written.entry))),
         )
         .pipe(Effect.catch(() => Effect.void))
 
@@ -409,7 +422,10 @@ export const commandsLayer = Layer.effect(
             }
           }),
         ),
-      ).pipe(Effect.tap(() => writeEntry(id, one)))
+      ).pipe(
+        Effect.tap(() => writeEntry(id, one)),
+        Effect.tap(() => Effect.sync(() => notices.ran(one.sessionId, viewOf(id, one)))),
+      )
 
     /** The Project a Session belongs to, and null for a Session this database does not hold. */
     const projectOf = (sessionId: string) =>
@@ -603,6 +619,7 @@ export const commandsLayer = Layer.effect(
             stop: Effect.void,
             stopping: false,
             ended: Deferred.makeUnsafe<void>(),
+            pushing: false,
           }
           live.set(id, record)
 
@@ -659,6 +676,14 @@ export const commandsLayer = Layer.effect(
             // The first address the run names is its address: a later one — a second server, a
             // proxy, a link in a log line — does not move the one the user already opened.
             if (record.url === null) record.url = addressIn(text)
+            // What it printed reaches the panel as it prints, a burst of lines at a time: the
+            // same run the thread and the agent read, pushed whole (D6-12).
+            if (record.pushing) return
+            record.pushing = true
+            setTimeout(() => {
+              record.pushing = false
+              notices.ran(record.sessionId, viewOf(id, record))
+            }, PUSH_EVERY_MS)
           }
           process.onStdout(keep)
           process.onStderr(keep)

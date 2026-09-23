@@ -42,4 +42,14 @@ describe('Tout canal déclaré est branché', () => {
   test('the option a Home sets on the agent it is offered reaches the engine', () => {
     expect(wired().has('agents.offerSet')).toBe(true)
   })
+
+  test('the commands and the Context view reach the engine, relayed and not answered here', () => {
+    const relayed = LIST.exec(SOURCE)?.[1] ?? ''
+    const names = new Set([...relayed.matchAll(NAME)].map(([, name]) => name ?? ''))
+    const lent = Object.keys(CHANNELS).filter(
+      (channel) => channel.startsWith('commands.') || channel.startsWith('context.'),
+    )
+    expect(lent).toHaveLength(9)
+    expect(lent.filter((channel) => !names.has(channel))).toEqual([])
+  })
 })

@@ -304,11 +304,13 @@ describe('No tool is replayed on resume', () => {
 })
 
 describe('Text arrives as a stream', () => {
-  test('the five things the engine pushes are the ones declared', () => {
+  test('the seven things the engine pushes are the ones declared', () => {
     expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
       'agent',
+      'delivery',
       'entry',
       'permission',
+      'run',
       'turn',
       'turn_start',
     ])
@@ -356,5 +358,70 @@ describe('Text arrives as a stream', () => {
 
   test('every pushed message travels under one name, declared once', () => {
     expect(ENGINE_EVENT_CHANNEL).toBe('agents.event')
+  })
+})
+
+describe('The agent starts the app and the user opens it', () => {
+  test('every use case of the commands and the context is a channel of the same name', () => {
+    const relayed = Object.keys(ENGINE_REQUESTS).filter(
+      (name) => name.startsWith('commands.') || name.startsWith('context.'),
+    )
+    const channels = Object.keys(CHANNELS).filter(
+      (name) => name.startsWith('commands.') || name.startsWith('context.'),
+    )
+
+    expect(channels.toSorted()).toEqual(relayed.toSorted())
+    expect(relayed.toSorted()).toEqual([
+      'commands.create',
+      'commands.list',
+      'commands.output',
+      'commands.remove',
+      'commands.run',
+      'commands.runs',
+      'commands.stop',
+      'commands.update',
+      'context.read',
+    ])
+  })
+
+  test('a run is pushed whole, with its address, and no entry', () => {
+    const run = {
+      id: 'run-1',
+      projectId: 'atlas',
+      sessionId: 'session-1',
+      commandId: 'command-1',
+      name: 'dev',
+      line: 'pnpm dev',
+      kind: 'app',
+      cwd: '/home/ana/atlas',
+      state: 'running',
+      pid: 4242,
+      url: 'http://localhost:5173',
+      exitCode: null,
+      output: 'ready in 300 ms',
+      dropped: 0,
+      startedAt: '2026-09-23T08:00:00.000Z',
+      endedAt: null,
+      joined: false,
+    }
+    expect(ENGINE_EVENTS.run.safeParse({ event: 'run', sessionId: 'session-1', run }).success).toBe(
+      true,
+    )
+    expect(
+      ENGINE_EVENTS.run.safeParse({
+        event: 'run',
+        sessionId: 'session-1',
+        run: { ...run, state: 'up' },
+      }).success,
+    ).toBe(false)
+  })
+})
+
+describe('A change during a turn leaves at the next safe point', () => {
+  test('a delivery is pushed about its Session, beside the entry it wrote', () => {
+    expect(
+      ENGINE_EVENTS.delivery.safeParse({ event: 'delivery', sessionId: 'session-1', entry: null })
+        .success,
+    ).toBe(true)
   })
 })

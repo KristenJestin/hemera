@@ -38,6 +38,8 @@ export const UNHURRIED: ReadonlySet<EngineRequestName> = new Set([
   // An update runs the installer's own tool, and a check asks three registries over the network.
   'agents.update',
   'agents.check',
+  // A stop gives a run the grace it is owed before its tree is taken down (D5-04, D6-12).
+  'commands.stop',
 ])
 
 /**

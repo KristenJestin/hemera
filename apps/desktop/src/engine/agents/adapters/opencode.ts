@@ -68,6 +68,8 @@ export const opencode: AgentAdapter = {
         ? "OPENCODE_CONFIG_CONTENT: a primary agent of Hemera's, a catch-all deny with the hemera_* namespace re-allowed, build and plan disabled — matched case-insensitively on Windows"
         : "OPENCODE_CONFIG_CONTENT: a primary agent of Hemera's, a catch-all deny with the hemera_* namespace re-allowed, build and plan disabled",
     base: 'embedded_resource',
+    private:
+      '$HOME/.opencode, its managed configuration and a remote .well-known/opencode still load; Hemera does not read them.',
     qualified: true,
     options: (input) => ({
       meta: undefined,

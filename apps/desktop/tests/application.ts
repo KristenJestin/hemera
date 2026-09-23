@@ -53,10 +53,10 @@ import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { type ToolPermissions, toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 
-const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
+export const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
 /** The version the shipped migrations are opened with, as the application opens them. */
-const VERSION = '0.4.0'
+export const VERSION = '0.4.0'
 
 /**
  * A machine that has every agent, signed in, at a path nothing has to be installed at.
@@ -101,6 +101,9 @@ export function watching() {
       changed: (sessionId: string, what: Notice) => {
         pushed.push({ sessionId, entry: null, what })
       },
+      // A run is pushed as the run it is and not as an entry: the suites that watch the window
+      // read the thread, and the Commands panel has suites of its own.
+      ran: () => undefined,
     }),
   }
 }
@@ -335,7 +338,7 @@ export type ToolEngine =
  * real on this machine: a run that says it ended has ended, and a tree that says it was stopped
  * was stopped.
  */
-const besideTheAgent = (
+export const besideTheAgent = (
   agents: readonly FakeAgent[],
 ): Layer.Layer<ProcessSupervisor, never, HostProcesses | StderrSink> =>
   Layer.effect(

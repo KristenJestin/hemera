@@ -22,8 +22,8 @@ import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
-import { commandsLayer } from '#engine/commands/service.ts'
-import { contextLayer } from '#engine/context/service.ts'
+import { type Commands, commandsLayer } from '#engine/commands/service.ts'
+import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
@@ -71,6 +71,8 @@ function running<A, E>(
     | AgentRuntime
     | Discovery
     | Agents
+    | Commands
+    | Context
   >,
 ) {
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
@@ -119,6 +121,8 @@ function running<A, E>(
     | AgentRuntime
     | Discovery
     | Agents
+    | Commands
+    | Context
     | Database
     | SqliteClient
   > = Layer.mergeAll(
@@ -131,7 +135,9 @@ function running<A, E>(
       Layer.provideMerge(discoveryLayer),
       Layer.provide(rows),
       Layer.provide(preferencesLayer),
-      Layer.provide(tools.pipe(Layer.provide(rows), Layer.provide(agents))),
+      // Handed up, as the engine hands them up: the settings and the Commands panel ask for the
+      // very catalogue and runs the runtime lends.
+      Layer.provideMerge(tools.pipe(Layer.provide(rows), Layer.provide(agents))),
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provide(agents),
       Layer.provide(heldWordsLayer),

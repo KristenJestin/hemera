@@ -13,6 +13,8 @@
 import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, SEARCH_SCAN_BYTES, type ToolName } from '@hemera/core'
 import { z } from 'zod'
 
+import { OUTPUT_KEPT_BYTES } from '../commands/service.ts'
+
 /** The arguments of a tool as they arrived: flat, JSON, and not yet read. */
 export type ToolArguments = Readonly<Record<string, string | number | boolean | null>>
 
@@ -61,6 +63,9 @@ export const RUN_WAIT_MS = 30_000
 
 /** The longest it may be told to wait: 10 minutes. */
 export const RUN_WAIT_LONGEST_MS = 600_000
+
+/** How many entries of the thread `session_get` hands back. */
+export const THREAD_TAIL = 20
 
 /**
  * The arguments of every tool, as the agent is told them and as they are read back.
@@ -151,6 +156,26 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     'The Project this Session belongs to: its name, where its Workspace root is, and what it reads from.',
   session_get:
     'This Session: its title, its Project, its agent, and the last entries of its thread.',
+}
+
+/**
+ * The limit each tool is held to, in one line, as the Context view lists it (design D6-10).
+ *
+ * The same numbers the descriptions give the agent, said for the reader: a tool offered with a
+ * limit is a different promise from a tool offered, which is why the limit is on the line.
+ */
+export const TOOL_BOUNDS: Record<ToolName, string> = {
+  fs_read: `${READ_PAGE_BYTES / 1024} KiB a page, inside the Workspace root`,
+  fs_edit: 'one unique match, inside the Workspace root',
+  fs_write: 'the whole file, inside the Workspace root',
+  fs_list: 'one level, inside the Workspace root',
+  search: `${SEARCH_MATCH_LIMIT} matches and ${SEARCH_SCAN_BYTES / 1024 / 1024} MiB scanned a call`,
+  commands_list: "the Project's catalogue",
+  commands_run: 'the catalogue, or a one-off line the user allows',
+  commands_output: `the last ${OUTPUT_KEPT_BYTES / 1024} KiB a run printed`,
+  commands_stop: 'a run of this Project, and all it started',
+  project_get: 'this Project',
+  session_get: `this Session and its last ${THREAD_TAIL} entries`,
 }
 
 /** What one reading of the arguments answered. */

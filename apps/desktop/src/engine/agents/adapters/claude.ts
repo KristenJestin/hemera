@@ -79,6 +79,8 @@ export const claude: AgentAdapter = {
     means:
       'session/new _meta: no built-in tool, no settings source, no MCP server but Hemera, the base as the system prompt',
     base: 'system_prompt',
+    private:
+      'its managed and policy settings and ~/.claude.json still load; Hemera does not read them.',
     qualified: true,
     options: (input) => ({
       meta: {

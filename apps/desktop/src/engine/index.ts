@@ -29,8 +29,8 @@ import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
-import { commandsLayer } from './commands/service.ts'
-import { contextLayer } from './context/service.ts'
+import { type Commands, commandsLayer } from './commands/service.ts'
+import { type Context, contextLayer } from './context/service.ts'
 import { toolAccessLayer } from './tools/access.ts'
 import { toolCatalogueLayer } from './tools/catalogue.ts'
 import { toolPermissionsLayer } from './tools/permissions.ts'
@@ -61,6 +61,16 @@ export interface EngineStart {
   migrations: string
 }
 
+/** The name each change of a Session travels under, on the one channel the page listens on. */
+export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run'>> = {
+  permission_requested: 'permission',
+  turn_started: 'turn_start',
+  turn_ended: 'turn',
+  agent_died: 'agent',
+  session_fallback: 'agent',
+  context_delivered: 'delivery',
+}
+
 /**
  * The window, as the runtime's notices.
  *
@@ -70,14 +80,6 @@ export interface EngineStart {
  * reasons the runtime changes something map onto them here, in the one place that knows the wire.
  */
 function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.Layer<AgentNotices> {
-  const PUSHED: Record<Notice, EngineEventName> = {
-    permission_requested: 'permission',
-    turn_started: 'turn_start',
-    turn_ended: 'turn',
-    agent_died: 'agent',
-    session_fallback: 'agent',
-  }
-
   return Layer.succeed(AgentNotices, {
     wrote: (sessionId, entry) => {
       try {
@@ -94,6 +96,13 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
         port.postMessage({ event, sessionId, entry: null })
       } catch (died) {
         log(`pushing ${event} failed: ${named(died)}`)
+      }
+    },
+    ran: (sessionId, run) => {
+      try {
+        port.postMessage({ event: 'run', sessionId, run })
+      } catch (died) {
+        log(`pushing a run failed: ${named(died)}`)
       }
     },
   })
@@ -117,6 +126,8 @@ type EngineServices =
   | AgentRuntime
   | Discovery
   | Agents
+  | Commands
+  | Context
   | Database
   | SqliteClient
 
@@ -183,10 +194,12 @@ function servicesOf(
       // What each Project's composer was left on: the runtime seeds the Home's choices from it
       // at start and writes them back as they are made (D5-17).
       Layer.provide(preferencesLayer),
-      Layer.provide(tools),
+      // Handed up rather than hidden: the Commands panel, the Project settings and the Context
+      // view ask this process for the very catalogue, runs and provisions the runtime lends.
+      Layer.provideMerge(tools),
       // What a Session is provided with, and the book of what is running on the engine's own
       // clock: it is what closes an agent nobody is talking to any more (D5-05).
-      Layer.provide(provisions),
+      Layer.provideMerge(provisions),
       Layer.provide(processes),
       Layer.provide(agents),
       Layer.provide(heldWordsLayer),

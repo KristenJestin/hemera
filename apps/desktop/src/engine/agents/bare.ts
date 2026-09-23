@@ -100,6 +100,12 @@ export type BareMode = {
    * or an embedded resource in the first prompt of the Session.
    */
   readonly base: BaseReach
+  /**
+   * What the agent keeps that Hemera does not see, in one sentence: the sources its means does
+   * not reach (D6-09). The Context view lists it as the agent's private part, and claims nothing
+   * about what the model retained (D6-10).
+   */
+  readonly private: string
   /** What the agent is handed: the options its own agent reads. */
   readonly options: (input: BareInput) => BareOptions
 } & (

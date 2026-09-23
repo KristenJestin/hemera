@@ -33,13 +33,20 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
+import { AgentNotices } from '../agents/notices.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Database } from '../storage/database.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
-import { RUN_WAIT_MS, type ToolArguments, type ParsedCall, parseCall } from './arguments.ts'
+import {
+  RUN_WAIT_MS,
+  THREAD_TAIL,
+  type ToolArguments,
+  type ParsedCall,
+  parseCall,
+} from './arguments.ts'
 import { type RefusedPathError, resolveInside } from './paths.ts'
 import { ToolPermissions } from './permissions.ts'
 import { type Page, type ReadRange, numbered, readPage } from './read.ts'
@@ -47,9 +54,6 @@ import { searchIn } from './search.ts'
 
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
 const ARGUMENTS_KEPT = 400
-
-/** How many entries of the thread `session_get` hands back. */
-const THREAD_TAIL = 20
 
 /** How many answered keys a Session keeps against a retry, the least recently asked let go of first. */
 const KEYS_KEPT = 256
@@ -199,7 +203,14 @@ function describeSearch(result: SearchResult, query: string): string {
 export const toolCatalogueLayer: Layer.Layer<
   ToolCatalogue,
   never,
-  Projects | Sessions | Commands | ToolAccess | ToolPermissions | HeldWords | Database
+  | Projects
+  | Sessions
+  | Commands
+  | ToolAccess
+  | ToolPermissions
+  | HeldWords
+  | AgentNotices
+  | Database
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -210,15 +221,20 @@ export const toolCatalogueLayer: Layer.Layer<
     const database = yield* Database
     const access = yield* ToolAccess
     const held = yield* HeldWords
+    const notices = yield* AgentNotices
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
      *
      * The runtime holds a message's words until its timer writes them (Decided 10 of #17): a call
-     * is written after them, because the agent asked for it after saying them.
+     * is written after them, because the agent asked for it after saying them. The window is told
+     * as the runtime tells it about the agent's own entries: the thread is drawn from what arrives.
      */
     const inThread = (sessionId: string, entry: ThreadWrite) =>
-      held.flushed(sessionId).pipe(Effect.andThen(sessions.write(sessionId, entry)))
+      held.flushed(sessionId).pipe(
+        Effect.andThen(() => sessions.write(sessionId, entry)),
+        Effect.tap((written) => Effect.sync(() => notices.wrote(sessionId, written.entry))),
+      )
 
     /**
      * The answers already given, per Session and by tool and key, so a retry is answered and not
