@@ -107,15 +107,24 @@ export const hostLinks = Layer.succeed(Links, {
     }),
 })
 
+/** A preparation of this Workspace is already running: a second one is refused, not interleaved. */
+export class PreparationRunningError extends Data.TaggedError('PreparationRunningError')<{
+  readonly workspaceId: string
+}> {
+  override get message(): string {
+    return 'this Workspace is already being prepared'
+  }
+}
+
 export interface PreparationService {
   /** Runs the pending steps in order, and stops at the first failure. */
   readonly prepare: (
     workspaceId: string,
-  ) => Effect.Effect<WorkspaceView, DatabaseError | UnknownWorkspaceError>
+  ) => Effect.Effect<WorkspaceView, DatabaseError | UnknownWorkspaceError | PreparationRunningError>
   /** Re-checks what was done against the disk, retries what failed, and carries on (D8-05). */
   readonly resume: (
     workspaceId: string,
-  ) => Effect.Effect<WorkspaceView, DatabaseError | UnknownWorkspaceError>
+  ) => Effect.Effect<WorkspaceView, DatabaseError | UnknownWorkspaceError | PreparationRunningError>
   /** The steps of a Workspace, in their order. */
   readonly steps: (
     workspaceId: string,
@@ -223,6 +232,23 @@ export const preparationLayer = Layer.effect(
     const supervisor = yield* ProcessSupervisor
 
     const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
+
+    /** The Workspaces a preparation or a resume is running on, in this engine. */
+    const running = new Set<string>()
+
+    /**
+     * One preparation of a Workspace at a time: a second `prepare` or `resume` while one runs is
+     * refused by name. Taken before anything is read, and in memory, which is enough: one engine
+     * holds a data folder. So a step a resume finds `running` is always one an engine that
+     * stopped left behind, never one being run now — which is what lets `resumedSteps` start it
+     * again (D8-05).
+     */
+    const alone = <A, E>(id: string, effect: Effect.Effect<A, E>) =>
+      Effect.suspend((): Effect.Effect<A, E | PreparationRunningError> => {
+        if (running.has(id)) return Effect.fail(new PreparationRunningError({ workspaceId: id }))
+        running.add(id)
+        return effect.pipe(Effect.ensuring(Effect.sync(() => running.delete(id))))
+      })
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -546,31 +572,34 @@ export const preparationLayer = Layer.effect(
     }
 
     return {
-      prepare: (id) => drive(id, new Set()),
+      prepare: (id) => alone(id, drive(id, new Set())),
 
       resume: (id) =>
-        Effect.gen(function* () {
-          const place = yield* placeOf(yield* workspaceRow(id))
-          const steps = yield* stepsOf(id)
-          const resumed = resumedSteps(steps, (step) => present(place, step))
-          const again = new Set(
-            resumed
-              .filter((step, index) => step.state === 'pending' && steps[index]?.state === 'done')
-              .map((step) => step.id),
-          )
-          const retried = resumed.filter(
-            (step, index) => step.state === 'pending' && steps[index]?.state !== step.state,
-          ).length
-          yield* persist(place, workspaceStateIn(place.workspace.state), steps, resumed, [
-            workspaceEvent(
-              place.workspace,
-              'workspace.resumed',
-              { redone: again.size, retried: retried - again.size },
-              'human',
-            ),
-          ])
-          return yield* drive(id, again)
-        }),
+        alone(
+          id,
+          Effect.gen(function* () {
+            const place = yield* placeOf(yield* workspaceRow(id))
+            const steps = yield* stepsOf(id)
+            const resumed = resumedSteps(steps, (step) => present(place, step))
+            const again = new Set(
+              resumed
+                .filter((step, index) => step.state === 'pending' && steps[index]?.state === 'done')
+                .map((step) => step.id),
+            )
+            const retried = resumed.filter(
+              (step, index) => step.state === 'pending' && steps[index]?.state !== step.state,
+            ).length
+            yield* persist(place, workspaceStateIn(place.workspace.state), steps, resumed, [
+              workspaceEvent(
+                place.workspace,
+                'workspace.resumed',
+                { redone: again.size, retried: retried - again.size },
+                'human',
+              ),
+            ])
+            return yield* drive(id, again)
+          }),
+        ),
 
       steps: (id) => workspaceRow(id).pipe(Effect.andThen(stepsOf(id))),
     } satisfies PreparationService

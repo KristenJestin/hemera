@@ -12,10 +12,15 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect, Fiber, Layer } from 'effect'
+import { Effect, Fiber, Layer, Result } from 'effect'
 
 import { SqliteClient } from '#engine/storage/database.ts'
-import { LinkRefusedError, Links, Preparation } from '#engine/workspaces/preparation.ts'
+import {
+  LinkRefusedError,
+  Links,
+  Preparation,
+  PreparationRunningError,
+} from '#engine/workspaces/preparation.ts'
 import { Recipe, type RecipeEdit } from '#engine/workspaces/recipe.ts'
 import { CleanupRefusedError, Workspaces } from '#engine/workspaces/workspaces.ts'
 
@@ -382,5 +387,39 @@ describe('A cleanup and a preparation never overlap', () => {
 
     expect(seen.after.state).toBe('cleaned')
     expect(seen.events).toEqual([])
+  })
+})
+
+describe('One preparation of a Workspace runs at a time', () => {
+  it('runs one of two resumes asked together, refuses the other, and installs once', async () => {
+    const count = join(folder, 'installs')
+    const front = join(main, 'sources', 'front')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspace = yield* createdWith([
+          { run: node(`require('fs').appendFileSync('${count}','x')`) },
+        ])
+        git(front, 'branch', BRANCH)
+        yield* preparation.prepare(workspace.id)
+        git(front, 'branch', '-D', BRANCH)
+        const both = yield* Effect.all(
+          [preparation.resume(workspace.id), preparation.resume(workspace.id)].map((one) =>
+            Effect.result(one),
+          ),
+          { concurrency: 'unbounded' },
+        )
+        return { both, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    const ran = seen.both.filter(Result.isSuccess)
+    const refused = seen.both.filter(Result.isFailure).map((one) => one.failure)
+    expect(ran).toHaveLength(1)
+    expect(ran[0]?.success.state).toBe('ready')
+    expect(refused).toHaveLength(1)
+    expect(refused[0]).toBeInstanceOf(PreparationRunningError)
+    expect(readFileSync(count, 'utf8')).toBe('x')
+    expect(shown(seen.steps).map((step) => step[2])).toEqual(['done', 'done', 'done'])
   })
 })
