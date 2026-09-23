@@ -1059,7 +1059,7 @@ export const specsLayer = Layer.effect(
 
       reopen: (request) =>
         onSpec('reworking the Spec', request.specId, (transaction, snapshot) =>
-          reopen(transaction, snapshot, request).pipe(Effect.map(only)),
+          reopen(transaction, snapshot, request),
         ),
 
       transferWrite: (input) =>

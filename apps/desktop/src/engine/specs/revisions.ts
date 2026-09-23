@@ -5,12 +5,17 @@
  * (with their versions, so the phase summaries keep meaning), stories, criteria, the contract task
  * set and its tasks, dependencies and story links, and the questions still open. Its phases start
  * `stale` with the summaries they had (Decided 4). Revision n is never written again.
+ *
+ * A copied question is a new question: the one asked in the chat named the old revision's, so
+ * each is asked again in the writer Session's thread, under its new identifier, and it is that
+ * block the answer is given in (D7-01).
  */
 
 import type { SpecPhase, SpecSnapshot } from '@hemera/core'
 import { and, eq, isNull } from 'drizzle-orm'
 import { Data, Effect } from 'effect'
 
+import type { NewEvent } from '../journal.ts'
 import type { EngineTransaction } from '../storage/database.ts'
 import {
   acceptanceCriteria,
@@ -26,6 +31,7 @@ import {
 } from '../storage/schema.ts'
 import { insertPhases } from './protocol.ts'
 import { failed, now, specEvent } from './snapshot.ts'
+import { type Written, appendEntry, askedIn } from './thread.ts'
 
 /** A Rework refused: not a `ready` Spec, or a stale expected revision (D7-05). */
 export class ReopenRefusedError extends Data.TaggedError('ReopenRefusedError')<{
@@ -144,7 +150,10 @@ function copyTasks(
   })
 }
 
-/** Copies the questions still open, with the date they were raised, so they keep their order. */
+/**
+ * Copies the questions still open, with the date they were raised, so they keep their order.
+ * Answers each old identifier with the new one.
+ */
 function copyOpenQuestions(transaction: EngineTransaction, from: string, revisionId: string) {
   return Effect.gen(function* () {
     const open = yield* transaction
@@ -152,12 +161,13 @@ function copyOpenQuestions(transaction: EngineTransaction, from: string, revisio
       .from(specQuestions)
       .where(and(eq(specQuestions.revisionId, from), isNull(specQuestions.resolvedAt)))
       .pipe(Effect.mapError(failed('reading the questions')))
-    if (open.length === 0) return
+    const ids = renamed(open)
+    if (open.length === 0) return ids
     yield* transaction
       .insert(specQuestions)
       .values(
         open.map((question) => ({
-          id: crypto.randomUUID(),
+          id: ids.get(question.id)!,
           revisionId,
           body: question.body,
           blocking: question.blocking,
@@ -171,6 +181,45 @@ function copyOpenQuestions(transaction: EngineTransaction, from: string, revisio
         })),
       )
       .pipe(Effect.mapError(failed('copying the questions')))
+    return ids
+  })
+}
+
+/**
+ * Asks again, in the writer Session's thread, every copied question that had been asked in a
+ * chat: the same question under its new identifier, which is the one an answer names.
+ */
+function askAgain(
+  transaction: EngineTransaction,
+  from: SpecSnapshot,
+  questionIds: ReadonlyMap<string, string>,
+) {
+  return Effect.gen(function* () {
+    const events: NewEvent[] = []
+    const wrote: Written[] = []
+    const writer = from.spec.writerSessionId
+    if (writer === null) return { events, wrote }
+    for (const question of from.questions) {
+      const id = questionIds.get(question.id)
+      if (id === undefined || (yield* askedIn(transaction, question.id)) === null) continue
+      const asked = yield* appendEntry(transaction, writer, {
+        role: 'hemera',
+        kind: 'spec_question',
+        body: question.body,
+        payload: JSON.stringify({
+          id,
+          body: question.body,
+          blocking: question.blocking,
+          phase: question.phase,
+          options: question.options,
+          answer: null,
+        }),
+        correlationId: id,
+      })
+      events.push(asked.event)
+      wrote.push({ sessionId: writer, entry: asked.entry })
+    }
+    return { events, wrote }
   })
 }
 
@@ -216,22 +265,27 @@ export function reopen(
       .pipe(Effect.mapError(failed('opening the revision')))
     const storyIds = yield* copyContent(transaction, snapshot, revisionId)
     yield* copyTasks(transaction, snapshot, revisionId, storyIds)
-    yield* copyOpenQuestions(transaction, revision.id, revisionId)
+    const questionIds = yield* copyOpenQuestions(transaction, revision.id, revisionId)
     yield* insertPhases(transaction, stalePhases(snapshot, revisionId))
     yield* transaction
       .update(specs)
       .set({ status: 'draft', currentRevisionId: revisionId, updatedAt: at })
       .where(eq(specs.id, spec.id))
       .pipe(Effect.mapError(failed('reopening the Spec')))
-    return [
-      specEvent(spec, revisionId, 'spec.reopened', {
-        author: 'human',
-        payload: {
-          reason,
-          number: revision.number + 1,
-          previousRevisionId: revision.id,
-        },
-      }),
-    ]
+    const asked = yield* askAgain(transaction, snapshot, questionIds)
+    return {
+      events: [
+        specEvent(spec, revisionId, 'spec.reopened', {
+          author: 'human',
+          payload: {
+            reason,
+            number: revision.number + 1,
+            previousRevisionId: revision.id,
+          },
+        }),
+        ...asked.events,
+      ],
+      wrote: asked.wrote,
+    }
   })
 }

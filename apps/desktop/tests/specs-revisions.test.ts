@@ -13,6 +13,7 @@ import { Effect } from 'effect'
 
 import { type SpecSnapshot, SpecNotWritableError, writable } from '@hemera/core'
 import { ReopenRefusedError } from '#engine/specs/revisions.ts'
+import { Sessions } from '#engine/sessions.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { agentOf, draft, frozen, openedOn, write } from './specs-harness.ts'
 
@@ -183,6 +184,44 @@ describe('Rework creates a complete new draft', () => {
     )
     expect(reworked.spec.status).toBe('draft')
     expect(reworked.revision).toMatchObject({ number: 2, changeReason: null })
+  })
+})
+
+describe('Rework asks the open questions again in the thread', () => {
+  test('the copied question is asked under its new id, and answered there', async () => {
+    const outcome = await opened()(
+      Effect.gen(function* () {
+        const { specId, session, snapshot } = yield* ready
+        const specs = yield* Specs
+        const reworked = yield* specs.reopen({ specId, expectedRevisionId: snapshot.revision.id })
+        const copied = reworked.questions[0]
+        if (copied === undefined) return yield* Effect.die('the open question was not copied')
+        const asked = yield* (yield* Sessions).read(session.id)
+        yield* specs.answerQuestion({ specId, questionId: copied.id, optionId: 'utf8' })
+        const answered = yield* (yield* Sessions).read(session.id)
+        return { old: snapshot.questions[0], copied, asked, answered }
+      }),
+    )
+    const questions = outcome.asked.entries.filter((entry) => entry.kind === 'spec_question')
+    // The first block names the frozen revision's question; the second the draft's.
+    expect(questions.map((entry) => entry.correlationId)).toEqual([
+      outcome.old?.id,
+      outcome.copied.id,
+    ])
+    expect(JSON.parse(questions[1]?.payload ?? '{}')).toEqual({
+      id: outcome.copied.id,
+      body: 'Which encoding?',
+      blocking: false,
+      phase: 'plan',
+      options: outcome.copied.options,
+      answer: null,
+    })
+    const answer = outcome.answered.entries.at(-1)
+    expect(answer).toMatchObject({
+      kind: 'spec_answer',
+      body: 'UTF-8',
+      correlationId: outcome.copied.id,
+    })
   })
 })
 
