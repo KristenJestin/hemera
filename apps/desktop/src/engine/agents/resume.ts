@@ -23,8 +23,17 @@ export const REBUILT_BYTES = 32 * 1024
 /** What a reader of the thread calls each role, as the block spells it. */
 const SPEAKER = { user: 'User', agent: 'Agent', hemera: 'Hemera' } as const
 
+/**
+ * What Hemera wrote for itself rather than said in the conversation: the mission brief that rode
+ * a turn (the next turn composes its own) and a Spec proposal (the Spec is created or it is not).
+ * Kept out of the block, a few briefs cannot push the conversation out of its budget. A question
+ * of a Spec and its answer stay: they are one line each, and they are the conversation.
+ */
+const NOT_SAID: readonly SessionEntry['kind'][] = ['mission_brief', 'spec_proposal']
+
 /** One entry as a line of the block: what a reader needs, and nothing of what a window draws. */
 function lineOf(entry: SessionEntry): string {
+  if (NOT_SAID.includes(entry.kind)) return ''
   const said = entry.body.trim()
   if (said === '') return ''
   return `${SPEAKER[entry.role]}: ${said}`
