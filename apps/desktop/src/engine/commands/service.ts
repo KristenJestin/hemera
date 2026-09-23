@@ -37,6 +37,7 @@ import {
   lineFor,
   MAIN_WORKSPACE,
   mergedEnvironment,
+  portOf,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
@@ -77,6 +78,64 @@ const PUSH_EVERY_MS = 200
 
 /** How long a run has to die quietly before its tree is taken down. */
 const GRACE_MS = 5_000
+
+/** How often a published address is requested until it answers (D8-09). */
+export const READINESS_EVERY_MS = 500
+
+/** How long a published address is requested before it is said not to answer (D8-09). */
+export const READINESS_FOR_MS = 60_000
+
+/** How long one request of an address is waited for: well under the interval between two. */
+const PROBE_TIMEOUT_MS = 400
+
+/**
+ * How often and for how long a published address is requested (D8-09): the two constants by
+ * default, and a shorter minute for a suite that has no minute to wait.
+ */
+export const ReadinessSettings = Context.Reference<{
+  readonly everyMs: number
+  readonly forMs: number
+}>('ReadinessSettings', {
+  defaultValue: () => ({ everyMs: READINESS_EVERY_MS, forMs: READINESS_FOR_MS }),
+})
+
+/**
+ * Where a published address is requested: as printed, except a `*.localhost` name over HTTPS,
+ * requested over HTTP. Such a name is what Portless prints, and its proxy serves HTTPS with a
+ * certificate of its own authority, which a request of the engine would refuse — the proxy
+ * answering at all is what readiness asks (D8-09, D8-10).
+ */
+const probedAddress = (url: string) => url.replace(/^https:\/\/(?=[^/:]+\.localhost\b)/, 'http://')
+
+/**
+ * Whether an address answers, whatever its status (D8-09): a refused connection, a name that does
+ * not resolve and a request that outlasts `PROBE_TIMEOUT_MS` are no answer. A redirect is an
+ * answer, not followed.
+ */
+const answers = (address: string) =>
+  Effect.tryPromise(async () => {
+    const response = await fetch(address, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    })
+    await response.body?.cancel()
+  }).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
+
+/** What a process says when the port it listens on is taken (D8-09): Node's code, and the text. */
+const IN_USE = /EADDRINUSE|address already in use/i
+
+/** The port the line saying so names, as `:3000` or `:::3000`, and null when it names none. */
+function portInUse(output: string): number | null {
+  const found = IN_USE.exec(output)
+  if (found === null) return null
+  const start = output.lastIndexOf('\n', found.index) + 1
+  const end = output.indexOf('\n', found.index)
+  const port = /:(\d{2,5})\b/.exec(output.slice(start, end === -1 ? undefined : end))
+  return port === null ? null : Number(port[1])
+}
 
 /**
  * The system this machine is, in Node's own word — `win32`, `linux`, `darwin` — which decides the
@@ -143,6 +202,8 @@ export interface Run {
   readonly url: string | null
   /** When its address first answered, and null until it has (D8-09). */
   readonly readyAt: string | null
+  /** Where its address stands, derived from the above (D8-09). */
+  readonly readiness: Readiness
   /** The run holding the port it published, and null when none does (D8-09). */
   readonly portConflict: PortConflict | null
   readonly exitCode: number | null
@@ -152,6 +213,23 @@ export interface Run {
   readonly dropped: number
   readonly startedAt: string
   readonly endedAt: string | null
+}
+
+/**
+ * Where the address of a `serve` run stands (D8-09): `starting` until it answers, `ready` once
+ * it has, `unanswered` after a minute without an answer or when the run ended without one; null
+ * for a run with no address, and for any run that is not a `serve`, which is never requested.
+ */
+export type Readiness = 'starting' | 'ready' | 'unanswered' | null
+
+/** The readiness of a run, derived from what it holds. */
+function readinessOf(
+  run: Pick<Run, 'type' | 'url' | 'readyAt' | 'state'>,
+  unanswered: boolean,
+): Readiness {
+  if (run.type !== 'serve' || run.url === null) return null
+  if (run.readyAt !== null) return 'ready'
+  return unanswered || run.state !== 'running' ? 'unanswered' : 'starting'
 }
 
 /** The same, and whether this is a run that was already going. */
@@ -342,6 +420,13 @@ interface Live {
   readonly ended: Deferred.Deferred<void>
   /** Whether a push of what it printed is already due, so a burst of lines is one push. */
   pushing: boolean
+  /** Whether its address was requested for a minute without an answer (D8-09). */
+  unanswered: boolean
+  /**
+   * Completed with the address it publishes, or with null once it has ended without one: what
+   * the conflict and the readiness of a `serve` run wait for (D8-09).
+   */
+  readonly published: Deferred.Deferred<string | null>
 }
 
 /**
@@ -369,6 +454,7 @@ export const commandsLayer = Layer.effect(
     /** The engine's own scope: everything started here dies when the engine does. */
     const scope = yield* Effect.scope
     const platform = yield* Platform
+    const readiness = yield* ReadinessSettings
     const live = new Map<string, Live>()
 
     /** An effect that needs a scope, run in the engine's: everything it starts dies with it. */
@@ -415,6 +501,7 @@ export const commandsLayer = Layer.effect(
       pid: one.pid,
       url: one.url,
       readyAt: one.readyAt,
+      readiness: readinessOf(one, one.unanswered),
       portConflict: one.portConflict,
       exitCode: one.exitCode,
       output: one.kept,
@@ -480,6 +567,15 @@ export const commandsLayer = Layer.effect(
       pid: row.pid,
       url: row.url,
       readyAt: row.readyAt,
+      readiness: readinessOf(
+        {
+          type: commandType(row.type),
+          url: row.url,
+          readyAt: row.readyAt,
+          state: runStateOf(row.state),
+        },
+        false,
+      ),
       portConflict: row.portConflict === null ? null : conflictOf(row.portConflict),
       exitCode: row.exitCode,
       output: row.output,
@@ -648,6 +744,63 @@ export const commandsLayer = Layer.effect(
           yield* record.stop
         }
         yield* Deferred.await(record.ended)
+      })
+
+    /**
+     * The run of the Project, other than `id`, that holds `port` (D8-09): one still running that
+     * published an address on it, the first to have been started; null when none does.
+     */
+    const holderOf = (id: string, projectId: string, port: number): PortConflict | null => {
+      const found = [...live.entries()].find(
+        ([other, one]) =>
+          other !== id &&
+          one.projectId === projectId &&
+          one.state === 'running' &&
+          one.url !== null &&
+          portOf(one.url) === port,
+      )
+      if (found === undefined) return null
+      const [runId, holder] = found
+      return {
+        port,
+        runId,
+        workspaceId: holder.workspaceId,
+        workspaceName: holder.workspaceName,
+        name: holder.name,
+      }
+    }
+
+    /**
+     * What a `serve` run's published address sets going (D8-09): the conflict with the run of the
+     * Project holding its port, written on the run at once; then the address requested every
+     * interval until it answers — `ready_at` written, and `command.run_ready` — or until the
+     * minute is up, which leaves it `unanswered`. Hemera assigns no port; it names who holds one.
+     * The requests stop when the run ends.
+     */
+    const checkAddress = (id: string, record: Live, url: string) =>
+      Effect.gen(function* () {
+        const port = portOf(url)
+        const conflict = port === null ? null : holderOf(id, record.projectId, port)
+        if (conflict !== null) {
+          record.portConflict = conflict
+          yield* writeRow(id, record, null)
+        }
+        const address = probedAddress(url)
+        const deadline = Date.now() + readiness.forMs
+        while (record.state === 'running') {
+          const answered = yield* answers(address)
+          if (record.state !== 'running') return
+          if (answered) {
+            record.readyAt = new Date().toISOString()
+            return yield* writeRow(id, record, 'command.run_ready')
+          }
+          if (Date.now() >= deadline) {
+            record.unanswered = true
+            notices.ran(record.sessionId, viewOf(id, record))
+            return
+          }
+          yield* Effect.sleep(readiness.everyMs)
+        }
       })
 
     /** The runs of this engine still going that `kept` keeps, oldest first. */
@@ -850,6 +1003,8 @@ export const commandsLayer = Layer.effect(
             stopping: false,
             ended: Deferred.makeUnsafe<void>(),
             pushing: false,
+            unanswered: false,
+            published: Deferred.makeUnsafe<string | null>(),
           }
           live.set(id, record)
 
@@ -916,9 +1071,12 @@ export const commandsLayer = Layer.effect(
             }
             // The first address the run names is its address: a later one — a second server, a
             // proxy, a link in a log line — does not move the one the user already opened.
-            // D8-09, D8-10: the readiness probe, the conflicts and Portless are wired by the
-            // commands agent.
-            if (record.url === null) record.url = addressIn(text)
+            if (record.url === null) {
+              record.url = addressIn(text)
+              if (record.url !== null) {
+                Deferred.doneUnsafe(record.published, Effect.succeed(record.url))
+              }
+            }
             // What it printed reaches the panel as it prints, a burst of lines at a time: the
             // same run the thread and the agent read, pushed whole (D6-12).
             if (record.pushing) return
@@ -930,6 +1088,23 @@ export const commandsLayer = Layer.effect(
           }
           process.onStdout(keep)
           process.onStderr(keep)
+
+          // A `serve` run's address is checked once it is published, in the engine's scope; a run
+          // of another type is never requested (D8-09).
+          if (asked.type === 'serve') {
+            yield* watching(
+              Deferred.await(record.published).pipe(
+                Effect.flatMap((url) =>
+                  url === null ? Effect.void : checkAddress(id, record, url),
+                ),
+                Effect.catch((cause) =>
+                  diagnostic.write(
+                    `commands: the address of run ${id} (${record.name}) was not recorded: ${cause.message}`,
+                  ),
+                ),
+              ),
+            )
+          }
 
           // The death is watched in the engine's scope: a run is stopped by a quit as much as by
           // a `stop`, and either way the row is rewritten with how it ended — here and only here,
@@ -948,6 +1123,15 @@ export const commandsLayer = Layer.effect(
                   record.exitCode = observation.code
                   record.endedAt = observation.when
                   yield* Effect.sleep(DRAIN_MS)
+                  // A server whose port was taken failed whatever its exit code, and names the
+                  // holder when the output names the port (D8-09). Only a `serve` is read so: a
+                  // test may well print the words and pass.
+                  if (record.type === 'serve' && !record.stopping && IN_USE.test(record.kept)) {
+                    record.state = 'failed'
+                    const port = portInUse(record.kept)
+                    const conflict = port === null ? null : holderOf(id, record.projectId, port)
+                    if (conflict !== null) record.portConflict = conflict
+                  }
                   yield* writeRow(id, record, 'command.run_ended').pipe(
                     // A row that cannot be written — the database locked, the disk full — is a
                     // run whose end is not recorded, and said so; it has ended all the same.
@@ -960,6 +1144,8 @@ export const commandsLayer = Layer.effect(
                     // stop, a Session let go of — is released, or it would wait for ever.
                     Effect.ensuring(
                       Effect.gen(function* () {
+                        // An address it never published is no longer awaited.
+                        yield* Deferred.succeed(record.published, null)
                         yield* Deferred.succeed(record.ended, undefined)
                         // What is left of a run that ended is its row: the memory, and the output
                         // it holds, is let go of rather than kept for as long as the engine runs.

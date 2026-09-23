@@ -1,23 +1,34 @@
 /**
- * The services of a Project: `serve` runs per Workspace or per Project (D8-07, D8-08).
+ * The services of a Project: `serve` runs per Workspace or per Project, their readiness and the
+ * ports they hold (D8-07, D8-08, D8-09).
  *
  * Each suite is named after a scenario of the Spec section `services`. Nothing is mocked: the
  * runs are real children of this machine that print an address and stay up, as a dev server
- * does, over the real engine on a database in a temporary folder. The second Workspace is a row
- * written as its creation would leave it, `ready`, with a folder of its own.
+ * does, over the real engine on a database in a temporary folder; an address that answers is a
+ * real HTTP server of a child, listening when the child decides to. The second Workspace is a
+ * row written as its creation would leave it, `ready`, with a folder of its own.
  */
 
 import { mkdirSync } from 'node:fs'
+import { type AddressInfo, createServer } from 'node:net'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 
-import { Commands } from '#engine/commands/service.ts'
+import { Commands, ReadinessSettings } from '#engine/commands/service.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { Database } from '#engine/storage/database.ts'
 import { workspaces } from '#engine/storage/schema.ts'
 
-import { PUBLISHES_AN_ADDRESS, engine, opened, request, scratch } from './commands-engine.ts'
+import {
+  PUBLISHES_AN_ADDRESS,
+  engine,
+  opened,
+  request,
+  runLines,
+  scratch,
+  until,
+} from './commands-engine.ts'
 
 /** A dedicated Workspace of the Project, `ready`, in a folder beside `main`. */
 const loginForm = (projectId: string) =>
@@ -147,5 +158,154 @@ describe('Stopping one instance leaves the other running', () => {
     expect(seen.still.state).toBe('running')
     expect(seen.inMain.map((run) => run.id)).toEqual([seen.here.id])
     expect(seen.inLoginForm).toEqual([])
+  })
+})
+
+/** A port nothing listens on: one the system handed out, closed again before it is used. */
+async function freePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolve) => server.listen(0, resolve))
+  // SAFETY: a server listening on a TCP port answers its address as an object, never a pipe name.
+  const { port } = server.address() as AddressInfo
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+  return port
+}
+
+/** A line that prints its address at once and stays up, never listening on it. */
+const printsOnly = (port: number) =>
+  `"${process.execPath}" -e "console.log('http://localhost:${String(port)}');setInterval(()=>{},1000)"`
+
+/** A line that prints its address at once and only listens on it `after` milliseconds later. */
+const listensLater = (port: number, after: number) =>
+  `"${process.execPath}" -e "console.log('http://localhost:${String(port)}');setTimeout(()=>require('http').createServer((q,s)=>s.end('ok')).listen(${String(port)}),${String(after)})"`
+
+/** A line that listens on its port, and prints its address once it does. */
+const listens = (port: number) =>
+  `"${process.execPath}" -e "require('http').createServer((q,s)=>s.end('ok')).listen(${String(port)},()=>console.log('http://localhost:${String(port)}'))"`
+
+/** A line that tries to listen on a port, and dies if it is taken. */
+const triesToListen = (port: number) =>
+  `"${process.execPath}" -e "require('http').createServer().listen(${String(port)})"`
+
+describe('A URL is ready only after it answers', () => {
+  it('shows the address starting until it answers two seconds later, then ready', async () => {
+    const port = await freePort()
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const started = yield* commands.run(
+          request(session, { name: 'dev', line: listensLater(port, 2_000), type: 'serve' }),
+        )
+        const read = commands.output(session.sessionId, started.id)
+        const published = yield* until(read, (view) => view.url !== null)
+        // A second after the address was printed, nothing answers it yet.
+        yield* Effect.sleep('1 second')
+        const starting = yield* read
+        const ready = yield* until(read, (view) => view.readyAt !== null)
+        const lines = yield* runLines(session.projectId)
+        return {
+          published,
+          starting,
+          ready,
+          row: (yield* commands.recent(session.sessionId))[0],
+          readyLines: lines.filter((line) => line.type === 'command.run_ready'),
+        }
+      }),
+    )
+
+    expect(seen.published.readiness).toBe('starting')
+    expect(seen.starting.url).toBe(`http://localhost:${String(port)}`)
+    expect(seen.starting.readyAt).toBeNull()
+    expect(seen.starting.readiness).toBe('starting')
+    expect(seen.ready.readiness).toBe('ready')
+    expect(seen.ready.readyAt).not.toBeNull()
+    // Written on the row, and said in the Journal once (D8-16).
+    expect(seen.row?.readyAt).toBe(seen.ready.readyAt)
+    expect(seen.readyLines).toHaveLength(1)
+    expect(seen.readyLines[0]?.entityId).toBe(seen.ready.id)
+  })
+
+  it('says an address that never answers is unanswered once the time is up', async () => {
+    const port = await freePort()
+    // The minute, shortened to a second: what is under test is its end, not its length.
+    const shortened = Layer.succeed(ReadinessSettings, { everyMs: 200, forMs: 1_000 })
+    const seen = await engine(shortened)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const started = yield* commands.run(
+          request(session, { name: 'dev', line: printsOnly(port), type: 'serve' }),
+        )
+        return yield* until(
+          commands.output(session.sessionId, started.id),
+          (view) => view.readiness === 'unanswered',
+        )
+      }),
+    )
+
+    expect(seen.state).toBe('running')
+    expect(seen.readiness).toBe('unanswered')
+    expect(seen.readyAt).toBeNull()
+  })
+})
+
+describe('A port conflict names its holder', () => {
+  it('names the main run holding the port, on a run that publishes it and on one that dies of it', async () => {
+    const port = await freePort()
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const { main, workspace, inLoginForm } = yield* twoWorkspaces
+        const commands = yield* Commands
+        const inWorkspace = {
+          cwd: workspace.path,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+        }
+        // main really listens on the port, and says so.
+        const holder = yield* commands.run(
+          request(main, { name: 'dev', line: listens(port), type: 'serve' }),
+        )
+        yield* until(commands.output(main.sessionId, holder.id), (view) => view.url !== null)
+        // login-form prints the same address.
+        const second = yield* commands.run(
+          request(inLoginForm, {
+            name: 'dev',
+            line: printsOnly(port),
+            type: 'serve',
+            ...inWorkspace,
+          }),
+        )
+        const named = yield* until(
+          commands.output(inLoginForm.sessionId, second.id),
+          (view) => view.portConflict !== null,
+        )
+        // And another tries to listen on it, and dies of it.
+        const third = yield* commands.run(
+          request(inLoginForm, {
+            name: 'api',
+            line: triesToListen(port),
+            type: 'serve',
+            ...inWorkspace,
+          }),
+        )
+        // Read once its end is written: what it printed last is what names the port.
+        const died = yield* commands.awaited(inLoginForm.sessionId, third.id, 5_000)
+        return { holder, named, died }
+      }),
+    )
+
+    const conflict = {
+      port,
+      runId: seen.holder.id,
+      workspaceId: null,
+      workspaceName: 'main',
+      name: 'dev',
+    }
+    expect(seen.named.state).toBe('running')
+    expect(seen.named.portConflict).toEqual(conflict)
+    expect(seen.died.output).toContain('EADDRINUSE')
+    expect(seen.died.state).toBe('failed')
+    expect(seen.died.portConflict).toEqual(conflict)
   })
 })
