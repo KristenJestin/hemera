@@ -23,6 +23,7 @@ import {
   IconAlertTriangleFilled as TablerAlertTriangleFilled,
   IconArchive as TablerArchive,
   IconArchiveFilled as TablerArchiveFilled,
+  IconArrowDown as TablerArrowDown,
   IconArrowUp as TablerArrowUp,
   IconAt as TablerAt,
   IconBell as TablerBell,
@@ -186,6 +187,7 @@ export const IconAlertTriangle = catalogued(
 export const IconArchive = catalogued(TablerArchiveFilled, TablerArchive, 'IconArchive')
 /* Tabler draws no solid arrow, no solid at-sign and no solid paperclip: the outline stands for
    both weights, which is what a line pointing somewhere looks like anyway. */
+export const IconArrowDown = catalogued(TablerArrowDown, TablerArrowDown, 'IconArrowDown')
 export const IconArrowUp = catalogued(TablerArrowUp, TablerArrowUp, 'IconArrowUp')
 export const IconAt = catalogued(TablerAt, TablerAt, 'IconAt')
 export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')

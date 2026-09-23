@@ -89,6 +89,16 @@ export {
 } from './project/project-settings.tsx'
 
 export type { ProjectDraft, RepositoryLine } from './project/model.ts'
+/** The preparation of a Project: the ordered recipe each dedicated Workspace replays (D8-05). */
+export {
+  PreparationEditor,
+  type PreparationEditorProps,
+  type RecipeCommand,
+  type RecipeKind,
+  type RecipeScope,
+  type RecipeStepDraft,
+  type RecipeStepLine,
+} from './project/preparation-editor.tsx'
 
 /** The settings of the application, and the bell of the chrome bar. */
 export {

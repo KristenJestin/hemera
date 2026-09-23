@@ -100,7 +100,7 @@ const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter', 'command-palette']
  * shows as a screen or a composed piece, with the same discipline whatever root they sit under.
  */
 const SURFACES = {
-  project: ['project-dialog', 'project-settings'],
+  project: ['project-dialog', 'project-settings', 'preparation-editor'],
   journal: ['journal'],
   composer: ['composer', 'prompt-input'],
   // The thread of a Session (HEM-57): the messages, the viewport they are read in, and the
@@ -179,6 +179,8 @@ const NAMED_STATES = new Map([
     'workspace/cleanup-dialog',
     ['Confirm', 'RefusedRunningService', 'RefusedGit', 'RefusedBuildSession', 'Keyboard'],
   ],
+  // Lot 20: the recipe of a Project, with nothing in it, in order, being added to, and walked.
+  ['project/preparation-editor', ['Empty', 'Filled', 'Adding', 'Keyboard']],
 ])
 
 function storiesIn(path: string): string[] {
@@ -325,6 +327,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ProjectDialog',
       'ProjectSettings',
       'RepositoryList',
+      'PreparationEditor',
       'DangerZone',
       'Journal',
       'JournalEntry',
