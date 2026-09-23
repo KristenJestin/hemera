@@ -7,10 +7,11 @@ import { Input } from '../components/field/field.tsx'
 /**
  * What `Rework` asks before it reopens a `ready` Spec (lot 19, brief screen 5; D7-05).
  *
- * One line for the reason, which the Journal keeps with the reopening, and one sentence that
- * says exactly what happens: a complete copy becomes the next revision, and the frozen one stays
- * as it is. Nothing is lost by reworking, and the dialog says so before the press rather than
- * after it.
+ * One line for the reason, which the Journal keeps with the reopening when there is one, and
+ * one sentence that says exactly what happens: a complete copy becomes the next revision, and the
+ * frozen one stays as it is. The reason is optional (decided on 23 September 2026): the field
+ * starts empty and `Rework` is pressable at once, because the reason is a courtesy to whoever
+ * reads the Journal later and not a gate in front of the one who wants to change something.
  */
 
 const SAYS = 'text-sm text-muted-foreground'
@@ -21,7 +22,7 @@ export interface ReworkDialogProps {
   specKey: string
   /** The frozen revision, which the copy is made from. */
   revision: number
-  /** The rework, with its reason. */
+  /** The rework, with its reason; empty when none was given. */
   onRework: (reason: string) => void
 }
 
@@ -33,11 +34,7 @@ export function ReworkDialog({
   onRework,
 }: ReworkDialogProps): ReactNode {
   const [reason, setReason] = useState('')
-  const [asked, setAsked] = useState(false)
-  const missing = asked && reason.trim() === ''
   function submit(): void {
-    setAsked(true)
-    if (reason.trim() === '') return
     onRework(reason.trim())
   }
   return (
@@ -58,8 +55,8 @@ export function ReworkDialog({
         label="Reason"
         value={reason}
         onValueChange={setReason}
+        description="Optional. Kept in the Journal with the new revision."
         placeholder="What changes, in one line"
-        error={missing ? 'Say in one line why it is reworked.' : undefined}
         onKeyDown={(event) => {
           if (event.key !== 'Enter') return
           event.preventDefault()

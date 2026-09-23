@@ -23,7 +23,7 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The reason, then Rework: a reason is asked for before anything is copied. */
+/** The reason is optional: Rework is pressable at once, with nothing typed. */
 export const Open: Story = {
   play: async ({ args }) => {
     const page = within(document.body)
@@ -32,13 +32,19 @@ export const Open: Story = {
       'A complete copy becomes revision 3; revision 2 stays as it is.',
     )
     await waitFor(() => expect(says).toBeVisible())
+    await expect(page.getByRole('textbox', { name: 'Reason' })).toHaveValue('')
     await userEvent.click(page.getByRole('button', { name: 'Rework' }))
-    await waitFor(() => expect(page.getByText('Say in one line why it is reworked.')).toBeVisible())
-    await expect(args.onRework).not.toHaveBeenCalled()
-    await userEvent.type(
-      page.getByRole('textbox', { name: 'Reason' }),
-      'Credit notes must keep the number of their invoice{Enter}',
-    )
+    await expect(args.onRework).toHaveBeenCalledWith('')
+  },
+}
+
+/** With a reason typed, Enter reworks and hands the reason over. */
+export const WithAReason: Story = {
+  play: async ({ args }) => {
+    const page = within(document.body)
+    const field = await page.findByRole('textbox', { name: 'Reason' })
+    await waitFor(() => expect(field).toBeVisible())
+    await userEvent.type(field, 'Credit notes must keep the number of their invoice{Enter}')
     await expect(args.onRework).toHaveBeenCalledWith(
       'Credit notes must keep the number of their invoice',
     )
