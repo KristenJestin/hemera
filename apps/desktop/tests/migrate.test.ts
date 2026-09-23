@@ -70,6 +70,12 @@ const AGENTS_MIGRATION = '20260921133441_sessions_with_agents'
  */
 const TOOLS_MIGRATION = '20260922075631_tools_commands_and_context'
 
+/**
+ * The migration lot 20 adds: the one a profile of lot 18 has never heard of — the Workspaces,
+ * their steps and variables, and the commands typed by seven types (D8-01, D8-05, D8-06, D8-07).
+ */
+const WORKSPACES_MIGRATION = '20260923194453_workspaces'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -373,7 +379,7 @@ describe('Un profil du lot 4b est migré vers le lot 5', () => {
 
     // Two migrations behind now — the agents' and this lot's — and the copy taken before them
     // is named after the first of the two, which is the one that was applied first.
-    expect(standing.behind).toEqual([AGENTS_MIGRATION, TOOLS_MIGRATION])
+    expect(standing.behind).toEqual([AGENTS_MIGRATION, TOOLS_MIGRATION, WORKSPACES_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${AGENTS_MIGRATION}.sqlite`])
 
     // The agent columns arrived...
@@ -633,8 +639,9 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
-    // One migration behind, and the copy taken before it is named after it.
-    expect(standing.behind).toEqual([TOOLS_MIGRATION])
+    // Behind by this lot's migration and the ones after it, and the copy taken before them is
+    // named after the first.
+    expect(standing.behind).toEqual([TOOLS_MIGRATION, WORKSPACES_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
     // The three tables of this lot arrived...
@@ -681,7 +688,7 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
     ])
   })
 
-  test('a run of an unknown state, or of an unknown kind, is refused by the database', async () => {
+  test('a run of an unknown state, or a command of an unknown type, is refused by the database', async () => {
     const dataFolder = join(workspace, 'checks-six')
     await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
@@ -697,14 +704,14 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
           VALUES ('session-1', 'atlas', 'T', 'derived', '2026-09-22T10:00:00.000Z', '2026-09-22T10:00:00.000Z', 1)`
         const unknownKind = yield* Effect.exit(
           Effect.gen(function* () {
-            yield* sql`INSERT INTO project_commands (id, project_id, name, line, kind, created_at, updated_at)
+            yield* sql`INSERT INTO project_commands (id, project_id, name, line, type, created_at, updated_at)
               VALUES ('c1', 'atlas', 'dev', 'pnpm dev', 'daemon', '2026-09-22T10:00:00.000Z', '2026-09-22T10:00:00.000Z')`
           }),
         )
         const unknownState = yield* Effect.exit(
           Effect.gen(function* () {
-            yield* sql`INSERT INTO command_runs (id, session_id, name, line, kind, cwd, state, started_by, started_at)
-              VALUES ('r1', 'session-1', 'dev', 'pnpm dev', 'app', '/work/atlas', 'wandering', 'agent', '2026-09-22T10:00:00.000Z')`
+            yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, started_by, started_at)
+              VALUES ('r1', 'session-1', 'dev', 'pnpm dev', 'serve', '/work/atlas', 'wandering', 'agent', '2026-09-22T10:00:00.000Z')`
           }),
         )
         const unknownDelivery = yield* Effect.exit(
@@ -732,5 +739,138 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
     )
 
     expect(refusals.refused).toEqual([true, true, true, true])
+  })
+})
+
+describe('A profile of lot 18 is migrated to lot 20', () => {
+  test('the commands and their runs take their type, main is ready, and nothing is lost', async () => {
+    const dataFolder = join(workspace, 'from-lot-eighteen')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(TOOLS_MIGRATION), '0.3.0'))
+
+    // A Project with its `main`, a repository, a command of each of lot 18's kinds and a run of
+    // the app: what this lot renames, types and gives a Workspace must all be there after it.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-22T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO workspaces (id, project_id, name, path, created_at)
+          VALUES ('main-1', 'atlas', 'main', '/work/atlas', ${at})`
+        yield* sql`INSERT INTO project_repositories (id, project_id, relative_path, rank)
+          VALUES ('repo-1', 'atlas', './sources/api', 'a')`
+        yield* sql`INSERT INTO project_commands (id, project_id, name, line, kind, created_at, updated_at)
+          VALUES ('c-app', 'atlas', 'dev', 'pnpm dev', 'app', ${at}, ${at}),
+                 ('c-check', 'atlas', 'check', 'pnpm check', 'check', ${at}, ${at}),
+                 ('c-utility', 'atlas', 'seed', './seed.sh', 'utility', ${at}, ${at})`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Serve it', 'derived', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO command_runs (id, session_id, command_id, name, line, kind, cwd, state, started_by, started_at)
+          VALUES ('run-1', 'session-1', 'c-app', 'dev', 'pnpm dev', 'app', '/work/atlas', 'exited', 'user', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([WORKSPACES_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
+      `${WORKSPACES_MIGRATION}.sqlite`,
+    ])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const commands = yield* sql<{ id: string; type: string; scope: string; portless: number }>`
+          SELECT id, type, scope, portless FROM project_commands ORDER BY id`
+        const runs = yield* sql<{ type: string; workspace_id: string | null; environment: string }>`
+          SELECT type, workspace_id, environment FROM command_runs WHERE id = 'run-1'`
+        const main = yield* sql<{ state: string; spec_id: string | null }>`
+          SELECT state, spec_id FROM workspaces WHERE id = 'main-1'`
+        const repositories = yield* sql<{ included_by_default: number }>`
+          SELECT included_by_default FROM project_repositories WHERE id = 'repo-1'`
+        const columns = yield* sql<{
+          name: string
+        }>`SELECT name FROM pragma_table_info('project_commands')`
+        const events = yield* sql<{ type: string; payload: string }>`
+          SELECT type, payload FROM domain_events ORDER BY sequence`
+        return { commands, runs, main, repositories, columns, events }
+      }),
+    )
+
+    // The three kinds of lot 18 are read as the types that replace them (D8-07).
+    expect(kept.commands).toEqual([
+      { id: 'c-app', type: 'serve', scope: 'workspace', portless: 0 },
+      { id: 'c-check', type: 'test', scope: 'workspace', portless: 0 },
+      { id: 'c-utility', type: 'script', scope: 'workspace', portless: 0 },
+    ])
+    // The run keeps what it was started as, in the new word, and belongs to no Workspace yet:
+    // null is read as `main` (D8-08).
+    expect(kept.runs).toEqual([{ type: 'serve', workspace_id: null, environment: '{}' }])
+    // `main` is ready, as every Workspace written before this lot is (D8-01).
+    expect(kept.main).toEqual([{ state: 'ready', spec_id: null }])
+    expect(kept.repositories).toEqual([{ included_by_default: 1 }])
+    expect(kept.columns.map((column) => column.name)).not.toContain('kind')
+
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const table of [
+      'workspace_repositories',
+      'workspace_steps',
+      'project_preparation_steps',
+      'environment_variables',
+    ]) {
+      expect(schema).toContain(table)
+    }
+
+    // And the Journal says what was done to the data: the first opening, then this one.
+    expect(kept.events.map((event) => event.type)).toEqual([
+      'profile.opened',
+      'profile.migrated',
+      'profile.opened',
+      'profile.backed_up',
+      'profile.migrated',
+    ])
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: WORKSPACES_MIGRATION })
+  })
+
+  test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
+    const dataFolder = join(workspace, 'checks-twenty')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+
+    const refusals = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-23T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO workspaces (id, project_id, name, path, created_at)
+          VALUES ('main-1', 'atlas', 'main', '/work/atlas', ${at})`
+        const oldWord = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO project_commands (id, project_id, name, line, type, created_at, updated_at)
+              VALUES ('c1', 'atlas', 'dev', 'pnpm dev', 'app', ${at}, ${at})`
+          }),
+        )
+        const unknownStep = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO workspace_steps (id, workspace_id, position, kind, target, state)
+              VALUES ('s1', 'main-1', 1, 'worktree', './sources/api', 'wandering')`
+          }),
+        )
+        // A key set twice in the Project is refused; the same key in a Workspace is an override.
+        yield* sql`INSERT INTO environment_variables (id, project_id, workspace_id, key, value)
+          VALUES ('v1', 'atlas', NULL, 'PORT', '3000'), ('v2', 'atlas', 'main-1', 'PORT', '3001')`
+        const twice = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO environment_variables (id, project_id, workspace_id, key, value)
+              VALUES ('v3', 'atlas', NULL, 'PORT', '4000')`
+          }),
+        )
+        return [oldWord, unknownStep, twice].map((exit) => Exit.isFailure(exit))
+      }),
+    )
+
+    expect(refusals).toEqual([true, true, true])
   })
 })
