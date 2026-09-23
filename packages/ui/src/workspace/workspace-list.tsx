@@ -30,6 +30,13 @@ const NAME = 'min-w-0 truncate text-sm font-medium'
 
 const PATH = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
 
+const ICON = 'flex shrink-0 text-muted-foreground'
+
+/** Create and Cancel, at the end of the name's line. */
+const FORM_ACTIONS = 'flex shrink-0 gap-2'
+
+const CLEANUP = 'shrink-0'
+
 /** The last segment of a folder, which is the name a Workspace on it is proposed (D8-02). */
 function lastSegmentOf(path: string): string {
   return path.split(/[\\/]/).findLast((segment) => segment !== '') ?? ''
@@ -102,7 +109,7 @@ export function WorkspaceList({
           description={`On ${picked}, as it is: no worktree is made and no step is run.`}
           error={refusal ?? (unnamed ? 'A Workspace needs a name.' : undefined)}
           action={
-            <span className="flex shrink-0 gap-2">
+            <span className={FORM_ACTIONS}>
               <Button
                 variant="primary"
                 state={creating ? 'loading' : 'idle'}
@@ -122,7 +129,7 @@ export function WorkspaceList({
         {workspaces.map((workspace) => (
           <li key={workspace.id}>
             <CardRow>
-              <span className="flex shrink-0 text-muted-foreground">
+              <span className={ICON}>
                 <IconFolder size="sm" aria-hidden="true" />
               </span>
               <span className={LINE}>
@@ -139,7 +146,7 @@ export function WorkspaceList({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="shrink-0"
+                  className={CLEANUP}
                   aria-label={`Clean up ${workspace.name}`}
                   onClick={() => onCleanup(workspace.id)}
                 >

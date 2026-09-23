@@ -36,9 +36,18 @@ const INCLUDE = 'flex min-w-0 flex-1 basis-full items-center gap-2 text-sm'
 
 const CHECK_RING = 'flex rounded-sm focus-ring'
 
+/**
+ * The platform's own box in the theme's accent: the design system has no checkbox yet, and this
+ * is the same fallback `project/project-settings.tsx` takes for its ticks.
+ */
 const CHECK = 'size-icon-sm accent-primary outline-none disabled:opacity-50'
 
 const PATH = 'min-w-0 truncate font-mono'
+
+/** The base is a short sha; the branch is the longer of the two, and gets the room. */
+const BASE_FIELD = 'min-w-0 flex-1'
+
+const BRANCH_FIELD = 'min-w-0 flex-2'
 
 /** What the dialog keeps of a row while it is edited: the plan's line, with text to type in. */
 interface Row {
@@ -199,7 +208,7 @@ export function CreateWorkspaceDialog({
                 <>
                   <Input
                     label="Base"
-                    className="min-w-0 flex-1"
+                    className={BASE_FIELD}
                     value={row.base}
                     disabled={!row.included}
                     error={
@@ -211,7 +220,7 @@ export function CreateWorkspaceDialog({
                   />
                   <Input
                     label="Branch"
-                    className="min-w-0 flex-2"
+                    className={BRANCH_FIELD}
                     value={row.branch}
                     disabled={!row.included}
                     error={

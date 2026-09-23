@@ -84,6 +84,13 @@ const SENTENCE = 'min-w-0 flex-1 truncate text-sm text-foreground'
 
 const MARK = 'flex shrink-0 text-muted-foreground'
 
+const STEPS = 'flex flex-col gap-2'
+
+/** The form that adds a step: its kind, then what the kind needs, on one line when it fits. */
+const ADD = 'flex flex-wrap items-end gap-3'
+
+const FILE_FIELD = 'min-w-0 flex-1'
+
 const KIND_ICONS: Record<RecipeKind, FunctionComponent<IconProps>> = {
   copy: IconCopy,
   link: IconLink,
@@ -162,7 +169,7 @@ export function PreparationEditor({
       {steps.length === 0 ? (
         <p className={NOTE}>No step: a Workspace is ready as soon as its worktrees are.</p>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className={STEPS}>
           {steps.map((step, index) => {
             const Icon = KIND_ICONS[step.kind]
             const sentence = sentenceOf(step)
@@ -203,7 +210,7 @@ export function PreparationEditor({
         </ul>
       )}
 
-      <div className="flex flex-wrap items-end gap-3">
+      <div className={ADD}>
         <Select
           label="Step kind"
           value={kind}
@@ -233,7 +240,7 @@ export function PreparationEditor({
           <>
             <Input
               label="File"
-              className="min-w-0 flex-1"
+              className={FILE_FIELD}
               placeholder=".env"
               value={path}
               error={pathError}

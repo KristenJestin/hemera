@@ -116,8 +116,10 @@ export function RunDetails({
     exitCode === undefined || running || state === 'stopped'
       ? shown.word
       : `Exited ${String(exitCode)}`
+  // By code point, as the environment itself is keyed: the same order on every machine and
+  // locale, where `localeCompare` would follow the reader's language.
   const variables = Object.entries(environment).toSorted(([one], [other]) =>
-    one.localeCompare(other),
+    one < other ? -1 : one > other ? 1 : 0,
   )
   return (
     <section className={cn(DETAILS, className)} aria-label={`Run of ${name}`}>
