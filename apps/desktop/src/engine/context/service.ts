@@ -314,11 +314,15 @@ export const contextLayer = Layer.effect(
     const pending = (sessionId: string): Effect.Effect<Pending | null, Refusal> =>
       Effect.gen(function* () {
         const root = yield* rootOf(sessionId)
-        const instructions = yield* instructionsOf(root)
-        if (instructions === null) return null
+        const read = yield* instructionsOf(root)
+        const before = yield* lastGiven(sessionId)
+        // A file deleted or renamed away after the agent read it is a change too: the agent still
+        // holds the old instructions, and it is told they are now empty. A Workspace that never
+        // had one has nothing to say.
+        if (read === null && before === null) return null
+        const instructions = read ?? { text: '', fingerprint: fingerprintOf('') }
         // What the agent holds is what it was last given, read at the start or delivered since:
         // a file that reads as that is not a change, and one that reads as anything else is.
-        const before = yield* lastGiven(sessionId)
         if (before === instructions.fingerprint) return null
         return {
           path: AGENTS_FILE,

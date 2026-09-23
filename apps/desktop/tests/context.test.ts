@@ -197,6 +197,26 @@ describe('what a Session is provided', () => {
     expect(seen.provided.filter((one) => one.kind === 'instructions')).toHaveLength(3)
   })
 
+  it('hands over a file deleted after the agent read it as an empty change, once', async () => {
+    instructions('Be brief.\n')
+
+    const seen = await given(
+      Effect.gen(function* () {
+        const { sessionId } = yield* opened
+        yield* (yield* Context).start(sessionId)
+        rmSync(join(root, AGENTS_FILE))
+        const once = yield* handedOver(sessionId)
+        const twice = yield* handedOver(sessionId)
+        return { once, twice }
+      }),
+    )
+
+    expect(seen.once?.content).toBe('')
+    expect(seen.once?.text).toContain(DELIVERY_MARKER)
+    expect(seen.once?.record.kind).toBe('instructions')
+    expect(seen.twice).toBeNull()
+  })
+
   it('keeps a change pending until it is recorded as given, and names what it replaces', async () => {
     const A = 'Be brief.\n'
     const B = 'Be brief, and say why.\n'
