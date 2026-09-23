@@ -171,6 +171,50 @@ describe('A permission request blocks the turn', () => {
   })
 })
 
+describe("The agent's own permission for one of Hemera's tools", () => {
+  test('is allowed once without the human, since Hemera gates its tools itself', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'asks', call: { ...ASKED, title: 'mcp__hemera__fs_read' } },
+        { does: 'asks', call: { ...ASKED, id: 'call-2', title: 'hemera_fs_write' } },
+        { does: 'says', text: 'done' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const report = yield* runtime.prompt(session.id, 'read it')
+
+        expect(report.stopReason).toBe('end_turn')
+        // "Allow once" and never "always": nothing is remembered on the agent's side (D6-05).
+        expect(agent.answers.optionIds).toEqual(['allow-once', 'allow-once'])
+        const entries = yield* threadOf(session.id)
+        expect(entries.some((entry) => entry.kind === 'permission_request')).toBe(false)
+      }),
+    )
+  })
+
+  test('a bare name is not taken for one of them: the human is asked', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'asks', call: { ...ASKED, title: 'fs_write' } }] })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'write it'))
+
+        yield* heldInThread(session.id, (held) => waiting(held) === 1)
+        yield* runtime.decide(session.id, 'call-1', 'reject-once')
+        yield* Fiber.join(running)
+
+        expect(agent.answers.optionIds).toEqual(['reject-once'])
+      }),
+    )
+  })
+})
+
 describe('Stop ends the turn cleanly', () => {
   test('stop during a long turn', async () => {
     const gate = gated(1)

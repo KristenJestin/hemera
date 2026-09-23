@@ -40,6 +40,7 @@ import {
   type BaseReach,
   CONTEXT_BASE,
   contextUri,
+  hemeraToolNamed,
   type Session,
   type SessionEntryOrigin,
 } from '@hemera/core'
@@ -1690,6 +1691,16 @@ export const runtimeLayer = Layer.effect(
       question: PermissionQuestion,
     ): Effect.Effect<PermissionAnswer, AgentRuntimeError> =>
       Effect.gen(function* () {
+        // A question about one of Hemera's own tools is not the agent's to ask: Hemera gates its
+        // tools itself, inside the root on its own and outside it with its own block (D6-05), and
+        // an agent's "always allow" would be a rule remembered on the agent's side. It is allowed
+        // once, under the agent's prefix only, and the call then meets Hemera's own gate.
+        const hemera = hemeraToolNamed(question.tool)
+        const once = question.options.find((option) => option.kind === 'allow_once')
+        if (hemera !== null && question.tool.toLowerCase() !== hemera && once !== undefined) {
+          return { optionId: once.id } satisfies PermissionAnswer
+        }
+
         const turn = turns.get(sessionId)
         if (turn === undefined) {
           // A question outside a turn is a question with nothing to block: the protocol has an

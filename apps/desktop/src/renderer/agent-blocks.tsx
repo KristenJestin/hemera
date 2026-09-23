@@ -1,3 +1,4 @@
+import { hemeraToolNamed } from '@hemera/core'
 import type { CommandRun as Run, SessionEntry } from '@hemera/ipc'
 import {
   AgentText,
@@ -24,12 +25,7 @@ import {
 import type { ReactNode } from 'react'
 import { z } from 'zod'
 
-import {
-  commandRunOf,
-  contextDeliveryOf,
-  hemeraToolCallOf,
-  hemeraToolNamed,
-} from './agent-tool-payloads.ts'
+import { commandRunOf, contextDeliveryOf, hemeraToolCallOf } from './agent-tool-payloads.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).

@@ -60,6 +60,7 @@ export {
   SEARCH_SKIPS_LISTED,
   TOOL_NAMES,
   admitTool,
+  hemeraToolNamed,
   offeredTools,
 } from './domain/tools.ts'
 export type {

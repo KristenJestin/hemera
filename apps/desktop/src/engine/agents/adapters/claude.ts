@@ -89,6 +89,9 @@ export const claude: AgentAdapter = {
             // Documented as removing every built-in, with the MCP tools kept — which is what
             // makes this agent qualified rather than merely configured.
             tools: [],
+            // Hemera's tools are gated by Hemera (D6-05): allowed here so Claude Code does not
+            // put its own permission, with its "always allow", in front of Hemera's gate.
+            allowedTools: ['mcp__hemera__*'],
             settingSources: [],
             strictMcpConfig: true,
             systemPrompt: { type: 'custom', prompt: input.base, snapshot: true },

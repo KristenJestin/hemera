@@ -94,6 +94,22 @@ export function offeredTools(mission: Mission): readonly ToolName[] {
   }
 }
 
+/**
+ * The tool of Hemera's a name an agent reports designates, or null for one of the agent's own
+ * (D6-06).
+ *
+ * Every agent reports the calls it makes, Hemera's included, as its own: the name is the tool's
+ * under the agent's prefix — `mcp__hemera__fs_read` on Claude Code and Codex, `hemera_fs_read`
+ * on OpenCode — or the bare name.
+ */
+export function hemeraToolNamed(title: string): ToolName | null {
+  const bare = title
+    .replace(/^mcp__hemera__/i, '')
+    .replace(/^hemera_/i, '')
+    .toLowerCase()
+  return TOOL_NAMES.find((name) => name === bare) ?? null
+}
+
 /** What the guard answers: the call goes through, or it does not and says why. */
 export type GuardDecision =
   | { readonly admitted: true }

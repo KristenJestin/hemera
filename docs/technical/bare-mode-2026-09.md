@@ -107,6 +107,35 @@ The SDK's `toolAliases` (`sdk.d.ts` ~1535) is the documented bridge for prompts 
 }
 ```
 
+### Permissions for Hemera's own tools (added in lot 2b)
+
+Emptying the built-ins does not stop Claude Code from asking about the MCP tools that remain.
+The adapter passes `permissionMode`, read from its own `SettingsManager`, which reads
+`~/.claude/settings.json` and the Workspace's `.claude/settings*.json` whatever `settingSources`
+says. It also passes `canUseTool`, which forwards anything the CLI does not allow on its own to
+ACP `session/request_permission`, with persistent "always allow" options (`dist/acp-agent.js`,
+`canUseTool` and the `options` object built for `query`). In `default` mode Claude Code asks
+before an MCP tool runs. Each Hemera call would then meet Claude's permission block before
+Hemera's own gate, and an "always allow" would be written into Claude's local settings. D6-05
+rules out both.
+
+Hemera does two things about it:
+
+- Its `_meta.claudeCode.options` carry `allowedTools: ["mcp__hemera__*"]`. The adapter spreads
+  `userProvidedOptions` into the SDK's `Options`, and `allowedTools` is the SDK's list of "tool
+  names that are auto-allowed without prompting" (`sdk.d.ts` ~1496). `mcp__hemera__*` is the
+  permission rule for every tool of the server named `hemera`.
+- The runtime answers a permission request about one of Hemera's tools itself, with the
+  agent's "allow once" option. The tool is read from `_meta.claudeCode.toolName` when the adapter
+  sends it, and from the title otherwise. Only a name under an agent's prefix counts
+  (`mcp__hemera__*`, `hemera_*`), so a native tool that happens to share a bare name is not
+  allowed this way. The call then goes through Hemera's own gate: inside the root on its own,
+  outside it through Hemera's block. Nothing is remembered on the agent's side.
+
+The second one also covers an agent or a version that ignores `allowedTools`. Whether Claude
+Code 2.1 still prompts with `allowedTools` set has not been run here yet; the phase-3 Windows
+trial checks it.
+
 ---
 
 ## 2. Codex over ACP

@@ -39,6 +39,8 @@ export type ClaudeCodeMeta = {
     readonly options: {
       /** The built-in tools: none of them, with the MCP tools kept. */
       readonly tools: readonly string[]
+      /** The tools allowed without the agent asking: Hemera's own, which Hemera gates itself. */
+      readonly allowedTools: readonly string[]
       /** The settings sources: no user, project or local file is read. */
       readonly settingSources: readonly string[]
       /** Only the servers handed over in the session: none of the user's own MCP configuration. */

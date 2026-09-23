@@ -1,4 +1,4 @@
-import { TOOL_NAMES } from '@hemera/core'
+import { hemeraToolNamed } from '@hemera/core'
 import type { CommandRun, SessionEntry } from '@hemera/ipc'
 import type { CommandKind, CommandState, HemeraToolArgument, HemeraToolStatus } from '@hemera/ui'
 import { z } from 'zod'
@@ -173,22 +173,6 @@ export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | n
 
 /** What the agent reports of a call, as far as telling one of Hemera's apart goes. */
 const reportedCallSchema = z.object({ call: z.object({ title: z.string() }) })
-
-/**
- * The tool of Hemera's a native call names, or null for one of the agent's own (D6-06).
- *
- * Every agent reports the calls it makes, Hemera's included, as its own `tool_call`: the name is
- * the tool's under the agent's prefix — `mcp__hemera__fs_read` on Claude Code and Codex,
- * `hemera_fs_read` on OpenCode — or the bare name. Such a call is the same call as the
- * `hemera_tool_call` entry Hemera writes for it, seen from the other end.
- */
-export function hemeraToolNamed(title: string): string | null {
-  const bare = title
-    .replace(/^mcp__hemera__/i, '')
-    .replace(/^hemera_/i, '')
-    .toLowerCase()
-  return TOOL_NAMES.find((name) => name === bare) ?? null
-}
 
 /** The tool of Hemera's an entry is about, whichever end reported it, or null. */
 function hemeraToolOf(entry: SessionEntry): string | null {

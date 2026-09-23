@@ -77,6 +77,12 @@ describe("A qualified agent has only Hemera's tools", () => {
     expect(options.meta?.claudeCode.options.strictMcpConfig).toBe(true)
   })
 
+  test("Claude Code runs Hemera's tools without asking its own permission for them", async () => {
+    const options = await Effect.runPromise(bareOptionsOf(claude, 'linux', input))
+
+    expect(options.meta?.claudeCode.options.allowedTools).toEqual(['mcp__hemera__*'])
+  })
+
   test('OpenCode is handed a catch-all deny, with its own namespace re-allowed', async () => {
     const options = await Effect.runPromise(bareOptionsOf(opencode, 'linux', input))
 

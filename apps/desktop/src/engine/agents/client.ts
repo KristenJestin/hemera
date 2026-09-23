@@ -47,6 +47,9 @@ import type { ClaudeCodeMeta } from './bare.ts'
  */
 export type SessionMeta = ClaudeCodeMeta
 
+/** Where Claude Code names the tool a permission is about, beside a title made for reading. */
+const CLAUDE_TOOL = z.object({ claudeCode: z.object({ toolName: z.string() }) })
+
 /** What went wrong while speaking the protocol, and at which step. */
 export class AgentProtocolError extends Data.TaggedError('AgentProtocolError')<{
   readonly what: string
@@ -246,6 +249,11 @@ export interface AgentOptionValue {
 export interface PermissionQuestion {
   readonly toolCallId: string
   readonly title: string
+  /**
+   * The tool the question is about, as the agent names it: Claude Code says it under
+   * `_meta.claudeCode.toolName`, and its title is only a title; the other agents' title is it.
+   */
+  readonly tool: string
   readonly options: readonly {
     readonly id: string
     readonly name: string
@@ -719,9 +727,12 @@ export function connect(
     const client: AcpClient = {
       // ACP's own contract: whatever the user answered, in the shape the protocol takes it in.
       requestPermission: async (request) => {
+        // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+        const named = CLAUDE_TOOL.safeParse(request.toolCall._meta)
         const answer = await options.onPermission({
           toolCallId: request.toolCall.toolCallId,
           title: request.toolCall.title ?? '',
+          tool: named.success ? named.data.claudeCode.toolName : (request.toolCall.title ?? ''),
           options: request.options.map((option) => ({
             id: option.optionId,
             name: option.name,

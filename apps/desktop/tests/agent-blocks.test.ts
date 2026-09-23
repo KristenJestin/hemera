@@ -11,6 +11,7 @@
 
 import { describe, expect, test } from 'vite-plus/test'
 
+import { hemeraToolNamed } from '@hemera/core'
 import type { SessionEntry } from '@hemera/ipc'
 
 import {
@@ -18,7 +19,6 @@ import {
   contextDeliveryOf,
   foldedCallsOf,
   hemeraToolCallOf,
-  hemeraToolNamed,
 } from '#renderer/agent-tool-payloads.ts'
 
 /** A thread entry with every field but `kind`, `role`, `body` and `payload` held to a fixed default. */
