@@ -138,3 +138,11 @@ describe('a link inside the root that leads nowhere', () => {
     expect(settled).toBe(join(realpathSync.native(root), 'src', 'later', 'file.ts'))
   })
 })
+
+describe('a child of the root whose name starts with two dots', () => {
+  it('is inside the root, and nothing is asked about it', async () => {
+    const settled = await resolveInside(root, '..notes/today.md', realpath)
+
+    expect(settled).toBe(join(realpathSync.native(root), '..notes', 'today.md'))
+  })
+})

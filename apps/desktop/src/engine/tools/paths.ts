@@ -14,7 +14,7 @@
  */
 
 import { readlink, realpath } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 /** Why a path the agent named was not accepted. */
 export type RefusedWhy = 'outside' | 'unreadable'
@@ -49,7 +49,9 @@ export class RefusedPathError extends Error {
 /** Whether a resolved path is the root itself or sits under it. */
 export function containedIn(root: string, resolved: string): boolean {
   const path = relative(root, resolved)
-  return path === '' || (!path.startsWith('..') && !isAbsolute(path))
+  // `..` itself, or a path that starts by climbing out: a child named `..notes` is inside.
+  const climbs = path === '..' || path.startsWith(`..${sep}`)
+  return path === '' || (!climbs && !isAbsolute(path))
 }
 
 /**
