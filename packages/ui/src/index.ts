@@ -370,6 +370,7 @@ export {
 /** The variables, the services and the details of a run of a Workspace (lot 20). */
 export { VariablesEditor, type VariablesEditorProps } from './workspace/variables-editor.tsx'
 export { ServiceList, type ServiceListProps } from './workspace/service-list.tsx'
+export { RunDetails, type RunDetailsProps, type RunState } from './activity/run-details.tsx'
 export type {
   PortConflict,
   Readiness,

@@ -389,6 +389,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // Lot 20: the variables, the services and the details of a run of a Workspace.
       'VariablesEditor',
       'ServiceList',
+      'RunDetails',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
