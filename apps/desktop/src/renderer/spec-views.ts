@@ -291,6 +291,26 @@ function isSection(target: string): target is SectionName {
   return target in SECTION_WORDS
 }
 
+/** A section whose text took the caret, and the version its edit was opened on (D7-12). */
+export interface OpenedSection {
+  name: SectionName
+  version: number
+}
+
+/**
+ * The section a part of the document is, and the version a save of it is checked against: the
+ * version the panel draws it at when the caret goes in, 0 for a section not written yet — `plan`
+ * until somebody writes it. Null for a part that is no section: the stories, the tasks, the
+ * questions.
+ */
+export function openedOn(
+  sections: readonly SectionView[],
+  part: string | null | undefined,
+): OpenedSection | null {
+  if (part === null || part === undefined || !isSection(part)) return null
+  return { name: part, version: sections.find((one) => one.name === part)?.version ?? 0 }
+}
+
 /**
  * What is left before ready, as links to where each is fixed: one item per missing section and
  * per story left uncovered, one for the blocking questions and one for the phases, however many

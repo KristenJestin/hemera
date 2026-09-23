@@ -132,6 +132,11 @@ export async function openSpec(specId: string): Promise<void> {
   await refresh(specId)
 }
 
+/** Reads the open Spec again, as it is now: what a save refused before it was sent asks for. */
+export async function readSpecAgain(): Promise<void> {
+  if (shown !== null) await refresh(shown)
+}
+
 export function closeSpec(): void {
   shown = null
   replace(EMPTY)

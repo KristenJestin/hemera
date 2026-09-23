@@ -22,6 +22,7 @@ import type {
 import {
   dayOf,
   nowOf,
+  openedOn,
   readerOf,
   readinessOf,
   revisionsOf,
@@ -195,6 +196,25 @@ describe('The panel says what is happening in one sentence', () => {
     expect(nowOf(snapshot({ phases: phases('finished', 'stale', 'pending') }))).toBe(
       'Plan · stale after a new shaping, the agent re-declares it',
     )
+  })
+})
+
+describe('A section save carries the version the edit was opened on', () => {
+  test('a section written is opened on the version the panel draws it at', () => {
+    const sections = sectionsOf(snapshot(), [])
+    expect(openedOn(sections, 'scope')).toEqual({ name: 'scope', version: 2 })
+  })
+
+  test('a section not written yet, the plan before anybody writes it, is opened on 0', () => {
+    const sections = sectionsOf(snapshot(), [])
+    expect(sections.some((one) => one.name === 'plan')).toBe(false)
+    expect(openedOn(sections, 'plan')).toEqual({ name: 'plan', version: 0 })
+  })
+
+  test('a part that is no section opens nothing', () => {
+    const sections = sectionsOf(snapshot(), [])
+    expect(openedOn(sections, 'stories')).toBe(null)
+    expect(openedOn(sections, null)).toBe(null)
   })
 })
 

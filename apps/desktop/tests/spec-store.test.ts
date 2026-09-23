@@ -168,7 +168,7 @@ describe('A Spec is opened with everything the panel draws', () => {
 })
 
 describe('A human edit is recorded and reaches the agent', () => {
-  test('a save is written from its Session, on the version the edit was opened on', async () => {
+  test('a save is sent from its Session with the version it is handed', async () => {
     reads(2)
     await openSpec('spec-7')
     answers.set('specs.writeSection', snapshot(3))

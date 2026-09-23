@@ -44,6 +44,7 @@ import {
   createSpec,
   discardMine,
   markReady,
+  readSpecAgain,
   rework,
   saveSection,
   saveStories,
@@ -52,7 +53,7 @@ import {
   subscribeToSpec,
   takeOver,
 } from '../spec-store.ts'
-import { readerOf, specViewOf, storiesWith } from '../spec-views.ts'
+import { openedOn, readerOf, specViewOf, storiesWith } from '../spec-views.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -270,10 +271,10 @@ export function SessionPage({
   const versionOf = (name: SectionName): number =>
     spec?.sections.find((one) => one.name === name)?.version ?? 0
   const noteOpened = (event: FocusEvent<HTMLElement>): void => {
-    if (!(event.target instanceof HTMLTextAreaElement)) return
+    if (!(event.target instanceof HTMLTextAreaElement) || spec === null) return
     const part = event.target.closest('[data-part]')?.getAttribute('data-part')
-    const section = spec?.sections.find((one) => one.name === part)
-    if (section !== undefined) opened.current.set(section.name, section.version)
+    const section = openedOn(spec.sections, part)
+    if (section !== null) opened.current.set(section.name, section.version)
   }
 
   const write = async (body: string): Promise<string | null> => {
@@ -648,9 +649,13 @@ export function SessionPage({
             spec={spec}
             reader={readerOf(defined, session.id, sessions)}
             onSaveSection={(name, body) => {
-              const base = opened.current.get(name) ?? versionOf(name)
+              const base = opened.current.get(name)
               opened.current.delete(name)
-              void saveSection(session.id, name, body, base)
+              // A text whose opening was never seen has no version to be checked against:
+              // saving it on the one on screen now would be last-writer-wins, so it is not
+              // saved, and the Spec is read again.
+              if (base === undefined) void readSpecAgain()
+              else void saveSection(session.id, name, body, base)
             }}
             onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
             onDiscardMine={(name) => void discardMine(name)}
