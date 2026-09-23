@@ -116,3 +116,26 @@ export const PersonalSourcesNotControlled: Story = {
     await expect(canvas.getByText(/its configuration and skills are its own/)).toBeVisible()
   },
 }
+
+/**
+ * A Session on an agent Hemera cannot empty of its own tools (D6-02): nothing has gone in, and
+ * what the agent keeps to itself is the reason no Session is opened on it, said rather than hidden.
+ */
+export const UnqualifiedAgent: Story = {
+  args: {
+    provided: [],
+    agents: [
+      {
+        name: 'codex',
+        sentence:
+          'not qualified: apply_patch and the three MCP resource tools cannot be switched off, so Hemera would not see those calls and opens no Session on it',
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Nothing has gone in yet.')).toBeVisible()
+    await userEvent.click(canvas.getByText('Hemera does not control'))
+    await expect(canvas.getByText(/not qualified: apply_patch/)).toBeVisible()
+  },
+}
