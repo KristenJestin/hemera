@@ -36,7 +36,7 @@ import type { ModelChoice } from './agent-model-menu-shared.tsx'
  * of it, and what is left under it is the panel's own surface.
  */
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Composer/AgentModelMenu',
   component: AgentModelMenu,
   render: (args) => <Controlled {...args} render={(props) => <AgentModelMenu {...props} />} />,
