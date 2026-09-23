@@ -772,6 +772,24 @@ export const commandsLayer = Layer.effect(
           return yield* service.output(sessionId, runId)
         }),
     }
+
+    // A quit takes every run down with the engine's scope — the supervisor stops each tree as
+    // it closes — and the watchers that write how a run ended go with that scope too. Added
+    // before any run was started, this runs after all of them, once the processes are gone, and
+    // writes each run still going as stopped: the panel of the next start must not show a
+    // process that died with the last one as running (D6-12).
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        const endedAt = new Date().toISOString()
+        for (const [id, record] of [...live.entries()]) {
+          if (record.state !== 'running') continue
+          record.state = 'stopped'
+          record.endedAt = endedAt
+          yield* writeRow(id, record, 'command.stopped').pipe(Effect.ignore)
+        }
+        live.clear()
+      }),
+    )
     return service
   }),
 )
