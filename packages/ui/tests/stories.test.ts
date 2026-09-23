@@ -389,6 +389,11 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
     // theme, not components: the application needs them to hand the shell a width and to say
     // which place it is on.
     const values = [
+      // Lot 20: the seven command types, their scopes, their icons and their labels (D8-07).
+      'COMMAND_SCOPES',
+      'COMMAND_TYPES',
+      'COMMAND_TYPE_ICONS',
+      'COMMAND_TYPE_LABELS',
       'EMPTY_DRAFT',
       'EVERYWHERE_PREFIX',
       'HOME_ENTRY',

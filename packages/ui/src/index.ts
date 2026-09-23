@@ -272,6 +272,15 @@ export {
   type CommandRunProps,
   type CommandState,
 } from './activity/command-run.tsx'
+/** The seven types of a command and the icon the design system fixes for each (D8-07). */
+export {
+  COMMAND_SCOPES,
+  COMMAND_TYPES,
+  COMMAND_TYPE_ICONS,
+  COMMAND_TYPE_LABELS,
+  type CommandScope,
+  type CommandType,
+} from './activity/command-type.ts'
 
 /** The gate a turn stops at, and the one line the answer leaves behind. */
 export {
