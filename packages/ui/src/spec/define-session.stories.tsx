@@ -289,13 +289,17 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/*
+ * The eight screens first, each named after the state it shows and each left as it opens: its
+ * play asserts and changes nothing, so the screen the gate looks at is the screen as drawn. The
+ * paths through them — the outline walked, a Spec marked ready, reworked, taken over, a conflict
+ * applied — are stories of their own, named after what they do.
+ */
+
 /**
  * Screen 1 · a feature being planned: shape finished, plan open with the pulse in the outline,
  * one blocking question on the stage, three checks of seven — no task exists before Decompose.
  * The thread says what the agent was handed in one folded Hemera line.
- *
- * Outline navigation: the keyboard walks the outline and opens the tasks, which say when they
- * will come.
  */
 export const MidPlan: Story = {
   play: async ({ canvasElement }) => {
@@ -303,6 +307,16 @@ export const MidPlan: Story = {
     await expect(canvas.getByRole('button', { name: /Mission brief · plan/ })).toBeVisible()
     await expect(canvas.getByRole('group', { name: 'Readiness, 3 of 7 checks pass' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Plan, being written' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tasks, 0, not written' })).toBeVisible()
+    await expect(canvas.getByRole('heading', { name: 'Questions' })).toBeVisible()
+    await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
+  },
+}
+
+/** Outline navigation: the keyboard walks the outline and opens the tasks, not written yet. */
+export const MidPlanOutlineWalked: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
     const tasks = canvas.getByRole('button', { name: 'Tasks, 0, not written' })
     const questions = canvas.getByRole('button', { name: /^Questions, 1/ })
     questions.focus()
@@ -336,30 +350,37 @@ export const Empty: Story = {
       canvas.getByRole('heading', { name: 'This Session defines a Spec.' }),
     ).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Create a Spec' })).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Join a Spec' }))
-    await expect(canvas.getByRole('button', { name: /ATL-12/ })).toHaveFocus()
+    await expect(canvas.getByRole('list', { name: 'Drafts in Atlas' })).toBeVisible()
   },
 }
 
-/**
- * Screen 4 · every check passes: `Ready to freeze`, `Mark ready` offered, and pressing it
- * freezes the Spec — the stage goes read only and `Rework` appears.
- */
+/** Screen 4 · every check passes: `Ready to freeze`, and `Mark ready` offered. */
 export const GateFull: Story = {
   args: { screen: 'gateFull' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Ready to freeze')).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeEnabled()
     await expect(canvas.getByText('4 tasks, 1 for you')).toBeVisible()
+  },
+}
+
+/** Mark ready pressed: the Spec is frozen, the stage read only, and Rework appears. */
+export const GateFullMarkedReady: Story = {
+  args: { screen: 'gateFull' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
     await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
     await expect(canvas.getByText(/Frozen on today/)).toBeVisible()
+    // It leaves the way it came, and is gone once it has.
+    await waitFor(() => expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull())
   },
 }
 
 /**
  * Screen 5 · ready and frozen at revision 2: no editing look, the picker of the revisions, and
- * Rework asking for its reason before it copies the whole contract into revision 3.
+ * Rework at the end of the head.
  */
 export const ReadyFrozen: Story = {
   args: { screen: 'ready' },
@@ -369,6 +390,27 @@ export const ReadyFrozen: Story = {
     await expect(within(stage).getByText('frozen')).toBeVisible()
     await expect(canvas.queryByRole('textbox', { name: 'Expected outcome' })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'rev 2' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
+  },
+}
+
+/** Screen 5, with the rework dialog open over the frozen Spec, as the brief draws it. */
+export const ReworkAsked: Story = {
+  args: { screen: 'ready', reworkOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await expect(await page.findByRole('dialog', { name: 'Rework ATL-7' })).toBeVisible()
+  },
+}
+
+/**
+ * Rework: the reason asked for, then the whole contract copied into revision 3, a draft again
+ * whose plan and tasks are stale.
+ */
+export const ReadyReworked: Story = {
+  args: { screen: 'ready' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Rework' }))
     const page = within(document.body)
     // The dialog rises into place; what is asked is where it ends.
@@ -385,26 +427,26 @@ export const ReadyFrozen: Story = {
   },
 }
 
-/** Screen 5, with the rework dialog open over the frozen Spec, as the brief draws it. */
-export const ReworkAsked: Story = {
-  args: { screen: 'ready', reworkOpen: true },
-  play: async () => {
-    const page = within(document.body)
-    await expect(await page.findByRole('dialog', { name: 'Rework ATL-7' })).toBeVisible()
-  },
-}
-
 /**
  * Screen 6 · the draft read from a second Session: the quiet bar with `Take over`; the agent of
- * this Session does not write, and you still edit in place — the edit saved on blur.
+ * this Session does not write, and you still edit in place.
  */
 export const Reader: Story = {
   args: { screen: 'reader' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('« Spec CSV »')).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Take over' })).toBeVisible()
     await expect(canvas.getByText('you can edit; the agent of the writer is told')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Tasks, 3, being written' })).toBeVisible()
+  },
+}
+
+/** A reader edits a story in place, saved on blur, then takes the write right over. */
+export const ReaderEditsThenTakesOver: Story = {
+  args: { screen: 'reader' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
     const narrative = canvas.getByRole('textbox', { name: 'Narrative of S2' })
     await userEvent.click(narrative)
     await userEvent.keyboard('{Control>}{End}{/Control} Each keeps its invoice number.')
@@ -416,8 +458,8 @@ export const Reader: Story = {
 }
 
 /**
- * Screen 7 · a conflict keeps the human's text: the banner inside Scope, your text in the
- * editor, the agent's version on Compare, and yours applied on top of it.
+ * Screen 7 · a conflict keeps the human's text: the banner inside Scope and your text in the
+ * editor, whole.
  */
 export const Conflict: Story = {
   args: { screen: 'conflict' },
@@ -427,7 +469,18 @@ export const Conflict: Story = {
       canvas.getByText('Your text was written on v3; the section is at v5.'),
     ).toBeVisible()
     await expect(canvas.getByRole('textbox', { name: 'Scope, your text' })).toHaveValue(SCOPE_MINE)
+    await expect(
+      canvas.getByRole('button', { name: 'Scope, in conflict with your text' }),
+    ).toBeVisible()
     await expect(canvas.getByRole('group', { name: 'Readiness, 3 of 7 checks pass' })).toBeVisible()
+  },
+}
+
+/** Conflict actions: the agent's version on Compare, then yours applied on top of it. */
+export const ConflictApplied: Story = {
+  args: { screen: 'conflict' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Compare' }))
     await expect(canvas.getByText('v5 · agent')).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Apply mine on v5' }))

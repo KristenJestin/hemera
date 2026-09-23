@@ -206,11 +206,18 @@ export const Stale: Story = {
   },
 }
 
-/**
- * A conflict keeps the human's text: the banner inside the section, your text in the editor,
- * Compare showing the current one, and `Apply mine on v5` writing yours on top of it.
- */
+/** A conflict keeps the human's text: the banner inside the section, your text in the editor. */
 export const Conflict: Story = {
+  args: { section: sectionOf(CONFLICT.sections, 'scope') },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('not saved')).toBeVisible()
+    await expect(canvas.getByRole('textbox', { name: 'Scope, your text' })).toHaveValue(SCOPE_MINE)
+  },
+}
+
+/** Compare shows the current text, and `Apply mine on v5` writes yours on top of it. */
+export const ConflictApplied: Story = {
   args: { section: sectionOf(CONFLICT.sections, 'scope') },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
