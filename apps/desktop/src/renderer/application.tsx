@@ -108,7 +108,7 @@ import {
   subscribeToSessions,
   writeMessage,
 } from './sessions-store.ts'
-import { closeSpec, listenToSpecs, openSpec } from './spec-store.ts'
+import { closeSpec, forgetSpecRefusal, listenToSpecs, openSpec } from './spec-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -492,6 +492,12 @@ export function Application() {
       }),
     [],
   )
+
+  // What a Spec act was refused with belongs to the Session it was made in: accepting a proposal
+  // refused in one Session is not a sentence to show under the composer of the next.
+  useEffect(() => {
+    forgetSpecRefusal()
+  }, [openId])
 
   // The Spec of the Session on screen, opened when that Session defines one (D7-07).
   useEffect(() => {

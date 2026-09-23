@@ -15,6 +15,7 @@ import {
   closeSpec,
   createSpec,
   discardMine,
+  forgetSpecRefusal,
   listenToSpecs,
   markReady,
   openSpec,
@@ -428,5 +429,18 @@ describe('Accepting the proposal creates the Spec', () => {
       argument: { sessionId: 'writer', type: 'feature', title: 'CSV invoice export' },
     })
     expect(specSnapshot().snapshot?.spec.key).toBe('ATL-7')
+  })
+})
+
+describe('A refusal stays with the Session it was made in', () => {
+  test('a proposal refused is said, and forgotten when the window opens another Session', async () => {
+    answers.set('specs.create', new Error('The Session "Invoices" already defines a Spec.'))
+
+    expect(await createSpec('writer', 'feature', 'CSV invoice export')).toBe(false)
+    expect(specSnapshot().refusal).toBe('The Session "Invoices" already defines a Spec.')
+
+    forgetSpecRefusal()
+
+    expect(specSnapshot().refusal).toBeNull()
   })
 })
