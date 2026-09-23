@@ -12,7 +12,16 @@
  * that refuses is a tool that answered.
  */
 
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -598,6 +607,69 @@ describe('A write outside the root asks the human', () => {
     expect(asked?.body).toContain(where)
     expect(seen.answer.ok).toBe(true)
     expect(readFileSync(where, 'utf8')).toBe('allowed once')
+  })
+})
+
+describe('A write through a link inside the root that leads outside asks the human', () => {
+  it('asks about the place the link points at, and writes nothing there when refused', async () => {
+    // A junction to a folder that does not exist yet: `realpath` fails on it, and it is inside.
+    symlinkSync(join(folder, 'planted'), join(root, 'notes'), 'junction')
+    const human = humanSaying('refused')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const write = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'notes/keys.txt', content: 'planted', key: 'link-1' },
+        })
+        const edit = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_edit',
+          arguments: { path: 'notes/keys.txt', old: 'a', new: 'b', key: 'link-2' },
+        })
+        return { write, edit }
+      }),
+    )
+
+    expect(human.asked.map((one) => one.named)).toEqual([
+      join(folder, 'planted', 'keys.txt'),
+      join(folder, 'planted', 'keys.txt'),
+    ])
+    expect(seen.write.ok).toBe(false)
+    expect(seen.edit.ok).toBe(false)
+    expect(existsSync(join(folder, 'planted'))).toBe(false)
+  })
+})
+
+describe('A write to a hard link inside the root', () => {
+  it('replaces the name inside the root and leaves the file outside as it was', async () => {
+    const outside = join(folder, 'shared.txt')
+    writeFileSync(outside, 'outside')
+    linkSync(outside, join(root, 'written.txt'))
+    linkSync(outside, join(root, 'edited.txt'))
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const write = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'written.txt', content: 'inside', key: 'hard-1' },
+        })
+        const edit = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_edit',
+          arguments: { path: 'edited.txt', old: 'outside', new: 'edited', key: 'hard-2' },
+        })
+        return { write, edit }
+      }),
+    )
+
+    expect(seen.write.ok).toBe(true)
+    expect(seen.edit.ok).toBe(true)
+    expect(readFileSync(join(root, 'written.txt'), 'utf8')).toBe('inside')
+    expect(readFileSync(join(root, 'edited.txt'), 'utf8')).toBe('edited')
+    expect(readFileSync(outside, 'utf8')).toBe('outside')
   })
 })
 

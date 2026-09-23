@@ -5,14 +5,16 @@
  * a symlink that leaves the root is a path outside the root, and so is `..` that climbs out of
  * it. A file that does not exist yet is judged by its deepest existing ancestor, which is what
  * lets a tool create a file in a folder the user asked for without first creating the folder.
+ * A link that leads nowhere is not a file that does not exist yet: writing through it creates
+ * whatever it points at, so it is judged by where it points, whether anything is there or not.
  *
  * Nothing here decides to refuse: it says whether a path is inside, and the caller asks the
  * human for what is not. Technical reachability is not an authorisation (D6-05), so the token a
  * Session carries never enters this file.
  */
 
-import { realpath } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { readlink, realpath } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 /** Why a path the agent named was not accepted. */
 export type RefusedWhy = 'outside' | 'unreadable'
@@ -95,12 +97,13 @@ export async function resolveInside(
   // An absolute path spelled under the root as the user opened it is the same place under the
   // root as it really is: it is followed from the real root, so the last check is one check.
   const within = underReal ? candidate : join(real, relative(written, candidate))
-  const existing = await closestExisting(within, realpathOf)
-  const anchored = await reading(() => realpathOf(existing), named)
-  const settled = existing === within ? anchored : join(anchored, relative(existing, within))
+  const settled = await followed(within, realpathOf, named, 0)
   if (!containedIn(real, settled)) throw new RefusedPathError(named, 'outside', settled, settled)
   return settled
 }
+
+/** How many links a path may go through before it is taken for a loop. */
+const LINKS_FOLLOWED = 32
 
 /** One filesystem read, as a refusal with a reason rather than as an unparsed rejection. */
 async function reading<A>(run: () => Promise<A>, named: string): Promise<A> {
@@ -110,19 +113,31 @@ async function reading<A>(run: () => Promise<A>, named: string): Promise<A> {
 }
 
 /**
- * The path itself when it exists, and its closest existing ancestor when it does not.
+ * Where a path really leads: its real path when it exists, and otherwise its real parent joined
+ * with its name — unless that name is a link, which is followed to where it points whether or not
+ * anything is there. `realpath` fails on a link that leads nowhere, and judging such a link by its
+ * parent would let a write create the file it points at, wherever that is.
  *
  * Recursive rather than a loop: each step is one filesystem read, and the shape the repository's
  * lint refuses is the loop that awaits inside itself. What it is handed already reads as inside
- * the root, and the root exists, so it never climbs above it.
+ * the root, and the root exists, so it only leaves the root through a link.
  */
-async function closestExisting(candidate: string, realpathOf: RealPath): Promise<string> {
-  const exists = await realpathOf(candidate).then(
-    () => true,
-    () => false,
-  )
-  if (exists) return candidate
+async function followed(
+  candidate: string,
+  realpathOf: RealPath,
+  named: string,
+  links: number,
+): Promise<string> {
+  const real = await realpathOf(candidate).catch(() => null)
+  if (real !== null) return real
   const parent = dirname(candidate)
   if (parent === candidate) return candidate
-  return closestExisting(parent, realpathOf)
+  const realParent = await followed(parent, realpathOf, named, links)
+  const here = join(realParent, basename(candidate))
+  const target = await readlink(here).catch(() => null)
+  if (target === null) return here
+  if (links >= LINKS_FOLLOWED) {
+    throw new RefusedPathError(named, 'unreadable', 'too many links along the path')
+  }
+  return followed(resolve(realParent, target), realpathOf, named, links + 1)
 }

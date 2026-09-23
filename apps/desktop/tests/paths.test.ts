@@ -103,3 +103,38 @@ describe('a path inside the root', () => {
     )
   })
 })
+
+describe('a link inside the root that leads nowhere', () => {
+  it('is judged by where it points, so a folder link to a missing place outside is outside', async () => {
+    // A junction needs no privilege on Windows; what it points at does not exist yet.
+    symlinkSync(join(folder, 'missing'), join(root, 'gone'), 'junction')
+    const refusal = await refusalOf('gone/planted.txt', realpath)
+
+    expect(refusal?.why).toBe('outside')
+    expect(refusal?.resolved).toBe(join(realpathSync.native(folder), 'missing', 'planted.txt'))
+  })
+
+  it('is judged by where it points, so a file link to a missing file outside is outside', async () => {
+    const made = (() => {
+      try {
+        symlinkSync(join(folder, 'planted.txt'), join(root, 'notes.md'), 'file')
+        return true
+      } catch {
+        // A file link needs a privilege on Windows that a runner may not have.
+        return false
+      }
+    })()
+    if (!made) return
+    const refusal = await refusalOf('notes.md', realpath)
+
+    expect(refusal?.why).toBe('outside')
+    expect(refusal?.resolved).toBe(join(realpathSync.native(folder), 'planted.txt'))
+  })
+
+  it('that points back inside the root is inside, where it points', async () => {
+    symlinkSync(join(root, 'src', 'later'), join(root, 'soon'), 'junction')
+    const settled = await resolveInside(root, 'soon/file.ts', realpath)
+
+    expect(settled).toBe(join(realpathSync.native(root), 'src', 'later', 'file.ts'))
+  })
+})

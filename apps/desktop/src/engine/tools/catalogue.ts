@@ -29,8 +29,8 @@ import {
   admitTool,
 } from '@hemera/core'
 import { Context, Deferred, Effect, Layer } from 'effect'
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { dirname, join, relative } from 'node:path'
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, relative } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
@@ -156,6 +156,29 @@ const answered = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A | undefine
       onSuccess: (value: A) => value,
     }),
   )
+
+/**
+ * Writes a file by replacing it: a new file beside it, renamed over it.
+ *
+ * Renaming replaces the name in its folder rather than writing through it, so whatever sits under
+ * that name — a link planted after the path was judged, a hard link shared with a file outside the
+ * root — is replaced and not written into. The mode of the file it replaces is kept, so a script
+ * the agent edits stays a script.
+ */
+async function replaceFile(path: string, content: string): Promise<void> {
+  const mode = await stat(path).then(
+    (found) => found.mode,
+    () => undefined,
+  )
+  const beside = join(dirname(path), `.${basename(path)}.${crypto.randomUUID()}.hemera`)
+  try {
+    await writeFile(beside, content, { encoding: 'utf8', mode })
+    await rename(beside, path)
+  } catch (cause) {
+    await rm(beside, { force: true })
+    throw cause
+  }
+}
 
 /** One line of a folder, as `fs_list` shows it. */
 function describeEntry(name: string, kind: 'folder' | 'file' | 'other', size: number): string {
@@ -560,7 +583,7 @@ export const toolCatalogueLayer: Layer.Layer<
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const written = yield* attempt(() =>
               mkdir(dirname(settled.path), { recursive: true }).then(() =>
-                writeFile(settled.path, call.arguments.content, 'utf8'),
+                replaceFile(settled.path, call.arguments.content),
               ),
             )
             if (!written.ok) {
@@ -604,7 +627,7 @@ export const toolCatalogueLayer: Layer.Layer<
               current.value.slice(0, at) +
               call.arguments.new +
               current.value.slice(at + call.arguments.old.length)
-            const written = yield* attempt(() => writeFile(settled.path, next, 'utf8'))
+            const written = yield* attempt(() => replaceFile(settled.path, next))
             if (!written.ok) {
               return failed(`could not write ${call.arguments.path}`, written.reason)
             }
