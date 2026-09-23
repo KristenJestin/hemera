@@ -27,6 +27,7 @@ import {
 import {
   activityOf,
   agentOf,
+  chooseOption,
   forgetAgentRefusal,
   listenToAgents,
   offerAgent,
@@ -550,6 +551,23 @@ describe('Ce que l’agent dit de ses valeurs arrive jusqu’au menu', () => {
       { id: 'low', label: 'low', description: undefined, recommended: undefined },
       { id: 'high', label: 'high', description: undefined, recommended: undefined },
     ])
+  })
+
+  test('a choice in a Session is sent to its agent, and what it is on is read back', async () => {
+    answers.set('agents.options', { options: claudeOn('fable', 'high') })
+    await readOptions('session-13')
+    answers.set('agents.setOption', {})
+    answers.set('agents.options', { options: claudeOn('opus', 'xhigh') })
+
+    await chooseOption('session-13', 'model', 'opus')
+
+    expect(asked.slice(1).map((one) => [one.name, one.argument])).toEqual([
+      ['agents.setOption', { sessionId: 'session-13', optionId: 'model', value: 'opus' }],
+      ['agents.options', { sessionId: 'session-13' }],
+    ])
+    // What the menu shows is the list read back: the effort Opus is on was never sent.
+    expect(modelStage(optionsOf('session-13'))?.current).toBe('opus')
+    expect(effortStage(optionsOf('session-13'))?.current).toBe('xhigh')
   })
 })
 
