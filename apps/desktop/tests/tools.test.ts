@@ -864,7 +864,8 @@ describe('the answers a Session keeps against a retry', () => {
 
     expect(seen.repeated).toBe(false)
     expect(readFileSync(join(root, 'kept', 'oldest.txt'), 'utf8')).toBe('second')
-  })
+    // 258 real writes, each a file and a thread entry: the Windows runner needs more than 30 s.
+  }, 120_000)
 })
 
 describe('A one-off command asks the human before it runs', () => {
