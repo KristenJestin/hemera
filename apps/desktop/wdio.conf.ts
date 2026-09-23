@@ -27,7 +27,10 @@ const application = dirname(fileURLToPath(import.meta.url))
  * holds a thread, which is what reopening the application is. They run in order because the
  * capabilities are read in order and one window runs at a time.
  */
-const CONTINUED = new Map([['sessions.reopened.e2e.ts', 'sessions.e2e.ts']])
+const CONTINUED = new Map([
+  ['sessions.reopened.e2e.ts', 'sessions.e2e.ts'],
+  ['specs.reopened.e2e.ts', 'specs.e2e.ts'],
+])
 
 /**
  * The data folder one spec file runs on, made for it and thrown away after the run (D3-06).

@@ -24,7 +24,15 @@ import {
   type FakeScript,
   type FakeStep,
 } from '../../src/engine/agents/fake.ts'
-import { MODEL_OPTION, NOTES, READ_ANSWER, VERSION, modelOption, turnOf } from './script.ts'
+import {
+  MODEL_OPTION,
+  NOTES,
+  READ_ANSWER,
+  VERSION,
+  modelOption,
+  proposalLineOf,
+  turnOf,
+} from './script.ts'
 
 // The version is the first thing the machine is asked, and it is asked of the command itself:
 // discovery starts it with `--version` before any session exists.
@@ -36,7 +44,7 @@ if (process.argv.includes('--version')) {
 /** How many prompts this process has been sent. */
 let turn = 0
 
-/** What the last prompt said, which is what decides whether this turn reads a file. */
+/** What the last prompt said: whether this turn reads a file, and whether it proposes a Spec. */
 let asked = ''
 
 /**
@@ -88,11 +96,16 @@ const script: FakeScript = {
     }
     const said = turnOf(turn + (continued() ? 1 : 0))
     const id = `${RUN}-${String(turn)}`
+    const proposal = proposalLineOf(asked)
     // A thought and an answer, in that order and under two different kinds: the thread folds the
     // first and shows the second, which is the difference the suite reads.
     return [
       { does: 'thinks', text: said.thought, messageId: `thought-${id}` },
-      { does: 'says', text: said.answer, messageId: `answer-${id}` },
+      {
+        does: 'says',
+        text: proposal === null ? said.answer : `${said.answer}\n\n${proposal}`,
+        messageId: `answer-${id}`,
+      },
     ]
   },
 }

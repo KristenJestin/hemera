@@ -74,3 +74,21 @@ export function turnOf(turn: number) {
 export const NOTES = 'notes.md'
 
 export const READ_ANSWER = 'The notes are read through Hemera.'
+
+/**
+ * What makes the agent propose a Spec: a prompt that asks for one (design D7-07).
+ *
+ * The agent proposes with the marker line of its answer until it has Hemera's `spec_propose`
+ * tool, and the runtime takes the line out and writes the proposal after the message. A prompt
+ * that does not ask is answered without one.
+ */
+export const PROPOSE = 'Write it down as a Spec.'
+
+/** The Spec it proposes then. */
+export const PROPOSAL = { title: 'CSV export keeps the invoice date', type: 'feature' } as const
+
+/** The marker line the answer to this prompt ends with, or null when it proposes nothing. */
+export function proposalLineOf(prompt: string): string | null {
+  if (!prompt.includes(PROPOSE)) return null
+  return `<!-- hemera:propose-spec title="${PROPOSAL.title}" type="${PROPOSAL.type}" -->`
+}
