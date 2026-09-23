@@ -65,6 +65,7 @@ export const claude: AgentAdapter = {
    */
   bareMode: () => ({
     means: 'session/new _meta: no built-in tool, no settings source, the base as the system prompt',
+    base: 'system_prompt',
     qualified: true,
     options: (input) => ({
       meta: {
@@ -86,6 +87,7 @@ export const claude: AgentAdapter = {
       // This agent is handed its environment inside `_meta` and not on its process, which is the
       // one thing the three do not agree on.
       env: {},
+      files: [],
     }),
   }),
 }

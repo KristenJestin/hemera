@@ -18,6 +18,7 @@ import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
+import { agentDirectoriesLayer } from './agents/bare.ts'
 import { heldWordsLayer } from './agents/held.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
@@ -189,6 +190,8 @@ function servicesOf(
       Layer.provide(processes),
       Layer.provide(agents),
       Layer.provide(heldWordsLayer),
+      // A directory of Hemera's per agent, inside the data folder, where its bare means is written.
+      Layer.provide(agentDirectoriesLayer(start.directory)),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
 }

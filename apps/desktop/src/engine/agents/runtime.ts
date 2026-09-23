@@ -34,7 +34,13 @@ import { existsSync } from 'node:fs'
 
 import type { McpServer } from '@agentclientprotocol/sdk'
 
-import type { AgentProvider, Session, SessionEntryOrigin } from '@hemera/core'
+import {
+  type AgentProvider,
+  type BaseReach,
+  CONTEXT_BASE,
+  type Session,
+  type SessionEntryOrigin,
+} from '@hemera/core'
 import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice } from '@hemera/ipc'
 
 import {
@@ -44,12 +50,14 @@ import {
   type AgentOption,
   type PermissionAnswer,
   type PermissionQuestion,
+  type SessionMeta,
   type ToolCallContentBlock,
   type ToolCallLocation,
   type UsageReport,
   type WindowReport,
   connect,
 } from './client.ts'
+import { AgentDirectories, bareModeOf, bareOptionsOf, writtenFiles } from './bare.ts'
 import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discovery.ts'
 import { HeldWords } from './held.ts'
 import { AgentNotices } from './notices.ts'
@@ -258,6 +266,13 @@ interface Live {
    * hand over the same address, and the grant behind it dies with this process.
    */
   readonly mcp: readonly McpServer[]
+  /**
+   * What the three ways into a session carry on `_meta` for this agent: its bare options, for the
+   * agent that reads them there, and nothing for the two that take them from the environment.
+   */
+  readonly meta: SessionMeta | undefined
+  /** How the base reaches this agent, as its adapter declares (D6-07). */
+  readonly base: BaseReach
   /** The handle the agent gave this Session, which a resume asks it to take back. */
   nativeSessionId: string
   /** What the supervisor observed when the process died, or null while it is alive. */
@@ -474,6 +489,8 @@ export const runtimeLayer = Layer.effect(
     const permissions = yield* ToolPermissions
     const heldWords = yield* HeldWords
     const pool = yield* Pool
+    // Where each agent's bare means is written: a directory of Hemera's, never the user's (D6-09).
+    const directories = yield* AgentDirectories
 
     /**
      * The scope the engine gave this layer: the lifetime every fiber and process here lives in.
@@ -891,11 +908,19 @@ export const runtimeLayer = Layer.effect(
       })
 
     /** What the supervisor is told to start, with only what the resolve named. */
-    const startOptions = (resolved: ResolvedAgent, cwd: string) => {
+    const startOptions = (
+      resolved: ResolvedAgent,
+      cwd: string,
+      bare: Readonly<Record<string, string>> = {},
+    ) => {
       // Built in statements rather than by spreading a conditional empty object, the way the
       // supervisor builds what it hands the host: an env that is not there is not a property.
       const options: AgentStartOptions = { cwd }
-      if (resolved.env !== undefined) options.env = resolved.env
+      // What the bare means sets is on top of what the resolve named: the agent's own
+      // configuration directory is Hemera's, whatever the machine says it is (D6-09).
+      if (resolved.env !== undefined || Object.keys(bare).length > 0) {
+        options.env = { ...resolved.env, ...bare }
+      }
       if (resolved.source === 'bundled') options.script = true
       return options
     }
@@ -1323,9 +1348,27 @@ export const runtimeLayer = Layer.effect(
 
         const resolved = yield* attempt('finding the agent', discovery.resolve(provider))
         const cwd = yield* workingDirectory(session, native)
+
+        // Bare, or not at all (D6-02): an agent whose means leaves a tool of its own behind opens
+        // no Session, and nothing is written or started for it. The reason shown is the adapter's.
+        const directory = directories.of(provider)
+        const mode = bareModeOf(resolved.adapter, globalThis.process.platform)
+        const bare = yield* bareOptionsOf(resolved.adapter, globalThis.process.platform, {
+          ownerDirectory: directory,
+          base: CONTEXT_BASE,
+        }).pipe(
+          Effect.mapError(
+            (refused) =>
+              new AgentRuntimeError({
+                what: 'starting the agent',
+                cause: `${refused.label} cannot run without its own tools here: ${refused.reason}`,
+              }),
+          ),
+        )
+        yield* attempt('preparing the agent', writtenFiles(directory, bare.files))
         const process = yield* attempt(
           'starting the agent',
-          supervisor.start(resolved.command, resolved.args, startOptions(resolved, cwd)),
+          supervisor.start(resolved.command, resolved.args, startOptions(resolved, cwd, bare.env)),
         )
 
         // The token is minted for this process and for this Session, and it is the whole of what
@@ -1368,6 +1411,8 @@ export const runtimeLayer = Layer.effect(
           queue,
           cwd,
           mcp,
+          meta: bare.meta,
+          base: mode.base,
           nativeSessionId: '',
           death: null,
           context: null,
@@ -1495,7 +1540,7 @@ export const runtimeLayer = Layer.effect(
         const handle = native.nativeSessionId
         if (handle === null || native.nativeState === 'none') {
           const openedSession = yield* Effect.result(
-            attempt('opening a session', held.connection.open(held.cwd, held.mcp)),
+            attempt('opening a session', held.connection.open(held.cwd, held.mcp, held.meta)),
           )
           if (Result.isFailure(openedSession)) return openedSession.failure
           const provided = yield* provide(sessionId, held)
@@ -1516,14 +1561,20 @@ export const runtimeLayer = Layer.effect(
         // conversation on as it stands, and asked to send it back only if it cannot.
         if (held.connection.handshake.resumes) {
           const resumed = yield* Effect.result(
-            attempt('resuming the session', held.connection.resume(handle, held.cwd, held.mcp)),
+            attempt(
+              'resuming the session',
+              held.connection.resume(handle, held.cwd, held.mcp, held.meta),
+            ),
           )
           if (Result.isSuccess(resumed)) return yield* attached(sessionId, held, handle)
         }
 
         if (held.connection.handshake.continues) {
           const loaded = yield* Effect.result(
-            attempt('loading the session', held.connection.load(handle, held.cwd, held.mcp)),
+            attempt(
+              'loading the session',
+              held.connection.load(handle, held.cwd, held.mcp, held.meta),
+            ),
           )
           if (Result.isSuccess(loaded)) return yield* attached(sessionId, held, handle)
           return yield* fallback(sessionId, held, loaded.failure.cause)
@@ -1559,7 +1610,7 @@ export const runtimeLayer = Layer.effect(
         // context rather than a session it cannot take back, and the handle of that new session
         // is what the next run of the application takes back.
         const openedSession = yield* Effect.result(
-          attempt('opening a session', held.connection.open(held.cwd, held.mcp)),
+          attempt('opening a session', held.connection.open(held.cwd, held.mcp, held.meta)),
         )
         if (Result.isFailure(openedSession)) return openedSession.failure
         held.nativeSessionId = openedSession.success

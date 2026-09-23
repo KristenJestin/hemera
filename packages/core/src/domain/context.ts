@@ -46,3 +46,28 @@ export const DELIVERY_MARKER = '[hemera:context]'
 export function deliveryText(instructions: string): string {
   return `${DELIVERY_MARKER} the project instructions changed; they now read:\n\n${instructions}`
 }
+
+/**
+ * How a source of the context reached the agent, which the Context view says beside it (D6-10).
+ *
+ * The base goes through the system prompt where the agent has one to hand over — Claude Code's
+ * `_meta.systemPrompt` — and as an embedded resource in the first prompt everywhere else; the
+ * Workspace's `AGENTS.md` is read by the agent itself; a change of it goes as a prompt of its own,
+ * made of the marker and the new text as a resource, between two turns (D6-07, D6-08).
+ */
+export const CONTEXT_REACHES = [
+  'system_prompt',
+  'embedded_resource',
+  'read_natively',
+  'delivery_prompt',
+] as const
+
+export type ContextReach = (typeof CONTEXT_REACHES)[number]
+
+/** How the base reaches an agent: one of the two means an adapter declares (D6-07). */
+export type BaseReach = Extract<ContextReach, 'system_prompt' | 'embedded_resource'>
+
+/** The address a provided text is named by in a prompt, which is Hemera's and no file's. */
+export function contextUri(path: string): string {
+  return `hemera://context/${path === '' ? 'base' : path}`
+}

@@ -67,6 +67,7 @@ export const opencode: AgentAdapter = {
       platform === 'win32'
         ? "OPENCODE_CONFIG_CONTENT: a primary agent of Hemera's, a catch-all deny with the hemera_* namespace re-allowed, build and plan disabled — matched case-insensitively on Windows"
         : "OPENCODE_CONFIG_CONTENT: a primary agent of Hemera's, a catch-all deny with the hemera_* namespace re-allowed, build and plan disabled",
+    base: 'embedded_resource',
     qualified: true,
     options: (input) => ({
       meta: undefined,
@@ -75,6 +76,7 @@ export const opencode: AgentAdapter = {
         OPENCODE_DISABLE_PROJECT_CONFIG: '1',
         OPENCODE_CONFIG_CONTENT: JSON.stringify(BARE_AGENT),
       },
+      files: [],
     }),
   }),
 }

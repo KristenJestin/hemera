@@ -55,12 +55,18 @@ export const codex: AgentAdapter = {
   /**
    * Codex's means is a configuration file, and it is not enough: about fourteen switches turn off
    * what can be turned off, and two families of tools have no switch at all. So this agent is not
-   * qualified, and no options are declared for it — a Session on it is refused before anything is
-   * written or started (D6-02).
+   * qualified, and a Session on it is refused before anything is written or started (D6-02): the
+   * options are declared for the trial that may qualify it, never handed to a Session.
    */
   bareMode: () => ({
     means:
       "a config.toml in a directory of Hemera's: about fourteen switches, from web_search to shell_tool, view_image, sleep_tool, multi_agent and code_mode",
+    base: 'embedded_resource',
+    options: (input) => ({
+      meta: undefined,
+      env: { CODEX_HOME: input.ownerDirectory },
+      files: [],
+    }),
     qualified: false,
     reason:
       'apply_patch has no configuration key — it is gated by the model catalog — and list_mcp_resources, list_mcp_resource_templates and read_mcp_resource appear as soon as an MCP server exists, which bare mode requires. Hemera would not see those calls, so this Session is not opened.',

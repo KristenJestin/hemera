@@ -38,6 +38,13 @@ import { Data, Effect } from 'effect'
 import { z } from 'zod'
 
 import { type AgentAdapter } from './adapter.ts'
+import type { ClaudeCodeMeta } from './bare.ts'
+
+/**
+ * What a session is opened with on `_meta`, beside the servers: the options of the one agent
+ * that reads its bare mode there (D6-02). Carried by the three ways into a session alike.
+ */
+export type SessionMeta = ClaudeCodeMeta
 
 /** What went wrong while speaking the protocol, and at which step. */
 export class AgentProtocolError extends Data.TaggedError('AgentProtocolError')<{
@@ -280,10 +287,12 @@ export interface AgentConnection {
    *
    * The MCP servers are the caller's: Hemera hands over one, its own tools on a loopback address
    * with the token of this Session in it, and the three ways into a session all carry it (D6-01).
+   * So does `meta`, for the agent that takes its bare mode from `_meta`.
    */
   readonly open: (
     workingDirectory: string,
     mcpServers: readonly McpServer[],
+    meta?: SessionMeta,
   ) => Effect.Effect<string, AgentProtocolError>
   /**
    * Asks the agent to carry the session on as it stands, without sending its history back.
@@ -295,6 +304,7 @@ export interface AgentConnection {
     nativeSessionId: string,
     workingDirectory: string,
     mcpServers: readonly McpServer[],
+    meta?: SessionMeta,
   ) => Effect.Effect<void, AgentProtocolError>
   /**
    * Asks the agent to stream the session's history back, so the thread can be matched to it.
@@ -306,6 +316,7 @@ export interface AgentConnection {
     nativeSessionId: string,
     workingDirectory: string,
     mcpServers: readonly McpServer[],
+    meta?: SessionMeta,
   ) => Effect.Effect<void, AgentProtocolError>
   /** Sends one turn and waits for the agent to be done with it. */
   readonly prompt: (text: string) => Effect.Effect<PromptOutcome, AgentProtocolError>
@@ -322,6 +333,19 @@ export interface ConnectionOptions {
   readonly adapter: AgentAdapter
   readonly onEvent: (event: AgentEvent) => void
   readonly onPermission: (question: PermissionQuestion) => Promise<PermissionAnswer>
+}
+
+/**
+ * A request of the three ways into a session, with `_meta` when there is one to carry.
+ *
+ * Left out rather than sent empty: an agent that reads nothing there is not told anything.
+ */
+function withMeta<T extends object>(
+  request: T,
+  meta: SessionMeta | undefined,
+): T & { _meta?: SessionMeta } {
+  if (meta === undefined) return request
+  return { ...request, _meta: meta }
 }
 
 /** The text of a content block, or null when it carries something other than text. */
@@ -736,11 +760,13 @@ export function connect(
           return announced
         }),
 
-      open: (workingDirectory, mcpServers) =>
+      open: (workingDirectory, mcpServers, meta) =>
         Effect.gen(function* () {
           const opened = yield* Effect.tryPromise({
             try: () =>
-              connection.newSession({ cwd: workingDirectory, mcpServers: [...mcpServers] }),
+              connection.newSession(
+                withMeta({ cwd: workingDirectory, mcpServers: [...mcpServers] }, meta),
+              ),
             catch: (cause) => new AgentProtocolError({ what: 'newSession', cause: String(cause) }),
           })
           sessionId = opened.sessionId
@@ -748,15 +774,20 @@ export function connect(
           return opened.sessionId
         }),
 
-      resume: (nativeSessionId, workingDirectory, mcpServers) =>
+      resume: (nativeSessionId, workingDirectory, mcpServers, meta) =>
         Effect.gen(function* () {
           const answered = yield* Effect.tryPromise({
             try: () =>
-              connection.resumeSession({
-                sessionId: nativeSessionId,
-                cwd: workingDirectory,
-                mcpServers: [...mcpServers],
-              }),
+              connection.resumeSession(
+                withMeta(
+                  {
+                    sessionId: nativeSessionId,
+                    cwd: workingDirectory,
+                    mcpServers: [...mcpServers],
+                  },
+                  meta,
+                ),
+              ),
             catch: (cause) =>
               new AgentProtocolError({ what: 'resumeSession', cause: String(cause) }),
           })
@@ -764,18 +795,23 @@ export function connect(
           announced = optionsOf(answered.configOptions)
         }),
 
-      load: (nativeSessionId, workingDirectory, mcpServers) =>
+      load: (nativeSessionId, workingDirectory, mcpServers, meta) =>
         Effect.gen(function* () {
           // Every chunk a load sends back is a replay: the flag is set for the whole call, so a
           // notification that arrives while the history is streaming is marked as what it is.
           replaying = true
           const answered = yield* Effect.tryPromise({
             try: () =>
-              connection.loadSession({
-                sessionId: nativeSessionId,
-                cwd: workingDirectory,
-                mcpServers: [...mcpServers],
-              }),
+              connection.loadSession(
+                withMeta(
+                  {
+                    sessionId: nativeSessionId,
+                    cwd: workingDirectory,
+                    mcpServers: [...mcpServers],
+                  },
+                  meta,
+                ),
+              ),
             catch: (cause) => new AgentProtocolError({ what: 'loadSession', cause: String(cause) }),
           }).pipe(Effect.ensuring(Effect.sync(() => (replaying = false))))
           sessionId = nativeSessionId

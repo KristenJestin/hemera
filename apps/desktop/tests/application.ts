@@ -35,6 +35,7 @@ import {
   hostProcessesLayer,
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
+import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
 import { type Commands, commandsLayer } from '#engine/commands/service.ts'
 import { type Context as AgentContext, contextLayer } from '#engine/context/service.ts'
@@ -160,6 +161,7 @@ export function application(
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(heldWordsLayer),
+      Layer.provide(agentDirectoriesLayer(dataFolder)),
     )
     return <A, E>(
       program: Effect.Effect<
@@ -403,6 +405,7 @@ export function toolApplication(
       Layer.provide(lines),
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(heldWordsLayer),
+      Layer.provide(agentDirectoriesLayer(dataFolder)),
     )
     return <A, E>(program: Effect.Effect<A, E, ToolEngine | Scope.Scope>) =>
       Effect.runPromise(

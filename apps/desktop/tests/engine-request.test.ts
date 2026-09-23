@@ -20,6 +20,7 @@ import { Agents } from '#engine/agents/service.ts'
 import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
+import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
@@ -134,6 +135,7 @@ function running<A, E>(
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provide(agents),
       Layer.provide(heldWordsLayer),
+      Layer.provide(agentDirectoriesLayer(dataFolder)),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
 

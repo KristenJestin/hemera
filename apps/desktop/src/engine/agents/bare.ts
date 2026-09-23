@@ -6,10 +6,10 @@
  * the means belongs to each agent: one reads its options out of `session/new`'s `_meta`, the
  * other two take them from the environment and a directory of Hemera's own. What each adapter
  * declares is that means, and the answer to the only question that matters here — whether the
- * means removes *every* tool the agent ships. Claude Code and OpenCode answer yes and carry the
- * options to hand over; Codex answers no, and the residue it keeps is the reason its Sessions
- * are refused. That is why the options sit inside the qualified case of the declaration rather
- * than beside it: an agent that is not qualified has none to give, and no caller can ask it.
+ * means removes *every* tool the agent ships. Claude Code and OpenCode answer yes; Codex answers
+ * no, and the residue it keeps is the reason its Sessions are refused. Codex still declares the
+ * options its means is made of: they are what a trial of it runs with, and what the refusal
+ * says was not enough — never what a Session is opened with.
  *
  * The declarations come from the spike `docs/technical/bare-mode-2026-09.md` (21 September 2026),
  * which read them in the three agents' own sources. Until the phase 3 trial per agent and
@@ -20,7 +20,11 @@
  * case-insensitive on Windows only — has to be checkable from a machine that is neither.
  */
 
-import { Data, Effect } from 'effect'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { Context, Data, Effect, Layer } from 'effect'
+
+import type { AgentProvider, BaseReach } from '@hemera/core'
 
 import type { AgentAdapter } from './adapter.ts'
 
@@ -48,18 +52,27 @@ export type ClaudeCodeMeta = {
   }
 }
 
+/** A file the means is made of, written into Hemera's directory for the agent before it starts. */
+export type BareFile = {
+  /** Its name inside that directory. */
+  readonly name: string
+  readonly content: string
+}
+
 /** What an agent is handed so that it runs bare, per agent and per platform (D6-02, D6-09). */
 export type BareOptions = {
   /** What `session/new` carries on `_meta`, for the agent that reads its options there. */
   readonly meta: ClaudeCodeMeta | undefined
   /** What the process is started with, on top of the environment it already has. */
   readonly env: Readonly<Record<string, string>>
+  /** What is written into Hemera's directory for this agent before its process starts. */
+  readonly files: readonly BareFile[]
 }
 
 /** What building them needs: Hemera's own directory for this agent, and the base (D6-07). */
 export type BareInput = {
   /**
-   * Hemera's directory for this Session's agent.
+   * Hemera's directory for this agent.
    *
    * The agents that isolate themselves through a configuration directory are pointed at this
    * one, so that what the agent reads is not the user's own configuration (D6-09). What survives
@@ -77,20 +90,24 @@ export type BareInput = {
  * whose means leaves a tool behind has a reason, and the refusal below reads it without asking
  * whether it is there.
  */
-export type BareMode =
+export type BareMode = {
+  /** The means, in the agent's own terms, as the Context view names it. */
+  readonly means: string
+  /**
+   * How the base reaches this agent (D6-07): its system prompt, where it has one to hand over,
+   * or an embedded resource in the first prompt of the Session.
+   */
+  readonly base: BaseReach
+  /** What the agent is handed: the options its own agent reads. */
+  readonly options: (input: BareInput) => BareOptions
+} & (
+  | { readonly qualified: true }
   | {
-      /** The means, in the agent's own terms, as the Context view names it. */
-      readonly means: string
-      readonly qualified: true
-      /** What the agent is handed: the options its own agent reads. */
-      readonly options: (input: BareInput) => BareOptions
-    }
-  | {
-      readonly means: string
       readonly qualified: false
       /** What the means leaves behind: the text a refused Session is shown with. */
       readonly reason: string
     }
+)
 
 /** An agent whose means leaves a tool behind: its Session is not opened, and this is why. */
 export class BareModeNotQualifiedError extends Data.TaggedError('BareModeNotQualifiedError')<{
@@ -127,4 +144,49 @@ export function bareOptionsOf(
       reason: mode.reason,
     }),
   )
+}
+
+/**
+ * Writes the files a means is made of into Hemera's directory for the agent.
+ *
+ * Written again at every start, whole: the directory is Hemera's, and what it holds is what this
+ * version of Hemera declares rather than what an older one left there.
+ */
+export function writtenFiles(
+  directory: string,
+  files: readonly BareFile[],
+): Effect.Effect<void, Error> {
+  return Effect.tryPromise({
+    try: async () => {
+      await mkdir(directory, { recursive: true })
+      for (const file of files) {
+        // oxlint-disable-next-line no-await-in-loop -- a handful of files, one directory, written in the order they are declared
+        await writeFile(join(directory, file.name), file.content, 'utf8')
+      }
+    },
+    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+  })
+}
+
+export interface AgentDirectoriesService {
+  /** Hemera's own directory for one agent: where its means is written, and nothing of the user's. */
+  readonly of: (provider: AgentProvider) => string
+}
+
+/**
+ * Where Hemera keeps a directory per agent (D6-09).
+ *
+ * Inside the data folder, so a trial run with `--data-dir` and a suite with a temporary folder
+ * each have their own, and one agent's directory is shared by its Sessions: what an agent keeps
+ * in it between two starts is kept for the next Session of the same agent.
+ */
+export class AgentDirectories extends Context.Service<AgentDirectories, AgentDirectoriesService>()(
+  'AgentDirectories',
+) {}
+
+/** The directories of the agents, under the data folder the engine opened. */
+export function agentDirectoriesLayer(dataFolder: string): Layer.Layer<AgentDirectories> {
+  return Layer.succeed(AgentDirectories, {
+    of: (provider) => join(dataFolder, 'agents', provider),
+  })
 }

@@ -86,8 +86,10 @@ export type { Command, CommandKind } from './domain/commands.ts'
 export {
   AGENTS_FILE,
   CONTEXT_BASE,
+  CONTEXT_REACHES,
   CONTEXT_SOURCES,
   DELIVERY_MARKER,
+  contextUri,
   deliveryText,
 } from './domain/context.ts'
-export type { ContextSource } from './domain/context.ts'
+export type { BaseReach, ContextReach, ContextSource } from './domain/context.ts'

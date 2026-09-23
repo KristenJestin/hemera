@@ -9,7 +9,11 @@
  * them in the three agents' own sources.
  */
 
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Effect } from 'effect'
+import { z } from 'zod'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { AGENT_PROVIDERS } from '#engine/agents/adapter.ts'
@@ -17,6 +21,9 @@ import { bareModeOf, bareOptionsOf } from '#engine/agents/bare.ts'
 import { claude } from '#engine/agents/adapters/claude.ts'
 import { codex } from '#engine/agents/adapters/codex.ts'
 import { opencode } from '#engine/agents/adapters/opencode.ts'
+import { fakeAgent } from '#engine/agents/fake.ts'
+import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { aSessionOn, application } from './application.ts'
 
 const ADAPTERS = [claude, codex, opencode]
 
@@ -136,5 +143,74 @@ describe('An unqualified combination is refused with its reason', () => {
     expect(refused.reason).toContain('read_mcp_resource')
     // The means travels with the refusal, because the window shows both.
     expect(refused.means).toBe(bareModeOf(codex, 'linux').means)
+  })
+})
+
+/** A data folder and a Workspace of the suite's own, for the runs below. */
+const folders = () => ({
+  data: mkdtempSync(join(tmpdir(), 'hemera-bare-')),
+  workspace: mkdtempSync(join(tmpdir(), 'hemera-bare-workspace-')),
+})
+
+describe("A qualified agent has only Hemera's tools", () => {
+  test('its means reaches the agent: the process for OpenCode, the session for Claude Code', async () => {
+    const places = folders()
+    const opencodeAgent = fakeAgent()
+    const claudeAgent = fakeAgent()
+    try {
+      for (const [provider, agent] of [
+        ['opencode', opencodeAgent],
+        ['claude', claudeAgent],
+      ] as const) {
+        mkdirSync(join(places.data, provider))
+        // oxlint-disable-next-line no-await-in-loop -- one run of the application per agent, one after the other
+        await application(join(places.data, provider))(agent)(
+          Effect.gen(function* () {
+            const runtime = yield* AgentRuntime
+            const session = yield* aSessionOn(places.workspace, provider)
+            yield* runtime.start(session.id)
+          }),
+        )
+      }
+
+      // OpenCode reads its means from its environment, pointed at a directory of Hemera's.
+      const environment = opencodeAgent.environments[0] ?? {}
+      expect(environment.XDG_CONFIG_HOME).toBe(join(places.data, 'opencode', 'agents', 'opencode'))
+      expect(environment.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1')
+      expect(environment.OPENCODE_CONFIG_CONTENT).toContain('"hemera_*":"allow"')
+      expect(opencodeAgent.answers.metas).toEqual([null])
+      // Claude Code reads it from `_meta`, on the session itself: no built-in tool.
+      const meta = z
+        .object({ claudeCode: z.object({ options: z.object({ tools: z.array(z.string()) }) }) })
+        .parse(JSON.parse(claudeAgent.answers.metas[0] ?? '{}'))
+      expect(meta.claudeCode.options.tools).toEqual([])
+    } finally {
+      rmSync(places.data, { recursive: true, force: true })
+      rmSync(places.workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('An unqualified combination is refused with its reason', () => {
+  test('a Session on Codex starts nothing, and the refusal is the reason Codex declares', async () => {
+    const places = folders()
+    const agent = fakeAgent()
+    try {
+      const refused = await application(places.data)(agent)(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime
+          const session = yield* aSessionOn(places.workspace, 'codex')
+          return yield* Effect.flip(runtime.start(session.id))
+        }),
+      )
+
+      expect(refused.message).toContain(reasonOf(codex, process.platform))
+      // Refused before anything was written or started for it.
+      expect(agent.starts).toEqual([])
+      expect(existsSync(join(places.data, 'agents', 'codex'))).toBe(false)
+    } finally {
+      rmSync(places.data, { recursive: true, force: true })
+      rmSync(places.workspace, { recursive: true, force: true })
+    }
   })
 })
