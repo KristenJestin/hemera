@@ -27,6 +27,8 @@ import { storiesWith } from './spec-views.ts'
 export interface SpecState {
   /** The revision on screen, or null while no Spec is open. */
   snapshot: SpecSnapshot | null
+  /** The current revision, the one shown or not: what the thread's questions are asked in. */
+  current: SpecSnapshot | null
   /** The revision picked, or null for the current one. */
   revision: number | null
   /** Every revision of the open Spec, as the engine lists them. */
@@ -41,6 +43,7 @@ export interface SpecState {
 
 const EMPTY: SpecState = {
   snapshot: null,
+  current: null,
   revision: null,
   revisions: [],
   buffers: [],
@@ -107,7 +110,7 @@ async function reload(specId: string): Promise<void> {
     limit: JOURNAL_PAGE,
   })
   if (shown !== specId || ticket !== started) return
-  replace({ ...state, snapshot, revisions, buffers, journal: journal.entries })
+  replace({ ...state, snapshot, current, revisions, buffers, journal: journal.entries })
 }
 
 /** Reads the open Spec again, keeping a failed read as the refusal on screen. */

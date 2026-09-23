@@ -336,6 +336,8 @@ export interface SpecContext {
   specId: string | null
   /** That Spec as its first revision named it, once it is read: what a created proposal names. */
   defined: DefinedSpec | null
+  /** The ids of the current revision's questions, null until the Spec is read. */
+  asked: ReadonlySet<string> | null
   /** The proposals `Not now` was pressed on, in this window only: nothing keeps it. */
   declined: ReadonlySet<string>
   onAnswer: (questionId: string, answer: SpecAnswer) => void
@@ -529,12 +531,14 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   // A question of the Spec, asked here and answered here (D7-01). The answer written beside it is
   // drawn by the question itself, folded to what was chosen, and has no block of its own.
   if (entry.kind === 'spec_question') {
-    const question = questionEntryOf(entry, context.spec.thread)
-    if (question === null) return null
+    const block = questionEntryOf(entry, context.spec.thread, context.spec.asked)
+    if (block === null) return null
+    const { question, cancelled } = block
     return (
       <div id={questionAnchor(question.id)}>
         <SpecQuestion
           question={question}
+          cancelled={cancelled}
           onAnswer={(answer) => context.spec.onAnswer(question.id, answer)}
         />
       </div>

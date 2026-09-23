@@ -64,24 +64,40 @@ export function briefOf(entry: SessionEntry): MissionBriefProps {
   }
 }
 
+/** A question as its block draws it, and whether it was left behind by a Rework. */
+export interface QuestionBlock {
+  question: SpecQuestionView
+  cancelled: boolean
+}
+
 /**
  * A question asked in the thread, answered once the `spec_answer` entry written beside it is in
  * the thread too: the two share the question's id. A question tied to no phase is drawn under
  * `shape`, as the register draws it.
+ *
+ * `asked` is the questions of the Spec's current revision, null until it is read. A question
+ * without an answer that is not among them was left behind by a Rework, which asks the open
+ * questions again under new ids (D7-05): its block is `cancelled` — it stays open in the Spec,
+ * asked again further down — and never offers an answer the engine would refuse.
  */
 export function questionEntryOf(
   entry: SessionEntry,
   thread: readonly SessionEntry[],
-): SpecQuestionView | null {
+  asked: ReadonlySet<string> | null,
+): QuestionBlock | null {
   const question = parsed(questionSchema, entry.payload)
   if (question === null) return null
+  const answer = answeredIn(question.id, thread)
   return {
-    id: question.id,
-    body: question.body,
-    blocking: question.blocking,
-    phase: question.phase ?? 'shape',
-    options: question.options,
-    answer: answeredIn(question.id, thread),
+    question: {
+      id: question.id,
+      body: question.body,
+      blocking: question.blocking,
+      phase: question.phase ?? 'shape',
+      options: question.options,
+      answer,
+    },
+    cancelled: answer === null && asked !== null && !asked.has(question.id),
   }
 }
 

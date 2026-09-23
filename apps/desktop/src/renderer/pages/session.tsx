@@ -368,6 +368,10 @@ export function SessionPage({
         thread,
         specId: session.specId,
         defined: definedOf(defined, stored.revisions),
+        asked:
+          stored.current?.spec.id === session.specId
+            ? new Set(stored.current.questions.map((one) => one.id))
+            : null,
         declined,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),

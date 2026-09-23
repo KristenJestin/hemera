@@ -60,8 +60,9 @@ describe('The brief is part of the turn, never a human message', () => {
 
 describe('A question is asked and answered in the chat', () => {
   test('a question with no answer beside it is open, its options as the agent offered them', () => {
-    const question = questionEntryOf(QUESTION, [QUESTION])
-    expect(question).toEqual({
+    const block = questionEntryOf(QUESTION, [QUESTION], new Set(['q-date']))
+    expect(block?.cancelled).toBe(false)
+    expect(block?.question).toEqual({
       id: 'q-date',
       body: 'Which date decides the month?',
       blocking: true,
@@ -80,7 +81,7 @@ describe('A question is asked and answered in the chat', () => {
       JSON.stringify({ questionId: 'q-date', optionId: 'issue' }),
       'answer',
     )
-    expect(questionEntryOf(QUESTION, [QUESTION, answer])?.answer).toEqual({
+    expect(questionEntryOf(QUESTION, [QUESTION, answer], null)?.question.answer).toEqual({
       optionId: 'issue',
       text: undefined,
     })
@@ -97,15 +98,39 @@ describe('A question is asked and answered in the chat', () => {
       JSON.stringify({ questionId: 'q-date', text: 'The delivery date' }),
       'own',
     )
-    expect(questionEntryOf(QUESTION, [QUESTION, other])?.answer).toBe(null)
-    expect(questionEntryOf(QUESTION, [QUESTION, other, own])?.answer).toEqual({
+    expect(questionEntryOf(QUESTION, [QUESTION, other], null)?.question.answer).toBe(null)
+    expect(questionEntryOf(QUESTION, [QUESTION, other, own], null)?.question.answer).toEqual({
       optionId: undefined,
       text: 'The delivery date',
     })
   })
 
   test('an entry this version cannot read is not drawn', () => {
-    expect(questionEntryOf(entry('spec_question', JSON.stringify({ id: 'q' })), [])).toBe(null)
+    expect(questionEntryOf(entry('spec_question', JSON.stringify({ id: 'q' })), [], null)).toBe(
+      null,
+    )
+  })
+})
+
+describe('A Rework asks the open questions again', () => {
+  test('a question the current revision no longer holds is drawn cancelled, not answerable', () => {
+    // After the Rework the same question is asked again under `q-date-2`.
+    expect(questionEntryOf(QUESTION, [QUESTION], new Set(['q-date-2']))?.cancelled).toBe(true)
+  })
+
+  test('one answered before the Rework stays folded to its answer', () => {
+    const answer = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', optionId: 'issue' }),
+      'answer',
+    )
+    const block = questionEntryOf(QUESTION, [QUESTION, answer], new Set(['q-date-2']))
+    expect(block?.cancelled).toBe(false)
+    expect(block?.question.answer).toEqual({ optionId: 'issue', text: undefined })
+  })
+
+  test('nothing is cancelled before the Spec has been read', () => {
+    expect(questionEntryOf(QUESTION, [QUESTION], null)?.cancelled).toBe(false)
   })
 })
 
