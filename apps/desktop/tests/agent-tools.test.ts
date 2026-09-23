@@ -13,6 +13,7 @@
 import { createHash } from 'node:crypto'
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -26,15 +27,27 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Fiber } from 'effect'
 import { z } from 'zod'
 
-import { AGENTS_FILE, DELIVERY_MARKER, type SessionEntry, TOOL_NAMES } from '@hemera/core'
+import {
+  AGENTS_FILE,
+  DELIVERY_MARKER,
+  READ_PAGE_BYTES,
+  SEARCH_MATCH_LIMIT,
+  SEARCH_SCAN_BYTES,
+  type SessionEntry,
+  TOOL_NAMES,
+  contextUri,
+} from '@hemera/core'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { Commands } from '#engine/commands/service.ts'
 import { Context as AgentContext } from '#engine/context/service.ts'
+import { Journal } from '#engine/journal.ts'
+import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { ToolAccess } from '#engine/tools/access.ts'
-import { aSessionOn, threadOf, toolApplication, until } from './application.ts'
+import { ToolServer } from '#engine/tools/server.ts'
+import { aSessionOn, gated, pause, threadOf, toolApplication, until } from './application.ts'
 
 let dataFolder: string
 let workspace: string
@@ -502,5 +515,433 @@ describe('A new Session starts from the current instructions', () => {
     expect(seen.pending).toBeNull()
     expect(seen.entries.filter((entry) => entry.kind === 'context_delivery')).toHaveLength(0)
     expect(second.answers.prompts.join('\n')).not.toContain(DELIVERY_MARKER)
+  })
+})
+
+/** The bearer token a fake agent was handed at `session/new`, as it sends it. */
+const tokenOf = (agent: ReturnType<typeof fakeAgent>): string => {
+  const server = agent.answers.mcpServers[0]?.[0]
+  const header = server !== undefined && 'headers' in server ? server.headers[0]?.value : undefined
+  return (header ?? '').replace(/^Bearer /, '')
+}
+
+/** One `tools/call` sent straight to the server, as an agent with that token would send it. */
+const callWith = (
+  origin: string,
+  token: string | null,
+  name: string,
+  sent: Readonly<Record<string, string>>,
+) =>
+  Effect.promise(async () => {
+    const headers = new Headers({
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    })
+    if (token !== null) headers.set('authorization', `Bearer ${token}`)
+    const response = await fetch(`${origin}/mcp`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name, arguments: sent },
+      }),
+    })
+    return { status: response.status, body: await response.text() }
+  })
+
+/** What a `hemera_tool_call` entry says of where it came from (D6-06). */
+const PROVENANCE = z.object({
+  tool: z.string(),
+  session: z.string(),
+  caller: z.string(),
+  agent: z.string(),
+  ms: z.number(),
+})
+
+describe('A read inside the Workspace goes through on its own', () => {
+  test('the entry and the Journal line carry the Session, the agent, the token and the time', async () => {
+    writeFileSync(join(workspace, 'notes.md'), 'the answer is 42\n')
+    const agent = fakeAgent({
+      steps: [{ does: 'uses', call: 'fs_read', arguments: { path: 'notes.md' } }],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const journal = yield* Journal
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'read the notes')
+        const read = yield* journal.read({ projectId: session.projectId })
+        return {
+          sessionId: session.id,
+          entries: yield* threadOf(session.id),
+          lines: read.entries.filter((line) => line.type.startsWith('tool.')),
+        }
+      }),
+    )
+
+    const token = tokenOf(agent)
+    const digest = createHash('sha256').update(token).digest('hex').slice(0, 12)
+    const calls = seen.entries.filter((entry) => entry.kind === 'hemera_tool_call')
+    expect(calls).toHaveLength(1)
+    const provenance = PROVENANCE.parse(JSON.parse(calls[0]?.payload ?? '{}'))
+    expect(provenance).toMatchObject({
+      tool: 'fs_read',
+      session: seen.sessionId,
+      caller: digest,
+      agent: 'claude',
+    })
+    expect(provenance.ms).toBeGreaterThan(0)
+    // The token itself is written nowhere: the digest names it.
+    expect(JSON.stringify(seen.entries)).not.toContain(token)
+    // Nothing was asked of the human, and the Journal has the same call under the same caller.
+    expect(questionsIn(seen.entries)).toHaveLength(0)
+    expect(seen.lines.map((line) => line.type)).toEqual(['tool.completed'])
+    expect(seen.lines[0]?.entityId).toBe(seen.sessionId)
+    expect(seen.lines[0]?.payload).toMatchObject({ tool: 'fs_read', caller: digest })
+  })
+})
+
+describe('A long read is paginated', () => {
+  test('the agent reads the range, truncated and the next offset, and the next page from it', async () => {
+    const body = 'x'.repeat(READ_PAGE_BYTES + 1024)
+    writeFileSync(join(workspace, 'long.txt'), body)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'uses', call: 'fs_read', arguments: { path: 'long.txt' } },
+        { does: 'uses', call: 'fs_read', arguments: { path: 'long.txt', offset: READ_PAGE_BYTES } },
+      ],
+    })
+
+    await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'read it all')
+      }),
+    )
+
+    // The range is the last line of what the agent reads, as fields it can parse.
+    const RANGE = z.object({
+      offset: z.number(),
+      end: z.number(),
+      size: z.number(),
+      truncated: z.boolean(),
+      next: z.number().nullable(),
+    })
+    const rangeOf = (text: string) => RANGE.parse(JSON.parse(text.split('\n').at(-1) ?? '{}'))
+    expect(rangeOf(agent.answers.used[0]?.text ?? '')).toEqual({
+      offset: 0,
+      end: READ_PAGE_BYTES,
+      size: body.length,
+      truncated: true,
+      next: READ_PAGE_BYTES,
+    })
+    expect(rangeOf(agent.answers.used[1]?.text ?? '')).toEqual({
+      offset: READ_PAGE_BYTES,
+      end: body.length,
+      size: body.length,
+      truncated: false,
+      next: null,
+    })
+  })
+})
+
+describe('The same write twice has one effect', () => {
+  test('a write, an edit and a run sent twice under one key act once and answer the same', async () => {
+    const counts = `"${process.execPath}" -e "require('fs').appendFileSync('ran.txt','x')"`
+    const twice = (call: string, sent: Readonly<Record<string, string>>) => [
+      { does: 'uses' as const, call, arguments: sent },
+      { does: 'uses' as const, call, arguments: sent },
+    ]
+    const agent = fakeAgent({
+      steps: [
+        ...twice('fs_write', { path: 'once.txt', content: 'first', key: 'write-1' }),
+        ...twice('fs_edit', { path: 'once.txt', old: 'first', new: 'edited', key: 'edit-1' }),
+        ...twice('commands_run', { name: 'count', key: 'run-1' }),
+      ],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* inCatalogue(session.projectId, 'count', counts, 'check')
+        yield* runtime.prompt(session.id, 'write, edit and run')
+        return yield* panelOf(session.id)
+      }),
+    )
+
+    const [write, writeAgain, edit, editAgain, run, runAgain] = agent.answers.used
+    // Each second answer is the first one, word for word.
+    expect(writeAgain?.text).toBe(write?.text)
+    expect(editAgain?.text).toBe(edit?.text)
+    expect(runAgain?.text).toBe(run?.text)
+    expect([write, edit, run].map((one) => one?.isError)).toEqual([false, false, false])
+    // And each effect happened once: the edit found its text, and the command ran once.
+    expect(readFileSync(join(workspace, 'once.txt'), 'utf8')).toBe('edited')
+    expect(readFileSync(join(workspace, 'ran.txt'), 'utf8')).toBe('x')
+    expect(seen.recent).toHaveLength(1)
+  })
+})
+
+describe('A search is bounded and says so', () => {
+  test('it stops at 1 MiB scanned, says which limit, and its cursor finds the rest', async () => {
+    // More than one call can scan, and what is looked for is past the budget.
+    const filler = `${'x'.repeat(99)}\n`.repeat(Math.ceil((SEARCH_SCAN_BYTES * 1.5) / 100))
+    writeFileSync(join(workspace, 'big.txt'), `${filler}the needle\n`)
+    const agent = fakeAgent({
+      steps: [{ does: 'uses', call: 'search', arguments: { query: 'needle' } }],
+    })
+
+    await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'find the needle')
+      }),
+    )
+
+    const first = agent.answers.used[0]?.text ?? ''
+    expect(first).toContain('no match')
+    expect(first).toContain('stopped by the scan budget')
+    expect(first).toContain(
+      `${String(SEARCH_MATCH_LIMIT)} matches and ${String(SEARCH_SCAN_BYTES)} bytes`,
+    )
+    const cursor = /continue from cursor (\S+)/.exec(first)?.[1] ?? ''
+    expect(cursor).not.toBe('')
+
+    // The agent carries on from where it was told to, in a turn of its own.
+    const next = fakeAgent({
+      steps: [{ does: 'uses', call: 'search', arguments: { query: 'needle', cursor } }],
+    })
+    await toolApplication(dataFolder)(next)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const sessions = yield* Sessions
+        const projects = yield* Projects
+        const project = (yield* projects.list())[0]
+        if (project === undefined) return
+        const session = yield* sessions.create(project.id, 'claude')
+        yield* runtime.prompt(session.id, 'carry on looking')
+      }),
+    )
+    expect(next.answers.used[0]?.text).toContain('big.txt')
+    expect(next.answers.used[0]?.text).toContain('the needle')
+  })
+})
+
+describe('The catalogue is edited and read', () => {
+  test('a command in a repository of the Project is listed to the agent with its kind and folder', async () => {
+    mkdirSync(join(workspace, 'api'))
+    const agent = fakeAgent({ steps: [{ does: 'uses', call: 'commands_list', arguments: {} }] })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const commands = yield* Commands
+        const projects = yield* Projects
+        const session = yield* aSessionOn(workspace, 'claude')
+        const project = (yield* projects.list()).find((one) => one.id === session.projectId)
+        yield* projects.addRepository(session.projectId, project?.version ?? 0, 'api')
+        yield* inCatalogue(session.projectId, 'test-api', 'pnpm test', 'check', 'api')
+        yield* runtime.prompt(session.id, 'what can I run?')
+        return yield* commands.list(session.projectId)
+      }),
+    )
+
+    // What the panel offers is the catalogue the user edited.
+    expect(seen.map((one) => [one.name, one.kind, one.folder])).toEqual([
+      ['test-api', 'check', 'api'],
+    ])
+    // And the agent reads the same command, with its kind and the folder it runs in.
+    expect(agent.answers.used[0]?.text).toContain('test-api  check  in api  pnpm test')
+  })
+})
+
+describe('A foreign or revoked access is rejected', () => {
+  test('no token, another Session’s, a released one: refused or kept to its own Session, never logged', async () => {
+    const written: string[] = []
+    const first = fakeAgent({ listsTools: true })
+    const second = fakeAgent({ listsTools: true })
+
+    const seen = await toolApplication(dataFolder, written)(first, second)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const sessions = yield* Sessions
+        const server = yield* ToolServer
+        const mine = yield* aSessionOn(workspace, 'claude')
+        const theirs = yield* sessions.create(mine.projectId, 'claude')
+        yield* runtime.start(mine.id)
+        yield* runtime.start(theirs.id)
+        const none = yield* callWith(server.origin, null, 'session_get', {})
+        // The other Session's token reaches the other Session, and never this one.
+        const other = yield* callWith(server.origin, tokenOf(second), 'session_get', {})
+        yield* runtime.release(mine.id)
+        const released = yield* callWith(server.origin, tokenOf(first), 'fs_read', {
+          path: 'notes.md',
+        })
+        return { none, other, released, mine: mine.id, theirs: theirs.id }
+      }),
+    )
+
+    expect(seen.none).toEqual({ status: 401, body: '{"error":"unauthorized"}' })
+    expect(seen.released).toEqual({ status: 401, body: '{"error":"unauthorized"}' })
+    expect(seen.other.status).toBe(200)
+    expect(seen.other.body).toContain(`session: ${seen.theirs}`)
+    expect(seen.other.body).not.toContain(seen.mine)
+    // The diagnostic names the Session and the tool of a refused call, and no token at all.
+    const refusals = written.filter((line) => line.includes('refused'))
+    expect(refusals.some((line) => line.includes(seen.mine) && line.includes('fs_read'))).toBe(true)
+    for (const token of [tokenOf(first), tokenOf(second)]) {
+      expect(token).not.toBe('')
+      for (const line of written) expect(line).not.toContain(token)
+    }
+  })
+})
+
+describe('No human-only action is reachable', () => {
+  test('no tool approves, closes or merges, a call to one is refused, and a one-off asks', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'uses', call: 'permission_approve', arguments: { id: 'anything' } },
+        { does: 'uses', call: 'session_close', arguments: {} },
+        { does: 'uses', call: 'commands_run', arguments: { line: ONE_OFF, key: 'one-off' } },
+      ],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* answeredTurn(session.id, 'approve it yourself', 'refused')
+        return { entries: yield* threadOf(session.id), panel: yield* panelOf(session.id) }
+      }),
+    )
+
+    // The server offers nothing of the human's, over the very door the agent uses.
+    const offered = agent.answers.tools[0] ?? []
+    expect(offered).not.toEqual([])
+    expect(
+      offered.filter((name) => /approv|decid|permission|close|merge|archiv/.test(name)),
+    ).toEqual([])
+    // Asking for one anyway is refused, and nothing happened.
+    expect(agent.answers.used[0]?.isError).toBe(true)
+    expect(agent.answers.used[1]?.isError).toBe(true)
+    // A line the agent wrote itself is the human's to allow: they were asked, refused, and it
+    // did not run.
+    expect(questionsIn(seen.entries)).toHaveLength(1)
+    expect(agent.answers.used[2]?.text).toContain('the user refused')
+    expect(seen.panel.recent).toHaveLength(0)
+  })
+})
+
+describe("A qualified agent has only Hemera's tools", () => {
+  test("the session's capabilities are Hemera's tools, and every call of the turn is one", async () => {
+    writeFileSync(join(workspace, 'notes.md'), 'the answer is 42\n')
+    const agent = fakeAgent({
+      steps: [
+        { does: 'uses', call: 'fs_list', arguments: {} },
+        { does: 'uses', call: 'fs_read', arguments: { path: 'notes.md' } },
+        { does: 'uses', call: 'session_get', arguments: {} },
+      ],
+    })
+
+    const entries = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'opencode')
+        yield* runtime.prompt(session.id, 'look around')
+        return yield* threadOf(session.id)
+      }),
+    )
+
+    // What the agent was handed to call is Hemera's catalogue, whole, and nothing beside it.
+    expect(agent.answers.tools).toEqual([[...TOOL_NAMES]])
+    // Every call the agent made in the turn is one Hemera answered and recorded.
+    const made = entries.filter((entry) => entry.kind === 'tool_call').map((entry) => entry.body)
+    const recorded = entries
+      .filter((entry) => entry.kind === 'hemera_tool_call')
+      .map((entry) => PROVENANCE.parse(JSON.parse(entry.payload ?? '{}')).tool)
+    expect(made).toEqual(['fs_list', 'fs_read', 'session_get'])
+    expect(recorded).toEqual(made)
+  })
+})
+
+describe('A change during a turn leaves at the next safe point', () => {
+  test('nothing is sent while the turn runs; after it, a delivery and no message of anyone', async () => {
+    writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')
+    const gate = gated(1)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'reading' },
+        { does: 'says', text: 'done' },
+      ],
+      between: gate.between,
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const context = yield* AgentContext
+        const session = yield* aSessionOn(workspace, 'claude')
+        const turn = yield* Effect.forkScoped(runtime.prompt(session.id, 'start'))
+        yield* until(threadOf(session.id), (entries) =>
+          entries.some((entry) => entry.body.includes('reading')),
+        )
+        // The instructions change while the turn is running.
+        writeFileSync(join(workspace, AGENTS_FILE), 'Be brief, and say why.\n')
+        yield* pause(50)
+        const duringTheTurn = {
+          prompts: agent.answers.prompts.length,
+          deliveries: (yield* threadOf(session.id)).filter(
+            (entry) => entry.kind === 'context_delivery',
+          ).length,
+        }
+        gate.carryOn()
+        yield* Fiber.join(turn)
+        yield* runtime.prompt(session.id, 'carry on')
+        return {
+          duringTheTurn,
+          entries: yield* threadOf(session.id),
+          provided: yield* context.provided(session.id),
+        }
+      }),
+    )
+
+    expect(seen.duringTheTurn).toEqual({ prompts: 1, deliveries: 0 })
+    // Between the turns, a prompt of its own: the marker and the new text as a resource.
+    expect(agent.answers.blocks[1]).toEqual([
+      { type: 'text', text: DELIVERY_MARKER },
+      {
+        type: 'resource',
+        resource: {
+          uri: contextUri(AGENTS_FILE),
+          mimeType: 'text/markdown',
+          text: 'Be brief, and say why.\n',
+        },
+      },
+    ])
+    expect(agent.answers.prompts[2]).toBe('carry on')
+    // One delivery in the thread, with the new fingerprint and how it reached the agent.
+    const fingerprint = createHash('sha256')
+      .update('Be brief, and say why.\n', 'utf8')
+      .digest('hex')
+    const deliveries = seen.entries.filter((entry) => entry.kind === 'context_delivery')
+    expect(deliveries).toHaveLength(1)
+    expect(deliveries[0]?.role).toBe('hemera')
+    expect(JSON.parse(deliveries[0]?.payload ?? '{}')).toMatchObject({
+      fingerprint,
+      reached: 'delivery_prompt',
+    })
+    // And no message of the user's that the user did not write: two prompts, two messages.
+    expect(
+      seen.entries.filter((entry) => entry.role === 'user' && entry.kind === 'message'),
+    ).toHaveLength(2)
+    // The Context view has it too, said to have reached the agent as a delivery.
+    const change = seen.provided.find((one) => one.kind === 'instructions')
+    expect(change).toMatchObject({ fingerprint, reached: 'delivery_prompt' })
+    expect(seen.provided.find((one) => one.kind === 'native')?.reached).toBe('read_natively')
   })
 })
