@@ -107,6 +107,17 @@ The SDK's `toolAliases` (`sdk.d.ts` ~1535) is the documented bridge for prompts 
 }
 ```
 
+This is the spike's proposal, and Hemera does not send `CLAUDE_CONFIG_DIR`, although the
+issue's design (D6-02) listed it. The directory it names is where Claude Code keeps its login, as
+`.credentials.json` wherever a file holds it. `claude auth status` run with a directory of its
+own answers `loggedIn: false` on a machine that is signed in (checked on 23 September 2026,
+Windows, Claude Code 2.1.280). Copying or linking the credentials into a directory of Hemera's
+would mean handling a secret that is not Hemera's. What the move was for is done without it:
+`settingSources: []` reads none of the user's settings files, and `strictMcpConfig: true` loads
+no MCP server but Hemera's. What still loads, `~/.claude.json` and the managed and policy
+settings, is named as residue in the Context view (D6-09). Hemera also sends
+`strictMcpConfig: true`, `MCP_TOOL_TIMEOUT` in `env`, and `allowedTools` (below).
+
 ### Permissions for Hemera's own tools (added in lot 2b)
 
 Emptying the built-ins does not stop Claude Code from asking about the MCP tools that remain.
