@@ -357,3 +357,54 @@ export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
 } from './session/resume-fallback-banner.tsx'
+
+/**
+ * The Spec panel of a `define` Session (lot 19): the head and its phase rail, the outline and
+ * the stage that shows one piece at a time, the readiness at the foot, and the pieces a Session
+ * reading, reworking or starting a Spec adds to it; with the thin Hemera line the thread draws
+ * for what the agent was handed. View types only: the domain arrives with phase 1.
+ */
+export {
+  SpecPanel,
+  SpecStage,
+  type SpecPanelProps,
+  type SpecStageProps,
+} from './spec/spec-panel.tsx'
+export { SpecHead, type SpecHeadProps } from './spec/spec-head.tsx'
+export { PhaseRail, type PhaseRailProps } from './spec/phase-rail.tsx'
+export { SpecOutline, type OutlineRow, type SpecOutlineProps } from './spec/spec-outline.tsx'
+export { SectionStage, type SectionStageProps } from './spec/section-stage.tsx'
+export { StoriesStage, type StoriesStageProps } from './spec/stories-stage.tsx'
+export { TasksStage, type TasksStageProps } from './spec/tasks-stage.tsx'
+export { QuestionsStage, type QuestionsStageProps } from './spec/questions-stage.tsx'
+export { ReadinessBar, type ReadinessBarProps } from './spec/readiness-bar.tsx'
+export { ConflictBanner, type ConflictBannerProps } from './spec/conflict-banner.tsx'
+export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
+export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
+export { NoSpecYet, type NoSpecYetProps } from './spec/no-spec-yet.tsx'
+export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
+export type {
+  Author,
+  ConflictView,
+  DraftSpecView,
+  Executor,
+  GateCheck,
+  GateCheckView,
+  Mark,
+  PhaseName,
+  PhaseState,
+  PhaseView,
+  QuestionView,
+  ReaderView,
+  ReadinessItem,
+  ReadinessView,
+  RevisionView,
+  SectionName,
+  SectionView,
+  SpecStatus,
+  SpecType,
+  SpecView,
+  StageItem,
+  StoryView,
+  TaskView,
+} from './spec/model.ts'
