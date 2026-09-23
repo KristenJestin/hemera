@@ -44,6 +44,7 @@ const meta = {
     path: '/home/kris/.local/share/hemera/workspaces/atlas/login-form',
     state: 'ready',
     main: false,
+    dedicated: true,
     specKey: 'HEM-7',
     repositories: [API, FRONT],
     onOpenFolder: fn(),
@@ -59,6 +60,10 @@ const meta = {
       description: 'Where the Workspace stands.',
     },
     main: { control: 'boolean', description: 'Whether it is the Project’s own folder.' },
+    dedicated: {
+      control: 'boolean',
+      description: 'Whether Hemera made it for a Spec: the only kind cleaned up.',
+    },
     specKey: { control: 'text', description: 'The key of the Spec it was made for.' },
     repositories: {
       control: 'object',
@@ -82,6 +87,7 @@ export const Main: Story = {
     name: 'main',
     path: '/home/kris/Projects/atlas',
     main: true,
+    dedicated: false,
     specKey: undefined,
     repositories: [
       { path: './sources/api', git: { ...CLEAN, branch: 'develop' } },
@@ -93,6 +99,22 @@ export const Main: Story = {
     // Its name and its badge: the badge is what says it is the Project's own folder.
     await expect(canvas.getAllByText('main')).toHaveLength(2)
     await expect(canvas.getByText('Ready')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /Clean up/ })).toBeNull()
+  },
+}
+
+/** A folder the user picked: theirs, so it can be opened and never cleaned up (D8-14). */
+export const PickedFolder: Story = {
+  args: {
+    name: 'spike',
+    path: '/home/kris/Projects/spike',
+    dedicated: false,
+    specKey: undefined,
+    repositories: [],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'Open folder' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /Clean up/ })).toBeNull()
   },
 }

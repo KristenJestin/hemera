@@ -17,7 +17,7 @@ import { WorkspaceBadges } from './workspace-card.tsx'
  * nothing is created in that folder and nothing is prepared in it.
  *
  * Cleaning up is offered on a dedicated Workspace that is not cleaned up yet, and never on
- * `main` (D8-14). The list asks for it and the caller confirms it: what is removed is said in the
+ * `main` nor on a folder the user picked, which is theirs (D8-14). The list asks for it and the caller confirms it: what is removed is said in the
  * cleanup dialog, not here.
  */
 const ROWS = 'flex flex-col gap-2'
@@ -135,7 +135,7 @@ export function WorkspaceList({
                 </span>
                 <span className={PATH}>{workspace.path}</span>
               </span>
-              {!workspace.main && workspace.state !== 'cleaned' && (
+              {workspace.dedicated && workspace.state !== 'cleaned' && (
                 <Button
                   variant="ghost"
                   size="sm"

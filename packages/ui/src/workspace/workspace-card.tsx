@@ -13,8 +13,8 @@ import type { GitState, WorkspaceRepositoryLine, WorkspaceState } from './model.
  * when it was drawn, and a repository Git could not read says Git's own message on its own row
  * while the others still say theirs. A Workspace is one folder whatever made it — `main`, one
  * made for a Spec, one on a folder the user picked — so the card is the same for all three, and
- * only the actions differ: `main` is never cleaned up, and a cleaned Workspace has nothing left
- * to act on.
+ * only the actions differ: only the one made for a Spec is cleaned up (D8-14), and a cleaned
+ * Workspace has nothing left to act on.
  */
 const BODY = 'flex flex-col gap-3'
 
@@ -70,6 +70,8 @@ export interface WorkspaceCardProps {
   state: WorkspaceState
   /** Whether it is the Project's own folder, which is never cleaned up. */
   main: boolean
+  /** Whether Hemera made it for a Spec, with its worktrees: the only kind cleaned up (D8-14). */
+  dedicated: boolean
   /** The key of the Spec it was made for, when it was made for one. */
   specKey?: string | undefined
   /** Each repository of the Workspace, with what Git answered when the card was drawn. */
@@ -91,6 +93,7 @@ export function WorkspaceCard({
   path,
   state,
   main,
+  dedicated,
   specKey,
   repositories,
   cleanedAt,
@@ -103,7 +106,7 @@ export function WorkspaceCard({
   // A cleaned Workspace has no folder left to open and nothing left to resume or clean (D8-14).
   const openable = !cleaned && onOpenFolder !== undefined
   const resumable = state === 'failed' && onResume !== undefined
-  const cleanable = !main && !cleaned && onCleanup !== undefined
+  const cleanable = dedicated && !cleaned && onCleanup !== undefined
   const actions =
     openable || resumable || cleanable ? (
       <>

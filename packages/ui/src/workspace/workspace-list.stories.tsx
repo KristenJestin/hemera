@@ -16,6 +16,7 @@ const MAIN: WorkspaceRow = {
   path: '/home/kris/Projects/atlas',
   state: 'ready',
   main: true,
+  dedicated: false,
 }
 
 const ROOT = '/home/kris/.local/share/hemera/workspaces/atlas'
@@ -28,6 +29,7 @@ const FILLED: WorkspaceRow[] = [
     path: `${ROOT}/login-form`,
     state: 'ready',
     main: false,
+    dedicated: true,
     specKey: 'HEM-7',
   },
   {
@@ -36,6 +38,7 @@ const FILLED: WorkspaceRow[] = [
     path: `${ROOT}/billing-export`,
     state: 'failed',
     main: false,
+    dedicated: true,
     specKey: 'HEM-9',
   },
   {
@@ -44,6 +47,7 @@ const FILLED: WorkspaceRow[] = [
     path: '/home/kris/Projects/spike',
     state: 'ready',
     main: false,
+    dedicated: false,
   },
   {
     id: 'onboarding',
@@ -51,6 +55,7 @@ const FILLED: WorkspaceRow[] = [
     path: `${ROOT}/onboarding`,
     state: 'cleaned',
     main: false,
+    dedicated: true,
     specKey: 'HEM-3',
   },
 ]
@@ -64,7 +69,11 @@ function Growing({ workspaces, onCreate, ...rest }: WorkspaceListProps) {
       workspaces={rows}
       onCreate={async (path, name) => {
         const said = await onCreate(path, name)
-        if (said === null) setRows([...rows, { id: name, name, path, state: 'ready', main: false }])
+        if (said === null)
+          setRows([
+            ...rows,
+            { id: name, name, path, state: 'ready', main: false, dedicated: false },
+          ])
         return said
       }}
     />
@@ -113,9 +122,12 @@ export const Filled: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('HEM-7')).toBeVisible()
-    // A cleaned Workspace and main offer nothing; the three others do.
-    await expect(canvas.getAllByRole('button', { name: /^Clean up/ })).toHaveLength(3)
+    // Only the two made for a Spec and not cleaned up yet offer it: main, the cleaned one and
+    // `spike`, a folder the user picked, are not Hemera's to remove (D8-14).
+    await expect(canvas.getAllByRole('button', { name: /^Clean up/ })).toHaveLength(2)
     await expect(canvas.queryByRole('button', { name: 'Clean up onboarding' })).toBeNull()
+    await expect(canvas.getByText('/home/kris/Projects/spike')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Clean up spike' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Clean up login-form' }))
     await expect(args.onCleanup).toHaveBeenCalledWith('login-form')
   },

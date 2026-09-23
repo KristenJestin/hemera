@@ -79,6 +79,11 @@ export interface WorkspaceRow {
   readonly state: WorkspaceState
   /** Whether it is the Project's own folder, which is never cleaned up. */
   readonly main: boolean
+  /**
+   * Whether Hemera made it for a Spec, with its worktrees: the only kind that is cleaned up
+   * (D8-14). A folder the user picked is theirs, and Hemera removes nothing from it.
+   */
+  readonly dedicated: boolean
   /** The key of the Spec it was made for, when it was made for one. */
   readonly specKey?: string | undefined
 }
