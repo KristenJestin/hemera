@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 
 import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
-import { IconPlayerStop } from '../icons.ts'
+import { IconBookmarkPlus, IconPlayerStop } from '../icons.ts'
+import { COMMAND_TYPE_ICONS, COMMAND_TYPE_LABELS, type CommandType } from './command-type.ts'
 import { Disclosure } from './disclosure.tsx'
 import { TerminalOutput } from './terminal-output.tsx'
 
@@ -22,7 +23,11 @@ import { TerminalOutput } from './terminal-output.tsx'
  *
  * A one-off command line is marked as one: it runs inside the Workspace root, shows here, and
  * is never promoted to the catalogue by itself. The reader is the one who decides what a
- * Project keeps.
+ * Project keeps, which is why a one-off offers `Add to catalogue` on its line and the run itself
+ * writes nothing (D8-11).
+ *
+ * The type is drawn with the icon the design system fixes for it (D8-07), beside the name, so a
+ * `test` reads as a test here as it does in the settings.
  */
 
 /** How a run is read at a glance: the state is the word, and the exit code is the proof. */
@@ -43,6 +48,8 @@ const SUMMARY = 'flex min-w-0 items-center gap-2'
 
 const NAME = 'min-w-0 truncate text-foreground'
 
+const TYPE_ICON = 'flex shrink-0 text-muted-foreground'
+
 const FOLDER = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
 
 /** The command line itself, under the name, as it was given to the shell. */
@@ -56,15 +63,13 @@ const URL = 'min-w-0 truncate font-mono text-info-muted-foreground'
 /** Where a run stands: a process is running, over, or was stopped under it. */
 export type CommandState = 'running' | 'finished' | 'failed' | 'stopped'
 
-/** What a command is for, which is what the catalogue keeps it as. */
-export type CommandKind = 'app' | 'check' | 'utility'
-
 export interface CommandRunProps {
   /** The command's name in the catalogue, or what a one-off is called on screen. */
   name: string
   /** The command line, exactly as it was run. */
   command: string
-  kind: CommandKind
+  /** What the command is for, drawn with its fixed icon and its word (D8-07). */
+  type: CommandType
   state: CommandState
   /** The folder it runs in, relative to the Workspace when it is inside it. */
   folder: string
@@ -82,6 +87,11 @@ export interface CommandRunProps {
   onOpenUrl?: ((url: string) => void) | undefined
   /** Stops the process, which is the reader's one action on a run. */
   onStop?: (() => void) | undefined
+  /**
+   * Asks for a one-off line to be kept in the catalogue (D8-11): the human adds, and the run
+   * itself promotes nothing. Offered on a one-off only.
+   */
+  onAddToCatalogue?: (() => void) | undefined
   /** Where the block sits; never how it looks. */
   className?: string | undefined
 }
@@ -89,7 +99,7 @@ export interface CommandRunProps {
 export function CommandRun({
   name,
   command,
-  kind,
+  type,
   state,
   folder,
   output,
@@ -99,9 +109,11 @@ export function CommandRun({
   defaultOpen = false,
   onOpenUrl,
   onStop,
+  onAddToCatalogue,
   className,
 }: CommandRunProps): ReactNode {
   const shown = STATE[state]
+  const TypeIcon = COMMAND_TYPE_ICONS[type]
   const running = state === 'running'
   // A process the reader is waiting on is held open: the output is the answer rather than a
   // detail to go and open. A run that exits 0 folds itself the moment it does (recette 5 of 24
@@ -117,11 +129,14 @@ export function CommandRun({
         defaultOpen={defaultOpen || state === 'failed'}
         summary={
           <span className={SUMMARY}>
+            <span className={TYPE_ICON}>
+              <TypeIcon size="sm" aria-hidden="true" />
+            </span>
             <span className={NAME}>{name}</span>
             <Badge tone={shown.tone}>
               {exitCode === undefined || running ? shown.word : `${shown.word} ${exitCode}`}
             </Badge>
-            <Badge tone="neutral">{kind}</Badge>
+            <Badge tone="neutral">{COMMAND_TYPE_LABELS[type]}</Badge>
             {oneOff && <Badge tone="neutral">One-off</Badge>}
             <span className={FOLDER}>{folder}</span>
           </span>

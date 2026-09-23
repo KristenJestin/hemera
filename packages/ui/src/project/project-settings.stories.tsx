@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { COMMAND_TYPE_LABELS } from '../activity/command-type.ts'
 import type { ProjectDraft, RepositoryLine } from './model.ts'
 import {
   ProjectSettings,
@@ -15,29 +16,101 @@ import {
  * What a name and a path are allowed to be is the domain's rule, and the panel stands in for
  * it: `saveRefusal` and `addRefusal` are what the engine would have answered. What is under
  * test here is the page — what it shows, what it saves, and what it does with a refusal.
+ *
+ * Lot 20 gives the catalogue its seven types, a line per system, a scope and Portless (D8-07,
+ * D8-10), each repository its place in a dedicated Workspace, and the page the folder and the
+ * branch prefix of dedicated Workspaces (D8-02, D8-04).
  */
 const ATLAS: ProjectDraft = {
   name: 'Atlas',
   tone: 'primary',
   mainPath: '/home/someone/Projects/atlas',
+  workspacesRoot: null,
+  branchPrefix: null,
 }
 
 const REPOSITORIES: RepositoryLine[] = [
-  { path: './sources/api', branch: 'main', exists: true },
-  { path: './sources/front', branch: 'develop', exists: true },
-  { path: './docs', branch: null, exists: true },
+  { path: './sources/api', branch: 'main', exists: true, includedByDefault: true },
+  { path: './sources/front', branch: 'develop', exists: true, includedByDefault: true },
+  { path: './docs', branch: null, exists: true, includedByDefault: false },
 ]
 
+/** What a command of the catalogue is unless a fixture says otherwise. */
+const PLAIN = {
+  lineWindows: null,
+  lineLinux: null,
+  scope: 'workspace',
+  portless: false,
+} as const
+
 /**
- * The catalogue of a Project that has three commands (design D6-12).
+ * The catalogue of a Project that has one command of each of the seven types (D8-07).
  *
  * Named the way a reader names them, and each with the folder it runs in: `dev` in the front,
- * `check` at the root, and a `seed` that is a utility — a line that does something and stops.
+ * `check` at the root, an `auth` server shared by the Project and run through Portless, and a
+ * `seed` whose Windows line is its own (scenario "The machine runs its own variant").
  */
 const COMMANDS: CommandLine[] = [
-  { id: 'check', name: 'check', command: 'pnpm check', kind: 'check', folder: '.' },
-  { id: 'dev', name: 'dev', command: 'pnpm dev', kind: 'app', folder: './sources/front' },
-  { id: 'seed', name: 'seed', command: 'pnpm db:seed', kind: 'utility', folder: './sources/api' },
+  { ...PLAIN, id: 'check', name: 'check', command: 'pnpm check', type: 'test', folder: '.' },
+  {
+    ...PLAIN,
+    id: 'dev',
+    name: 'dev',
+    command: 'pnpm dev',
+    type: 'serve',
+    folder: './sources/front',
+  },
+  {
+    ...PLAIN,
+    id: 'auth',
+    name: 'auth',
+    command: 'pnpm auth:serve',
+    type: 'serve',
+    scope: 'project',
+    portless: true,
+    folder: './sources/api',
+  },
+  {
+    ...PLAIN,
+    id: 'lint',
+    name: 'lint',
+    command: 'pnpm lint',
+    type: 'lint',
+    folder: './sources/api',
+  },
+  {
+    ...PLAIN,
+    id: 'build',
+    name: 'build',
+    command: 'pnpm build',
+    type: 'build',
+    folder: './sources/api',
+  },
+  {
+    ...PLAIN,
+    id: 'env',
+    name: 'env',
+    command: 'pnpm env:configure',
+    type: 'configure',
+    folder: './sources/api',
+  },
+  {
+    ...PLAIN,
+    id: 'inspect',
+    name: 'inspect',
+    command: 'node --inspect dist/main.js',
+    type: 'debug',
+    folder: './sources/api',
+  },
+  {
+    ...PLAIN,
+    id: 'seed',
+    name: 'seed',
+    command: './scripts/seed.sh',
+    lineWindows: 'scripts\\seed.cmd',
+    type: 'script',
+    folder: './sources/api',
+  },
 ]
 
 /**
@@ -48,7 +121,7 @@ const COMMANDS: CommandLine[] = [
  */
 const FOLDERS: RepositoryLine[] = [
   ...REPOSITORIES,
-  { path: './scripts', branch: null, exists: true },
+  { path: './scripts', branch: null, exists: true, includedByDefault: false },
 ]
 
 interface Extra {
@@ -75,6 +148,7 @@ function Controlled({
   onSave,
   onAddRepository,
   onRemoveRepository,
+  onToggleIncluded,
   onAddCommand,
   onUpdateCommand,
   onRemoveCommand,
@@ -98,12 +172,22 @@ function Controlled({
         onAddRepository={async (path) => {
           await onAddRepository(path)
           if (addRefusal !== null) return addRefusal
-          setLines([...lines, { path, branch: null, exists: false }])
+          setLines([...lines, { path, branch: null, exists: false, includedByDefault: true }])
           return null
         }}
         onRemoveRepository={(path) => {
           onRemoveRepository(path)
           setLines(lines.filter((one) => one.path !== path))
+        }}
+        onToggleIncluded={(path, included) => {
+          onToggleIncluded?.(path, included)
+          setLines(
+            lines.map((one) =>
+              one.path === path
+                ? { path, branch: one.branch, exists: one.exists, includedByDefault: included }
+                : one,
+            ),
+          )
         }}
         commands={catalogue}
         onAddCommand={async (command) => {
@@ -128,7 +212,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Project/Settings',
   component: ProjectSettings,
   render: (args) => <Controlled {...args} />,
@@ -149,6 +233,7 @@ const meta = {
     onBrowse: fn(async () => await Promise.resolve('/home/someone/Projects/atlas-2')),
     onAddRepository: fn(async () => await Promise.resolve(null)),
     onRemoveRepository: fn(),
+    onToggleIncluded: fn(),
     onArchive: fn(),
   },
   argTypes: {
@@ -179,12 +264,30 @@ const meta = {
     onBrowse: { action: 'folder picked' },
     onAddRepository: { action: 'repository added' },
     onRemoveRepository: { action: 'repository removed' },
+    onToggleIncluded: {
+      action: 'repository included by default',
+      description: 'Says whether a repository is in every dedicated Workspace by default.',
+    },
     onArchive: { action: 'archived' },
   },
 } satisfies Meta<typeof Controlled>
 
 export default meta
 type Story = StoryObj<typeof meta>
+
+type StoryContext = Parameters<NonNullable<Story['play']>>[0]
+
+/** Opens a select of the page by its name and chooses one of its items, then waits it out. */
+async function choose(canvasElement: HTMLElement, label: string, option: RegExp): Promise<void> {
+  await userEvent.click(within(canvasElement).getByLabelText(label))
+  const list = await waitFor(() => within(document.body).getByRole('listbox'))
+  await userEvent.click(within(list).getByRole('option', { name: option }))
+  // The list is waited out: the accessibility pass runs on whatever is on the page at the end,
+  // and a popup still leaving carries focus guards that read as an error.
+  await waitFor(() => {
+    expect(within(document.body).queryByRole('listbox')).toBeNull()
+  })
+}
 
 export const Playground: Story = {}
 
@@ -349,7 +452,7 @@ export const CommandCatalogue: Story = {
 
     await userEvent.click(canvas.getByRole('button', { name: 'Remove seed' }))
     await waitFor(() => {
-      expect(canvas.queryByText('pnpm db:seed')).toBeNull()
+      expect(canvas.queryByText('./scripts/seed.sh')).toBeNull()
     })
     expect(args.onRemoveCommand).toHaveBeenCalledWith('seed')
   },
@@ -375,7 +478,7 @@ export const ACommandIsAdded: Story = {
     const canvas = within(canvasElement)
 
     await userEvent.type(canvas.getByRole('textbox', { name: 'Command name' }), 'check')
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Command line' }), 'pnpm check')
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Default line' }), 'pnpm check')
     await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
 
     // The refusal lands under the folder field, and what was typed stays: a refusal is not a
@@ -383,7 +486,7 @@ export const ACommandIsAdded: Story = {
     await waitFor(() => {
       expect(canvas.getByText(/already declared/)).toHaveStyle({ opacity: '1' })
     })
-    expect(canvas.getByRole('textbox', { name: 'Command line' })).toHaveValue('pnpm check')
+    expect(canvas.getByRole('textbox', { name: 'Default line' })).toHaveValue('pnpm check')
   },
 }
 
@@ -397,7 +500,7 @@ export const CommandFolderIsARepository: Story = {
     const canvas = within(canvasElement)
 
     await userEvent.type(canvas.getByRole('textbox', { name: 'Command name' }), 'test')
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Command line' }), 'pnpm test')
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Default line' }), 'pnpm test')
     const folder = canvas.getByRole('textbox', { name: 'Command folder' })
     await userEvent.type(folder, 'sou')
 
@@ -417,7 +520,8 @@ export const CommandFolderIsARepository: Story = {
         id: 'test',
         name: 'test',
         command: 'pnpm test',
-        kind: 'utility',
+        ...PLAIN,
+        type: 'script',
         folder: './sources/api',
       })
     })
@@ -426,7 +530,7 @@ export const CommandFolderIsARepository: Story = {
 
 /**
  * Scenario « The catalogue is edited and read »: a command of the catalogue is edited in place.
- * Its name is what it is found by, so the name stays and the line, the kind and the folder are
+ * Its name is what it is found by, so the name stays and the lines, the type and the folder are
  * rewritten.
  */
 export const ACommandIsEdited: Story = {
@@ -438,7 +542,7 @@ export const ACommandIsEdited: Story = {
     const name = canvas.getByRole('textbox', { name: 'Command name' })
     expect(name).toHaveValue('dev')
     expect(name).toBeDisabled()
-    const line = canvas.getByRole('textbox', { name: 'Command line' })
+    const line = canvas.getByRole('textbox', { name: 'Default line' })
     expect(line).toHaveValue('pnpm dev')
     await userEvent.clear(line)
     await userEvent.type(line, 'pnpm dev --host')
@@ -449,12 +553,110 @@ export const ACommandIsEdited: Story = {
         id: 'dev',
         name: 'dev',
         command: 'pnpm dev --host',
-        kind: 'app',
+        ...PLAIN,
+        type: 'serve',
         folder: './sources/front',
       })
     })
     expect(canvas.getByText('pnpm dev --host')).toBeInTheDocument()
     // The form is back to adding one.
     expect(canvas.getByRole('button', { name: 'Add a command' })).toBeInTheDocument()
+  },
+}
+
+/**
+ * The seven types, each with its fixed icon and word, and a command whose Windows line is its
+ * own (D8-07).
+ */
+async function theMachineRunsItsOwnVariant({ canvasElement }: StoryContext): Promise<void> {
+  // "The machine runs its own variant"
+  const canvas = within(canvasElement)
+  // SAFETY: the default line of `seed` is drawn on its own row of the catalogue, which is a list
+  // item; the lookups below fail loudly if it ever is not.
+  const row = canvas.getByText('./scripts/seed.sh').closest('li') as HTMLElement
+  const seed = within(row)
+  // The badge names the system and carries the line it runs there, beside the default one.
+  const windows = seed.getByText('Windows')
+  await expect(windows.closest('[title]')).toHaveAttribute('title', 'scripts\\seed.cmd')
+  await expect(seed.getByText(': scripts\\seed.cmd')).toBeInTheDocument()
+  await expect(seed.getByText('./scripts/seed.sh')).toBeVisible()
+  // No Linux line is set, so Linux runs the default and no badge says otherwise.
+  await expect(seed.queryByText('Linux')).toBeNull()
+  // Every type of the catalogue is drawn with its word.
+  const drawn = Object.values(COMMAND_TYPE_LABELS).filter(
+    (word) => canvas.queryAllByText(word, { exact: true }).length > 0,
+  )
+  await expect(drawn).toEqual(Object.values(COMMAND_TYPE_LABELS))
+  // The shared server says it is the Project's and goes through Portless.
+  await expect(canvas.getByText('Project, in main')).toBeVisible()
+  await expect(canvas.getByText('Portless')).toBeVisible()
+}
+
+export const CommandTypes: Story = {
+  play: theMachineRunsItsOwnVariant,
+}
+
+/** A scope and Portless are a `serve`'s alone: the form offers them for that type only. */
+export const ServeScope: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByLabelText('Scope')).toBeNull()
+    await expect(canvas.queryByRole('checkbox', { name: 'Serve through Portless' })).toBeNull()
+
+    await choose(canvasElement, 'Type', /^Serve/)
+    await waitFor(() => {
+      expect(canvas.getByLabelText('Scope')).toBeInTheDocument()
+    })
+    await expect(canvas.getByRole('checkbox', { name: 'Serve through Portless' })).not.toBeChecked()
+
+    await choose(canvasElement, 'Type', /^Test/)
+    await waitFor(() => {
+      expect(canvas.queryByLabelText('Scope')).toBeNull()
+    })
+    await expect(canvas.queryByRole('checkbox', { name: 'Serve through Portless' })).toBeNull()
+  },
+}
+
+/** Each repository says whether a dedicated Workspace takes it by default (D8-04). */
+export const RepositoriesDefault: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onToggleIncluded?.mockClear()
+    const canvas = within(canvasElement)
+    const api = canvas.getByRole('checkbox', {
+      name: 'In every Workspace by default for ./sources/api',
+    })
+    await expect(api).toBeChecked()
+    await expect(
+      canvas.getByRole('checkbox', { name: 'In every Workspace by default for ./docs' }),
+    ).not.toBeChecked()
+
+    await userEvent.click(api)
+    await expect(args.onToggleIncluded).toHaveBeenCalledWith('./sources/api', false)
+    await waitFor(() => {
+      expect(api).not.toBeChecked()
+    })
+  },
+}
+
+/** Where dedicated Workspaces go and what their branches are called, saved with the page. */
+export const DedicatedWorkspaces: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onSave.mockClear()
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('textbox', { name: 'Workspaces folder' })).toHaveValue('')
+    const prefix = canvas.getByRole('textbox', { name: 'Branch prefix' })
+    // Empty, the prefix is the Project's slug, and the description says what a branch becomes.
+    await expect(prefix).toHaveAttribute('placeholder', 'atlas')
+    await expect(canvas.getByText('Dedicated branches are atlas/<KEY>-<slug>.')).toBeVisible()
+
+    await userEvent.type(prefix, 'kris')
+    await expect(canvas.getByText('Dedicated branches are kris/<KEY>-<slug>.')).toBeVisible()
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: 'Save' })).toBeEnabled()
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(args.onSave).toHaveBeenCalledWith({ ...ATLAS, branchPrefix: 'kris' })
+    })
   },
 }

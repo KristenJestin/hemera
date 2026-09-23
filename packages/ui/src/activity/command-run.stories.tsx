@@ -4,6 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { movesLess } from '../../.storybook/reduced-motion.ts'
 import { CommandRun } from './command-run.tsx'
+import { COMMAND_TYPES } from './command-type.ts'
 
 /**
  * A command Hemera runs for a Session (design D6-12).
@@ -11,7 +12,8 @@ import { CommandRun } from './command-run.tsx'
  * The stories are the four ways a run is read: an application that is running and has just
  * published its address, a check that is over and exited clean, a one-off line run inside the
  * Workspace root, and a process the reader stopped. The address is the reason the block exists,
- * so it is on the line in every story that has one.
+ * so it is on the line in every story that has one. A one-off offers `Add to catalogue` on its
+ * line, and pressing it is a request to the human's catalogue, not a promotion (D8-11).
  */
 const SERVER_OUTPUT = [
   'vite v7.1.4 building for development...',
@@ -29,28 +31,29 @@ const CHECK_OUTPUT = [
 ].join('\n')
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/CommandRun',
   component: CommandRun,
   parameters: { layout: 'padded' },
   args: {
     name: 'dev',
     command: 'pnpm dev',
-    kind: 'app',
+    type: 'serve',
     state: 'running',
     folder: 'apps/desktop',
     output: SERVER_OUTPUT,
     url: 'http://localhost:5173/',
     onOpenUrl: fn(),
     onStop: fn(),
+    onAddToCatalogue: fn(),
   },
   argTypes: {
     name: { control: 'text', description: 'The name the catalogue keeps it under.' },
     command: { control: 'text', description: 'The command line, as it was run.' },
-    kind: {
-      control: 'inline-radio',
-      options: ['app', 'check', 'utility'],
-      description: 'What the command is for.',
+    type: {
+      control: 'select',
+      options: COMMAND_TYPES,
+      description: 'What the command is for, drawn with its fixed icon (D8-07).',
     },
     state: {
       control: 'inline-radio',
@@ -64,12 +67,18 @@ const meta = {
     oneOff: { control: 'boolean', description: 'A line run without being in the catalogue.' },
     onOpenUrl: { control: false, description: 'Opens the published address.' },
     onStop: { control: false, description: 'Stops the process.' },
+    onAddToCatalogue: {
+      control: false,
+      description: 'Asks for a one-off line to be kept in the catalogue; a one-off only.',
+    },
   },
 } satisfies Meta<typeof CommandRun>
 
 export default meta
 
 type Story = StoryObj<typeof meta>
+
+type StoryContext = Parameters<NonNullable<Story['play']>>[0]
 
 /**
  * One fold, the run's own: its line, and one chevron at the end of it (trial of 23 September
@@ -81,7 +90,7 @@ async function oneHeader(canvasElement: HTMLElement, word: string, name?: string
   const folds = canvas.queryAllByRole('button', { expanded: true }).length
   const closed = canvas.queryAllByRole('button', { expanded: false }).length
   await expect(folds + closed, 'more than one fold in the run').toBe(1)
-  // The name is counted where it is not also the kind or the command line.
+  // The name is counted where it is not also the type or the command line.
   if (name !== undefined) await expect(canvas.getAllByText(name, { exact: true })).toHaveLength(1)
   await expect(canvas.getAllByText(new RegExp(`^${word}`))).toHaveLength(1)
 }
@@ -112,7 +121,7 @@ export const CheckExitedClean: Story = {
   args: {
     name: 'check',
     command: 'pnpm check',
-    kind: 'check',
+    type: 'test',
     state: 'finished',
     folder: '.',
     output: CHECK_OUTPUT,
@@ -137,7 +146,7 @@ export const CheckFailed: Story = {
   args: {
     name: 'test',
     command: 'pnpm test',
-    kind: 'check',
+    type: 'test',
     state: 'failed',
     folder: '.',
     output: 'Test Files  1 failed (1)\n      Tests  3 failed (3)',
@@ -158,7 +167,7 @@ export const OneOff: Story = {
   args: {
     name: 'pnpm drizzle-kit generate',
     command: 'pnpm drizzle-kit generate',
-    kind: 'utility',
+    type: 'script',
     state: 'finished',
     folder: 'apps/desktop',
     output: '1 tables\nproject_commands 1ms',
@@ -169,11 +178,53 @@ export const OneOff: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('One-off')).toBeVisible()
-    await expect(canvas.getByText('utility')).toBeVisible()
+    await expect(canvas.getByText('Script')).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: /Exited 0/ }))
     await expect(canvas.getByText(/project_commands 1ms/)).toBeVisible()
     await oneHeader(canvasElement, 'Exited')
   },
+}
+
+/**
+ * A one-off line offers to be kept, and pressing it asks and changes nothing of the run.
+ *
+ * Scenario "A one-off execution stays out of the catalogue": the run is marked `One-off`, the
+ * press is a request to the human's catalogue, and the run itself promotes nothing.
+ */
+async function aOneOffExecutionStaysOutOfTheCatalogue({
+  canvasElement,
+  args,
+}: StoryContext): Promise<void> {
+  // "A one-off execution stays out of the catalogue"
+  const canvas = within(canvasElement)
+  await expect(canvas.getByText('One-off')).toBeVisible()
+  await expect(canvas.getByText('Exited 0')).toBeVisible()
+  await userEvent.click(canvas.getByRole('button', { name: 'Add to catalogue' }))
+  await expect(args.onAddToCatalogue).toHaveBeenCalledTimes(1)
+  // Nothing else moved: still a one-off, still exited, still folded, and nothing was stopped.
+  await expect(canvas.getByText('One-off')).toBeVisible()
+  await expect(canvas.getByText('Exited 0')).toBeVisible()
+  await expect(canvas.getByRole('button', { name: /Exited 0/ })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  )
+  await expect(args.onStop).not.toHaveBeenCalled()
+  await oneHeader(canvasElement, 'Exited')
+}
+
+export const OneOffAddToCatalogue: Story = {
+  args: {
+    name: 'npx vitest run src/login.test.ts',
+    command: 'npx vitest run src/login.test.ts',
+    type: 'script',
+    state: 'finished',
+    folder: 'sources/front',
+    output: 'Test Files  1 passed (1)',
+    url: undefined,
+    exitCode: 0,
+    oneOff: true,
+  },
+  play: aOneOffExecutionStaysOutOfTheCatalogue,
 }
 
 /** A process the reader stopped: nothing exited, and the line says so. */

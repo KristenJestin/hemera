@@ -9,27 +9,25 @@ import { Input } from '../components/field/field.tsx'
 import { Select } from '../components/select/select.tsx'
 import { useAppForm } from '../form/app-form.ts'
 import { projectFormSchema, relativePathSchema } from '../form/schemas.ts'
-import {
-  IconArchive,
-  IconCommand,
-  IconFolder,
-  IconGitBranch,
-  IconPencil,
-  IconPlus,
-  IconX,
-} from '../icons.ts'
+import { IconArchive, IconFolder, IconGitBranch, IconPencil, IconPlus, IconX } from '../icons.ts'
 import { causeOf } from './project-dialog.tsx'
-import type { CommandKind } from '../activity/command-run.tsx'
+import {
+  COMMAND_TYPES,
+  COMMAND_TYPE_ICONS,
+  COMMAND_TYPE_LABELS,
+  type CommandScope,
+  type CommandType,
+} from '../activity/command-type.ts'
 import type { ProjectDraft, RepositoryLine } from './model.ts'
 
 /**
- * The settings of one Project, in four cards (design D4-07).
+ * The settings of one Project, in its cards (design D4-07).
  *
- * Identity and the folder of `main` are one form with one button, and the button sits with the
- * title of the page rather than under the last field: what it saves is the two cards above it,
- * and a button inside one of them would be claiming only that one. A page that saved each field
- * as it was typed would be a page writing a version of the Project per keystroke, and the engine
- * refuses a stale version rather than merging one.
+ * Identity, the folder of `main` and where dedicated Workspaces go are one form with one button,
+ * and the button sits with the title of the page rather than under the last field: what it saves
+ * is the three cards above it, and a button inside one of them would be claiming only that one.
+ * A page that saved each field as it was typed would be a page writing a version of the Project
+ * per keystroke, and the engine refuses a stale version rather than merging one.
  *
  * The repositories are their own thing — each line is added or taken away on its own — and the
  * archive sits at the bottom, alone, because it is the one action here that takes the Project
@@ -42,6 +40,66 @@ const NOTE = 'text-sm text-muted-foreground'
 const REFUSAL = 'text-sm text-destructive-muted-foreground'
 
 const PATH = 'min-w-0 flex-1 truncate font-mono text-sm'
+
+/** A command's line on its row, which gives way before its name does. */
+const LINE = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
+
+/** A box to tick and its words: the label is the whole target, as a native one is. */
+const TICK = 'flex shrink-0 items-center gap-2 text-sm text-foreground'
+
+/**
+ * The ring of the box, worn by what holds it: a checkbox is a replaced element and draws no
+ * pseudo-element, so the ring would never show on the input itself.
+ */
+const TICK_RING = 'flex rounded-sm focus-ring'
+
+const TICK_BOX = 'size-4 accent-primary'
+
+/**
+ * A box to tick, as the platform draws it, in the theme's accent.
+ *
+ * The design system has no checkbox of its own yet, and two boxes on one page are not worth a
+ * component: the native one is taken as it is. `hidden` completes the name for a screen reader
+ * where the same words sit on every row.
+ */
+function Tick({
+  label,
+  hidden,
+  checked,
+  disabled,
+  onCheckedChange,
+}: {
+  label: string
+  hidden?: string | undefined
+  checked: boolean
+  disabled?: boolean | undefined
+  onCheckedChange: (checked: boolean) => void
+}): ReactNode {
+  return (
+    <label className={TICK}>
+      <span className={TICK_RING}>
+        <input
+          type="checkbox"
+          className={TICK_BOX}
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onCheckedChange(event.target.checked)}
+        />
+      </span>
+      {label}
+      {hidden !== undefined && <span className="sr-only">{hidden}</span>}
+    </label>
+  )
+}
+
+/** What a Project's name gives as a branch prefix when none is set (D8-04). */
+function slugOf(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, '-')
+    .replaceAll(/^-|-$/g, '')
+}
 
 export interface ProjectSettingsProps {
   /** What the Project is right now; the form opens on it and says when it has moved away. */
@@ -68,6 +126,8 @@ export interface ProjectSettingsProps {
   onMainPathChange?: ((path: string) => void) | undefined
   onAddRepository: (path: string) => Promise<string | null>
   onRemoveRepository: (path: string) => void
+  /** Says whether a repository is in every dedicated Workspace unless left out (D8-04). */
+  onToggleIncluded?: ((path: string, included: boolean) => void) | undefined
   /**
    * The commands of the Project, which are what its Sessions may run (design D6-12).
    *
@@ -94,6 +154,7 @@ export function ProjectSettings({
   onMainPathChange,
   onAddRepository,
   onRemoveRepository,
+  onToggleIncluded,
   commands = [],
   onAddCommand,
   onUpdateCommand,
@@ -154,11 +215,56 @@ export function ProjectSettings({
         </form.AppField>
       </Card>
 
+      <Card
+        title="Dedicated Workspaces"
+        description="Where the Workspace of a Spec is made, and what its branches are called."
+      >
+        {/* Both are null when empty (D8-02, D8-04), so the field shows the empty string and
+            hands null back: an empty field is Hemera's own folder, and the Project's slug. */}
+        <form.AppField name="workspacesRoot">
+          {(field) => (
+            <Input
+              label="Workspaces folder"
+              description="Leave empty to use Hemera's own folder, in the Profile."
+              value={field.state.value ?? ''}
+              onValueChange={(next) => field.handleChange(next === '' ? null : next)}
+              onBlur={field.handleBlur}
+              action={
+                <Button
+                  variant="secondary"
+                  className="shrink-0"
+                  onClick={() => {
+                    void onBrowse().then((chosen) => {
+                      if (chosen !== null) field.handleChange(chosen)
+                    })
+                  }}
+                >
+                  Browse…
+                </Button>
+              }
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="branchPrefix">
+          {(field) => (
+            <Input
+              label="Branch prefix"
+              placeholder={slugOf(project.name)}
+              description={`Dedicated branches are ${field.state.value ?? slugOf(project.name)}/<KEY>-<slug>.`}
+              value={field.state.value ?? ''}
+              onValueChange={(next) => field.handleChange(next === '' ? null : next)}
+              onBlur={field.handleBlur}
+            />
+          )}
+        </form.AppField>
+      </Card>
+
       <RepositoryList
         repositories={repositories}
         folders={folders}
         onAdd={onAddRepository}
         onRemove={onRemoveRepository}
+        onToggleIncluded={onToggleIncluded}
       />
 
       <CommandList
@@ -181,18 +287,24 @@ export function ProjectSettings({
  *
  * An empty list is not a mistake: it means the root itself, which is what the card says instead
  * of offering to initialise anything. Nothing here clones, creates or writes.
+ *
+ * Each line says whether a dedicated Workspace takes a worktree of it by default (D8-04); the
+ * creation dialog still lets the user change that for one Workspace.
  */
 export function RepositoryList({
   repositories,
   folders = [],
   onAdd,
   onRemove,
+  onToggleIncluded,
 }: {
   repositories: RepositoryLine[]
   /** What sits directly under the Workspace, offered rather than asked for. */
   folders?: readonly RepositoryLine[] | undefined
   onAdd: (path: string) => Promise<string | null>
   onRemove: (path: string) => void
+  /** Says whether a repository is in every dedicated Workspace unless left out. */
+  onToggleIncluded?: ((path: string, included: boolean) => void) | undefined
 }): ReactNode {
   const [adding, setAdding] = useState('')
   const [refusal, setRefusal] = useState<string | null>(null)
@@ -269,6 +381,13 @@ export function RepositoryList({
                 ) : (
                   <Badge tone="success">git · {repository.branch}</Badge>
                 )}
+                <Tick
+                  label="In every Workspace by default"
+                  hidden={`for ${repository.path}`}
+                  checked={repository.includedByDefault}
+                  disabled={onToggleIncluded === undefined}
+                  onCheckedChange={(included) => onToggleIncluded?.(repository.path, included)}
+                />
                 <IconButton
                   variant="ghost"
                   size="sm"
@@ -349,9 +468,12 @@ function suggestionsOf(folders: readonly RepositoryLine[]): Suggestion[] {
  * catalogue is the reader's, the agent cannot invent a line, and what a Session may run is what
  * this card holds and nothing else.
  *
- * The kind is what the interface says about a command and not a permission: `app` is a server the
- * reader wants an address for, `check` is something that ends and answers with a code, `utility`
- * is everything else. What each one is allowed to do is the same: it runs inside the Workspace.
+ * The type is what the interface says about a command and not a permission (D8-07): `serve` is a
+ * server the reader wants an address for, and the six others end and answer with a code. Each is
+ * drawn with the icon the design system fixes for it. A command has one default line and may
+ * carry its own for Windows or Linux, which the machine runs instead; a `serve` says whether it
+ * runs once per Workspace or once for the Project, and whether it goes through Portless (D8-10).
+ * What each one is allowed to do is the same: it runs inside the Workspace.
  *
  * An empty catalogue is a Project whose Sessions run no command, and the card says that rather
  * than showing an empty box: a reader who sees "no command" knows why the agent's `commands_run`
@@ -362,12 +484,42 @@ export interface CommandLine {
   id: string
   /** The name the reader gave it, shown everywhere the catalogue is read. */
   name: string
-  /** The line itself, run in the folder below. */
+  /** The default line, run in the folder below on a system with no line of its own. */
   command: string
-  /** What the command is for, which is how the panel draws it. */
-  kind: CommandKind
+  /** What Windows runs instead of the default line, or null. */
+  lineWindows: string | null
+  /** What Linux runs instead of the default line, or null. */
+  lineLinux: string | null
+  /** What the command is for, which is how it is drawn everywhere (D8-07). */
+  type: CommandType
+  /** Where a `serve` runs: once per Workspace, or once for the Project in `main`. */
+  scope: CommandScope
+  /** Whether a `serve` goes through Portless at launch (D8-10). */
+  portless: boolean
   /** The folder it runs in, relative to the Workspace root. */
   folder: string
+}
+
+/** What a scope is read as on a command's row. */
+const SCOPE_WORDS: Record<CommandScope, string> = {
+  workspace: 'Per Workspace',
+  project: 'Project, in main',
+}
+
+/** The type offered in the form, each with its fixed icon. */
+const TYPE_ITEMS = COMMAND_TYPES.map((one) => {
+  const Icon = COMMAND_TYPE_ICONS[one]
+  return { value: one, label: COMMAND_TYPE_LABELS[one], icon: <Icon size="sm" /> }
+})
+
+const SCOPE_ITEMS: { value: CommandScope; label: string }[] = [
+  { value: 'workspace', label: 'One instance per Workspace' },
+  { value: 'project', label: 'One instance, run in main' },
+]
+
+/** A line of a system, typed or left empty: empty is the default line (D8-07). */
+function lineOrNull(typed: string): string | null {
+  return typed.trim() === '' ? null : typed.trim()
 }
 
 export function CommandList({
@@ -388,13 +540,17 @@ export function CommandList({
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
   const [folder, setFolder] = useState('')
-  const [kind, setKind] = useState<CommandKind>('utility')
+  const [lineWindows, setLineWindows] = useState('')
+  const [lineLinux, setLineLinux] = useState('')
+  const [type, setType] = useState<CommandType>('script')
+  const [scope, setScope] = useState<CommandScope>('workspace')
+  const [portless, setPortless] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   /**
    * The command being edited, by name, or null when the form adds one.
    *
    * A command is found by its name, which is what the agent asks for: the name is kept while the
-   * line, the kind and the folder are rewritten, and a new name is a new command.
+   * lines, the type and the folder are rewritten, and a new name is a new command.
    */
   const [editing, setEditing] = useState<string | null>(null)
 
@@ -402,7 +558,11 @@ export function CommandList({
     setName('')
     setCommand('')
     setFolder('')
-    setKind('utility')
+    setLineWindows('')
+    setLineLinux('')
+    setType('script')
+    setScope('workspace')
+    setPortless(false)
     setEditing(null)
   }
 
@@ -411,7 +571,12 @@ export function CommandList({
       id: name.trim(),
       name: name.trim(),
       command: command.trim(),
-      kind,
+      lineWindows: lineOrNull(lineWindows),
+      lineLinux: lineOrNull(lineLinux),
+      type,
+      // Meaningful for a `serve` only (D8-07, D8-10): anything else is one run per call.
+      scope: type === 'serve' ? scope : 'workspace',
+      portless: type === 'serve' && portless,
       folder: folder.trim() === '' ? '.' : folder.trim(),
     }
     const said = await (editing === null ? onAdd : onUpdate)?.(drafted)
@@ -422,7 +587,11 @@ export function CommandList({
   const edit = (one: CommandLine) => {
     setName(one.name)
     setCommand(one.command)
-    setKind(one.kind)
+    setLineWindows(one.lineWindows ?? '')
+    setLineLinux(one.lineLinux ?? '')
+    setType(one.type)
+    setScope(one.scope)
+    setPortless(one.portless)
     setFolder(one.folder === '.' ? '' : one.folder)
     setRefusal(null)
     setEditing(one.name)
@@ -443,14 +612,14 @@ export function CommandList({
           {commands.map((one) => (
             <li key={one.id}>
               <CardRow>
-                <span className="flex shrink-0 text-muted-foreground">
-                  <IconCommand size="sm" />
-                </span>
+                <CommandTypeIcon type={one.type} />
                 <span className={PATH}>{one.name}</span>
-                <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-                  {one.command}
-                </span>
-                <Badge tone="neutral">{one.kind}</Badge>
+                <span className={LINE}>{one.command}</span>
+                <Badge tone="neutral">{COMMAND_TYPE_LABELS[one.type]}</Badge>
+                <SystemLine system="Windows" line={one.lineWindows} />
+                <SystemLine system="Linux" line={one.lineLinux} />
+                {one.type === 'serve' && <Badge tone="neutral">{SCOPE_WORDS[one.scope]}</Badge>}
+                {one.type === 'serve' && one.portless && <Badge tone="info">Portless</Badge>}
                 <Badge tone="neutral">{one.folder === '.' ? 'Workspace root' : one.folder}</Badge>
                 {onUpdate === undefined ? null : (
                   <IconButton
@@ -489,23 +658,48 @@ export function CommandList({
               disabled={editing !== null}
             />
             <Input
-              label="Command line"
+              label="Default line"
               className="min-w-0 flex-1"
               placeholder="pnpm check"
               value={command}
               onValueChange={setCommand}
             />
             <Select
-              label="Kind"
-              value={kind}
-              onValueChange={setKind}
-              items={[
-                { value: 'app', label: 'App' },
-                { value: 'check', label: 'Check' },
-                { value: 'utility', label: 'Utility' },
-              ]}
+              label="Type"
+              value={type}
+              onValueChange={setType}
+              mark={<CommandTypeIcon type={type} />}
+              items={TYPE_ITEMS}
             />
           </div>
+          <div className="flex flex-wrap items-start gap-3">
+            <Input
+              label="Windows line"
+              className="min-w-0 flex-1"
+              placeholder="scripts\check.cmd"
+              description="Leave empty to run the default line on that system."
+              value={lineWindows}
+              onValueChange={setLineWindows}
+            />
+            <Input
+              label="Linux line"
+              className="min-w-0 flex-1"
+              placeholder="./scripts/check.sh"
+              description="Leave empty to run the default line on that system."
+              value={lineLinux}
+              onValueChange={setLineLinux}
+            />
+          </div>
+          {type === 'serve' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Select label="Scope" value={scope} onValueChange={setScope} items={SCOPE_ITEMS} />
+              <Tick
+                label="Serve through Portless"
+                checked={portless}
+                onCheckedChange={setPortless}
+              />
+            </div>
+          )}
           <SuggestInput
             label="Command folder"
             placeholder="."
@@ -548,6 +742,30 @@ export function CommandList({
         </>
       )}
     </Card>
+  )
+}
+
+/** The fixed icon of a command's type, in the muted colour of a row's mark (D8-07). */
+function CommandTypeIcon({ type }: { type: CommandType }): ReactNode {
+  const Icon = COMMAND_TYPE_ICONS[type]
+  return (
+    <span className="flex shrink-0 text-muted-foreground">
+      <Icon size="sm" />
+    </span>
+  )
+}
+
+/**
+ * The line a system runs instead of the default one, as a badge that names the system and
+ * carries the line: in its title for the pointer, in its words for a screen reader (D8-07).
+ */
+function SystemLine({ system, line }: { system: string; line: string | null }): ReactNode {
+  if (line === null) return null
+  return (
+    <span className="flex shrink-0" title={line}>
+      <Badge tone="neutral">{system}</Badge>
+      <span className="sr-only">: {line}</span>
+    </span>
   )
 }
 

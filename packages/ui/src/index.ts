@@ -266,12 +266,7 @@ export {
   type HemeraToolMark,
   type HemeraToolStatus,
 } from './activity/hemera-tool-call.tsx'
-export {
-  CommandRun,
-  type CommandKind,
-  type CommandRunProps,
-  type CommandState,
-} from './activity/command-run.tsx'
+export { CommandRun, type CommandRunProps, type CommandState } from './activity/command-run.tsx'
 /** The seven types of a command and the icon the design system fixes for each (D8-07). */
 export {
   COMMAND_SCOPES,

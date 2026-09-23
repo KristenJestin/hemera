@@ -12,6 +12,16 @@ export interface ProjectDraft {
   tone: ProjectTone
   /** The folder of the `main` Workspace, as the system's own picker wrote it. */
   mainPath: string
+  /**
+   * Where dedicated Workspaces are made (D8-02). Null means Hemera's own folder, under the
+   * Profile.
+   */
+  workspacesRoot: string | null
+  /**
+   * What a dedicated branch starts with (D8-04): `<prefix>/<KEY>-<slug>`. Null means the
+   * Project's name as a slug.
+   */
+  branchPrefix: string | null
 }
 
 /**
@@ -26,4 +36,9 @@ export interface RepositoryLine {
   branch: string | null
   /** Whether the folder is there at all: a path may be declared before its sources arrive. */
   exists: boolean
+  /**
+   * Whether a dedicated Workspace takes a worktree of it unless told otherwise (D8-04). The
+   * creation dialog still lets the user leave it out, or take one that is not.
+   */
+  includedByDefault: boolean
 }

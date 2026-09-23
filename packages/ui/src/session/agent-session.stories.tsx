@@ -227,7 +227,7 @@ const THREAD: ScrollerEntry[] = [
       <CommandRun
         name="dev"
         command="pnpm dev"
-        kind="app"
+        type="serve"
         state="running"
         folder="./sources/front"
         url="http://localhost:5173/"
@@ -274,7 +274,7 @@ const COMMANDS = (
         id: 'run-dev',
         name: 'dev',
         command: 'pnpm dev',
-        kind: 'app',
+        type: 'serve',
         state: 'running',
         folder: './sources/front',
         url: 'http://localhost:5173/',
@@ -284,7 +284,7 @@ const COMMANDS = (
         id: 'run-check',
         name: 'check',
         command: 'pnpm check',
-        kind: 'check',
+        type: 'test',
         state: 'failed',
         folder: '.',
         exitCode: 1,

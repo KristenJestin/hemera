@@ -14,7 +14,7 @@ const SERVER: CommandPanelRun = {
   id: 'run-dev',
   name: 'dev',
   command: 'pnpm dev',
-  kind: 'app',
+  type: 'serve',
   state: 'running',
   folder: 'apps/desktop',
   output: 'vite v7.1.4\n\n  Local:   http://localhost:5173/',
@@ -25,7 +25,7 @@ const CHECK: CommandPanelRun = {
   id: 'run-check',
   name: 'check',
   command: 'pnpm check',
-  kind: 'check',
+  type: 'test',
   state: 'finished',
   folder: '.',
   output: 'Test Files  155 passed (155)',
@@ -33,7 +33,7 @@ const CHECK: CommandPanelRun = {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Session/CommandsPanel',
   component: CommandsPanel,
   parameters: { layout: 'padded' },
