@@ -14,8 +14,32 @@ function lineOf(command: Command): CommandLine {
     id: command.name,
     name: command.name,
     command: command.line,
-    kind: command.kind,
+    kind: command.type,
     folder: command.folder ?? '.',
+  }
+}
+
+/** What the engine writes a command from: the fields a row edits, and the others as they are. */
+type CommandWrite = Pick<
+  Command,
+  'name' | 'line' | 'lineWindows' | 'lineLinux' | 'type' | 'folder' | 'scope' | 'portless'
+>
+
+/**
+ * A row as the engine writes it. What the row does not show — the per-system lines, the scope,
+ * Portless — is kept as the catalogue holds it, and a new command takes the defaults (D8-07).
+ */
+function writeOf(line: CommandLine, held: Command | undefined): CommandWrite {
+  return {
+    name: line.name,
+    line: line.command,
+    lineWindows: held?.lineWindows ?? null,
+    lineLinux: held?.lineLinux ?? null,
+    type: line.kind,
+    // The row's `.` is the Workspace root, which the engine is told as no folder at all.
+    folder: line.folder === '.' ? null : line.folder,
+    scope: held?.scope ?? 'workspace',
+    portless: held?.portless ?? false,
   }
 }
 
@@ -52,10 +76,7 @@ export function ProjectSettingsPage({
    * Writes a command: a new one, or the one of the same name when `existing` is true. The
    * folder is null for the Workspace root. Answers the engine's refusal, or null.
    */
-  onSaveCommand: (
-    command: { name: string; line: string; kind: Command['kind']; folder: string | null },
-    existing: boolean,
-  ) => Promise<string | null>
+  onSaveCommand: (command: CommandWrite, existing: boolean) => Promise<string | null>
   onRemoveCommand: (name: string) => void
   onArchive: () => void
 }): ReactNode {
@@ -73,26 +94,13 @@ export function ProjectSettingsPage({
         onAddRepository={onAddRepository}
         onRemoveRepository={onRemoveRepository}
         commands={commands.map(lineOf)}
-        // The row's `.` is the Workspace root, which the engine is told as no folder at all.
-        onAddCommand={async (line) =>
-          await onSaveCommand(
-            {
-              name: line.name,
-              line: line.command,
-              kind: line.kind,
-              folder: line.folder === '.' ? null : line.folder,
-            },
-            false,
-          )
-        }
+        onAddCommand={async (line) => await onSaveCommand(writeOf(line, undefined), false)}
         onUpdateCommand={async (line) =>
           await onSaveCommand(
-            {
-              name: line.name,
-              line: line.command,
-              kind: line.kind,
-              folder: line.folder === '.' ? null : line.folder,
-            },
+            writeOf(
+              line,
+              commands.find((one) => one.name === line.name),
+            ),
             true,
           )
         }

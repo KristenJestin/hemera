@@ -68,7 +68,7 @@ async function aProject(window: OpenWindow) {
 }
 
 describe('The catalogue is edited and read', () => {
-  test('a command in a repository is listed with its kind and folder, and edited in place', async () => {
+  test('a command in a repository is listed with its type and folder, and edited in place', async () => {
     opened = await openWindow(dataFolder, fakeAgent())
     const { bridge } = opened
     const project = await aProject(opened)
@@ -77,7 +77,11 @@ describe('The catalogue is edited and read', () => {
       projectId: project.id,
       name: 'check',
       line: 'pnpm check',
-      kind: 'check',
+      type: 'test',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
       folder: 'api',
     })
     // The folder is stored the way the Project declares its repository.
@@ -88,7 +92,11 @@ describe('The catalogue is edited and read', () => {
       projectId: project.id,
       name: 'check',
       line: 'pnpm test',
-      kind: 'check',
+      type: 'test',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
       folder: null,
     })
     expect(edited.id).toBe(made.id)
@@ -105,7 +113,16 @@ describe('The catalogue is edited and read', () => {
     opened = await openWindow(dataFolder, fakeAgent())
     const { bridge } = opened
     const project = await aProject(opened)
-    const draft = { projectId: project.id, name: 'dev', line: 'pnpm dev', kind: 'app' as const }
+    const draft = {
+      projectId: project.id,
+      name: 'dev',
+      line: 'pnpm dev',
+      type: 'serve' as const,
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace' as const,
+      portless: false,
+    }
     await bridge.invoke('commands.create', { ...draft, folder: null })
 
     await expect(bridge.invoke('commands.create', { ...draft, folder: null })).rejects.toThrow(
@@ -135,7 +152,11 @@ describe('The agent starts the app and the user opens it', () => {
       projectId: project.id,
       name: 'dev',
       line: PUBLISHES_AN_ADDRESS,
-      kind: 'app',
+      type: 'serve',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
       folder: null,
     })
 
@@ -206,7 +227,11 @@ describe('The view lists the sources with their provenance', () => {
       projectId: project.id,
       name: 'check',
       line: 'pnpm check',
-      kind: 'check',
+      type: 'test',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
       folder: null,
     })
     const session = await bridge.invoke('sessions.create', {

@@ -136,6 +136,7 @@ export interface SessionsService {
   readonly create: (
     projectId: string | null,
     provider?: AgentProvider | null,
+    workspaceId?: string | null,
   ) => Effect.Effect<
     Session,
     DatabaseError | NoActiveProjectError | NoAgentError | UnknownProjectError
@@ -273,6 +274,7 @@ function sessionOf(row: typeof sessions.$inferSelect): Session {
     // SAFETY: the same, for the check on `native_state`: it admits exactly the states the
     // domain declares.
     nativeState: row.nativeState as NativeState,
+    workspaceId: row.workspaceId,
     // This lot writes one kind of Session; a mission is what HEM-48 gives a Session here.
     mission: 'free',
     archivedAt: row.archivedAt === null ? null : Date.parse(row.archivedAt),
@@ -436,7 +438,7 @@ export const sessionsLayer = Layer.effect(
             ),
         ),
 
-      create: (projectId, provider = null) =>
+      create: (projectId, provider = null, workspaceId = null) =>
         withDatabase(
           mutate('creating a Session', (transaction) =>
             Effect.gen(function* () {
@@ -470,6 +472,8 @@ export const sessionsLayer = Layer.effect(
                 provider,
                 model: null,
                 nativeState: 'none',
+                // D8-08: that the Workspace is the Project's is checked by the sessions agent.
+                workspaceId,
                 archivedAt: null,
                 createdAt: Date.parse(at),
                 lastWrittenAt: Date.parse(at),
@@ -483,6 +487,7 @@ export const sessionsLayer = Layer.effect(
                   title: session.title,
                   titleSource: session.titleSource,
                   provider,
+                  workspaceId,
                   createdAt: at,
                   lastWrittenAt: at,
                 })

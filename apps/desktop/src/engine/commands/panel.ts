@@ -12,7 +12,8 @@
 import { join } from 'node:path'
 
 import {
-  type CommandKind,
+  type CommandScope,
+  type CommandType,
   EmptyCommandLineError,
   EmptyCommandNameError,
   commandLine,
@@ -48,8 +49,12 @@ export interface CommandDraft {
   readonly projectId: string
   readonly name: string
   readonly line: string
-  readonly kind: CommandKind
+  readonly lineWindows: string | null
+  readonly lineLinux: string | null
+  readonly type: CommandType
   readonly folder: string | null
+  readonly scope: CommandScope
+  readonly portless: boolean
 }
 
 /** The Project a command or a Session belongs to, read among every Project. */
@@ -148,7 +153,7 @@ export const runsOf = (sessionId: string) =>
  * Runs a command of the catalogue by name, or a one-off line, from the panel (D6-12).
  *
  * The user's act: a catalogue command runs in its folder, a one-off line in the Workspace root,
- * and the run is the same one the agent would have started — an app already running is handed
+ * and the run is the same one the agent would have started — a server already running is handed
  * back rather than started twice. A one-off is not added to the catalogue.
  */
 export const runFromPanel = (
@@ -172,8 +177,11 @@ export const runFromPanel = (
         commandId: entry.id,
         name: entry.name,
         line: entry.line,
-        kind: entry.kind,
+        type: entry.type,
         cwd: entry.folder === null ? project.mainPath : join(project.mainPath, entry.folder),
+        // D8-08: the Session's Workspace and its variables are wired by the sessions agent.
+        workspaceId: null,
+        environment: {},
         startedBy: 'user',
       })
     }
@@ -185,8 +193,10 @@ export const runFromPanel = (
       // What a one-off is called on screen: the program it runs, which is its first word.
       name: line.split(/\s+/)[0] ?? line,
       line,
-      kind: 'utility',
+      type: 'script',
       cwd: project.mainPath,
+      workspaceId: null,
+      environment: {},
       startedBy: 'user',
     })
   })

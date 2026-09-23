@@ -1,4 +1,11 @@
-import type { Command, CommandKind, CommandRun, ContextView, EngineEvent } from '@hemera/ipc'
+import type {
+  Command,
+  CommandRun,
+  CommandScope,
+  CommandType,
+  ContextView,
+  EngineEvent,
+} from '@hemera/ipc'
 
 /**
  * The runs and the Context view of the Sessions this window has open (design D6-10, D6-12).
@@ -192,8 +199,12 @@ export interface CommandDraft {
   readonly projectId: string
   readonly name: string
   readonly line: string
-  readonly kind: CommandKind
+  readonly lineWindows: string | null
+  readonly lineLinux: string | null
+  readonly type: CommandType
   readonly folder: string | null
+  readonly scope: CommandScope
+  readonly portless: boolean
 }
 
 /**

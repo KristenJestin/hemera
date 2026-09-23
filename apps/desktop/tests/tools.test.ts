@@ -583,7 +583,11 @@ describe('the commands of a Project', () => {
             // A line is not a shell line: what it names is the program and the rest are its
             // arguments, so the program to evaluate is one token.
             line: 'node -e console.log(process.cwd())',
-            kind: 'utility',
+            type: 'script',
+            lineWindows: null,
+            lineLinux: null,
+            scope: 'workspace',
+            portless: false,
             folder: null,
           },
           false,
@@ -930,7 +934,11 @@ describe('A catalogue command inside the root runs on its own', () => {
             projectId: session.projectId,
             name: 'hello',
             line: 'node -e console.log(1)',
-            kind: 'utility',
+            type: 'script',
+            lineWindows: null,
+            lineLinux: null,
+            scope: 'workspace',
+            portless: false,
             folder: null,
           },
           false,
@@ -962,7 +970,11 @@ describe("A catalogue command's folder is the Project's", () => {
             projectId: session.projectId,
             name: 'hello',
             line: 'node -e console.log(1)',
-            kind: 'utility',
+            type: 'script',
+            lineWindows: null,
+            lineLinux: null,
+            scope: 'workspace',
+            portless: false,
             folder: null,
           },
           false,
@@ -1043,7 +1055,17 @@ describe('A short command answers with its output; a long one is left running', 
         const commands = yield* Commands
         const save = (name: string, line: string) =>
           commands.save(
-            { projectId: session.projectId, name, line, kind: 'check', folder: null },
+            {
+              projectId: session.projectId,
+              name,
+              line,
+              type: 'test',
+              lineWindows: null,
+              lineLinux: null,
+              folder: null,
+              scope: 'workspace',
+              portless: false,
+            },
             false,
           )
         yield* save('short', 'node -e console.log(42)')

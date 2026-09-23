@@ -51,12 +51,21 @@ describe('The catalogue is edited and read', () => {
     await readCatalogue(project.id)
     expect(catalogueOf(project.id)).toEqual([])
 
-    const draft = { projectId: project.id, name: 'test', line: 'pnpm test', kind: 'check' as const }
+    const draft = {
+      projectId: project.id,
+      name: 'test',
+      line: 'pnpm test',
+      type: 'test' as const,
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace' as const,
+      portless: false,
+    }
     expect(await saveCommand({ ...draft, folder: './api' }, false)).toBeNull()
-    expect(catalogueOf(project.id).map((one) => [one.name, one.kind, one.folder])).toEqual([
-      ['test', 'check', './api'],
+    expect(catalogueOf(project.id).map((one) => [one.name, one.type, one.folder])).toEqual([
+      ['test', 'test', './api'],
     ])
-    // The agent reads the same catalogue, with the kind and the folder.
+    // The agent reads the same catalogue, with the type and the folder.
     expect(
       (await opened.bridge.invoke('commands.list', { projectId: project.id })).map(
         (one) => one.folder,

@@ -9,24 +9,42 @@
 
 import { z } from 'zod'
 
-/** What a command is for: an app stays up, a check ends with a code, a utility is the rest. */
-export const commandKindSchema = z.enum(['app', 'check', 'utility'])
+/** What a command is for (D8-07): `serve` stays up, and the six others end with a code. */
+export const commandTypeSchema = z.enum([
+  'serve',
+  'test',
+  'lint',
+  'build',
+  'configure',
+  'debug',
+  'script',
+])
 
-export type CommandKind = z.infer<typeof commandKindSchema>
+export type CommandType = z.infer<typeof commandTypeSchema>
+
+/** Where a `serve` command runs: once per Workspace, or once for the Project (D8-07). */
+export const commandScopeSchema = z.enum(['workspace', 'project'])
+
+export type CommandScope = z.infer<typeof commandScopeSchema>
 
 /**
  * A command of a Project's catalogue (design D6-12).
  *
  * `folder` is where it runs: null for the Workspace root, or one of the Project's repositories,
- * relative to the root as the Project declares it.
+ * relative to the root as the Project declares it. `lineWindows` and `lineLinux` are the lines
+ * those systems run instead of `line`, null when they run it (D8-07).
  */
 export const commandSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   name: z.string(),
   line: z.string(),
-  kind: commandKindSchema,
+  lineWindows: z.string().nullable(),
+  lineLinux: z.string().nullable(),
+  type: commandTypeSchema,
   folder: z.string().nullable(),
+  scope: commandScopeSchema,
+  portless: z.boolean(),
   createdAt: z.number(),
 })
 
@@ -42,7 +60,10 @@ export type RunState = z.infer<typeof runStateSchema>
  *
  * `commandId` is null for a one-off line. `output` is the end of what it printed, bounded, and
  * `dropped` how many characters of the beginning were let go of. `joined` says the run asked for
- * was an app already running, handed back rather than started a second time.
+ * was a server already running, handed back rather than started a second time. `workspaceId` is
+ * the Workspace it runs in, null for `main` (D8-08); `environment` the variables it was given
+ * (D8-06); `readyAt` when its address first answered and `portConflict` the run holding the port
+ * it published (D8-09).
  */
 export const commandRunSchema = z.object({
   id: z.string(),
@@ -51,11 +72,23 @@ export const commandRunSchema = z.object({
   commandId: z.string().nullable(),
   name: z.string(),
   line: z.string(),
-  kind: commandKindSchema,
+  type: commandTypeSchema,
   cwd: z.string(),
+  workspaceId: z.string().nullable(),
+  environment: z.record(z.string(), z.string()),
   state: runStateSchema,
   pid: z.number().nullable(),
   url: z.string().nullable(),
+  readyAt: z.string().nullable(),
+  portConflict: z
+    .object({
+      port: z.number(),
+      runId: z.string(),
+      workspaceId: z.string().nullable(),
+      workspaceName: z.string(),
+      name: z.string(),
+    })
+    .nullable(),
   exitCode: z.number().nullable(),
   output: z.string(),
   dropped: z.number(),

@@ -96,12 +96,21 @@ export type {
   ToolCallStatus,
 } from './agents.ts'
 export {
-  commandKindSchema,
   commandRunSchema,
   commandSchema,
+  commandScopeSchema,
+  commandTypeSchema,
   contextReachSchema,
   contextViewSchema,
   providedSchema,
   runStateSchema,
 } from './tools.ts'
-export type { Command, CommandKind, CommandRun, ContextView, Provided, RunState } from './tools.ts'
+export type {
+  Command,
+  CommandRun,
+  CommandScope,
+  CommandType,
+  ContextView,
+  Provided,
+  RunState,
+} from './tools.ts'

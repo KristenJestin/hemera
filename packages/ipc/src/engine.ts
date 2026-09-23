@@ -23,7 +23,13 @@ import {
   resumeStateSchema,
   stopReasonSchema,
 } from './agents.ts'
-import { commandKindSchema, commandRunSchema, commandSchema, contextViewSchema } from './tools.ts'
+import {
+  commandRunSchema,
+  commandSchema,
+  commandScopeSchema,
+  commandTypeSchema,
+  contextViewSchema,
+} from './tools.ts'
 
 /**
  * Which build this is, and therefore which data folder it opens.
@@ -157,7 +163,14 @@ export type EngineStatus = z.infer<typeof engineStatusSchema>
  */
 export const projectToneSchema = z.enum(['primary', 'info', 'success', 'warning', 'neutral'])
 
-export const entityKindSchema = z.enum(['project', 'profile', 'session'])
+export const entityKindSchema = z.enum([
+  'project',
+  'profile',
+  'session',
+  'workspace',
+  'command',
+  'launch',
+])
 
 export const eventAuthorSchema = z.enum(['human', 'hemera', 'agent', 'mcp', 'system'])
 
@@ -252,6 +265,7 @@ export const sessionEntryKindSchema = z.enum([
   'hemera_tool_call',
   'command_run',
   'context_delivery',
+  'command_proposal',
 ])
 
 /**
@@ -397,9 +411,12 @@ export const ENGINE_REQUESTS = {
     // The agent is chosen when the Session is made, and it is not optional: a Session nothing
     // can answer is refused (NoAgentError). `null` still crosses, because every Session written
     // before the agents existed holds nothing there and is still read (design D5-06).
+    //
+    // The Workspace it works in is optional: none is `main` (D8-08).
     arguments: z.object({
       projectId: z.string().nullable(),
       provider: agentProviderSchema.nullable(),
+      workspaceId: z.string().nullable().optional(),
     }),
     response: sessionSchema,
   },
@@ -519,8 +536,12 @@ export const ENGINE_REQUESTS = {
       projectId: z.string(),
       name: z.string(),
       line: z.string(),
-      kind: commandKindSchema,
+      lineWindows: z.string().nullable(),
+      lineLinux: z.string().nullable(),
+      type: commandTypeSchema,
       folder: z.string().nullable(),
+      scope: commandScopeSchema,
+      portless: z.boolean(),
     }),
     response: commandSchema,
   },
@@ -529,8 +550,12 @@ export const ENGINE_REQUESTS = {
       projectId: z.string(),
       name: z.string(),
       line: z.string(),
-      kind: commandKindSchema,
+      lineWindows: z.string().nullable(),
+      lineLinux: z.string().nullable(),
+      type: commandTypeSchema,
       folder: z.string().nullable(),
+      scope: commandScopeSchema,
+      portless: z.boolean(),
     }),
     response: commandSchema,
   },

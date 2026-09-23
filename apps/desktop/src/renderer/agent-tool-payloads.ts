@@ -1,4 +1,4 @@
-import { TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
+import { COMMAND_TYPES, TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
 import type { CommandRun, SessionEntry } from '@hemera/ipc'
 import type {
   CommandKind,
@@ -41,7 +41,7 @@ const commandRunPayloadSchema = z.object({
   runId: z.string().optional(),
   name: z.string(),
   line: z.string(),
-  kind: z.enum(['app', 'check', 'utility']),
+  type: z.enum(COMMAND_TYPES),
   state: z.enum(['running', 'exited', 'failed', 'stopped']),
   cwd: z.string(),
   url: z.string().nullable().optional(),
@@ -304,7 +304,7 @@ export function commandRunOf(
 ): CommandRunDrawn | null {
   const read = readPayload(commandRunPayloadSchema, entry.payload)
   if (read === null) return null
-  const { runId, name, line, kind, cwd, oneOff } = read
+  const { runId, name, line, type, cwd, oneOff } = read
   const heard = runId === undefined ? undefined : live.find((one) => one.id === runId)
   const state = heard?.state ?? read.state
   const url = heard === undefined ? read.url : heard.url
@@ -313,7 +313,7 @@ export function commandRunOf(
     runId: runId ?? null,
     name,
     command: line,
-    kind,
+    kind: type,
     state: state === 'exited' ? 'finished' : state,
     folder: cwd,
     url: url ?? undefined,

@@ -9,7 +9,7 @@
  *
  * Three rules live here rather than in the tool that asks:
  *
- * - an `app` command that is already running is handed back, never started twice, which is what
+ * - a `serve` command that is already running is handed back, never started twice, which is what
  *   `joinsRunningRun` decides and what makes a second `run` harmless;
  * - the output is kept bounded, because a process that prints for an hour must not become an
  *   hour of rows, and what was dropped is said rather than hidden;
@@ -25,16 +25,19 @@
 
 import {
   type Command,
-  type CommandKind,
+  type CommandType,
   addressIn,
-  commandKind,
   commandLine,
   commandName,
+  commandScope,
+  commandType,
   DuplicateCommandNameError,
   joinsRunningRun,
+  mergedEnvironment,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
+import { z } from 'zod'
 
 import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
@@ -82,6 +85,18 @@ export class UnknownCommandError extends Error {
   }
 }
 
+/**
+ * The run holding the port another run published (D8-09): which run, in which Workspace, under
+ * which name — what a conflict is shown with, on both runs.
+ */
+export interface PortConflict {
+  port: number
+  runId: string
+  workspaceId: string | null
+  workspaceName: string
+  name: string
+}
+
 /** One run of a command, as a panel and as a tool read it. */
 export interface Run {
   readonly id: string
@@ -91,12 +106,20 @@ export interface Run {
   readonly commandId: string | null
   readonly name: string
   readonly line: string
-  readonly kind: CommandKind
+  readonly type: CommandType
   readonly cwd: string
+  /** The Workspace it runs in; null on a run written before Workspaces, read as `main` (D8-08). */
+  readonly workspaceId: string | null
+  /** The variables it was given over the process's environment (D8-06). */
+  readonly environment: Record<string, string>
   readonly state: RunState
   readonly pid: number | null
   /** The address it published, and null while it has published none. */
   readonly url: string | null
+  /** When its address first answered, and null until it has (D8-09). */
+  readonly readyAt: string | null
+  /** The run holding the port it published, and null when none does (D8-09). */
+  readonly portConflict: PortConflict | null
   readonly exitCode: number | null
   /** The end of what it printed, bounded: what fits in `OUTPUT_KEPT_BYTES`. */
   readonly output: string
@@ -118,9 +141,13 @@ export interface RunRequest {
   readonly commandId: string | null
   readonly name: string
   readonly line: string
-  readonly kind: CommandKind
+  readonly type: CommandType
   /** Where it runs: the Workspace root, or one of the Project's repositories under it. */
   readonly cwd: string
+  /** The Workspace it runs in, and null for `main` (D8-08). */
+  readonly workspaceId: string | null
+  /** The variables it is given over the process's environment, the Workspace's last (D8-06). */
+  readonly environment: Record<string, string>
   readonly startedBy: 'agent' | 'user'
 }
 
@@ -129,9 +156,13 @@ export interface CommandEdit {
   readonly projectId: string
   readonly name: string
   readonly line: string
-  readonly kind: string
+  readonly lineWindows: string | null
+  readonly lineLinux: string | null
+  readonly type: string
   /** The repository it runs in, relative to the root, and null for the root itself. */
   readonly folder: string | null
+  readonly scope: string
+  readonly portless: boolean
 }
 
 export interface CommandsService {
@@ -152,7 +183,7 @@ export interface CommandsService {
   /**
    * What a run has printed, bounded, and the address it published.
    *
-   * A run that is over is read from its row, where a `check` that exited kept its output and its
+   * A run that is over is read from its row, where a `test` that exited kept its output and its
    * exit code: the question is about the run, not about the process.
    */
   readonly output: (
@@ -170,7 +201,7 @@ export interface CommandsService {
    * The last runs of a Session, newest first, ended ones included.
    *
    * The panel draws them, and `commands_output` answers from them when the agent reads the run
-   * it just started: a `check` or a `utility` ends on its own, and its exit code and its output
+   * it just started: a `test` or a `script` ends on its own, and its exit code and its output
    * are what the agent came for.
    */
   readonly recent: (sessionId: string) => Effect.Effect<RunView[], DatabaseError>
@@ -189,6 +220,30 @@ export interface CommandsService {
 
 export class Commands extends Context.Service<Commands, CommandsService>()('Commands') {}
 
+/** The variables a run was given, read back from the JSON its row keeps them as (D8-06). */
+const variablesSchema = z.record(z.string(), z.string())
+
+/** The conflict a run's row keeps as JSON (D8-09). */
+const conflictSchema = z.object({
+  port: z.number(),
+  runId: z.string(),
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string(),
+  name: z.string(),
+})
+
+/** The variables of a row: what this service wrote, and nothing when it no longer reads. */
+function variablesOf(text: string): Record<string, string> {
+  const read = variablesSchema.safeParse(JSON.parse(text))
+  return read.success ? read.data : {}
+}
+
+/** The conflict of a row: what this service wrote, and none when it no longer reads. */
+function conflictOf(text: string): PortConflict | null {
+  const read = conflictSchema.safeParse(JSON.parse(text))
+  return read.success ? read.data : null
+}
+
 /** One live run: what it is, what it has printed, and how to end it. */
 interface Live {
   readonly sessionId: string
@@ -196,14 +251,18 @@ interface Live {
   readonly commandId: string | null
   readonly name: string
   readonly line: string
-  readonly kind: CommandKind
+  readonly type: CommandType
   readonly cwd: string
+  readonly workspaceId: string | null
+  readonly environment: Record<string, string>
   /** Who asked for it: the agent through its tool, or the user through the panel. */
   readonly startedBy: 'agent' | 'user'
   readonly startedAt: string
   state: RunState
   pid: number | null
   url: string | null
+  readyAt: string | null
+  portConflict: PortConflict | null
   exitCode: number | null
   kept: string
   dropped: number
@@ -280,11 +339,15 @@ export const commandsLayer = Layer.effect(
       commandId: one.commandId,
       name: one.name,
       line: one.line,
-      kind: one.kind,
+      type: one.type,
       cwd: one.cwd,
+      workspaceId: one.workspaceId,
+      environment: one.environment,
       state: one.state,
       pid: one.pid,
       url: one.url,
+      readyAt: one.readyAt,
+      portConflict: one.portConflict,
       exitCode: one.exitCode,
       output: one.kept,
       dropped: one.dropped,
@@ -306,11 +369,15 @@ export const commandsLayer = Layer.effect(
       commandId: row.commandId,
       name: row.name,
       line: row.line,
-      kind: commandKind(row.kind),
+      type: commandType(row.type),
       cwd: row.cwd,
+      workspaceId: row.workspaceId,
+      environment: variablesOf(row.environment),
       state: runStateOf(row.state),
       pid: row.pid,
       url: row.url,
+      readyAt: row.readyAt,
+      portConflict: row.portConflict === null ? null : conflictOf(row.portConflict),
       exitCode: row.exitCode,
       output: row.output,
       dropped: row.truncated === 1 ? row.outputBytes - row.output.length : 0,
@@ -345,9 +412,10 @@ export const commandsLayer = Layer.effect(
                 runId: id,
                 name: one.name,
                 line: one.line,
-                kind: one.kind,
+                type: one.type,
                 state: one.state,
                 cwd: one.cwd,
+                workspaceId: one.workspaceId,
                 url: one.url,
                 exitCode: one.exitCode,
                 startedBy: one.startedBy,
@@ -375,11 +443,15 @@ export const commandsLayer = Layer.effect(
               commandId: one.commandId,
               name: one.name,
               line: one.line,
-              kind: one.kind,
+              type: one.type,
               cwd: one.cwd,
+              workspaceId: one.workspaceId,
+              environment: JSON.stringify(one.environment),
               state: one.state,
               pid: one.pid,
               url: one.url,
+              readyAt: one.readyAt,
+              portConflict: one.portConflict === null ? null : JSON.stringify(one.portConflict),
               exitCode: one.exitCode,
               output: one.kept,
               outputBytes: one.kept.length + one.dropped,
@@ -472,8 +544,12 @@ export const commandsLayer = Layer.effect(
                     projectId: row.projectId,
                     name: row.name,
                     line: row.line,
-                    kind: commandKind(row.kind),
+                    lineWindows: row.lineWindows,
+                    lineLinux: row.lineLinux,
+                    type: commandType(row.type),
                     folder: row.folder === '' ? null : row.folder,
+                    scope: commandScope(row.scope),
+                    portless: row.portless === 1,
                     createdAt: Date.parse(row.createdAt),
                   })),
                 catch: (cause) => new DatabaseError({ doing: 'reading the commands', cause }),
@@ -487,7 +563,10 @@ export const commandsLayer = Layer.effect(
             Effect.gen(function* () {
               const name = commandName(edit.name)
               const line = commandLine(edit.line)
-              const kind = commandKind(edit.kind)
+              const type = commandType(edit.type)
+              const runsIn = commandScope(edit.scope)
+              const lines = { lineWindows: edit.lineWindows, lineLinux: edit.lineLinux }
+              const portless = edit.portless ? 1 : 0
               const at = new Date().toISOString()
               const existing = yield* transaction
                 .select()
@@ -513,8 +592,11 @@ export const commandsLayer = Layer.effect(
                     projectId: edit.projectId,
                     name,
                     line,
-                    kind,
+                    ...lines,
+                    type,
                     folder,
+                    scope: runsIn,
+                    portless,
                     createdAt,
                     updatedAt: at,
                   })
@@ -522,7 +604,7 @@ export const commandsLayer = Layer.effect(
               } else {
                 yield* transaction
                   .update(projectCommands)
-                  .set({ line, kind, folder, updatedAt: at })
+                  .set({ line, ...lines, type, folder, scope: runsIn, portless, updatedAt: at })
                   .where(eq(projectCommands.id, id))
                   .pipe(Effect.mapError(failed('writing the commands')))
               }
@@ -532,8 +614,11 @@ export const commandsLayer = Layer.effect(
                   projectId: edit.projectId,
                   name,
                   line,
-                  kind,
+                  ...lines,
+                  type,
                   folder: edit.folder,
+                  scope: runsIn,
+                  portless: edit.portless,
                   createdAt: Date.parse(createdAt),
                 } satisfies Command,
                 events: [
@@ -544,7 +629,7 @@ export const commandsLayer = Layer.effect(
                     source: 'ui' as const,
                     author: 'human' as const,
                     projectId: edit.projectId,
-                    payload: { name, kind },
+                    payload: { name, type },
                   },
                 ],
               }
@@ -584,7 +669,7 @@ export const commandsLayer = Layer.effect(
 
       run: (asked) =>
         Effect.gen(function* () {
-          // An app is the Project's, not the Session's (D6-12): a second Session that asks for
+          // A server is the Project's, not the Session's (D6-12): a second Session that asks for
           // the one already running is handed that one, and can read and stop it like its own.
           const already = [...live.entries()].find(
             ([, one]) =>
@@ -594,7 +679,7 @@ export const commandsLayer = Layer.effect(
           )
           if (
             already !== undefined &&
-            joinsRunningRun(asked.kind, already[1].state === 'running')
+            joinsRunningRun(asked.type, already[1].state === 'running')
           ) {
             return viewOf(already[0], already[1], true)
           }
@@ -607,13 +692,17 @@ export const commandsLayer = Layer.effect(
             commandId: asked.commandId,
             name: asked.name,
             line: asked.line,
-            kind: asked.kind,
+            type: asked.type,
             cwd: asked.cwd,
+            workspaceId: asked.workspaceId,
+            environment: asked.environment,
             startedBy: asked.startedBy,
             startedAt,
             state: 'running',
             pid: null,
             url: null,
+            readyAt: null,
+            portConflict: null,
             exitCode: null,
             kept: '',
             dropped: 0,
@@ -643,14 +732,27 @@ export const commandsLayer = Layer.effect(
             return viewOf(id, record)
           }
 
+          const options: Parameters<typeof supervisor.start>[2] = {
+            cwd: asked.cwd,
+            graceMilliseconds: GRACE_MS,
+            verbatim: invocation.verbatim,
+            // What a run prints on its standard error is its output, kept with it (D6-12).
+            logsStderr: false,
+          }
           const spawned = yield* owned(
-            supervisor.start(invocation.command, invocation.args, {
-              cwd: asked.cwd,
-              graceMilliseconds: GRACE_MS,
-              verbatim: invocation.verbatim,
-              // What a run prints on its standard error is its output, kept with it (D6-12).
-              logsStderr: false,
-            }),
+            supervisor.start(
+              invocation.command,
+              invocation.args,
+              // The supervisor's `env` replaces the whole environment, so the variables a run is
+              // given go over the process's own (D8-06) — and a run given none gets no `env`,
+              // inheriting the engine's as it always did.
+              Object.keys(asked.environment).length === 0
+                ? options
+                : {
+                    ...options,
+                    env: mergedEnvironment(globalThis.process.env, asked.environment, {}),
+                  },
+            ),
           ).pipe(Effect.exit)
 
           if (Exit.isFailure(spawned)) {
@@ -679,6 +781,8 @@ export const commandsLayer = Layer.effect(
             }
             // The first address the run names is its address: a later one — a second server, a
             // proxy, a link in a log line — does not move the one the user already opened.
+            // D8-09, D8-10: the readiness probe, the conflicts and Portless are wired by the
+            // commands agent.
             if (record.url === null) record.url = addressIn(text)
             // What it printed reaches the panel as it prints, a burst of lines at a time: the
             // same run the thread and the agent read, pushed whole (D6-12).
@@ -748,7 +852,7 @@ export const commandsLayer = Layer.effect(
           const projectId = yield* projectOf(sessionId)
           const record = live.get(runId)
           if (record !== undefined && record.projectId === projectId) return viewOf(runId, record)
-          // The process is gone: the row is what is left of the run, and a `check` that exited
+          // The process is gone: the row is what is left of the run, and a `test` that exited
           // an hour ago is read from it exactly as a run of this process is read from memory.
           const rows = yield* database
             .select({ run: commandRuns, projectId: sessions.projectId })

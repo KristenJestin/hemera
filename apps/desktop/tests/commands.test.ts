@@ -165,8 +165,10 @@ describe('A one-off command shows and is not promoted', () => {
           commandId: null,
           name: 'boom',
           line: FAILS_LOUDLY,
-          kind: 'check',
+          type: 'test',
           cwd: root,
+          workspaceId: null,
+          environment: {},
           startedBy: 'agent',
         })
         const settled = yield* until(
@@ -213,7 +215,7 @@ describe('A one-off command shows and is not promoted', () => {
     expect(JSON.parse(entry?.payload ?? '{}')).toMatchObject({
       runId: seen.settled.run.id,
       name: 'boom',
-      kind: 'check',
+      type: 'test',
       state: 'failed',
       cwd: root,
       url: null,
@@ -235,7 +237,11 @@ describe('The agent starts the app and the user opens it', () => {
             projectId: session.projectId,
             name: 'dev',
             line: PUBLISHES_AN_ADDRESS,
-            kind: 'app',
+            type: 'serve',
+            lineWindows: null,
+            lineLinux: null,
+            scope: 'workspace',
+            portless: false,
             folder: null,
           },
           false,
@@ -246,8 +252,10 @@ describe('The agent starts the app and the user opens it', () => {
           commandId: saved.id,
           name: saved.name,
           line: saved.line,
-          kind: saved.kind,
+          type: saved.type,
           cwd: root,
+          workspaceId: null,
+          environment: {},
           startedBy: 'agent',
         })
         // The address is the first one the output names, and it is named while the app runs.
@@ -272,7 +280,7 @@ describe('The agent starts the app and the user opens it', () => {
     // catalogue: a command of the Project can be run again by name, a one-off cannot.
     expect(JSON.parse(entry?.payload ?? '{}')).toMatchObject({
       name: 'dev',
-      kind: 'app',
+      type: 'serve',
       state: 'stopped',
       url: 'http://localhost:4321',
       oneOff: false,
@@ -293,8 +301,10 @@ describe('A run is written in the Journal under whoever started it', () => {
             commandId: null,
             name: startedBy,
             line: `${process.execPath} -e 0`,
-            kind: 'check',
+            type: 'test',
             cwd: root,
+            workspaceId: null,
+            environment: {},
             startedBy,
           })
         yield* run('user')
@@ -324,8 +334,10 @@ describe('A stopped run ends once', () => {
           commandId: null,
           name: 'server',
           line: PUBLISHES_AN_ADDRESS,
-          kind: 'app',
+          type: 'serve',
           cwd: root,
+          workspaceId: null,
+          environment: {},
           startedBy: 'user',
         })
         const ended = yield* commands.stop(session.sessionId, started.id)
@@ -361,8 +373,10 @@ describe('A run whose end cannot be recorded', () => {
           commandId: null,
           name: 'server',
           line: PUBLISHES_AN_ADDRESS,
-          kind: 'app',
+          type: 'serve',
           cwd: root,
+          workspaceId: null,
+          environment: {},
           startedBy: 'user',
         })
         // The database refuses every later write of a run, as a locked or full one would.
@@ -394,8 +408,10 @@ describe('A run that ended is left as it ended', () => {
           commandId: null,
           name: 'boom',
           line: FAILS_LOUDLY,
-          kind: 'check',
+          type: 'test',
           cwd: root,
+          workspaceId: null,
+          environment: {},
           startedBy: 'agent',
         })
         // Ended and written: the row says so, which is when the run is no longer held in memory.
@@ -439,8 +455,10 @@ describe('A running app is shared by the Sessions of its Project', () => {
             commandId: null,
             name: 'dev',
             line: PUBLISHES_AN_ADDRESS,
-            kind: 'app',
+            type: 'serve',
             cwd: root,
+            workspaceId: null,
+            environment: {},
             startedBy: 'agent',
           })
         const started = yield* run(first.sessionId)
@@ -474,8 +492,10 @@ const ranToTheEnd = (line: string) =>
       commandId: null,
       name: 'arguments',
       line,
-      kind: 'check',
+      type: 'test',
       cwd: root,
+      workspaceId: null,
+      environment: {},
       startedBy: 'user',
     })
     return yield* until(
@@ -528,8 +548,10 @@ describe('A run keeps the first address it names', () => {
           commandId: null,
           name: 'two',
           line: `"${process.execPath}" -e "console.log('http://127.0.0.1:4000');console.log('http://localhost:5000')"`,
-          kind: 'check',
+          type: 'test',
           cwd: root,
+          workspaceId: null,
+          environment: {},
           startedBy: 'user',
         })
         return yield* until(

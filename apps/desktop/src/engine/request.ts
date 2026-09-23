@@ -182,13 +182,13 @@ export function answer(
     if (decision.name === 'sessions.create') {
       // The agent the Session is made with crosses with the Project (D5-06): it is chosen once,
       // in the composer that starts it, and every turn of that Session runs it.
-      const { projectId, provider } = decision.argument
+      const { projectId, provider, workspaceId } = decision.argument
       // Bare, or no Session at all (D6-02): an agent whose means leaves a tool of its own behind
       // is refused here, with its adapter's reason, before anything is written.
       if (provider !== null) {
         yield* refusedUnlessBare(ADAPTERS[provider], globalThis.process.platform)
       }
-      return yield* sessions.create(projectId, provider)
+      return yield* sessions.create(projectId, provider, workspaceId ?? null)
     }
     if (decision.name === 'sessions.rename') {
       const { id, version, title } = decision.argument

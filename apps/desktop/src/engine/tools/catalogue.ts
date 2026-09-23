@@ -581,8 +581,8 @@ export const toolCatalogueLayer: Layer.Layer<
     /** Which run a call means, when it named none: the only one this Session has going. */
     /**
      * Which run a call is about: the one it names, else the only one running, else — when the
-     * call came to read and nothing is running — the last run of the Session. A `check` or a
-     * `utility` is over by the time its output is read, and its exit code is the whole point.
+     * call came to read and nothing is running — the last run of the Session. A `test` or a
+     * `script` is over by the time its output is read, and its exit code is the whole point.
      */
     const chooseRun = (
       asked: ToolCall,
@@ -784,7 +784,7 @@ export const toolCatalogueLayer: Layer.Layer<
             // that runs in one of the Project's repositories is not the same one run at the root.
             const lines = listed.map(
               (command) =>
-                `${command.name}  ${command.kind}  in ${command.folder ?? 'the Workspace root'}  ${command.line}`,
+                `${command.name}  ${command.type}  in ${command.folder ?? 'the Workspace root'}  ${command.line}`,
             )
             // And the runs of this Session, whoever started them (recette 4 of 23 September 2026):
             // a line the human ran from the panel is in the thread, and an agent asked about it
@@ -894,21 +894,24 @@ export const toolCatalogueLayer: Layer.Layer<
                 commandId: entry?.id ?? null,
                 name: entry?.name ?? named ?? (line ?? '').split(/\s+/)[0] ?? 'command',
                 line: entry?.line ?? line ?? '',
-                kind: entry?.kind ?? 'utility',
+                type: entry?.type ?? 'script',
                 cwd: inside.path,
+                // D8-08: the Session's Workspace is wired by the sessions agent.
+                workspaceId: null,
+                environment: {},
                 startedBy: 'agent',
               }),
             )
             if (started === undefined) {
               return failed('the command did not start', 'the engine could not start this command')
             }
-            // A check or a utility is waited for, so the agent reads how it ended in the same
+            // A test or a script is waited for, so the agent reads how it ended in the same
             // answer instead of polling for it; one that outlasts the wait is left running and
-            // said to be. An app is meant to keep running, and is answered once it has started.
+            // said to be. A server is meant to keep running, and is answered once it has started.
             const waits =
               call.arguments.background !== true &&
               !started.joined &&
-              started.kind !== 'app' &&
+              started.type !== 'serve' &&
               started.state === 'running'
             const run = waits
               ? ((yield* answered(

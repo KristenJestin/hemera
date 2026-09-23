@@ -249,12 +249,12 @@ export function activityOf(
 
   if (waiting(running)) return { state: 'waiting', thought }
 
-  // A command Hemera is running for the turn — a check, a utility — is what the turn waits on,
-  // and its name says more than the tool call that asked for it (D6-12). An app is left running
+  // A command Hemera is running for the turn — a test, a script — is what the turn waits on,
+  // and its name says more than the tool call that asked for it (D6-12). A server is left running
   // on purpose and is not what the turn is doing once it has started.
   const command = [...running].reverse().find((entry) => entry.kind === 'command_run')
   const run = command === undefined ? null : commandRunOf(command)
-  if (run !== null && run.state === 'running' && run.kind !== 'app') {
+  if (run !== null && run.state === 'running' && run.kind !== 'serve') {
     return { state: 'running', detail: `Running ${run.name}`, thought }
   }
 
