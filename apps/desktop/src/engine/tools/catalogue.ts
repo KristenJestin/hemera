@@ -754,6 +754,11 @@ export const toolCatalogueLayer: Layer.Layer<
                 : `${run.name} is ${run.state} (${run.id})`,
               text: [
                 `run ${run.id}: ${run.name} — ${run.state}${run.pid === null ? '' : ` (pid ${run.pid})`}`,
+                // The agent reads it too, not only the thread: an agent told "running" and nothing
+                // more would believe it had started a second one.
+                run.joined
+                  ? 'it was already running: nothing new was started, and this is that run'
+                  : 'started for this call',
                 run.state === 'running'
                   ? `still running, left in the background: run id ${run.id}; read it with commands_output, stop it with commands_stop`
                   : `exit code ${run.exitCode === null ? 'none' : String(run.exitCode)}`,
