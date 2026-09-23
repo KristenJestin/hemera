@@ -1,3 +1,4 @@
+import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
@@ -6,6 +7,7 @@ import { Button } from '../components/button/button.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Tabs } from '../components/tabs/tabs.tsx'
 import { IconActivity, IconBrain, IconCommand, IconFolderOpen } from '../icons.ts'
+import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 import { PlanPanel, type PlanEntry } from './plan-panel.tsx'
 
 /**
@@ -26,6 +28,9 @@ import { PlanPanel, type PlanEntry } from './plan-panel.tsx'
  *
  * Three tabs and not three stacked panels, because a reader who comes back to a Session where a
  * command is running wants that tab, not a scroll; the tab it opens on is the page's to say.
+ * The dialog is the same height on all three (third review of #18): one that took the height of
+ * each tab changed size under the hand switching them. What changes is the panel, crossfaded in
+ * place, and a panel taller than the dialog scrolls inside it.
  *
  * Nothing here is a second inbox: what is listed is what the turn has done, and a file is listed
  * because a call named it.
@@ -44,6 +49,22 @@ const ADDED = 'text-success-muted-foreground'
 const REMOVED = 'text-destructive-muted-foreground'
 
 const NOTHING = 'pt-1 text-sm text-muted-foreground'
+
+/**
+ * A tab's panel, faded in as it is chosen.
+ *
+ * The tabs mount only the panel that is shown, so each one arrives as it is chosen and plays the
+ * `crossfade` from there; the one that was left is gone at once, and the dialog around them does
+ * not move.
+ */
+function Crossfaded({ children }: { children: ReactNode }): ReactNode {
+  const transition = useTransition(crossfade)
+  return (
+    <motion.div initial={CROSSFADE.from} animate={CROSSFADE.to} transition={transition}>
+      {children}
+    </motion.div>
+  )
+}
 
 /** A file the turn touched, with what the change added up to. */
 export interface TouchedFile {
@@ -97,7 +118,7 @@ export function SessionDetails({
             label: 'Activity',
             icon: <IconActivity size="sm" />,
             panel: (
-              <>
+              <Crossfaded>
                 {/* A Session can have nothing here yet, and says so like the two other tabs
                     rather than showing an empty panel. */}
                 {plan.length === 0 && files.length === 0 ? (
@@ -148,20 +169,28 @@ export function SessionDetails({
                     </ul>
                   </Disclosure>
                 )}
-              </>
+              </Crossfaded>
             ),
           },
           {
             value: 'commands',
             label: 'Commands',
             icon: <IconCommand size="sm" />,
-            panel: commands ?? <p className={NOTHING}>No command has run in this Session.</p>,
+            panel: (
+              <Crossfaded>
+                {commands ?? <p className={NOTHING}>No command has run in this Session.</p>}
+              </Crossfaded>
+            ),
           },
           {
             value: 'context',
             label: 'Context',
             icon: <IconBrain size="sm" />,
-            panel: context ?? <p className={NOTHING}>Hemera has nothing to say about it yet.</p>,
+            panel: (
+              <Crossfaded>
+                {context ?? <p className={NOTHING}>Hemera has nothing to say about it yet.</p>}
+              </Crossfaded>
+            ),
           },
         ]}
       />

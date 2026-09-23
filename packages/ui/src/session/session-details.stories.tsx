@@ -125,10 +125,72 @@ async function opened(canvasElement: HTMLElement): Promise<HTMLElement> {
   const dialog = await waitFor(() =>
     within(document.body).getByRole('dialog', { name: 'Session details' }),
   )
-  await waitFor(() => {
-    expect(getComputedStyle(dialog).opacity).toBe('1')
-  })
+  await risen(dialog)
   return dialog
+}
+
+/** One frame of the browser, which is how long anything drawn has to have moved in. */
+function frame(): Promise<void> {
+  return new Promise((done) => {
+    requestAnimationFrame(() => done())
+  })
+}
+
+/**
+ * Waits for the dialog to be in place: opaque, and no longer growing from the smaller scale it
+ * rises from — two frames in a row at the same height.
+ */
+async function risen(dialog: HTMLElement): Promise<void> {
+  await waitFor(async () => {
+    expect(getComputedStyle(dialog).opacity).toBe('1')
+    const before = dialog.getBoundingClientRect().height
+    await frame()
+    expect(dialog.getBoundingClientRect().height).toBe(before)
+  })
+}
+
+/** How far a tab's panel has faded in, from 0 to 1, read off the filter the crossfade plays. */
+function fadeOf(dialog: HTMLElement, tab: string): number | null {
+  const id = within(dialog).getByRole('tab', { name: tab }).id
+  const faded = dialog.querySelector(`[role="tabpanel"][aria-labelledby="${id}"] > div`)
+  if (faded === null) return null
+  const written = /opacity\(([\d.e-]+)\)/.exec(getComputedStyle(faded).filter)
+  return written === null ? 1 : Number(written[1])
+}
+
+/**
+ * Walks the three tabs the way `choose` picks one and answers the dialog's height on each, once
+ * the tab's panel has faded all the way in.
+ */
+async function heightsOnEveryTab(
+  dialog: HTMLElement,
+  choose: (tab: string) => Promise<void>,
+): Promise<number[]> {
+  const heights: number[] = []
+  for (const tab of ['Activity', 'Commands', 'Context']) {
+    // oxlint-disable-next-line no-await-in-loop -- one tab after the other, as a reader walks them
+    await choose(tab)
+    // oxlint-disable-next-line no-await-in-loop -- the panel is measured once it has landed
+    await waitFor(() => {
+      expect(fadeOf(dialog, tab)).toBe(1)
+    })
+    heights.push(dialog.getBoundingClientRect().height)
+  }
+  return heights
+}
+
+/** The same height on every tab, to the pixel: switching them never resizes the dialog. */
+function sameHeight(heights: number[]): void {
+  for (const height of heights) {
+    expect(height, 'a tab resized the dialog').toBeCloseTo(heights[0]!, 1)
+  }
+}
+
+/** Picks a tab with the pointer. */
+function clicking(dialog: HTMLElement): (tab: string) => Promise<void> {
+  return async (tab) => {
+    await userEvent.click(within(dialog).getByRole('tab', { name: tab }))
+  }
 }
 
 /**
@@ -189,6 +251,8 @@ export const Activity: Story = {
       inside.getByRole('button', { name: 'packages/ui/src/session/plan-panel.tsx' }),
     )
     await expect(args.onSelectFile).toHaveBeenCalledWith('packages/ui/src/session/plan-panel.tsx')
+    // Whatever a tab holds — an open list of files included — the dialog keeps its height.
+    sameHeight(await heightsOnEveryTab(dialog, clicking(dialog)))
   },
 }
 
@@ -196,7 +260,8 @@ export const Activity: Story = {
 export const Commands: Story = {
   args: { defaultTab: 'commands' },
   play: async ({ canvasElement }) => {
-    const inside = within(await opened(canvasElement))
+    const dialog = await opened(canvasElement)
+    const inside = within(dialog)
     await expect(inside.getByRole('tab', { name: 'Commands' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -204,6 +269,8 @@ export const Commands: Story = {
     await expect(inside.getByText('pnpm dev')).toBeVisible()
     await expect(inside.getByText('1 running')).toBeVisible()
     await expect(inside.getByRole('button', { name: 'http://localhost:5173/' })).toBeVisible()
+    // A list of runs and their output is no reason for the dialog to be taller than the others.
+    sameHeight(await heightsOnEveryTab(dialog, clicking(dialog)))
   },
 }
 
@@ -211,7 +278,8 @@ export const Commands: Story = {
 export const Context: Story = {
   args: { defaultTab: 'context' },
   play: async ({ canvasElement }) => {
-    const inside = within(await opened(canvasElement))
+    const dialog = await opened(canvasElement)
+    const inside = within(dialog)
     await expect(inside.getByRole('tab', { name: 'Context' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -219,6 +287,8 @@ export const Context: Story = {
     await expect(inside.getByText('Instructions')).toBeVisible()
     await expect(inside.getByText('· 21 Sep 23:02')).toBeVisible()
     await expect(inside.getByRole('button', { name: 'Tools · 1' })).toBeVisible()
+    // Nor is a short one a reason for it to be smaller.
+    sameHeight(await heightsOnEveryTab(dialog, clicking(dialog)))
   },
 }
 
@@ -249,10 +319,14 @@ export const Keyboard: Story = {
         expect(dialog.contains(document.activeElement), 'Tab left the dialog').toBe(true)
       })
     }
-    // The arrows walk the strip of tabs.
+    // The arrows walk the strip of tabs, and the dialog keeps its height on every one of them.
+    await risen(dialog)
     within(dialog).getByRole('tab', { name: 'Activity' }).focus()
-    await userEvent.keyboard('{ArrowRight}')
-    await expect(within(dialog).getByRole('tab', { name: 'Commands' })).toHaveAttribute(
+    const heights = await heightsOnEveryTab(dialog, async (tab) => {
+      if (tab !== 'Activity') await userEvent.keyboard('{ArrowRight}')
+    })
+    sameHeight(heights)
+    await expect(within(dialog).getByRole('tab', { name: 'Context' })).toHaveAttribute(
       'aria-selected',
       'true',
     )
@@ -271,5 +345,39 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
+  },
+}
+
+/**
+ * Changing tab: the panel that was left goes, the one that was chosen comes up from transparent
+ * on the `crossfade` kind, and the dialog does not change height at any frame of it.
+ */
+export const TabChange: Story = {
+  args: { defaultTab: 'activity' },
+  play: async ({ canvasElement }) => {
+    const dialog = await opened(canvasElement)
+    const resting = dialog.getBoundingClientRect().height
+    const fades: number[] = []
+    const heights: number[] = []
+    // Watched from before the press, frame by frame, for longer than the fade lasts.
+    const watched = (async () => {
+      for (let seen = 0; seen < 40; seen += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one frame after the other, as they are drawn
+        await frame()
+        const fade = fadeOf(dialog, 'Commands')
+        if (fade !== null) fades.push(fade)
+        heights.push(dialog.getBoundingClientRect().height)
+      }
+    })()
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'Commands' }))
+    await watched
+
+    await expect(within(dialog).getByText('pnpm dev')).toBeVisible()
+    expect(
+      fades.some((fade) => fade > 0 && fade < 1),
+      'the new panel never showed between transparent and opaque',
+    ).toBe(true)
+    expect(fades.at(-1), 'the new panel did not land opaque').toBe(1)
+    sameHeight([resting, ...heights])
   },
 }

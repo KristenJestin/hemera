@@ -118,8 +118,9 @@ export const Keyboard: Story = {
 }
 
 /**
- * A dialog that holds a page of its own: as wide as the thread, never taller than the window, and
- * what it holds scrolls inside it while the title and the close button stay in place.
+ * A dialog that holds a page of its own: as wide as the thread, seven tenths of the window tall
+ * whatever it holds, and what it holds scrolls inside it while the title and the close button
+ * stay in place.
  */
 export const Wide: Story = {
   parameters: { controls: { disable: true } },
@@ -144,8 +145,11 @@ export const Wide: Story = {
     await waitFor(() => {
       expect(getComputedStyle(dialog).opacity).toBe('1')
     })
-    // Never taller than the window, and wider than a question.
-    expect(dialog.getBoundingClientRect().height).toBeLessThan(window.innerHeight)
+    // Seven tenths of the window, whatever it holds, and wider than a question. Waited on, because
+    // it rises from a smaller scale as well as from transparent.
+    await waitFor(() => {
+      expect(dialog.getBoundingClientRect().height).toBeCloseTo(window.innerHeight * 0.7, 0)
+    })
     expect(dialog.getBoundingClientRect().width).toBeGreaterThan(448)
     const list = within(dialog).getByRole('list')
     const room = list.parentElement!

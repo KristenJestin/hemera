@@ -21,19 +21,20 @@ const BACKDROP =
   'fixed inset-0 bg-overlay backdrop-blur-xs backdrop-motion data-starting-style:opacity-0 data-starting-style:backdrop-blur-none data-ending-style:opacity-0 data-ending-style:backdrop-blur-none'
 
 const POPUP =
-  'fixed inset-0 m-auto flex h-fit w-full flex-col gap-4 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-lg outline-none translate-y-0 scale-100 popup-motion data-starting-style:translate-y-4 data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:translate-y-4 data-ending-style:scale-95 data-ending-style:opacity-0'
+  'fixed inset-0 m-auto flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-lg outline-none translate-y-0 scale-100 popup-motion data-starting-style:translate-y-4 data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:translate-y-4 data-ending-style:scale-95 data-ending-style:opacity-0'
 
 /**
- * How wide the dialog is. `md` is a question and its answer; `wide` is a dialog that holds a page
- * of its own — the details of a Session — and never grows past the window: it keeps a margin
- * above and below, and what it holds scrolls inside it while the title and the close button stay
- * where they are.
+ * How wide the dialog is. `md` is a question and its answer, as tall as what it says; `wide` is
+ * a dialog that holds a page of its own — the details of a Session — and is `dialog-wide` tall
+ * whatever it holds: a page of tabs that took the height of each tab would change size under the
+ * hand that switches them. It keeps a margin above and below, and what it holds scrolls inside
+ * it while the title and the close button stay where they are.
  */
 export type DialogSize = 'md' | 'wide'
 
 const SIZE: Record<DialogSize, string> = {
-  md: 'max-w-md',
-  wide: 'max-h-5/6 max-w-3xl',
+  md: 'h-fit max-w-md',
+  wide: 'h-dialog-wide max-w-3xl',
 }
 
 /** The room the content of a wide dialog scrolls in, with space left for its focus rings. */
