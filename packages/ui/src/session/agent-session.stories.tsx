@@ -535,8 +535,9 @@ export const Complete: Story = {
       },
       { timeout: 10_000 },
     )
-    // A call to one of Hemera's own tools wears the mark, so it is not read as a native call.
-    await expect(canvas.getByRole('img', { name: 'Hemera' })).toBeVisible()
+    // A call to one of Hemera's own tools wears the mark of its kind, as a native call does, and
+    // is announced as Hemera's, so it is not read as a native call.
+    await expect(canvas.getByRole('button', { name: /^Hemera fs_read/ })).toBeVisible()
     await expect(canvas.getByText('fs_read')).toBeVisible()
     // The command the agent started is a block of the thread, with the address one press away.
     await expect(canvas.getByText('pnpm dev')).toBeVisible()

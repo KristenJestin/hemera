@@ -251,7 +251,7 @@ export {
 export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
 export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
 /** The tools Hemera lends the agent (HEM-18): the call it made, and the command it ran. A call
- * to one of Hemera's own tools is not the agent's business alone, so it wears the mark. */
+ * to one of Hemera's own tools is not the agent's business alone, so it says whose it is. */
 export {
   HemeraToolCall,
   type HemeraToolArgument,

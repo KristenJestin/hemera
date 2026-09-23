@@ -55,8 +55,11 @@ import { Disclosure } from './disclosure.tsx'
  * so the body opening under it does not carry it along (trial of 23 September 2026).
  */
 
-/** How a call is read at a glance: the kind is the mark, the status is the colour of the dot. */
-const MARKS: Record<ToolKind, ReactNode> = {
+/**
+ * How a call is read at a glance: the kind is the mark, the status is the colour of the dot.
+ * Shared with `HemeraToolCall`, so a read is the same mark whoever lent the tool.
+ */
+export const MARKS: Record<ToolKind, ReactNode> = {
   read: <IconFileText size="sm" aria-hidden="true" />,
   edit: <IconPencil size="sm" aria-hidden="true" />,
   delete: <IconTrash size="sm" aria-hidden="true" />,

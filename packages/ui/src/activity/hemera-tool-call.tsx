@@ -2,8 +2,9 @@ import type { ReactNode } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
-import { IconBrandHemera } from '../icons.ts'
+import { IconInfoCircle, IconTerminal } from '../icons.ts'
 import { Disclosure } from './disclosure.tsx'
+import { MARKS } from './tool-call-card.tsx'
 
 /**
  * One call the agent made to a tool Hemera lent it (design D6-06).
@@ -11,10 +12,12 @@ import { Disclosure } from './disclosure.tsx'
  * Since this lot the agent runs bare and works through Hemera's own tools, so a call in the
  * thread is no longer the agent's business alone: it is Hemera's, and the thread has to say so.
  * That is the whole reason this block is not `ToolCallCard` — the two sit side by side in one
- * turn and a reader must tell them apart at a glance. Hemera's mark on the line is that
- * difference, drawn where and as large as an agent's mark is, and named `Hemera` for whatever
- * reads the page; the provenance under it is what makes the call accountable: which Session it
- * was made in, which agent made it, and which token it carried (D6-01).
+ * turn and a reader must tell them apart. The line reads like a native call's — the mark of the
+ * kind of tool, drawn as `ToolCallCard` draws it, then the tool's name in mono — and the
+ * difference is the name itself and the provenance under it, which is what makes the call
+ * accountable: which Session it was made in, which agent made it, and which token it carried
+ * (D6-01). Hemera's own mark left the line (recette 2 of 23 September 2026): a brand on every
+ * call was louder than the call; the word `Hemera` stays in what the line is announced by.
  *
  * Where a call stands is a dot, as it is on a native call, and not a word: the word is what the
  * dot is announced by.
@@ -42,10 +45,47 @@ const STATUS: Record<HemeraToolStatus, { word: string; tone: StatusTone }> = {
 /** The line that is read: whose call it is, the tool, and what the call is doing. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
-/** Where the mark sits on the line; it carries its own colours. */
-const MARK = 'flex shrink-0'
+/** How a Hemera tool is read at a glance: what it does to the Workspace, not whose it is. */
+type MarkKind = 'read' | 'edit' | 'search' | 'terminal' | 'quiet-terminal' | 'info'
 
-const TOOL = 'min-w-0 truncate font-mono text-foreground'
+/**
+ * The kind of each tool of the catalogue. A command that is only looked at — the catalogue, an
+ * output — is the terminal of a command that runs, drawn quieter: nothing started or stopped.
+ */
+const KINDS: ReadonlyMap<string, MarkKind> = new Map([
+  ['fs_read', 'read'],
+  ['fs_list', 'read'],
+  ['fs_write', 'edit'],
+  ['fs_edit', 'edit'],
+  ['search', 'search'],
+  ['commands_run', 'terminal'],
+  ['commands_stop', 'terminal'],
+  ['commands_list', 'quiet-terminal'],
+  ['commands_output', 'quiet-terminal'],
+  ['project_get', 'info'],
+  ['session_get', 'info'],
+])
+
+/** The marks, the three a native call already has read from its own table. */
+const HEMERA_MARKS: Record<MarkKind, ReactNode> = {
+  read: MARKS.read,
+  edit: MARKS.edit,
+  search: MARKS.search,
+  terminal: <IconTerminal size="sm" aria-hidden="true" />,
+  'quiet-terminal': <IconTerminal size="sm" aria-hidden="true" />,
+  info: <IconInfoCircle size="sm" aria-hidden="true" />,
+}
+
+/** Where the mark sits on the line, in the tone a native call's mark is drawn in. */
+const MARK = 'flex shrink-0 text-muted-foreground'
+
+/** The mark of a command only looked at, a step quieter than one that runs. */
+const QUIET_MARK = 'flex shrink-0 text-muted-foreground opacity-60'
+
+/** Who the call is, for whatever reads the page rather than looks at it. */
+const WHOSE = 'sr-only'
+
+const TOOL = 'min-w-0 truncate font-mono text-muted-foreground'
 
 /** The path, shortened from its end rather than pushing the line off the block. */
 const PATH = 'min-w-0 truncate'
@@ -136,6 +176,7 @@ export function HemeraToolCall({
   const forced =
     status === 'in_progress' || status === 'failed' || status === 'pending' || status === 'refused'
   const first = paths?.[0]
+  const kind = KINDS.get(tool)
   return (
     <Disclosure
       className={className}
@@ -144,9 +185,13 @@ export function HemeraToolCall({
       defaultOpen={defaultOpen}
       summary={
         <span className={SUMMARY}>
-          <span className={MARK}>
-            <IconBrandHemera size="md" role="img" aria-label="Hemera" />
+          <span
+            className={kind === 'quiet-terminal' ? QUIET_MARK : MARK}
+            data-mark={kind ?? 'other'}
+          >
+            {kind === undefined ? MARKS.other : HEMERA_MARKS[kind]}
           </span>
+          <span className={WHOSE}>Hemera</span>
           <span className={TOOL}>{tool}</span>
           <StatusDot status={tone} size="sm" label={word} />
         </span>

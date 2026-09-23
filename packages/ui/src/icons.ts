@@ -304,8 +304,9 @@ export const IconBrandClaude = vendored(
 /**
  * Hemera's own mark, provisional until a logo is handed over: an `H` on a tinted rounded square.
  *
- * It is what tells a call to one of Hemera's tools from an agent's native call in the same turn,
- * so it is drawn where an agent's mark would be and at the same size. Unlike the vendored marks
+ * It no longer sits on the line of a call to one of Hemera's tools, which wears the mark of its
+ * kind as a native call does (recette 2 of 23 September 2026); it is kept for where Hemera will
+ * sign as itself, and the Foundations catalogue still draws it. Unlike the vendored marks
  * it is two colours and not `currentColor`: the tint pair a badge is drawn in, the square in the
  * muted fill and the `H` in its foreground, so it reads as a tinted badge in either theme.
  * `weight` is read and dropped, as for a vendored mark. Nothing here is borrowed, so it has no

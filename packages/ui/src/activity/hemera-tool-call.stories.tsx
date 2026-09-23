@@ -9,9 +9,11 @@ import { HemeraToolCall, type HemeraToolProvenance } from './hemera-tool-call.ts
  *
  * The stories are the states a call is read in: a read that is done and folded, the same call
  * opened by the reader, an edit, a write, a search that hit its limit, a call in flight, a call
- * that failed, a call Hemera refused, and a write waiting for the reader's decision. The `Hemera`
- * mark and the provenance line are what tell this block from a native tool call in the same
- * turn, so both are on every story; where the call stands is the dot beside the tool.
+ * that failed, a call Hemera refused, and a write waiting for the reader's decision, then one
+ * story per mark a tool is drawn with. The line carries the mark of the kind of tool, as a native
+ * call does, and no brand; the provenance under it is what tells this block from a native call
+ * in the same turn, and the word `Hemera` is still what the line is announced by. Where the call
+ * stands is the dot beside the tool.
  */
 const PROVENANCE: HemeraToolProvenance = {
   session: 'CSV invoice export',
@@ -117,21 +119,21 @@ export const AFoldClosing: Story = {
   },
 }
 
-/** A call that is done, folded: the tool, the state, and the file it read. */
+/** A call that is done, folded: the mark of a read, the tool, the state, and the file it read. */
 export const ReadFolded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    // The mark is the whole difference from a native call, so it is read on the line, and heard
-    // as the word it stands for: the line reads "Hemera, the tool, where the call stands".
-    const mark = canvas.getByRole('img', { name: 'Hemera' })
-    await expect(mark).toBeVisible()
-    // Two tones, the tint pair of a badge: the square in the muted fill, the `H` on it.
-    const [square, letter] = [...mark.querySelectorAll('path')].map(
-      (path) => getComputedStyle(path).fill,
-    )
-    await expect(square).not.toBe(letter)
-    await expect(canvas.getByText('fs_read')).toBeVisible()
+    // The line wears the mark of what the tool does, as a native call does, and no brand: the
+    // word `Hemera` is only heard, so the line reads "Hemera, the tool, where the call stands".
     const row = canvas.getByRole('button', { name: 'Hemera fs_read Done' })
+    const mark = row.querySelector('[data-mark]')
+    await expect(mark).toHaveAttribute('data-mark', 'read')
+    await expect(mark?.querySelector('svg')).toBeVisible()
+    await expect(canvas.queryByRole('img', { name: 'Hemera' })).toBeNull()
+    // The tool's name is mono and quiet, the tone a native call's title is drawn in.
+    const tool = canvas.getByText('fs_read')
+    await expect(tool).toBeVisible()
+    await expect(getComputedStyle(tool).color).toBe(getComputedStyle(mark ?? tool).color)
     // Where it stands is a dot, and the word is only what the dot is announced by.
     await expect(canvas.getByRole('img', { name: 'Done' })).toBeVisible()
     await expect(canvas.queryByText('Done')).toBeNull()
@@ -298,6 +300,49 @@ export const WaitingForYou: Story = {
     )
   },
 }
+
+/**
+ * One story per mark: the tool, and the mark it is drawn with. The mark is a native call's for
+ * what a native call also does, and the line holds no other picture than it and the dot.
+ */
+function marked(tool: string, kind: string, summary: string): Story {
+  return {
+    args: { tool, summary, arguments: [], paths: [] },
+    play: async ({ canvasElement }) => {
+      const canvas = within(canvasElement)
+      const row = canvas.getByRole('button', { name: `Hemera ${tool} Done` })
+      const mark = row.querySelector('[data-mark]')
+      await expect(mark).toHaveAttribute('data-mark', kind)
+      await expect(mark?.querySelector('svg')).toBeVisible()
+      await expect(canvas.queryByRole('img', { name: 'Hemera' })).toBeNull()
+      // A command only looked at is drawn a step quieter than one that runs.
+      const opacity = Number(getComputedStyle(mark ?? row).opacity)
+      await expect(kind === 'quiet-terminal' ? opacity < 1 : opacity === 1).toBe(true)
+    },
+  }
+}
+
+/** `fs_read` and `fs_list`: a read, the mark of a native read. */
+export const MarkRead: Story = marked('fs_list', 'read', '12 entries listed under src/billing.')
+
+/** `fs_write` and `fs_edit`: an edit, the mark of a native edit. */
+export const MarkEdit: Story = marked('fs_edit', 'edit', '1 occurrence replaced.')
+
+/** `search`: the mark of a native search. */
+export const MarkSearch: Story = marked('search', 'search', '3 matches for exportInvoices.')
+
+/** `commands_run` and `commands_stop`: a command started or stopped. */
+export const MarkTerminal: Story = marked('commands_run', 'terminal', 'check started.')
+
+/** `commands_list` and `commands_output`: a command only looked at, quieter. */
+export const MarkTerminalMuted: Story = marked(
+  'commands_output',
+  'quiet-terminal',
+  '40 lines of the output of check.',
+)
+
+/** `project_get` and `session_get`: what Hemera knows of the Project or the Session. */
+export const MarkInfo: Story = marked('project_get', 'info', 'The Project, its root and commands.')
 
 /** The catalogue as the thread reads it: one line per tool, with the state of the call. */
 export const EveryTool: Story = {
