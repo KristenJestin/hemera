@@ -44,6 +44,7 @@ import {
 } from './commands/panel.ts'
 import { Commands, type UnknownCommandError, type UnknownRunError } from './commands/service.ts'
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
+import type { Variables } from './workspaces/variables.ts'
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
@@ -156,6 +157,7 @@ export function answer(
   | Agents
   | Commands
   | Context
+  | Variables
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read

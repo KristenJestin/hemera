@@ -24,6 +24,7 @@ import { Effect } from 'effect'
 
 import { Projects, UnknownProjectError } from '../projects.ts'
 import { Sessions } from '../sessions.ts'
+import { Variables } from '../workspaces/variables.ts'
 import { Commands, UnknownCommandError } from './service.ts'
 
 /** A folder that is neither the Workspace root nor one of the Project's repositories. */
@@ -165,6 +166,12 @@ export const runFromPanel = (
     const session = yield* sessionOf(sessionId)
     const project = yield* projectOf(session.projectId)
     const commands = yield* Commands
+    const sessions = yield* Sessions
+    const variables = yield* Variables
+    // The run belongs to the Session's Workspace (D8-08), with the variables Hemera gives it:
+    // the Project's, overridden by the Workspace's (D8-06).
+    const workspace = yield* sessions.workspace(sessionId)
+    const environment = yield* variables.givenFor(project.id, workspace.id)
     const name = named?.trim() ?? ''
     const line = written?.trim() ?? ''
     if (name !== '') {
@@ -183,11 +190,11 @@ export const runFromPanel = (
         scope: entry.scope,
         portless: entry.portless,
         folder: entry.folder,
-        cwd: entry.folder === null ? project.mainPath : join(project.mainPath, entry.folder),
-        // D8-08: the Session's Workspace and its variables are wired by the sessions agent.
-        workspaceId: null,
-        workspaceName: 'main',
-        environment: {},
+        // The folder of a command resolves under the Workspace the run is in (D8-07).
+        cwd: entry.folder === null ? workspace.path : join(workspace.path, entry.folder),
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        environment,
         startedBy: 'user',
       })
     }
@@ -205,10 +212,10 @@ export const runFromPanel = (
       scope: 'workspace',
       portless: false,
       folder: null,
-      cwd: project.mainPath,
-      workspaceId: null,
-      workspaceName: 'main',
-      environment: {},
+      cwd: workspace.path,
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      environment,
       startedBy: 'user',
     })
   })

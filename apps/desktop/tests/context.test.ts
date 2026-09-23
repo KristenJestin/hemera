@@ -7,6 +7,7 @@
  * change at all.
  */
 
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,6 +23,7 @@ import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
+import { gitLayer } from '#engine/git.ts'
 
 /** The migrations this branch ships, and the version it writes in the profile. */
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
@@ -45,6 +47,7 @@ const engine = (
   place: string,
 ): Layer.Layer<Context | Projects | Sessions | Database | SqliteClient> =>
   contextLayer.pipe(
+    Layer.provide(gitLayer()),
     Layer.provideMerge(
       Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
         Layer.provideMerge(databaseLayer(join(place, 'hemera.sqlite'))),
@@ -110,6 +113,35 @@ describe('what a Session is provided', () => {
     expect(seen.provided.map((one) => one.kind).sort()).toEqual(['base', 'provided'])
     const file = seen.provided.find((one) => one.kind === 'provided')
     expect(file?.fingerprint).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('names each repository of the Workspace with the branch Git reads for it (D8-08)', async () => {
+    // A declared repository that is one, on a branch of its own, and one that holds no
+    // repository: the first is named with its branch, the second as its path alone.
+    const api = join(root, 'sources', 'api')
+    mkdirSync(api, { recursive: true })
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', api, '-c', 'commit.gpgsign=false', ...args], { encoding: 'utf8' })
+    git('init', '-q', '-b', 'trunk')
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'base')
+
+    const seen = await given(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const sessions = yield* Sessions
+        const project = yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: root })
+        const withApi = yield* projects.addRepository(project.id, project.version, './sources/api')
+        yield* projects.addRepository(withApi.id, withApi.version, './docs')
+        const session = yield* sessions.create(project.id, 'claude')
+        const context = yield* Context
+        return yield* context.start(session.id)
+      }),
+    )
+
+    expect(seen.base).toEqual(
+      `${CONTEXT_BASE}\nWorkspace: main at ${root} (repositories: ./sources/api on trunk, ./docs)`,
+    )
   })
 
   it('has nothing it read natively without AGENTS.md', async () => {

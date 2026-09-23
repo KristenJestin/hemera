@@ -51,6 +51,7 @@ import type { ToolOutcome } from '#engine/tools/catalogue.ts'
 import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
+import { variablesLayer } from '#engine/workspaces/variables.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -138,6 +139,7 @@ function engine(human: Human) {
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
     Layer.provideMerge(commandsLayer),
+    Layer.provide(variablesLayer),
     Layer.provideMerge(
       Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
         Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite'))),

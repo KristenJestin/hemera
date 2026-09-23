@@ -49,6 +49,8 @@ import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { toolServerLayer } from '#engine/tools/server.ts'
+import { gitLayer } from '#engine/git.ts'
+import { variablesLayer } from '#engine/workspaces/variables.ts'
 
 import { SHIPPED, VERSION, besideTheAgent, machine } from './application.ts'
 
@@ -104,10 +106,11 @@ export async function openWindow(
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
+    Layer.provideMerge(variablesLayer),
   )
   const services = runtimeLayer.pipe(
     Layer.provideMerge(tools),
-    Layer.provideMerge(contextLayer),
+    Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),
     Layer.provideMerge(journalLayer),
     Layer.provideMerge(
       Layer.mergeAll(

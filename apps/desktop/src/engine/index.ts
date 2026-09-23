@@ -183,6 +183,8 @@ function servicesOf(
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
+    // The variables a run is given are the Project's overridden by the Workspace's (D8-06).
+    Layer.provide(variablesLayer),
     Layer.provide(rows),
     Layer.provide(processes),
     Layer.provide(agents),
@@ -191,13 +193,15 @@ function servicesOf(
     Layer.provide(heldWordsLayer),
   )
   // What a Session is provided with, and the book of which agents are live (D6-07, D5-05).
-  const provisions = Layer.mergeAll(contextLayer.pipe(Layer.provide(rows)), poolLayer).pipe(
-    Layer.provide(clockLayer),
-  )
+  // The context names each repository's branch, read through the machine's `git` (D8-08).
+  const git = gitLayer()
+  const provisions = Layer.mergeAll(
+    contextLayer.pipe(Layer.provide(rows), Layer.provide(git)),
+    poolLayer,
+  ).pipe(Layer.provide(clockLayer))
   // The Workspaces of the Projects, over the machine's `git`, made under the data folder unless a
   // Project names a folder of its own (D8-02, D8-03), and prepared by the same supervisor that
   // starts every other process (D8-05).
-  const git = gitLayer()
   const workspaces = preparationLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
     Layer.provide(git),

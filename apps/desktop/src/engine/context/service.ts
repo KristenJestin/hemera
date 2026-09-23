@@ -38,6 +38,7 @@ import { Context as EffectContext, Effect, Layer } from 'effect'
 
 import { bareModeOf } from '../agents/bare.ts'
 import { ADAPTERS } from '../agents/discovery.ts'
+import { Git } from '../git.ts'
 import { Sessions, UnknownSessionError } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
 import { type ContextDeliveryKind, contextDeliveries } from '../storage/schema.ts'
@@ -142,6 +143,7 @@ export const contextLayer = Layer.effect(
   Effect.gen(function* () {
     const database = yield* Database
     const sessions = yield* Sessions
+    const git = yield* Git
 
     const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
 
@@ -199,16 +201,21 @@ export const contextLayer = Layer.effect(
      * and path, and its repositories relative to that path.
      */
     const composedBase = (sessionId: string): Effect.Effect<string, Refusal> =>
-      workspaceOf(sessionId).pipe(
-        Effect.map((workspace) => {
-          // D8-08: the branch of each repository is read through Git by the integrator.
-          const held =
-            workspace.repositories.length === 0
-              ? ''
-              : ` (repositories: ${workspace.repositories.join(', ')})`
-          return `${CONTEXT_BASE}\nWorkspace: ${workspace.name} at ${workspace.path}${held}`
-        }),
-      )
+      Effect.gen(function* () {
+        const workspace = yield* workspaceOf(sessionId)
+        // Each repository with its branch, read from Git as the base is composed and never
+        // stored (D8-08, D8-15); a folder Git cannot read is named without a branch.
+        const named = yield* Effect.forEach(workspace.repositories, (repository) =>
+          git.status(join(workspace.path, repository)).pipe(
+            Effect.match({
+              onFailure: () => repository,
+              onSuccess: (status) => `${repository} on ${status.branch}`,
+            }),
+          ),
+        )
+        const held = named.length === 0 ? '' : ` (repositories: ${named.join(', ')})`
+        return `${CONTEXT_BASE}\nWorkspace: ${workspace.name} at ${workspace.path}${held}`
+      })
 
     /** The kind of a row, which the table's check constraint already closed. */
     const kindOf = (kind: string): DeliveryKind => {

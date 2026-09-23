@@ -39,6 +39,7 @@ import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { type SessionWorkspace, Sessions, type ThreadWrite } from '../sessions.ts'
 import { Database } from '../storage/database.ts'
+import { Variables } from '../workspaces/variables.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
 import {
@@ -259,6 +260,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | HeldWords
   | AgentNotices
   | Database
+  | Variables
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -270,6 +272,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const access = yield* ToolAccess
     const held = yield* HeldWords
     const notices = yield* AgentNotices
+    const variables = yield* Variables
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -906,8 +909,8 @@ export const toolCatalogueLayer: Layer.Layer<
                 // D8-08: the run belongs to the Session's Workspace, which names it too.
                 workspaceId: workspace.id,
                 workspaceName: workspace.name,
-                // D8-06: the variables are merged in by the integrator once Variables exists
-                environment: {},
+                // D8-06: the Project's variables overridden by the Workspace's, kept on the run.
+                environment: (yield* answered(variables.givenFor(projectId, workspace.id))) ?? {},
                 startedBy: 'agent',
               }),
             )

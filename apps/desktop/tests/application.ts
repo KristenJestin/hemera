@@ -52,6 +52,8 @@ import type { ToolAccess } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { type ToolPermissions, toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
+import { gitLayer } from '#engine/git.ts'
+import { variablesLayer } from '#engine/workspaces/variables.ts'
 
 export const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -195,7 +197,7 @@ export function application(
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(contextLayer),
-      Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer)),
+      Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer, gitLayer())),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
@@ -440,10 +442,11 @@ export function toolApplication(
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(toolPermissionsLayer),
       Layer.provideMerge(commandsLayer),
+      Layer.provide(variablesLayer),
     )
     const services: Layer.Layer<ToolEngine> = runtimeLayer.pipe(
       Layer.provideMerge(tools),
-      Layer.provideMerge(contextLayer),
+      Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),
       Layer.provideMerge(journalLayer),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(

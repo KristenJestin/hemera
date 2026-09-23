@@ -36,6 +36,8 @@ import type { Database } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer } from '#engine/tools/server.ts'
+import { gitLayer } from '#engine/git.ts'
+import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /**
@@ -73,6 +75,7 @@ function running<A, E>(
     | Agents
     | Commands
     | Context
+    | Variables
   >,
 ) {
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
@@ -96,8 +99,9 @@ function running<A, E>(
   const tools = Layer.mergeAll(
     toolAccessLayer,
     toolPermissionsLayer,
-    contextLayer,
+    contextLayer.pipe(Layer.provide(gitLayer())),
     commandsLayer,
+    variablesLayer,
     Layer.succeed(ToolServer, {
       origin: 'http://127.0.0.1:1',
       forAgent: () => 'http://127.0.0.1:1/mcp',
@@ -125,6 +129,7 @@ function running<A, E>(
     | Agents
     | Commands
     | Context
+    | Variables
     | Database
     | SqliteClient
   > = Layer.mergeAll(
