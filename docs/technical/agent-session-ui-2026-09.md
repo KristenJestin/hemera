@@ -11,6 +11,10 @@ and OpenCode documentation. The URLs are listed at the end of the document.
 
 ## Summary
 
+> Hemera itself no longer draws that side column: since the second review of #18
+> (23 September 2026) the plan, the files, the commands and the context are a **Session
+> details** dialog the reader opens from the Session's head, and nothing opens it by itself.
+
 A Session screen is a **chronological thread** in which everything the agent does is a
 block, plus a **writing area** at the bottom, plus a **side column** used only for the
 things that must stay visible while scrolling: the plan, the summary of touched files,
