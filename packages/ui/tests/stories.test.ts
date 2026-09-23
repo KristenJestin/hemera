@@ -113,12 +113,11 @@ const SURFACES = {
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
-  // Lot 20: what a Workspace is made of, one file per line so that each piece adds its own.
+  // Lot 20: what a Workspace is made of, one file per line (a1 and a2 each added theirs).
   workspace: [
-    // The variables of a Project and of a Workspace over it (D8-06).
     'variables-editor',
-    // The services of a Workspace, with their readiness and their conflicts (D8-08, D8-09).
     'service-list',
+    'workspace-card',
   ],
 }
 
@@ -157,6 +156,10 @@ const NAMED_STATES = new Map([
       'Empty',
       'Keyboard',
     ],
+  ],
+  [
+    'workspace/workspace-card',
+    ['Main', 'Preparing', 'Ready', 'Failed', 'Cleaned', 'Loading', 'GitError'],
   ],
 ])
 
@@ -390,6 +393,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'VariablesEditor',
       'ServiceList',
       'RunDetails',
+      // Lot 20: a Workspace with what Git says of it, the dialog that creates one, its
+      // preparation step by step, the Workspaces of a Project, and the cleanup that keeps the
+      // branches.
+      'WorkspaceCard',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

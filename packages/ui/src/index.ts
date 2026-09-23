@@ -377,3 +377,16 @@ export type {
   ServiceLine,
   VariableLine,
 } from './workspace/services-model.ts'
+/** The Workspace and its preparation (lot 20). */
+export {
+  type GitState,
+  type PlanRepositoryLine,
+  type PreparationStepLine,
+  type StepKind,
+  type StepState,
+  type WorkspaceDraft,
+  type WorkspaceRepositoryLine,
+  type WorkspaceRow,
+  type WorkspaceState,
+} from './workspace/model.ts'
+export { WorkspaceCard, type WorkspaceCardProps } from './workspace/workspace-card.tsx'
