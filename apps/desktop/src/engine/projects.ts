@@ -32,6 +32,12 @@ export interface Project extends DomainProject {
   mainPath: string
   /** What it reads from, relative to that root, in the order the user put them in. */
   repositories: string[]
+  /** Where its dedicated Workspaces are made, and null for Hemera's own folder (D8-02). */
+  workspacesRoot: string | null
+  /** What their branches start with, and null for the Project's name as a slug (D8-04). */
+  branchPrefix: string | null
+  /** The repositories a dedicated Workspace gets a worktree of unless left out (D8-04). */
+  included: string[]
 }
 
 /** A Project was asked for by an identifier nothing answers to. */
@@ -90,6 +96,22 @@ export interface ProjectsService {
     version: number,
     relativePath: string,
   ) => Effect.Effect<Project, Refusal>
+  readonly setWorkspacesRoot: (
+    id: string,
+    version: number,
+    path: string | null,
+  ) => Effect.Effect<Project, Refusal>
+  readonly setBranchPrefix: (
+    id: string,
+    version: number,
+    prefix: string | null,
+  ) => Effect.Effect<Project, Refusal>
+  readonly setRepositoryIncluded: (
+    id: string,
+    version: number,
+    relativePath: string,
+    included: boolean,
+  ) => Effect.Effect<Project, Refusal | InvalidRepositoryPathError>
 }
 
 export class Projects extends Context.Service<Projects, ProjectsService>()('Projects') {}
@@ -111,6 +133,12 @@ function canonical(path: string): string {
   } catch {
     return path
   }
+}
+
+/** A setting cleared to nothing: the default it stands for, rather than an empty value. */
+function blankAsNull(value: string | null): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed === '' ? null : trimmed
 }
 
 /** The date every row of one mutation shares, so a Project and its event agree on when. */
@@ -218,6 +246,11 @@ export const projectsLayer = Layer.effect(
           repositories: locations
             .filter((one) => one.projectId === row.id)
             .map((one) => one.relativePath),
+          workspacesRoot: row.workspacesRoot,
+          branchPrefix: row.branchPrefix,
+          included: locations
+            .filter((one) => one.projectId === row.id && one.includedByDefault === 1)
+            .map((one) => one.relativePath),
         }))
       })
 
@@ -241,7 +274,13 @@ export const projectsLayer = Layer.effect(
       transaction: Parameters<Parameters<typeof mutate>[1]>[0],
       id: string,
       version: number,
-      change: Partial<{ name: string; tone: string; archivedAt: string | null }>,
+      change: Partial<{
+        name: string
+        tone: string
+        archivedAt: string | null
+        workspacesRoot: string | null
+        branchPrefix: string | null
+      }>,
     ) =>
       Effect.gen(function* () {
         const written = yield* transaction
@@ -317,6 +356,9 @@ export const projectsLayer = Layer.effect(
                 version: 1,
                 mainPath,
                 repositories: [],
+                workspacesRoot: null,
+                branchPrefix: null,
+                included: [],
               }
               return {
                 result: project,
@@ -510,6 +552,98 @@ export const projectsLayer = Layer.effect(
                     author: 'human',
                     projectId: id,
                     payload: { relativePath },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      setWorkspacesRoot: (id, version, path) =>
+        withDatabase(
+          mutate('choosing the folder of the Workspaces', (transaction) =>
+            Effect.gen(function* () {
+              // An empty field is the default folder, not a folder with no name (D8-02).
+              const workspacesRoot = blankAsNull(path)
+              yield* bump(transaction, id, version, { workspacesRoot })
+              const project = yield* readOne(id)
+              return {
+                result: project,
+                events: [
+                  {
+                    type: 'project.updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { workspacesRoot },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      setBranchPrefix: (id, version, prefix) =>
+        withDatabase(
+          mutate('choosing the branch prefix', (transaction) =>
+            Effect.gen(function* () {
+              // An empty field is the Project's name as a slug, not an empty prefix (D8-04).
+              const branchPrefix = blankAsNull(prefix)
+              yield* bump(transaction, id, version, { branchPrefix })
+              const project = yield* readOne(id)
+              return {
+                result: project,
+                events: [
+                  {
+                    type: 'project.updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { branchPrefix },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      setRepositoryIncluded: (id, version, relativePath, included) =>
+        withDatabase(
+          mutate('changing a repository', (transaction) =>
+            Effect.gen(function* () {
+              yield* bump(transaction, id, version, {})
+              const written = yield* transaction
+                .update(projectRepositories)
+                .set({ includedByDefault: included ? 1 : 0 })
+                .where(
+                  and(
+                    eq(projectRepositories.projectId, id),
+                    eq(projectRepositories.relativePath, relativePath),
+                  ),
+                )
+                .returning({ id: projectRepositories.id })
+                .pipe(Effect.mapError(failed('writing the repository')))
+              if (written.length === 0) {
+                return yield* Effect.fail(
+                  new InvalidRepositoryPathError(relativePath, 'it is not declared'),
+                )
+              }
+              const project = yield* readOne(id)
+              return {
+                result: project,
+                events: [
+                  {
+                    type: 'project.repository_updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { relativePath, included },
                   },
                 ],
               } satisfies Mutation<Project>

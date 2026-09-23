@@ -250,6 +250,87 @@ describe('Chemin hors racine refusé', () => {
   })
 })
 
+describe('The folder of the Workspaces and the branch prefix are the Project’s', () => {
+  test('both start at their default, are set, and are cleared back to it', async () => {
+    const [fresh, set, cleared, entries] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        const rooted = yield* projects.setWorkspacesRoot(one.id, one.version, '/tmp/atlas-trees')
+        const prefixed = yield* projects.setBranchPrefix(rooted.id, rooted.version, ' hemera ')
+        const unrooted = yield* projects.setWorkspacesRoot(prefixed.id, prefixed.version, '  ')
+        const back = yield* projects.setBranchPrefix(unrooted.id, unrooted.version, null)
+        return [one, prefixed, back, yield* journal] as const
+      }),
+    )
+
+    // Null is the default and not a value: Hemera's own folder, and the Project's name (D8-02).
+    expect(fresh.workspacesRoot).toBeNull()
+    expect(fresh.branchPrefix).toBeNull()
+    expect(set.workspacesRoot).toBe('/tmp/atlas-trees')
+    expect(set.branchPrefix).toBe('hemera')
+    expect(cleared.workspacesRoot).toBeNull()
+    expect(cleared.branchPrefix).toBeNull()
+    expect(entries.map((entry) => entry.type)).toEqual([
+      'project.created',
+      'project.updated',
+      'project.updated',
+      'project.updated',
+      'project.updated',
+    ])
+  })
+
+  test('a setting made against a version that is no longer current is refused', async () => {
+    const raised = await refusalOn(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        yield* projects.setBranchPrefix(one.id, one.version, 'hemera')
+        return yield* projects.setBranchPrefix(one.id, one.version, 'atlas')
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(StaleVersionError)
+  })
+})
+
+describe('A repository is included by default and can be left out', () => {
+  test('included beside the list of repositories, which stays as it is', async () => {
+    const [declared, left, entries] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        const withApi = yield* projects.addRepository(one.id, one.version, './sources/api')
+        const both = yield* projects.addRepository(withApi.id, withApi.version, './sources/front')
+        const out = yield* projects.setRepositoryIncluded(
+          both.id,
+          both.version,
+          './sources/front',
+          false,
+        )
+        return [both, out, yield* journal] as const
+      }),
+    )
+
+    expect(declared.included).toEqual(['./sources/api', './sources/front'])
+    expect(left.repositories).toEqual(['./sources/api', './sources/front'])
+    expect(left.included).toEqual(['./sources/api'])
+    expect(entries.at(-1)?.type).toBe('project.repository_updated')
+  })
+
+  test('a location the Project does not declare is refused', async () => {
+    const raised = await refusalOn(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        return yield* projects.setRepositoryIncluded(one.id, one.version, './nowhere', false)
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(InvalidRepositoryPathError)
+  })
+})
+
 describe('Archivé puis restauré', () => {
   test('it leaves the list, comes back to it, and keeps its Journal', async () => {
     const [afterArchive, afterRestore, entries] = await opened()(
@@ -309,6 +390,9 @@ describe('Aucune suppression', () => {
       'moveMain',
       'removeRepository',
       'restore',
+      'setBranchPrefix',
+      'setRepositoryIncluded',
+      'setWorkspacesRoot',
       'update',
     ])
   })
