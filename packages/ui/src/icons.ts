@@ -42,6 +42,8 @@ import {
   IconDeviceDesktopFilled as TablerDeviceDesktopFilled,
   IconDots as TablerDots,
   IconDotsFilled as TablerDotsFilled,
+  IconEye as TablerEye,
+  IconEyeFilled as TablerEyeFilled,
   IconFileText as TablerFileText,
   IconFilePlus as TablerFilePlus,
   IconFileTextFilled as TablerFileTextFilled,
@@ -53,6 +55,7 @@ import {
   IconFolders as TablerFolders,
   IconFoldersFilled as TablerFoldersFilled,
   IconGitBranch as TablerGitBranch,
+  IconGitCompare as TablerGitCompare,
   IconHome as TablerHome,
   IconHomeFilled as TablerHomeFilled,
   IconInfoCircle as TablerInfoCircle,
@@ -61,6 +64,8 @@ import {
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
   IconListDetails as TablerListDetails,
   IconListDetailsFilled as TablerListDetailsFilled,
+  IconLock as TablerLock,
+  IconLockFilled as TablerLockFilled,
   IconMessage as TablerMessage,
   IconMessageFilled as TablerMessageFilled,
   IconMessages as TablerMessages,
@@ -193,6 +198,7 @@ export const IconDeviceDesktop = catalogued(
   'IconDeviceDesktop',
 )
 export const IconDots = catalogued(TablerDotsFilled, TablerDots, 'IconDots')
+export const IconEye = catalogued(TablerEyeFilled, TablerEye, 'IconEye')
 /* Tabler draws no solid file with a plus, and no solid second terminal further down: the outline
    stands for both weights. */
 export const IconFilePlus = catalogued(TablerFilePlus, TablerFilePlus, 'IconFilePlus')
@@ -203,6 +209,7 @@ export const IconFolderOpen = catalogued(TablerFolderOpenFilled, TablerFolderOpe
 export const IconFolderPlus = catalogued(TablerFolderPlus, TablerFolderPlus, 'IconFolderPlus')
 export const IconFolders = catalogued(TablerFoldersFilled, TablerFolders, 'IconFolders')
 export const IconGitBranch = catalogued(TablerGitBranch, TablerGitBranch, 'IconGitBranch')
+export const IconGitCompare = catalogued(TablerGitCompare, TablerGitCompare, 'IconGitCompare')
 export const IconHome = catalogued(TablerHomeFilled, TablerHome, 'IconHome')
 export const IconInfoCircle = catalogued(TablerInfoCircleFilled, TablerInfoCircle, 'IconInfoCircle')
 export const IconLayoutSidebar = catalogued(
@@ -215,6 +222,7 @@ export const IconListDetails = catalogued(
   TablerListDetails,
   'IconListDetails',
 )
+export const IconLock = catalogued(TablerLockFilled, TablerLock, 'IconLock')
 export const IconMessage = catalogued(TablerMessageFilled, TablerMessage, 'IconMessage')
 export const IconMessages = catalogued(TablerMessagesFilled, TablerMessages, 'IconMessages')
 export const IconMoon = catalogued(TablerMoonFilled, TablerMoon, 'IconMoon')
