@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Deferred, Effect, Layer } from 'effect'
 import type { Scope } from 'effect'
 
+import { type ToolName } from '@hemera/core'
+
 import {
   StderrSink,
   hostProcessesLayer,
@@ -101,7 +103,30 @@ type Engine =
   | SqliteClient
 
 /** The engine with its tools served, over one database in the suite's folder. */
-function engine(permissions: ToolPermissionsService = noQuestions, written: string[] = []) {
+/**
+ * The access of this engine, with every grant offering only `offered`: what a mission that lends
+ * fewer tools than `free` will look like to the server.
+ */
+const offering = (offered: readonly ToolName[]) =>
+  Layer.effect(
+    ToolAccess,
+    Effect.gen(function* () {
+      const real = yield* ToolAccess
+      const narrowed = <G extends { readonly offered: readonly ToolName[] }>(grant: G | null) =>
+        grant === null ? null : { ...grant, offered }
+      return {
+        ...real,
+        byToken: (token: string | null) => real.byToken(token).pipe(Effect.map(narrowed)),
+        byId: (id: string) => real.byId(id).pipe(Effect.map(narrowed)),
+      }
+    }),
+  ).pipe(Layer.provideMerge(toolAccessLayer))
+
+function engine(
+  permissions: ToolPermissionsService = noQuestions,
+  written: string[] = [],
+  offered: readonly ToolName[] | null = null,
+) {
   const sink = Layer.succeed(StderrSink, {
     write: (line: string) =>
       Effect.sync(() => {
@@ -113,7 +138,7 @@ function engine(permissions: ToolPermissionsService = noQuestions, written: stri
   )
   const services: Layer.Layer<Engine> = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
-    Layer.provideMerge(toolAccessLayer),
+    Layer.provideMerge(offered === null ? toolAccessLayer : offering(offered)),
     Layer.provideMerge(Layer.succeed(ToolPermissions, permissions)),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(
@@ -371,6 +396,44 @@ describe('An agent that stops waiting for a call', () => {
     const decision = seen.find((entry) => entry.kind === 'permission_decision')
     expect(decision?.body).toContain('Withdrawn')
     expect(seen.find((entry) => entry.kind === 'hemera_tool_call')?.state).toBe('failed')
+  })
+})
+
+describe('The server lists only the tools the Session was offered', () => {
+  it('shows what was offered, and a call to another tool is refused and recorded', async () => {
+    const seen = await engine(
+      noQuestions,
+      [],
+      ['fs_read'],
+    )(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const sessions = yield* Sessions
+        const held = yield* aSessionWithAToken
+        const token = held.granted.token
+        const list = yield* Effect.promise(async () => {
+          const response = await fetch(`${server.origin}/mcp`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+          })
+          return await response.text()
+        })
+        yield* toolCall(server, token, 2, 'fs_write', { path: 'x.md', content: 'no', key: 'k' })
+        const page = yield* sessions.read(held.session.id)
+        return { list, entries: page.entries }
+      }),
+    )
+
+    expect(seen.list).toContain('"fs_read"')
+    expect(seen.list).not.toContain('"fs_write"')
+    const call = seen.entries.find((entry) => entry.kind === 'hemera_tool_call')
+    expect(call?.state).toBe('refused')
+    expect(call?.body).toBe('the tool fs_write is not offered to this Session')
   })
 })
 

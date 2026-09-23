@@ -27,7 +27,7 @@ import {
 } from './arguments.ts'
 import { type AccessGrant, type GrantedAccess, ToolAccess } from './access.ts'
 import { ToolCatalogue, type ToolCall } from './catalogue.ts'
-import { TOOL_NAMES } from '@hemera/core'
+import { TOOL_NAMES, admitTool } from '@hemera/core'
 import {
   McpServer,
   type RequestMeta,
@@ -137,10 +137,13 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
        * and the answer of a call still waiting — on the human, on a command — would go to the
        * transport of the call that came after it. Building one is registering eleven tools, which
        * is nothing next to the call itself.
+       *
+       * Only the tools the Session was offered are registered (D6-01, D6-03): what an agent lists
+       * is what it may ask for, and the day a mission offers fewer, the rest are not shown to it.
        */
       const serverFor = (grant: AccessGrant): McpServer => {
         const server = new McpServer({ name: 'hemera', version: '1.0.0' })
-        for (const tool of TOOL_NAMES) {
+        for (const tool of grant.offered) {
           server.registerTool(
             tool,
             { description: TOOL_DESCRIPTIONS[tool], inputSchema: TOOL_ARGUMENTS[tool] },
@@ -410,8 +413,12 @@ async function refusalOf(
     caller: grant.id,
     callId: meta?.['claudecode/toolUseId'] ?? null,
   }
+  // A tool this Session was not offered is not registered for it: the server answers it as a name
+  // it does not know, and the guard says which of the two it is.
+  const decision = admitTool(grant.offered, name)
+  if (!decision.admitted) return { asked, reason: decision.reason }
   const tool = TOOL_NAMES.find((one) => one === name)
-  if (tool === undefined) return { asked, reason: `Hemera has no tool named ${asked.tool}` }
+  if (tool === undefined) return null
   const read = TOOL_ARGUMENTS[tool].safeParse(sent)
   if (read.success) return null
   const why = read.error.issues
