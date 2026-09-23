@@ -266,7 +266,12 @@ export function nowOf(snapshot: SpecSnapshot): string {
   }
   const phase = PHASE_WORDS[focus]
   if (phaseState(snapshot, focus) === 'stale') {
-    return number > 1
+    // Right after a Rework every phase that can run is stale; one stale among others finished is
+    // a new shaping's doing, whatever the revision.
+    const reworked = snapshot.phases.every(
+      (one) => one.state === 'stale' || one.state === 'unavailable',
+    )
+    return reworked
       ? 'Rework · the agent re-declares each phase'
       : `${phase} · stale after a new shaping, the agent re-declares it`
   }

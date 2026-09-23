@@ -192,8 +192,15 @@ describe('The panel says what is happening in one sentence', () => {
     expect(nowOf({ ...reworked, revision: { ...reworked.revision, number: 2 } })).toBe(
       'Rework · the agent re-declares each phase',
     )
-    // In the first revision, a stale phase is a new shaping's doing and not a Rework's.
+    // A stale phase among finished ones is a new shaping's doing, not a Rework's.
     expect(nowOf(snapshot({ phases: phases('finished', 'stale', 'pending') }))).toBe(
+      'Plan · stale after a new shaping, the agent re-declares it',
+    )
+  })
+
+  test('on revision 2, once shape is declared again, a stale plan is a new shaping', () => {
+    const redeclared = snapshot({ phases: phases('finished', 'stale', 'stale') })
+    expect(nowOf({ ...redeclared, revision: { ...redeclared.revision, number: 2 } })).toBe(
       'Plan · stale after a new shaping, the agent re-declares it',
     )
   })
