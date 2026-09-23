@@ -50,6 +50,7 @@ import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
 import { Projects, type UnknownProjectError } from './projects.ts'
 import { Sessions, type UnknownSessionError } from './sessions.ts'
+import { Specs, type SpecRefusal } from './specs/specs.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
@@ -157,6 +158,7 @@ export function answer(
   | Agents
   | Commands
   | Context
+  | Specs
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -325,6 +327,49 @@ export function answer(
     // What a Session was provided, may consult, and keeps to its agent (D6-10).
     if (decision.name === 'context.read') return yield* contextOf(decision.argument.sessionId)
 
+    // The Spec use cases (D7-03). The renderer is the human actor: whatever it writes carries
+    // human provenance and the Session whose panel it came from (D7-04, D7-11).
+    const specs = yield* Specs
+    if (decision.name === 'specs.list') return yield* specs.list(decision.argument.projectId)
+    if (decision.name === 'specs.read') {
+      return yield* specs.read(decision.argument.specId, decision.argument.revision)
+    }
+    if (decision.name === 'specs.gate') return yield* specs.gate(decision.argument.specId)
+    if (decision.name === 'specs.revisions') return yield* specs.revisions(decision.argument.specId)
+    if (decision.name === 'specs.create') return yield* specs.create(decision.argument)
+    if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
+    if (decision.name === 'specs.writeSection') {
+      const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
+      return yield* specs.writeSection(human, decision.argument)
+    }
+    if (decision.name === 'specs.writeStories') {
+      const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
+      return yield* specs.writeStories(human, decision.argument)
+    }
+    if (decision.name === 'specs.writeTasks') {
+      const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
+      return yield* specs.writeTasks(human, decision.argument)
+    }
+    if (decision.name === 'specs.raiseQuestion') {
+      const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
+      return yield* specs.raiseQuestion(human, decision.argument)
+    }
+    if (decision.name === 'specs.answerQuestion') {
+      return yield* specs.answerQuestion(decision.argument)
+    }
+    if (decision.name === 'specs.markReady') return yield* specs.markReady(decision.argument)
+    if (decision.name === 'specs.reopen') return yield* specs.reopen(decision.argument)
+    if (decision.name === 'specs.transferWrite') {
+      return yield* specs.transferWrite(decision.argument)
+    }
+    if (decision.name === 'specs.buffers.read') {
+      return yield* specs.buffers.read(decision.argument.specId)
+    }
+    if (decision.name === 'specs.buffers.save') return yield* specs.buffers.save(decision.argument)
+    if (decision.name === 'specs.buffers.discard') {
+      return yield* specs.buffers.discard(decision.argument)
+    }
+
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
   })
@@ -338,6 +383,7 @@ export function answer(
  * something that happens by writing a service.
  */
 export type Refusal =
+  | SpecRefusal
   | AgentRuntimeError
   | AgentUpdateRefusedError
   | DatabaseError

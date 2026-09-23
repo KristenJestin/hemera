@@ -258,8 +258,8 @@ function written(candidate: string) {
   })
 }
 
-/** A row of `sessions`, as the domain's own Session. */
-function sessionOf(row: typeof sessions.$inferSelect): Session {
+/** A row of `sessions`, as the domain's own Session; the Specs read one they change (D7-07). */
+export function sessionOf(row: typeof sessions.$inferSelect): Session {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -285,8 +285,8 @@ function sessionOf(row: typeof sessions.$inferSelect): Session {
   }
 }
 
-/** A row of `session_entries`, as the domain's own entry. */
-function entryOf(row: typeof sessionEntries.$inferSelect): SessionEntry {
+/** A row of `session_entries`, as the domain's own entry; the Specs write some (D7-01). */
+export function entryOf(row: typeof sessionEntries.$inferSelect): SessionEntry {
   return {
     id: row.id,
     sessionId: row.sessionId,

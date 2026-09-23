@@ -45,6 +45,9 @@ import type { Projects } from './projects.ts'
 import { type EngineAnswer, type EngineRequest, answer, decideRequest } from './request.ts'
 import { sessionsLayer } from './sessions.ts'
 import type { Sessions } from './sessions.ts'
+import { SpecNotices } from './specs/notices.ts'
+import { specsLayer } from './specs/specs.ts'
+import type { Specs } from './specs/specs.ts'
 import { engineStatusLayer } from './status.ts'
 import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
@@ -109,6 +112,33 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
 }
 
 /**
+ * The window, as the Specs' notices: a Spec changed, whoever wrote it, and every panel open on it
+ * reads it again (D7-11). Its own shape, never a top-level `id`, which is what tells an answer
+ * from an event. A question asked or answered in a thread is pushed as any entry is.
+ */
+function specNoticesTo(
+  port: MessagePortMain,
+  log: (line: string) => void,
+): Layer.Layer<SpecNotices> {
+  return Layer.succeed(SpecNotices, {
+    changed: (specId, projectId) => {
+      try {
+        port.postMessage({ event: 'spec.changed', specId, projectId })
+      } catch (died) {
+        log(`pushing spec.changed failed: ${named(died)}`)
+      }
+    },
+    wrote: (sessionId, entry) => {
+      try {
+        port.postMessage({ event: 'entry', sessionId, entry })
+      } catch (died) {
+        log(`pushing an entry failed: ${named(died)}`)
+      }
+    },
+  })
+}
+
+/**
  * Everything this process is, built once.
  *
  * The database layer is underneath the two services, so both stand on the same open file, and
@@ -123,6 +153,7 @@ type EngineServices =
   | Projects
   | Journal
   | Sessions
+  | Specs
   | AgentRuntime
   | Discovery
   | Agents
@@ -189,6 +220,7 @@ function servicesOf(
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),
     journalLayer,
     rows,
+    specsLayer.pipe(Layer.provide(specNoticesTo(port, log))),
     listed,
     runtimeLayer.pipe(
       // Discovery is handed up rather than hidden: the settings page asks this process what the

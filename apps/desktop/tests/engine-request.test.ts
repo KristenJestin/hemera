@@ -30,6 +30,8 @@ import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
 import { type Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
 import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { NoSpecNotices } from '#engine/specs/notices.ts'
+import { type Specs, specsLayer } from '#engine/specs/specs.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import type { Database } from '#engine/storage/database.ts'
@@ -67,6 +69,7 @@ function running<A, E>(
     | Projects
     | Journal
     | Sessions
+    | Specs
     | SqliteClient
     | AgentRuntime
     | Discovery
@@ -120,6 +123,7 @@ function running<A, E>(
     | Projects
     | Journal
     | Sessions
+    | Specs
     | AgentRuntime
     | Discovery
     | Agents
@@ -132,6 +136,7 @@ function running<A, E>(
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
     journalLayer,
     rows,
+    specsLayer.pipe(Layer.provide(NoSpecNotices)),
     listed,
     runtimeLayer.pipe(
       Layer.provideMerge(discoveryLayer),

@@ -7,9 +7,8 @@
  *
  * What an event is correlated to is a column, never something to be dug out of its payload: a
  * journal read by project finds its rows through an index, without opening a single JSON
- * document. The correlations of the Session, the Spec, the revision and the phase are declared
- * with the rest and left empty by this lot, because a column that exists costs nothing and a
- * column added later costs a migration.
+ * document. The correlations of the Session, the Spec, the revision and the phase are filled by
+ * the steps of a Spec, and a Spec's Journal is read by `spec_id` (design D7-13).
  */
 
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm'
@@ -54,6 +53,10 @@ export interface NewEvent {
   projectId?: string | null
   /** The Session the event is about, for what happens inside one (design D4b-04). */
   sessionId?: string | null
+  /** The Spec, its revision and the phase a step of a Spec is correlated to (design D7-13). */
+  specId?: string | null
+  revisionId?: string | null
+  phaseId?: string | null
   payload?: EventPayload
 }
 
@@ -87,6 +90,9 @@ export function record(
         seenAt: event.author === 'human' ? occurredAt : null,
         projectId: event.projectId ?? null,
         sessionId: event.sessionId ?? null,
+        specId: event.specId ?? null,
+        revisionId: event.revisionId ?? null,
+        phaseId: event.phaseId ?? null,
         payload: JSON.stringify(event.payload ?? {}),
       })),
     )
@@ -109,6 +115,11 @@ export interface JournalEntry {
   payload: EventPayload
   /** When the user was shown it, and null for as long as they were not. */
   seenAt: string | null
+  /** The correlations a Spec's Journal is projected by (design D7-13). */
+  sessionId: string | null
+  specId: string | null
+  revisionId: string | null
+  phaseId: string | null
 }
 
 /** What a page of the Journal is asked for. */
@@ -120,6 +131,8 @@ export interface JournalQuery {
   limit?: number | undefined
   kinds?: readonly EntityKind[] | undefined
   authors?: readonly EventAuthor[] | undefined
+  /** One Spec's steps only: its Journal tab (design D7-13). */
+  specId?: string | undefined
 }
 
 /** A page, and where the next one starts. */
@@ -174,6 +187,10 @@ function entryOf(row: typeof domainEvents.$inferSelect): JournalEntry {
     projectId: row.projectId,
     payload: parsed(row.payload),
     seenAt: row.seenAt,
+    sessionId: row.sessionId,
+    specId: row.specId,
+    revisionId: row.revisionId,
+    phaseId: row.phaseId,
   }
 }
 
@@ -249,6 +266,7 @@ export const journalLayer = Layer.effect(
                 query.authors === undefined
                   ? undefined
                   : inArray(domainEvents.author, [...query.authors]),
+                query.specId === undefined ? undefined : eq(domainEvents.specId, query.specId),
               ),
             )
             .orderBy(desc(domainEvents.sequence))
