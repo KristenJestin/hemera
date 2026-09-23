@@ -168,9 +168,13 @@ describe('A read inside the Workspace goes through on its own', () => {
     // the thread draws the call as Hemera's, beside the agent's own answer.
     await awaits(READ_ANSWER)
     expect(await shows('fs_read')).toBe(true)
-    // The call wears Hemera's mark, which is found by the name it is announced by.
-    const marked = await browser.execute(
-      () => document.querySelector('[role="img"][aria-label="Hemera"]') !== null,
+    // The call wears the mark of a read and is announced as Hemera's, which is how it is found.
+    const marked = await browser.execute(() =>
+      [...document.querySelectorAll('button')].some(
+        (button) =>
+          button.querySelector('[data-mark="read"]') !== null &&
+          (button.textContent ?? '').startsWith('Hemerafs_read'),
+      ),
     )
     expect(marked).toBe(true)
     expect(await shows('Allow once')).toBe(false)
