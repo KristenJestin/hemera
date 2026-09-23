@@ -147,14 +147,15 @@ function running<A, E>(
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
 
   return Effect.runPromise(
-    Effect.scoped(
-      Effect.provide(
+    // The program's scope closes before the services': what it holds ends first.
+    Effect.provide(
+      Effect.scoped(
         Effect.gen(function* () {
           yield* openProfile(dataFolder, SHIPPED, '0.3.0')
           return yield* program
         }),
-        services,
       ),
+      services,
     ),
   )
 }

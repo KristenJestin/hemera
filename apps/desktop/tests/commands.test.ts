@@ -90,14 +90,15 @@ function engine() {
   )
   return <A, E>(program: Effect.Effect<A, E, Engine | Scope.Scope>): Promise<A> =>
     Effect.runPromise(
-      Effect.scoped(
-        Effect.provide(
+      // The program's scope closes before the services': the runs it holds end first.
+      Effect.provide(
+        Effect.scoped(
           Effect.gen(function* () {
             yield* openProfile(folder, SHIPPED, VERSION)
             return yield* program
           }),
-          services,
         ),
+        services,
       ),
     )
 }

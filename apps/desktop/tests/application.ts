@@ -187,15 +187,17 @@ export function application(
       >,
     ) =>
       Effect.runPromise(
-        Effect.scoped(
-          Effect.provide(
+        // The program's scope closes inside the services': what it holds — the agents, the fibers
+        // draining them, their death watchers — ends before the database closes, never after.
+        Effect.provide(
+          Effect.scoped(
             Effect.gen(function* () {
               mkdirSync(dataFolder, { recursive: true })
               yield* openProfile(dataFolder, SHIPPED, VERSION)
               return yield* program
             }),
-            services,
           ),
+          services,
         ),
       )
   }
@@ -416,15 +418,17 @@ export function toolApplication(
     )
     return <A, E>(program: Effect.Effect<A, E, ToolEngine | Scope.Scope>) =>
       Effect.runPromise(
-        Effect.scoped(
-          Effect.provide(
+        // The program's scope closes inside the services': what it holds — the agents, the fibers
+        // draining them, their death watchers — ends before the database closes, never after.
+        Effect.provide(
+          Effect.scoped(
             Effect.gen(function* () {
               mkdirSync(dataFolder, { recursive: true })
               yield* openProfile(dataFolder, SHIPPED, VERSION)
               return yield* program
             }),
-            services,
           ),
+          services,
         ),
       )
   }

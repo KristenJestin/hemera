@@ -1251,3 +1251,30 @@ describe('A delivery outside a turn is its own turn', () => {
     ).toHaveLength(1)
   })
 })
+
+describe('A Session torn down with the application writes into an open database', () => {
+  test('what the program scope does as it closes still meets the database', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
+    let closing: string | null = null
+
+    await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'start')
+        // The agent, its drain and its death watcher live in this scope: whatever they write as it
+        // closes has to find the database still open, which is the order the engine runs in.
+        yield* Effect.addFinalizer(() =>
+          threadOf(session.id).pipe(
+            Effect.exit,
+            Effect.map((exit) => {
+              closing = exit._tag
+            }),
+          ),
+        )
+      }),
+    )
+
+    expect(closing).toBe('Success')
+  })
+})
