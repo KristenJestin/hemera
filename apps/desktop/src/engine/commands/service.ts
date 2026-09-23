@@ -47,6 +47,7 @@ import {
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
+import { request as httpsRequest } from 'node:https'
 import { z } from 'zod'
 
 import { HeldWords } from '../agents/held.ts'
@@ -106,25 +107,37 @@ export const ReadinessSettings = Context.Reference<{
 })
 
 /**
- * Where a published address is requested: as printed, except a `*.localhost` name over HTTPS,
- * requested over HTTP. Such a name is what Portless prints, and its proxy serves HTTPS with a
- * certificate of its own authority, which a request of the engine would refuse — the proxy
- * answering at all is what readiness asks (D8-09, D8-10).
- */
-const probedAddress = (url: string) => url.replace(/^https:\/\/(?=[^/:]+\.localhost\b)/, 'http://')
-
-/**
  * Whether an address answers, whatever its status (D8-09): a refused connection, a name that does
  * not resolve and a request that outlasts `PROBE_TIMEOUT_MS` are no answer. A redirect is an
  * answer, not followed.
+ *
+ * The address is requested as printed. An `https` one — what Portless prints, its proxy serving
+ * a certificate of its own authority (D8-10) — is requested without checking that certificate:
+ * the question is whether this machine's own server answers, not whether it is to be trusted.
  */
-const answers = (address: string) =>
+export const addressAnswers = (address: string) =>
   Effect.tryPromise(async () => {
-    const response = await fetch(address, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    if (!address.startsWith('https:')) {
+      const response = await fetch(address, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      })
+      await response.body?.cancel()
+      return
+    }
+    await new Promise<void>((resolve, reject) => {
+      const asked = httpsRequest(
+        address,
+        { method: 'GET', rejectUnauthorized: false, timeout: PROBE_TIMEOUT_MS },
+        (response) => {
+          response.resume()
+          resolve()
+        },
+      )
+      asked.on('timeout', () => asked.destroy(new Error('no answer in time')))
+      asked.on('error', reject)
+      asked.end()
     })
-    await response.body?.cancel()
   }).pipe(
     Effect.as(true),
     Effect.orElseSucceed(() => false),
@@ -799,10 +812,9 @@ export const commandsLayer = Layer.effect(
           record.portConflict = conflict
           yield* writeRow(id, record, null)
         }
-        const address = probedAddress(url)
         const deadline = Date.now() + readiness.forMs
         while (record.state === 'running') {
-          const answered = yield* answers(address)
+          const answered = yield* addressAnswers(url)
           if (record.state !== 'running') return
           if (answered) {
             record.readyAt = new Date().toISOString()

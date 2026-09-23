@@ -12,13 +12,19 @@
  */
 
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { createServer as createHttpServer } from 'node:http'
 import { type AddressInfo, createServer } from 'node:net'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
 import { hostLookup } from '#engine/commands/line.ts'
-import { Commands, ProgramLookup, ReadinessSettings } from '#engine/commands/service.ts'
+import {
+  Commands,
+  ProgramLookup,
+  ReadinessSettings,
+  addressAnswers,
+} from '#engine/commands/service.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { Database } from '#engine/storage/database.ts'
 import { workspaces } from '#engine/storage/schema.ts'
@@ -254,6 +260,31 @@ describe('A URL is ready only after it answers', () => {
     expect(seen.state).toBe('running')
     expect(seen.readiness).toBe('unanswered')
     expect(seen.readyAt).toBeNull()
+  })
+})
+
+describe('An address is probed as printed', () => {
+  it('any status of an http address is an answer, and a closed port is none, over https too', async () => {
+    const server = createHttpServer((_request, response) => {
+      response.statusCode = 500
+      response.end('failing, but there')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    // SAFETY: a server listening on a TCP port answers its address as an object, never a pipe name.
+    const { port } = server.address() as AddressInfo
+    const closed = await freePort()
+    try {
+      const seen = await Effect.runPromise(
+        Effect.all({
+          answering: addressAnswers(`http://127.0.0.1:${String(port)}`),
+          refused: addressAnswers(`http://127.0.0.1:${String(closed)}`),
+          refusedOverHttps: addressAnswers(`https://127.0.0.1:${String(closed)}`),
+        }),
+      )
+      expect(seen).toEqual({ answering: true, refused: false, refusedOverHttps: false })
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 })
 
