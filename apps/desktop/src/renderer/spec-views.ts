@@ -107,12 +107,12 @@ export function dayOf(at: number): string {
 }
 
 /** Whether the revision shown is the Spec's current one. */
-export function isCurrent(snapshot: SpecSnapshot): boolean {
+function isCurrent(snapshot: SpecSnapshot): boolean {
   return snapshot.revision.id === snapshot.spec.currentRevisionId
 }
 
 /** Whether it may be edited: the current revision of a draft Spec (D7-04). */
-export function isEditable(snapshot: SpecSnapshot): boolean {
+function isEditable(snapshot: SpecSnapshot): boolean {
   return isCurrent(snapshot) && snapshot.spec.status === 'draft'
 }
 
@@ -177,7 +177,7 @@ export function sectionsOf(snapshot: SpecSnapshot, buffers: readonly EditBuffer[
   })
 }
 
-export function storiesOf(snapshot: SpecSnapshot): StoryView[] {
+function storiesOf(snapshot: SpecSnapshot): StoryView[] {
   const keys = storyKeys(snapshot)
   return snapshot.stories.map((story) => ({
     key: keys.get(story.id) ?? '',
@@ -208,7 +208,7 @@ export function tasksOf(snapshot: SpecSnapshot): TaskView[] {
 }
 
 /** An answer as the design system reads it: one of the options, or a text. */
-export function answerOf(answer: WireAnswer | null): SpecAnswer | null {
+function answerOf(answer: WireAnswer | null): SpecAnswer | null {
   if (answer === null) return null
   return { optionId: answer.optionId ?? undefined, text: answer.text ?? undefined }
 }
@@ -217,7 +217,7 @@ export function answerOf(answer: WireAnswer | null): SpecAnswer | null {
  * A question of the register. A question the engine ties to no phase is drawn under `shape`,
  * the phase that frames the need: the design system has no word for none.
  */
-export function questionOf(question: SpecQuestion): SpecQuestionView {
+function questionOf(question: SpecQuestion): SpecQuestionView {
   return {
     id: question.id,
     body: question.body,
@@ -229,7 +229,7 @@ export function questionOf(question: SpecQuestion): SpecQuestionView {
 }
 
 /** The state of each phase, in protocol order, which the group headings wear. */
-export function phasesOf(snapshot: SpecSnapshot): PhaseView[] {
+function phasesOf(snapshot: SpecSnapshot): PhaseView[] {
   return PHASES.map((name) => ({ name, state: phaseState(snapshot, name) }))
 }
 
