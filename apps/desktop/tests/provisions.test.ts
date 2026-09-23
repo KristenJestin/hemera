@@ -26,6 +26,7 @@ import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { Context as AgentContext } from '#engine/context/service.ts'
 import { ToolAccess } from '#engine/tools/access.ts'
 import { application, aSession, aSessionOn, threadOf } from './application.ts'
+import { withQualifiedOpenCode } from './unqualified.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -60,6 +61,8 @@ const SYSTEM_PROMPT = z.object({
 })
 
 describe('The base is provided once, by the agent’s means', () => {
+  withQualifiedOpenCode()
+
   test('on Claude Code, through the system prompt, and never in a prompt', async () => {
     const agent = answering()
 

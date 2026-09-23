@@ -20,12 +20,12 @@ import { AGENT_PROVIDERS, type AgentAdapter } from '#engine/agents/adapter.ts'
 import { type BareOptions, bareModeOf, bareOptionsOf } from '#engine/agents/bare.ts'
 import { claude } from '#engine/agents/adapters/claude.ts'
 import { codex } from '#engine/agents/adapters/codex.ts'
-import { opencode } from '#engine/agents/adapters/opencode.ts'
+import { NOT_RUN_ON_LINUX, opencode } from '#engine/agents/adapters/opencode.ts'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { MachineEnvironment } from '#engine/agents/discovery.ts'
 import { AgentRuntime, NoNotices } from '#engine/agents/runtime.ts'
 import { aSessionOn, application } from './application.ts'
-import { RESIDUE, unqualified, withUnqualifiedCodex } from './unqualified.ts'
+import { RESIDUE, unqualified, withQualifiedOpenCode, withUnqualifiedCodex } from './unqualified.ts'
 
 const ADAPTERS = [claude, codex, opencode]
 
@@ -57,10 +57,25 @@ describe("A qualified agent has only Hemera's tools", () => {
     expect(ADAPTERS.map((adapter) => adapter.id)).toEqual([...AGENT_PROVIDERS])
   })
 
-  test('the three agents can be emptied, on both platforms', () => {
+  test('Claude Code and Codex can be emptied on both platforms, OpenCode on Windows', () => {
     for (const platform of PLATFORMS) {
-      for (const adapter of ADAPTERS) expect(bareModeOf(adapter, platform).qualified).toBe(true)
+      for (const adapter of [claude, codex]) {
+        expect(bareModeOf(adapter, platform).qualified).toBe(true)
+      }
     }
+  })
+
+  test('OpenCode is qualified on Windows and not yet on Linux', async () => {
+    expect(bareModeOf(opencode, 'win32').qualified).toBe(true)
+    expect(reasonOf(opencode, 'linux')).toBe(NOT_RUN_ON_LINUX)
+    expect(NOT_RUN_ON_LINUX).toBe(
+      'not run on Linux yet: no signed-in OpenCode on the qualification machine',
+    )
+    // Not qualified is refused like a means that leaves a tool: no Session, the reason shown.
+    const refused = await Effect.runPromise(Effect.flip(bareOptionsOf(opencode, 'linux', input)))
+    expect(refused.label).toBe('OpenCode')
+    expect(refused.reason).toBe(NOT_RUN_ON_LINUX)
+    expect(refused.means).toBe(bareModeOf(opencode, 'linux').means)
   })
 
   test('Claude Code is handed no built-in tool and no settings source', async () => {
@@ -101,7 +116,7 @@ describe("A qualified agent has only Hemera's tools", () => {
   })
 
   test('OpenCode is handed a catch-all deny, with its own namespace re-allowed', async () => {
-    const options = await Effect.runPromise(bareOptionsOf(opencode, 'linux', input))
+    const options = await Effect.runPromise(bareOptionsOf(opencode, 'win32', input))
 
     expect(options.meta).toBeUndefined()
     expect(options.env).toEqual({
@@ -119,7 +134,7 @@ describe("A qualified agent has only Hemera's tools", () => {
   })
 
   test('the re-allow is the one that matters: a blanket deny hides Hemera tools too', async () => {
-    const options = await Effect.runPromise(bareOptionsOf(opencode, 'linux', input))
+    const options = await Effect.runPromise(bareOptionsOf(opencode, 'win32', input))
     const config = options.env.OPENCODE_CONFIG_CONTENT ?? ''
 
     expect(config).toContain('"*":"deny"')
@@ -172,6 +187,8 @@ const folders = () => ({
 })
 
 describe("A qualified agent has only Hemera's tools", () => {
+  withQualifiedOpenCode()
+
   test('its means reaches the agent: the process for OpenCode, the session for Claude Code', async () => {
     const places = folders()
     const opencodeAgent = fakeAgent()
@@ -415,6 +432,8 @@ describe("A bare Claude session still finds the user's login", () => {
 })
 
 describe('A bare OpenCode session starts on the model the user uses', () => {
+  withQualifiedOpenCode()
+
   /** OpenCode's own files on a machine, as `own` names them: the configuration, then the state. */
   const ownOn = (home: string, env: Readonly<Record<string, string>>) =>
     opencode.own?.files(home, env) ?? []

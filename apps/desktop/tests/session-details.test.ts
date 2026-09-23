@@ -26,6 +26,7 @@ import {
 } from '#renderer/session-details.ts'
 import { contextOf, listenToTools, readContext, runCommand, runsOf } from '#renderer/tools-store.ts'
 
+import { withQualifiedOpenCode } from './unqualified.ts'
 import { type OpenWindow, install, openWindow } from './window.ts'
 
 /** A run as the engine pushes one. */
@@ -259,6 +260,8 @@ describe('The Context tab says how the instructions reached the agent', () => {
 })
 
 describe('A one-off command shows and is not promoted', () => {
+  withQualifiedOpenCode()
+
   let dataFolder: string
   let workspace: string
   let opened: OpenWindow | null = null

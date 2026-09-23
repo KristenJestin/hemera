@@ -18,6 +18,7 @@ import type { CommandRun } from '@hemera/ipc'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
 
+import { withQualifiedOpenCode } from './unqualified.ts'
 import { type OpenWindow, openWindow } from './window.ts'
 
 let dataFolder: string
@@ -194,6 +195,8 @@ describe('The agent starts the app and the user opens it', () => {
 })
 
 describe('The view lists the sources with their provenance', () => {
+  withQualifiedOpenCode()
+
   test('the base and AGENTS.md with how they reached the agent, the tools and the catalogue', async () => {
     writeFileSync(join(workspace, AGENTS_FILE), '# Atlas\n\nKeep the tests green.\n')
     opened = await openWindow(dataFolder, fakeAgent({ steps: [{ does: 'says', text: 'ok' }] }))

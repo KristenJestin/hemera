@@ -21,6 +21,7 @@ import { agentOf, listenToAgents, say } from '#renderer/agent-store.ts'
 import { contextOf, listenToTools, readContext } from '#renderer/tools-store.ts'
 
 import { gated } from './application.ts'
+import { withQualifiedOpenCode } from './unqualified.ts'
 import { type OpenWindow, install, openWindow } from './window.ts'
 
 let dataFolder: string
@@ -55,6 +56,8 @@ async function until(ready: () => boolean): Promise<boolean> {
 const settled = () => new Promise((resolve) => setTimeout(resolve, 800))
 
 describe('A change during a turn leaves at the next safe point', () => {
+  withQualifiedOpenCode()
+
   test('nothing goes during the turn; after it, a delivery on its own and no message of anyone', async () => {
     writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')
     const gate = gated(1)

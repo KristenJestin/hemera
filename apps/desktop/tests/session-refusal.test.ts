@@ -19,7 +19,7 @@ import { agentSnapshot, loadAgents } from '#renderer/agent-store.ts'
 import { offeredOf } from '#renderer/bare-mode.ts'
 import { sessionsSnapshot, startSession } from '#renderer/sessions-store.ts'
 
-import { withUnqualifiedCodex } from './unqualified.ts'
+import { withQualifiedOpenCode, withUnqualifiedCodex } from './unqualified.ts'
 import { type OpenWindow, install, openWindow } from './window.ts'
 
 let dataFolder: string
@@ -53,8 +53,8 @@ describe('An unqualified combination is refused with its reason', () => {
       expect(offered?.available).toBe(false)
       expect(offered?.hint).toBe('Not available here')
       // A qualified agent is offered as it always was, with nothing under it.
-      const opencode = agentSnapshot().agents.find((one) => one.id === 'opencode')
-      const qualified = opencode === undefined ? null : offeredOf(opencode)
+      const claude = agentSnapshot().agents.find((one) => one.id === 'claude')
+      const qualified = claude === undefined ? null : offeredOf(claude)
       expect(qualified?.available).toBe(true)
       expect(qualified?.hint).toBeUndefined()
     }))
@@ -81,6 +81,8 @@ describe('An unqualified combination is refused with its reason', () => {
 })
 
 describe("A qualified agent has only Hemera's tools", () => {
+  withQualifiedOpenCode()
+
   test('the diagnostic says it started bare and was handed the MCP server, and not the token', async () => {
     opened = await openWindow(dataFolder, fakeAgent({ steps: [{ does: 'says', text: 'ok' }] }))
     const project = await opened.bridge.invoke('projects.create', {

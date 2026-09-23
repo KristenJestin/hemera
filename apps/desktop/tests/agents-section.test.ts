@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { ADAPTERS } from '#engine/agents/discovery.ts'
 import { bareModeOf } from '#engine/agents/bare.ts'
+import { NOT_RUN_ON_LINUX } from '#engine/agents/adapters/opencode.ts'
 import { agentSnapshot, loadAgents } from '#renderer/agent-store.ts'
 import { bareRowOf } from '#renderer/bare-mode.ts'
 
@@ -40,13 +41,38 @@ describe("A qualified agent has only Hemera's tools", () => {
     install(opened.bridge)
     await loadAgents()
 
+    const declared = bareModeOf(ADAPTERS.claude, process.platform)
+    const claude = agentSnapshot().agents.find((one) => one.id === 'claude')
+    expect(claude?.bareMode.qualified).toBe(true)
+    expect(claude?.bareMode.reason).toBeNull()
+    expect(claude?.bareMode.private).toBe(declared.private)
+    const row = claude === undefined ? null : bareRowOf(claude)
+    expect(row).toEqual({ qualified: true, private: declared.private })
+  })
+
+  test('OpenCode is qualified on Windows and not yet on Linux', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    install(opened.bridge)
+    await loadAgents()
+
+    // The section reads the declaration of the platform the engine runs on, so the row this
+    // machine draws is the one of its own platform, and the other one is the declaration's.
     const declared = bareModeOf(ADAPTERS.opencode, process.platform)
     const opencode = agentSnapshot().agents.find((one) => one.id === 'opencode')
-    expect(opencode?.bareMode.qualified).toBe(true)
-    expect(opencode?.bareMode.reason).toBeNull()
-    expect(opencode?.bareMode.private).toBe(declared.private)
     const row = opencode === undefined ? null : bareRowOf(opencode)
-    expect(row).toEqual({ qualified: true, private: declared.private })
+    if (process.platform === 'linux') {
+      expect(row).toEqual({
+        qualified: false,
+        reason: `${NOT_RUN_ON_LINUX} Means tried: ${declared.means}.`,
+      })
+    } else {
+      expect(row).toEqual({ qualified: true, private: declared.private })
+    }
+    expect(bareModeOf(ADAPTERS.opencode, 'win32').qualified).toBe(true)
+    expect(bareModeOf(ADAPTERS.opencode, 'linux')).toMatchObject({
+      qualified: false,
+      reason: NOT_RUN_ON_LINUX,
+    })
   })
 })
 

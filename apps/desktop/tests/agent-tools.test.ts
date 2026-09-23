@@ -58,6 +58,7 @@ import {
   toolApplication,
   until,
 } from './application.ts'
+import { withQualifiedOpenCode } from './unqualified.ts'
 
 let dataFolder: string
 let workspace: string
@@ -1050,6 +1051,8 @@ describe('No human-only action is reachable', () => {
 })
 
 describe("A qualified agent has only Hemera's tools", () => {
+  withQualifiedOpenCode()
+
   test("the session's capabilities are Hemera's tools, and every call of the turn is one", async () => {
     writeFileSync(join(workspace, 'notes.md'), 'the answer is 42\n')
     const agent = fakeAgent({

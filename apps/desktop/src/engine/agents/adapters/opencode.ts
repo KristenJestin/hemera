@@ -22,6 +22,14 @@ import { type AgentAdapter, type Environment, versionIn } from '../adapter.ts'
  */
 
 /**
+ * Why OpenCode is not qualified on Linux (D6-02): nothing in its means depends on the platform,
+ * but the Linux qualification of 23 September 2026 could not run it — the machine had no
+ * signed-in OpenCode. Qualified means "ran bare here", so it stays off until that trial runs.
+ */
+export const NOT_RUN_ON_LINUX =
+  'not run on Linux yet: no signed-in OpenCode on the qualification machine'
+
+/**
  * The agent OpenCode is asked to be: one primary agent of Hemera's own, and nothing else.
  *
  * A catch-all deny is what removes a tool's definition from the request sent to the provider,
@@ -126,7 +134,8 @@ export const opencode: AgentAdapter = {
    * The platform is read because the wildcard matching is not the same on both: on Windows it is
    * case-insensitive, so the re-allow holds whatever case the agent spells the namespace in.
    * What survives the means is `$HOME/.opencode`, managed configuration and a remote
-   * `.well-known/opencode`, which the Context view names.
+   * `.well-known/opencode`, which the Context view names. It is qualified on Windows, and not
+   * on Linux until it has run bare there (`NOT_RUN_ON_LINUX`).
    */
   bareMode: (platform) => ({
     means:
@@ -140,7 +149,9 @@ export const opencode: AgentAdapter = {
     readsAgentsFile: false,
     private:
       '$HOME/.opencode, its managed configuration and a remote .well-known/opencode still load; Hemera does not read them.',
-    qualified: true,
+    ...(platform === 'linux'
+      ? { qualified: false as const, reason: NOT_RUN_ON_LINUX }
+      : { qualified: true as const }),
     options: (input) => ({
       meta: undefined,
       env: {
