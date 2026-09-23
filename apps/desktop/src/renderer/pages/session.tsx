@@ -1,10 +1,11 @@
-import { useState, useSyncExternalStore } from 'react'
-import type { ReactNode } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
+import type { FocusEvent, ReactNode } from 'react'
 
 import type {
   CommandRun,
   ConfigOption,
   ContextView as Provided,
+  SectionName,
   Session,
   SessionEntry,
 } from '@hemera/ipc'
@@ -22,6 +23,7 @@ import {
   SessionEmpty,
   SessionDetails,
   SessionHeader,
+  SpecPanel,
   UsageMeter,
   type MessageLine,
   type MessageState,
@@ -36,7 +38,21 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
-import { answerQuestion, createSpec, specSnapshot, subscribeToSpec } from '../spec-store.ts'
+import { questionAnchor } from '../spec-entries.ts'
+import {
+  answerQuestion,
+  createSpec,
+  discardMine,
+  markReady,
+  rework,
+  saveSection,
+  saveStories,
+  selectRevision,
+  specSnapshot,
+  subscribeToSpec,
+  takeOver,
+} from '../spec-store.ts'
+import { readerOf, specViewOf, storiesWith } from '../spec-views.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -99,10 +115,27 @@ function countOf(entries: number): string {
   return entries === 1 ? '1 message' : `${String(entries)} messages`
 }
 
-/** The line under a Session's title: when it was made, what runs it, and how much is in it. */
-function metaOf(session: Session, entries: number, now: number): string {
+/**
+ * The line under a Session's title: when it was made, what runs it, and how much is in it — or,
+ * for a `define` Session, its mission, its agent and model, and the key of the Spec it defines
+ * (core.md, "Session view": `DEFINE · Claude Sonnet`).
+ */
+function metaOf(session: Session, entries: number, now: number, specKey: string | null): string {
   const agent = session.provider === null ? 'no agent' : session.provider
+  if (session.mission === 'define') {
+    return ['DEFINE', agent, session.model, specKey].filter((one) => one !== null).join(' · ')
+  }
   return `created ${whenOf(session.createdAt, now)} · ${agent} · ${countOf(entries)}`
+}
+
+/**
+ * Takes the thread to where a question of the Spec is asked, and the keyboard to its first
+ * answer: the register of the panel links there, and the answer is given in the thread.
+ */
+function goToQuestion(id: string): void {
+  const block = document.getElementById(questionAnchor(id))
+  block?.scrollIntoView({ block: 'center' })
+  block?.querySelector('button')?.focus()
 }
 
 /** What the last act of a thread was refused with, when the engine refused it. */
@@ -121,6 +154,8 @@ export interface SessionPageProps {
   refusal: string | null
   /** What the engine has pushed for this Session since it was opened. */
   agent: AgentSessionState
+  /** The Sessions of the Project, which name the Session that writes a Spec this one reads. */
+  sessions: readonly Session[]
   /**
    * The agent this Session runs, as the menu lists it: one, and never another.
    *
@@ -178,6 +213,7 @@ export function SessionPage({
   editing,
   refusal,
   agent,
+  sessions,
   agents,
   options,
   onWrite,
@@ -209,8 +245,36 @@ export function SessionPage({
   const [detailsOpen, setDetailsOpen] = useState(false)
   /** The proposals `Not now` was pressed on: this window's answer, which nothing keeps. */
   const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set())
+  /**
+   * The version each section was at when its text took the caret (D7-12).
+   *
+   * The panel saves a section with its text alone, when the caret leaves it; what the save is
+   * checked against is the version the edit started on, never the one on screen by then — an
+   * agent may have written the section meanwhile, and a save on the newer version would be
+   * last-writer-wins. The document marks each part with `data-part`, which says whose text the
+   * caret went into.
+   */
+  const opened = useRef(new Map<SectionName, number>())
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
+  const spec =
+    defined === null || stored.gate === null
+      ? null
+      : specViewOf({
+          snapshot: defined,
+          gate: stored.gate,
+          revisions: stored.revisions,
+          buffers: stored.buffers,
+          journal: stored.journal,
+        })
+  const versionOf = (name: SectionName): number =>
+    spec?.sections.find((one) => one.name === name)?.version ?? 0
+  const noteOpened = (event: FocusEvent<HTMLElement>): void => {
+    if (!(event.target instanceof HTMLTextAreaElement)) return
+    const part = event.target.closest('[data-part]')?.getAttribute('data-part')
+    const section = spec?.sections.find((one) => one.name === part)
+    if (section !== undefined) opened.current.set(section.name, section.version)
+  }
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -288,7 +352,7 @@ export function SessionPage({
       spec: {
         thread,
         specId: session.specId,
-        specKey: defined?.spec.key,
+        specKey: spec?.key,
         declined,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
@@ -396,9 +460,9 @@ export function SessionPage({
   return (
     /*
       One column (review of #40, defect 2): the header, the thread and the composer share one
-      width and one left edge, and nothing stands beside them — the Session details are a dialog
-      the reader opens from the head (second review of #18). The screen runs under the frame all
-      the same, and the page's own scroll is the thread's.
+      width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
+      the Session details are a dialog the reader opens from the head (second review of #18). The
+      screen runs under the frame all the same, and the page's own scroll is the thread's.
     */
     <div className="flex h-full min-h-0">
       <div className="flex min-h-0 flex-1 flex-col">
@@ -406,7 +470,7 @@ export function SessionPage({
           <SessionHeader
             title={session.title}
             projectName={projectName}
-            meta={metaOf(session, thread.length, now)}
+            meta={metaOf(session, thread.length, now, spec?.key ?? null)}
             onRename={onRename}
             editing={editing}
             onStartEditing={onStartEditing}
@@ -473,9 +537,9 @@ export function SessionPage({
             in. It stands in the same stack as the meter rather than over the thread, so what it
             moves is itself and nothing above it (D4b-02).
           */}
-          {refusal !== null && (
+          {(refusal ?? stored.refusal) !== null && (
             <p role="alert" className="text-sm text-muted-foreground">
-              {refusal}
+              {refusal ?? stored.refusal}
             </p>
           )}
           <Composer
@@ -569,6 +633,41 @@ export function SessionPage({
         // is read when the dialog opens, so an open dialog never changes tab under the reader.
         defaultTab={openingTabOf(commandRuns, tabs)}
       />
+      {/*
+        A `define` Session has its Spec beside the chat, the working surface the thread gave up
+        width for, where the side column stood before the Session details took its plan and its
+        files into a dialog. A `free` Session has no panel and nothing that offers one: a Spec
+        begins with the agent's proposal in the thread (D7-07).
+      */}
+      {session.mission === 'define' && spec !== null && defined !== null && (
+        <div
+          className="min-h-0 min-w-0 basis-9/20 border-l border-border"
+          onFocusCapture={noteOpened}
+        >
+          <SpecPanel
+            spec={spec}
+            reader={readerOf(defined, session.id, sessions)}
+            onSaveSection={(name, body) => {
+              const base = opened.current.get(name) ?? versionOf(name)
+              opened.current.delete(name)
+              void saveSection(session.id, name, body, base)
+            }}
+            onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
+            onDiscardMine={(name) => void discardMine(name)}
+            onSaveStory={(story) => void saveStories(session.id, storiesWith(defined, story))}
+            onGoToQuestion={goToQuestion}
+            onMarkReady={() => void markReady()}
+            onRework={(reason) => void rework(reason)}
+            onPickRevision={(revision) => {
+              const current = stored.revisions.find(
+                (one) => one.id === defined.spec.currentRevisionId,
+              )
+              void selectRevision(revision === current?.number ? null : revision)
+            }}
+            onTakeOver={() => void takeOver(session.id)}
+          />
+        </div>
+      )}
     </div>
   )
 }

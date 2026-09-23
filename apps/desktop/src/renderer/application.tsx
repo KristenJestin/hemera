@@ -1041,6 +1041,7 @@ export function Application() {
           // not wait for a turn, and a refusal nobody draws is a message that just goes unanswered.
           refusal={sessions.refusal ?? agents.refusal}
           agent={agentOf(open.id)}
+          sessions={sessions.sessions}
           agents={runsOn(open, agents.agents)}
           options={optionsOf(open.id)}
           onWrite={async (body) => await writeInto(open.id, body)}
