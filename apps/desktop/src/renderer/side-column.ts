@@ -45,13 +45,15 @@ export function panelRunsOf(runs: readonly CommandRun[], root: string): CommandP
 }
 
 /**
- * Which of the three tabs has something to show (review of #40, defect 3; D6-10, D6-12).
+ * Which of the three tabs has something to show: #40's rule, back after the trial of 23 September
+ * 2026 (D6-10, D6-12).
  *
  * Activity has a plan or a file the turn touched; Commands has a run of this Session or a
- * catalogue to run from; Context has whatever its three lists hold once the engine has said it —
- * a source beyond the base, and in every case the tools the Session is offered and what the agent
- * keeps private (D6-10). A Workspace without `AGENTS.md` still has those to read, and the tab is
- * where they are read: a Session whose context is not known yet has no column for it.
+ * catalogue to run from; Context has a delivery — a change of `AGENTS.md` handed to the agent
+ * between two turns. The base, the file given at the start and the tools are there in every
+ * Session its agent has been asked anything, so they open nothing by themselves: a column drawn
+ * for them was a column drawn for every Session, on an Activity tab with nothing in it. The
+ * Context view is reached from the Session's head instead, and the column opened there stays.
  */
 export interface SideTabs {
   activity: boolean
@@ -68,11 +70,7 @@ export function sideTabsOf(
   return {
     activity: plan > 0 || files > 0,
     commands: runs.length > 0 || (view?.commands.length ?? 0) > 0,
-    context:
-      view !== null &&
-      (view.provided.some((one) => one.kind !== 'base') ||
-        view.tools.length > 0 ||
-        view.private.length > 0),
+    context: view?.provided.some((one) => one.kind === 'instructions') ?? false,
   }
 }
 
@@ -84,13 +82,14 @@ export function hasSideColumn(tabs: SideTabs): boolean {
 /**
  * The tab a Session opens on, which follows what is happening in it (D6-12): a command running
  * opens on its commands, then what the agent has been doing, then whichever tab has something.
+ * A column none of whose tabs has anything is one the reader opened from the head, for its
+ * Context.
  */
 export function openingTabOf(runs: readonly CommandRun[], tabs: SideTabs): SideColumnTab {
   if (runs.some((run) => run.state === 'running')) return 'commands'
   if (tabs.activity) return 'activity'
   if (tabs.commands) return 'commands'
-  if (tabs.context) return 'context'
-  return 'activity'
+  return 'context'
 }
 
 /** How a source reached the agent, in the words the Context view says it with. */

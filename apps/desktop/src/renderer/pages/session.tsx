@@ -210,6 +210,8 @@ export function SessionPage({
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /** What was last handed to the engine, so `Retry` has something to send again. */
   const [attempted, setAttempted] = useState<string | null>(null)
+  /** Whether the reader opened the column from the head, which it stays open for. */
+  const [contextAsked, setContextAsked] = useState(false)
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -371,11 +373,13 @@ export function SessionPage({
   const plan = planOf(thread)
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
-  // Which tabs have something to show, and whether the column is drawn at all (#40's decision:
-  // no empty side column). Once it is drawn, the Commands panel and the Context view go with it
-  // whatever they hold: the panel is also where a one-off line is run from.
+  // Which tabs have something to show, and whether the column is drawn at all (#40's rule: no
+  // empty side column). The reader may open it from the head all the same, for its Context, and
+  // it then stays until the Session is left — the page is keyed on the Session. Once it is drawn,
+  // the Commands panel and the Context view go with it whatever they hold: the panel is also
+  // where a one-off line is run from.
   const tabs = sideTabsOf(plan.length, touched.length, commandRuns, context)
-  const drawn = hasSideColumn(tabs)
+  const drawn = hasSideColumn(tabs) || contextAsked
 
   return (
     /*
@@ -400,6 +404,9 @@ export function SessionPage({
             // than one they are done with, and putting it away is a press they would come to
             // regret: the archive is where threads go.
             archiveDisabled={thread.length === 0}
+            // The way to the Context while no column stands beside the thread, once the engine
+            // has said what it is; the column's own tab is the way once it is drawn.
+            onOpenContext={drawn || context === null ? undefined : () => setContextAsked(true)}
           />
         </div>
         {/*
@@ -522,9 +529,10 @@ export function SessionPage({
       {/*
         The column stands beside the thread and not under it, and it is the width the thread gave
         up for it. A Session none of whose tabs has anything — no plan, no file, no run, no
-        catalogue, nothing provided beyond the base — draws no column at all (review of #40,
-        defect 3): empty tabs take that width and say nothing with it. The box is the page's and the emptiness is the column's — there is no wrapper here, so
-        a column that draws nothing leaves the width where it was.
+        catalogue, no delivery — draws no column at all unless the reader opened it from the head
+        (review of #40, defect 3): empty tabs take that width and say nothing with it. The box is
+        the page's and the emptiness is the column's — there is no wrapper here, so a column that
+        draws nothing leaves the width where it was.
       */}
       <SessionSideColumn
         plan={plan}
@@ -549,7 +557,7 @@ export function SessionPage({
           !drawn || context === null ? undefined : <ContextView {...contextListsOf(context)} />
         }
         // The tab it opens on follows what is happening: a command running opens on Commands,
-        // then the tab that has something. Keyed on it, so a command that starts while the
+        // then the tab that has something, and Context when it was opened from the head. Keyed on it, so a command that starts while the
         // Session is open brings the column to its commands, as opening the Session with one
         // running would have (D6-12).
         key={openingTabOf(commandRuns, tabs)}

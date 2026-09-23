@@ -104,24 +104,34 @@ function aView(
   }
 }
 
-describe('The Context tab is reachable without AGENTS.md', () => {
-  test('the base alone still lists the tools, so the column opens on the Context view', () => {
+describe('No side column until a tab has something', () => {
+  test('no column on a fresh Session whose context is only the base and the tools', () => {
     const tabs = sideTabsOf(0, 0, [], aView(['base']))
 
-    expect(tabs.context).toBe(true)
-    expect(hasSideColumn(tabs)).toBe(true)
-    expect(openingTabOf([], tabs)).toBe('context')
+    expect(tabs).toEqual({ activity: false, commands: false, context: false })
+    expect(hasSideColumn(tabs)).toBe(false)
   })
-})
 
-describe('No side column on a Session that has nothing to show', () => {
+  test('AGENTS.md given at the start or read by the agent opens no column by itself', () => {
+    expect(hasSideColumn(sideTabsOf(0, 0, [], aView(['base', 'provided'])))).toBe(false)
+    expect(hasSideColumn(sideTabsOf(0, 0, [], aView(['base', 'native'])))).toBe(false)
+  })
+
   test('no plan, no file, no run, no catalogue and no context known draw no column', () => {
     const tabs = sideTabsOf(0, 0, [], null)
     expect(tabs).toEqual({ activity: false, commands: false, context: false })
     expect(hasSideColumn(tabs)).toBe(false)
   })
 
-  test('each tab that has something draws it, and the column opens on that tab', () => {
+  test('a delivery opens the Context tab', () => {
+    const tabs = sideTabsOf(0, 0, [], aView(['base', 'provided', 'instructions']))
+
+    expect(tabs).toEqual({ activity: false, commands: false, context: true })
+    expect(hasSideColumn(tabs)).toBe(true)
+    expect(openingTabOf([], tabs)).toBe('context')
+  })
+
+  test('a plan opens the Activity tab, and a catalogue the Commands tab', () => {
     const plan = sideTabsOf(2, 0, [], aView(['base']))
     expect(plan.activity).toBe(true)
     expect(openingTabOf([], plan)).toBe('activity')
@@ -129,11 +139,12 @@ describe('No side column on a Session that has nothing to show', () => {
     const catalogue = sideTabsOf(0, 0, [], aView(['base'], [{ name: 'check', line: 'pnpm check' }]))
     expect(catalogue.commands).toBe(true)
     expect(openingTabOf([], catalogue)).toBe('commands')
+  })
 
-    const instructions = sideTabsOf(0, 0, [], aView(['base', 'native']))
-    expect(instructions.context).toBe(true)
-    expect(openingTabOf([], instructions)).toBe('context')
-    expect(hasSideColumn(instructions)).toBe(true)
+  test('a column opened from the head with nothing in any tab opens on the Context', () => {
+    const tabs = sideTabsOf(0, 0, [], aView(['base', 'provided']))
+
+    expect(openingTabOf([], tabs)).toBe('context')
   })
 })
 
