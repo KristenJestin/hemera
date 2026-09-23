@@ -52,6 +52,8 @@ import {
   IconGitBranch as TablerGitBranch,
   IconHome as TablerHome,
   IconHomeFilled as TablerHomeFilled,
+  IconInfoCircle as TablerInfoCircle,
+  IconInfoCircleFilled as TablerInfoCircleFilled,
   IconLayoutSidebar as TablerLayoutSidebar,
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
   IconMessage as TablerMessage,
@@ -80,6 +82,7 @@ import {
   IconShield as TablerShield,
   IconSun as TablerSun,
   IconSunFilled as TablerSunFilled,
+  IconTerminal as TablerTerminal,
   IconTimelineEvent as TablerTimelineEvent,
   IconTimelineEventFilled as TablerTimelineEventFilled,
   IconTrash as TablerTrash,
@@ -191,6 +194,7 @@ export const IconFolderOpen = catalogued(TablerFolderOpenFilled, TablerFolderOpe
 export const IconFolderPlus = catalogued(TablerFolderPlus, TablerFolderPlus, 'IconFolderPlus')
 export const IconGitBranch = catalogued(TablerGitBranch, TablerGitBranch, 'IconGitBranch')
 export const IconHome = catalogued(TablerHomeFilled, TablerHome, 'IconHome')
+export const IconInfoCircle = catalogued(TablerInfoCircleFilled, TablerInfoCircle, 'IconInfoCircle')
 export const IconLayoutSidebar = catalogued(
   TablerLayoutSidebarFilled,
   TablerLayoutSidebar,
@@ -225,6 +229,9 @@ export const IconSearch = catalogued(TablerSearchFilled, TablerSearch, 'IconSear
 export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'IconSettings')
 export const IconShield = catalogued(TablerShield, TablerShield, 'IconShield')
 export const IconSun = catalogued(TablerSunFilled, TablerSun, 'IconSun')
+/* Tabler draws no solid prompt: the outline stands for both weights, which is what a prompt is
+   anyway, a chevron and a line. */
+export const IconTerminal = catalogued(TablerTerminal, TablerTerminal, 'IconTerminal')
 export const IconTimelineEvent = catalogued(
   TablerTimelineEventFilled,
   TablerTimelineEvent,
