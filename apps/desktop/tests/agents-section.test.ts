@@ -3,7 +3,8 @@
  *
  * The section is drawn from `agents.list`, asked through the agent store over the whole engine:
  * what is under test is that each agent's row carries what its adapter declares for this
- * platform — qualified or not, the means, and the adapter's own sentence when it is not.
+ * platform — for a qualified agent, what it keeps that Hemera does not control; for one that is
+ * not, the adapter's own sentence and the means it was about.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -33,17 +34,18 @@ afterEach(async () => {
 })
 
 describe("A qualified agent has only Hemera's tools", () => {
-  test('its row says it runs bare, and by which means', async () => {
+  test('its row says what it keeps that Hemera does not control', async () => {
     opened = await openWindow(dataFolder, fakeAgent())
     install(opened.bridge)
     await loadAgents()
 
+    const declared = bareModeOf(ADAPTERS.opencode, process.platform)
     const opencode = agentSnapshot().agents.find((one) => one.id === 'opencode')
     expect(opencode?.bareMode.qualified).toBe(true)
     expect(opencode?.bareMode.reason).toBeNull()
+    expect(opencode?.bareMode.private).toBe(declared.private)
     const row = opencode === undefined ? null : bareRowOf(opencode)
-    expect(row?.qualified).toBe(true)
-    expect(row?.reason).toContain(bareModeOf(ADAPTERS.opencode, process.platform).means)
+    expect(row).toEqual({ qualified: true, private: declared.private })
   })
 })
 
@@ -63,7 +65,9 @@ describe('An unqualified combination is refused with its reason', () => {
       private: declared.private,
     })
     const row = codex === undefined ? null : bareRowOf(codex)
-    expect(row?.qualified).toBe(false)
-    expect(row?.reason).toContain(declared.qualified ? 'unreachable' : declared.reason)
+    expect(row).toEqual({
+      qualified: false,
+      reason: `${declared.qualified ? 'unreachable' : declared.reason} Means tried: ${declared.means}.`,
+    })
   })
 })

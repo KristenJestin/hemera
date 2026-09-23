@@ -64,8 +64,8 @@ const AGENTS: SettingsProps['agents'] = {
       latest: '2.0.35',
       bare: {
         qualified: true,
-        reason: 'it works through the tools Hemera lends it',
-        checkedAt: '21 Sep 2026',
+        private:
+          'its managed and policy settings and ~/.claude.json still load; Hemera does not read them.',
       },
     },
     {
@@ -79,9 +79,9 @@ const AGENTS: SettingsProps['agents'] = {
       installer: 'pnpm',
       latest: '0.9.4',
       bare: {
-        qualified: true,
-        reason: 'it works through the tools Hemera lends it',
-        checkedAt: '21 Sep 2026',
+        qualified: false,
+        reason:
+          'apply_patch has no configuration key, and the MCP resource tools appear as soon as an MCP server exists. Hemera would not see those calls, so this Session is not opened.',
       },
     },
     {
@@ -95,9 +95,9 @@ const AGENTS: SettingsProps['agents'] = {
       installer: 'unknown',
       latest: null,
       bare: {
-        qualified: false,
-        reason: 'its adapter has not answered for bare mode yet',
-        remedy: 'it qualifies once its own tools are known to be switchable',
+        qualified: true,
+        private:
+          '$HOME/.opencode, its managed configuration and a remote .well-known/opencode still load; Hemera does not read them.',
       },
     },
   ],

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { Disclosure } from '../activity/disclosure.tsx'
 import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
@@ -26,6 +27,12 @@ import { IconRefresh } from '../icons.ts'
  * It is the shape of the other sections and not a shape of its own: the same card, the same rows
  * of key and value, the same quiet buttons under them. A reader who has read the Profile block
  * has read this one.
+ *
+ * Only what a reader acts on is a row (trial of 23 September 2026): whether the agent is signed
+ * in, what is installed, and one line for the only question a version raises — is it up to date.
+ * What was published, which tool installed it and how bare mode is reached were rows the reader
+ * had to read past to get there. Bare mode is one folded line under the agent: what it keeps
+ * that Hemera does not control, or why it is not available here.
  *
  * Nothing here chooses and nothing here fetches. The choice of the agent belongs to the session
  * that is about to start, where the reader is the one who makes it; what the registries published
@@ -85,32 +92,36 @@ export interface AgentOnTheMachine {
   loginHint: string
   /** The tool that installed it, which is the only one that can move it. */
   installer: string
-  /** What its registry published, or null when nobody has asked it yet. */
+  /** What its registry published, or null when nobody has asked it yet or it answered nothing. */
   latest: string | null
   /**
    * Where its adapter stands with bare mode (design D6-15), or nothing when it has not been asked.
    *
-   * Asked of the adapter and not guessed from the agent: what it says is whether this agent
-   * leaves its own tools behind and works through the ones Hemera lends it, why, and the date
-   * the answer was last true. A reader who is told "no" is told what would make it "yes".
-   *
-   * An adapter that has not answered is not an agent that answered no, and the line says which
-   * of the two it is — the same distinction the published version makes.
+   * Asked of the adapter and not guessed from the agent. Drawn as one folded line: an agent that
+   * runs with Hemera's tools only opens on what it still keeps out of Hemera's sight, one that
+   * does not opens on why, and on what would change it where something would.
    */
   bare?: BareMode | undefined
 }
 
-/** What an adapter answered about bare mode, and when it answered it. */
-export interface BareMode {
-  /** Whether this agent runs without its own tools. */
-  qualified: boolean
-  /** Why it does, or why it does not. */
-  reason: string
-  /** What would qualify it, said only where something would. */
-  remedy?: string | undefined
-  /** When the adapter last answered, as it records the date itself. */
-  checkedAt?: string | undefined
-}
+/** What an adapter answered about bare mode on this machine. */
+export type BareMode =
+  | {
+      /** This agent runs with Hemera's tools only. */
+      qualified: true
+      /** What its means does not reach: its own sources that still load, which Hemera does not read. */
+      private: string
+    }
+  | {
+      /** This agent cannot run here: a Session is not opened on it. */
+      qualified: false
+      /** Why it cannot. */
+      reason: string
+      /** What would qualify it, said only where something would. */
+      remedy?: string | undefined
+      /** When the adapter last answered, as it records the date itself. */
+      checkedAt?: string | undefined
+    }
 
 export interface AgentsSectionProps {
   /** Every agent Hemera knows about, with what this machine says about it. */
@@ -160,14 +171,14 @@ export function AgentsSection({
                 <dl className={ROW}>
                   <Pair label="Signed in">{agent.authenticated ? 'yes' : 'no'}</Pair>
                   <Pair label="Installed">{installedOf(agent)}</Pair>
-                  <Pair label="Published">{publishedOf(agent, checked)}</Pair>
-                  <Pair label={agent.found ? 'Installed with' : 'How to get it'}>
-                    {agent.found ? agent.installer : agent.installHint}
-                  </Pair>
+                  {agent.found ? (
+                    <Pair label="Updates">{updatesOf(agent, checked)}</Pair>
+                  ) : (
+                    <Pair label="How to get it">{agent.installHint}</Pair>
+                  )}
                   {agent.authenticated ? null : <Pair label="To sign in">{agent.loginHint}</Pair>}
-                  <Pair label="Bare mode">{bareWord(agent.bare)}</Pair>
                 </dl>
-                {agent.bare === undefined ? null : <p className={NOTE}>{bareOf(agent.bare)}</p>}
+                {agent.bare === undefined ? null : <BareFold bare={agent.bare} />}
                 {update === null ? null : (
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
@@ -217,24 +228,35 @@ function Pair({ label, children }: { label: string; children: ReactNode }): Reac
 }
 
 /**
- * The word the row stands on: what the adapter answered, or that nobody has asked it.
+ * Bare mode, in one line that opens on the rest (D6-02, D6-09).
  *
- * Lowercase and bare, like `not asked yet` beside it: the row is a value in a list, and the
- * sentence under it is where the reason goes.
+ * The line is what a reader needs to know at a glance — this agent runs with Hemera's tools only,
+ * or it is not available here — and the fold is the sentence behind it, which is long and read
+ * once: what the agent still keeps out of Hemera's sight, or the adapter's reason for refusing it.
  */
-function bareWord(bare: BareMode | undefined): string {
-  if (bare === undefined) return 'not asked yet'
-  return bare.qualified ? 'bare' : 'not bare'
+function BareFold({ bare }: { bare: BareMode }): ReactNode {
+  return (
+    <Disclosure
+      summary={
+        <span className={NOTE}>
+          {bare.qualified ? "Runs with Hemera's tools only" : 'Not available here'}
+        </span>
+      }
+    >
+      <p className={NOTE}>
+        {bare.qualified ? `Hemera does not control: ${bare.private}` : whyNot(bare)}
+      </p>
+    </Disclosure>
+  )
 }
 
 /**
- * What the adapter said about bare mode, in one sentence.
+ * Why an agent cannot run here, whole.
  *
  * The reason, then what would change it, then the date it was last true — in that order, because
- * that is the order a reader asks in. An agent that is not qualified is not a broken agent: it
- * runs with its own tools, and what is missing is said rather than implied.
+ * that is the order a reader asks in.
  */
-function bareOf(bare: BareMode): string {
+function whyNot(bare: Extract<BareMode, { qualified: false }>): string {
   const said = [bare.reason, bare.remedy].filter((part) => part !== undefined).join(' ')
   return bare.checkedAt === undefined ? said : `${said} Checked ${bare.checkedAt}.`
 }
@@ -252,14 +274,16 @@ function installedOf(agent: AgentOnTheMachine): string {
 }
 
 /**
- * What the registry answered, and which of the two ways of not knowing it is.
+ * The one question a version raises — is it up to date — answered for an agent that is found.
  *
- * A version nobody asked for and a registry that answered nothing are not the same absence, and
- * neither of them is a version. Saying which one it is is the whole value of the line.
+ * Still being asked and asked with no answer are not the same absence, and neither is a version:
+ * the line says which it is rather than guessing. An installed command that reports no version
+ * cannot be compared, so the line says what was published and leaves the comparison alone.
  */
-function publishedOf(agent: AgentOnTheMachine, checked: boolean): string {
-  if (agent.latest !== null) return agent.latest
-  return checked ? 'no registry answered' : 'not asked yet'
+function updatesOf(agent: AgentOnTheMachine, checked: boolean): string {
+  if (agent.latest === null) return checked ? 'Could not check' : 'Checking…'
+  if (agent.version === null) return `Latest ${agent.latest}`
+  return agent.version === agent.latest ? 'Up to date' : `Update available ${agent.latest}`
 }
 
 /**

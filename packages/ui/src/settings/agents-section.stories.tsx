@@ -5,12 +5,12 @@ import { AgentsSection } from './agents-section.tsx'
 
 /**
  * The three answers this machine can give about an agent, drawn in the shape of the other
- * settings sections: what is installed, what its registry published, and the one press that
- * moves it.
+ * settings sections: what is installed, whether it is up to date, and the one press that moves
+ * it.
  *
  * Every story keeps the same three agents so that the section reads the way a reader would find
- * it: Claude Code found with an update waiting, Codex installed but not signed in, OpenCode
- * absent with the one command that would get it.
+ * it: Claude Code found with an update waiting, Codex installed but not signed in and not
+ * available here, OpenCode absent with the one command that would get it.
  */
 const CLAUDE = {
   id: 'claude',
@@ -24,8 +24,8 @@ const CLAUDE = {
   latest: '2.0.35',
   bare: {
     qualified: true,
-    reason: 'it works through the tools Hemera lends it',
-    checkedAt: '21 Sep 2026',
+    private:
+      'its managed and policy settings and ~/.claude.json still load; Hemera does not read them.',
   },
 } as const
 
@@ -40,9 +40,9 @@ const CODEX = {
   installer: 'pnpm',
   latest: '0.9.4',
   bare: {
-    qualified: true,
-    reason: 'it works through the tools Hemera lends it',
-    checkedAt: '21 Sep 2026',
+    qualified: false,
+    reason:
+      'apply_patch has no configuration key, and the MCP resource tools appear as soon as an MCP server exists. Hemera would not see those calls, so this Session is not opened.',
   },
 } as const
 
@@ -57,9 +57,9 @@ const OPENCODE = {
   installer: 'unknown',
   latest: null,
   bare: {
-    qualified: false,
-    reason: 'its adapter has not answered for bare mode yet',
-    remedy: 'it qualifies once its own tools are known to be switchable',
+    qualified: true,
+    private:
+      '$HOME/.opencode, its managed configuration and a remote .well-known/opencode still load; Hemera does not read them.',
   },
 } as const
 
@@ -107,20 +107,38 @@ export const FoundNotInstalledAndNotSignedIn: Story = {
 }
 
 /**
- * The two versions side by side, and the one agent whose registry answered something newer.
+ * One line for the one question a version raises, and the one agent whose registry answered
+ * something newer.
  *
  * Claude Code is found at 2.0.31 and its registry published 2.0.35, so it is the only one
- * offered an update; Codex is on the version it published, so nothing is offered for it.
+ * offered an update; Codex is on the version it published, so nothing is offered for it. What
+ * was published, and which tool installed either of them, are not rows of their own.
  */
-export const AnUpdateIsPublishedAndOffered: Story = {
+export const UpdateAvailable: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('2.0.31')).toBeVisible()
-    await expect(canvas.getByText('2.0.35')).toBeVisible()
+    await expect(canvas.getByText('Update available 2.0.35')).toBeVisible()
+    await expect(canvas.getByText('Up to date')).toBeVisible()
     await expect(canvas.getByRole('button', { name: /update to 2\.0\.35/i })).toBeVisible()
-    // Both found agents say which tool put them there, and the absent one says what to run.
-    await expect(canvas.getAllByText('Installed with')).toHaveLength(2)
     await expect(canvas.getAllByRole('button', { name: /update to/i })).toHaveLength(1)
+    const gone = ['Published', 'Installed with', 'Bare mode'].filter(
+      (label) => canvas.queryByText(label) !== null,
+    )
+    await expect(gone).toEqual([])
+  },
+}
+
+/**
+ * Newer published, and nothing here can say which tool installed the command: the line says so,
+ * and no button is offered, because an update run with the wrong tool is a second installation.
+ */
+export const UpdateAvailableWithNoKnownInstaller: Story = {
+  args: { agents: [{ ...CLAUDE, installer: 'unknown' }] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Update available 2.0.35')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
   },
 }
 
@@ -133,13 +151,14 @@ export const TheUpdateRunsOnAPress: Story = {
   },
 }
 
-/** An agent already on what its registry published is offered nothing at all. */
-export const UpToDateOffersNothing: Story = {
+/** An agent already on what its registry published says so, and is offered nothing at all. */
+export const UpToDate: Story = {
   args: { agents: [{ ...CLAUDE, version: '2.0.35' }] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await expect(canvas.getByText('Up to date')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
-    await expect(canvas.getAllByText('2.0.35')).toHaveLength(2)
+    await expect(canvas.getAllByText('2.0.35')).toHaveLength(1)
   },
 }
 
@@ -150,9 +169,8 @@ export const MissingSaysHowToGetIt: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('not on this machine')).toBeVisible()
     await expect(canvas.getByText('npm i -g opencode-ai')).toBeVisible()
-    // The registries were asked and this one answered nothing, which is not the same absence
-    // as never having asked, and neither of them is a version.
-    await expect(canvas.getByText('no registry answered')).toBeVisible()
+    // Nothing is installed, so there is no version to compare and no line about updates.
+    await expect(canvas.queryByText('Updates')).not.toBeInTheDocument()
     await expect(canvas.queryByText('unknown')).not.toBeInTheDocument()
   },
 }
@@ -165,8 +183,9 @@ export const InstalledButNotSignedIn: Story = {
     await expect(canvas.getByText('Not signed in')).toBeVisible()
     // The one command that would fix it, in the agent's own words (D5-21).
     await expect(canvas.getByText('codex login')).toBeVisible()
-    // The version it is on, and the one its registry published: the same number twice.
-    await expect(canvas.getAllByText('0.9.4')).toHaveLength(2)
+    // The version it is on, and the one line that says nothing newer was published.
+    await expect(canvas.getByText('0.9.4')).toBeVisible()
+    await expect(canvas.getByText('Up to date')).toBeVisible()
   },
 }
 
@@ -223,21 +242,70 @@ export const TheToolsOwnWords: Story = {
   },
 }
 
-/** The three, before anything has asked a registry: an installed version and no published one,
-    which is the same absence for an agent this machine has and one it does not. */
-const UNASKED = [
+/** The three with an installed version and no published one: asked and not yet answered, or
+    answered with nothing. */
+const UNANSWERED = [
   { ...CLAUDE, latest: null },
   { ...CODEX, latest: null },
   { ...OPENCODE, latest: null },
 ]
 
-/** Nothing has asked the registries yet: the section says so rather than showing a version. */
-export const NobodyAskedTheRegistriesYet: Story = {
-  args: { checked: false, agents: UNASKED },
+/** The registries are being asked: each found agent says so rather than showing a version. */
+export const Checking: Story = {
+  args: { checked: false, agents: UNANSWERED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getAllByText('not asked yet')).toHaveLength(3)
+    await expect(canvas.getAllByText('Checking…')).toHaveLength(2)
     await expect(canvas.getByText(/Asking each registry what it published/)).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
+  },
+}
+
+/**
+ * The registries were asked and answered nothing — offline, down, or not published there: the
+ * line says the check failed, which is not the same as being up to date, and offers nothing.
+ */
+export const CouldNotCheck: Story = {
+  args: { checked: true, agents: UNANSWERED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByText('Could not check')).toHaveLength(2)
+    await expect(canvas.queryByText('Up to date')).not.toBeInTheDocument()
+    await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
+  },
+}
+
+/**
+ * An agent that runs with Hemera's tools only says so in one line, folded on what it still
+ * keeps out of Hemera's sight — its own sources, which Hemera names and does not read.
+ */
+export const RunsWithHemerasToolsOnly: Story = {
+  args: { agents: [CLAUDE] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const fold = canvas.getByRole('button', { name: /Runs with Hemera's tools only/ })
+    await expect(fold).toHaveAttribute('aria-expanded', 'false')
+    await expect(canvas.queryByText(/~\/\.claude\.json/)).not.toBeInTheDocument()
+
+    await userEvent.click(fold)
+    await expect(await canvas.findByText(/~\/\.claude\.json still load/)).toBeVisible()
+  },
+}
+
+/**
+ * An agent that cannot run here: one line, `Not available here`, folded on the adapter's reason,
+ * which is read in full once it is asked for and not before.
+ */
+export const NotAvailableHere: Story = {
+  args: { agents: [CODEX] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const fold = canvas.getByRole('button', { name: /Not available here/ })
+    await expect(fold).toHaveAttribute('aria-expanded', 'false')
+    await expect(canvas.queryByText(/apply_patch/)).not.toBeInTheDocument()
+
+    await userEvent.click(fold)
+    await expect(fold).toHaveAttribute('aria-expanded', 'true')
+    await expect(await canvas.findByText(/apply_patch has no configuration key/)).toBeVisible()
   },
 }

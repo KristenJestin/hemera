@@ -888,8 +888,8 @@ export function Application() {
               loginHint: one.loginHint,
               installer: one.installer,
               latest: one.latest,
-              // What its adapter declares about running it bare here (D6-02): qualified or not,
-              // the means, and the adapter's own reason when it is not.
+              // What its adapter declares about running it bare here (D6-02): what it keeps that
+              // Hemera does not control, or the adapter's own reason when it cannot run here.
               bare: bareRowOf(one),
             })),
             checked: agents.checked,
