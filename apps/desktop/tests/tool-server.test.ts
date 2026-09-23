@@ -177,6 +177,7 @@ const toolCall = (
   id: number,
   name: string,
   sent: Record<string, string>,
+  meta: Record<string, string> | null = null,
 ) =>
   Effect.promise(async () => {
     const response = await fetch(`${server.origin}/mcp`, {
@@ -190,7 +191,7 @@ const toolCall = (
         jsonrpc: '2.0',
         id,
         method: 'tools/call',
-        params: { name, arguments: sent },
+        params: meta === null ? { name, arguments: sent } : { name, arguments: sent, _meta: meta },
       }),
     })
     return { status: response.status, body: await response.text() }
@@ -270,6 +271,59 @@ describe('the tools of the Session', () => {
 
     expect(seen.status).not.toBe(401)
     expect(seen.body).toContain('fs_read')
+  })
+})
+
+describe('A call the server turns away before any tool is recorded like any call', () => {
+  it('an unknown tool and arguments that do not read are refused entries with their reason', async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const sessions = yield* Sessions
+        const held = yield* aSessionWithAToken
+        const token = held.granted.token
+        const unknown = yield* toolCall(server, token, 1, 'shell_run', { line: 'rm -rf /' })
+        const invalid = yield* toolCall(server, token, 2, 'fs_read', { offset: 'far' })
+        const page = yield* sessions.read(held.session.id)
+        return { unknown, invalid, entries: page.entries }
+      }),
+    )
+
+    // The agent is answered by the server as before; Hemera has written the refusals down.
+    expect(seen.unknown.status).toBe(200)
+    expect(seen.invalid.status).toBe(200)
+    const calls = seen.entries.filter((entry) => entry.kind === 'hemera_tool_call')
+    expect(calls.map((entry) => entry.state)).toEqual(['refused', 'refused'])
+    expect(calls[0]?.body).toBe('Hemera has no tool named shell_run')
+    expect(calls[1]?.body).toContain('the arguments of fs_read do not read')
+  })
+})
+
+describe("A call carries the agent's own identifier of it", () => {
+  it("is written into Hemera's entry, which is what the thread pairs the agent's report with", async () => {
+    fileInRoot('inside.md', 'inside the root\n')
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const server = yield* ToolServer
+        const sessions = yield* Sessions
+        const held = yield* aSessionWithAToken
+        yield* toolCall(
+          server,
+          held.granted.token,
+          1,
+          'fs_read',
+          { path: 'inside.md' },
+          {
+            'claudecode/toolUseId': 'toolu_01',
+          },
+        )
+        const page = yield* sessions.read(held.session.id)
+        return page.entries
+      }),
+    )
+
+    const call = seen.find((entry) => entry.kind === 'hemera_tool_call')
+    expect(JSON.parse(call?.payload ?? '{}')).toMatchObject({ callId: 'toolu_01' })
   })
 })
 

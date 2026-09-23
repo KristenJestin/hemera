@@ -81,6 +81,11 @@ export interface ToolCall {
   readonly offered: readonly ToolName[]
   /** The digest of the token, which is how the thread names whoever asked. */
   readonly caller: string
+  /**
+   * The agent's own identifier of the call, when its request carries one: what the thread pairs
+   * the agent's report of the call with Hemera's entry by (D6-06).
+   */
+  readonly callId?: string | null
 }
 
 /** How a call ended, in the words the thread and the Journal share. */
@@ -105,6 +110,11 @@ export interface ToolOutcome {
 export interface ToolCatalogueService {
   /** One call, from the guard to the answer. Never fails: a refusal is an answer. */
   readonly call: (asked: ToolCall) => Effect.Effect<ToolOutcome>
+  /**
+   * Records a call the server turned away before it reached a tool — a name no tool has, or
+   * arguments that do not read — as a refusal like any other: an entry and a Journal line.
+   */
+  readonly refuse: (asked: ToolCall, reason: string) => Effect.Effect<void>
 }
 
 export class ToolCatalogue extends Context.Service<ToolCatalogue, ToolCatalogueService>()(
@@ -359,6 +369,9 @@ export const toolCatalogueLayer: Layer.Layer<
           // The key the agent sent, which is what a retry is recognised by; the entry itself is
           // one per call, so a key used again never writes over the entry of an earlier call.
           key: asked.key,
+          // The agent's identifier of the call, when it sent one: its report of the call and this
+          // entry are the same call, and this is what says so (D6-06).
+          callId: asked.callId ?? null,
           // The provenance of the call (D6-06): the Session the token served, the digest of that
           // token, the agent that held it, and how long it took. The row belongs to the Session
           // already; the payload says it too, so an entry read on its own still says whose it is.
@@ -943,130 +956,135 @@ export const toolCatalogueLayer: Layer.Layer<
         }
       })
 
-    return {
-      call: (asked) =>
-        Effect.gen(function* () {
-          const named = TOOL_NAMES.find((one) => one === asked.tool)
-          const read = yield* answered(sessions.one(asked.sessionId))
-          if (read === undefined) {
-            return {
-              ok: false,
-              state: 'refused' as const,
-              summary: 'this Session is unknown',
-              text: 'this Session is unknown to the engine',
-              paths: [],
-              repeated: false,
-              range: null,
-            }
+    /** One call from the guard to the answer, or one already refused by the server, recorded. */
+    const handled = (asked: ToolCall, rejected: string | null) =>
+      Effect.gen(function* () {
+        const named = TOOL_NAMES.find((one) => one === asked.tool)
+        const read = yield* answered(sessions.one(asked.sessionId))
+        if (read === undefined) {
+          return {
+            ok: false,
+            state: 'refused' as const,
+            summary: 'this Session is unknown',
+            text: 'this Session is unknown to the engine',
+            paths: [],
+            repeated: false,
+            range: null,
           }
-          const session = read.session
-          const all = yield* answered(projects.list())
-          const project = all?.find((one) => one.id === session.projectId)
-          if (project === undefined) {
-            return {
-              ok: false,
-              state: 'failed' as const,
-              summary: 'the Project of this Session is missing',
-              text: 'this Session belongs to a Project the engine cannot read',
-              paths: [],
-              repeated: false,
-              range: null,
-            }
+        }
+        const session = read.session
+        const all = yield* answered(projects.list())
+        const project = all?.find((one) => one.id === session.projectId)
+        if (project === undefined) {
+          return {
+            ok: false,
+            state: 'failed' as const,
+            summary: 'the Project of this Session is missing',
+            text: 'this Session belongs to a Project the engine cannot read',
+            paths: [],
+            repeated: false,
+            range: null,
           }
-          const root = project.mainPath
-          // The agent of the Session is what the thread names as the caller, beside the digest of
-          // the token: a Session without one is served all the same, and "agent" is what it says.
-          const made = {
-            projectId: project.id,
-            agent: session.provider ?? 'agent',
-            milliseconds: 0,
-          } satisfies Made
+        }
+        const root = project.mainPath
+        // The agent of the Session is what the thread names as the caller, beside the digest of
+        // the token: a Session without one is served all the same, and "agent" is what it says.
+        const made = {
+          projectId: project.id,
+          agent: session.provider ?? 'agent',
+          milliseconds: 0,
+        } satisfies Made
 
-          if (named === undefined) {
-            return yield* refused(asked, made, `Hemera has no tool named ${asked.tool}`)
-          }
-          const decision = admitTool(asked.offered, named)
-          if (!decision.admitted) return yield* refused(asked, made, decision.reason)
+        if (rejected !== null) return yield* refused(asked, made, rejected)
+        if (named === undefined) {
+          return yield* refused(asked, made, `Hemera has no tool named ${asked.tool}`)
+        }
+        const decision = admitTool(asked.offered, named)
+        if (!decision.admitted) return yield* refused(asked, made, decision.reason)
 
-          const parsed = parseCall(named, asked.arguments)
-          if (!parsed.ok) {
-            return yield* refused(
-              asked,
-              made,
-              `the arguments of ${named} do not read: ${parsed.reason}`,
-            )
-          }
-
-          // Measured around the tool itself, question to the human included: what the Journal
-          // says a call took is how long the agent waited for it.
-          const run = Effect.gen(function* () {
-            // A monotonic clock, to the microsecond: a read inside the root takes less than a
-            // millisecond, and a call recorded as taking none is a call that says nothing of itself.
-            const began = performance.now()
-            const answer = yield* perform(
-              asked,
-              root,
-              project.id,
-              project.name,
-              project.repositories,
-              parsed.call,
-            )
-            // A tool has no error channel on purpose: everything a tool can be told no by is
-            // answered as a value, and what would remain is a defect the engine should hear about.
-            return yield* settle(
-              asked,
-              { ...made, milliseconds: Math.round((performance.now() - began) * 1000) / 1000 },
-              answer,
-              answer.ok ? 'completed' : 'failed',
-            )
-          })
-          if (asked.key === null) return yield* run
-
-          const key = asked.key
-          const slot = `${named}|${key}`
-          const sent = argumentsSent(asked.arguments)
-          /**
-           * The answer an earlier call under this key was given, as this call's own: no second
-           * entry in the thread, one Journal line that says the call was a repeat — unless the
-           * arguments differ, which is a new call under an old key and is refused rather than
-           * guessed at, because either answer would be wrong for one of the two.
-           */
-          const again = (first: ToolOutcome, firstSent: string) =>
-            Effect.gen(function* () {
-              if (firstSent !== sent) {
-                return yield* refused(
-                  asked,
-                  made,
-                  `the key "${key}" was already used by a ${named} call with other arguments: send a new key for a new call`,
-                )
-              }
-              yield* journalled(asked, made, 'tool.repeated', { state: first.state, key })
-              return { ...first, repeated: true }
-            })
-          const earlier = answeredBefore(asked.sessionId, slot)
-          if (earlier !== undefined) return yield* again(earlier.outcome, earlier.sent)
-          const reservation = `${asked.sessionId}|${slot}`
-          const running = inFlight.get(reservation)
-          if (running !== undefined) {
-            const first = yield* Deferred.await(running.outcome)
-            return yield* again(first, running.sent)
-          }
-          const reserved = Deferred.makeUnsafe<ToolOutcome>()
-          inFlight.set(reservation, { sent, outcome: reserved })
-          const outcome = yield* run.pipe(
-            Effect.onExit((exit) =>
-              Effect.gen(function* () {
-                inFlight.delete(reservation)
-                yield* Deferred.done(reserved, exit)
-              }),
-            ),
+        const parsed = parseCall(named, asked.arguments)
+        if (!parsed.ok) {
+          return yield* refused(
+            asked,
+            made,
+            `the arguments of ${named} do not read: ${parsed.reason}`,
           )
-          // Whatever it answered is remembered: a retry is answered what the first call was, a
-          // refusal included. A corrected call is a call with other arguments, and it is told to
-          // send a new key rather than being answered for the one it replaced.
-          remember(asked.sessionId, slot, { sent, outcome })
-          return outcome
-        }),
+        }
+
+        // Measured around the tool itself, question to the human included: what the Journal
+        // says a call took is how long the agent waited for it.
+        const run = Effect.gen(function* () {
+          // A monotonic clock, to the microsecond: a read inside the root takes less than a
+          // millisecond, and a call recorded as taking none is a call that says nothing of itself.
+          const began = performance.now()
+          const answer = yield* perform(
+            asked,
+            root,
+            project.id,
+            project.name,
+            project.repositories,
+            parsed.call,
+          )
+          // A tool has no error channel on purpose: everything a tool can be told no by is
+          // answered as a value, and what would remain is a defect the engine should hear about.
+          return yield* settle(
+            asked,
+            { ...made, milliseconds: Math.round((performance.now() - began) * 1000) / 1000 },
+            answer,
+            answer.ok ? 'completed' : 'failed',
+          )
+        })
+        if (asked.key === null) return yield* run
+
+        const key = asked.key
+        const slot = `${named}|${key}`
+        const sent = argumentsSent(asked.arguments)
+        /**
+         * The answer an earlier call under this key was given, as this call's own: no second
+         * entry in the thread, one Journal line that says the call was a repeat — unless the
+         * arguments differ, which is a new call under an old key and is refused rather than
+         * guessed at, because either answer would be wrong for one of the two.
+         */
+        const again = (first: ToolOutcome, firstSent: string) =>
+          Effect.gen(function* () {
+            if (firstSent !== sent) {
+              return yield* refused(
+                asked,
+                made,
+                `the key "${key}" was already used by a ${named} call with other arguments: send a new key for a new call`,
+              )
+            }
+            yield* journalled(asked, made, 'tool.repeated', { state: first.state, key })
+            return { ...first, repeated: true }
+          })
+        const earlier = answeredBefore(asked.sessionId, slot)
+        if (earlier !== undefined) return yield* again(earlier.outcome, earlier.sent)
+        const reservation = `${asked.sessionId}|${slot}`
+        const running = inFlight.get(reservation)
+        if (running !== undefined) {
+          const first = yield* Deferred.await(running.outcome)
+          return yield* again(first, running.sent)
+        }
+        const reserved = Deferred.makeUnsafe<ToolOutcome>()
+        inFlight.set(reservation, { sent, outcome: reserved })
+        const outcome = yield* run.pipe(
+          Effect.onExit((exit) =>
+            Effect.gen(function* () {
+              inFlight.delete(reservation)
+              yield* Deferred.done(reserved, exit)
+            }),
+          ),
+        )
+        // Whatever it answered is remembered: a retry is answered what the first call was, a
+        // refusal included. A corrected call is a call with other arguments, and it is told to
+        // send a new key rather than being answered for the one it replaced.
+        remember(asked.sessionId, slot, { sent, outcome })
+        return outcome
+      })
+
+    return {
+      call: (asked) => handled(asked, null),
+      refuse: (asked, reason) => handled(asked, reason).pipe(Effect.asVoid),
     }
   }),
 )

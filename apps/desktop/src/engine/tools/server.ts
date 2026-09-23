@@ -26,9 +26,14 @@ import {
   type ToolArguments,
 } from './arguments.ts'
 import { type AccessGrant, type GrantedAccess, ToolAccess } from './access.ts'
-import { ToolCatalogue } from './catalogue.ts'
+import { ToolCatalogue, type ToolCall } from './catalogue.ts'
 import { TOOL_NAMES } from '@hemera/core'
-import { McpServer, createMcpHandler } from '@modelcontextprotocol/server'
+import {
+  McpServer,
+  type RequestMeta,
+  type ServerContext,
+  createMcpHandler,
+} from '@modelcontextprotocol/server'
 import {
   type FetchLikeMcpHandler,
   type NodeIncomingMessageLike,
@@ -131,7 +136,10 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
           server.registerTool(
             tool,
             { description: TOOL_DESCRIPTIONS[tool], inputSchema: TOOL_ARGUMENTS[tool] },
-            async (argumentsSent: Record<string, string | number | boolean | null>) => {
+            async (
+              argumentsSent: Record<string, string | number | boolean | null>,
+              context: ServerContext,
+            ) => {
               const argumentsRead = flatArguments(Object.entries(argumentsSent ?? {}))
               const outcome = await Effect.runPromise(
                 catalogue.call({
@@ -141,6 +149,8 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
                   key: keyIn(argumentsRead),
                   offered: grant.offered,
                   caller: grant.id,
+                  // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+                  callId: callIdIn(context.mcpReq._meta),
                 }),
               )
               return {
@@ -208,6 +218,11 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
               headers: { 'content-type': 'application/json' },
             })
           }
+          // A call the server will turn away before any tool sees it is recorded all the same:
+          // the refusal is an entry and a Journal line like any other (D6-03).
+          const turnedAway = await refusalOf(request, grant)
+          if (turnedAway !== null)
+            await Effect.runPromise(catalogue.refuse(turnedAway.asked, turnedAway.reason))
           // The digest stands where the token would: the agent's own name for itself is not the
           // secret it was handed, and the tools are told the caller, not the credential.
           return mcp.fetch(request, {
@@ -289,6 +304,83 @@ function asNodeResponse(response: ServerResponse): NodeServerResponseLike {
       return response.destroyed
     },
   }
+}
+
+/**
+ * Where an agent names its own identifier of a call in the request's `_meta`: Claude Code sends
+ * the `tool_use` id it reports the call under.
+ */
+const CALL_ID = z.object({ 'claudecode/toolUseId': z.string().min(1) })
+
+/** The agent's identifier of a call, when its request carries one. */
+function callIdIn(meta: RequestMeta | undefined): string | null {
+  const read = CALL_ID.safeParse(meta)
+  return read.success ? read.data['claudecode/toolUseId'] : null
+}
+
+/**
+ * One argument as a flat bag holds it: a string, a number, a boolean or null, and anything else
+ * as its JSON text — what the thread shows of a call its schema refused.
+ */
+const FLAT_VALUE = z
+  .union([z.string(), z.number(), z.boolean(), z.null()])
+  .or(z.unknown().transform((value) => JSON.stringify(value)))
+
+/** What one call to a tool sends, as far as the server's own refusals go. */
+const CALL_SENT = z.object({
+  method: z.literal('tools/call'),
+  params: z.object({
+    name: z.string(),
+    arguments: z.record(z.string(), z.unknown()).optional(),
+    // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+    _meta: CALL_ID.optional().catch(undefined),
+  }),
+})
+
+/**
+ * The call a request makes that the MCP server will refuse before any tool is reached, and why:
+ * a name no tool of Hemera's has, or arguments its schema does not read. Null for anything else,
+ * which the server serves or answers itself.
+ *
+ * Read from a copy of the body, as the server reads the same body after it.
+ */
+async function refusalOf(
+  request: Request,
+  grant: AccessGrant,
+): Promise<{ readonly asked: ToolCall; readonly reason: string } | null> {
+  const body = await request
+    .clone()
+    .text()
+    .catch(() => '')
+  const parsed = (() => {
+    try {
+      return CALL_SENT.safeParse(JSON.parse(body))
+    } catch {
+      return null
+    }
+  })()
+  if (parsed === null || !parsed.success) return null
+  const { name, arguments: sent = {}, _meta: meta } = parsed.data.params
+  const argumentsRead = flatArguments(
+    Object.entries(sent).map(([label, value]) => [label, FLAT_VALUE.parse(value)]),
+  )
+  const asked: ToolCall = {
+    sessionId: grant.sessionId,
+    tool: name.slice(0, 64),
+    arguments: argumentsRead,
+    key: keyIn(argumentsRead),
+    offered: grant.offered,
+    caller: grant.id,
+    callId: meta?.['claudecode/toolUseId'] ?? null,
+  }
+  const tool = TOOL_NAMES.find((one) => one === name)
+  if (tool === undefined) return { asked, reason: `Hemera has no tool named ${asked.tool}` }
+  const read = TOOL_ARGUMENTS[tool].safeParse(sent)
+  if (read.success) return null
+  const why = read.error.issues
+    .map((issue) => `${issue.path.join('.') || 'arguments'}: ${issue.message}`)
+    .join('; ')
+  return { asked, reason: `the arguments of ${tool} do not read: ${why}` }
 }
 
 /** What an idempotency key is, read where it arrives: one non-empty string, or nothing. */

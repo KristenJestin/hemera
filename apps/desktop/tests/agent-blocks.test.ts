@@ -272,4 +272,49 @@ describe('A Hemera tool call is drawn once', () => {
     ])
     expect(folded.inPlaceOf.has('shell')).toBe(false)
   })
+
+  /** A report as the runtime correlates it, with what the agent said it sent. */
+  const reportedAs = (id: string, callId: string, sent: Record<string, string>): SessionEntry => {
+    const base = reported(id, 'mcp__hemera__fs_write', 'completed')
+    const read = JSON.parse(base.payload)
+    const rawInput = { text: JSON.stringify(sent), truncated: false, length: 0 }
+    return {
+      ...base,
+      correlationId: `call:${callId}`,
+      payload: JSON.stringify({ call: { ...read.call, rawInput } }),
+    }
+  }
+  /** Hemera's entry of one call, naming the call as the request did. */
+  const answeredAs = (id: string, names: { callId?: string; key?: string }): SessionEntry => {
+    const base = answered(id, 'fs_write')
+    return { ...base, payload: JSON.stringify({ ...JSON.parse(base.payload), ...names }) }
+  }
+
+  test("calls that finish out of order pair by the agent's identifier of each", () => {
+    const thread = [
+      reportedAs('n1', 'toolu_a', { path: 'a.md' }),
+      reportedAs('n2', 'toolu_b', { path: 'b.md' }),
+      answeredAs('h2', { callId: 'toolu_b' }),
+      answeredAs('h1', { callId: 'toolu_a' }),
+    ]
+    const folded = foldedCallsOf(thread)
+
+    expect(folded.inPlaceOf.get('n1')?.id).toBe('h1')
+    expect(folded.inPlaceOf.get('n2')?.id).toBe('h2')
+  })
+
+  test('a retry answered from memory has no entry, and the call after it keeps its own', () => {
+    const thread = [
+      reportedAs('n1', 'c1', { path: 'a.md', key: 'k1' }),
+      answeredAs('h1', { key: 'k1' }),
+      reportedAs('n2', 'c2', { path: 'a.md', key: 'k1' }),
+      reportedAs('n3', 'c3', { path: 'b.md', key: 'k2' }),
+      answeredAs('h3', { key: 'k2' }),
+    ]
+    const folded = foldedCallsOf(thread)
+
+    expect(folded.inPlaceOf.get('n1')?.id).toBe('h1')
+    expect(folded.inPlaceOf.has('n2')).toBe(false)
+    expect(folded.inPlaceOf.get('n3')?.id).toBe('h3')
+  })
 })

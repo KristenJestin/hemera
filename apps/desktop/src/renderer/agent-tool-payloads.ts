@@ -174,6 +174,30 @@ export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | n
 /** What the agent reports of a call, as far as telling one of Hemera's apart goes. */
 const reportedCallSchema = z.object({ call: z.object({ title: z.string() }) })
 
+/** What the agent says it called with, which is where its idempotency key is when it sent one. */
+const reportedInputSchema = z.object({
+  call: z.object({ rawInput: z.object({ text: z.string() }).nullable() }),
+})
+
+/** The two things a Hemera entry names its call by, beside the tool (engine, `catalogue.ts`). */
+const hemeraCallNamesSchema = z.object({
+  callId: z.string().nullable().optional(),
+  key: z.string().nullable().optional(),
+})
+
+/** The idempotency key an agent's report of a call says it sent, or null. */
+function reportedKeyOf(entry: SessionEntry): string | null {
+  const text = readPayload(reportedInputSchema, entry.payload)?.call.rawInput?.text ?? null
+  if (text === null) return null
+  return readPayload(z.object({ key: z.string() }), text)?.key ?? null
+}
+
+/** The agent's identifier of a reported call: its `tool_call` entry is correlated by it. */
+function reportedIdOf(entry: SessionEntry): string | null {
+  const id = entry.correlationId ?? ''
+  return id.startsWith('call:') ? id.slice('call:'.length) : null
+}
+
 /** The tool of Hemera's an entry is about, whichever end reported it, or null. */
 function hemeraToolOf(entry: SessionEntry): string | null {
   if (entry.kind === 'hemera_tool_call') return hemeraToolCallOf(entry)?.tool ?? null
@@ -194,33 +218,59 @@ export interface FoldedCalls {
  *
  * The call is drawn once, as Hemera's block — distinct from a native call, which is the point —
  * and in the place where the agent reported it, which is when it happened. The agent's entry is
- * kept in the thread and in the Journal; only its drawing is folded. Nothing names one from the
- * other, so they are paired in order, tool by tool: the first report of `fs_read` with the
- * first entry Hemera wrote for `fs_read`. A report whose entry Hemera has not written yet — the call
- * is still running, and Hemera writes when it answers — is drawn as Hemera's block in the state
- * the agent reports.
+ * kept in the thread and in the Journal; only its drawing is folded.
+ *
+ * They are paired by what both carry, first: the agent's identifier of the call, when its request
+ * sent one (Claude Code does), then the idempotency key the agent sent with it. Only what neither
+ * names is paired in order, tool by tool: the first such report of `fs_read` with the first such
+ * entry. Order alone goes wrong as soon as one call has no entry — a retry answered from memory,
+ * a call still running — or calls finish out of order. A report whose entry Hemera has not
+ * written yet is drawn as Hemera's block in the state the agent reports.
  */
 export function foldedCallsOf(entries: readonly SessionEntry[]): FoldedCalls {
-  const reported = new Map<string, SessionEntry[]>()
-  const written = new Map<string, SessionEntry[]>()
+  const reports: { readonly entry: SessionEntry; readonly tool: string }[] = []
+  const written: { readonly entry: SessionEntry; readonly tool: string }[] = []
   for (const entry of entries) {
     const tool = hemeraToolOf(entry)
     if (tool === null) continue
-    const into = entry.kind === 'tool_call' ? reported : written
-    const held = into.get(tool)
-    if (held === undefined) into.set(tool, [entry])
-    else held.push(entry)
+    ;(entry.kind === 'tool_call' ? reports : written).push({ entry, tool })
   }
   const hidden = new Set<string>()
   const inPlaceOf = new Map<string, SessionEntry>()
-  for (const [tool, reports] of reported) {
-    const own = written.get(tool) ?? []
-    for (const [index, report] of reports.entries()) {
-      const answer = own[index]
-      if (answer === undefined) continue
-      hidden.add(answer.id)
-      inPlaceOf.set(report.id, answer)
-    }
+  const pair = (report: SessionEntry, answer: SessionEntry) => {
+    hidden.add(answer.id)
+    inPlaceOf.set(report.id, answer)
+  }
+  const namesOf = (entry: SessionEntry) => readPayload(hemeraCallNamesSchema, entry.payload)
+  const unpaired = (tool: string) =>
+    written.filter((one) => one.tool === tool && !hidden.has(one.entry.id))
+
+  // By the agent's own identifier of the call, which only that call carries.
+  for (const report of reports) {
+    const id = reportedIdOf(report.entry)
+    if (id === null) continue
+    const answer = unpaired(report.tool).find((one) => namesOf(one.entry)?.callId === id)
+    if (answer !== undefined) pair(report.entry, answer.entry)
+  }
+  // By the key the agent sent, which names one call and its retries: the first report under it.
+  for (const report of reports) {
+    if (inPlaceOf.has(report.entry.id)) continue
+    const key = reportedKeyOf(report.entry)
+    if (key === null) continue
+    const answer = unpaired(report.tool).find((one) => namesOf(one.entry)?.key === key)
+    if (answer !== undefined) pair(report.entry, answer.entry)
+  }
+  // In order, among what names nothing either end can match on. A report whose key an entry
+  // already carries is a retry answered from memory, which has no entry of its own.
+  for (const report of reports) {
+    if (inPlaceOf.has(report.entry.id)) continue
+    const key = reportedKeyOf(report.entry)
+    if (key !== null && written.some((one) => namesOf(one.entry)?.key === key)) continue
+    const answer = unpaired(report.tool).find((one) => {
+      const names = namesOf(one.entry)
+      return (names?.callId ?? null) === null && (names?.key ?? null) === null
+    })
+    if (answer !== undefined) pair(report.entry, answer.entry)
   }
   return { hidden, inPlaceOf }
 }
