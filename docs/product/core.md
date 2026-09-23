@@ -616,6 +616,13 @@ permission modes — and, beside them, what the turn used: the reading the agent
 window, with "not provided" for whatever it did not announce. Hemera divides by no window an agent
 never named.
 
+The effort scale marks the level the agent recommends for the current model, and nothing where it
+recommends none. While the user has chosen no effort in the Session, a model change puts the
+agent on the level the new model recommends, so the scale stands on its recommended mark instead
+of on whatever the agent's own settings kept; a model that recommends no level leaves the effort
+where it is. Once the user has chosen an effort in the Session, it is kept across model changes.
+The composer of a Project's Home follows the same rule before the Session exists.
+
 The views surrounding the main surface are closable and mutually exclusive:
 the user opens only one at a time. A working surface can display, as
 needed, a Spec, tasks, a prototype, a diff, a review or a document.
