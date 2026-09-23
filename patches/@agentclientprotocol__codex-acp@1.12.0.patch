@@ -1,0 +1,209 @@
+diff --git a/dist/index.js b/dist/index.js
+index c134fd36ed44f4dccb510f8ac7971f0f7e26aba4..a0180930b90ea78bf846f2d8f7cda772073d415f 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -28159,6 +28159,99 @@ function isUnknownRecord(value) {
+   return typeof value === "object" && value !== null && !Array.isArray(value);
+ }
+ 
++// --- Hemera patch: bare mode -------------------------------------------------
++// A session/new, session/load or session/resume whose _meta carries
++// { "hemera": { "bare": true, "toolServer": "<name>" } } runs Codex with no
++// environment and with Hemera's tools as dynamic tools:
++// - "environments: []" on thread/start and on every turn/start of the thread:
++//   no shell, no apply_patch, no view_image (all gated on an environment);
++// - the HTTP MCP server named toolServer (default "hemera") is taken out of
++//   mcpServers and its tools are handed to thread/start as "dynamicTools",
++//   named "hemera_<tool>": no MCP server exists, so list_mcp_resources,
++//   list_mcp_resource_templates and read_mcp_resource are never registered;
++// - the MCP servers of the user's own configuration are turned off by name;
++// - Codex's "item/tool/call" requests are answered by that server's tools/call.
++// Both thread/start fields are experimental in codex app-server (tried on
++// codex-cli 0.154.0): a Codex upgrade needs the trial again.
++var HEMERA_TOOL_PREFIX = "hemera_";
++var HEMERA_MCP_VERSION = "2025-06-18";
++var hemeraBareThreads = /* @__PURE__ */ new Map();
++function hemeraBareRequest(request) {
++  const bare = request._meta?.hemera;
++  if (bare?.bare !== true) return request;
++  const name = typeof bare.toolServer === "string" ? bare.toolServer : "hemera";
++  const servers = request.mcpServers ?? [];
++  const server = servers.find((mcp) => mcp.name === name && typeof mcp.url === "string");
++  if (!server) throw new Error("Hemera bare mode: no HTTP MCP server named " + name);
++  const headers = Object.fromEntries((server.headers ?? []).map((header) => [header.name, header.value]));
++  return { ...request, mcpServers: servers.filter((mcp) => mcp !== server), hemeraToolServer: { url: server.url, headers } };
++}
++function hemeraPost(server, body, session) {
++  const url = new URL(server.url);
++  const http = require(url.protocol === "https:" ? "node:https" : "node:http");
++  const data = JSON.stringify(body);
++  const headers = { ...server.headers, "content-type": "application/json", accept: "application/json, text/event-stream", "content-length": Buffer.byteLength(data) };
++  if (session?.id) headers["mcp-session-id"] = session.id;
++  if (session?.version) headers["mcp-protocol-version"] = session.version;
++  // node:http rather than fetch: a call may wait on the human for minutes, past undici's timeouts.
++  return new Promise((resolve, reject) => {
++    const request = http.request(url, { method: "POST", headers }, (response) => {
++      let text = "";
++      response.setEncoding("utf8");
++      response.on("data", (chunk) => text += chunk);
++      response.on("error", reject);
++      response.on("end", () => resolve({
++        status: response.statusCode,
++        session: response.headers["mcp-session-id"],
++        sse: String(response.headers["content-type"] ?? "").includes("text/event-stream"),
++        text
++      }));
++    });
++    request.on("error", reject);
++    request.end(data);
++  });
++}
++function hemeraAnswer(reply, id) {
++  const messages = reply.sse ? reply.text.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5))) : reply.text.trim() === "" ? [] : [JSON.parse(reply.text)];
++  const message = messages.find((one) => one.id === id);
++  if (!message) throw new Error("Hemera tool server answered " + reply.status + " without a result");
++  if (message.error) throw new Error(message.error.message);
++  return message.result;
++}
++async function hemeraMcp(server, method, params) {
++  const opened = await hemeraPost(server, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: HEMERA_MCP_VERSION, capabilities: {}, clientInfo: { name: "codex-acp-hemera", version: "1.12.0" } } });
++  const session = { id: opened.session, version: hemeraAnswer(opened, 1).protocolVersion };
++  await hemeraPost(server, { jsonrpc: "2.0", method: "notifications/initialized" }, session);
++  return hemeraAnswer(await hemeraPost(server, { jsonrpc: "2.0", id: 2, method, params }, session), 2);
++}
++async function hemeraDynamicTools(server) {
++  const { tools } = await hemeraMcp(server, "tools/list", {});
++  return tools.map((tool) => ({ type: "function", name: HEMERA_TOOL_PREFIX + tool.name, description: tool.description ?? "", inputSchema: tool.inputSchema }));
++}
++async function hemeraBareConfig(client, config, cwd) {
++  const own = await client.getConfigMcpServerNames(cwd);
++  const off = Object.fromEntries([...own].map((name) => [name, { enabled: false }]));
++  return { ...config, mcp_servers: { ...off, ...config.mcp_servers ?? {} } };
++}
++async function hemeraToolCall(params) {
++  const server = hemeraBareThreads.get(params.threadId);
++  const refused = (text) => ({ success: false, contentItems: [{ type: "inputText", text }] });
++  if (!server || !params.tool.startsWith(HEMERA_TOOL_PREFIX)) return refused("No such tool: " + params.tool);
++  try {
++    const result = await hemeraMcp(server, "tools/call", {
++      name: params.tool.slice(HEMERA_TOOL_PREFIX.length),
++      arguments: params.arguments ?? {},
++      // The call's id, which is also the ACP toolCallId of its report: Hemera pairs the two.
++      _meta: { "hemera/callId": params.callId }
++    });
++    const contentItems = (result.content ?? []).map((block) => block.type === "text" ? { type: "inputText", text: block.text } : block.type === "image" ? { type: "inputImage", imageUrl: "data:" + block.mimeType + ";base64," + block.data } : { type: "inputText", text: JSON.stringify(block) });
++    return { success: result.isError !== true, contentItems };
++  } catch (error) {
++    return refused("Hemera's tool server failed: " + (error instanceof Error ? error.message : String(error)));
++  }
++}
++// --- end of Hemera patch helpers ---------------------------------------------
++
+ // src/CodexAcpClient.ts
+ var CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
+ var OPENAI_PROVIDER_ID = "openai";
+@@ -28530,9 +28623,15 @@ var CodexAcpClient = class {
+   async resumeSession(request, onSubscribed) {
+     const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+     await this.refreshSkills(request.cwd, additionalDirectories);
++    let config = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
++    // Hemera patch: Codex restores the thread's dynamic tools from its rollout; environments go on each turn/start.
++    if (request.hemeraToolServer) {
++      config = await hemeraBareConfig(this, config, request.cwd);
++      hemeraBareThreads.set(request.sessionId, request.hemeraToolServer);
++    }
+     const response = await this.codexClient.threadResume({
+       excludeTurns: true,
+-      config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
++      config,
+       cwd: request.cwd,
+       modelProvider: await this.getResumeModelProvider(),
+       threadId: request.sessionId
+@@ -28565,9 +28664,15 @@ var CodexAcpClient = class {
+   async loadSession(request, onSubscribed) {
+     const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+     await this.refreshSkills(request.cwd, additionalDirectories);
++    let config = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
++    // Hemera patch: Codex restores the thread's dynamic tools from its rollout; environments go on each turn/start.
++    if (request.hemeraToolServer) {
++      config = await hemeraBareConfig(this, config, request.cwd);
++      hemeraBareThreads.set(request.sessionId, request.hemeraToolServer);
++    }
+     const response = await this.codexClient.threadResume({
+       excludeTurns: true,
+-      config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
++      config,
+       cwd: request.cwd,
+       modelProvider: await this.getResumeModelProvider(),
+       threadId: request.sessionId
+@@ -28596,11 +28701,19 @@ var CodexAcpClient = class {
+   async newSession(request) {
+     const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+     await this.refreshSkills(request.cwd, additionalDirectories);
++    const config = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers);
++    // Hemera patch: no environment, Hemera's tools as dynamic tools, the user's MCP servers off.
++    const bare = request.hemeraToolServer ? {
++      config: await hemeraBareConfig(this, config, request.cwd),
++      environments: [],
++      dynamicTools: await hemeraDynamicTools(request.hemeraToolServer)
++    } : { config };
+     const response = await this.codexClient.threadStart({
+-      config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers),
++      ...bare,
+       modelProvider: this.getModelProvider(),
+       cwd: request.cwd
+     });
++    if (request.hemeraToolServer) hemeraBareThreads.set(response.thread.id, request.hemeraToolServer);
+     const codexModels = await this.fetchAvailableModels();
+     if (codexModels.length === 0) {
+       throw new Error("Codex did not return any models");
+@@ -28617,6 +28730,7 @@ var CodexAcpClient = class {
+     };
+   }
+   async closeSession(sessionId) {
++    hemeraBareThreads.delete(sessionId); // Hemera patch
+     try {
+       await this.codexClient.threadUnsubscribe({ threadId: sessionId });
+     } finally {
+@@ -29301,6 +29415,8 @@ var CodexAppServerClient = class {
+       }
+       return await handler.handleUserInput(params);
+     });
++    // Hemera patch: a dynamic tool call goes to Hemera's tool server.
++    this.connection.onRequest(new import_node2.RequestType("item/tool/call"), hemeraToolCall);
+   }
+   onApprovalRequest(threadId, handler) {
+     this.approvalHandlers.set(threadId, handler);
+@@ -29317,6 +29433,8 @@ var CodexAppServerClient = class {
+     return await this.sendRequest({ method: "initialize", params });
+   }
+   async turnStart(params) {
++    // Hemera patch: a resumed thread gets its environment back unless each turn says none.
++    if (hemeraBareThreads.has(params.threadId)) params = { ...params, environments: [] };
+     return await this.sendRequest({ method: "turn/start", params });
+   }
+   async runTurn(params, onTurnStarted) {
+@@ -32721,6 +32839,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+     if (this.providerUpdate !== null) {
+       await this.providerUpdate;
+     }
++    params = hemeraBareRequest(params); // Hemera patch
+     logger.log("Loading session...", { sessionId: params.sessionId });
+     const {
+       sessionId,
+@@ -32745,6 +32864,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+     if (this.providerUpdate !== null) {
+       await this.providerUpdate;
+     }
++    params = hemeraBareRequest(params); // Hemera patch
+     logger.log("Resuming session...", { sessionId: params.sessionId });
+     const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
+     logger.log("Session resumed", {
+@@ -32855,6 +32975,7 @@ Check ${configPath} and project .codex directories, especially their config.toml
+     if (this.providerUpdate !== null) {
+       await this.providerUpdate;
+     }
++    params = hemeraBareRequest(params); // Hemera patch
+     logger.log("Starting new session...");
+     const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
+     logger.log("New session created", {
