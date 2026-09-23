@@ -162,6 +162,13 @@ export interface HemeraToolCallProps {
   className?: string | undefined
 }
 
+/** Whether the summary only says the error again: the same sentence, or one opening with it. */
+function repeats(summary: string, error: string | undefined): boolean {
+  if (error === undefined) return false
+  const said = error.trim()
+  return said !== '' && summary.trim().startsWith(said)
+}
+
 export function HemeraToolCall({
   tool,
   label,
@@ -215,7 +222,9 @@ export function HemeraToolCall({
       }
     >
       {error !== undefined && <p className={status === 'refused' ? REFUSAL : FAILURE}>{error}</p>}
-      <p className={ANSWER}>{summary}</p>
+      {/* Said once (recette 4 of 23 September 2026): a summary that is the error again, or opens
+          with it, is the red line a second time in grey. */}
+      {!repeats(summary, error) && <p className={ANSWER}>{summary}</p>}
       {args !== undefined && args.length > 0 && (
         <dl className={ARGUMENTS}>
           {args.map((argument) => (

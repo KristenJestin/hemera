@@ -276,12 +276,17 @@ export const Running: Story = {
   },
 }
 
-/** A call that failed: the dot says so, and the reason is the first line of the open body. */
+/**
+ * A call that failed: the dot says so, and the reason is the first line of the open body.
+ *
+ * Said once (recette 4 of 23 September 2026): the entry's summary is the error itself, and the
+ * red line is all that is drawn of it.
+ */
 export const Failed: Story = {
   args: {
     tool: 'fs_read',
     status: 'failed',
-    summary: 'Nothing read.',
+    summary: 'src/billing/export.csv does not exist.',
     error: 'src/billing/export.csv does not exist.',
     subject: { text: 'src/billing/export.csv', path: 'src/billing/export.csv' },
     arguments: [{ label: 'path', value: 'src/billing/export.csv' }],
@@ -295,6 +300,7 @@ export const Failed: Story = {
       'true',
     )
     await expect(canvas.getByText(/does not exist/)).toBeVisible()
+    await expect(canvas.getAllByText(/does not exist/)).toHaveLength(1)
   },
 }
 
