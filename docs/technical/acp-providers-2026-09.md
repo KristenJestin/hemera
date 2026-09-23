@@ -261,12 +261,12 @@ platform `qualified` flag is what those declarations say; the real trials of pha
   The wildcard is matched case-insensitively on Windows. The base goes as an embedded resource of
   the first prompt. `$HOME/.opencode`, managed configuration and a remote `.well-known/opencode`
   still load.
-- **Codex** (not qualified): `CODEX_HOME` at a directory of Hemera's with a `config.toml` that
-  turns off about fourteen features, from `web_search` to `shell_tool`, `view_image`,
-  `sleep_tool`, `multi_agent` and `code_mode`. `apply_patch` has no key and the three
-  `*_mcp_resource*` tools appear as soon as an MCP server exists, so no Session is made on it:
-  `sessions.create` refuses it with that reason, and so does a start. Moving `CODEX_HOME` also
-  moves the login (`auth.json`), which a trial that qualifies Codex has to settle first.
+- **Codex** (qualified since 23 September 2026): Hemera's patch of `codex-acp` (`patches/`) reads
+  `_meta.hemera` and starts the thread with `environments: []` — no shell, `apply_patch` or image
+  viewer — and with Hemera's tools as `dynamicTools`, so no MCP server and no `*_mcp_resource*`
+  tool exists; `CODEX_CONFIG` turns off every tool a key reaches. `CODEX_HOME` is left where the
+  user has it, with the login. The two `thread/start` fields are experimental: tried on codex-cli
+  0.154.0 on Windows (`bare-mode-2026-09.md` §2), to be tried again at every upgrade.
 
 ## Consequences for Hemera
 
