@@ -1,6 +1,7 @@
 import { join } from 'node:path'
+import { z } from 'zod'
 
-import { type AgentAdapter, versionIn } from '../adapter.ts'
+import { type AgentAdapter, type Environment, versionIn } from '../adapter.ts'
 
 /**
  * OpenCode, which speaks ACP itself (design D5-02, D5-21).
@@ -39,6 +40,71 @@ const BARE_AGENT = {
   },
 }
 
+/** The two settings of the user's own configuration that name a model, and nothing else of it. */
+const MODELS = z.object({ model: z.string().optional(), small_model: z.string().optional() })
+
+/** The models OpenCode's own interface was last used with, most recent first. */
+const RECENT = z.object({
+  recent: z.array(z.object({ providerID: z.string(), modelID: z.string() })),
+})
+
+/**
+ * A JSONC text as JSON: its comments and its trailing commas gone, its strings untouched.
+ *
+ * OpenCode reads `opencode.jsonc` as well as `opencode.json`, and a comment in the user's file is
+ * not a reason to lose the model it names.
+ */
+export function withoutComments(text: string): string {
+  let out = ''
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]
+    if (char === '"') {
+      // A string is copied whole, escapes included: a `//` inside a URL is not a comment.
+      let end = index + 1
+      while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1
+      out += text.slice(index, end + 1)
+      index = end + 1
+    } else if (text.startsWith('//', index)) {
+      const end = text.indexOf('\n', index)
+      index = end === -1 ? text.length : end
+    } else if (text.startsWith('/*', index)) {
+      const end = text.indexOf('*/', index + 2)
+      index = end === -1 ? text.length : end + 2
+    } else {
+      out += char
+      index += 1
+    }
+  }
+  return out.replaceAll(/,(\s*[}\]])/g, '$1')
+}
+
+/** A text parsed by a schema, or `undefined` when it is not JSON or not that shape. */
+function parsedAs<T>(schema: z.ZodType<T>, text: string | undefined): T | undefined {
+  if (text === undefined) return undefined
+  try {
+    const parsed = schema.safeParse(JSON.parse(withoutComments(text)))
+    return parsed.success ? parsed.data : undefined
+  } catch {
+    // A file the user left half-written is theirs to fix; the agent keeps nothing of it.
+    return undefined
+  }
+}
+
+/** Where OpenCode reads its global configuration: `$XDG_CONFIG_HOME/opencode`, on every platform. */
+const configDirectory = (home: string, env: Environment) =>
+  join(env.XDG_CONFIG_HOME ?? join(home, '.config'), 'opencode')
+
+/** Where OpenCode keeps the models its interface was used with, which bare mode does not move. */
+const stateFile = (home: string, env: Environment) =>
+  join(env.XDG_STATE_HOME ?? join(home, '.local', 'state'), 'opencode', 'model.json')
+
+/** The global configuration files, in the order OpenCode merges them: a later one wins. */
+const configFiles = (home: string, env: Environment) =>
+  ['config.json', 'opencode.json', 'opencode.jsonc'].map((name) =>
+    join(configDirectory(home, env), name),
+  )
+
 export const opencode: AgentAdapter = {
   id: 'opencode',
   label: 'OpenCode',
@@ -76,9 +142,38 @@ export const opencode: AgentAdapter = {
       env: {
         XDG_CONFIG_HOME: input.ownerDirectory,
         OPENCODE_DISABLE_PROJECT_CONFIG: '1',
-        OPENCODE_CONFIG_CONTENT: JSON.stringify(BARE_AGENT),
+        // The user's model first, Hemera's agent on top of it: the redirection above hides the
+        // file that named it, and the agent's own default may be a model it refuses to serve
+        // outside its interface. A model chosen in the composer is set after `session/new`, and
+        // wins over this one.
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...input.own, ...BARE_AGENT }),
       },
       files: [],
     }),
   }),
+  /**
+   * The model the user works with, which `XDG_CONFIG_HOME` pointed at Hemera's directory would
+   * lose (D6-09).
+   *
+   * `model` and `small_model` out of the user's own global configuration, and nothing else of
+   * it: the file may hold a provider's key. Without a `model` there, the one the user last picked
+   * in OpenCode's own interface — which the interface opens on, while `opencode acp` falls back
+   * on the first free model of its own provider, a model it refuses to serve outside OpenCode.
+   */
+  own: {
+    files: (home, env) => [...configFiles(home, env), stateFile(home, env)],
+    kept: (texts) => {
+      const kept: Record<string, string> = {}
+      for (const text of texts.slice(0, -1)) {
+        const models = parsedAs(MODELS, text)
+        if (models?.model !== undefined) kept.model = models.model
+        if (models?.small_model !== undefined) kept.small_model = models.small_model
+      }
+      if (kept.model === undefined) {
+        const last = parsedAs(RECENT, texts.at(-1))?.recent[0]
+        if (last !== undefined) kept.model = `${last.providerID}/${last.modelID}`
+      }
+      return kept
+    },
+  },
 }

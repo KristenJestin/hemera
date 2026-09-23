@@ -839,6 +839,7 @@ describe('An agent that cannot be asked', () => {
     bundled: (packageName: string) => Effect.succeed(join('/opt/hemera', packageName, 'index.js')),
     readVersion: () => Effect.succeed('1.0.0'),
     holds: () => Effect.succeed(false),
+    read: () => Effect.succeed(undefined),
   })
 
   test('An agent not signed in is refused before any process starts', async () => {
@@ -1158,6 +1159,7 @@ describe('A turn announces its start before its first chunk', () => {
         Effect.succeed(join('/opt/hemera', packageName, 'index.js')),
       readVersion: () => Effect.succeed('1.0.0'),
       holds: () => Effect.succeed(false),
+      read: () => Effect.succeed(undefined),
     })
     const agent = fakeAgent({})
     const window = watching()

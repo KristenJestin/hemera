@@ -271,6 +271,7 @@ const machineWith = (env: Readonly<Record<string, string>>) =>
       Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
     readVersion: () => Effect.succeed('1.0.0'),
     holds: () => Effect.succeed(true),
+    read: () => Effect.succeed(undefined),
   })
 
 /** What Claude Code's session was configured with on `_meta`, as far as its environment goes. */
@@ -319,6 +320,97 @@ describe("A bare Claude session still finds the user's login", () => {
           join(name === 'moved' ? own : join('/home/ana', '.claude'), '.credentials.json'),
         ])
       }
+    } finally {
+      rmSync(places.data, { recursive: true, force: true })
+      rmSync(places.workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('A bare OpenCode session starts on the model the user uses', () => {
+  /** OpenCode's own files on a machine, as `own` names them: the configuration, then the state. */
+  const ownOn = (home: string, env: Readonly<Record<string, string>>) =>
+    opencode.own?.files(home, env) ?? []
+
+  test("the model and the small model of the user's configuration, and no other setting", () => {
+    const files = ownOn('/home/ana', {})
+    expect(files).toEqual([
+      join('/home/ana', '.config', 'opencode', 'config.json'),
+      join('/home/ana', '.config', 'opencode', 'opencode.json'),
+      join('/home/ana', '.config', 'opencode', 'opencode.jsonc'),
+      join('/home/ana', '.local', 'state', 'opencode', 'model.json'),
+    ])
+    const kept = opencode.own?.kept([
+      undefined,
+      undefined,
+      `{
+        // the user's own comment
+        "model": "anthropic/claude-sonnet-4", /* and another */
+        "small_model": "anthropic/claude-haiku",
+        "provider": { "anthropic": { "options": { "apiKey": "sk-secret", "baseURL": "https://a//b" } } },
+      }`,
+      '{"recent":[{"providerID":"opencode-go","modelID":"kimi-k3"}]}',
+    ])
+    // The configuration wins over the last model of the interface, and the key stays where it was.
+    expect(kept).toEqual({
+      model: 'anthropic/claude-sonnet-4',
+      small_model: 'anthropic/claude-haiku',
+    })
+  })
+
+  test('without a model in the configuration, the one last picked in OpenCode itself', () => {
+    const kept = opencode.own?.kept([
+      undefined,
+      undefined,
+      '{ "$schema": "https://opencode.ai/config.json" }',
+      '{"recent":[{"providerID":"opencode-go","modelID":"deepseek-v4.1-flash"},{"providerID":"opencode","modelID":"x"}]}',
+    ])
+    expect(kept).toEqual({ model: 'opencode-go/deepseek-v4.1-flash' })
+    // Nothing at all is nothing kept, and a broken file is the same.
+    expect(opencode.own?.kept([undefined, '{ "model": ', undefined, undefined])).toEqual({})
+  })
+
+  test("the files are read where the user's own XDG directories say", () => {
+    expect(ownOn('/home/ana', { XDG_CONFIG_HOME: '/cfg', XDG_STATE_HOME: '/state' })).toEqual([
+      join('/cfg', 'opencode', 'config.json'),
+      join('/cfg', 'opencode', 'opencode.json'),
+      join('/cfg', 'opencode', 'opencode.jsonc'),
+      join('/state', 'opencode', 'model.json'),
+    ])
+  })
+
+  test("the agent is handed that model under Hemera's own configuration", async () => {
+    const places = folders()
+    const agent = fakeAgent()
+    const configuration = join('/home/ana', '.config', 'opencode', 'opencode.json')
+    const machine = Layer.succeed(MachineEnvironment, {
+      home: '/home/ana',
+      env: {},
+      locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
+      bundled: (packageName: string) =>
+        Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
+      readVersion: () => Effect.succeed('1.0.0'),
+      holds: () => Effect.succeed(true),
+      read: (path: string) =>
+        Effect.succeed(
+          path === configuration ? '{"model":"anthropic/claude-sonnet-4"}' : undefined,
+        ),
+    })
+    try {
+      await application(places.data, NoNotices, machine)(agent)(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime
+          const session = yield* aSessionOn(places.workspace, 'opencode')
+          yield* runtime.start(session.id)
+        }),
+      )
+
+      const content = z
+        .object({ model: z.string(), default_agent: z.string() })
+        .parse(JSON.parse(agent.environments[0]?.OPENCODE_CONFIG_CONTENT ?? '{}'))
+      expect(content).toEqual({ model: 'anthropic/claude-sonnet-4', default_agent: 'hemera' })
+      // The configuration directory is still Hemera's: only the model came across.
+      expect(agent.environments[0]?.XDG_CONFIG_HOME).toBe(join(places.data, 'agents', 'opencode'))
     } finally {
       rmSync(places.data, { recursive: true, force: true })
       rmSync(places.workspace, { recursive: true, force: true })

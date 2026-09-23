@@ -89,6 +89,7 @@ function machineOf(
       sought.push(...paths)
       return Effect.succeed(paths.some((path) => logins.includes(path)))
     },
+    read: () => Effect.succeed(undefined),
   })
   return { layer, asked, logins: sought, resolved }
 }

@@ -74,6 +74,7 @@ export const machine = Layer.succeed(MachineEnvironment, {
     Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
   readVersion: () => Effect.succeed('1.0.0'),
   holds: () => Effect.succeed(true),
+  read: () => Effect.succeed(undefined),
 })
 
 /** One push the engine made, as the window would have received it. */

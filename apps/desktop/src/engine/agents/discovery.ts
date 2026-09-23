@@ -158,6 +158,11 @@ export interface ResolvedAgent {
   readonly env?: ChildEnvironment
   /** Where what is started resolved: the adapter's executable, or the agent's own command. */
   readonly path: string
+  /**
+   * What of the user's own choices the agent keeps once it runs bare: the model they work with,
+   * read out of their own files (D6-09). Empty for an agent that declares none.
+   */
+  readonly own: Readonly<Record<string, string>>
 }
 
 /** Raised when a Session is asked for an agent this machine does not have. */
@@ -232,6 +237,11 @@ export interface MachineEnvironmentService {
   readonly env: Environment
   /** Whether any of these files is there. None of them is ever opened. */
   readonly holds: (paths: readonly string[]) => Effect.Effect<boolean>
+  /**
+   * The text of one of the user's own files, or `undefined` when it is not there or cannot be
+   * read. Only ever asked for the files an adapter names as its own settings (D6-09).
+   */
+  readonly read: (path: string) => Effect.Effect<string | undefined>
 }
 
 export class MachineEnvironment extends Context.Service<
@@ -337,6 +347,19 @@ export const discoveryLayer = Layer.effect(
         }
       })
 
+    /**
+     * What of the user's own choices this agent keeps once bare (D6-09): its files read, and
+     * only the settings the adapter keeps taken out of them, so that nothing else of the user's
+     * configuration travels any further than this.
+     */
+    const ownOf = (adapter: AgentAdapter): Effect.Effect<Readonly<Record<string, string>>> =>
+      Effect.gen(function* () {
+        const own = adapter.own
+        if (own === undefined) return {}
+        const texts = yield* Effect.forEach(own.files(machine.home, machine.env), machine.read)
+        return own.kept(texts)
+      })
+
     return {
       // The three commands are asked at once: the page waits for the slowest of them, which is
       // the difference between one command that will not answer and three of them in a row.
@@ -353,6 +376,7 @@ export const discoveryLayer = Layer.effect(
           if (!found.found) return yield* Effect.fail(new AgentNotInstalledError({ id }))
           if (!found.authenticated) return yield* Effect.fail(new AgentNotSignedInError({ id }))
 
+          const own = yield* ownOf(adapter)
           const acp = adapter.acp
           if (acp.from === 'agent') {
             // The agent speaks the protocol itself: what starts it is its own command with its
@@ -365,6 +389,7 @@ export const discoveryLayer = Layer.effect(
               command: path,
               args: acp.args,
               path,
+              own,
             } satisfies ResolvedAgent
           }
 
@@ -390,6 +415,7 @@ export const discoveryLayer = Layer.effect(
               [acp.agentVariable]: found.path ?? adapter.command,
             },
             path: executable,
+            own,
           } satisfies ResolvedAgent
         }),
     } satisfies DiscoveryService
@@ -579,4 +605,14 @@ export const machineEnvironmentLayer = Layer.succeed(MachineEnvironment, {
   bundled: (packageName) => Effect.sync(() => executableOf(packageName)),
   readVersion: (command) => Effect.promise((signal) => versionOf(command, signal)),
   holds: (paths) => Effect.sync(() => paths.some((path) => existsSync(path))),
+  read: (path) =>
+    Effect.sync(() => {
+      try {
+        return readFileSync(path, 'utf8')
+      } catch {
+        // A file that is not there is the usual answer, and one that cannot be read is the same
+        // one: the agent keeps nothing of it.
+        return undefined
+      }
+    }),
 })

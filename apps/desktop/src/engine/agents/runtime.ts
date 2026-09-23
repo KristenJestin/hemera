@@ -1378,6 +1378,7 @@ export const runtimeLayer = Layer.effect(
         const bare = yield* bareOptionsOf(resolved.adapter, globalThis.process.platform, {
           ownerDirectory: directory,
           base: CONTEXT_BASE,
+          own: resolved.own,
         }).pipe(
           Effect.mapError(
             (refused) =>

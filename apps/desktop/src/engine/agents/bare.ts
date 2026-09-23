@@ -83,6 +83,11 @@ export type BareInput = {
   readonly ownerDirectory: string
   /** The base the Context provides, the one instruction a Session starts with (D6-07). */
   readonly base: string
+  /**
+   * What of the user's own choices the agent keeps, as its adapter read them out of the user's
+   * files: the model they work with, which the redirection above would otherwise lose (D6-09).
+   */
+  readonly own?: Readonly<Record<string, string>>
 }
 
 /**

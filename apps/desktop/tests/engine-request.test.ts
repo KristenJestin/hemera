@@ -85,6 +85,7 @@ function running<A, E>(
       bundled: () => Effect.succeed('/opt/hemera/node_modules/adapter/dist/index.js'),
       readVersion: () => Effect.succeed('1.0.0'),
       holds: () => Effect.succeed(true),
+      read: () => Effect.succeed(undefined),
     }),
     fakeSupervisor(fakeAgent()),
     NoNotices,
