@@ -4,8 +4,8 @@
  * View types only: the words, the counts and the states the panel shows, already decided. The
  * domain — the gate as a pure function, the protocol, the revisions — arrives with phase 1 in
  * `@hemera/core`, and the design system imports nothing of Hemera: the application turns the
- * one into the other. Nothing here computes a rule of the product; the one function in this
- * file is the order the outline reads a type's sections in, which is a question of layout.
+ * one into the other. Nothing here computes a rule of the product; the two functions in this
+ * file say which sections a type's document shows and in which words an answer reads.
  */
 
 /** The three contracts a Spec can be written under (core.md, "Spec types"). */
@@ -14,7 +14,7 @@ export type SpecType = 'feature' | 'bug' | 'maintenance'
 /** The two statuses this lot writes; the others are declared by the domain and never drawn yet. */
 export type SpecStatus = 'draft' | 'ready'
 
-/** The four phases of the `define` protocol, in the order the rail reads them. */
+/** The four phases of the `define` protocol, in their order; `prototype` is not drawn in v1. */
 export type PhaseName = 'shape' | 'plan' | 'decompose' | 'prototype'
 
 /**
@@ -42,11 +42,14 @@ export type SectionName =
   | 'invariants'
   | 'plan'
 
-/** What the stage can show: one section, or one of the three lists. */
-export type StageItem = SectionName | 'stories' | 'tasks' | 'questions'
+/**
+ * A part of the document a link can lead to and the focus can rest on: one section, or one of
+ * the three lists.
+ */
+export type SpecTarget = SectionName | 'stories' | 'tasks' | 'questions'
 
 /**
- * The mark an outline row wears: nothing written yet, written by the agent, edited by you, out
+ * The mark in the margin of a part: nothing written yet, written by the agent, edited by you, out
  * of date after a rework, in conflict with an unsaved text of yours, or being written right now.
  */
 export type Mark = 'empty' | 'agent' | 'human' | 'stale' | 'conflict' | 'writing'
@@ -114,17 +117,44 @@ export interface TaskView {
   executor: Executor
 }
 
-export interface QuestionView {
+/** One answer the agent offers to a question; one of them may be the one it recommends. */
+export interface SpecQuestionOption {
+  id: string
+  label: string
+  recommended?: boolean | undefined
+}
+
+/**
+ * The answer given: one of the options, or words of the reader's own — "Something else…".
+ */
+export interface SpecAnswer {
+  optionId?: string | undefined
+  text?: string | undefined
+}
+
+/**
+ * A question of the Spec (revision 2 of the brief): asked in the chat, where the answer is given,
+ * and kept in the document as a register of what was asked and what was decided.
+ */
+export interface SpecQuestionView {
   id: string
   body: string
-  /** What the agent recommends, said with the question as `shape` asks it to. */
-  recommendation?: string | undefined
   blocking: boolean
   phase: PhaseName
+  /** The answers the agent offers, one of them recommended, as `shape` asks it to. */
+  options: readonly SpecQuestionOption[]
   /** The stories it bears on. */
   stories?: string[] | undefined
-  /** The answer, once there is one: its words and who gave it when, already written. */
-  answer?: { text: string; by: string } | undefined
+  /** The answer, or `null` while it is open. */
+  answer: SpecAnswer | null
+}
+
+/** What an answer says, in words: the label of the option chosen, or the reader's own text. */
+export function answerText(question: SpecQuestionView): string | null {
+  const answer = question.answer
+  if (answer === null) return null
+  const chosen = question.options.find((option) => option.id === answer.optionId)
+  return chosen?.label ?? answer.text ?? null
 }
 
 /** The seven checks of the ready gate, in the order the bar draws them (D7-10). */
@@ -157,12 +187,12 @@ export interface GateCheckView {
 /**
  * One thing left before ready, said as a link to where it is fixed.
  *
- * The attestation has no place on the stage — it is the agent's to give, in the thread — so an
+ * The attestation has no part in the document — it is the agent's to give, in the thread — so an
  * item may name no target, and is then said without a link.
  */
 export interface ReadinessItem {
   label: string
-  target?: StageItem | undefined
+  target?: SpecTarget | undefined
 }
 
 export interface ReadinessView {
@@ -194,31 +224,26 @@ export interface SpecView {
   revision: number
   /** Every revision, newest first; the picker is drawn only when there is more than one. */
   revisions: RevisionView[]
+  /** The state of each phase, which the group headings of the document wear. */
   phases: PhaseView[]
-  /** The one sentence under the rail: `Plan · the agent is writing the plan`. */
+  /** The one sentence under the head: `Plan · the agent is writing the plan`. */
   now: string
-  /** The sections of the revision; the outline draws the ones the type's contract names. */
+  /** Where the agent is writing now, which the document highlights and scrolls to. */
+  focus?: SpecTarget | undefined
+  /** The sections of the revision; the document draws the ones the type's contract names. */
   sections: SectionView[]
   stories: StoryView[]
   storiesMark: Mark
   tasks: TaskView[]
   tasksMark: Mark
-  questions: QuestionView[]
+  questions: SpecQuestionView[]
   questionsMark: Mark
   readiness: ReadinessView
   /** When it was frozen, already written: `23 Sep`. Present on a `ready` Spec only. */
   frozenOn?: string | undefined
 }
 
-/** A draft of the Project, as the empty `define` Session offers it to join. */
-export interface DraftSpecView {
-  key: string
-  title: string
-  /** The Session that writes it. */
-  writer: string
-}
-
-/** How each section is named on the outline and the stage. */
+/** How each section is named in the document. */
 export const SECTION_TITLES: Record<SectionName, string> = {
   problem: 'Problem',
   expected_outcome: 'Expected outcome',
@@ -230,7 +255,7 @@ export const SECTION_TITLES: Record<SectionName, string> = {
   plan: 'Plan',
 }
 
-/** How the phases are named on the rail. */
+/** How the phases are named on the group headings of the document. */
 export const PHASE_TITLES: Record<PhaseName, string> = {
   shape: 'Shape',
   plan: 'Plan',
@@ -249,11 +274,11 @@ const OWN: Record<SpecType, SectionName> = {
 }
 
 /**
- * The sections the outline reads, in order, for a type: the base, the type's own, the plan.
+ * The sections `shape` writes, in order, for a type: the base, then the type's own.
  *
- * A section of another type is never drawn — a `bug` has no `Behaviour` row — even when a type
+ * A section of another type is never drawn — a `bug` has no `Behaviour` — even when a type
  * change left one in the revision: D7-06 keeps it, folded and ignored, and folded here is gone.
  */
-export function sectionsOf(type: SpecType): SectionName[] {
-  return [...BASE, OWN[type], 'plan']
+export function shapedSectionsOf(type: SpecType): SectionName[] {
+  return [...BASE, OWN[type]]
 }

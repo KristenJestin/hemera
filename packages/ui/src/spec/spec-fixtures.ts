@@ -1,13 +1,12 @@
 import type {
-  DraftSpecView,
   GateCheck,
   GateCheckView,
   PhaseState,
   PhaseView,
-  QuestionView,
   ReadinessItem,
   ReadinessView,
   SectionView,
+  SpecQuestionView,
   SpecView,
   StoryView,
   TaskView,
@@ -173,24 +172,46 @@ export const TASKS: TaskView[] = [
   },
 ]
 
-const CREDIT_NOTES: QuestionView = {
+export const CREDIT_NOTES: SpecQuestionView = {
   id: 'q-credit-notes',
   body: 'Credit notes: negative rows in the same file, or left out of the export?',
-  recommendation: 'negative rows, so the file total matches the ledger.',
   blocking: true,
   phase: 'plan',
   stories: ['S2'],
+  options: [
+    { id: 'negative', label: 'Negative rows in the same file', recommended: true },
+    { id: 'separate', label: 'A second file for credit notes' },
+    { id: 'omitted', label: 'Left out of the export' },
+  ],
+  answer: null,
 }
 
-const WHICH_DATE: QuestionView = {
+const WHICH_DATE: SpecQuestionView = {
   id: 'q-which-date',
   body: 'Which date decides the month: the issue date or the payment date?',
   blocking: true,
   phase: 'shape',
-  answer: { text: 'Issue date', by: 'you, 10:36' },
+  options: [
+    { id: 'issue', label: 'The issue date', recommended: true },
+    { id: 'payment', label: 'The payment date' },
+  ],
+  answer: { optionId: 'issue' },
 }
 
-export const QUESTIONS: QuestionView[] = [CREDIT_NOTES, WHICH_DATE]
+export const QUESTIONS: SpecQuestionView[] = [CREDIT_NOTES, WHICH_DATE]
+
+/** The rounding question of the bug, open. */
+export const ROUNDING: SpecQuestionView = {
+  id: 'q-rounding',
+  body: 'Is the total the sum of the lines as printed, or one rounding of the raw amounts?',
+  blocking: true,
+  phase: 'shape',
+  options: [
+    { id: 'lines', label: 'The sum of the lines as printed', recommended: true },
+    { id: 'raw', label: 'One rounding of the raw amounts' },
+  ],
+  answer: null,
+}
 
 /** The revisions of ATL-7 once it has been frozen at 2. */
 const FROZEN_REVISIONS = [
@@ -227,6 +248,7 @@ export const MID_PLAN: SpecView = {
   revisions: [{ number: 1, detail: 'current, draft' }],
   phases: phases('finished', 'open', 'pending'),
   now: 'Plan · the agent is writing the plan',
+  focus: 'plan',
   sections: [PROBLEM, OUTCOME, SCOPE, VERIFICATION, BEHAVIOUR, PLAN_WRITING],
   stories: STORIES,
   storiesMark: 'agent',
@@ -249,7 +271,8 @@ export const BUG: SpecView = {
   revision: 1,
   revisions: [{ number: 1, detail: 'current, draft' }],
   phases: phases('open', 'pending', 'pending'),
-  now: 'Shape · waiting for your answer on one question',
+  now: 'Shape · waiting for your answer',
+  focus: 'reproduction',
   sections: [
     {
       name: 'problem',
@@ -282,15 +305,7 @@ export const BUG: SpecView = {
   storiesMark: 'empty',
   tasks: [],
   tasksMark: 'empty',
-  questions: [
-    {
-      id: 'q-rounding',
-      body: 'Is the total the sum of the lines as printed, or one rounding of the raw amounts?',
-      recommendation: 'the sum of the lines: it is what the PDF prints today.',
-      blocking: true,
-      phase: 'shape',
-    },
-  ],
+  questions: [ROUNDING],
   questionsMark: 'agent',
   readiness: gate(
     {
@@ -315,10 +330,11 @@ export const GATE_FULL: SpecView = {
   ...MID_PLAN,
   phases: phases('finished', 'finished', 'finished'),
   now: 'Decompose · finished, the agent attests the contract is complete',
+  focus: 'tasks',
   sections: [PROBLEM, OUTCOME, SCOPE, VERIFICATION, BEHAVIOUR, PLAN],
   tasks: TASKS,
   tasksMark: 'agent',
-  questions: [{ ...CREDIT_NOTES, answer: { text: 'Negative rows', by: 'you, 10:52' } }, WHICH_DATE],
+  questions: [{ ...CREDIT_NOTES, answer: { optionId: 'negative' } }, WHICH_DATE],
   readiness: FULL_GATE,
 }
 
@@ -329,6 +345,7 @@ export const READY: SpecView = {
   revision: 2,
   revisions: FROZEN_REVISIONS,
   now: 'Ready · frozen at revision 2, a build can start from it',
+  focus: undefined,
   frozenOn: '23 Sep',
 }
 
@@ -340,6 +357,7 @@ export const READER: SpecView = {
   ...MID_PLAN,
   phases: phases('finished', 'finished', 'open'),
   now: 'Decompose · the agent of the writer is splitting the tasks',
+  focus: 'tasks',
   sections: [PROBLEM, OUTCOME, SCOPE, VERIFICATION, BEHAVIOUR, PLAN],
   tasks: TASKS.slice(0, 2).concat(TASKS[3]!),
   tasksMark: 'writing',
@@ -372,6 +390,7 @@ const SCOPE_THEIRS =
 export const CONFLICT: SpecView = {
   ...MID_PLAN,
   now: 'Plan · the agent rewrote Scope while you were editing it',
+  focus: 'scope',
   sections: [
     PROBLEM,
     OUTCOME,
@@ -403,6 +422,7 @@ export const STALE: SpecView = {
   ],
   phases: phases('finished', 'stale', 'stale'),
   now: 'Rework · the agent re-declares each phase',
+  focus: 'plan',
   sections: [
     PROBLEM,
     OUTCOME,
@@ -431,6 +451,7 @@ export const MAINTENANCE: SpecView = {
   revisions: [{ number: 1, detail: 'current, draft' }],
   phases: phases('finished', 'open', 'pending'),
   now: 'Plan · the agent is reading the storage adapter',
+  focus: 'invariants',
   sections: [
     {
       name: 'problem',
@@ -489,17 +510,6 @@ export const MAINTENANCE: SpecView = {
   ),
 }
 
-/** The drafts of Atlas an empty `define` Session can join, and the Session writing each. */
-export const DRAFTS: DraftSpecView[] = [
-  {
-    key: 'ATL-12',
-    title: 'Totals off by a cent on multi-currency invoices',
-    writer: 'Rounding bug',
-  },
-  { key: 'ATL-7', title: 'CSV invoice export', writer: 'Spec CSV' },
-  { key: 'ATL-9', title: 'Full-text search in the journal', writer: 'Search scope' },
-]
-
 /**
  * The feature one answer away from ready: every phase finished and attested, the tasks written,
  * and the credit-note question still open. Answering it is what fills the bar.
@@ -507,8 +517,55 @@ export const DRAFTS: DraftSpecView[] = [
 export const ONE_QUESTION_LEFT: SpecView = {
   ...GATE_FULL,
   now: 'Decompose · finished, one question is still yours',
+  focus: 'questions',
   questions: QUESTIONS,
   readiness: gate({ questions: 'questions · 1 blocking' }, [
     { label: 'the credit-note question', target: 'questions' },
   ]),
+}
+
+/**
+ * The Spec a `free` Session has just created from its conversation: `shape` open, the agent
+ * writing the problem, nothing else written yet.
+ */
+export const JUST_CREATED: SpecView = {
+  key: 'ATL-7',
+  title: 'CSV invoice export',
+  type: 'feature',
+  status: 'draft',
+  revision: 1,
+  revisions: [{ number: 1, detail: 'current, draft' }],
+  phases: phases('open', 'pending', 'pending'),
+  now: 'Shape · the agent is writing the problem',
+  focus: 'problem',
+  sections: [
+    {
+      name: 'problem',
+      body: 'Accountants rebuild each month of invoices by hand in their ledger.',
+      version: 1,
+      author: 'agent',
+      mark: 'writing',
+    },
+  ],
+  stories: [],
+  storiesMark: 'empty',
+  tasks: [],
+  tasksMark: 'empty',
+  questions: [],
+  questionsMark: 'empty',
+  readiness: gate(
+    {
+      contract: 'contract · outcome, scope, verification, behaviour',
+      coverage: 'coverage · no task yet',
+      phases: 'phases · shape open',
+      attestation: 'attestation · not given',
+    },
+    [
+      { label: 'the expected outcome', target: 'expected_outcome' },
+      { label: 'the scope', target: 'scope' },
+      { label: 'the verification', target: 'verification' },
+      { label: 'the tasks', target: 'tasks' },
+      { label: 'the attestation' },
+    ],
+  ),
 }
