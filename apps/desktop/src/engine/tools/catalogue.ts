@@ -30,9 +30,10 @@ import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 
+import { HeldWords } from '../agents/held.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
-import { Sessions } from '../sessions.ts'
+import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Database } from '../storage/database.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
@@ -193,7 +194,7 @@ function describeSearch(result: SearchResult, query: string): string {
 export const toolCatalogueLayer: Layer.Layer<
   ToolCatalogue,
   never,
-  Projects | Sessions | Commands | ToolAccess | ToolPermissions | Database
+  Projects | Sessions | Commands | ToolAccess | ToolPermissions | HeldWords | Database
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -203,6 +204,16 @@ export const toolCatalogueLayer: Layer.Layer<
     const permissions = yield* ToolPermissions
     const database = yield* Database
     const access = yield* ToolAccess
+    const held = yield* HeldWords
+
+    /**
+     * One entry of a call written into its Session's thread, below what the agent said before it.
+     *
+     * The runtime holds a message's words until its timer writes them (Decided 10 of #17): a call
+     * is written after them, because the agent asked for it after saying them.
+     */
+    const inThread = (sessionId: string, entry: ThreadWrite) =>
+      held.flushed(sessionId).pipe(Effect.andThen(sessions.write(sessionId, entry)))
 
     /**
      * The answers already given, per Session and by tool and key, so a retry is answered and not
@@ -265,20 +276,18 @@ export const toolCatalogueLayer: Layer.Layer<
           paths: answer.paths,
           arguments: JSON.stringify(asked.arguments).slice(0, ARGUMENTS_KEPT),
         })
-        yield* sessions
-          .write(asked.sessionId, {
-            role: 'agent',
-            kind: 'hemera_tool_call',
-            body: answer.summary,
-            payload,
-            correlationId: asked.key === null ? null : `tool:${asked.tool}:${asked.key}`,
-            state,
-          })
-          .pipe(
-            // A thread that cannot be written is a Session that went away while the call was
-            // running: the answer is still the answer, and losing the line is not losing it.
-            Effect.catch(() => Effect.void),
-          )
+        yield* inThread(asked.sessionId, {
+          role: 'agent',
+          kind: 'hemera_tool_call',
+          body: answer.summary,
+          payload,
+          correlationId: asked.key === null ? null : `tool:${asked.tool}:${asked.key}`,
+          state,
+        }).pipe(
+          // A thread that cannot be written is a Session that went away while the call was
+          // running: the answer is still the answer, and losing the line is not losing it.
+          Effect.catch(() => Effect.void),
+        )
         yield* withDatabase(
           mutate('recording a tool call', () =>
             Effect.succeed({
@@ -380,24 +389,22 @@ export const toolCatalogueLayer: Layer.Layer<
         // and nothing about it is remembered (D6-05). The request and the decision are two rows
         // under two correlations, so neither is written over the other.
         const request = (state: string) =>
-          sessions
-            .write(asked.sessionId, {
-              role: 'hemera',
-              kind: 'permission_request',
-              body,
-              payload: JSON.stringify({
-                toolCallId: id,
-                options: OUTSIDE_OPTIONS,
-                tool: asked.tool,
-                named,
-                resolved: where,
-                root,
-                line,
-              }),
-              correlationId: `perm:${id}`,
-              state,
-            })
-            .pipe(Effect.catch(() => Effect.void))
+          inThread(asked.sessionId, {
+            role: 'hemera',
+            kind: 'permission_request',
+            body,
+            payload: JSON.stringify({
+              toolCallId: id,
+              options: OUTSIDE_OPTIONS,
+              tool: asked.tool,
+              named,
+              resolved: where,
+              root,
+              line,
+            }),
+            correlationId: `perm:${id}`,
+            state,
+          }).pipe(Effect.catch(() => Effect.void))
 
         yield* request('pending')
         const answer = yield* permissions.askOutside({
@@ -408,26 +415,24 @@ export const toolCatalogueLayer: Layer.Layer<
           root,
         })
         yield* request(answer === 'allowed' ? 'decided' : 'refused')
-        yield* sessions
-          .write(asked.sessionId, {
-            role: 'user',
-            kind: 'permission_decision',
-            body:
-              answer === 'allowed'
-                ? `you allowed ${asked.tool} to act on ${where}`
-                : `you refused ${asked.tool} on ${where}`,
-            payload: JSON.stringify({
-              toolCallId: id,
-              optionId: answer === 'allowed' ? 'allowed' : null,
-              tool: asked.tool,
-              named,
-              resolved: where,
-              answer,
-            }),
-            correlationId: `decision:${id}`,
-            state: answer === 'allowed' ? 'completed' : 'refused',
-          })
-          .pipe(Effect.catch(() => Effect.void))
+        yield* inThread(asked.sessionId, {
+          role: 'user',
+          kind: 'permission_decision',
+          body:
+            answer === 'allowed'
+              ? `you allowed ${asked.tool} to act on ${where}`
+              : `you refused ${asked.tool} on ${where}`,
+          payload: JSON.stringify({
+            toolCallId: id,
+            optionId: answer === 'allowed' ? 'allowed' : null,
+            tool: asked.tool,
+            named,
+            resolved: where,
+            answer,
+          }),
+          correlationId: `decision:${id}`,
+          state: answer === 'allowed' ? 'completed' : 'refused',
+        }).pipe(Effect.catch(() => Effect.void))
         if (answer === 'refused') {
           return {
             allowed: false as const,

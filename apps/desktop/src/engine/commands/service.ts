@@ -36,6 +36,7 @@ import {
 import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
 
+import { HeldWords } from '../agents/held.ts'
 import { ProcessSupervisor } from '../agents/supervisor.ts'
 import { Sessions } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
@@ -227,6 +228,7 @@ export const commandsLayer = Layer.effect(
     // Named for what it is used for here, because `sessions` is already the table of rows this
     // service joins on: what a run writes is one entry of the Session's thread.
     const thread = yield* Sessions
+    const held = yield* HeldWords
     /** The engine's own scope: everything started here dies when the engine does. */
     const scope = yield* Effect.scope
     const live = new Map<string, Live>()
@@ -312,31 +314,39 @@ export const commandsLayer = Layer.effect(
      *
      * A write that fails is a Session that went away while its command was running: the run is
      * unaffected, because what it printed and how it ended are its row's, not the thread's.
+     *
+     * What the agent said before the run started is written first: the runtime holds a message's
+     * words until its timer writes them (Decided 10 of #17), and a run is below them in the thread.
      */
     const writeEntry = (id: string, one: Live) =>
-      thread
-        .write(one.sessionId, {
-          role: 'hemera',
-          kind: 'command_run',
-          body: one.name,
-          payload: JSON.stringify({
-            runId: id,
-            name: one.name,
-            line: one.line,
-            kind: one.kind,
-            state: one.state,
-            cwd: one.cwd,
-            url: one.url,
-            exitCode: one.exitCode,
-            startedBy: one.startedBy,
-            // A one-off is a line the agent wrote rather than a command of the catalogue, and
-            // the block says so: what is not in the catalogue cannot be run again by name.
-            oneOff: one.commandId === null,
-          }),
-          correlationId: `run:${id}`,
-          turnId: null,
-          state: one.state,
-        })
+      held
+        .flushed(one.sessionId)
+        .pipe(
+          Effect.andThen(
+            thread.write(one.sessionId, {
+              role: 'hemera',
+              kind: 'command_run',
+              body: one.name,
+              payload: JSON.stringify({
+                runId: id,
+                name: one.name,
+                line: one.line,
+                kind: one.kind,
+                state: one.state,
+                cwd: one.cwd,
+                url: one.url,
+                exitCode: one.exitCode,
+                startedBy: one.startedBy,
+                // A one-off is a line the agent wrote rather than a command of the catalogue, and
+                // the block says so: what is not in the catalogue cannot be run again by name.
+                oneOff: one.commandId === null,
+              }),
+              correlationId: `run:${id}`,
+              turnId: null,
+              state: one.state,
+            }),
+          ),
+        )
         .pipe(Effect.catch(() => Effect.void))
 
     /** The row of a run and its entry in the thread, written as it starts and when it ends. */

@@ -18,6 +18,7 @@ import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
+import { heldWordsLayer } from './agents/held.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
 import { clockLayer, poolLayer } from './agents/pool.ts'
@@ -158,6 +159,9 @@ function servicesOf(
     Layer.provide(rows),
     Layer.provide(processes),
     Layer.provide(agents),
+    // What an agent holds in memory, written before a call or a run is: the runtime hands its
+    // flush to this very instance, which is why the same layer is given to both.
+    Layer.provide(heldWordsLayer),
   )
   // What a Session is provided with, and the book of which agents are live (D6-07, D5-05).
   const provisions = Layer.mergeAll(contextLayer.pipe(Layer.provide(rows)), poolLayer).pipe(
@@ -184,6 +188,7 @@ function servicesOf(
       Layer.provide(provisions),
       Layer.provide(processes),
       Layer.provide(agents),
+      Layer.provide(heldWordsLayer),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
 }

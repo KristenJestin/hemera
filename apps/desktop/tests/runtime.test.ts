@@ -17,12 +17,14 @@ import * as TestClock from 'effect/testing/TestClock'
 import type { SessionEntry } from '@hemera/core'
 
 import { MachineEnvironment } from '#engine/agents/discovery.ts'
+import { HeldWords } from '#engine/agents/held.ts'
 import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
 import { AgentRuntime, CANCEL_GRACE, CHUNK_FLUSH, TEXT_LIMIT } from '#engine/agents/runtime.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Preferences } from '#engine/preferences.ts'
 import { Projects } from '#engine/projects.ts'
+import { Sessions } from '#engine/sessions.ts'
 import {
   ASKED,
   application,
@@ -577,6 +579,68 @@ describe('A turn that ends mid-flush loses nothing', () => {
           'session.entry_written',
           'session.entry_settled',
         ])
+      }),
+    )
+  })
+})
+
+/**
+ * A tool call or a command run written while the agent is holding words (Decided 10 of #17,
+ * D6-04, D6-12).
+ *
+ * The runtime is not the only thing that writes into a Session's thread during a turn: Hemera's
+ * tools write the call they answered, and the commands the run they started. The agent said what
+ * it held before it asked for either, so those words are written first — through the port the
+ * two services ask, which the runtime answers with its own flush.
+ */
+describe('What an agent holds is written before a call or a run', () => {
+  test('the words held when a tool call is written are above it in the thread', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'reading the reader first', messageId: 'msg-1' },
+        { does: 'says', text: ', then the project', messageId: 'msg-1' },
+      ],
+      between: gate.between,
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const sessions = yield* Sessions
+        const words = yield* HeldWords
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'read the reader'))
+
+        // The suite's clock never moves here, so the timer never writes: what reaches the thread
+        // is what the port wrote, and nothing else could have.
+        let entries: readonly SessionEntry[] = []
+        for (let look = 0; look < 400; look++) {
+          yield* words.flushed(session.id)
+          entries = yield* threadOf(session.id)
+          if (entries.some((entry) => entry.role === 'agent' && entry.kind === 'message')) break
+          yield* pause(5)
+        }
+        yield* sessions.write(session.id, {
+          role: 'agent',
+          kind: 'hemera_tool_call',
+          body: 'read src/reader.ts',
+          correlationId: 'tool:fs_read:k1',
+          state: 'completed',
+        })
+        gate.carryOn()
+        yield* Fiber.join(running)
+
+        // The words said before the call are in the thread above it: the row of the message was
+        // written first, and what the agent said after the call grew that same row.
+        const thread = yield* threadOf(session.id)
+        const call = entryOf(thread, 'hemera_tool_call')
+        const said = entryOf(
+          thread.filter((entry) => entry.role === 'agent'),
+          'message',
+        )
+        expect(said.body).toBe('reading the reader first, then the project')
+        expect(said.seq).toBeLessThan(call.seq)
       }),
     )
   })

@@ -23,6 +23,7 @@ import {
   hostProcessesLayer,
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
+import { heldWordsLayer } from '#engine/agents/held.ts'
 import { Commands, commandsLayer } from '#engine/commands/service.ts'
 import { Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -74,6 +75,7 @@ function engine() {
       ),
     ),
     Layer.provide(processes),
+    Layer.provide(heldWordsLayer),
   )
   return <A, E>(program: Effect.Effect<A, E, Engine | Scope.Scope>): Promise<A> =>
     Effect.runPromise(

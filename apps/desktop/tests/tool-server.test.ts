@@ -20,6 +20,7 @@ import {
   hostProcessesLayer,
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
+import { heldWordsLayer } from '#engine/agents/held.ts'
 import { commandsLayer, type Commands } from '#engine/commands/service.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
@@ -120,6 +121,7 @@ function engine(permissions: ToolPermissionsService = noQuestions, written: stri
       ),
     ),
     Layer.provide(Layer.mergeAll(processes, sink)),
+    Layer.provide(heldWordsLayer),
   )
   return <A, E>(program: Effect.Effect<A, E, Engine | Scope.Scope>): Promise<A> =>
     Effect.runPromise(

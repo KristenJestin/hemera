@@ -24,6 +24,7 @@ import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { AgentNotices, CHUNK_FLUSH, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime, Notice } from '#engine/agents/runtime.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
+import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -128,6 +129,7 @@ export function application(
       | Database
       | SqliteClient
       | TestClock.TestClock
+      | HeldWords
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
       Layer.provide(Layer.mergeAll(server, contextLayer, commandsLayer, toolPermissionsLayer)),
@@ -144,6 +146,7 @@ export function application(
       // idle minutes are a `TestClock.adjust` here rather than five minutes of waiting (D5-05).
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(TestClock.layer()),
+      Layer.provideMerge(heldWordsLayer),
     )
     return <A, E>(
       program: Effect.Effect<
@@ -157,6 +160,7 @@ export function application(
         | Database
         | SqliteClient
         | TestClock.TestClock
+        | HeldWords
         | Scope.Scope
       >,
     ) =>

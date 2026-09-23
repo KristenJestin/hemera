@@ -51,6 +51,7 @@ import {
   connect,
 } from './client.ts'
 import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discovery.ts'
+import { HeldWords } from './held.ts'
 import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
@@ -471,6 +472,7 @@ export const runtimeLayer = Layer.effect(
     const context = yield* AgentContext
     const commands = yield* Commands
     const permissions = yield* ToolPermissions
+    const heldWords = yield* HeldWords
     const pool = yield* Pool
 
     /**
@@ -559,6 +561,16 @@ export const runtimeLayer = Layer.effect(
         if (held !== undefined) yield* flush(sessionId, held, true)
         return yield* writeNow(sessionId, entry)
       })
+
+    // A tool call and a command run are written by services of their own, into the same thread
+    // and in the middle of a turn (D6-04, D6-12): they go below what the agent holds, exactly as
+    // an entry written here does.
+    heldWords.heldBy((sessionId) =>
+      Effect.gen(function* () {
+        const held = live.get(sessionId)
+        if (held !== undefined) yield* flush(sessionId, held, true).pipe(Effect.ignore)
+      }),
+    )
 
     /** One line, written as a `note`: what Hemera did that the agent did not say. */
     const note = (sessionId: string, turn: Turn | undefined, body: string, reason: string) =>
