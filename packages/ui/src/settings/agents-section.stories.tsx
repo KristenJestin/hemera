@@ -208,6 +208,20 @@ export const VersionThatCannotBeCompared: Story = {
   },
 }
 
+/**
+ * Found, silent about its version, and the registry answered: the line says what was published and
+ * nothing more, because there is no installed version to call up to date or behind.
+ */
+export const NoVersionReported: Story = {
+  args: { agents: [{ ...CODEX, version: null }] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('no version reported')).toBeVisible()
+    await expect(canvas.getByText('Latest 0.9.4')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
+  },
+}
+
 /** Installed and not signed in, which is the reader's to fix and nobody else's. */
 export const InstalledButNotSignedIn: Story = {
   args: { agents: [CODEX] },
