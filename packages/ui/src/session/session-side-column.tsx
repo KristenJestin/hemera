@@ -107,8 +107,12 @@ export function SessionSideColumn({
   if (!hasSideColumn({ plan, files, commands, context })) return null
   return (
     <aside className={cn(COLUMN, className)}>
+      {/* The icons alone: three labelled tabs are wider than the column, and a strip wider than
+          its column is a column that scrolls sideways (trial of 23 September 2026). Each tab is
+          still named by its label, which the tooltip says under the hand. */}
       <Tabs
         label="What this Session is doing"
+        iconsOnly
         defaultValue={defaultTab}
         items={[
           {
@@ -144,7 +148,9 @@ export function SessionSideColumn({
                                 onSelectFile(file.path)
                               }}
                             >
-                              {file.path}
+                              {/* One line, cut at its end rather than clipped: a path is one
+                                  word, and the link holds it to the column's width. */}
+                              <span className="min-w-0 truncate">{file.path}</span>
                             </Button>
                           )}
                           <span className={COUNTS}>

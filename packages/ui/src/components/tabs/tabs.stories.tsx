@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconMessages, IconSettings, IconTimelineEvent } from '../../icons.ts'
+import { TooltipProvider } from '../tooltip/tooltip.tsx'
 import { Tabs } from './tabs.tsx'
 
 const PLACES = [
@@ -26,7 +27,7 @@ const PLACES = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Tabs',
   component: Tabs,
   // Anchored rather than centred. Each panel is a different height, and a centred story puts
@@ -37,6 +38,10 @@ const meta = {
   argTypes: {
     label: { control: 'text' },
     items: { table: { disable: true } },
+    iconsOnly: {
+      control: 'boolean',
+      description: 'Each tab as its icon alone, named by its label.',
+    },
     className: { table: { disable: true } },
   },
   decorators: [
@@ -61,8 +66,38 @@ export const Variants: Story = {
     <div className="flex flex-col gap-6">
       <Tabs {...args} items={PLACES.map(({ icon: _icon, ...rest }) => rest)} />
       <Tabs {...args} />
+      {/* A strip narrower than its words: the icons alone, each named by its label. */}
+      <TooltipProvider>
+        <Tabs {...args} iconsOnly />
+      </TooltipProvider>
     </div>
   ),
+}
+
+/**
+ * A strip of icons, for a box narrower than the labels: each tab is still named by its label,
+ * which is what a screen reader announces and what the tooltip says under the hand.
+ */
+export const IconsOnly: Story = {
+  parameters: { controls: { disable: true } },
+  args: { iconsOnly: true },
+  decorators: [
+    (Story) => (
+      <TooltipProvider>
+        <Story />
+      </TooltipProvider>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const journal = canvas.getByRole('tab', { name: 'Journal' })
+    expect(canvas.queryByText('Journal')).toBeNull()
+    await userEvent.click(journal)
+    await waitFor(() => {
+      expect(journal).toHaveAttribute('aria-selected', 'true')
+    })
+    expect(canvas.getByText('What happened, in order.')).toBeInTheDocument()
+  },
 }
 
 export const States: Story = {

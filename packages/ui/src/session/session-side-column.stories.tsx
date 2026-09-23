@@ -141,6 +141,62 @@ export const NothingToStandBeside: Story = {
   },
 }
 
+/**
+ * Names longer than the column: a path, a command line, a folder and an address that do not fit.
+ *
+ * The column never scrolls sideways (trial of 23 September 2026): a one-line row is cut at its end
+ * and a sentence wraps, on every tab and with every fold open.
+ */
+export const LongNames: Story = {
+  args: {
+    files: [
+      {
+        path: 'packages/ui/src/session/a-module-whose-path-is-longer-than-the-column.tsx',
+        added: 1204,
+        removed: 318,
+      },
+    ],
+    commands: (
+      <CommandsPanel
+        runs={[
+          {
+            id: 'run-long',
+            name: 'storybook-with-a-long-name',
+            command: 'pnpm --filter @hemera/ui exec storybook dev --port 6006 --no-open --ci',
+            kind: 'app',
+            state: 'running',
+            folder: './packages/ui/and/a/folder/deeper/than/the/column',
+            output:
+              'Storybook ready\n  Local: http://localhost:6006/?path=/story/surfaces-session--complete',
+            url: 'http://localhost:6006/?path=/story/surfaces-session--complete',
+          },
+        ]}
+        onStop={fn()}
+        onOpenUrl={fn()}
+        onRun={fn()}
+      />
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const column = canvas.getByRole('complementary')
+    await userEvent.click(canvas.getByRole('button', { name: /Files/ }))
+    await expect(canvas.getByText(/a-module-whose-path/)).toBeVisible()
+    for (const tab of ['Activity', 'Commands', 'Context']) {
+      // oxlint-disable-next-line no-await-in-loop -- one tab after the other, as a reader walks them
+      await userEvent.click(canvas.getByRole('tab', { name: tab }))
+      for (const fold of canvas.queryAllByRole('button', { expanded: false })) {
+        // oxlint-disable-next-line no-await-in-loop -- each fold opens under the one before it
+        await userEvent.click(fold)
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the width is read once the tab is drawn
+      await expect(column.scrollWidth, `the ${tab} tab pushes the column sideways`).toBe(
+        column.clientWidth,
+      )
+    }
+  },
+}
+
 /** Pressing a path opens that file, which is the only thing this column does. */
 export const OpeningAFile: Story = {
   play: async ({ canvasElement, args }) => {
