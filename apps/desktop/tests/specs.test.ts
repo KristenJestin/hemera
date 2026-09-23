@@ -272,10 +272,16 @@ describe('A second Session opened on a Spec reads but does not write', () => {
   test('its agent is refused until it takes the write right, then the first is refused', async () => {
     const outcome = await opened()(
       Effect.gen(function* () {
-        const { specId, session: first } = yield* draft()
+        const { specId, session: drafted } = yield* draft()
         const specs = yield* Specs
+        const sessions = yield* Sessions
+        const first = yield* sessions.rename(drafted.id, drafted.version, 'Shape the export')
         const opening = yield* specs.openSession({ specId, provider: 'codex' })
-        const second = opening.session
+        const second = yield* sessions.rename(
+          opening.session.id,
+          opening.session.version,
+          'Read the export',
+        )
         const joined = opening.snapshot
         const read = yield* specs.read(specId)
         const refusedSecond = yield* Effect.flip(
@@ -299,7 +305,8 @@ describe('A second Session opened on a Spec reads but does not write', () => {
     expect(outcome.joined.spec.writerSessionId).toBe(outcome.first.id)
     expect(outcome.read.spec.writerSessionId).toBe(outcome.first.id)
     expect(outcome.refusedSecond).toBeInstanceOf(SpecNotWritableError)
-    expect(outcome.refusedSecond.message).toContain(outcome.first.id)
+    // The writer is named as the user knows it, by its title (D7-11).
+    expect(outcome.refusedSecond.message).toContain('belongs to the Session "Shape the export"')
     expect(outcome.passed.spec.writerSessionId).toBe(outcome.second.id)
     expect(outcome.passed.sections.find((section) => section.name === 'problem')).toMatchObject({
       body: 'Now it writes.',
@@ -307,7 +314,7 @@ describe('A second Session opened on a Spec reads but does not write', () => {
       sessionId: outcome.second.id,
     })
     expect(outcome.refusedFirst).toBeInstanceOf(SpecNotWritableError)
-    expect(outcome.refusedFirst.message).toContain(outcome.second.id)
+    expect(outcome.refusedFirst.message).toContain('belongs to the Session "Read the export"')
   })
 })
 

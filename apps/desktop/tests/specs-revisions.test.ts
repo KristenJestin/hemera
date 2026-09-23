@@ -245,7 +245,7 @@ describe('A write to an old revision is refused', () => {
         const specs = yield* Specs
         yield* specs.reopen({ specId, expectedRevisionId: snapshot.revision.id, reason: 'Rework' })
         const old = yield* specs.read(specId, 1)
-        const refusal = writable(old.spec, old.revision, agentOf(session.id))
+        const refusal = writable(old.spec, old.revision, agentOf(session.id), null)
         const written = yield* write(agentOf(session.id), specId, 'problem', 'The new problem.')
         return { snapshot, refusal, written, old: yield* specs.read(specId, 1) }
       }),

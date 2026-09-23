@@ -445,29 +445,29 @@ describe('Writability', () => {
 
   test('the writer Session’s agent writes the current draft', () => {
     const { spec, revision } = passingSnapshot()
-    expect(writable(spec, revision, agent)).toBeNull()
+    expect(writable(spec, revision, agent, null)).toBeNull()
   })
 
   test('a frozen Spec is refused, with its status', () => {
     const { spec, revision } = passingSnapshot()
-    expect(writable({ ...spec, status: 'ready' }, revision, agent)).toBe(
+    expect(writable({ ...spec, status: 'ready' }, revision, agent, null)).toBe(
       'HEM-7 is ready: only a draft is written',
     )
   })
 
   test('an old revision is refused', () => {
     const { spec, revision } = passingSnapshot()
-    expect(writable({ ...spec, currentRevisionId: 'revision-2' }, revision, agent)).toBe(
+    expect(writable({ ...spec, currentRevisionId: 'revision-2' }, revision, agent, null)).toBe(
       'revision 1 of HEM-7 is not its current revision',
     )
   })
 
   test('another Session’s agent is refused with the writer’s name; a human from it is not', () => {
     const { spec, revision } = passingSnapshot()
-    const refusal = writable(spec, revision, { kind: 'agent', sessionId: 'session-2' })
-    expect(refusal).toBe('the write right on HEM-7 belongs to Session session-1')
+    const refusal = writable(spec, revision, { kind: 'agent', sessionId: 'session-2' }, 'Export')
+    expect(refusal).toBe('the write right on HEM-7 belongs to the Session "Export"')
     expect(new SpecNotWritableError(refusal!).message).toBe(refusal)
-    expect(writable(spec, revision, { kind: 'human', sessionId: 'session-2' })).toBeNull()
+    expect(writable(spec, revision, { kind: 'human', sessionId: 'session-2' }, 'Export')).toBeNull()
   })
 })
 

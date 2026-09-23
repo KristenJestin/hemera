@@ -95,6 +95,7 @@ import {
   definable,
   openSessionIn,
   sessionNow,
+  sessionRow,
   transferWrite,
 } from './write-right.ts'
 
@@ -279,10 +280,20 @@ export class Specs extends Context.Service<Specs, SpecsService>()('Specs') {}
 /** A human acting from the panel of no particular Session. */
 const HUMAN: SpecWriter = { kind: 'human', sessionId: null }
 
-/** The one writability rule (D7-04), as a refusal. */
-function guard(snapshot: SpecSnapshot, actor: SpecWriter) {
-  const refused = writable(snapshot.spec, snapshot.revision, actor)
-  return refused === null ? Effect.void : Effect.fail(new SpecNotWritableError(refused))
+/**
+ * The one writability rule (D7-04), as a refusal. An agent refused for the write right is told
+ * the writer Session by its title (D7-11), read only then.
+ */
+function guard(transaction: EngineTransaction, snapshot: SpecSnapshot, actor: SpecWriter) {
+  return Effect.gen(function* () {
+    const writer = snapshot.spec.writerSessionId
+    const writerTitle =
+      actor.kind === 'agent' && writer !== null && actor.sessionId !== writer
+        ? (yield* sessionRow(transaction, writer)).title
+        : null
+    const refused = writable(snapshot.spec, snapshot.revision, actor, writerTitle)
+    if (refused !== null) return yield* Effect.fail(new SpecNotWritableError(refused))
+  })
 }
 
 function answered(question: SpecQuestion, input: QuestionAnswer) {
@@ -936,7 +947,7 @@ export const specsLayer = Layer.effect(
     ) =>
       onSpec(doing, specId, (transaction, snapshot) =>
         Effect.gen(function* () {
-          yield* guard(snapshot, actor)
+          yield* guard(transaction, snapshot, actor)
           const outcome = yield* body(transaction, snapshot)
           yield* touch(transaction, specId)
           return outcome
@@ -1036,7 +1047,7 @@ export const specsLayer = Layer.effect(
       declarePhase: (specId, sessionId, phase, declaration) =>
         onSpec('declaring a phase', specId, (transaction, snapshot) =>
           Effect.gen(function* () {
-            yield* guard(snapshot, agent(sessionId))
+            yield* guard(transaction, snapshot, agent(sessionId))
             return only(yield* declare(transaction, snapshot, phase, agent(sessionId), declaration))
           }),
         ),
@@ -1044,7 +1055,7 @@ export const specsLayer = Layer.effect(
       attest: (specId, sessionId) =>
         onSpec('attesting the Spec', specId, (transaction, snapshot) =>
           Effect.gen(function* () {
-            yield* guard(snapshot, agent(sessionId))
+            yield* guard(transaction, snapshot, agent(sessionId))
             return only(yield* attestIn(transaction, snapshot, agent(sessionId)))
           }),
         ),
@@ -1052,7 +1063,7 @@ export const specsLayer = Layer.effect(
       markReady: (request) =>
         onSpec('marking the Spec ready', request.specId, (transaction, snapshot) =>
           Effect.gen(function* () {
-            yield* guard(snapshot, HUMAN)
+            yield* guard(transaction, snapshot, HUMAN)
             return only(yield* markReady(transaction, snapshot, request))
           }),
         ),

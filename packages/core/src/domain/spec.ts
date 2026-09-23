@@ -650,11 +650,15 @@ export interface SpecWriter {
 /**
  * The one writability rule (D7-04): the Spec is a draft, the revision is its current one, and
  * an agent writes only from the writer Session. `null` when the write may go ahead.
+ *
+ * `writerTitle` is what the writer Session is called, which a refused agent is told (D7-11):
+ * the caller reads it, since a Spec knows its writer by identifier only.
  */
 export function writable(
   spec: Spec,
   revision: SpecRevision,
   actor: SpecWriter,
+  writerTitle: string | null,
 ): WriteRefusal | null {
   if (spec.status !== 'draft') {
     return `${spec.key} is ${spec.status}: only a draft is written`
@@ -665,7 +669,7 @@ export function writable(
   if (actor.kind === 'agent' && actor.sessionId !== spec.writerSessionId) {
     return spec.writerSessionId === null
       ? `${spec.key} has no writer Session`
-      : `the write right on ${spec.key} belongs to Session ${spec.writerSessionId}`
+      : `the write right on ${spec.key} belongs to the Session "${writerTitle ?? 'another Session'}"`
   }
   return null
 }
