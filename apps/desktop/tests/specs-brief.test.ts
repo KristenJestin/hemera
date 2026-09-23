@@ -10,13 +10,13 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
 
 import { DEFINE_MISSION_BRIEF, PHASE_BRIEFS } from '@hemera/core'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { Specs } from '#engine/specs/specs.ts'
-import { application, aSession, threadOf } from './application.ts'
+import { application, aSession, gated, heldInThread, threadOf } from './application.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -77,6 +77,53 @@ describe('The brief is part of the turn, never a human message', () => {
 })
 
 describe('A human edit is recorded and reaches the agent', () => {
+  test('a section saved while the agent is answering reaches nothing during the turn, and the next brief lists it', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'Shaping the export' },
+        { does: 'says', text: ' and carrying on.' },
+      ],
+      between: gate.between,
+    })
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        const runtime = yield* AgentRuntime
+        const specs = yield* Specs
+        const running = yield* Effect.forkScoped(runtime.prompt(sessionId, 'First turn.'))
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.role === 'agent' && entry.body.startsWith('Shaping')),
+        )
+
+        // The turn is running, held after the agent's first words: the user saves `scope`.
+        const before = yield* specs.read(specId)
+        const scope = before.sections.find((section) => section.name === 'scope')
+        const written = yield* specs.writeSection(
+          { kind: 'human', sessionId },
+          { specId, name: 'scope', body: 'CSV only.', baseVersion: scope?.version ?? 0 },
+        )
+        expect(written.sections.find((section) => section.name === 'scope')).toMatchObject({
+          author: 'human',
+          sessionId,
+        })
+        // Nothing was sent to the agent while its turn runs: the one prompt is the turn's own.
+        expect(agent.answers.prompts).toHaveLength(1)
+        expect(agent.answers.prompts[0]).not.toContain('CSV only.')
+
+        gate.carryOn()
+        yield* Fiber.join(running)
+        expect(agent.answers.prompts).toHaveLength(1)
+
+        yield* runtime.prompt(sessionId, 'Second turn.')
+        const second = agent.answers.prompts[1] ?? ''
+        expect(second.slice(second.indexOf(HUMAN_EDITS))).toContain('## scope · version')
+        expect(second.slice(second.indexOf(HUMAN_EDITS))).toContain('CSV only.')
+      }),
+    )
+  })
+
   test('the next turn’s brief lists the human edit with its version, and the one after lists nothing', async () => {
     const agent = fakeAgent()
 
