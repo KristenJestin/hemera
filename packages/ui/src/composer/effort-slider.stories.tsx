@@ -35,7 +35,7 @@ import { EffortSlider } from './effort-slider.tsx'
  * at the foot of it with `Default` written above until a level is chosen.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Composer/EffortSlider',
   component: EffortSlider,
   render: (args) => <SetEffort {...args} render={(props) => <EffortSlider {...props} />} />,

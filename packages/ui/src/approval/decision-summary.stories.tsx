@@ -9,7 +9,7 @@ import { DecisionSummary } from './decision-summary.tsx'
 const meta = {
   title: 'Blocks/Session/DecisionSummary',
   component: DecisionSummary,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { answer: 'Allowed once', at: '14:02' },
   argTypes: {

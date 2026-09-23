@@ -16,7 +16,7 @@ import { ComposerActions } from './composer-actions.tsx'
 const meta = {
   title: 'Blocks/Composer/ComposerActions',
   component: ComposerActions,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     workspaces: ['hemera'],

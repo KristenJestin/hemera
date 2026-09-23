@@ -11,7 +11,7 @@ import { UsageMeter } from './usage-meter.tsx'
 const meta = {
   title: 'Blocks/Composer/UsageMeter',
   component: UsageMeter,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { used: 12400, size: 200000 },
   argTypes: {

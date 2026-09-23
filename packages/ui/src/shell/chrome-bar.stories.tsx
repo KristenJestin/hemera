@@ -13,7 +13,7 @@ const PROJECTS: ShellProject[] = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Shell/ChromeBar',
   component: ChromeBar,
   parameters: { layout: 'fullscreen' },

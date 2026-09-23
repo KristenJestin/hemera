@@ -26,7 +26,7 @@ const OUTPUT = `export function SessionPage() {
 `
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/ToolCallCard',
   component: ToolCallCard,
   parameters: { layout: 'padded' },

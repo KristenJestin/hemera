@@ -23,7 +23,7 @@ import type { MessageLine, MessageState } from './model.ts'
  * that drew the two the same way would show the syntax of an answer instead of the answer.
  */
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Message/Message',
   component: MessageGroup,
   parameters: { layout: 'padded' },

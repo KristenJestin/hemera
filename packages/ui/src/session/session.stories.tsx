@@ -80,7 +80,7 @@ const SESSIONS = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Session',
   component: SessionHeader,
   render: (args) => <Harness {...args} />,

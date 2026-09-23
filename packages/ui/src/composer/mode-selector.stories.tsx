@@ -10,7 +10,7 @@ import { ModeSelector } from './mode-selector.tsx'
 const meta = {
   title: 'Blocks/Composer/ModeSelector',
   component: ModeSelector,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     modes: [

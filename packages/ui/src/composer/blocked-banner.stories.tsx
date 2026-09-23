@@ -9,7 +9,7 @@ import { BlockedBanner } from './blocked-banner.tsx'
 const meta = {
   title: 'Blocks/Session/BlockedBanner',
   component: BlockedBanner,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     waiting: 'the agent asked to run pnpm --filter @hemera/ui test',
