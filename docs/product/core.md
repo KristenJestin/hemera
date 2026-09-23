@@ -1033,8 +1033,9 @@ Hemera takes the line out of the message and shows the proposal in its place. Th
 `spec_propose` tool replaces this line once the agent is offered it.
 
 Moving from `free` to `build` is only possible if the Session is first attached to an
-existing Spec. Without a Spec, the user must remain in free discussion or go through
-`define` to create or absorb the necessary Spec.
+existing Spec. Without a Spec, the user must remain in free discussion, accept the agent's
+proposal of a Spec to go through `define`, or open a `define` Session on an existing Spec from
+the Project's list of Specs.
 
 Among the specialised missions, only `define` is reached from a free discussion without an
 existing Spec, since its responsibility is precisely to create one. The `build` mission
