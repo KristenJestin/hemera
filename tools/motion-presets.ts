@@ -75,6 +75,9 @@ export const PRESET_KINDS = [
   'expand',
   'collapse',
   'push',
+  'crossfade',
+  'ping',
+  'pinging',
   'useTransition',
 ]
 
