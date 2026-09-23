@@ -1,4 +1,6 @@
 import { realpathSync } from 'node:fs'
+import { isAbsolute, relative, sep } from 'node:path'
+
 import {
   type Project as DomainProject,
   InvalidProjectNameError,
@@ -45,6 +47,28 @@ export class UnknownProjectError extends Error {
   constructor(readonly id: string) {
     super(`no Project has the identifier "${id}"`)
     this.name = 'UnknownProjectError'
+  }
+}
+
+/** A folder of dedicated Workspaces that cannot be one (D8-02). */
+export class InvalidWorkspacesRootError extends Error {
+  constructor(
+    readonly path: string,
+    reason: string,
+  ) {
+    super(`the folder of the Workspaces "${path}" is refused: ${reason}`)
+    this.name = 'InvalidWorkspacesRootError'
+  }
+}
+
+/** A branch prefix Git would not take, or one that is no prefix at all (D8-04). */
+export class InvalidBranchPrefixError extends Error {
+  constructor(
+    readonly prefix: string,
+    reason: string,
+  ) {
+    super(`the branch prefix "${prefix}" is refused: ${reason}`)
+    this.name = 'InvalidBranchPrefixError'
   }
 }
 
@@ -96,16 +120,18 @@ export interface ProjectsService {
     version: number,
     relativePath: string,
   ) => Effect.Effect<Project, Refusal>
+  /** Null is Hemera's own folder; a path is absolute and outside `main` (D8-02). */
   readonly setWorkspacesRoot: (
     id: string,
     version: number,
     path: string | null,
-  ) => Effect.Effect<Project, Refusal>
+  ) => Effect.Effect<Project, Refusal | InvalidWorkspacesRootError>
+  /** Null is the Project's name as a slug; a prefix is one Git takes (D8-04). */
   readonly setBranchPrefix: (
     id: string,
     version: number,
     prefix: string | null,
-  ) => Effect.Effect<Project, Refusal>
+  ) => Effect.Effect<Project, Refusal | InvalidBranchPrefixError>
   readonly setRepositoryIncluded: (
     id: string,
     version: number,
@@ -135,10 +161,19 @@ function canonical(path: string): string {
   }
 }
 
-/** A setting cleared to nothing: the default it stands for, rather than an empty value. */
-function blankAsNull(value: string | null): string | null {
-  const trimmed = value?.trim() ?? ''
-  return trimmed === '' ? null : trimmed
+/**
+ * Why a branch prefix is refused, and null when it is one (D8-04): it goes in front of every
+ * branch a dedicated Workspace makes, so it is a part of a branch name Git takes — no space, no
+ * `..`, no `/` at either end, none of the characters a reference cannot hold.
+ */
+function prefixRefusal(prefix: string): string | null {
+  if (prefix === '') return 'it is empty'
+  if (/\s/.test(prefix)) return 'it holds a space'
+  if (prefix.includes('..')) return 'it holds ".."'
+  if (prefix.startsWith('/') || prefix.endsWith('/')) return 'it starts or ends with "/"'
+  if (prefix.includes('//')) return 'it holds "//"'
+  if (/[~^:?*[\\]|@\{/.test(prefix)) return 'it holds a character a branch name cannot'
+  return null
 }
 
 /** The date every row of one mutation shares, so a Project and its event agree on when. */
@@ -563,8 +598,26 @@ export const projectsLayer = Layer.effect(
         withDatabase(
           mutate('choosing the folder of the Workspaces', (transaction) =>
             Effect.gen(function* () {
-              // An empty field is the default folder, not a folder with no name (D8-02).
-              const workspacesRoot = blankAsNull(path)
+              const workspacesRoot = path === null ? null : canonical(path.trim())
+              if (workspacesRoot !== null) {
+                if (!isAbsolute(workspacesRoot)) {
+                  return yield* Effect.fail(
+                    new InvalidWorkspacesRootError(workspacesRoot, 'it is not an absolute path'),
+                  )
+                }
+                // Inside `main` is set aside (D8-02): the Workspaces would be in the sources
+                // they are worktrees of, and in every search and every watcher of `main`.
+                const main = (yield* readOne(id)).mainPath
+                const below = relative(main, workspacesRoot)
+                if (
+                  below === '' ||
+                  !(below === '..' || below.startsWith(`..${sep}`) || isAbsolute(below))
+                ) {
+                  return yield* Effect.fail(
+                    new InvalidWorkspacesRootError(workspacesRoot, `it is inside main (${main})`),
+                  )
+                }
+              }
               yield* bump(transaction, id, version, { workspacesRoot })
               const project = yield* readOne(id)
               return {
@@ -589,8 +642,11 @@ export const projectsLayer = Layer.effect(
         withDatabase(
           mutate('choosing the branch prefix', (transaction) =>
             Effect.gen(function* () {
-              // An empty field is the Project's name as a slug, not an empty prefix (D8-04).
-              const branchPrefix = blankAsNull(prefix)
+              const branchPrefix = prefix === null ? null : prefix.trim()
+              const refused = branchPrefix === null ? null : prefixRefusal(branchPrefix)
+              if (branchPrefix !== null && refused !== null) {
+                return yield* Effect.fail(new InvalidBranchPrefixError(branchPrefix, refused))
+              }
               yield* bump(transaction, id, version, { branchPrefix })
               const project = yield* readOne(id)
               return {

@@ -120,3 +120,20 @@ describe('A worktree is added, found and removed with the machine’s git', () =
     expect(refused.message).toMatch(/^fatal: /)
   })
 })
+
+describe('A branch name is one Git takes', () => {
+  it('takes a name with folders, and refuses a space, a double dot and a trailing slash', async () => {
+    const api = repository(join(folder, 'api'))
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        return yield* Effect.forEach(
+          ['atlas/HEM-7-login-form', 'atlas/HEM 7', 'atlas/HEM..7', 'atlas/'],
+          (name) => one.checkRefFormat(api, name),
+        )
+      }),
+    )
+
+    expect(seen).toEqual([true, false, false, false])
+  })
+})

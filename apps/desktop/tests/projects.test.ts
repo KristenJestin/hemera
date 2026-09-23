@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
 import { InvalidProjectNameError, InvalidRepositoryPathError } from '@hemera/core'
+import { InvalidBranchPrefixError, InvalidWorkspacesRootError } from '#engine/projects.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { SqliteClient, databaseLayer } from '#engine/storage/database.ts'
@@ -258,7 +259,7 @@ describe('The folder of the Workspaces and the branch prefix are the Project’s
         const one = yield* created
         const rooted = yield* projects.setWorkspacesRoot(one.id, one.version, '/tmp/atlas-trees')
         const prefixed = yield* projects.setBranchPrefix(rooted.id, rooted.version, ' hemera ')
-        const unrooted = yield* projects.setWorkspacesRoot(prefixed.id, prefixed.version, '  ')
+        const unrooted = yield* projects.setWorkspacesRoot(prefixed.id, prefixed.version, null)
         const back = yield* projects.setBranchPrefix(unrooted.id, unrooted.version, null)
         return [one, prefixed, back, yield* journal] as const
       }),
@@ -291,6 +292,57 @@ describe('The folder of the Workspaces and the branch prefix are the Project’s
     )
 
     expect(raised).toBeInstanceOf(StaleVersionError)
+  })
+})
+
+describe('A folder of Workspaces is absolute and outside main, a prefix one Git takes', () => {
+  test.each([
+    ['relative', 'workspaces', 'it is not an absolute path'],
+    ['main itself', '/tmp/atlas', 'it is inside main'],
+    ['inside main', '/tmp/atlas/.worktrees', 'it is inside main'],
+  ])('a folder %s is refused, naming why', async (_, path, reason) => {
+    const raised = await refusalOn(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        return yield* projects.setWorkspacesRoot(one.id, one.version, path)
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(InvalidWorkspacesRootError)
+    expect(raised.message).toContain(reason)
+  })
+
+  test.each([
+    ['', 'it is empty'],
+    ['my team', 'it holds a space'],
+    ['team..x', 'it holds ".."'],
+    ['/team', 'it starts or ends with "/"'],
+    ['team/', 'it starts or ends with "/"'],
+    ['team:x', 'it holds a character a branch name cannot'],
+  ])('the prefix "%s" is refused: %s', async (prefix, reason) => {
+    const raised = await refusalOn(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        return yield* projects.setBranchPrefix(one.id, one.version, prefix)
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(InvalidBranchPrefixError)
+    expect(raised.message).toContain(reason)
+  })
+
+  test('a prefix with folders of its own is kept', async () => {
+    const project = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        return yield* projects.setBranchPrefix(one.id, one.version, 'team/hemera')
+      }),
+    )
+
+    expect(project.branchPrefix).toBe('team/hemera')
   })
 })
 

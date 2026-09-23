@@ -276,6 +276,20 @@ describe('A failed check refuses the whole creation', () => {
     expect(git(join(main, 'sources', 'api'), 'branch', '--list', 'atlas/*')).toBe('')
   })
 
+  it('refuses a branch name Git would not take', async () => {
+    const seen = await refusedWith((draft) =>
+      draft.map((one) => (one.relativePath === FRONT ? { ...one, branch: 'atlas/HEM 7..' } : one)),
+    )
+
+    expect(seen.refused).toMatchObject({ check: 'branch' })
+    expect(seen.refused.message).toBe(
+      'atlas/HEM 7.. is not a branch name Git takes, in ./sources/front',
+    )
+    expect(seen.after).toEqual(seen.before)
+    expect(existsSync(seen.path)).toBe(false)
+    expect(git(join(main, 'sources', 'api'), 'branch', '--list', 'atlas/*')).toBe('')
+  })
+
   it('refuses a folder that already exists', async () => {
     const seen = await refusedWith(
       (draft) => draft,

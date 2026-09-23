@@ -483,6 +483,17 @@ export const workspacesLayer = Layer.effect(
               )
             }
             const folder = join(main, asked.relativePath)
+            const named = yield* git
+              .checkRefFormat(folder, asked.branch)
+              .pipe(
+                Effect.catchTag('GitUnavailableError', (missing) => refuse('git', missing.message)),
+              )
+            if (!named) {
+              return yield* refuse(
+                'branch',
+                `${asked.branch} is not a branch name Git takes, in ${asked.relativePath}`,
+              )
+            }
             const base = yield* git.revParse(folder, asked.base).pipe(
               Effect.catchTag('GitError', () =>
                 refuse(

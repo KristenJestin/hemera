@@ -81,6 +81,11 @@ export interface GitService {
   /** Forgets the worktrees whose folder is gone, which Git otherwise holds as still there. */
   readonly worktreePrune: (cwd: string) => Effect.Effect<void, Refusal>
   readonly branchExists: (cwd: string, branch: string) => Effect.Effect<boolean, Refusal>
+  /** Whether Git takes a name as a branch name: `check-ref-format --branch` (D8-04). */
+  readonly checkRefFormat: (
+    cwd: string,
+    branch: string,
+  ) => Effect.Effect<boolean, GitUnavailableError>
   readonly status: (cwd: string) => Effect.Effect<GitStatus, Refusal>
   /**
    * Whether a folder is the top of a repository: a folder inside another repository — `./docs`
@@ -154,6 +159,11 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
     worktreePrune: (cwd) => run(cwd, ['worktree', 'prune']).pipe(Effect.asVoid),
     branchExists: (cwd, branch) =>
       run(cwd, ['branch', '--list', branch]).pipe(Effect.map((printed) => printed.trim() !== '')),
+    checkRefFormat: (cwd, branch) =>
+      run(cwd, ['check-ref-format', '--branch', branch]).pipe(
+        Effect.as(true),
+        Effect.catchTag('GitError', () => Effect.succeed(false)),
+      ),
     status: (cwd) => run(cwd, ['status', '--porcelain=v2', '--branch']).pipe(Effect.map(statusOf)),
     // At the top of a repository the prefix is empty; inside one it is the path down to here,
     // and outside any Git refuses — which is an answer here, not a failure.
