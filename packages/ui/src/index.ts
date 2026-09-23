@@ -88,7 +88,7 @@ export {
   type ProjectSettingsProps,
 } from './project/project-settings.tsx'
 
-export type { ProjectDraft, RepositoryLine } from './project/model.ts'
+export type { ProjectDraft, ProjectSettingsDraft, RepositoryLine } from './project/model.ts'
 
 /** The settings of the application, and the bell of the chrome bar. */
 export {

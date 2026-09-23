@@ -995,7 +995,12 @@ export function Application() {
     if (shell.activeEntryId === PROJECT_SETTINGS_ENTRY && current !== null) {
       return (
         <ProjectSettingsPage
-          project={{ name: current.name, tone: current.tone, mainPath: current.mainPath }}
+          project={{
+            name: current.name,
+            tone: current.tone,
+            mainPath: current.mainPath,
+            specPrefix: current.specPrefix,
+          }}
           repositories={repositories}
           onSave={async (draft: ProjectDraft) => {
             const renamed = await renameProject(current, { name: draft.name, tone: draft.tone })
