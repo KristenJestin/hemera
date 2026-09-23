@@ -104,12 +104,21 @@ function aView(
   }
 }
 
-describe('No side column on a Session that has nothing to show', () => {
-  test('the base alone, no plan, no file, no run and no catalogue draw no column', () => {
+describe('The Context tab is reachable without AGENTS.md', () => {
+  test('the base alone still lists the tools, so the column opens on the Context view', () => {
     const tabs = sideTabsOf(0, 0, [], aView(['base']))
+
+    expect(tabs.context).toBe(true)
+    expect(hasSideColumn(tabs)).toBe(true)
+    expect(openingTabOf([], tabs)).toBe('context')
+  })
+})
+
+describe('No side column on a Session that has nothing to show', () => {
+  test('no plan, no file, no run, no catalogue and no context known draw no column', () => {
+    const tabs = sideTabsOf(0, 0, [], null)
     expect(tabs).toEqual({ activity: false, commands: false, context: false })
     expect(hasSideColumn(tabs)).toBe(false)
-    expect(hasSideColumn(sideTabsOf(0, 0, [], null))).toBe(false)
   })
 
   test('each tab that has something draws it, and the column opens on that tab', () => {
