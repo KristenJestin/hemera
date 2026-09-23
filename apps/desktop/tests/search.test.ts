@@ -72,6 +72,32 @@ describe('A search is bounded and says so, however large what it walks', () => {
     expect(second.stoppedBy).toBeNull()
   })
 
+  test('holds its budget on a file with no newline, and goes on past it', async () => {
+    // A minified bundle: three budgets on a single line, the match at its very end.
+    writeFileSync(join(root, 'bundle.min.js'), `${'x'.repeat(3 * SEARCH_SCAN_BYTES)}needle`)
+    writeFileSync(join(root, 'next.ts'), 'needle\n')
+
+    const first = await searchIn({ root, query: 'needle' })
+    expect(first.stoppedBy).toBe('scanned')
+    expect(first.scanned).toBeLessThan(SEARCH_SCAN_BYTES + 128 * 1024)
+    expect(first.hits).toEqual([])
+    expect(first.cursor).toBe('bundle.min.js:1')
+
+    // The line was cut at the budget: the next call starts after it, and reaches the next file.
+    const second = await searchIn({ root, query: 'needle', cursor: first.cursor })
+    expect(second.hits).toEqual([{ path: 'next.ts', line: 1, text: 'needle' }])
+    expect(second.stoppedBy).toBeNull()
+  })
+
+  test('finds a match inside the part of an overlong line it read', async () => {
+    writeFileSync(join(root, 'bundle.min.js'), `needle${'x'.repeat(2 * SEARCH_SCAN_BYTES)}`)
+
+    const result = await searchIn({ root, query: 'needle' })
+
+    expect(result.hits.map((hit) => hit.line)).toEqual([1])
+    expect(result.stoppedBy).toBe('scanned')
+  })
+
   test('resumes past ten thousand files without walking them one call deep each', async () => {
     const folder = join(root, 'many')
     mkdirSync(folder)

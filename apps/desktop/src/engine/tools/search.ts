@@ -130,7 +130,12 @@ function skip(progress: Progress, path: string, reason: SearchSkip['reason']): v
  * The budget is checked after every chunk: a file larger than what is left of it is read up to
  * the budget and the cursor points at the last line examined, so the next call continues inside
  * the same file. The lines before `from` are passed over without counting against the budget —
- * the previous call already paid for them.
+ * the previous call already paid for them — and without being held, since nothing reads them.
+ *
+ * A line is counted while it is still being read, not once its end arrives: a minified bundle or
+ * a log with no newline is one line, and waiting for its end would read the whole file past the
+ * budget and hold it in memory. A line that outlasts the budget is examined as far as it was read
+ * and cut there; the cursor names it, so the next call goes on from the line after it.
  */
 async function scanFile(
   file: string,
@@ -168,8 +173,13 @@ async function scanFile(
       carry = lines.pop() ?? ''
       for (const line of lines) examine(line)
       if (progress.stoppedBy !== null) return false
-      if (progress.scanned >= SEARCH_SCAN_BYTES) {
-        progress.stoppedBy = 'scanned'
+      // The line still being read is one the previous call already went past: only its end
+      // matters, and the newline that ends it is in a chunk still to come.
+      if (index + 1 <= from) carry = ''
+      const reading = Buffer.byteLength(carry, 'utf8')
+      if (progress.scanned + reading >= SEARCH_SCAN_BYTES) {
+        if (reading > 0) examine(carry)
+        progress.stoppedBy = progress.stoppedBy ?? 'scanned'
         return false
       }
     }
