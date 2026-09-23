@@ -242,6 +242,32 @@ For tokens and cost, two channels — `session/update` with `sessionUpdate: "usa
 
 **Monetary cost is therefore available only for Claude and OpenCode**, and only in USD; for Codex, Hemera can display only tokens and a window occupancy.
 
+## 8. Bare mode
+
+Added on 23 September 2026 for #18. The research is [`bare-mode-2026-09.md`](bare-mode-2026-09.md)
+(21 September 2026); this section says the means each adapter declares as implemented in
+`apps/desktop/src/engine/agents/adapters/`, which is what the Agents section shows. The per
+platform `qualified` flag is what those declarations say; the real trials of phase 3 set it.
+
+- **Claude Code** (qualified): `session/new._meta.claudeCode.options` with `tools: []`,
+  `settingSources: []`, `strictMcpConfig: true`, a custom `systemPrompt` carrying Hemera's base,
+  and an `env` with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `ENABLE_CLAUDEAI_MCP_SERVERS=false` and
+  `MCP_TOOL_TIMEOUT` at ten minutes, so a tool call waiting on the human is not cut short.
+  `CLAUDE_CONFIG_DIR` is left where the user has it: the login lives there, and a directory of
+  Hemera's reads as signed out. Managed and policy settings and `~/.claude.json` still load.
+- **OpenCode** (qualified): `OPENCODE_CONFIG_CONTENT` with a primary agent of Hemera's as
+  `default_agent`, `permission: { "*": "deny", "hemera_*": "allow" }`, `build` and `plan` disabled;
+  `XDG_CONFIG_HOME` pointed at a directory of Hemera's and `OPENCODE_DISABLE_PROJECT_CONFIG=1`.
+  The wildcard is matched case-insensitively on Windows. The base goes as an embedded resource of
+  the first prompt. `$HOME/.opencode`, managed configuration and a remote `.well-known/opencode`
+  still load.
+- **Codex** (not qualified): `CODEX_HOME` at a directory of Hemera's with a `config.toml` that
+  turns off about fourteen features, from `web_search` to `shell_tool`, `view_image`,
+  `sleep_tool`, `multi_agent` and `code_mode`. `apply_patch` has no key and the three
+  `*_mcp_resource*` tools appear as soon as an MCP server exists, so no Session is made on it:
+  `sessions.create` refuses it with that reason, and so does a start. Moving `CODEX_HOME` also
+  moves the login (`auth.json`), which a trial that qualifies Codex has to settle first.
+
 ## Consequences for Hemera
 
 Established:

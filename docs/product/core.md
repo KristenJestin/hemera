@@ -527,7 +527,17 @@ When a modification of the Project's instructions occurs during a Session, Hemer
 signals its content to the agent at the next safe resumption point, without interrupting a response
 in progress or recreating its ACP session. Only the useful update is transmitted, without reinjecting
 the whole context. New Sessions directly use the updated instructions.
-The delivery modalities according to the provider's capabilities remain to be specified.
+
+The delivery modalities are specified since issue #18 (designs D6-07 and D6-08). The base reaches
+each agent once, at the start of the Session, by that agent's own means: through the system prompt
+where the agent takes one (Claude Code), and as an embedded resource of the first prompt elsewhere
+(Codex, OpenCode). The Project's instructions are the Workspace's `AGENTS.md`, which the agents
+read natively: Hemera does not send it, records its fingerprint when the Session starts and lists
+it as read natively. While a Session's agent runs, Hemera watches that file; a change is delivered
+at the next safe point — when the turn in progress ends, or at once between two turns — as a
+prompt of its own made of a Hemera marker and the new text as a resource. The thread records it as
+a delivery, never as a message of the user, and no new native session is opened for it. A change
+made while no agent runs is delivered before the next prompt.
 
 Instruction files already present in the repositories, such as `AGENTS.md` or
 `CLAUDE.md`, can serve as context sources from the first version on. Their content
