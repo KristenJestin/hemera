@@ -1,11 +1,12 @@
 /**
  * The engine the suites about Workspaces run on, and the Project they run it over.
  *
- * Nothing is mocked: the Projects, the Sessions, the commands, the Workspaces and the recipe over
- * a database in the suite's folder, the machine's `git` on real repositories, and the commands
- * started for real through the supervisor. The Project is `Atlas`, whose `main` holds
- * `sources/api` and `sources/front` — two repositories with one commit each — and `docs`, a
- * plain folder; none of them has a remote, so nothing here can reach a network.
+ * Nothing is mocked: the Projects, the Sessions, the commands, the Workspaces, their recipe and
+ * their variables over a database in the suite's folder, the machine's `git` on real
+ * repositories, and the commands started for real through the supervisor. The Project is
+ * `Atlas`, whose `main` holds `sources/api` and `sources/front` — two repositories with one
+ * commit each — and `docs`, a plain folder; none of them has a remote, so nothing here can reach
+ * a network.
  */
 
 import { mkdirSync } from 'node:fs'
@@ -28,6 +29,7 @@ import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type Database, type SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
+import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { SHIPPED, VERSION } from './application.ts'
@@ -42,6 +44,7 @@ export type WorkspaceEngine =
   | Git
   | Workspaces
   | Recipe
+  | Variables
   | Database
   | SqliteClient
 
@@ -55,7 +58,11 @@ export function workspaceEngine(folder: string, gitProgram?: string) {
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
-  const services: Layer.Layer<WorkspaceEngine> = Layer.mergeAll(workspacesLayer, recipeLayer).pipe(
+  const services: Layer.Layer<WorkspaceEngine> = Layer.mergeAll(
+    workspacesLayer,
+    recipeLayer,
+    variablesLayer,
+  ).pipe(
     Layer.provide(Layer.succeed(WorkspacesRoot, join(folder, 'workspaces'))),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(journalLayer),

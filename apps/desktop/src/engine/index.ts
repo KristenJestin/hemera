@@ -51,6 +51,7 @@ import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
 import { gitLayer } from './git.ts'
 import { type Recipe, recipeLayer } from './workspaces/recipe.ts'
+import { type Variables, variablesLayer } from './workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from './workspaces/workspaces.ts'
 import type { Database, SqliteClient } from './storage/database.ts'
 
@@ -135,6 +136,7 @@ type EngineServices =
   | Context
   | Workspaces
   | Recipe
+  | Variables
   | Database
   | SqliteClient
 
@@ -192,7 +194,7 @@ function servicesOf(
   )
   // The Workspaces of the Projects, over the machine's `git`, made under the data folder unless a
   // Project names a folder of its own (D8-02, D8-03).
-  const workspaces = Layer.mergeAll(workspacesLayer, recipeLayer).pipe(
+  const workspaces = Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer).pipe(
     Layer.provide(gitLayer()),
     Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
   )
