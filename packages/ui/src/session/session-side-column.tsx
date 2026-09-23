@@ -121,6 +121,11 @@ export function SessionSideColumn({
             icon: <IconActivity size="sm" />,
             panel: (
               <>
+                {/* A column opened from the head can have nothing here yet, and says so like its
+                    two other tabs rather than showing an empty panel. */}
+                {plan.length === 0 && files.length === 0 ? (
+                  <p className={NOTHING}>No plan and no file touched in this Session yet.</p>
+                ) : null}
                 {plan.length === 0 ? null : <PlanPanel entries={plan} />}
                 {files.length === 0 ? null : (
                   <Disclosure

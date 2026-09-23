@@ -673,6 +673,11 @@ export const Empty: Story = {
     )
     await expect(canvas.getByText('Nothing has gone to the agent yet.')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Tools · 2' })).toBeVisible()
+    // The two other tabs say they have nothing yet, rather than showing an empty panel.
+    await userEvent.click(canvas.getByRole('tab', { name: 'Activity' }))
+    await expect(canvas.getByText('No plan and no file touched in this Session yet.')).toBeVisible()
+    await userEvent.click(canvas.getByRole('tab', { name: 'Commands' }))
+    await expect(canvas.getByText('No command has run in this Session.')).toBeVisible()
     // The column is the way to the Context from now on, so the head's button has gone.
     expect(canvas.queryByRole('button', { name: 'Context' })).toBeNull()
   },
