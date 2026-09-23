@@ -21,6 +21,8 @@
 
 import {
   READ_PAGE_BYTES,
+  SEARCH_MATCH_LIMIT,
+  SEARCH_SCAN_BYTES,
   type SearchResult,
   TOOL_NAMES,
   type ToolName,
@@ -172,6 +174,9 @@ function describeSearch(result: SearchResult, query: string): string {
       ? `no match for "${query}" in ${result.scanned} bytes scanned`
       : `${result.hits.length} match(es) for "${query}" in ${result.scanned} bytes scanned`
   const stop = stoppedSentence(result)
+  // The limits are in every answer and not only in the description (D6-04): an agent that reads
+  // "no match" has to know how much was looked through to know what it means.
+  const limits = `limits: at most ${SEARCH_MATCH_LIMIT} matches and ${SEARCH_SCAN_BYTES} bytes scanned per call`
   // What the search passed over is said, so a match the agent expected and did not get has a
   // reason under it rather than a silence.
   const passed =
@@ -182,7 +187,7 @@ function describeSearch(result: SearchResult, query: string): string {
             .map((one) => `${one.path} (${one.reason})`)
             .join(', ')}${result.skippedCount > result.skipped.length ? ', …' : ''}`,
         ]
-  return [head, stop, ...passed, ...lines].join('\n')
+  return [head, stop, limits, ...passed, ...lines].join('\n')
 }
 
 /**
@@ -268,6 +273,10 @@ export const toolCatalogueLayer: Layer.Layer<
         const payload = JSON.stringify({
           tool: asked.tool,
           state,
+          // The provenance of the call (D6-06): the Session the token served, the digest of that
+          // token, the agent that held it, and how long it took. The row belongs to the Session
+          // already; the payload says it too, so an entry read on its own still says whose it is.
+          session: asked.sessionId,
           caller: asked.caller,
           // Who asked and how long it took: the thread shows a call under the agent that made it,
           // and a call that took a while is a call the reader wants the length of.
@@ -647,8 +656,11 @@ export const toolCatalogueLayer: Layer.Layer<
             if (listed === undefined) {
               return failed("could not read the Project's commands", 'the commands did not read')
             }
+            // The folder is said on every line, as the description of the tool promises: a command
+            // that runs in one of the Project's repositories is not the same one run at the root.
             const lines = listed.map(
-              (command) => `${command.name}  ${command.kind}  ${command.line}`,
+              (command) =>
+                `${command.name}  ${command.kind}  in ${command.folder ?? 'the Workspace root'}  ${command.line}`,
             )
             return {
               ok: true,
@@ -903,7 +915,9 @@ export const toolCatalogueLayer: Layer.Layer<
           // Measured around the tool itself, question to the human included: what the Journal
           // says a call took is how long the agent waited for it.
           const run = Effect.gen(function* () {
-            const began = Date.now()
+            // A monotonic clock, to the microsecond: a read inside the root takes less than a
+            // millisecond, and a call recorded as taking none is a call that says nothing of itself.
+            const began = performance.now()
             const answer = yield* perform(
               asked,
               root,
@@ -916,7 +930,7 @@ export const toolCatalogueLayer: Layer.Layer<
             // answered as a value, and what would remain is a defect the engine should hear about.
             return yield* settle(
               asked,
-              { ...made, milliseconds: Date.now() - began },
+              { ...made, milliseconds: Math.round((performance.now() - began) * 1000) / 1000 },
               answer,
               answer.ok ? 'completed' : 'failed',
             )
