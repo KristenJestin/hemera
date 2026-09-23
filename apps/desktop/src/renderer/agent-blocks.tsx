@@ -33,6 +33,7 @@ import {
   hemeraToolCallOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
+  questionOpen,
   subjectOf,
 } from './agent-tool-payloads.ts'
 
@@ -403,6 +404,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'permission_request') {
+    // A question already answered is drawn by the decision written after it, without buttons.
+    if (!questionOpen(entry)) return null
     const read = readPayload(permissionSchema, entry.payload)
     if (read === null) return null
     // A question of Hemera's own tools (D6-05): the tool by its name, the place it would act on

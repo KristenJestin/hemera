@@ -339,6 +339,18 @@ export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | n
   return { id: entry.id, body: `${entry.body} (${short})` }
 }
 
+/**
+ * Whether a permission question still waits for the reader, and so is drawn with its buttons.
+ *
+ * The engine rewrites the request in the state it closed in — decided, refused, cancelled — and
+ * writes the decision after it (D5-09, D6-05). A closed question is drawn by that decision alone,
+ * one line. Read from the entry and nothing the window holds, so a Session read back draws it
+ * as an open one does.
+ */
+export function questionOpen(entry: SessionEntry): boolean {
+  return entry.state === 'pending'
+}
+
 /** What the agent reports of a call, as far as telling one of Hemera's apart goes. */
 const reportedCallSchema = z.object({ call: z.object({ title: z.string() }) })
 

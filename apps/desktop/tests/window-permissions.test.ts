@@ -19,6 +19,7 @@ import type { SessionEntry } from '@hemera/ipc'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { agentOf, decide, listenToAgents, say, stopTurn } from '#renderer/agent-store.ts'
+import { questionOpen } from '#renderer/agent-tool-payloads.ts'
 
 import { type OpenWindow, install, openWindow } from './window.ts'
 
@@ -156,5 +157,27 @@ describe('A write outside the root asks the human', () => {
     )
     expect(closed?.state).toBe('cancelled')
     expect(pendingIn(entries)).toBeUndefined()
+  })
+
+  test('a Session read back draws a decided question as decided', async () => {
+    const target = join(outside, 'notes.md')
+    const session = await aSessionWritingOutside(target)
+
+    const turn = say(session.id, 'write the notes')
+    await until(() => pendingIn(agentOf(session.id).entries) !== undefined)
+    const asked = QUESTION.parse(
+      JSON.parse(pendingIn(agentOf(session.id).entries)?.payload ?? '{}'),
+    )
+    await decide(session.id, asked.toolCallId, 'allowed')
+    await turn
+
+    // The thread as a reopened Session reads it: nothing of what the window heard live.
+    const { entries } = await window.hemera.invoke('sessions.read', { sessionId: session.id })
+    const request = entries.find((entry) => entry.kind === 'permission_request')
+    expect(request?.state).toBe('decided')
+    expect(request === undefined ? true : questionOpen(request)).toBe(false)
+    const decision = entries.find((entry) => entry.kind === 'permission_decision')
+    expect(decision?.body).toBe(`you allowed fs_write to act on ${target}`)
+    expect((decision?.seq ?? 0) > (request?.seq ?? 0)).toBe(true)
   })
 })

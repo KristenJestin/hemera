@@ -21,6 +21,7 @@ import {
   hemeraPermissionOf,
   hemeraToolCallOf,
   nativeSubjectOf,
+  questionOpen,
   subjectOf,
 } from '#renderer/agent-tool-payloads.ts'
 
@@ -429,5 +430,44 @@ describe('Every tool shows its subject', () => {
         line: 'pnpm test',
       }),
     ).toEqual({ label: 'Run command', subject: 'pnpm test', intent: 'asks to run in /w/app' })
+  })
+})
+
+describe('A Session read back draws a decided question as decided', () => {
+  /**
+   * A question of `fs_write` and its answer, as `sessions.read` gave them back on the Linux trial
+   * of 23 September 2026: the request rewritten in the state it closed in, the decision after it.
+   */
+  const asked = (state: string): SessionEntry => ({
+    ...entryOf(
+      'permission_request',
+      'hemera',
+      'fs_write asks to act outside the Workspace: /tmp/outside.txt',
+      JSON.stringify({
+        toolCallId: 'q1',
+        options: [
+          { optionId: 'refused', name: 'Refuse', kind: 'reject_once' },
+          { optionId: 'allowed', name: 'Allow once', kind: 'allow_once' },
+        ],
+        tool: 'fs_write',
+        named: '/tmp/outside.txt',
+        resolved: '/tmp/outside.txt',
+        root: '/tmp/hemera-linux-claude-ws',
+        line: null,
+      }),
+    ),
+    id: 'request',
+    seq: 42,
+    correlationId: 'perm:q1',
+    state,
+  })
+
+  test('a question decided, refused or stopped is not drawn waiting, and a pending one is', () => {
+    // Its decision is what the thread draws for it: allowed, refused or stopped, and no button.
+    expect(questionOpen(asked('decided'))).toBe(false)
+    expect(questionOpen(asked('refused'))).toBe(false)
+    expect(questionOpen(asked('cancelled'))).toBe(false)
+    // Only a question nobody has answered yet is waiting for the reader.
+    expect(questionOpen(asked('pending'))).toBe(true)
   })
 })
