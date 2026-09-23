@@ -40,7 +40,7 @@ import {
 
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
-import { createCommand } from '#engine/commands/panel.ts'
+import { createCommand, runFromPanel } from '#engine/commands/panel.ts'
 import { Commands } from '#engine/commands/service.ts'
 import { Context as AgentContext } from '#engine/context/service.ts'
 import { Journal } from '#engine/journal.ts'
@@ -999,6 +999,45 @@ describe('A command saved in the settings is listed to the agent at once', () =>
     expect(agent.answers.used[0]?.text).toContain(
       'check  check  in the Workspace root  bun run check',
     )
+  })
+})
+
+describe('A run the human started in the Session is read back by the agent', () => {
+  test('the list names it with how it ended, and its output reads without its id', async () => {
+    const agent = fakeAgent({
+      turns: [
+        [{ does: 'uses', call: 'commands_list', arguments: {} }],
+        [{ does: 'uses', call: 'commands_output', arguments: {} }],
+      ],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        // The human writes a line in the Commands panel, and it ends badly.
+        const started = yield* runFromPanel(session.id, undefined, ONE_OFF)
+        yield* until(panelOf(session.id), (read) =>
+          read.recent.some((run) => run.id === started.id && run.state === 'failed'),
+        )
+        yield* runtime.prompt(session.id, 'did you see it?')
+        yield* runtime.prompt(session.id, 'what did it say?')
+        return started
+      }),
+    )
+
+    expect(agent.answers.used.map((one) => one.isError)).toEqual([false, false])
+    // The catalogue is empty, and the list says so; the run is there all the same.
+    const listed = agent.answers.used[0]?.text ?? ''
+    expect(listed).toContain('the catalogue of')
+    expect(listed).toContain(seen.id)
+    expect(listed).toContain('failed, exit code 2')
+    expect(listed).toContain('one-off')
+    // And its output is read back, whoever started it.
+    const read = agent.answers.used[1]?.text ?? ''
+    expect(read).toContain(`run ${seen.id}`)
+    expect(read).toContain('exit code 2')
+    expect(read).toContain('checked')
   })
 })
 

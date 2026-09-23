@@ -24,7 +24,7 @@ const TOOLS = [
   { name: 'fs_write', bound: 'the whole file, inside the Workspace root' },
   { name: 'fs_list', bound: 'one level, inside the Workspace root' },
   { name: 'search', bound: '200 matches and 1 MiB scanned a call' },
-  { name: 'commands_list', bound: "the Project's catalogue" },
+  { name: 'commands_list', bound: "the Project's catalogue, and this Session's last runs" },
   { name: 'commands_run', bound: 'the catalogue, or a one-off line the user allows' },
   { name: 'commands_output', bound: 'the last 64 KiB a run printed' },
   { name: 'commands_stop', bound: 'a run of this Project, and all it started' },

@@ -131,7 +131,11 @@ export const TOOL_ARGUMENTS = {
       .describe('true to answer as soon as it has started, without waiting for it to end'),
   }),
   commands_output: z.object({
-    run: z.string().min(1).optional().describe('which run; the only one running without it'),
+    run: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('which run, as commands_list names it; the one running, or the last, without it'),
   }),
   commands_stop: z.object({
     run: z.string().min(1).optional().describe('which run; the only one running without it'),
@@ -149,10 +153,10 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     'List one level of a folder of the Workspace root: the name, the kind and the size of what it holds.',
   search: `Search the files of the Workspace root for a piece of text, \`.gitignore\` respected. One call returns at most ${SEARCH_MATCH_LIMIT} matches and scans at most ${SEARCH_SCAN_BYTES} bytes: the answer says which limit stopped it, gives the cursor to continue from, and names the files it did not read (binary or unreadable).`,
   commands_list:
-    "The commands the Project's catalogue holds: name, line, kind, and the folder each runs in.",
+    "The commands the Project's catalogue holds: name, line, kind, and the folder each runs in. Then the runs of this Session, whoever started them, you or the user from the Commands panel: run id, name, state, the exit code once it ended, catalogue or one-off, and the line.",
   commands_run: `Ask for a command of the Project's catalogue to run, by name, or a one-off line, which the user is asked to allow before it runs. An app command that is already running is handed back rather than started twice. A check or a utility is waited for, up to timeout, and answers with its exit code and the end of its output; one still running then is left running in the background and its run id is given, so there is nothing to poll for. background: true answers at once. An app is left running as soon as it has started. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
   commands_output:
-    'What a run has printed, bounded, the address it published, and how it ended if it has.',
+    'What a run of this Session has printed, whoever started it, bounded, the address it published, and how it ended if it has.',
   commands_stop: 'Stop a run and everything it started.',
   project_get:
     'The Project this Session belongs to: its name, where its Workspace root is, and what it reads from.',
@@ -172,7 +176,7 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   fs_write: 'the whole file, inside the Workspace root',
   fs_list: 'one level, inside the Workspace root',
   search: `${SEARCH_MATCH_LIMIT} matches and ${SEARCH_SCAN_BYTES / 1024 / 1024} MiB scanned a call`,
-  commands_list: "the Project's catalogue",
+  commands_list: "the Project's catalogue, and this Session's last runs",
   commands_run: 'the catalogue, or a one-off line the user allows',
   commands_output: `the last ${OUTPUT_KEPT_BYTES / 1024} KiB a run printed`,
   commands_stop: 'a run of this Project, and all it started',

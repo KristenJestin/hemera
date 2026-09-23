@@ -786,11 +786,31 @@ export const toolCatalogueLayer: Layer.Layer<
               (command) =>
                 `${command.name}  ${command.kind}  in ${command.folder ?? 'the Workspace root'}  ${command.line}`,
             )
+            // And the runs of this Session, whoever started them (recette 4 of 23 September 2026):
+            // a line the human ran from the panel is in the thread, and an agent asked about it
+            // that reads only the catalogue answers that it sees nothing. What is running is read
+            // from memory, where it stands; what ended from its row, with how it ended.
+            const running = (yield* answered(commands.running(asked.sessionId))) ?? []
+            const live = new Set(running.map((run) => run.id))
+            const ended = ((yield* answered(commands.recent(asked.sessionId))) ?? []).filter(
+              (run) => !live.has(run.id),
+            )
+            const runs = [...running, ...ended].map((run) => {
+              const how = run.exitCode === null ? '' : `, exit code ${run.exitCode}`
+              const what = run.commandId === null ? 'one-off' : 'catalogue'
+              return `${run.id}  ${run.name}  ${run.state}${how}  ${what}  ${run.line}`
+            })
             return {
               ok: true,
-              summary: `${listed.length} command(s) in the catalogue of ${projectName}`,
-              text:
-                lines.length === 0 ? `the catalogue of ${projectName} is empty` : lines.join('\n'),
+              summary: `${listed.length} command(s) in the catalogue of ${projectName}, ${runs.length} run(s) in this Session`,
+              text: [
+                lines.length === 0
+                  ? `the catalogue of ${projectName} is empty`
+                  : `the catalogue of ${projectName}:\n${lines.join('\n')}`,
+                runs.length === 0
+                  ? 'no run in this Session yet'
+                  : `the runs of this Session, running first, then the last that ended; read one with commands_output:\n${runs.join('\n')}`,
+              ].join('\n'),
               paths: [],
             }
           }
