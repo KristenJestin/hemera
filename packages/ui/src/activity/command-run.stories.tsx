@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { type ReactNode, useState } from 'react'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { CommandRun } from './command-run.tsx'
 
@@ -53,7 +54,7 @@ const meta = {
     state: {
       control: 'inline-radio',
       options: ['running', 'finished', 'failed', 'stopped'],
-      description: 'Where the process stands. A running process stays open.',
+      description: 'Where the process stands. A running process stays open; an ended one folds.',
     },
     folder: { control: 'text', description: 'The folder it runs in.' },
     output: { control: 'text', description: 'What it has written so far.' },
@@ -204,5 +205,84 @@ export const Empty: Story = {
     const log = canvas.getByRole('log', { name: 'Output of dev' })
     await expect(log).toBeInTheDocument()
     await expect(log.textContent).toBe('')
+  },
+}
+
+/**
+ * A failed run folds (recette 4 of 23 September 2026): it opens on its output, and once it is
+ * over the fold is the reader's. It used to be held open for good, in the way of the thread.
+ */
+export const AFailedRunFolds: Story = {
+  args: {
+    name: 'bun',
+    command: 'bun run check',
+    kind: 'utility',
+    state: 'failed',
+    folder: '.',
+    output: 'error: script "check" exited with code 1',
+    url: undefined,
+    exitCode: 1,
+    oneOff: true,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /^bun Exited 1/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => {
+      expect(canvas.queryByText(/exited with code 1/)).toBeNull()
+    })
+  },
+}
+
+/** A running run stays open: a press on its line does not fold the process the reader waits on. */
+export const ARunningRunStaysOpen: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /^dev Running/ })
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(canvas.getByRole('log', { name: 'Output of dev' })).toBeVisible()
+  },
+}
+
+/** A check that runs, then fails: the line, and the button that ends it, as a Session would. */
+function EndingRun(): ReactNode {
+  const [over, setOver] = useState(false)
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <button type="button" onClick={() => setOver(true)}>
+        End the run
+      </button>
+      <CommandRun
+        name="check"
+        command="pnpm check"
+        kind="check"
+        state={over ? 'failed' : 'running'}
+        folder="."
+        output={over ? 'Tests  3 failed (3)' : 'Running the tests...'}
+        exitCode={over ? 1 : undefined}
+      />
+    </div>
+  )
+}
+
+/**
+ * A run that ends while it is open stays open: it does not snap shut to how it was first drawn,
+ * and folds under the reader's next press.
+ */
+export const ARunThatEndsStaysOpen: Story = {
+  render: () => <EndingRun />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /^check Running/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(canvas.getByRole('button', { name: 'End the run' }))
+    await expect(canvas.getByText('Exited 1')).toBeVisible()
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(canvas.getByText(/3 failed/)).toBeVisible()
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
   },
 }

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { withinFrames } from '../../.storybook/reduced-motion.ts'
@@ -304,7 +305,7 @@ export const Failed: Story = {
   },
 }
 
-/** A call Hemera refused: nothing ran, and the reason is on the line, not behind a fold. */
+/** A call Hemera refused: nothing ran, and it opens on the reason, which the reader may fold. */
 export const Refused: Story = {
   args: {
     tool: 'fs_write',
@@ -322,11 +323,92 @@ export const Refused: Story = {
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByRole('img', { name: 'Refused' })).toBeVisible()
     await expect(canvas.getByText(/not in the set of this Session/)).toBeVisible()
+    // Over, so the reader's to fold (recette 4 of 23 September 2026).
     await userEvent.click(row)
-    await expect(row, 'a refusal folds away under the reader\u2019s hand').toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+  },
+}
+
+/**
+ * A failed call folds (recette 4 of 23 September 2026): it opens on its reason, and once it is
+ * over the fold is the reader's. It used to be held open for good, in the way of the thread.
+ */
+export const AFailedCallFolds: Story = {
+  args: {
+    status: 'failed',
+    summary: 'src/billing/export.csv does not exist.',
+    error: 'src/billing/export.csv does not exist.',
+    ms: 3,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /Read file/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => {
+      expect(canvas.queryByText(/does not exist/)).toBeNull()
+    })
+  },
+}
+
+/** A call in flight stays open: a press on its line does not fold what the reader waits on. */
+export const ARunningCallStaysOpen: Story = {
+  args: {
+    tool: 'search',
+    label: 'Search',
+    mark: 'search',
+    subject: { text: '"exportInvoices"' },
+    status: 'in_progress',
+    summary: 'Searching for exportInvoices under src/.',
+    arguments: [{ label: 'query', value: 'exportInvoices' }],
+    ms: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /Search/ })
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(canvas.getByText(/Searching for exportInvoices/)).toBeVisible()
+  },
+}
+
+/** A call that runs, then ends: the line, and the button that ends it, as a turn would. */
+function EndingCall(): ReactNode {
+  const [over, setOver] = useState(false)
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <button type="button" onClick={() => setOver(true)}>
+        End the call
+      </button>
+      <HemeraToolCall
+        tool="search"
+        label="Search"
+        mark="search"
+        status={over ? 'completed' : 'in_progress'}
+        summary={over ? '3 match(es) for "exportInvoices"' : 'Searching for exportInvoices.'}
+        ms={over ? 64 : undefined}
+      />
+    </div>
+  )
+}
+
+/**
+ * A call that ends while it is open stays open: it does not snap shut to how it was first drawn,
+ * and folds under the reader's next press.
+ */
+export const ACallThatEndsStaysOpen: Story = {
+  render: () => <EndingCall />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /Search/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(canvas.getByRole('button', { name: 'End the call' }))
+    await expect(canvas.getByRole('img', { name: 'Done' })).toBeVisible()
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(canvas.getByText(/3 match\(es\)/)).toBeVisible()
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
   },
 }
 

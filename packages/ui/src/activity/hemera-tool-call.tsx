@@ -43,13 +43,13 @@ import { MARKS, SubjectOnLine, type ToolSubject, pressable } from './tool-call-c
  *
  * A refused call is a call like any other, recorded like any other, so it is not drawn as an
  * error: nothing failed, Hemera said no, and nothing ran — it wears the dot of a call nobody
- * ran. The reason is read on the line it left, and the body stays open, because a refusal
+ * ran. The reason is read on the line it left, and the body opens on it, because a refusal
  * nobody can read is a refusal that will be asked again.
  *
- * What is open, and what the reader may fold, follows the rule of a native call: a call in
- * flight is what the reader is waiting on, a call that failed is when the details matter, and a
- * call waiting for a human decision is the one thing in the thread that is asking for something.
- * Everything else folds.
+ * What is held open is what is still happening: a call in flight is what the reader is waiting
+ * on, and a call waiting for a human decision is the one thing in the thread that is asking for
+ * something. A call that failed or was refused opens on its reason, since that is when the
+ * details matter, and folds under the reader's hand like everything that is over (recette 4).
  */
 
 /** Where a call stands, in the word the dot is announced by and the tone it is drawn in. */
@@ -185,17 +185,19 @@ export function HemeraToolCall({
   className,
 }: HemeraToolCallProps): ReactNode {
   const { word, tone } = STATUS[status]
-  // The four states in which the body is the answer to the reader's question rather than a
-  // detail they may go and look for: running, failed, waiting on a decision, and refused — the
-  // reason a call was turned down is the whole of what a reader has to act on.
-  const forced =
-    status === 'in_progress' || status === 'failed' || status === 'pending' || status === 'refused'
+  // Held open while something is still happening or waits for the reader: a call in flight and a
+  // call waiting on a decision. A call that failed or was refused opens on its reason, and once
+  // it is over the fold is the reader's (recette 4 of 23 September 2026): an ended block that
+  // cannot be folded stays in the way of the whole thread.
+  const forced = status === 'in_progress' || status === 'pending'
+  const ended = status === 'failed' || status === 'refused'
   return (
     <Disclosure
       className={className}
-      // Uncontrolled once the call is over: `undefined` hands the fold back to the reader.
+      // Uncontrolled once the call is over: `undefined` hands the fold back to the reader, and
+      // a call that ends while it is held open is handed back open.
       open={forced ? true : undefined}
-      defaultOpen={defaultOpen}
+      defaultOpen={defaultOpen || ended}
       // A subject that is a path is the press that goes there, where it is read: on the line that
       // never moves, so the body opening under it does not carry it along (trials of 23 September
       // 2026), and once rather than a second time at the end of the line.

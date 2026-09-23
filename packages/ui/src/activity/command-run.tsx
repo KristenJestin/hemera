@@ -103,15 +103,16 @@ export function CommandRun({
 }: CommandRunProps): ReactNode {
   const shown = STATE[state]
   const running = state === 'running'
-  // A process the reader is waiting on, and a run that failed: both are read where they are, since
-  // the output is the answer rather than a detail to go and open. Everything else folds.
-  const staysOpen = running || state === 'failed'
+  // A process the reader is waiting on is held open: the output is the answer rather than a
+  // detail to go and open. A run that failed opens on it too, and is the reader's to fold once it
+  // is over (recette 4 of 23 September 2026): an ended block that cannot be folded is a block
+  // that stays in the way of the whole thread. One that ends while it is open stays open.
   return (
     <div className={cn(ROW, className)}>
       <Disclosure
         className={FOLDING}
-        open={staysOpen ? true : undefined}
-        defaultOpen={defaultOpen}
+        open={running ? true : undefined}
+        defaultOpen={defaultOpen || state === 'failed'}
         summary={
           <span className={SUMMARY}>
             <span className={NAME}>{name}</span>
