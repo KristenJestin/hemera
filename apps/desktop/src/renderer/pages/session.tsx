@@ -668,8 +668,8 @@ export function SessionPage({
               else void saveStory(session.id, story, stories)
             }}
             onGoToQuestion={goToQuestion}
-            onMarkReady={() => void markReady()}
-            onRework={(reason) => void rework(reason)}
+            onMarkReady={() => void markReady(session.id)}
+            onRework={(reason) => void rework(session.id, reason)}
             onPickRevision={(revision) => {
               const current = stored.revisions.find(
                 (one) => one.id === defined.spec.currentRevisionId,

@@ -39,7 +39,7 @@ export interface ReadyRequest {
   expectedRevisionId: string
   expectedContentVersion: number
   /** The Session whose panel the click came from (D7-13). */
-  sessionId?: string | undefined
+  sessionId: string
 }
 
 /**
@@ -79,7 +79,7 @@ export function markReady(
     return [
       specEvent(spec, snapshot.revision.id, 'spec.ready', {
         author: 'human',
-        sessionId: request.sessionId ?? null,
+        sessionId: request.sessionId,
         payload: { key: spec.key, contentVersion: spec.contentVersion },
       }),
     ]

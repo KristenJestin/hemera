@@ -101,13 +101,14 @@ describe('The button is offered only when the checks pass', () => {
   test('a complete, declared and attested draft has an empty gate, and is frozen by the click', async () => {
     const outcome = await opened()(
       Effect.gen(function* () {
-        const { specId, snapshot } = yield* attested
+        const { specId, session, snapshot } = yield* attested
         const specs = yield* Specs
         const gate = yield* specs.gate(specId)
         const readied = yield* specs.markReady({
           specId,
           expectedRevisionId: snapshot.revision.id,
           expectedContentVersion: gate.contentVersion,
+          sessionId: session.id,
         })
         return { gate, readied }
       }),
@@ -164,6 +165,7 @@ describe('An obsolete request is refused', () => {
             specId,
             expectedRevisionId: snapshot.revision.id,
             expectedContentVersion: shown.contentVersion,
+            sessionId: session.id,
           }),
         )
         return { refusal, after: yield* specs.read(specId) }
@@ -195,6 +197,7 @@ describe('An attestation alone does not freeze', () => {
             specId,
             expectedRevisionId: reattested.revision.id,
             expectedContentVersion: gate.contentVersion,
+            sessionId: session.id,
           }),
         )
         return { gate, refusal, after: yield* specs.read(specId) }

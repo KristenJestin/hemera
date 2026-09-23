@@ -283,12 +283,13 @@ describe('An obsolete request is refused', () => {
     await openSpec('spec-7')
     answers.set('specs.markReady', snapshot(4))
 
-    expect(await markReady()).toBe(true)
+    expect(await markReady('writer')).toBe(true)
 
     expect(argumentOf('specs.markReady')).toEqual({
       specId: 'spec-7',
       expectedRevisionId: 'rev-1',
       expectedContentVersion: 4,
+      sessionId: 'writer',
     })
   })
 
@@ -302,7 +303,7 @@ describe('An obsolete request is refused', () => {
     reads(5)
     asked = []
 
-    expect(await markReady()).toBe(false)
+    expect(await markReady('writer')).toBe(false)
 
     expect(names()).toContain('specs.read')
     expect(specSnapshot().snapshot?.spec.contentVersion).toBe(5)
@@ -318,12 +319,13 @@ describe('Rework creates a complete new draft', () => {
     await openSpec('spec-7')
     answers.set('specs.reopen', snapshot(4))
 
-    await rework('  Credit notes keep their number.  ')
+    await rework('writer', '  Credit notes keep their number.  ')
 
     expect(argumentOf('specs.reopen')).toEqual({
       specId: 'spec-7',
       expectedRevisionId: 'rev-1',
       reason: 'Credit notes keep their number.',
+      sessionId: 'writer',
     })
   })
 
@@ -332,12 +334,13 @@ describe('Rework creates a complete new draft', () => {
     await openSpec('spec-7')
     answers.set('specs.reopen', snapshot(4))
 
-    await rework('   ')
+    await rework('writer', '   ')
 
     expect(argumentOf('specs.reopen')).toEqual({
       specId: 'spec-7',
       expectedRevisionId: 'rev-1',
       reason: undefined,
+      sessionId: 'writer',
     })
   })
 })

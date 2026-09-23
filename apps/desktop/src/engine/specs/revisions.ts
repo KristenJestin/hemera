@@ -48,7 +48,7 @@ export interface ReopenRequest {
   expectedRevisionId: string
   reason?: string | undefined
   /** The Session whose panel the Rework came from (D7-13). */
-  sessionId?: string | undefined
+  sessionId: string
 }
 
 function refusal(snapshot: SpecSnapshot, request: ReopenRequest): string | null {
@@ -279,7 +279,7 @@ export function reopen(
       events: [
         specEvent(spec, revisionId, 'spec.reopened', {
           author: 'human',
-          sessionId: request.sessionId ?? null,
+          sessionId: request.sessionId,
           payload: {
             reason,
             number: revision.number + 1,

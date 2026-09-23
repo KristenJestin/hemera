@@ -190,26 +190,26 @@ describe('A question offers options and takes one of them or a text', () => {
     expect(answer.safeParse({ specId: 's', questionId: 'q', text: 'Both' }).success).toBe(true)
   })
 
-  test('Rework takes a reason or none', () => {
+  test('Rework takes a reason or none, and names the Session it came from', () => {
     const reopen = ENGINE_REQUESTS['specs.reopen'].arguments
-    expect(reopen.safeParse({ specId: 's', expectedRevisionId: 'r' }).success).toBe(true)
-    expect(reopen.safeParse({ specId: 's', expectedRevisionId: 'r', reason: 'CSV' }).success).toBe(
-      true,
-    )
+    const asked = { specId: 's', expectedRevisionId: 'r', sessionId: 'writer' }
+    expect(reopen.safeParse(asked).success).toBe(true)
+    expect(reopen.safeParse({ ...asked, reason: 'CSV' }).success).toBe(true)
+    expect(reopen.safeParse({ specId: 's', expectedRevisionId: 'r' }).success).toBe(false)
   })
 })
 
 describe('Mark ready is sent with the content it was shown', () => {
   const markReady = ENGINE_REQUESTS['specs.markReady'].arguments
 
-  test('a click carries the revision and the content version', () => {
-    expect(
-      markReady.safeParse({
-        specId: 'spec-1',
-        expectedRevisionId: 'revision-1',
-        expectedContentVersion: 3,
-      }).success,
-    ).toBe(true)
+  test('a click carries the revision, the content version and the Session it came from', () => {
+    const clicked = {
+      specId: 'spec-1',
+      expectedRevisionId: 'revision-1',
+      expectedContentVersion: 3,
+    }
+    expect(markReady.safeParse({ ...clicked, sessionId: 'writer' }).success).toBe(true)
+    expect(markReady.safeParse(clicked).success).toBe(false)
   })
 
   test('a negative content version is refused', () => {
@@ -218,6 +218,7 @@ describe('Mark ready is sent with the content it was shown', () => {
         specId: 'spec-1',
         expectedRevisionId: 'revision-1',
         expectedContentVersion: -1,
+        sessionId: 'writer',
       }).success,
     ).toBe(false)
   })

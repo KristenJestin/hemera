@@ -266,9 +266,10 @@ export async function answerQuestion(
 /**
  * "Mark ready", made against the revision and the content version of the snapshot the
  * readiness was computed from, which is the one on screen (D7-10). A Spec that changed since
- * refuses it, and is read again.
+ * refuses it, and is read again. The Session is the one whose panel the click came from, which
+ * the Journal line names (D7-13).
  */
-export async function markReady(): Promise<boolean> {
+export async function markReady(sessionId: string): Promise<boolean> {
   const { snapshot } = state
   if (snapshot === null) return false
   return await acting(async (specId) => {
@@ -276,15 +277,16 @@ export async function markReady(): Promise<boolean> {
       specId,
       expectedRevisionId: snapshot.spec.currentRevisionId,
       expectedContentVersion: snapshot.spec.contentVersion,
+      sessionId,
     })
   })
 }
 
 /**
  * "Rework" of a `ready` Spec: a new complete draft revision (D7-05). A reason left empty is
- * no reason, and is sent as none.
+ * no reason, and is sent as none. The Session is named as for Mark ready.
  */
-export async function rework(reason: string): Promise<boolean> {
+export async function rework(sessionId: string, reason: string): Promise<boolean> {
   const current = state.snapshot?.spec.currentRevisionId
   if (current === undefined) return false
   replace({ ...state, revision: null })
@@ -294,6 +296,7 @@ export async function rework(reason: string): Promise<boolean> {
       specId,
       expectedRevisionId: current,
       reason: said === '' ? undefined : said,
+      sessionId,
     })
   })
 }

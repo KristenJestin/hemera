@@ -190,8 +190,12 @@ describe('Rework creates a complete new draft', () => {
   test('a Rework without a reason is a Rework all the same', async () => {
     const reworked = await opened()(
       Effect.gen(function* () {
-        const { specId, snapshot } = yield* ready
-        return yield* (yield* Specs).reopen({ specId, expectedRevisionId: snapshot.revision.id })
+        const { specId, session, snapshot } = yield* ready
+        return yield* (yield* Specs).reopen({
+          specId,
+          expectedRevisionId: snapshot.revision.id,
+          sessionId: session.id,
+        })
       }),
     )
     expect(reworked.spec.status).toBe('draft')
@@ -205,7 +209,11 @@ describe('Rework asks the open questions again in the thread', () => {
       Effect.gen(function* () {
         const { specId, session, snapshot } = yield* ready
         const specs = yield* Specs
-        const reworked = yield* specs.reopen({ specId, expectedRevisionId: snapshot.revision.id })
+        const reworked = yield* specs.reopen({
+          specId,
+          expectedRevisionId: snapshot.revision.id,
+          sessionId: session.id,
+        })
         const copied = reworked.questions[0]
         if (copied === undefined) return yield* Effect.die('the open question was not copied')
         const asked = yield* (yield* Sessions).read(session.id)
@@ -243,7 +251,12 @@ describe('A write to an old revision is refused', () => {
       Effect.gen(function* () {
         const { specId, session, snapshot } = yield* ready
         const specs = yield* Specs
-        yield* specs.reopen({ specId, expectedRevisionId: snapshot.revision.id, reason: 'Rework' })
+        yield* specs.reopen({
+          specId,
+          expectedRevisionId: snapshot.revision.id,
+          reason: 'Rework',
+          sessionId: session.id,
+        })
         const old = yield* specs.read(specId, 1)
         const refusal = writable(old.spec, old.revision, agentOf(session.id), null)
         const written = yield* write(agentOf(session.id), specId, 'problem', 'The new problem.')
@@ -260,9 +273,14 @@ describe('A stale reopening is refused', () => {
   test('two reopenings on the same revision make one draft', async () => {
     const outcome = await opened()(
       Effect.gen(function* () {
-        const { specId, snapshot } = yield* ready
+        const { specId, session, snapshot } = yield* ready
         const specs = yield* Specs
-        const asked = { specId, expectedRevisionId: snapshot.revision.id, reason: 'Rework' }
+        const asked = {
+          specId,
+          expectedRevisionId: snapshot.revision.id,
+          reason: 'Rework',
+          sessionId: session.id,
+        }
         const first = yield* specs.reopen(asked)
         const second = yield* Effect.flip(specs.reopen(asked))
         return { first, second, revisions: yield* specs.revisions(specId) }
