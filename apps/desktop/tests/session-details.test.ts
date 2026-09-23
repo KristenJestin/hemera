@@ -1,6 +1,6 @@
 /**
- * What the side column of a Session draws: the Commands tab and the Context tab (design D6-10,
- * D6-12).
+ * What the Session details draw: the tab they open on, the Commands tab and the Context tab
+ * (design D6-10, D6-12).
  *
  * The page imports the design system's components, which need a browser; what is read here is
  * the pure module the page hands them from — the runs as the panel lists them, the tab a Session
@@ -19,15 +19,11 @@ import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
 import {
-  columnDrawn,
   contextListsOf,
-  contextReachable,
-  focusesOpeningTab,
-  hasSideColumn,
+  detailsTabsOf,
   openingTabOf,
   panelRunsOf,
-  sideTabsOf,
-} from '#renderer/side-column.ts'
+} from '#renderer/session-details.ts'
 import { contextOf, listenToTools, readContext, runCommand, runsOf } from '#renderer/tools-store.ts'
 
 import { type OpenWindow, install, openWindow } from './window.ts'
@@ -78,13 +74,13 @@ describe('The agent starts the app and the user opens it', () => {
     expect(panelRunsOf(runs.slice(2), 'C:\\Users\\ana\\atlas')[0]?.folder).toBe('web')
   })
 
-  test('a Session with a command running opens on its commands', () => {
+  test('the details of a Session with a command running open on its commands', () => {
     const done = aRun('r1', '/a', 'exited', 'c1')
-    const tabs = sideTabsOf(1, 0, [done], null)
+    const tabs = detailsTabsOf(1, 0, [done], null)
     expect(openingTabOf([aRun('r1', '/a', 'running', 'c1')], tabs)).toBe('commands')
     expect(openingTabOf([done], tabs)).toBe('activity')
     // With nothing done yet, the tab that has something is the one it opens on.
-    expect(openingTabOf([done], sideTabsOf(0, 0, [done], null))).toBe('commands')
+    expect(openingTabOf([done], detailsTabsOf(0, 0, [done], null))).toBe('commands')
   })
 })
 
@@ -106,94 +102,52 @@ function aView(
   }
 }
 
-describe('No side column until a tab has something', () => {
-  test('no column on a fresh Session whose context is only the base and the tools', () => {
-    const tabs = sideTabsOf(0, 0, [], aView(['base']))
+describe('The details open on the tab that has something', () => {
+  test('a fresh Session whose context is only the base and the tools has no tab with something', () => {
+    const tabs = detailsTabsOf(0, 0, [], aView(['base']))
 
     expect(tabs).toEqual({ activity: false, commands: false, context: false })
-    expect(hasSideColumn(tabs)).toBe(false)
-  })
-
-  test('AGENTS.md given at the start or read by the agent opens no column by itself', () => {
-    expect(hasSideColumn(sideTabsOf(0, 0, [], aView(['base', 'provided'])))).toBe(false)
-    expect(hasSideColumn(sideTabsOf(0, 0, [], aView(['base', 'native'])))).toBe(false)
-  })
-
-  test('no plan, no file, no run, no catalogue and no context known draw no column', () => {
-    const tabs = sideTabsOf(0, 0, [], null)
-    expect(tabs).toEqual({ activity: false, commands: false, context: false })
-    expect(hasSideColumn(tabs)).toBe(false)
-  })
-
-  test('a delivery opens the Context tab', () => {
-    const tabs = sideTabsOf(0, 0, [], aView(['base', 'provided', 'instructions']))
-
-    expect(tabs).toEqual({ activity: false, commands: false, context: true })
-    expect(hasSideColumn(tabs)).toBe(true)
     expect(openingTabOf([], tabs)).toBe('context')
   })
 
-  test('a plan opens the Activity tab, and a catalogue the Commands tab', () => {
-    const plan = sideTabsOf(2, 0, [], aView(['base']))
+  test('AGENTS.md given at the start or read by the agent is no delivery', () => {
+    expect(detailsTabsOf(0, 0, [], aView(['base', 'provided'])).context).toBe(false)
+    expect(detailsTabsOf(0, 0, [], aView(['base', 'native'])).context).toBe(false)
+  })
+
+  test('with no plan, no file, no run, no catalogue and no context known, they open on the Context', () => {
+    const tabs = detailsTabsOf(0, 0, [], null)
+
+    expect(tabs).toEqual({ activity: false, commands: false, context: false })
+    expect(openingTabOf([], tabs)).toBe('context')
+  })
+
+  test('a delivery makes them open on the Context tab', () => {
+    const tabs = detailsTabsOf(0, 0, [], aView(['base', 'provided', 'instructions']))
+
+    expect(tabs).toEqual({ activity: false, commands: false, context: true })
+    expect(openingTabOf([], tabs)).toBe('context')
+  })
+
+  test('a plan makes them open on the Activity tab, and a catalogue on the Commands tab', () => {
+    const plan = detailsTabsOf(2, 0, [], aView(['base']))
     expect(plan.activity).toBe(true)
     expect(openingTabOf([], plan)).toBe('activity')
 
-    const catalogue = sideTabsOf(0, 0, [], aView(['base'], [{ name: 'check', line: 'pnpm check' }]))
+    const catalogue = detailsTabsOf(
+      0,
+      0,
+      [],
+      aView(['base'], [{ name: 'check', line: 'pnpm check' }]),
+    )
     expect(catalogue.commands).toBe(true)
     expect(openingTabOf([], catalogue)).toBe('commands')
   })
 
-  test('a column opened from the head with nothing in any tab opens on the Context', () => {
-    const tabs = sideTabsOf(0, 0, [], aView(['base', 'provided']))
+  test('a running command wins over a plan and a delivery', () => {
+    const tabs = detailsTabsOf(2, 1, [], aView(['base', 'instructions']))
 
-    expect(openingTabOf([], tabs)).toBe('context')
-  })
-})
-
-describe('The Context is reached from the head while no column is drawn', () => {
-  test('a fresh Session offers the head button once its context is known, and draws no column', () => {
-    const tabs = sideTabsOf(0, 0, [], aView(['base', 'provided']))
-    const drawn = columnDrawn(tabs, false)
-
-    expect(drawn).toBe(false)
-    expect(contextReachable(drawn, aView(['base', 'provided']))).toBe(true)
-  })
-
-  test('no head button before the engine has said what the context is', () => {
-    expect(contextReachable(columnDrawn(sideTabsOf(0, 0, [], null), false), null)).toBe(false)
-  })
-
-  test('the column opened from the head is drawn, and the head button goes', () => {
-    const view = aView(['base', 'provided'])
-    const drawn = columnDrawn(sideTabsOf(0, 0, [], view), true)
-
-    expect(drawn).toBe(true)
-    expect(contextReachable(drawn, view)).toBe(false)
-  })
-
-  test('a column drawn for a tab that has something offers no head button', () => {
-    const view = aView(['base', 'provided', 'instructions'])
-    const drawn = columnDrawn(sideTabsOf(0, 0, [], view), false)
-
-    expect(drawn).toBe(true)
-    expect(contextReachable(drawn, view)).toBe(false)
-  })
-
-  test('the column opened from the head takes the focus the pressed button had', () => {
-    expect(focusesOpeningTab(sideTabsOf(0, 0, [], aView(['base', 'provided'])), true)).toBe(true)
-  })
-
-  test('a column that comes to hold something does not take the focus back', () => {
-    expect(focusesOpeningTab(sideTabsOf(2, 0, [], aView(['base'])), true)).toBe(false)
-    expect(focusesOpeningTab(sideTabsOf(2, 0, [], aView(['base'])), false)).toBe(false)
-  })
-
-  test('once opened from the head the column stays, whatever its tabs hold', () => {
-    const empty = sideTabsOf(0, 0, [], aView(['base']))
-    const planned = sideTabsOf(2, 0, [], aView(['base']))
-
-    expect(columnDrawn(empty, true)).toBe(true)
-    expect(columnDrawn(planned, true)).toBe(true)
+    expect(openingTabOf([aRun('r1', '/a', 'running', 'c1')], tabs)).toBe('commands')
   })
 })
 
@@ -311,8 +265,8 @@ describe('A one-off command shows and is not promoted', () => {
   let stops: (() => void)[] = []
 
   beforeEach(() => {
-    dataFolder = mkdtempSync(join(tmpdir(), 'hemera-side-column-'))
-    workspace = realpathSync(mkdtempSync(join(tmpdir(), 'hemera-side-column-workspace-')))
+    dataFolder = mkdtempSync(join(tmpdir(), 'hemera-session-details-'))
+    workspace = realpathSync(mkdtempSync(join(tmpdir(), 'hemera-session-details-workspace-')))
   })
 
   afterEach(async () => {

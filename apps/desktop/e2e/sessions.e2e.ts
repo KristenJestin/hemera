@@ -191,10 +191,12 @@ describe('The agent starts the app and the user opens it', () => {
     await press('Add a command')
     await awaits('Workspace root')
 
-    // Back in the Session, the Commands tab runs it by name.
+    // Back in the Session, the Commands tab of its details runs it by name.
     await press(NAMED)
     await browser.pause(900)
-    // The tab of the side column, pressed as a hand presses it: the pointer, not a click event.
+    await press('Session details')
+    await browser.pause(400)
+    // The tab of the details, pressed as a hand presses it: the pointer, not a click event.
     const tabs = await browser.$$('[role="tab"]')
     for (const tab of tabs) {
       // oxlint-disable-next-line no-await-in-loop -- the tabs are read one after the other, in order
@@ -211,6 +213,9 @@ describe('The agent starts the app and the user opens it', () => {
     // One process, run by Hemera in the Workspace root: it ends on its own with its exit code,
     // in the panel and in the thread alike.
     await awaits('Exited 0')
+    // The details close on Escape, and the Session is in front again.
+    await browser.keys('Escape')
+    await browser.pause(400)
   })
 })
 

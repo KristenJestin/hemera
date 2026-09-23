@@ -32,8 +32,8 @@ import { commandRunOf, contextDeliveryOf, hemeraToolCallOf } from './agent-tool-
  *
  * The thread a Session holds is not a list of messages: it is what the agent reported, entry by
  * entry, and the kind of an entry is what says which block draws it. This is the one place that
- * reads that — a page asks for the blocks of a thread and draws them, and the side column asks
- * for the same thread for the two things it keeps beside it.
+ * reads that — a page asks for the blocks of a thread and draws them, and the Session details ask
+ * for the same thread for the two things they keep.
  *
  * Everything is parsed and nothing is assumed. `payload` is JSON text on the wire rather than a
  * shape of its own — the same column holds every kind's details, and each kind validates what it
@@ -300,7 +300,7 @@ export interface AgentContext {
 /**
  * The block an entry is drawn as, or null when the page draws it elsewhere.
  *
- * Two kinds are not blocks of the thread: the plan is the side column's, and the usage is the
+ * Two kinds are not blocks of the thread: the plan is the Session details', and the usage is the
  * composer's — both are states rather than events, and the thread already carries every call
  * they add up. The console is the third: what a terminal would show is not in the thread (the
  * engine does not answer `terminal/output`), so an entry that only names a console says its name

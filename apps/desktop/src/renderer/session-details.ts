@@ -4,11 +4,11 @@ import type {
   ContextCommand,
   ContextEntry,
   ContextTool,
-  SideColumnTab,
+  SessionDetailsTab,
 } from '@hemera/ui'
 
 /**
- * What the side column of a Session draws from the tools store (design D6-10, D6-12).
+ * What the details of a Session draw from the tools store (design D6-10, D6-12).
  *
  * The Commands tab is the runs of the Session, the same runs the thread's blocks read; the
  * Context tab is its instructions and its tools, as the engine answered them. Both are read as
@@ -45,28 +45,28 @@ export function panelRunsOf(runs: readonly CommandRun[], root: string): CommandP
 }
 
 /**
- * Which of the three tabs has something to show: #40's rule, back after the trial of 23 September
- * 2026 (D6-10, D6-12).
+ * Which of the three tabs has something to show (D6-10, D6-12), which is what the details open on.
  *
  * Activity has a plan or a file the turn touched; Commands has a run of this Session or a
  * catalogue to run from; Context has a delivery — a change of `AGENTS.md` handed to the agent
  * between two turns. The base, the file given at the start and the tools are there in every
- * Session its agent has been asked anything, so they open nothing by themselves: a column drawn
- * for them was a column drawn for every Session, on an Activity tab with nothing in it. The
- * Context view is reached from the Session's head instead, and the column opened there stays.
+ * Session its agent has been asked anything, so they make no tab one to open on by themselves.
+ *
+ * Nothing here opens the details: they are a dialog only the reader opens, from the Session's head
+ * (second review of #18). What arrives while they are open changes what a tab holds.
  */
-export interface SideTabs {
+export interface DetailsTabs {
   activity: boolean
   commands: boolean
   context: boolean
 }
 
-export function sideTabsOf(
+export function detailsTabsOf(
   plan: number,
   files: number,
   runs: readonly CommandRun[],
   view: ContextView | null,
-): SideTabs {
+): DetailsTabs {
   return {
     activity: plan > 0 || files > 0,
     commands: runs.length > 0 || (view?.commands.length ?? 0) > 0,
@@ -74,44 +74,12 @@ export function sideTabsOf(
   }
 }
 
-/** Whether the column is drawn at all: a column whose three tabs are empty is not (#40). */
-export function hasSideColumn(tabs: SideTabs): boolean {
-  return tabs.activity || tabs.commands || tabs.context
-}
-
 /**
- * Whether the page draws the column: when a tab has something, or when the reader opened it from
- * the Session's head — and then it stays, whatever its tabs hold, until the Session is left.
+ * The tab the details open on, which follows what is happening in the Session (D6-12): a command
+ * running opens on its commands, then what the agent has been doing, then whichever tab has
+ * something. With nothing in any tab they open on the Context, which is what the agent works from.
  */
-export function columnDrawn(tabs: SideTabs, asked: boolean): boolean {
-  return asked || hasSideColumn(tabs)
-}
-
-/**
- * Whether the column hands the focus to the tab it opens on: when the reader opened it from the
- * head, whose button went away with the press, and only while that press is the reason it is
- * drawn — a column that later comes to hold a plan or a run does not take the focus back from
- * wherever the reader has gone since.
- */
-export function focusesOpeningTab(tabs: SideTabs, asked: boolean): boolean {
-  return asked && !hasSideColumn(tabs)
-}
-
-/**
- * Whether the head offers its Context button: while no column stands beside the thread, and once
- * the engine has said what the Context is. With the column drawn, its own tab is the way there.
- */
-export function contextReachable(drawn: boolean, view: ContextView | null): boolean {
-  return !drawn && view !== null
-}
-
-/**
- * The tab a Session opens on, which follows what is happening in it (D6-12): a command running
- * opens on its commands, then what the agent has been doing, then whichever tab has something.
- * A column none of whose tabs has anything is one the reader opened from the head, for its
- * Context.
- */
-export function openingTabOf(runs: readonly CommandRun[], tabs: SideTabs): SideColumnTab {
+export function openingTabOf(runs: readonly CommandRun[], tabs: DetailsTabs): SessionDetailsTab {
   if (runs.some((run) => run.state === 'running')) return 'commands'
   if (tabs.activity) return 'activity'
   if (tabs.commands) return 'commands'

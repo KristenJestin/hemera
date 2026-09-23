@@ -20,8 +20,8 @@ import {
   MessageScroller,
   MessageText,
   SessionEmpty,
+  SessionDetails,
   SessionHeader,
-  SessionSideColumn,
   UsageMeter,
   type MessageLine,
   type MessageState,
@@ -35,15 +35,7 @@ import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-op
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
-import {
-  columnDrawn,
-  contextListsOf,
-  contextReachable,
-  focusesOpeningTab,
-  openingTabOf,
-  panelRunsOf,
-  sideTabsOf,
-} from '../side-column.ts'
+import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -212,8 +204,8 @@ export function SessionPage({
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /** What was last handed to the engine, so `Retry` has something to send again. */
   const [attempted, setAttempted] = useState<string | null>(null)
-  /** Whether the reader opened the column from the head, which it stays open for. */
-  const [contextAsked, setContextAsked] = useState(false)
+  /** Whether the reader has the Session details open: only the head's button opens them. */
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -369,26 +361,21 @@ export function SessionPage({
   const effort = effortStage(options)
   const mode = modeStage(options)
 
-  // What the column beside the thread would hold: the plan the agent last published and the files
-  // the turn has touched. Both are states rather than events, and they are read here because the
-  // meter above the box and the column are two readings of the same turn.
+  // What the Session details hold: the plan the agent last published and the files the turn has
+  // touched. Both are states rather than events, and they are read here because the meter above
+  // the box and the details are two readings of the same turn.
   const plan = planOf(thread)
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
-  // Which tabs have something to show, and whether the column is drawn at all (#40's rule: no
-  // empty side column). The reader may open it from the head all the same, for its Context, and
-  // it then stays until the Session is left — the page is keyed on the Session. Once it is drawn,
-  // the Commands panel and the Context view go with it whatever they hold: the panel is also
-  // where a one-off line is run from.
-  const tabs = sideTabsOf(plan.length, touched.length, commandRuns, context)
-  const drawn = columnDrawn(tabs, contextAsked)
+  // Which tabs have something to show, which is what the details open on.
+  const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
 
   return (
     /*
-      One column, with the side column beside it (review of #40, defect 2). The header, the thread
-      and the composer share one width and one left edge: a composer centred in the whole window
-      while the thread was centred in what the column left over is what put them visibly out of
-      line. The screen runs under the frame all the same, and the page's own scroll is the thread's.
+      One column (review of #40, defect 2): the header, the thread and the composer share one
+      width and one left edge, and nothing stands beside them — the Session details are a dialog
+      the reader opens from the head (second review of #18). The screen runs under the frame all
+      the same, and the page's own scroll is the thread's.
     */
     <div className="flex h-full min-h-0">
       <div className="flex min-h-0 flex-1 flex-col">
@@ -406,11 +393,8 @@ export function SessionPage({
             // than one they are done with, and putting it away is a press they would come to
             // regret: the archive is where threads go.
             archiveDisabled={thread.length === 0}
-            // The way to the Context while no column stands beside the thread, once the engine
-            // has said what it is; the column's own tab is the way once it is drawn.
-            onOpenContext={
-              contextReachable(drawn, context) ? () => setContextAsked(true) : undefined
-            }
+            // The one way to the Session details: nothing the agent does opens them.
+            onOpenDetails={() => setDetailsOpen(true)}
           />
         </div>
         {/*
@@ -531,22 +515,21 @@ export function SessionPage({
         </div>
       </div>
       {/*
-        The column stands beside the thread and not under it, and it is the width the thread gave
-        up for it. A Session none of whose tabs has anything — no plan, no file, no run, no
-        catalogue, no delivery — draws no column at all unless the reader opened it from the head
-        (review of #40, defect 3): empty tabs take that width and say nothing with it. The box is
-        the page's and the emptiness is the column's — there is no wrapper here, so a column that
-        draws nothing leaves the width where it was.
+        The Session details: a centred dialog the reader opens from the head, and nothing else
+        opens (second review of #18). A permission, a run or a plan that arrives updates the thread
+        and, while the dialog is open, the tab it concerns — never which tab is shown.
       */}
-      <SessionSideColumn
+      <SessionDetails
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
         plan={plan}
         files={touched}
         onSelectFile={onOpenFile}
         // The commands of a Session with an agent, whoever started them (D6-12): the same runs
         // the thread's blocks read, and the line a one-off is run from. A Session nothing
-        // answers has no agent to lend a command to, and no tab for one.
+        // answers has no agent to lend a command to, and says so on the tab.
         commands={
-          !drawn || session.provider === null ? undefined : (
+          session.provider === null ? undefined : (
             <CommandsPanel
               runs={panelRunsOf(commandRuns, root)}
               onStop={onStopRun}
@@ -557,18 +540,11 @@ export function SessionPage({
         }
         // What the agent is working from, its instructions and its tools (D6-10), once the engine
         // has said it.
-        context={
-          !drawn || context === null ? undefined : <ContextView {...contextListsOf(context)} />
-        }
+        context={context === null ? undefined : <ContextView {...contextListsOf(context)} />}
         // The tab it opens on follows what is happening: a command running opens on Commands,
-        // then the tab that has something, and Context when it was opened from the head. Keyed
-        // on it, so a command that starts while the Session is open brings the column to its
-        // commands, as opening the Session with one running would have (D6-12).
-        key={openingTabOf(commandRuns, tabs)}
+        // then the tab that has something, and the Context when no tab has anything (D6-12). It
+        // is read when the dialog opens, so an open dialog never changes tab under the reader.
         defaultTab={openingTabOf(commandRuns, tabs)}
-        // Opened from the head, the column takes the focus the head's button had: that button
-        // goes away with the press.
-        focusSelectedTab={focusesOpeningTab(tabs, contextAsked)}
       />
     </div>
   )
