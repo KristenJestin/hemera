@@ -12,7 +12,7 @@ const ACTIONS = (
 )
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Dialog',
   component: Dialog,
   args: {
@@ -27,6 +27,7 @@ const meta = {
     title: { control: 'text' },
     description: { control: 'text' },
     trigger: { control: 'text' },
+    size: { control: 'inline-radio', options: ['md', 'wide'] },
     open: { control: 'boolean' },
     actions: { table: { disable: true } },
     children: { table: { disable: true } },
@@ -113,5 +114,47 @@ export const Keyboard: Story = {
       expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
     expect(document.activeElement).toBe(trigger)
+  },
+}
+
+/**
+ * A dialog that holds a page of its own: as wide as the thread, never taller than the window, and
+ * what it holds scrolls inside it while the title and the close button stay in place.
+ */
+export const Wide: Story = {
+  parameters: { controls: { disable: true } },
+  args: {
+    size: 'wide',
+    title: 'Session details',
+    description: undefined,
+    trigger: 'Details',
+    actions: undefined,
+    children: (
+      <ol className="flex flex-col gap-2 text-sm">
+        {Array.from({ length: 60 }, (_, index) => (
+          <li key={index}>{`Line ${index + 1} of what the dialog holds`}</li>
+        ))}
+      </ol>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Details' }))
+    const dialog = await waitFor(() => within(document.body).getByRole('dialog'))
+    // Read once it has risen into place: it arrives from transparent.
+    await waitFor(() => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+    })
+    // Never taller than the window, and wider than a question.
+    expect(dialog.getBoundingClientRect().height).toBeLessThan(window.innerHeight)
+    expect(dialog.getBoundingClientRect().width).toBeGreaterThan(448)
+    const list = within(dialog).getByRole('list')
+    const room = list.parentElement!
+    // The content is what scrolls, and the close button stays where it is.
+    expect(room.scrollHeight).toBeGreaterThan(room.clientHeight)
+    await expect(within(dialog).getByRole('button', { name: 'Close' })).toBeVisible()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
   },
 }

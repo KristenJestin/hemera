@@ -1,4 +1,5 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
+import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
 import { IconX } from '../../icons.ts'
@@ -20,7 +21,23 @@ const BACKDROP =
   'fixed inset-0 bg-overlay backdrop-blur-xs backdrop-motion data-starting-style:opacity-0 data-starting-style:backdrop-blur-none data-ending-style:opacity-0 data-ending-style:backdrop-blur-none'
 
 const POPUP =
-  'fixed inset-0 m-auto flex h-fit w-full max-w-md flex-col gap-4 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-lg outline-none translate-y-0 scale-100 popup-motion data-starting-style:translate-y-4 data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:translate-y-4 data-ending-style:scale-95 data-ending-style:opacity-0'
+  'fixed inset-0 m-auto flex h-fit w-full flex-col gap-4 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-lg outline-none translate-y-0 scale-100 popup-motion data-starting-style:translate-y-4 data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:translate-y-4 data-ending-style:scale-95 data-ending-style:opacity-0'
+
+/**
+ * How wide the dialog is. `md` is a question and its answer; `wide` is a dialog that holds a page
+ * of its own — the details of a Session — and never grows past the window: it keeps a margin
+ * above and below, and what it holds scrolls inside it while the title and the close button stay
+ * where they are.
+ */
+export type DialogSize = 'md' | 'wide'
+
+const SIZE: Record<DialogSize, string> = {
+  md: 'max-w-md',
+  wide: 'max-h-5/6 max-w-3xl',
+}
+
+/** The room the content of a wide dialog scrolls in, with space left for its focus rings. */
+const SCROLL = '-m-1 min-h-0 overflow-y-auto p-1'
 
 export interface DialogProps {
   title: string
@@ -34,6 +51,8 @@ export interface DialogProps {
   trigger?: string | undefined
   open?: boolean | undefined
   onOpenChange?: ((open: boolean) => void) | undefined
+  /** How wide it is: `md`, unless it holds a page of its own. */
+  size?: DialogSize | undefined
   /** Where the trigger sits; never how it looks. */
   className?: string | undefined
 }
@@ -46,6 +65,7 @@ export function Dialog({
   trigger,
   open,
   onOpenChange,
+  size = 'md',
   className,
 }: DialogProps) {
   const container = useOverlayContainer()
@@ -58,7 +78,7 @@ export function Dialog({
       )}
       <BaseDialog.Portal container={container}>
         <BaseDialog.Backdrop className={BACKDROP} />
-        <BaseDialog.Popup className={POPUP}>
+        <BaseDialog.Popup className={cn(POPUP, SIZE[size])}>
           <div className="flex items-start gap-2">
             <div className="flex flex-col gap-1">
               <BaseDialog.Title className="text-lg font-medium">{title}</BaseDialog.Title>
@@ -80,7 +100,7 @@ export function Dialog({
               }
             />
           </div>
-          {children}
+          {size === 'wide' ? <div className={SCROLL}>{children}</div> : children}
           {actions !== undefined && <div className="flex justify-end gap-2">{actions}</div>}
         </BaseDialog.Popup>
       </BaseDialog.Portal>
