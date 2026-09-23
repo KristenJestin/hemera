@@ -206,6 +206,48 @@ export const GitMissing: Story = {
   play: aMissingGitIsANamedRefusal,
 }
 
+// Scenario "A failed check refuses the whole creation", for what the form checks on its own.
+async function theDialogRefusesWhatCannotBeCreated({ args }: Context) {
+  args.onCreate.mockClear()
+  const dialog = within(document.body).getByRole('dialog')
+  const inside = within(dialog)
+  const create = inside.getByRole('button', { name: 'Create' })
+  const name = inside.getByRole('textbox', { name: 'Name' })
+  const api = rowOf(dialog, './sources/api')
+
+  await userEvent.clear(name)
+  await userEvent.type(name, '../login-form')
+  await waitFor(() => {
+    expect(inside.getByText('A Workspace name is one folder name.')).toHaveStyle({ opacity: '1' })
+  })
+  await expect(create).toBeDisabled()
+  await userEvent.clear(name)
+  await userEvent.type(name, 'login-form')
+
+  await userEvent.clear(api.getByRole('textbox', { name: 'Base' }))
+  await userEvent.clear(api.getByRole('textbox', { name: 'Branch' }))
+  await waitFor(() => {
+    expect(api.getByText('An included repository needs a base.')).toHaveStyle({ opacity: '1' })
+  })
+  await expect(api.getByText('An included repository needs a branch.')).toBeInTheDocument()
+  await expect(create).toBeDisabled()
+
+  await userEvent.click(api.getByRole('checkbox'))
+  await userEvent.click(rowOf(dialog, './sources/front').getByRole('checkbox'))
+  await expect(inside.getByRole('alert')).toHaveTextContent('Include at least one repository.')
+  await expect(create).toBeDisabled()
+  await expect(args.onCreate).not.toHaveBeenCalled()
+  // The messages of the fields left out are gone before the colours are judged.
+  await waitFor(() => {
+    expect(inside.queryByText(/An included repository needs/)).toBeNull()
+  })
+}
+
+/** What cannot be created is refused before the engine is asked, and Create waits. */
+export const Invalid: Story = {
+  play: theDialogRefusesWhatCannotBeCreated,
+}
+
 /** One repository with the keyboard: its box, its base, its branch. */
 async function walkRow(row: ReturnType<typeof rowOf>) {
   await userEvent.tab()

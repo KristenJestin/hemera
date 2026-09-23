@@ -168,7 +168,7 @@ const NAMED_STATES = new Map([
   ],
   [
     'workspace/create-workspace-dialog',
-    ['Proposed', 'RepositoryLeftOut', 'Refused', 'GitMissing', 'Keyboard'],
+    ['Proposed', 'RepositoryLeftOut', 'Refused', 'GitMissing', 'Invalid', 'Keyboard'],
   ],
   [
     'workspace/preparation-steps',

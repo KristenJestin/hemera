@@ -60,6 +60,17 @@ function rowsOf(plan: readonly PlanRepositoryLine[]): Row[] {
   }))
 }
 
+/**
+ * What is wrong with the name, before anything is asked of the engine: it is one folder under the
+ * root (D8-02), so a separator or a climb out of it cannot be one.
+ */
+function nameRefusalOf(name: string): string | undefined {
+  const trimmed = name.trim()
+  if (trimmed === '') return 'A Workspace needs a name.'
+  if (/[\\/]/.test(trimmed) || trimmed.includes('..')) return 'A Workspace name is one folder name.'
+  return undefined
+}
+
 /** The folder the Workspace will be, written with the separator its root is written with. */
 function folderOf(root: string, name: string): string {
   const separator = root.includes('\\') && !root.includes('/') ? '\\' : '/'
@@ -103,7 +114,15 @@ export function CreateWorkspaceDialog({
     setRefusal(null)
   }, [open])
 
-  const unnamed = name.trim() === ''
+  // What a form can refuse on its own is refused here, and Create waits until nothing is: the
+  // engine is asked only about what only Git and the disk can answer (D8-04).
+  const nameRefusal = nameRefusalOf(name)
+  const included = rows.filter((row) => row.included)
+  // A plan with nothing to include is a Project whose Workspace is its folder alone (D8-04):
+  // only a plan that offers a repository can be left with none.
+  const noneIncluded = included.length === 0 && rows.some((row) => row.holdsRepository)
+  const incomplete = included.some((row) => row.base.trim() === '' || row.branch.trim() === '')
+  const refused = nameRefusal !== undefined || noneIncluded || incomplete
 
   const change = (path: string, next: Partial<Row>) => {
     setRows(rows.map((row) => (row.path === path ? { ...row, ...next } : row)))
@@ -113,9 +132,11 @@ export function CreateWorkspaceDialog({
     setCreating(true)
     const said = await onCreate({
       name: name.trim(),
-      repositories: rows
-        .filter((row) => row.included)
-        .map((row) => ({ path: row.path, base: row.base.trim(), branch: row.branch.trim() })),
+      repositories: included.map((row) => ({
+        path: row.path,
+        base: row.base.trim(),
+        branch: row.branch.trim(),
+      })),
     })
     setCreating(false)
     setRefusal(said)
@@ -136,7 +157,7 @@ export function CreateWorkspaceDialog({
           <Button
             variant="primary"
             state={creating ? 'loading' : 'idle'}
-            disabled={gitMissing || unnamed}
+            disabled={gitMissing || refused}
             onClick={() => void create()}
           >
             Create
@@ -154,12 +175,7 @@ export function CreateWorkspaceDialog({
             git makes them: install it or put it on the PATH, then open this dialog again.
           </p>
         )}
-        <Input
-          label="Name"
-          value={name}
-          onValueChange={setName}
-          error={unnamed ? 'A Workspace needs a name.' : undefined}
-        />
+        <Input label="Name" value={name} onValueChange={setName} error={nameRefusal} />
         <p className={NOTE}>
           Folder <span className={FOLDER}>{folderOf(root, name)}</span>
         </p>
@@ -186,6 +202,11 @@ export function CreateWorkspaceDialog({
                     className="min-w-0 flex-1"
                     value={row.base}
                     disabled={!row.included}
+                    error={
+                      row.included && row.base.trim() === ''
+                        ? 'An included repository needs a base.'
+                        : undefined
+                    }
                     onValueChange={(base) => change(row.path, { base })}
                   />
                   <Input
@@ -193,6 +214,11 @@ export function CreateWorkspaceDialog({
                     className="min-w-0 flex-2"
                     value={row.branch}
                     disabled={!row.included}
+                    error={
+                      row.included && row.branch.trim() === ''
+                        ? 'An included repository needs a branch.'
+                        : undefined
+                    }
                     onValueChange={(branch) => change(row.path, { branch })}
                   />
                 </>
@@ -200,6 +226,11 @@ export function CreateWorkspaceDialog({
             </li>
           ))}
         </ul>
+        {noneIncluded && (
+          <p role="alert" className={REFUSAL}>
+            Include at least one repository.
+          </p>
+        )}
         {refusal !== null && (
           <p role="alert" className={REFUSAL}>
             {refusal}
