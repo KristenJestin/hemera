@@ -74,7 +74,7 @@ const TOOLS_MIGRATION = '20260922075631_tools_commands_and_context'
  * The migration lot 20 adds: the one a profile of lot 18 has never heard of — the Workspaces,
  * their steps and variables, and the commands typed by seven types (D8-01, D8-05, D8-06, D8-07).
  */
-const WORKSPACES_MIGRATION = '20260923194453_workspaces'
+const WORKSPACES_MIGRATION = '20260923204250_workspaces'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -768,6 +768,11 @@ describe('A profile of lot 18 is migrated to lot 20', () => {
           VALUES ('session-1', 'atlas', 'Serve it', 'derived', ${at}, ${at}, 1)`
         yield* sql`INSERT INTO command_runs (id, session_id, command_id, name, line, kind, cwd, state, started_by, started_at)
           VALUES ('run-1', 'session-1', 'c-app', 'dev', 'pnpm dev', 'app', '/work/atlas', 'exited', 'user', ${at})`
+        // The thread's block of that run, as lot 18 wrote it: its payload names the kind.
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, correlation_id, state, created_at)
+          VALUES ('entry-1', 'session-1', 1, 'hemera', 'command_run', 'dev',
+            '{"runId":"run-1","name":"dev","line":"pnpm dev","kind":"app","state":"exited","cwd":"/work/atlas","url":null,"exitCode":0,"oneOff":false}',
+            'run:run-1', 'exited', ${at})`
       }),
     )
 
@@ -783,8 +788,15 @@ describe('A profile of lot 18 is migrated to lot 20', () => {
         const sql = yield* SqliteClient
         const commands = yield* sql<{ id: string; type: string; scope: string; portless: number }>`
           SELECT id, type, scope, portless FROM project_commands ORDER BY id`
-        const runs = yield* sql<{ type: string; workspace_id: string | null; environment: string }>`
-          SELECT type, workspace_id, environment FROM command_runs WHERE id = 'run-1'`
+        const runs = yield* sql<{
+          type: string
+          workspace_id: string | null
+          environment: string
+          folder: string | null
+          scope: string
+        }>`SELECT type, workspace_id, environment, folder, scope FROM command_runs WHERE id = 'run-1'`
+        const entries = yield* sql<{ payload: string }>`
+          SELECT payload FROM session_entries WHERE id = 'entry-1'`
         const main = yield* sql<{ state: string; spec_id: string | null }>`
           SELECT state, spec_id FROM workspaces WHERE id = 'main-1'`
         const repositories = yield* sql<{ included_by_default: number }>`
@@ -794,7 +806,7 @@ describe('A profile of lot 18 is migrated to lot 20', () => {
         }>`SELECT name FROM pragma_table_info('project_commands')`
         const events = yield* sql<{ type: string; payload: string }>`
           SELECT type, payload FROM domain_events ORDER BY sequence`
-        return { commands, runs, main, repositories, columns, events }
+        return { commands, runs, entries, main, repositories, columns, events }
       }),
     )
 
@@ -806,7 +818,14 @@ describe('A profile of lot 18 is migrated to lot 20', () => {
     ])
     // The run keeps what it was started as, in the new word, and belongs to no Workspace yet:
     // null is read as `main` (D8-08).
-    expect(kept.runs).toEqual([{ type: 'serve', workspace_id: null, environment: '{}' }])
+    // It ran at the root, once per Workspace: what every run before this lot did (D8-07).
+    expect(kept.runs).toEqual([
+      { type: 'serve', workspace_id: null, environment: '{}', folder: null, scope: 'workspace' },
+    ])
+    // Its block in the thread names the type in place of the kind, so the thread still draws it.
+    const payload: unknown = JSON.parse(kept.entries[0]!.payload)
+    expect(payload).toMatchObject({ runId: 'run-1', type: 'serve', state: 'exited', exitCode: 0 })
+    expect(payload).not.toHaveProperty('kind')
     // `main` is ready, as every Workspace written before this lot is (D8-01).
     expect(kept.main).toEqual([{ state: 'ready', spec_id: null }])
     expect(kept.repositories).toEqual([{ included_by_default: 1 }])
@@ -872,5 +891,69 @@ describe('A profile of lot 18 is migrated to lot 20', () => {
     )
 
     expect(refusals).toEqual([true, true, true])
+  })
+
+  test('a cleaned Workspace frees its name and its Spec, and two live ones may not share them', async () => {
+    const dataFolder = join(workspace, 'cleaned-twenty')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+
+    const written = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-23T10:00:00.000Z'
+        const insert = (id: string, state: string) =>
+          Effect.exit(
+            Effect.gen(function* () {
+              yield* sql`INSERT INTO workspaces (id, project_id, name, path, created_at, spec_id, state)
+                VALUES (${id}, 'atlas', 'login-form', ${`/work/${id}`}, ${at}, 'HEM-7', ${state})`
+            }),
+          )
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        // Two live Workspaces of the same name and the same Spec: the second is refused.
+        const first = yield* insert('w1', 'ready')
+        const second = yield* insert('w2', 'preparing')
+        // Once the first is cleaned, its name and its Spec are free (D8-02, D8-14).
+        yield* sql`UPDATE workspaces SET state = 'cleaned', cleaned_at = ${at} WHERE id = 'w1'`
+        const after = yield* insert('w3', 'preparing')
+        const rows = yield* sql<{ id: string; state: string }>`
+          SELECT id, state FROM workspaces ORDER BY id`
+        return { exits: [first, second, after].map((exit) => Exit.isSuccess(exit)), rows }
+      }),
+    )
+
+    expect(written.exits).toEqual([true, false, true])
+    expect(written.rows).toEqual([
+      { id: 'w1', state: 'cleaned' },
+      { id: 'w3', state: 'preparing' },
+    ])
+  })
+
+  test('two live Workspaces of different names may not share a Spec', async () => {
+    const dataFolder = join(workspace, 'spec-twenty')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+
+    const exits = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-23T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        const insert = (id: string, name: string) =>
+          Effect.exit(
+            Effect.gen(function* () {
+              yield* sql`INSERT INTO workspaces (id, project_id, name, path, created_at, spec_id, state)
+                VALUES (${id}, 'atlas', ${name}, ${`/work/${id}`}, ${at}, 'HEM-7', 'ready')`
+            }),
+          )
+        return [yield* insert('w1', 'login-form'), yield* insert('w2', 'login-form-2')].map(
+          (exit) => Exit.isSuccess(exit),
+        )
+      }),
+    )
+
+    expect(exits).toEqual([true, false])
   })
 })

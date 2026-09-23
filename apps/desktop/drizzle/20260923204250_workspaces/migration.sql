@@ -53,12 +53,13 @@ CREATE TABLE `workspace_steps` (
 );
 --> statement-breakpoint
 ALTER TABLE `command_runs` RENAME COLUMN `kind` TO `type`;--> statement-breakpoint
-UPDATE `command_runs` SET `type` = CASE `type` WHEN 'app' THEN 'serve' WHEN 'check' THEN 'test' WHEN 'utility' THEN 'script' ELSE `type` END;--> statement-breakpoint
 ALTER TABLE `project_commands` RENAME COLUMN `kind` TO `type`;--> statement-breakpoint
 ALTER TABLE `command_runs` ADD `workspace_id` text REFERENCES workspaces(id) ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE `command_runs` ADD `environment` text DEFAULT '{}' NOT NULL;--> statement-breakpoint
 ALTER TABLE `command_runs` ADD `ready_at` text;--> statement-breakpoint
 ALTER TABLE `command_runs` ADD `port_conflict` text;--> statement-breakpoint
+ALTER TABLE `command_runs` ADD `folder` text;--> statement-breakpoint
+ALTER TABLE `command_runs` ADD `scope` text DEFAULT 'workspace' NOT NULL;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `line_windows` text;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `line_linux` text;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `scope` text DEFAULT 'workspace' NOT NULL;--> statement-breakpoint
@@ -70,6 +71,43 @@ ALTER TABLE `sessions` ADD `workspace_id` text REFERENCES workspaces(id) ON DELE
 ALTER TABLE `workspaces` ADD `spec_id` text;--> statement-breakpoint
 ALTER TABLE `workspaces` ADD `state` text DEFAULT 'ready' NOT NULL;--> statement-breakpoint
 ALTER TABLE `workspaces` ADD `cleaned_at` text;--> statement-breakpoint
+PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE `__new_command_runs` (
+	`id` text PRIMARY KEY,
+	`session_id` text NOT NULL,
+	`command_id` text,
+	`name` text NOT NULL,
+	`line` text NOT NULL,
+	`type` text NOT NULL,
+	`cwd` text NOT NULL,
+	`state` text NOT NULL,
+	`pid` integer,
+	`url` text,
+	`exit_code` integer,
+	`output` text DEFAULT '' NOT NULL,
+	`output_bytes` integer DEFAULT 0 NOT NULL,
+	`truncated` integer DEFAULT 0 NOT NULL,
+	`started_by` text NOT NULL,
+	`started_at` text NOT NULL,
+	`ended_at` text,
+	`workspace_id` text,
+	`environment` text DEFAULT '{}' NOT NULL,
+	`ready_at` text,
+	`port_conflict` text,
+	`folder` text,
+	`scope` text DEFAULT 'workspace' NOT NULL,
+	CONSTRAINT `fk_command_runs_session_id_sessions_id_fk` FOREIGN KEY (`session_id`) REFERENCES `sessions`(`id`) ON DELETE CASCADE,
+	CONSTRAINT `fk_command_runs_command_id_project_commands_id_fk` FOREIGN KEY (`command_id`) REFERENCES `project_commands`(`id`) ON DELETE SET NULL,
+	CONSTRAINT `fk_command_runs_workspace_id_workspaces_id_fk` FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON DELETE SET NULL,
+	CONSTRAINT "run_state_is_known" CHECK("state" IN ('running', 'exited', 'failed', 'stopped')),
+	CONSTRAINT "run_scope_is_known" CHECK("scope" IN ('workspace', 'project')),
+	CONSTRAINT "run_starter_is_known" CHECK("started_by" IN ('agent', 'user'))
+);
+--> statement-breakpoint
+INSERT INTO `__new_command_runs`(`id`, `session_id`, `command_id`, `name`, `line`, `type`, `cwd`, `state`, `pid`, `url`, `exit_code`, `output`, `output_bytes`, `truncated`, `started_by`, `started_at`, `ended_at`) SELECT `id`, `session_id`, `command_id`, `name`, `line`, CASE `type` WHEN 'app' THEN 'serve' WHEN 'check' THEN 'test' WHEN 'utility' THEN 'script' ELSE `type` END, `cwd`, `state`, `pid`, `url`, `exit_code`, `output`, `output_bytes`, `truncated`, `started_by`, `started_at`, `ended_at` FROM `command_runs`;--> statement-breakpoint
+DROP TABLE `command_runs`;--> statement-breakpoint
+ALTER TABLE `__new_command_runs` RENAME TO `command_runs`;--> statement-breakpoint
+PRAGMA foreign_keys=ON;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_project_commands` (
 	`id` text PRIMARY KEY,
@@ -105,7 +143,6 @@ CREATE TABLE `__new_workspaces` (
 	`state` text DEFAULT 'ready' NOT NULL,
 	`cleaned_at` text,
 	CONSTRAINT `fk_workspaces_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
-	CONSTRAINT `workspace_name_in_project` UNIQUE(`project_id`,`name`),
 	CONSTRAINT "workspace_state_is_known" CHECK("state" IN ('preparing', 'ready', 'failed', 'cleaned'))
 );
 --> statement-breakpoint
@@ -162,13 +199,16 @@ CREATE TABLE `__new_session_entries` (
 INSERT INTO `__new_session_entries`(`id`, `session_id`, `seq`, `role`, `kind`, `body`, `payload`, `origin`, `correlation_id`, `turn_id`, `state`, `created_at`) SELECT `id`, `session_id`, `seq`, `role`, `kind`, `body`, `payload`, `origin`, `correlation_id`, `turn_id`, `state`, `created_at` FROM `session_entries`;--> statement-breakpoint
 DROP TABLE `session_entries`;--> statement-breakpoint
 ALTER TABLE `__new_session_entries` RENAME TO `session_entries`;--> statement-breakpoint
+UPDATE `session_entries` SET `payload` = json_set(json_remove(`payload`, '$.kind'), '$.type', CASE json_extract(`payload`, '$.kind') WHEN 'app' THEN 'serve' WHEN 'check' THEN 'test' WHEN 'utility' THEN 'script' ELSE json_extract(`payload`, '$.kind') END) WHERE `kind` = 'command_run' AND json_extract(`payload`, '$.kind') IS NOT NULL;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
-CREATE UNIQUE INDEX `workspace_once_per_spec` ON `workspaces` (`spec_id`) WHERE "workspaces"."spec_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `run_by_session` ON `command_runs` (`session_id`,`started_at`);--> statement-breakpoint
+CREATE INDEX `run_by_workspace` ON `command_runs` (`workspace_id`,`state`);--> statement-breakpoint
+CREATE UNIQUE INDEX `workspace_name_in_project` ON `workspaces` (`project_id`,`name`) WHERE "workspaces"."state" <> 'cleaned';--> statement-breakpoint
+CREATE UNIQUE INDEX `workspace_once_per_spec` ON `workspaces` (`spec_id`) WHERE "workspaces"."spec_id" IS NOT NULL AND "workspaces"."state" <> 'cleaned';--> statement-breakpoint
 CREATE INDEX `event_by_project` ON `domain_events` (`project_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `event_by_session` ON `domain_events` (`session_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `event_unseen` ON `domain_events` (`seen_at`);--> statement-breakpoint
 CREATE INDEX `entry_by_correlation` ON `session_entries` (`session_id`,`correlation_id`);--> statement-breakpoint
 CREATE INDEX `entry_by_turn` ON `session_entries` (`session_id`,`turn_id`);--> statement-breakpoint
-CREATE INDEX `run_by_workspace` ON `command_runs` (`workspace_id`,`state`);--> statement-breakpoint
 CREATE UNIQUE INDEX `variable_once_in_project` ON `environment_variables` (`project_id`,`key`) WHERE "environment_variables"."workspace_id" IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `variable_once_in_workspace` ON `environment_variables` (`workspace_id`,`key`) WHERE "environment_variables"."workspace_id" IS NOT NULL;

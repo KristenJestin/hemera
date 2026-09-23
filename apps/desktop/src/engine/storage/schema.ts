@@ -129,6 +129,10 @@ export const projects = sqliteTable(
  * made on a folder is from its creation; a dedicated one is written `preparing`, explicitly.
  * `cleaned_at` is when a cleanup removed its folder: the row is kept, `cleaned`, and so is every
  * branch it made (D8-14).
+ *
+ * Both uniques leave a `cleaned` Workspace out. Its folder is gone, so its name is free for a new
+ * one in the same place (D8-02), and a Spec whose Workspace was cleaned can be given another
+ * (D8-01, D8-14): the row stays as a record, not as a claim on the name or the Spec.
  */
 export const workspaces = sqliteTable(
   'workspaces',
@@ -145,11 +149,13 @@ export const workspaces = sqliteTable(
     cleanedAt: text('cleaned_at'),
   },
   (table) => [
-    unique('workspace_name_in_project').on(table.projectId, table.name),
+    uniqueIndex('workspace_name_in_project')
+      .on(table.projectId, table.name)
+      .where(sql`${table.state} <> 'cleaned'`),
     check('workspace_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(WORKSPACE_STATES))})`),
     uniqueIndex('workspace_once_per_spec')
       .on(table.specId)
-      .where(sql`${table.specId} IS NOT NULL`),
+      .where(sql`${table.specId} IS NOT NULL AND ${table.state} <> 'cleaned'`),
   ],
 )
 
@@ -443,6 +449,12 @@ export const projectCommands = sqliteTable(
  * a cleanup's running runs are found. `environment` is the JSON of the variables it was given
  * (D8-06). `ready_at` is when its address first answered (D8-09), and `port_conflict` the JSON
  * of the run holding the port it published — `{ port, runId, workspaceId, workspaceName, name }`.
+ *
+ * `folder` and `scope` are the command's as the run was started, kept on the run because the
+ * Spec asks every run to record its folder, and the catalogue entry cannot answer for it: it may
+ * have been edited or removed since, and a one-off has none. `folder` is relative to the
+ * Workspace root and null for the root; a run written before this lot ran at the root, once per
+ * Workspace, which is what the defaults say (D8-07).
  */
 export const commandRuns = sqliteTable(
   'command_runs',
@@ -472,9 +484,12 @@ export const commandRuns = sqliteTable(
     environment: text('environment').notNull().default('{}'),
     readyAt: text('ready_at'),
     portConflict: text('port_conflict'),
+    folder: text('folder'),
+    scope: text('scope').notNull().default('workspace'),
   },
   (table) => [
     check('run_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(COMMAND_RUN_STATES))})`),
+    check('run_scope_is_known', sql`${table.scope} IN (${sql.raw(oneOf(COMMAND_SCOPES))})`),
     check('run_starter_is_known', sql`${table.startedBy} IN ('agent', 'user')`),
     index('run_by_session').on(table.sessionId, table.startedAt),
     index('run_by_workspace').on(table.workspaceId, table.state),

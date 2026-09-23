@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "2338cef9-a6cd-42a2-acd5-8664ed8374be",
+  "id": "8f4ce2e1-ac11-40d5-87a3-564804d9bdcf",
   "prevIds": ["afd29bb9-b5c5-4a02-8ef9-8fa8a2b1284f"],
   "ddl": [
     {
@@ -291,6 +291,26 @@
       "default": null,
       "generated": null,
       "name": "port_conflict",
+      "entityType": "columns",
+      "table": "command_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "folder",
+      "entityType": "columns",
+      "table": "command_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'workspace'",
+      "generated": null,
+      "name": "scope",
       "entityType": "columns",
       "table": "command_runs"
     },
@@ -1902,12 +1922,30 @@
     {
       "columns": [
         {
+          "value": "project_id",
+          "isExpression": false
+        },
+        {
+          "value": "name",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"workspaces\".\"state\" <> 'cleaned'",
+      "origin": "manual",
+      "name": "workspace_name_in_project",
+      "entityType": "indexes",
+      "table": "workspaces"
+    },
+    {
+      "columns": [
+        {
           "value": "spec_id",
           "isExpression": false
         }
       ],
       "isUnique": true,
-      "where": "\"workspaces\".\"spec_id\" IS NOT NULL",
+      "where": "\"workspaces\".\"spec_id\" IS NOT NULL AND \"workspaces\".\"state\" <> 'cleaned'",
       "origin": "manual",
       "name": "workspace_once_per_spec",
       "entityType": "indexes",
@@ -1949,15 +1987,14 @@
       "table": "workspace_steps"
     },
     {
-      "columns": ["project_id", "name"],
-      "nameExplicit": true,
-      "name": "workspace_name_in_project",
-      "entityType": "uniques",
-      "table": "workspaces"
-    },
-    {
       "value": "\"state\" IN ('running', 'exited', 'failed', 'stopped')",
       "name": "run_state_is_known",
+      "entityType": "checks",
+      "table": "command_runs"
+    },
+    {
+      "value": "\"scope\" IN ('workspace', 'project')",
+      "name": "run_scope_is_known",
       "entityType": "checks",
       "table": "command_runs"
     },
