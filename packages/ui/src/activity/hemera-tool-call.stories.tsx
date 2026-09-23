@@ -2,11 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { withinFrames } from '../../.storybook/reduced-motion.ts'
-import {
-  HemeraToolCall,
-  type HemeraToolMark,
-  type HemeraToolProvenance,
-} from './hemera-tool-call.tsx'
+import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
 
 /**
  * A call to a tool Hemera lent the agent (design D6-06).
@@ -16,14 +12,10 @@ import {
  * that failed, a call Hemera refused, and a write waiting for the reader's decision, then the
  * whole catalogue, one line per tool. The line carries the tool's own mark, its label, what the
  * call is about and the catalogue's name, quieter (recette 3 of 23 September 2026), and no brand;
- * the provenance under it is what tells this block from a native call in the same turn, and the
- * word `Hemera` is still what the line is announced by. Where the call stands is the dot.
+ * the word `Hemera` is still what the line is announced by. Where the call stands is the dot,
+ * and how long it took is the dot's hover (recette 4): the provenance is the entry's and the
+ * Journal's, and no foot of identifiers closes the body.
  */
-const PROVENANCE: HemeraToolProvenance = {
-  session: 'CSV invoice export',
-  agent: 'opencode',
-  token: '7f31c0',
-}
 
 const meta = {
   tags: ['autodocs', 'new'],
@@ -42,7 +34,6 @@ const meta = {
       { label: 'range', value: '0–262144' },
     ],
     ms: 18,
-    provenance: PROVENANCE,
     onOpenPath: fn(),
   },
   argTypes: {
@@ -60,8 +51,7 @@ const meta = {
     },
     summary: { control: 'text', description: 'What the call returned, in one line.' },
     arguments: { control: 'object', description: 'The arguments as they were bounded.' },
-    ms: { control: 'number', description: 'How long the call took.' },
-    provenance: { control: 'object', description: 'The Session, the agent and the token id.' },
+    ms: { control: 'number', description: 'How long the call took: the dot’s hover.' },
     error: { control: 'text', description: 'Why the call failed, or why it was refused.' },
     onOpenPath: { control: false, description: 'What a press on a subject that is a path does.' },
     children: { control: false, description: 'What the call returned, already drawn.' },
@@ -112,7 +102,7 @@ export const AFoldOpening: Story = {
     await expect(await withinFrames(moved, A_FOLD), 'the path slid while the block opened').toBe(
       false,
     )
-    await expect(canvas.getByText('token 7f31c0')).toBeVisible()
+    await expect(canvas.getByText('0–262144')).toBeVisible()
   },
 }
 
@@ -123,7 +113,7 @@ export const AFoldClosing: Story = {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /Read file/ })
     const path = canvas.getByRole('button', { name: 'src/billing/export.ts' })
-    await expect(canvas.getByText('token 7f31c0')).toBeVisible()
+    await expect(canvas.getByText('0–262144')).toBeVisible()
     const open = path.getBoundingClientRect().top
     const moved = () => Math.abs(path.getBoundingClientRect().top - open) > 0.5
 
@@ -133,7 +123,7 @@ export const AFoldClosing: Story = {
       false,
     )
     await waitFor(() => {
-      expect(canvas.queryByText('token 7f31c0')).toBeNull()
+      expect(canvas.queryByText('0–262144')).toBeNull()
     })
     await expect(moved()).toBe(false)
   },
@@ -174,7 +164,13 @@ export const ReadFolded: Story = {
   },
 }
 
-/** The same call opened: what it was asked, what it answered, and where it was made from. */
+/**
+ * The same call opened: what it was asked and what it answered, and nothing under it.
+ *
+ * The foot of identifiers is gone (recette 4 of 23 September 2026): the Session, the agent and
+ * the token are the entry's and the Journal's, and how long the call took is the dot's hover
+ * and what the dot is described by.
+ */
 export const ReadOpen: Story = {
   args: { defaultOpen: true },
   play: async ({ canvasElement }) => {
@@ -182,8 +178,13 @@ export const ReadOpen: Story = {
     const row = canvas.getByRole('button', { name: /Read file/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText('0–262144')).toBeVisible()
-    await expect(canvas.getByText('token 7f31c0')).toBeVisible()
-    await expect(canvas.getByText('18 ms')).toBeVisible()
+    await expect(canvas.getByText(/4 812 bytes read/)).toBeVisible()
+    // No foot: no token, no agent, no duration written on the page.
+    await expect(canvas.queryByText(/token/)).toBeNull()
+    await expect(canvas.queryByText(/ms/)).toBeNull()
+    const dot = canvas.getByRole('img', { name: 'Done' })
+    await expect(dot).toHaveAttribute('title', '18 ms')
+    await expect(dot).toHaveAccessibleDescription('18 ms')
   },
 }
 
@@ -380,7 +381,6 @@ export const EveryTool: Story = {
           subject={subject === null ? undefined : { text: subject }}
           status="completed"
           summary={summary}
-          provenance={PROVENANCE}
         />
       ))}
     </div>

@@ -25,10 +25,12 @@ import { MARKS, SubjectOnLine, type ToolSubject, pressable } from './tool-call-c
  * That is the whole reason this block is not `ToolCallCard` — the two sit side by side in one
  * turn and a reader must tell them apart. The line reads like a native call's — the mark of the
  * tool, what a reader calls it, what it is about, then the catalogue's name in mono, quieter —
- * and the difference is the name itself and the provenance under it, which is what makes the call
- * accountable: which Session it was made in, which agent made it, and which token it carried
- * (D6-01). Hemera's own mark left the line (recette 2 of 23 September 2026): a brand on every
- * call was louder than the call; the word `Hemera` stays in what the line is announced by.
+ * and the difference is the name itself. Hemera's own mark left the line (recette 2 of 23
+ * September 2026): a brand on every call was louder than the call; the word `Hemera` stays in
+ * what the line is announced by. The provenance left the body (recette 4): which Session, which
+ * agent and which token is what the entry and the Journal record, where it is looked up, and a
+ * foot of identifiers under every open call was read by nobody; how long the call took is the
+ * dot's hover and description.
  *
  * Each tool wears a mark of its own and a label of its own (recette 3 of 23 September 2026): a
  * mark per kind of tool drew `fs_list` as `fs_read` and the four commands as one, and a line
@@ -123,9 +125,6 @@ const LABEL = 'shrink-0 font-mono text-xs text-muted-foreground'
 
 const VALUE = 'min-w-0 truncate font-mono text-xs text-foreground'
 
-/** The paths touched and the provenance, which is what makes the call accountable. */
-const FOOT = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground'
-
 /** Where a call stands in its life, which is what says whether the reader may fold it. */
 export type HemeraToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'refused'
 
@@ -133,16 +132,6 @@ export type HemeraToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed
 export interface HemeraToolArgument {
   label: string
   value: string
-}
-
-/** Who made the call, and with what: what the entry is recorded with (D6-06). */
-export interface HemeraToolProvenance {
-  /** The Session the call belongs to. */
-  session: string
-  /** The agent that made it, as the protocol names it. */
-  agent: string
-  /** The identifier of the token it carried, never the token itself. */
-  token: string
 }
 
 export interface HemeraToolCallProps {
@@ -159,10 +148,8 @@ export interface HemeraToolCallProps {
   summary: string
   /** The arguments as they were bounded, in the order the tool declares them. */
   arguments?: readonly HemeraToolArgument[] | undefined
-  /** How long the call took, once it is over. */
+  /** How long the call took, once it is over: the dot's hover and description, not the line. */
   ms?: number | undefined
-  /** Where the call was made from: the Session, the agent and the token identifier. */
-  provenance: HemeraToolProvenance
   /** Why the call failed, or why it was refused. */
   error?: string | undefined
   /** Whether a reader who has not touched it finds it open. */
@@ -184,7 +171,6 @@ export function HemeraToolCall({
   summary,
   arguments: args,
   ms,
-  provenance,
   error,
   defaultOpen = false,
   onOpenPath,
@@ -219,7 +205,12 @@ export function HemeraToolCall({
           <span className={TOOL} aria-hidden="true">
             {tool}
           </span>
-          <StatusDot status={tone} size="sm" label={word} />
+          <StatusDot
+            status={tone}
+            size="sm"
+            label={word}
+            title={ms === undefined ? undefined : `${ms} ms`}
+          />
         </span>
       }
     >
@@ -235,12 +226,6 @@ export function HemeraToolCall({
           ))}
         </dl>
       )}
-      <div className={FOOT}>
-        <span>{provenance.session}</span>
-        <span>{provenance.agent}</span>
-        <span>{`token ${provenance.token}`}</span>
-        {ms !== undefined && <span>{`${ms} ms`}</span>}
-      </div>
       {children}
     </Disclosure>
   )

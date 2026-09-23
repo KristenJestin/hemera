@@ -238,7 +238,6 @@ export interface HemeraToolCallDrawn {
   readonly summary: string
   readonly arguments: readonly HemeraToolArgument[]
   readonly ms: number | undefined
-  readonly provenance: { readonly session: string; readonly agent: string; readonly token: string }
   readonly error: string | undefined
   readonly defaultOpen: boolean
 }
@@ -261,7 +260,7 @@ export function hemeraToolCallOf(
 ): HemeraToolCallDrawn | null {
   const read = readPayload(hemeraToolCallPayloadSchema, entry.payload)
   if (read === null) return null
-  const { tool, state, caller, arguments: bounded, agent, ms } = read
+  const { tool, state, arguments: bounded, ms } = read
   return {
     tool,
     ...hemeraToolLabelOf(tool),
@@ -270,7 +269,6 @@ export function hemeraToolCallOf(
     summary: entry.body,
     arguments: argumentsOf(bounded),
     ms,
-    provenance: { session: entry.sessionId, agent: agent ?? 'agent', token: caller },
     error: state !== 'completed' ? entry.body : undefined,
     defaultOpen: state !== 'completed',
   }

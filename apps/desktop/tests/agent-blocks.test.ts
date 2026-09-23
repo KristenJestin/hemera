@@ -67,11 +67,8 @@ describe('A read inside the Workspace goes through on its own', () => {
     expect(drawn?.summary).toBe('Read 42 lines of src/index.ts')
     expect(drawn?.status).toBe('completed')
     expect(drawn?.arguments).toEqual([{ label: 'path', value: 'src/index.ts' }])
-    expect(drawn?.provenance).toEqual({
-      session: 'session-1',
-      agent: 'agent',
-      token: 'a1b2c3d4e5f6',
-    })
+    // The provenance is the entry's and the Journal's: nothing of it is drawn (recette 4).
+    expect(drawn).not.toHaveProperty('provenance')
   })
 
   test('arguments the bound cut short than no longer parse draw as the raw text', () => {

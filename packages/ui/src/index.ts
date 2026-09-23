@@ -264,7 +264,6 @@ export {
   type HemeraToolArgument,
   type HemeraToolCallProps,
   type HemeraToolMark,
-  type HemeraToolProvenance,
   type HemeraToolStatus,
 } from './activity/hemera-tool-call.tsx'
 export {

@@ -171,11 +171,6 @@ const THREAD: ScrollerEntry[] = [
           { label: 'limit', value: '2 000 lines' },
         ]}
         ms={38}
-        provenance={{
-          session: 'CSV invoice export',
-          agent: 'claude-code',
-          token: 'call_8f21c4',
-        }}
         onOpenPath={fn()}
       />
     ),

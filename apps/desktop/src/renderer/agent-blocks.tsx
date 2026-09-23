@@ -356,7 +356,6 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           subject={subjectOf(hemera, call.rawInput?.text ?? '', context.runs)}
           status={reportedStatus(call.status)}
           summary={call.title}
-          provenance={{ session: entry.sessionId, agent: 'agent', token: '' }}
           defaultOpen={false}
         />
       )
