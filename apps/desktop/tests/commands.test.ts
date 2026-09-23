@@ -1,156 +1,34 @@
 /**
- * The commands of a Project, as the panel and the thread read them (D6-11, D6-12).
+ * The commands of a Project, as the panel and the thread read them (D6-11, D6-12, D8-07).
  *
  * Each suite is named after the scenario of the issue's Spec section that it covers, and nothing
  * here is mocked: the engine is the real one — the Projects, the Sessions and the commands over a
  * database in a temporary folder — and the commands are real children of the machine running the
  * tests, started through the real supervisor. A run that says it failed has to have failed.
- *
- * The children are `node` itself, reached through `process.execPath` rather than through the
- * `PATH`: a line is run and not interpreted, so what the suite writes is split into words as a
- * user's line would be, a quoted word — the path, the code to evaluate — staying one word.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
+import { describe, expect, it } from 'vite-plus/test'
 import { Effect, Layer, Result } from 'effect'
-import type { Scope } from 'effect'
+
+import { Commands, Platform } from '#engine/commands/service.ts'
+import { Projects } from '#engine/projects.ts'
+import { Sessions } from '#engine/sessions.ts'
+import { SqliteClient } from '#engine/storage/database.ts'
 
 import {
-  StderrSink,
-  hostProcessesLayer,
-  processSupervisorLayer,
-} from '#engine/agents/supervisor.ts'
-import { heldWordsLayer } from '#engine/agents/held.ts'
-import { NoNotices } from '#engine/agents/notices.ts'
-import { Commands, commandsLayer } from '#engine/commands/service.ts'
-import { Journal, journalLayer } from '#engine/journal.ts'
-import { openProfile } from '#engine/migrate.ts'
-import { Projects, projectsLayer } from '#engine/projects.ts'
-import { Sessions, sessionsLayer } from '#engine/sessions.ts'
-import { databaseLayer } from '#engine/storage/database.ts'
-import { SqliteClient } from '#engine/storage/database.ts'
-import type { Database } from '#engine/storage/database.ts'
-
-const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
-
-/** The version the shipped migrations are opened with, as the engine opens them. */
-const VERSION = '0.4.0'
-
-/** How long a run is waited for before the suite gives up on it: 5 seconds, 50 ms at a time. */
-const TRIES = 100
-
-let folder: string
-let root: string
-
-beforeEach(() => {
-  folder = join(tmpdir(), `hemera-commands-${String(Date.now())}-${String(Math.random())}`)
-  root = join(folder, 'workspace')
-  mkdirSync(root, { recursive: true })
-})
-
-afterEach(() => {
-  rmSync(folder, { recursive: true, force: true })
-})
-
-/** Everything a program of these suites may ask for: the engine, and nothing of the window. */
-type Engine = Projects | Sessions | Commands | Journal | Database | SqliteClient
-
-/**
- * One run of this engine, over one database in the suite's folder.
- *
- * The commands stand on the real supervisor and on the real Sessions: a run is a process of this
- * machine, and the entry it writes is a row of the same thread the window draws.
- */
-function engine() {
-  diagnostics.length = 0
-  const sink = Layer.succeed(StderrSink, {
-    write: (line: string) =>
-      Effect.sync(() => {
-        diagnostics.push(line)
-      }),
-  })
-  const processes = processSupervisorLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
-  )
-  const services: Layer.Layer<Engine> = commandsLayer.pipe(
-    Layer.provideMerge(journalLayer),
-    Layer.provideMerge(
-      Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
-        Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite'))),
-      ),
-    ),
-    Layer.provide(processes),
-    Layer.provide(sink),
-    Layer.provide(heldWordsLayer),
-    // Nobody is watching: these suites read the thread and the runs, not what was pushed.
-    Layer.provide(NoNotices),
-  )
-  return <A, E>(program: Effect.Effect<A, E, Engine | Scope.Scope>): Promise<A> =>
-    Effect.runPromise(
-      // The program's scope closes before the services': the runs it holds end first.
-      Effect.provide(
-        Effect.scoped(
-          Effect.gen(function* () {
-            yield* openProfile(folder, SHIPPED, VERSION)
-            return yield* program
-          }),
-        ),
-        services,
-      ),
-    )
-}
-
-/** The engine's diagnostic lines, as the suite's sink received them. */
-const diagnostics: string[] = []
-
-/** A Project on the suite's Workspace and one Session of it, as the window would make them. */
-const opened = Effect.gen(function* () {
-  const projects = yield* Projects
-  const sessions = yield* Sessions
-  const project = yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: root })
-  const session = yield* sessions.create(project.id, 'claude')
-  return { projectId: project.id, sessionId: session.id }
-})
-
-/** The entries of a Session's thread, oldest first. */
-const threadEntries = (sessionId: string) =>
-  Effect.gen(function* () {
-    const sessions = yield* Sessions
-    const page = yield* sessions.read(sessionId)
-    return page.entries
-  })
-
-/**
- * Reads until what is being waited for is true, and answers the last thing it read.
- *
- * A real child ends when the kernel says so, and what it printed arrives after that: a suite that
- * read once would read a run that has not finished being a run. Bounded, so a process that never
- * ends fails a test rather than hanging it.
- */
-const until = <A, E, R>(read: Effect.Effect<A, E, R>, ready: (seen: A) => boolean) =>
-  Effect.gen(function* () {
-    let seen = yield* read
-    for (let tries = 0; tries < TRIES && !ready(seen); tries += 1) {
-      yield* Effect.sleep('50 millis')
-      seen = yield* read
-    }
-    return seen
-  })
-
-/** The `command_run` entries of a thread: one per run, whatever state the run reached. */
-const runEntries = (sessionId: string) =>
-  threadEntries(sessionId).pipe(
-    Effect.map((entries) => entries.filter((entry) => entry.kind === 'command_run')),
-  )
-
-/** A line that says something on its standard error and ends badly, as a failing tool does. */
-const FAILS_LOUDLY = `"${process.execPath}" -e "process.stderr.write('boom\\n');process.exit(3)"`
-
-/** A line that publishes an address and stays up, as a dev server does. */
-const PUBLISHES_AN_ADDRESS = `"${process.execPath}" -e "console.log('http://localhost:4321');setInterval(()=>{},1000)"`
+  FAILS_LOUDLY,
+  PUBLISHES_AN_ADDRESS,
+  diagnostics,
+  engine,
+  opened,
+  request,
+  runEntries,
+  runLines,
+  scratch,
+  until,
+} from './commands-engine.ts'
 
 describe('A one-off command shows and is not promoted', () => {
   it('keeps what it said on standard error, its exit code, and one entry of the thread', async () => {
@@ -158,19 +36,10 @@ describe('A one-off command shows and is not promoted', () => {
       Effect.gen(function* () {
         const session = yield* opened
         const commands = yield* Commands
-        const started = yield* commands.run({
-          sessionId: session.sessionId,
-          projectId: session.projectId,
-          // A one-off: a line the agent wrote, which the catalogue never hears about.
-          commandId: null,
-          name: 'boom',
-          line: FAILS_LOUDLY,
-          type: 'test',
-          cwd: root,
-          workspaceId: null,
-          environment: {},
-          startedBy: 'agent',
-        })
+        // A one-off: a line the agent wrote, which the catalogue never hears about.
+        const started = yield* commands.run(
+          request(session, { name: 'boom', line: FAILS_LOUDLY, type: 'test', startedBy: 'agent' }),
+        )
         const settled = yield* until(
           Effect.gen(function* () {
             return {
@@ -217,7 +86,7 @@ describe('A one-off command shows and is not promoted', () => {
       name: 'boom',
       type: 'test',
       state: 'failed',
-      cwd: root,
+      cwd: scratch.root,
       url: null,
       exitCode: 3,
       startedBy: 'agent',
@@ -246,18 +115,15 @@ describe('The agent starts the app and the user opens it', () => {
           },
           false,
         )
-        const started = yield* commands.run({
-          sessionId: session.sessionId,
-          projectId: session.projectId,
-          commandId: saved.id,
-          name: saved.name,
-          line: saved.line,
-          type: saved.type,
-          cwd: root,
-          workspaceId: null,
-          environment: {},
-          startedBy: 'agent',
-        })
+        const started = yield* commands.run(
+          request(session, {
+            commandId: saved.id,
+            name: saved.name,
+            line: saved.line,
+            type: saved.type,
+            startedBy: 'agent',
+          }),
+        )
         // The address is the first one the output names, and it is named while the app runs.
         const published = yield* until(
           commands.output(session.sessionId, started.id),
@@ -295,30 +161,29 @@ describe('A run is written in the Journal under whoever started it', () => {
         const session = yield* opened
         const commands = yield* Commands
         const run = (startedBy: 'agent' | 'user') =>
-          commands.run({
-            sessionId: session.sessionId,
-            projectId: session.projectId,
-            commandId: null,
-            name: startedBy,
-            line: `${process.execPath} -e 0`,
-            type: 'test',
-            cwd: root,
-            workspaceId: null,
-            environment: {},
-            startedBy,
-          })
-        yield* run('user')
+          commands.run(
+            request(session, {
+              name: startedBy,
+              line: `${process.execPath} -e 0`,
+              type: 'test',
+              startedBy,
+            }),
+          )
+        const user = yield* run('user')
         yield* run('agent')
-        const journal = yield* Journal
-        const read = yield* journal.read({ projectId: session.projectId })
-        return read.entries.filter((entry) => entry.type === 'command.started')
+        const lines = yield* runLines(session.projectId)
+        return { user, started: lines.filter((entry) => entry.type === 'command.run_started') }
       }),
     )
 
     const byName = (name: string) =>
-      seen.find((entry) => JSON.stringify(entry.payload).includes(`"name":"${name}"`))
+      seen.started.find((entry) => JSON.stringify(entry.payload).includes(`"name":"${name}"`))
     expect(byName('user')?.author).toBe('human')
     expect(byName('agent')?.author).toBe('mcp')
+    // The run is the entity of its lines, in the Workspace it ran in (D8-16).
+    expect(byName('user')?.entityKind).toBe('command')
+    expect(byName('user')?.entityId).toBe(seen.user.id)
+    expect(byName('user')?.payload).toMatchObject({ name: 'user', workspaceName: 'main' })
   })
 })
 
@@ -328,36 +193,25 @@ describe('A stopped run ends once', () => {
       Effect.gen(function* () {
         const session = yield* opened
         const commands = yield* Commands
-        const started = yield* commands.run({
-          sessionId: session.sessionId,
-          projectId: session.projectId,
-          commandId: null,
-          name: 'server',
-          line: PUBLISHES_AN_ADDRESS,
-          type: 'serve',
-          cwd: root,
-          workspaceId: null,
-          environment: {},
-          startedBy: 'user',
-        })
+        const started = yield* commands.run(
+          request(session, { name: 'server', line: PUBLISHES_AN_ADDRESS, type: 'serve' }),
+        )
         const ended = yield* commands.stop(session.sessionId, started.id)
         // Anything the watcher would still write arrives now, not after the suite has read.
         yield* Effect.sleep('200 millis')
-        const journal = yield* Journal
-        const read = yield* journal.read({ projectId: session.projectId })
+        const lines = yield* runLines(session.projectId)
         return {
           ended,
           row: (yield* commands.recent(session.sessionId))[0],
-          ends: read.entries.filter(
-            (entry) => entry.type.startsWith('command.') && entry.type !== 'command.started',
-          ),
+          ends: lines.filter((entry) => entry.type !== 'command.run_started'),
         }
       }),
     )
 
     expect(seen.ended.state).toBe('stopped')
     expect(seen.row?.state).toBe('stopped')
-    expect(seen.ends.map((entry) => entry.type)).toEqual(['command.stopped'])
+    expect(seen.ends.map((entry) => entry.type)).toEqual(['command.run_ended'])
+    expect(seen.ends[0]?.payload).toMatchObject({ state: 'stopped' })
   })
 })
 
@@ -367,18 +221,9 @@ describe('A run whose end cannot be recorded', () => {
       Effect.gen(function* () {
         const session = yield* opened
         const commands = yield* Commands
-        const started = yield* commands.run({
-          sessionId: session.sessionId,
-          projectId: session.projectId,
-          commandId: null,
-          name: 'server',
-          line: PUBLISHES_AN_ADDRESS,
-          type: 'serve',
-          cwd: root,
-          workspaceId: null,
-          environment: {},
-          startedBy: 'user',
-        })
+        const started = yield* commands.run(
+          request(session, { name: 'server', line: PUBLISHES_AN_ADDRESS, type: 'serve' }),
+        )
         // The database refuses every later write of a run, as a locked or full one would.
         const sql = yield* SqliteClient
         yield* sql.unsafe(
@@ -402,26 +247,16 @@ describe('A run that ended is left as it ended', () => {
       Effect.gen(function* () {
         const session = yield* opened
         const commands = yield* Commands
-        const started = yield* commands.run({
-          sessionId: session.sessionId,
-          projectId: session.projectId,
-          commandId: null,
-          name: 'boom',
-          line: FAILS_LOUDLY,
-          type: 'test',
-          cwd: root,
-          workspaceId: null,
-          environment: {},
-          startedBy: 'agent',
-        })
+        const started = yield* commands.run(
+          request(session, { name: 'boom', line: FAILS_LOUDLY, type: 'test', startedBy: 'agent' }),
+        )
         // Ended and written: the row says so, which is when the run is no longer held in memory.
         yield* until(commands.recent(session.sessionId), (rows) => rows[0]?.state === 'failed')
         yield* commands.stopped(session.sessionId)
-        const journal = yield* Journal
-        const read = yield* journal.read({ projectId: session.projectId })
+        const lines = yield* runLines(session.projectId)
         return {
           read: yield* commands.output(session.sessionId, started.id),
-          stops: read.entries.filter((entry) => entry.type === 'command.stopped'),
+          ends: lines.filter((entry) => entry.type === 'command.run_ended'),
         }
       }),
     )
@@ -429,7 +264,9 @@ describe('A run that ended is left as it ended', () => {
     expect(seen.read.state).toBe('failed')
     expect(seen.read.exitCode).toBe(3)
     expect(seen.read.output).toContain('boom')
-    expect(seen.stops).toHaveLength(0)
+    // One end, the one it had: the sweep writes no second one.
+    expect(seen.ends).toHaveLength(1)
+    expect(seen.ends[0]?.payload).toMatchObject({ state: 'failed', exitCode: 3 })
   })
 })
 
@@ -444,23 +281,17 @@ describe('A running app is shared by the Sessions of its Project', () => {
         const elsewhere = yield* projects.create({
           name: 'Other',
           tone: 'primary',
-          mainPath: folder,
+          mainPath: scratch.folder,
         })
         const stranger = yield* sessions.create(elsewhere.id, 'claude')
         const commands = yield* Commands
         const run = (sessionId: string) =>
-          commands.run({
-            sessionId,
-            projectId: first.projectId,
-            commandId: null,
-            name: 'dev',
-            line: PUBLISHES_AN_ADDRESS,
-            type: 'serve',
-            cwd: root,
-            workspaceId: null,
-            environment: {},
-            startedBy: 'agent',
-          })
+          commands.run(
+            request(
+              { projectId: first.projectId, sessionId },
+              { name: 'dev', line: PUBLISHES_AN_ADDRESS, type: 'serve', startedBy: 'agent' },
+            ),
+          )
         const started = yield* run(first.sessionId)
         const joined = yield* run(second.id)
         const read = yield* commands.output(second.id, started.id)
@@ -481,23 +312,12 @@ describe('A running app is shared by the Sessions of its Project', () => {
 /** A program that prints the arguments it was given, one `|` between two of them. */
 const PRINTS_ITS_ARGUMENTS = `-e "console.log(process.argv.slice(1).join('|'))"`
 
-/** Starts one line as a `check` of the suite's Session and reads it once it has ended. */
+/** Starts one line as a `test` of the suite's Session and reads it once it has ended. */
 const ranToTheEnd = (line: string) =>
   Effect.gen(function* () {
     const session = yield* opened
     const commands = yield* Commands
-    const started = yield* commands.run({
-      sessionId: session.sessionId,
-      projectId: session.projectId,
-      commandId: null,
-      name: 'arguments',
-      line,
-      type: 'test',
-      cwd: root,
-      workspaceId: null,
-      environment: {},
-      startedBy: 'user',
-    })
+    const started = yield* commands.run(request(session, { name: 'arguments', line, type: 'test' }))
     return yield* until(
       commands.output(session.sessionId, started.id),
       (view) => view.state !== 'running',
@@ -519,11 +339,11 @@ describe('A line is split into words, a quoted one staying whole', () => {
     async () => {
       // A shim as npm writes one: a batch file that hands its arguments on to a program.
       writeFileSync(
-        join(root, 'echo-args.cmd'),
+        join(scratch.root, 'echo-args.cmd'),
         `@"${process.execPath}" ${PRINTS_ITS_ARGUMENTS} %*\r\n`,
       )
       const before = process.env['PATH']
-      process.env['PATH'] = `${root};${before ?? ''}`
+      process.env['PATH'] = `${scratch.root};${before ?? ''}`
       try {
         const seen = await engine()(ranToTheEnd('echo-args "two words" "a&b" plain'))
 
@@ -539,29 +359,112 @@ describe('A line is split into words, a quoted one staying whole', () => {
 describe('A run keeps the first address it names', () => {
   it('does not move to an address printed later', async () => {
     const seen = await engine()(
-      Effect.gen(function* () {
-        const session = yield* opened
-        const commands = yield* Commands
-        const started = yield* commands.run({
-          sessionId: session.sessionId,
-          projectId: session.projectId,
-          commandId: null,
-          name: 'two',
-          line: `"${process.execPath}" -e "console.log('http://127.0.0.1:4000');console.log('http://localhost:5000')"`,
-          type: 'test',
-          cwd: root,
-          workspaceId: null,
-          environment: {},
-          startedBy: 'user',
-        })
-        return yield* until(
-          commands.output(session.sessionId, started.id),
-          (view) => view.state !== 'running',
-        )
-      }),
+      ranToTheEnd(
+        `"${process.execPath}" -e "console.log('http://127.0.0.1:4000');console.log('http://localhost:5000')"`,
+      ),
     )
 
     expect(seen.output).toContain('localhost:5000')
     expect(seen.url).toBe('http://127.0.0.1:4000')
+  })
+})
+
+describe('The machine runs its own variant', () => {
+  it('runs the Windows line on Windows and the default line on Linux, and keeps the line run', async () => {
+    // What the catalogue holds: a default line, and a line of its own for Windows.
+    const seed = { name: 'seed', line: './scripts/seed.sh', lineWindows: 'scripts\\seed.cmd' }
+    const ranOn = (platform: string) =>
+      engine(Layer.succeed(Platform, platform))(
+        Effect.gen(function* () {
+          const session = yield* opened
+          const commands = yield* Commands
+          const started = yield* commands.run(request(session, { ...seed, type: 'script' }))
+          return yield* until(
+            commands.output(session.sessionId, started.id),
+            (view) => view.state !== 'running',
+          )
+        }),
+      )
+    // The default line is a script of the Workspace, which this machine can really run.
+    mkdirSync(join(scratch.root, 'scripts'))
+    writeFileSync(join(scratch.root, 'scripts', 'seed.sh'), '#!/bin/sh\necho seeded\n')
+    chmodSync(join(scratch.root, 'scripts', 'seed.sh'), 0o755)
+
+    const linux = await ranOn('linux')
+    const windows = await ranOn('win32')
+
+    expect(linux.line).toBe('./scripts/seed.sh')
+    expect(windows.line).toBe('scripts\\seed.cmd')
+    // The Linux one ran for real where it can: the line kept is the line that ran.
+    if (process.platform === 'linux') expect(linux.output).toContain('seeded')
+  })
+})
+
+describe('A run shows what it ran', () => {
+  it('keeps the line run, its folder, the variables given, its output and its exit code', async () => {
+    const api = join(scratch.root, 'sources', 'api')
+    mkdirSync(api, { recursive: true })
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const saved = yield* commands.save(
+          {
+            projectId: session.projectId,
+            name: 'test',
+            line: `"${process.execPath}" -e "console.log('port '+process.env.PORT);process.exit(1)"`,
+            type: 'test',
+            lineWindows: null,
+            lineLinux: null,
+            scope: 'workspace',
+            portless: false,
+            folder: 'sources/api',
+          },
+          false,
+        )
+        const started = yield* commands.run(
+          request(session, {
+            commandId: saved.id,
+            name: saved.name,
+            line: saved.line,
+            type: saved.type,
+            folder: saved.folder,
+            cwd: api,
+            environment: { PORT: '3001' },
+          }),
+        )
+        // Ended, what it printed arrived, and its entry rewritten: one moment, read as one.
+        return yield* until(
+          Effect.gen(function* () {
+            return {
+              saved,
+              run: yield* commands.output(session.sessionId, started.id),
+              entries: yield* runEntries(session.sessionId),
+            }
+          }),
+          (read) =>
+            read.run.state !== 'running' &&
+            read.run.output.includes('port') &&
+            read.entries.some((entry) => entry.state !== 'running'),
+        )
+      }),
+    )
+
+    expect(seen.run.line).toBe(seen.saved.line)
+    expect(seen.run.folder).toBe('sources/api')
+    expect(seen.run.cwd).toBe(api)
+    expect(seen.run.environment['PORT']).toBe('3001')
+    // The variable reached the process: what it printed says so.
+    expect(seen.run.output).toContain('port 3001')
+    expect(seen.run.exitCode).toBe(1)
+    expect(seen.run.state).toBe('failed')
+    expect(JSON.parse(seen.entries[0]?.payload ?? '{}')).toMatchObject({
+      line: seen.saved.line,
+      folder: 'sources/api',
+      cwd: api,
+      environment: { PORT: '3001' },
+      workspaceName: 'main',
+      exitCode: 1,
+    })
   })
 })

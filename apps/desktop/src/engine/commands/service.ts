@@ -25,6 +25,7 @@
 
 import {
   type Command,
+  type CommandScope,
   type CommandType,
   addressIn,
   commandLine,
@@ -33,6 +34,8 @@ import {
   commandType,
   DuplicateCommandNameError,
   joinsRunningRun,
+  lineFor,
+  MAIN_WORKSPACE,
   mergedEnvironment,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
@@ -44,7 +47,13 @@ import { AgentNotices } from '../agents/notices.ts'
 import { ProcessSupervisor, StderrSink } from '../agents/supervisor.ts'
 import { Sessions } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
-import { type RunState, commandRuns, projectCommands, sessions } from '../storage/schema.ts'
+import {
+  type RunState,
+  commandRuns,
+  projectCommands,
+  sessions,
+  workspaces,
+} from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { hostLookup, invocationOf } from './line.ts'
 
@@ -68,6 +77,15 @@ const PUSH_EVERY_MS = 200
 
 /** How long a run has to die quietly before its tree is taken down. */
 const GRACE_MS = 5_000
+
+/**
+ * The system this machine is, in Node's own word — `win32`, `linux`, `darwin` — which decides the
+ * line a command runs (D8-07). The engine's own by default; a suite hands another one to see the
+ * variant a Windows machine would run without being one.
+ */
+export const Platform = Context.Reference<string>('CommandsPlatform', {
+  defaultValue: () => globalThis.process.platform,
+})
 
 /** A run was asked for by an identifier nothing of this Project answers to. */
 export class UnknownRunError extends Error {
@@ -105,11 +123,18 @@ export interface Run {
   /** The catalogue entry it is, and null for a one-off command line. */
   readonly commandId: string | null
   readonly name: string
+  /** The line it ran: the machine's own variant when the command has one (D8-07). */
   readonly line: string
   readonly type: CommandType
+  /** Once per Workspace or once for the Project: what a second `serve` run joins (D8-07). */
+  readonly scope: CommandScope
   readonly cwd: string
+  /** The command's folder relative to the Workspace root, and null for the root itself. */
+  readonly folder: string | null
   /** The Workspace it runs in; null on a run written before Workspaces, read as `main` (D8-08). */
   readonly workspaceId: string | null
+  /** What that Workspace is called: what a conflict names (D8-09). */
+  readonly workspaceName: string
   /** The variables it was given over the process's environment (D8-06). */
   readonly environment: Record<string, string>
   readonly state: RunState
@@ -134,18 +159,34 @@ export interface RunView extends Run {
   readonly joined: boolean
 }
 
-/** What the caller hands over to start or join a run. */
+/**
+ * What the caller hands over to start or join a run.
+ *
+ * The caller resolves where it runs: `cwd` is the command's folder under the Workspace the run
+ * is in — under `main` for a Project-scoped command, whichever Workspace asked (D8-07). The
+ * service checks nothing about that path; it runs there.
+ */
 export interface RunRequest {
   readonly sessionId: string
   readonly projectId: string
   readonly commandId: string | null
   readonly name: string
+  /** The default line: what runs on a machine the command has no line of its own for (D8-07). */
   readonly line: string
+  readonly lineWindows: string | null
+  readonly lineLinux: string | null
   readonly type: CommandType
+  /** What a second `serve` run joins; `workspace` for a one-off (D8-07). */
+  readonly scope: CommandScope
+  readonly portless: boolean
+  /** The command's folder relative to the Workspace root, and null for the root itself. */
+  readonly folder: string | null
   /** Where it runs: the Workspace root, or one of the Project's repositories under it. */
   readonly cwd: string
   /** The Workspace it runs in, and null for `main` (D8-08). */
   readonly workspaceId: string | null
+  /** What that Workspace is called, `main` when the caller does not know (D8-09). */
+  readonly workspaceName: string
   /** The variables it is given over the process's environment, the Workspace's last (D8-06). */
   readonly environment: Record<string, string>
   readonly startedBy: 'agent' | 'user'
@@ -198,6 +239,13 @@ export interface CommandsService {
   /** What this Session has running, oldest first: what the panel draws. */
   readonly running: (sessionId: string) => Effect.Effect<RunView[]>
   /**
+   * What a Workspace has running, oldest first, whoever started it (D8-08): its services, and
+   * what keeps it from being cleaned up. Null is `main`.
+   */
+  readonly runningIn: (workspaceId: string | null, projectId: string) => Effect.Effect<RunView[]>
+  /** What the Project has running, in every Workspace, oldest first. */
+  readonly runningOf: (projectId: string) => Effect.Effect<RunView[]>
+  /**
    * The last runs of a Session, newest first, ended ones included.
    *
    * The panel draws them, and `commands_output` answers from them when the agent reads the run
@@ -244,6 +292,19 @@ function conflictOf(text: string): PortConflict | null {
   return read.success ? read.data : null
 }
 
+/**
+ * Whether a run is in `main`: the Workspace a run written before Workspaces is read as (D8-08),
+ * whether the caller named `main` by its row or by null.
+ */
+const inMain = (one: { workspaceId: string | null; workspaceName: string }) =>
+  one.workspaceId === null || one.workspaceName === MAIN_WORKSPACE
+
+/** Whether two runs are in the same Workspace. */
+const sameWorkspace = (
+  left: { workspaceId: string | null; workspaceName: string },
+  right: { workspaceId: string | null; workspaceName: string },
+) => (inMain(left) && inMain(right)) || left.workspaceId === right.workspaceId
+
 /** One live run: what it is, what it has printed, and how to end it. */
 interface Live {
   readonly sessionId: string
@@ -252,8 +313,11 @@ interface Live {
   readonly name: string
   readonly line: string
   readonly type: CommandType
+  readonly scope: CommandScope
   readonly cwd: string
+  readonly folder: string | null
   readonly workspaceId: string | null
+  readonly workspaceName: string
   readonly environment: Record<string, string>
   /** Who asked for it: the agent through its tool, or the user through the panel. */
   readonly startedBy: 'agent' | 'user'
@@ -304,6 +368,7 @@ export const commandsLayer = Layer.effect(
     const diagnostic = yield* StderrSink
     /** The engine's own scope: everything started here dies when the engine does. */
     const scope = yield* Effect.scope
+    const platform = yield* Platform
     const live = new Map<string, Live>()
 
     /** An effect that needs a scope, run in the engine's: everything it starts dies with it. */
@@ -340,8 +405,11 @@ export const commandsLayer = Layer.effect(
       name: one.name,
       line: one.line,
       type: one.type,
+      scope: one.scope,
       cwd: one.cwd,
+      folder: one.folder,
       workspaceId: one.workspaceId,
+      workspaceName: one.workspaceName,
       environment: one.environment,
       state: one.state,
       pid: one.pid,
@@ -357,12 +425,44 @@ export const commandsLayer = Layer.effect(
     })
 
     /**
+     * The rows of runs, with what a row does not hold itself: the Project, from the Session; the
+     * Workspace's name, `main` for a row without one (D8-08); and the folder and the scope, from
+     * the catalogue entry it ran — a one-off, or an entry since taken out, ran at the root once
+     * per Workspace — because `command_runs` keeps neither.
+     */
+    const runRows = () =>
+      database
+        .select({
+          run: commandRuns,
+          projectId: sessions.projectId,
+          workspaceName: workspaces.name,
+          folder: projectCommands.folder,
+          scope: projectCommands.scope,
+        })
+        .from(commandRuns)
+        .innerJoin(sessions, eq(sessions.id, commandRuns.sessionId))
+        .leftJoin(workspaces, eq(workspaces.id, commandRuns.workspaceId))
+        .leftJoin(projectCommands, eq(projectCommands.id, commandRuns.commandId))
+
+    /**
      * A run read from its row rather than from memory: what a process that is gone left behind.
      *
      * `outputBytes` is what the run printed altogether and `output` is what was kept of it, so
      * what was dropped is what the two differ by — the number the panel says out loud.
      */
-    const rowOf = (row: typeof commandRuns.$inferSelect, projectId: string): RunView => ({
+    const rowOf = ({
+      run: row,
+      projectId,
+      workspaceName,
+      folder,
+      scope: runsIn,
+    }: {
+      run: typeof commandRuns.$inferSelect
+      projectId: string
+      workspaceName: string | null
+      folder: string | null
+      scope: string | null
+    }): RunView => ({
       id: row.id,
       projectId,
       sessionId: row.sessionId,
@@ -370,8 +470,11 @@ export const commandsLayer = Layer.effect(
       name: row.name,
       line: row.line,
       type: commandType(row.type),
+      scope: runsIn === null ? 'workspace' : commandScope(runsIn),
       cwd: row.cwd,
+      folder: folder === null || folder === '' ? null : folder,
       workspaceId: row.workspaceId,
+      workspaceName: workspaceName ?? MAIN_WORKSPACE,
       environment: variablesOf(row.environment),
       state: runStateOf(row.state),
       pid: row.pid,
@@ -415,8 +518,15 @@ export const commandsLayer = Layer.effect(
                 type: one.type,
                 state: one.state,
                 cwd: one.cwd,
+                folder: one.folder,
                 workspaceId: one.workspaceId,
+                workspaceName: one.workspaceName,
+                // What `RunDetails` shows: the variables given, readiness and a conflict (D8-06,
+                // D8-09).
+                environment: one.environment,
                 url: one.url,
+                readyAt: one.readyAt,
+                portConflict: one.portConflict,
                 exitCode: one.exitCode,
                 startedBy: one.startedBy,
                 // A one-off is a line the agent wrote rather than a command of the catalogue, and
@@ -432,8 +542,11 @@ export const commandsLayer = Layer.effect(
         )
         .pipe(Effect.catch(() => Effect.void))
 
-    /** The row of a run and its entry in the thread, written as it starts and when it ends. */
-    const writeRow = (id: string, one: Live, type: string) =>
+    /**
+     * The row of a run and its entry in the thread, written as it starts, as it changes and when
+     * it ends, with the Journal line `type` names — none for a change D8-16 does not name.
+     */
+    const writeRow = (id: string, one: Live, type: string | null) =>
       withDatabase(
         mutate('recording a run', (transaction) =>
           Effect.gen(function* () {
@@ -479,20 +592,30 @@ export const commandsLayer = Layer.effect(
             }
             return {
               result: undefined,
-              events: [
-                {
-                  type,
-                  entityKind: 'session' as const,
-                  entityId: one.sessionId,
-                  // Who asked is who the Journal names: a run the user started from the panel is
-                  // the user's, and one the agent asked for through its tool is the tool's.
-                  source: one.startedBy === 'user' ? ('ui' as const) : ('system' as const),
-                  author: one.startedBy === 'user' ? ('human' as const) : ('mcp' as const),
-                  projectId: one.projectId,
-                  sessionId: one.sessionId,
-                  payload: { name: one.name, state: one.state, url: one.url },
-                },
-              ],
+              // The run is the entity of its lines (D8-16): started, ready, ended.
+              events:
+                type === null
+                  ? []
+                  : [
+                      {
+                        type,
+                        entityKind: 'command' as const,
+                        entityId: id,
+                        // Who asked is who the Journal names: a run the user started from the
+                        // panel is the user's, and one the agent asked for is the tool's.
+                        source: one.startedBy === 'user' ? ('ui' as const) : ('system' as const),
+                        author: one.startedBy === 'user' ? ('human' as const) : ('mcp' as const),
+                        projectId: one.projectId,
+                        sessionId: one.sessionId,
+                        payload: {
+                          name: one.name,
+                          state: one.state,
+                          exitCode: one.exitCode,
+                          url: one.url,
+                          workspaceName: one.workspaceName,
+                        },
+                      },
+                    ],
             }
           }),
         ),
@@ -526,6 +649,15 @@ export const commandsLayer = Layer.effect(
         }
         yield* Deferred.await(record.ended)
       })
+
+    /** The runs of this engine still going that `kept` keeps, oldest first. */
+    const runningWhere = (kept: (one: Live) => boolean) =>
+      Effect.sync(() =>
+        [...live.entries()]
+          .filter(([, one]) => one.state === 'running' && kept(one))
+          .sort((left, right) => (left[1].startedAt < right[1].startedAt ? -1 : 1))
+          .map(([id, one]) => viewOf(id, one)),
+      )
 
     const service: CommandsService = {
       list: (projectId) =>
@@ -669,13 +801,15 @@ export const commandsLayer = Layer.effect(
 
       run: (asked) =>
         Effect.gen(function* () {
-          // A server is the Project's, not the Session's (D6-12): a second Session that asks for
-          // the one already running is handed that one, and can read and stop it like its own.
+          // A server is shared, not the Session's (D6-12): a second Session that asks for the
+          // one already running is handed that one, and can read and stop it like its own. Which
+          // one is the scope's (D8-07): the one of the same Workspace, or the Project's one.
           const already = [...live.entries()].find(
             ([, one]) =>
               one.projectId === asked.projectId &&
               one.name === asked.name &&
-              one.state === 'running',
+              one.state === 'running' &&
+              (asked.scope === 'project' || sameWorkspace(one, asked)),
           )
           if (
             already !== undefined &&
@@ -686,15 +820,20 @@ export const commandsLayer = Layer.effect(
 
           const id = crypto.randomUUID()
           const startedAt = new Date().toISOString()
+          // The machine's own line when the command has one, and the run keeps the line it ran.
+          const line = lineFor(asked, platform)
           const record: Live = {
             sessionId: asked.sessionId,
             projectId: asked.projectId,
             commandId: asked.commandId,
             name: asked.name,
-            line: asked.line,
+            line,
             type: asked.type,
+            scope: asked.scope,
             cwd: asked.cwd,
+            folder: asked.folder,
             workspaceId: asked.workspaceId,
+            workspaceName: asked.workspaceName,
             environment: asked.environment,
             startedBy: asked.startedBy,
             startedAt,
@@ -717,16 +856,12 @@ export const commandsLayer = Layer.effect(
           // A line is run and not interpreted: what it names is the program, and the rest are
           // its arguments, a quoted one staying one. A line that needs a shell — a pipeline, a
           // variable — is a line the user writes in a script and names here.
-          const invocation = invocationOf(
-            asked.line,
-            globalThis.process.platform,
-            hostLookup(asked.cwd),
-          )
+          const invocation = invocationOf(line, platform, hostLookup(asked.cwd))
           if (invocation === null) {
             record.state = 'failed'
             record.kept = `Hemera has nothing to run: the line of ${asked.name} is empty`
             record.endedAt = startedAt
-            yield* writeRow(id, record, 'command.failed')
+            yield* writeRow(id, record, 'command.run_ended')
             yield* Deferred.succeed(record.ended, undefined)
             live.delete(id)
             return viewOf(id, record)
@@ -757,9 +892,9 @@ export const commandsLayer = Layer.effect(
 
           if (Exit.isFailure(spawned)) {
             record.state = 'failed'
-            record.kept = `the command could not be started: ${asked.line}`
+            record.kept = `the command could not be started: ${line}`
             record.endedAt = new Date().toISOString()
-            yield* writeRow(id, record, 'command.failed')
+            yield* writeRow(id, record, 'command.run_ended')
             yield* Deferred.succeed(record.ended, undefined)
             live.delete(id)
             return viewOf(id, record)
@@ -813,11 +948,7 @@ export const commandsLayer = Layer.effect(
                   record.exitCode = observation.code
                   record.endedAt = observation.when
                   yield* Effect.sleep(DRAIN_MS)
-                  yield* writeRow(
-                    id,
-                    record,
-                    record.stopping ? 'command.stopped' : 'command.exited',
-                  ).pipe(
+                  yield* writeRow(id, record, 'command.run_ended').pipe(
                     // A row that cannot be written — the database locked, the disk full — is a
                     // run whose end is not recorded, and said so; it has ended all the same.
                     Effect.catch((cause) =>
@@ -843,7 +974,7 @@ export const commandsLayer = Layer.effect(
 
           // Asked to stop while it was starting: the stop found nothing to end, so it ends now.
           if (record.stopping) yield* process.stop
-          yield* writeRow(id, record, 'command.started')
+          yield* writeRow(id, record, 'command.run_started')
           return viewOf(id, record)
         }),
 
@@ -854,15 +985,12 @@ export const commandsLayer = Layer.effect(
           if (record !== undefined && record.projectId === projectId) return viewOf(runId, record)
           // The process is gone: the row is what is left of the run, and a `test` that exited
           // an hour ago is read from it exactly as a run of this process is read from memory.
-          const rows = yield* database
-            .select({ run: commandRuns, projectId: sessions.projectId })
-            .from(commandRuns)
-            .innerJoin(sessions, eq(sessions.id, commandRuns.sessionId))
+          const rows = yield* runRows()
             .where(and(eq(commandRuns.id, runId), eq(sessions.projectId, projectId ?? '')))
             .pipe(Effect.mapError(failed('reading a run')))
           const row = rows[0]
           if (row === undefined) return yield* Effect.fail(new UnknownRunError(runId))
-          return rowOf(row.run, row.projectId)
+          return rowOf(row)
         }),
 
       stop: (sessionId, runId) =>
@@ -876,25 +1004,25 @@ export const commandsLayer = Layer.effect(
           return viewOf(runId, record)
         }),
 
-      running: (sessionId) =>
-        Effect.sync(() =>
-          [...live.entries()]
-            .filter(([, one]) => one.sessionId === sessionId && one.state === 'running')
-            .sort((left, right) => (left[1].startedAt < right[1].startedAt ? -1 : 1))
-            .map(([id, one]) => viewOf(id, one)),
+      running: (sessionId) => runningWhere((one) => one.sessionId === sessionId),
+
+      runningIn: (workspaceId, projectId) =>
+        runningWhere(
+          (one) =>
+            one.projectId === projectId &&
+            (workspaceId === null ? inMain(one) : one.workspaceId === workspaceId),
         ),
 
+      runningOf: (projectId) => runningWhere((one) => one.projectId === projectId),
+
       recent: (sessionId) =>
-        database
-          .select({ run: commandRuns, projectId: sessions.projectId })
-          .from(commandRuns)
-          .innerJoin(sessions, eq(sessions.id, commandRuns.sessionId))
+        runRows()
           .where(eq(commandRuns.sessionId, sessionId))
           .orderBy(desc(commandRuns.startedAt))
           .limit(RECENT_RUNS)
           .pipe(
             Effect.mapError(failed('reading the runs')),
-            Effect.map((rows) => rows.map((row) => rowOf(row.run, row.projectId))),
+            Effect.map((rows) => rows.map(rowOf)),
           ),
 
       stopped: (sessionId) =>
@@ -932,7 +1060,7 @@ export const commandsLayer = Layer.effect(
           if (record.state !== 'running') continue
           record.state = 'stopped'
           record.endedAt = endedAt
-          yield* writeRow(id, record, 'command.stopped').pipe(Effect.ignore)
+          yield* writeRow(id, record, 'command.run_ended').pipe(Effect.ignore)
         }
         live.clear()
       }),

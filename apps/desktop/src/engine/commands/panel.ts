@@ -177,10 +177,16 @@ export const runFromPanel = (
         commandId: entry.id,
         name: entry.name,
         line: entry.line,
+        lineWindows: entry.lineWindows,
+        lineLinux: entry.lineLinux,
         type: entry.type,
+        scope: entry.scope,
+        portless: entry.portless,
+        folder: entry.folder,
         cwd: entry.folder === null ? project.mainPath : join(project.mainPath, entry.folder),
         // D8-08: the Session's Workspace and its variables are wired by the sessions agent.
         workspaceId: null,
+        workspaceName: 'main',
         environment: {},
         startedBy: 'user',
       })
@@ -193,9 +199,15 @@ export const runFromPanel = (
       // What a one-off is called on screen: the program it runs, which is its first word.
       name: line.split(/\s+/)[0] ?? line,
       line,
+      lineWindows: null,
+      lineLinux: null,
       type: 'script',
+      scope: 'workspace',
+      portless: false,
+      folder: null,
       cwd: project.mainPath,
       workspaceId: null,
+      workspaceName: 'main',
       environment: {},
       startedBy: 'user',
     })
