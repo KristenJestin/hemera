@@ -268,7 +268,7 @@ describe('Criteria keep their order', () => {
   })
 })
 
-describe('A second Session opened on a Spec reads but does not write', () => {
+describe('A second Session reads but does not write', () => {
   test('its agent is refused until it takes the write right, then the first is refused', async () => {
     const outcome = await opened()(
       Effect.gen(function* () {
