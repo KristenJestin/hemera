@@ -442,6 +442,37 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
       expect(git(source, 'worktree', 'list')).not.toContain('login-form')
     }
   })
+
+  it('frees the name and the Spec of the cleaned Workspace for a new one', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const first = yield* prepared(project.id)
+        yield* workspaces.cleanup(first.id)
+        // The old branches stay, so the new Workspace is made on branches of its own.
+        const again = yield* workspaces.create(project.id, {
+          specId: 'HEM-7',
+          name: 'login-form',
+          repositories: first.repositories.map((one) => ({
+            relativePath: one.relativePath,
+            base: one.base,
+            branch: 'atlas/HEM-7-login-form-again',
+          })),
+        })
+        return { first, again, listed: yield* workspaces.list(project.id) }
+      }),
+    )
+
+    expect(seen.again.name).toBe('login-form')
+    expect(seen.again.specId).toBe('HEM-7')
+    expect(seen.again.id).not.toBe(seen.first.id)
+    expect(seen.listed.map((one) => [one.name, one.state])).toEqual([
+      ['main', 'ready'],
+      ['login-form', 'cleaned'],
+      ['login-form', 'preparing'],
+    ])
+  })
 })
 
 describe('Cleanup is refused while a service runs or Git refuses', () => {

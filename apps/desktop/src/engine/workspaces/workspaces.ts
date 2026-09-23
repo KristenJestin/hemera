@@ -32,7 +32,7 @@ import {
   stepsFor,
   workspaceName,
 } from '@hemera/core'
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
 
 import { Git, type GitStatus } from '../git.ts'
@@ -338,7 +338,14 @@ export const workspacesLayer = Layer.effect(
       database
         .select({ id: workspaces.id })
         .from(workspaces)
-        .where(and(eq(workspaces.projectId, projectId), eq(workspaces.name, name)))
+        .where(
+          and(
+            eq(workspaces.projectId, projectId),
+            eq(workspaces.name, name),
+            // A cleaned Workspace frees its name, as the table's partial index does (D8-14).
+            ne(workspaces.state, 'cleaned'),
+          ),
+        )
         .pipe(
           Effect.mapError(failed('reading the Workspaces')),
           Effect.map((rows) => rows.length > 0),
