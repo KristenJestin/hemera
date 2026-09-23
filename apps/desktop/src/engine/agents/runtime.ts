@@ -30,11 +30,12 @@ import {
   Semaphore,
   Stream,
 } from 'effect'
-import { existsSync } from 'node:fs'
+import { type FSWatcher, existsSync, watch } from 'node:fs'
 
 import type { McpServer } from '@agentclientprotocol/sdk'
 
 import {
+  AGENTS_FILE,
   type AgentProvider,
   type BaseReach,
   CONTEXT_BASE,
@@ -96,6 +97,12 @@ export const CHUNK_FLUSH = Duration.millis(100)
  * that cannot end because one of them is stuck is worse than a turn whose last line arrives late.
  */
 const DRAIN_LIMIT = Duration.seconds(5)
+
+/**
+ * How long the Workspace's instructions have to stay still before a change of them is handed over
+ * (D6-08): an editor saves a file in several writes, and one change is one delivery.
+ */
+export const INSTRUCTIONS_SETTLE = Duration.millis(300)
 
 /** Everything that can stop the engine from talking to an agent, as one thing to report. */
 export class AgentRuntimeError extends Data.TaggedError('AgentRuntimeError')<{
@@ -1255,6 +1262,7 @@ export const runtimeLayer = Layer.effect(
         // cancelled, and the block it drew in the thread closes with it (D6-05).
         const outside = yield* permissions.waiting(sessionId)
         if (outside !== null) yield* permissions.answer(outside, 'cancelled')
+        unwatched(sessionId)
         yield* access.revoked(sessionId)
         yield* commands.stopped(sessionId).pipe(Effect.ignore)
         yield* pool.forgotten(sessionId)
@@ -1457,6 +1465,11 @@ export const runtimeLayer = Layer.effect(
           yield* attempt('stopping the agent', process.stop).pipe(Effect.ignore)
           return yield* Effect.fail(resumed)
         }
+
+        // The Workspace's instructions are watched for as long as this agent holds the Session:
+        // a change is handed over at the next safe point rather than at the next prompt (D6-08).
+        const root = yield* projectPath(session)
+        watched(sessionId, root)
 
         // A Session opened for the first time starts on the choices its composer made before it
         // existed: the model and the mode were picked on the Home's probe, and the session the
@@ -1726,6 +1739,125 @@ export const runtimeLayer = Layer.effect(
         state: stopReason,
       })
 
+    /**
+     * The gate a turn of a Session holds from its prompt to its end, and a delivery waits on.
+     *
+     * The next safe point of D6-08 is the end of the turn running now, or now when none is: a
+     * change of the Workspace's instructions is handed over under this gate, so it never goes out
+     * in the middle of a turn and never races the prompt of the next one.
+     */
+    const turnGate = (sessionId: string) => gateOf(`turn:${sessionId}`)
+
+    /**
+     * Hands a change of the Workspace's instructions over, if one waits (D6-08).
+     *
+     * A prompt of its own, made of the marker and the new text as a resource and of nothing the
+     * user said: the agent is handed a change, not a message. The thread gets a
+     * `context_delivery` entry — never a message of anyone — and the window is told.
+     */
+    const handOver = (sessionId: string, held: Live) =>
+      Effect.gen(function* () {
+        const delivered = yield* attempt('delivering the context', context.deliver(sessionId))
+        if (delivered === null) return
+        yield* write(sessionId, {
+          role: 'hemera',
+          kind: 'context_delivery',
+          body: 'The instructions of the Workspace changed and were handed to the agent.',
+          payload: JSON.stringify({
+            kind: delivered.record.kind,
+            path: delivered.record.path,
+            fingerprint: delivered.record.fingerprint,
+            deliveredAt: delivered.record.deliveredAt,
+            reached: delivered.record.reached,
+          }),
+          correlationId: `delivery:${delivered.record.fingerprint}`,
+          turnId: null,
+        })
+        notices.changed(sessionId, 'context_delivered')
+        yield* attempt(
+          'delivering the context',
+          held.connection.prompt('', [
+            {
+              uri: contextUri(delivered.record.path),
+              text: delivered.content,
+              mimeType: 'text/markdown',
+            },
+          ]),
+        )
+      })
+
+    /**
+     * Hands a change over at the next safe point: when the turn running now ends, or now.
+     *
+     * Nothing is sent to an agent that is not running any more — the next one reads the file when
+     * it starts — nor while a prompt is being started, which hands the change over itself.
+     */
+    const deliverWhenSafe = (sessionId: string) =>
+      turnGate(sessionId).withPermits(1)(
+        Effect.gen(function* () {
+          const held = live.get(sessionId)
+          if (held === undefined || held.death !== null) return
+          if (turns.has(sessionId) || starting.has(sessionId)) return
+          yield* pool.busy(sessionId, true).pipe(Effect.ignore)
+          yield* handOver(sessionId, held).pipe(
+            Effect.andThen(drained(sessionId, held)),
+            Effect.ignore,
+            Effect.ensuring(pool.busy(sessionId, false).pipe(Effect.ignore)),
+          )
+        }),
+      )
+
+    /** What watches the Workspace's instructions of each Session whose agent is running. */
+    const watchers = new Map<
+      string,
+      { readonly watcher: FSWatcher; settle: NodeJS.Timeout | null }
+    >()
+
+    /** Stops watching a Session's instructions: its agent went. */
+    const unwatched = (sessionId: string) => {
+      const held = watchers.get(sessionId)
+      if (held === undefined) return
+      watchers.delete(sessionId)
+      if (held.settle !== null) clearTimeout(held.settle)
+      held.watcher.close()
+    }
+
+    /**
+     * Watches the `AGENTS.md` at the Workspace root for as long as the Session's agent runs.
+     *
+     * The folder is watched rather than the file: an editor saves by writing a new file and
+     * renaming it over the old one, and a watch on the file itself follows the one that is gone.
+     * A change waits for the file to settle, then waits for the safe point; a folder that cannot
+     * be watched leaves the delivery to the next prompt, which reads the file anyway.
+     */
+    const watched = (sessionId: string, root: string) => {
+      unwatched(sessionId)
+      try {
+        const watcher = watch(root, { persistent: false }, (_event, name) => {
+          const said = name === null ? '' : String(name)
+          if (said.toLowerCase() !== AGENTS_FILE.toLowerCase()) return
+          const held = watchers.get(sessionId)
+          if (held === undefined) return
+          if (held.settle !== null) clearTimeout(held.settle)
+          held.settle = setTimeout(() => {
+            held.settle = null
+            void Effect.runPromise(owned(deliverWhenSafe(sessionId)))
+          }, Duration.toMillis(INSTRUCTIONS_SETTLE))
+        })
+        watcher.on('error', () => unwatched(sessionId))
+        watchers.set(sessionId, { watcher, settle: null })
+      } catch {
+        // Nothing to watch: the next prompt reads the file and hands a change over itself.
+      }
+    }
+
+    // Nothing is watched once the engine is gone.
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        for (const sessionId of [...watchers.keys()]) unwatched(sessionId)
+      }),
+    )
+
     const start = (sessionId: string) =>
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
@@ -1806,117 +1938,101 @@ export const runtimeLayer = Layer.effect(
             yield* closeTurn(sessionId, turn, turn.closed)
             return { stopReason: turn.closed, usage: null } satisfies TurnReport
           }
-          turns.set(sessionId, turn)
-
           // Everything from here to the end of the turn runs under the one `ensuring` below: a
           // delivery that failed must not leave a turn registered that never ran — every later
-          // prompt would be refused as "already running".
-          const report = yield* Effect.gen(function* () {
-            yield* pool.used(sessionId)
-            yield* pool.busy(sessionId, true).pipe(Effect.ignore)
-
-            // Right before the prompt is the safe point of D6-08: the previous turn is over and
-            // this one has not started, which is the only moment a change of the Workspace's
-            // instructions can be handed over as text rather than as a message nobody wrote.
-            const delivered = yield* attempt('delivering the context', context.deliver(sessionId))
-            if (delivered !== null) {
-              yield* write(sessionId, {
-                role: 'hemera',
-                kind: 'context_delivery',
-                body: 'The instructions of the Workspace changed and were handed to the agent.',
-                payload: JSON.stringify({
-                  kind: delivered.record.kind,
-                  path: delivered.record.path,
-                  fingerprint: delivered.record.fingerprint,
-                  deliveredAt: delivered.record.deliveredAt,
-                  reached: delivered.record.reached,
-                }),
-                correlationId: `delivery:${delivered.record.fingerprint}`,
-                turnId: null,
-              })
-              // A prompt of its own, made of the marker and the new text as a resource and of
-              // nothing the user said: the agent is handed a change, not a message (D6-08).
-              yield* attempt(
-                'delivering the context',
-                held.connection.prompt('', [
-                  {
-                    uri: contextUri(delivered.record.path),
-                    text: delivered.content,
-                    mimeType: 'text/markdown',
-                  },
-                ]),
-              )
-            }
-
-            // What the agent is provided goes in front of what the user asked: the base, as a
-            // resource, on the first prompt of an agent with no system prompt to take it (D6-07),
-            // and the conversation rebuilt for an agent that lost its own (D5-07).
-            const sent = [held.context, text].filter((one) => one !== null).join('\n\n')
-            const provisions = held.provisions
-            held.context = null
-            held.provisions = []
-
-            const outcome = yield* Effect.result(
-              attempt('prompting', held.connection.prompt(sent, provisions)),
-            )
-            if (Result.isSuccess(outcome)) {
-              const answered = outcome.success
-              // What is in the thread is read before the window is: the announcement travels as a
-              // notification of its own, and the entry is written from it once everything the agent
-              // said is held rather than racing it.
-              yield* drained(sessionId, held)
-              const window = held.window
-              // What a turn used and what the window holds are two readings, and either can be
-              // missing: an agent that accounts for a turn but never announces a window leaves the
-              // meter with nothing to divide by, and one that announces a window and answers
-              // nothing leaves it with what it is filling (D5-20). The entry is written when the
-              // agent had anything to say at all, and the payload says which halves it said.
-              if (answered.usage !== null || window !== null) {
-                yield* write(sessionId, {
-                  role: 'hemera',
-                  kind: 'usage',
-                  body: `${answered.usage?.totalTokens ?? window?.used ?? 0} tokens`,
-                  payload: JSON.stringify({
-                    totalTokens: answered.usage?.totalTokens ?? null,
-                    inputTokens: answered.usage?.inputTokens ?? null,
-                    outputTokens: answered.usage?.outputTokens ?? null,
-                    thoughtTokens: answered.usage?.thoughtTokens ?? null,
-                    used: window?.used ?? null,
-                    size: window?.size ?? null,
-                    cost: window?.cost ?? null,
-                  }),
-                  correlationId: `turn:${turn.id}:usage`,
-                  turnId: turn.id,
-                })
-              }
-              yield* closeTurn(sessionId, turn, turn.closed ?? answered.stopReason)
-              return {
-                stopReason: turn.closed ?? answered.stopReason,
-                usage: answered.usage,
-              } satisfies TurnReport
-            }
-
-            // The agent never answered: either the process died under the turn, or Hemera stopped
-            // an agent that would not stop. The thread keeps everything it received either way.
-            const stopReason = turn.closed ?? (held.death === null ? 'cancelled' : 'interrupted')
-            yield* drained(sessionId, held)
-            yield* closeTurn(sessionId, turn, stopReason)
-            return { stopReason, usage: null } satisfies TurnReport
-          }).pipe(
-            Effect.ensuring(
-              Effect.gen(function* () {
-                turns.delete(sessionId)
-                yield* pool.busy(sessionId, false).pipe(Effect.ignore)
-                // The idle time is counted from the end of the turn, not from its start: a sweep
-                // that ran during a long turn found it busy and struck it out of the book.
-                if (live.has(sessionId)) yield* kept(sessionId)
-              }),
-            ),
+          // prompt would be refused as "already running". And all of it holds the Session's turn
+          // gate, which is what a delivery waits on: the end of this turn is the next safe point.
+          const report = yield* turnGate(sessionId).withPermits(1)(
+            Effect.suspend(() => {
+              turns.set(sessionId, turn)
+              return turnBodyOf(sessionId, text, turn, held)
+            }),
           )
 
           return report
         }).pipe(Effect.ensuring(Effect.sync(() => notices.changed(sessionId, 'turn_ended'))))
       })
+
+    /**
+     * The body of a turn, from the safe point before its prompt to the entry that closes it.
+     *
+     * Run under the Session's turn gate by `announcedTurn`, once the turn is registered.
+     */
+    const turnBodyOf = (sessionId: string, text: string, turn: Turn, held: Live) =>
+      Effect.gen(function* () {
+        yield* pool.used(sessionId)
+        yield* pool.busy(sessionId, true).pipe(Effect.ignore)
+
+        // Right before the prompt is a safe point of D6-08: the previous turn is over and
+        // this one has not started. A change the watcher has not handed over yet — it was
+        // made while the agent was not running — goes now.
+        yield* handOver(sessionId, held)
+
+        // What the agent is provided goes in front of what the user asked: the base, as a
+        // resource, on the first prompt of an agent with no system prompt to take it (D6-07),
+        // and the conversation rebuilt for an agent that lost its own (D5-07).
+        const sent = [held.context, text].filter((one) => one !== null).join('\n\n')
+        const provisions = held.provisions
+        held.context = null
+        held.provisions = []
+
+        const outcome = yield* Effect.result(
+          attempt('prompting', held.connection.prompt(sent, provisions)),
+        )
+        if (Result.isSuccess(outcome)) {
+          const answered = outcome.success
+          // What is in the thread is read before the window is: the announcement travels as a
+          // notification of its own, and the entry is written from it once everything the agent
+          // said is held rather than racing it.
+          yield* drained(sessionId, held)
+          const window = held.window
+          // What a turn used and what the window holds are two readings, and either can be
+          // missing: an agent that accounts for a turn but never announces a window leaves the
+          // meter with nothing to divide by, and one that announces a window and answers
+          // nothing leaves it with what it is filling (D5-20). The entry is written when the
+          // agent had anything to say at all, and the payload says which halves it said.
+          if (answered.usage !== null || window !== null) {
+            yield* write(sessionId, {
+              role: 'hemera',
+              kind: 'usage',
+              body: `${answered.usage?.totalTokens ?? window?.used ?? 0} tokens`,
+              payload: JSON.stringify({
+                totalTokens: answered.usage?.totalTokens ?? null,
+                inputTokens: answered.usage?.inputTokens ?? null,
+                outputTokens: answered.usage?.outputTokens ?? null,
+                thoughtTokens: answered.usage?.thoughtTokens ?? null,
+                used: window?.used ?? null,
+                size: window?.size ?? null,
+                cost: window?.cost ?? null,
+              }),
+              correlationId: `turn:${turn.id}:usage`,
+              turnId: turn.id,
+            })
+          }
+          yield* closeTurn(sessionId, turn, turn.closed ?? answered.stopReason)
+          return {
+            stopReason: turn.closed ?? answered.stopReason,
+            usage: answered.usage,
+          } satisfies TurnReport
+        }
+
+        // The agent never answered: either the process died under the turn, or Hemera stopped
+        // an agent that would not stop. The thread keeps everything it received either way.
+        const stopReason = turn.closed ?? (held.death === null ? 'cancelled' : 'interrupted')
+        yield* drained(sessionId, held)
+        yield* closeTurn(sessionId, turn, stopReason)
+        return { stopReason, usage: null } satisfies TurnReport
+      }).pipe(
+        Effect.ensuring(
+          Effect.gen(function* () {
+            turns.delete(sessionId)
+            yield* pool.busy(sessionId, false).pipe(Effect.ignore)
+            // The idle time is counted from the end of the turn, not from its start: a sweep
+            // that ran during a long turn found it busy and struck it out of the book.
+            if (live.has(sessionId)) yield* kept(sessionId)
+          }),
+        ),
+      )
 
     /**
      * The user's Stop.
