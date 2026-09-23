@@ -26,7 +26,7 @@ import { MessageScroller, type ScrollerEntry } from '../message/scroller/scrolle
 import { ActivityRow } from './activity-row.tsx'
 import type { PlanEntry } from './plan-panel.tsx'
 import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
-import { SessionHeader } from './session.tsx'
+import { SessionEmpty, SessionHeader } from './session.tsx'
 import { CommandRun } from '../activity/command-run.tsx'
 import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
 import { CommandsPanel } from './commands-panel.tsx'
@@ -306,6 +306,21 @@ const CONTEXT = (
   />
 )
 
+/**
+ * The Context view of a Session nothing has gone into yet, which is what the head's button opens
+ * the column on before the first message: the tools are lent already.
+ */
+const FRESH_CONTEXT = (
+  <ContextView
+    instructions={[]}
+    tools={[
+      { name: 'fs_read', bound: '256 KiB a page, inside the Workspace root' },
+      { name: 'commands_run', bound: 'the catalogue, or a one-off line the user allows' },
+    ]}
+    commands={[]}
+  />
+)
+
 interface PageProps {
   /** The plan the column stands beside the thread with, and the files the turn has touched. */
   plan?: PlanEntry[] | undefined
@@ -317,6 +332,8 @@ interface PageProps {
    */
   commands?: ReactNode
   context?: ReactNode
+  /** Whether nothing has been written yet: no thread, no turn running, nothing spent. */
+  fresh?: boolean | undefined
 }
 
 /**
@@ -332,7 +349,13 @@ function Page({
   touched = TOUCHED,
   commands = COMMANDS,
   context = CONTEXT,
+  fresh = false,
 }: PageProps): ReactNode {
+  // The column the reader opened from the head, which stays open for as long as the Session is:
+  // the same state the renderer's page holds.
+  const [asked, setAsked] = useState(false)
+  const drawn =
+    asked || plan.length > 0 || touched.length > 0 || commands !== null || context !== null
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [agent, setAgent] = useState<string | null>('claude-code')
@@ -352,37 +375,54 @@ function Page({
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
             <SessionHeader
-              title="CSV invoice export"
+              title={fresh ? 'Untitled' : 'CSV invoice export'}
               projectName="Atlas"
-              meta="started 12 minutes ago · 9 entries"
+              meta={fresh ? 'created just now · 0 entries' : 'started 12 minutes ago · 9 entries'}
               onRename={fn()}
               onStartEditing={fn()}
               onCancelEditing={fn()}
               onArchive={fn()}
+              archiveDisabled={fresh}
+              // What the agent works from, one press away while no column stands beside the thread.
+              onOpenContext={drawn ? undefined : () => setAsked(true)}
             />
           </div>
-          {/* The thread takes the whole width under the head and lays its own column on the
-              head's and the composer's, so a wheel beside it scrolls it; the banner is not
-              scrolled, and stands in the column above it. */}
-          <div className="mx-auto w-full max-w-3xl px-6">
-            <ResumeFallbackBanner
-              agent="claude-code"
-              session="CSV invoice export"
-              kept="everything up to the last tool call"
-              onDismiss={fn()}
-            />
-          </div>
-          <MessageScroller className="flex-1" label="The thread of this Session" entries={THREAD} />
+          {fresh ? (
+            <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
+              <SessionEmpty />
+            </div>
+          ) : (
+            <>
+              {/* The thread takes the whole width under the head and lays its own column on the
+                  head's and the composer's, so a wheel beside it scrolls it; the banner is not
+                  scrolled, and stands in the column above it. */}
+              <div className="mx-auto w-full max-w-3xl px-6">
+                <ResumeFallbackBanner
+                  agent="claude-code"
+                  session="CSV invoice export"
+                  kept="everything up to the last tool call"
+                  onDismiss={fn()}
+                />
+              </div>
+              <MessageScroller
+                className="flex-1"
+                label="The thread of this Session"
+                entries={THREAD}
+              />
+            </>
+          )}
           {/* What the turn has spent stands above the box rather than in its foot: the foot is
               the Workspace and the send alone since the trial of 22 September 2026, and a figure
               read at a glance is a figure that must not be what makes a row wrap. What the turn
               is *doing* shares that row, at its other end: one reading of one turn, what it is
               doing on the left where the agent writes, what it has cost on the right. */}
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-            <div className="flex items-center justify-between gap-3">
-              <ActivityRow state="waiting" />
-              <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
-            </div>
+            {!fresh && (
+              <div className="flex items-center justify-between gap-3">
+                <ActivityRow state="waiting" />
+                <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
+              </div>
+            )}
             <Composer
               value={value}
               onValueChange={setValue}
@@ -393,9 +433,13 @@ function Page({
               action="Send"
               placeholder="Say something to claude-code…"
               onSend={() => Promise.resolve(null)}
-              running
+              running={!fresh}
               onStop={fn()}
-              blocked={<BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />}
+              blocked={
+                fresh ? undefined : (
+                  <BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />
+                )
+              }
               agentMenu={
                 // A Session runs the agent it was made with, so the panel opens on that agent's
                 // models and offers no way back to a list of agents. No `spec` either: a Spec
@@ -424,12 +468,18 @@ function Page({
             />
           </div>
         </div>
+        {/* Opened from the head, the column shows its Commands panel and the Context view the
+            way the page hands them over whenever it is drawn, and it opens on the Context. */}
         <SessionSideColumn
           plan={plan}
           files={touched}
           onSelectFile={fn()}
-          commands={commands}
-          context={context}
+          commands={
+            commands ??
+            (asked ? <CommandsPanel runs={[]} onStop={fn()} onOpenUrl={fn()} onRun={fn()} /> : null)
+          }
+          context={context ?? (asked ? FRESH_CONTEXT : null)}
+          defaultTab={asked ? 'context' : undefined}
         />
       </div>
     </TooltipProvider>
@@ -465,8 +515,11 @@ export const Complete: Story = {
   render: () => <Page />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    // A Session with a plan, files, runs and sources draws its column beside the thread.
-    await expect(canvas.getByRole('complementary')).toBeVisible()
+    // A Session with a plan, files, runs and a delivery draws its column beside the thread, and
+    // the head offers no second way to it.
+    const column = canvas.getByRole('complementary')
+    await expect(column).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Context' })).toBeNull()
     // The plan is the column's, and the thread does not repeat it.
     await expect(canvas.getByText('2 of 4')).toBeVisible()
     // The column is the state: the plan the agent works to, and the files the turn touched.
@@ -495,6 +548,8 @@ export const Complete: Story = {
     await userEvent.click(canvas.getByRole('tab', { name: 'Context' }))
     await expect(canvas.getByText('Instructions')).toBeVisible()
     await expect(canvas.getByText('Last change')).toBeVisible()
+    // Whatever the tab, the column never scrolls sideways (trial of 23 September 2026).
+    await expect(column.scrollWidth, 'the column scrolls sideways').toBe(column.clientWidth)
     await userEvent.click(canvas.getByRole('tab', { name: 'Activity' }))
     // The agent is waiting for an answer, and the turn it is in can be stopped.
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
@@ -593,28 +648,32 @@ export const Complete: Story = {
 }
 
 /**
- * The same page before the agent has published a plan, touched a file, run a command or been given
- * anything to work from: no column at all.
+ * A fresh Session: nothing written, no plan, no file touched, no command run, nothing delivered —
+ * and no column at all (#40's rule, back after the trial of 23 September 2026).
  *
- * A column with no section is not drawn (review of #40, defect 3), and the thread keeps the width
- * it had — which is the state a Session is in for its first turns, and the one the empty column
- * used to take a third of a window to say.
+ * The tools are lent and the base will go in with the first message, but neither is a reason to
+ * take a third of the window: the column is not drawn, and the thread keeps its width. What the
+ * agent works from is one press away at the end of the head's line, and the column that press
+ * opens stays, on its Context tab.
  */
-export const NoColumn: Story = {
-  render: () => <Page plan={[]} touched={[]} commands={null} context={null} />,
+export const Empty: Story = {
+  render: () => <Page fresh plan={[]} touched={[]} commands={null} context={null} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     // No column at all: not an empty box, not three tabs with nothing under them.
     expect(canvas.queryByRole('complementary')).toBeNull()
-    expect(canvas.queryByRole('tab', { name: 'Activity' })).toBeNull()
-    expect(canvas.queryByText('2 of 4')).toBeNull()
-    expect(canvas.queryByText('Files')).toBeNull()
-    // The thread and its foot are still the page, and the head is still its head: the thread is
-    // drawn the width the column used to take.
-    await expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
-    await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()
-    // One Stop on the command run, one on the box, and one on the strip that says why the box
-    // is waiting.
-    await expect(canvas.getAllByRole('button', { name: 'Stop' })).toHaveLength(3)
+    expect(canvas.queryByRole('tab')).toBeNull()
+    await expect(canvas.getByText('Nothing written yet')).toBeVisible()
+    // The Context is reached from the head, and the column opens on it.
+    await userEvent.click(canvas.getByRole('button', { name: 'Context' }))
+    await expect(canvas.getByRole('complementary')).toBeVisible()
+    await expect(canvas.getByRole('tab', { name: 'Context' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(canvas.getByText('Nothing has gone to the agent yet.')).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tools · 2' })).toBeVisible()
+    // The column is the way to the Context from now on, so the head's button has gone.
+    expect(canvas.queryByRole('button', { name: 'Context' })).toBeNull()
   },
 }

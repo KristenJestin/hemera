@@ -80,7 +80,7 @@ const SESSIONS = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: SessionHeader,
   render: (args) => <Harness {...args} />,
@@ -112,6 +112,10 @@ const meta = {
     onStartEditing: { control: false, description: 'Opens the field.' },
     onCancelEditing: { control: false, description: 'Closes it without keeping what was typed.' },
     onArchive: { control: false, description: 'Takes the Session out of the sidebar.' },
+    onOpenContext: {
+      control: false,
+      description: 'Opens the column on its Context tab, while the column is not drawn.',
+    },
   },
 } satisfies Meta<typeof Harness>
 
@@ -462,6 +466,23 @@ export const TheHeadCommands: Story = {
     await waitFor(() => {
       expect(within(document.body).queryByRole('menu')).toBeNull()
     })
+  },
+}
+
+/**
+ * A Session whose column is not drawn: what the agent works from is one press away, at the end of
+ * the head's line, before the `…`.
+ */
+export const ContextWithinReach: Story = {
+  parameters: { controls: { disable: true } },
+  args: { onOpenContext: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const context = canvas.getByRole('button', { name: 'Context' })
+    const menu = canvas.getByRole('button', { name: 'Commands for CSV invoice export' })
+    expect(context.compareDocumentPosition(menu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await userEvent.click(context)
+    expect(args.onOpenContext).toHaveBeenCalledTimes(1)
   },
 }
 

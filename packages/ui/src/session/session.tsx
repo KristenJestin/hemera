@@ -8,7 +8,14 @@ import { Card } from '../components/card/card.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
 import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconArchive, IconDots, IconMessages, IconPencil, IconRestore } from '../icons.ts'
+import {
+  IconArchive,
+  IconBrain,
+  IconDots,
+  IconMessages,
+  IconPencil,
+  IconRestore,
+} from '../icons.ts'
 import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
 
 /**
@@ -110,6 +117,14 @@ export interface SessionHeaderProps {
    * head and the eye does not have to find the control again when the first line is written.
    */
   archiveDisabled?: boolean | undefined
+  /**
+   * Opens the column beside the thread on its Context tab, when the column is not drawn.
+   *
+   * A Session none of whose tabs has anything draws no column (#40), and what the agent works from
+   * would be out of reach with it: this is the way to it, at the end of the head's line. Left out
+   * while the column is there, since its own tab is the way then.
+   */
+  onOpenContext?: (() => void) | undefined
 }
 
 /**
@@ -139,6 +154,7 @@ export function SessionHeader({
   onCancelEditing,
   onArchive,
   archiveDisabled = false,
+  onOpenContext,
 }: SessionHeaderProps): ReactNode {
   const titleControl = useRef<HTMLButtonElement>(null)
   const wasEditing = useRef(false)
@@ -189,6 +205,17 @@ export function SessionHeader({
         <p className={SUB}>{`${projectName} · ${meta}`}</p>
       </div>
       <div className={ACTIONS}>
+        {onOpenContext !== undefined && (
+          <Tooltip label="Context">
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={<IconBrain size="sm" />}
+              aria-label="Context"
+              onClick={onOpenContext}
+            />
+          </Tooltip>
+        )}
         {commands.length > 0 && (
           <Menu label={`Commands for ${title}`} icon={<IconDots size="sm" />} groups={[commands]} />
         )}

@@ -310,7 +310,7 @@ export const TurnDone: Story = {
  *
  * The composer is the way in, which is why the empty state does not carry a button of its own.
  */
-export const Empty: Story = {
+export const NoMessageYet: Story = {
   parameters: { controls: { disable: true } },
   args: { title: 'New session', meta: 'just now', thread: [], empty: true, editing: true },
   play: async ({ canvasElement }) => {
