@@ -102,9 +102,12 @@ export const claude: AgentAdapter = {
               CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
               ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
               // A tool call can wait on the human — a path outside the root, a one-off command —
-              // for as long as they take to answer, and the agent's own limit must not end it
-              // first: ten minutes, as the prototype had it.
+              // for as long as they take to answer, and the agent's own limits must not end it
+              // first: ten minutes, as the prototype had it. Claude Code has two of them, one on
+              // the whole call and one on a call that sends nothing, and a call waiting on the
+              // human sends nothing: with the total one alone, 2.1 aborted it after 300 s.
               MCP_TOOL_TIMEOUT: String(TOOL_WAIT_MS),
+              CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(TOOL_WAIT_MS),
             },
           },
         },

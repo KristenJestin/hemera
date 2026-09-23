@@ -89,6 +89,17 @@ describe("A qualified agent has only Hemera's tools", () => {
     expect(claudeOptionsOf(options)?.allowedTools).toEqual(['mcp__hemera__*'])
   })
 
+  test('Claude Code is told to wait ten minutes on a silent tool as well as on a slow one', async () => {
+    const options = await Effect.runPromise(bareOptionsOf(claude, 'linux', input))
+
+    // A call waiting on the human sends nothing until they answer: the total limit alone let
+    // Claude Code 2.1 abort it after 300 s of silence.
+    expect(claudeOptionsOf(options)?.env).toMatchObject({
+      MCP_TOOL_TIMEOUT: '600000',
+      CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: '600000',
+    })
+  })
+
   test('OpenCode is handed a catch-all deny, with its own namespace re-allowed', async () => {
     const options = await Effect.runPromise(bareOptionsOf(opencode, 'linux', input))
 
