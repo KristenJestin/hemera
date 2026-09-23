@@ -336,6 +336,13 @@ export interface ProcessSupervisorService {
       readonly script?: boolean
       /** Whether the arguments reach Windows unquoted by Node, as a `cmd.exe /s /c` line needs. */
       readonly verbatim?: boolean
+      /**
+       * Whether the child's standard error is copied to the diagnostic log, which it is unless
+       * told otherwise: an agent says there why it failed, and nowhere else. A command run's is
+       * its own output, kept with the run and shown in its panel, and whatever a user's program
+       * prints — a secret, a flood — has no business in the engine's log.
+       */
+      readonly logsStderr?: boolean
     },
   ) => Effect.Effect<SupervisedProcess, AgentSpawnError, Scope.Scope>
 }
@@ -557,6 +564,7 @@ export const processSupervisorLayer = Layer.effect(
         readonly graceMilliseconds?: number
         readonly script?: boolean
         readonly verbatim?: boolean
+        readonly logsStderr?: boolean
       },
     ): Effect.Effect<SupervisedProcess, AgentSpawnError, Scope.Scope> =>
       Effect.acquireRelease(
@@ -613,9 +621,11 @@ export const processSupervisorLayer = Layer.effect(
               Effect.runSync(refused(failure))
               Effect.runSync(answerWith(Effect.fail(failure), false))
             })
-            started.onStderr((line) => {
-              Effect.runSync(sink.write(`${command} (${String(started.pid)}): ${line}`))
-            })
+            if (options.logsStderr !== false) {
+              started.onStderr((line) => {
+                Effect.runSync(sink.write(`${command} (${String(started.pid)}): ${line}`))
+              })
+            }
           })
 
           // The command has to become a process before anything is written to it: a program

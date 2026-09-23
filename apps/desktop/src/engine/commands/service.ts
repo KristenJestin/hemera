@@ -648,6 +648,8 @@ export const commandsLayer = Layer.effect(
               cwd: asked.cwd,
               graceMilliseconds: GRACE_MS,
               verbatim: invocation.verbatim,
+              // What a run prints on its standard error is its output, kept with it (D6-12).
+              logsStderr: false,
             }),
           ).pipe(Effect.exit)
 

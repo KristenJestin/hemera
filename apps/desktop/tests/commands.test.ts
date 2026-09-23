@@ -192,6 +192,8 @@ describe('A one-off command shows and is not promoted', () => {
     // What a failing tool says on standard error is what the agent came for: an exit code with
     // nothing under it would be a failure nobody can account for.
     expect(seen.settled.run.output).toContain('boom')
+    // It is the run's output and nothing else: the engine's diagnostic log does not copy it.
+    expect(diagnostics.some((line) => line.includes('boom'))).toBe(false)
     expect(seen.settled.run.exitCode).toBe(3)
     expect(seen.settled.run.state).toBe('failed')
     // A one-off is run, not remembered: the catalogue is the user's and nothing promotes into it.
