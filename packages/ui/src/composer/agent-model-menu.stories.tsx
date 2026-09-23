@@ -171,6 +171,11 @@ export const AgentNotAvailableHere: Story = {
 
     await userEvent.click(off)
     await expect(args.onAgentChange).not.toHaveBeenCalled()
+    // The panel stays, as it does for a signed-out agent: waited out rather than read at once,
+    // since it comes down from its trigger in opacity.
+    await waitFor(() => {
+      expect(screen.getByRole('listbox', { name: 'Agents' })).toBeVisible()
+    })
   },
 }
 
