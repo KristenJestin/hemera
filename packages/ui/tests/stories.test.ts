@@ -119,6 +119,7 @@ const SURFACES = {
     'service-list',
     'workspace-card',
     'preparation-steps',
+    'create-workspace-dialog',
   ],
 }
 
@@ -161,6 +162,10 @@ const NAMED_STATES = new Map([
   [
     'workspace/workspace-card',
     ['Main', 'Preparing', 'Ready', 'Failed', 'Cleaned', 'Loading', 'GitError'],
+  ],
+  [
+    'workspace/create-workspace-dialog',
+    ['Proposed', 'RepositoryLeftOut', 'Refused', 'GitMissing', 'Keyboard'],
   ],
   [
     'workspace/preparation-steps',
@@ -402,6 +407,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // preparation step by step, the Workspaces of a Project, and the cleanup that keeps the
       // branches.
       'WorkspaceCard',
+      'CreateWorkspaceDialog',
       'PreparationSteps',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the

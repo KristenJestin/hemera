@@ -379,6 +379,10 @@ export type {
 } from './workspace/services-model.ts'
 /** The Workspace and its preparation (lot 20). */
 export {
+  CreateWorkspaceDialog,
+  type CreateWorkspaceDialogProps,
+} from './workspace/create-workspace-dialog.tsx'
+export {
   type GitState,
   type PlanRepositoryLine,
   type PreparationStepLine,
