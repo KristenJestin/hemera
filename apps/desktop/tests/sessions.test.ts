@@ -568,6 +568,7 @@ describe('Aucune suppression proposée', () => {
       'append',
       'archive',
       'chooseAgent',
+      'chooseWorkspace',
       'create',
       'list',
       'one',
@@ -575,6 +576,7 @@ describe('Aucune suppression proposée', () => {
       'recordNative',
       'rename',
       'restore',
+      'workspace',
       'write',
     ])
   })

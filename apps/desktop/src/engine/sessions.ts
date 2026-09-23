@@ -25,6 +25,7 @@ import {
   type SessionTitleSource,
   EmptyMessageError,
   EmptyTitleError,
+  MAIN_WORKSPACE,
   NEW_SESSION_TITLE,
   NoActiveProjectError,
   NoAgentError,
@@ -32,14 +33,21 @@ import {
   sessionTitle,
   titleAfterMessage,
 } from '@hemera/core'
-import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, lt, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
 import { StderrSink } from './agents/supervisor.ts'
 import { InvalidCursorError, PAGE, type NewEvent } from './journal.ts'
 import { UnknownProjectError } from './projects.ts'
 import { Database, DatabaseError } from './storage/database.ts'
-import { projects, sessionEntries, sessions } from './storage/schema.ts'
+import {
+  projectRepositories,
+  projects,
+  sessionEntries,
+  sessions,
+  workspaceRepositories,
+  workspaces,
+} from './storage/schema.ts'
 import { type Mutation, StaleVersionError, mutate } from './transaction.ts'
 
 /** The domain's own Session, read back out: it carries no path and loads nothing beside it. */
@@ -53,6 +61,48 @@ export class UnknownSessionError extends Error {
     super(`no Session has the identifier "${id}"`)
     this.name = 'UnknownSessionError'
   }
+}
+
+/** A Session was asked to work in a Workspace its Project does not have (D8-08). */
+export class UnknownWorkspaceError extends Error {
+  constructor(readonly id: string) {
+    super(`this Project has no Workspace with the identifier "${id}"`)
+    this.name = 'UnknownWorkspaceError'
+  }
+}
+
+/** A Session was asked to work in a Workspace that is not `ready` (D8-08). */
+export class WorkspaceNotReadyError extends Error {
+  constructor(
+    readonly workspace: string,
+    readonly state: string,
+  ) {
+    super(`the Workspace ${workspace} is ${state}, and a Session works only in a ready one`)
+    this.name = 'WorkspaceNotReadyError'
+  }
+}
+
+/**
+ * A Session's Workspace was changed after its agent started (D8-08): the agent's own session was
+ * opened in that folder, and moving the Session would leave it working somewhere else.
+ */
+export class WorkspaceFixedError extends Error {
+  constructor() {
+    super('The Workspace is fixed once the agent has started.')
+    this.name = 'WorkspaceFixedError'
+  }
+}
+
+/**
+ * Where a Session works (D8-08): its Workspace, `main` when it chose none, and the repositories
+ * that Workspace holds, relative to its root.
+ */
+export interface SessionWorkspace {
+  /** The Workspace's identifier, and null for a Session that chose none, which works in `main`. */
+  readonly id: string | null
+  readonly name: string
+  readonly path: string
+  readonly repositories: readonly string[]
 }
 
 /** One page of a thread, and where the one before it starts (design D4b-05). */
@@ -132,6 +182,8 @@ export interface SessionsService {
    * D5-06), and a Session nothing can answer is what `NoAgentError` refuses. The parameter is
    * still nullable at the wire because a Session written before the agents existed holds nothing
    * there; reading one is not making one.
+   *
+   * The Workspace is one of the Project's in state `ready`, or null for `main` (D8-08).
    */
   readonly create: (
     projectId: string | null,
@@ -139,7 +191,12 @@ export interface SessionsService {
     workspaceId?: string | null,
   ) => Effect.Effect<
     Session,
-    DatabaseError | NoActiveProjectError | NoAgentError | UnknownProjectError
+    | DatabaseError
+    | NoActiveProjectError
+    | NoAgentError
+    | UnknownProjectError
+    | UnknownWorkspaceError
+    | WorkspaceNotReadyError
   >
   readonly rename: (id: string, version: number, title: string) => Effect.Effect<Session, Refusal>
   readonly archive: (id: string, version: number) => Effect.Effect<Session, Refusal>
@@ -171,6 +228,26 @@ export interface SessionsService {
     version: number,
     choice: AgentChoice,
   ) => Effect.Effect<Session, Refusal>
+  /**
+   * Chooses the Workspace a Session works in, null for `main` (D8-08).
+   *
+   * Only before its agent has started: the agent's own session is opened in that folder, so once
+   * it has a directory or a native session the choice is fixed and a change is refused.
+   */
+  readonly chooseWorkspace: (
+    id: string,
+    version: number,
+    workspaceId: string | null,
+  ) => Effect.Effect<
+    Session,
+    Refusal | UnknownWorkspaceError | WorkspaceNotReadyError | WorkspaceFixedError
+  >
+  /**
+   * Where a Session works (D8-08): its Workspace's name, path and repositories, `main`'s when it
+   * chose none. What the agent is started in, what its tools take as their root, and what its
+   * context names.
+   */
+  readonly workspace: (id: string) => Effect.Effect<SessionWorkspace, Refusal>
   /**
    * Records what the agent itself handed back: the handle of its native session, the directory
    * it ran in, and how far that handle is still worth anything (design D5-06).
@@ -395,6 +472,7 @@ export const sessionsLayer = Layer.effect(
         model: string | null
         lastWrittenAt: string
         archivedAt: string | null
+        workspaceId: string | null
       }>,
     ) =>
       Effect.gen(function* () {
@@ -408,6 +486,31 @@ export const sessionsLayer = Layer.effect(
           return yield* Effect.fail(
             new StaleVersionError({ entity: 'session', id, expected: version }),
           )
+        }
+      })
+
+    /**
+     * The Workspace a Session may be given (D8-08): one of its Project's, and `ready` — `main`
+     * always is. Null is `main` and needs no check.
+     */
+    const usable = (
+      transaction: Parameters<Parameters<typeof mutate>[1]>[0],
+      projectId: string,
+      workspaceId: string | null,
+    ) =>
+      Effect.gen(function* () {
+        if (workspaceId === null) return
+        const found = yield* transaction
+          .select({ name: workspaces.name, state: workspaces.state })
+          .from(workspaces)
+          .where(and(eq(workspaces.id, workspaceId), eq(workspaces.projectId, projectId)))
+          .pipe(Effect.mapError(failed('reading the Workspace')))
+        const workspace = found[0]
+        if (workspace === undefined) {
+          return yield* Effect.fail(new UnknownWorkspaceError(workspaceId))
+        }
+        if (workspace.state !== 'ready') {
+          return yield* Effect.fail(new WorkspaceNotReadyError(workspace.name, workspace.state))
         }
       })
 
@@ -457,6 +560,7 @@ export const sessionsLayer = Layer.effect(
               // Refused here rather than in the interface, because a Session nothing can answer
               // is not something a second reader of this service should be able to make either.
               if (provider === null) return yield* Effect.fail(new NoAgentError())
+              yield* usable(transaction, projectId, workspaceId)
 
               const id = crypto.randomUUID()
               const at = now()
@@ -472,7 +576,6 @@ export const sessionsLayer = Layer.effect(
                 provider,
                 model: null,
                 nativeState: 'none',
-                // D8-08: that the Workspace is the Project's is checked by the sessions agent.
                 workspaceId,
                 archivedAt: null,
                 createdAt: Date.parse(at),
@@ -703,6 +806,105 @@ export const sessionsLayer = Layer.effect(
               } satisfies Mutation<Session>
             }),
           ),
+        ),
+
+      chooseWorkspace: (id, version, workspaceId) =>
+        withDatabase(
+          mutate('choosing the Workspace of a Session', (transaction) =>
+            Effect.gen(function* () {
+              const rows = yield* transaction
+                .select({
+                  projectId: sessions.projectId,
+                  cwd: sessions.cwd,
+                  nativeState: sessions.nativeState,
+                })
+                .from(sessions)
+                .where(eq(sessions.id, id))
+                .pipe(Effect.mapError(failed('reading the Session')))
+              const row = rows[0]
+              if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
+              // Fixed once the agent has started (D8-08): it was started in that folder, and its
+              // own session knows no other.
+              if (row.cwd !== null || row.nativeState !== 'none') {
+                return yield* Effect.fail(new WorkspaceFixedError())
+              }
+              yield* usable(transaction, row.projectId, workspaceId)
+              yield* bump(transaction, id, version, { workspaceId, lastWrittenAt: now() })
+              const session = yield* readOne(transaction, id)
+              return {
+                result: session,
+                events: [
+                  {
+                    type: 'session.workspace_chosen',
+                    entityKind: 'session',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: session.projectId,
+                    sessionId: id,
+                    payload: { workspaceId },
+                  },
+                ],
+              } satisfies Mutation<Session>
+            }),
+          ),
+        ),
+
+      workspace: (id) =>
+        withDatabase(
+          Effect.gen(function* () {
+            const rows = yield* database
+              .select({ projectId: sessions.projectId, workspaceId: sessions.workspaceId })
+              .from(sessions)
+              .where(eq(sessions.id, id))
+              .limit(1)
+              .pipe(Effect.mapError(failed('reading the Session')))
+            const row = rows[0]
+            if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
+            // Null is `main`, and so is a Session written before Workspaces were real (D8-08).
+            const found = yield* database
+              .select()
+              .from(workspaces)
+              .where(
+                row.workspaceId === null
+                  ? and(
+                      eq(workspaces.projectId, row.projectId),
+                      eq(workspaces.name, MAIN_WORKSPACE),
+                    )
+                  : eq(workspaces.id, row.workspaceId),
+              )
+              .limit(1)
+              .pipe(Effect.mapError(failed('reading the Workspace')))
+            const workspace = found[0]
+            if (workspace === undefined) {
+              return yield* Effect.fail(
+                new DatabaseError({ doing: 'reading the Workspace', cause: 'it has no row' }),
+              )
+            }
+            // A dedicated Workspace holds the worktrees it was made with; `main` and a folder the
+            // user picked hold the repositories the Project declares.
+            const worktrees = yield* database
+              .select({ path: workspaceRepositories.relativePath })
+              .from(workspaceRepositories)
+              .where(eq(workspaceRepositories.workspaceId, workspace.id))
+              .orderBy(asc(workspaceRepositories.relativePath))
+              .pipe(Effect.mapError(failed('reading the worktrees')))
+            const declared =
+              worktrees.length > 0
+                ? worktrees
+                : yield* database
+                    .select({ path: projectRepositories.relativePath })
+                    .from(projectRepositories)
+                    .where(eq(projectRepositories.projectId, row.projectId))
+                    .orderBy(asc(projectRepositories.rank))
+                    .pipe(Effect.mapError(failed('reading the repositories')))
+            return {
+              id: row.workspaceId,
+              name: workspace.name,
+              path: workspace.path,
+              repositories: declared.map((one) => one.path),
+            } satisfies SessionWorkspace
+          }),
         ),
 
       recordNative: (id, native) =>

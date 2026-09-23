@@ -39,7 +39,6 @@ import {
   AGENTS_FILE,
   type AgentProvider,
   type BaseReach,
-  CONTEXT_BASE,
   contextUri,
   hemeraToolNamed,
   type Session,
@@ -975,21 +974,26 @@ export const runtimeLayer = Layer.effect(
         return project.mainPath
       })
 
-    /** The path of the Project a Session belongs to, which is where its agent is run. */
-    const projectPath = (session: Session): Effect.Effect<string, AgentRuntimeError> =>
-      mainPathOf(session.projectId)
+    /**
+     * The path of the Session's Workspace, which is where its agent is run (D8-08): the Workspace
+     * it chose, or `main` when it chose none.
+     */
+    const workspacePathOf = (session: Session): Effect.Effect<string, AgentRuntimeError> =>
+      attempt('reading the Workspace', sessions.workspace(session.id)).pipe(
+        Effect.map((workspace) => workspace.path),
+      )
 
-    /** Where an agent runs for this Session: where it ran before, or the Project's own path. */
+    /** Where an agent runs for this Session: where it ran before, or its Workspace's path. */
     const workingDirectory = (
       session: Session,
       native: NativeRecord,
     ): Effect.Effect<string, AgentRuntimeError> =>
       Effect.gen(function* () {
-        const project = yield* projectPath(session)
+        const workspace = yield* workspacePathOf(session)
         // A directory that is gone is not a place to run an agent in, and a Session does not
-        // stop being one because its folder was moved: the Project's own path takes it in.
+        // stop being one because its folder was moved: the Workspace's path takes it in.
         if (native.cwd !== null && existsSync(native.cwd)) return native.cwd
-        return project
+        return workspace
       })
 
     /** What the supervisor is told to start, with only what the resolve named. */
@@ -1444,7 +1448,8 @@ export const runtimeLayer = Layer.effect(
         const mode = bareModeOf(resolved.adapter, globalThis.process.platform)
         const bare = yield* bareOptionsOf(resolved.adapter, globalThis.process.platform, {
           ownerDirectory: directory,
-          base: CONTEXT_BASE,
+          // The base as the Context composes it for this Session: it names its Workspace (D8-08).
+          base: yield* attempt('composing the context', context.base(sessionId)),
           own: resolved.own,
         }).pipe(
           Effect.mapError(
@@ -1546,7 +1551,7 @@ export const runtimeLayer = Layer.effect(
 
         // The Workspace's instructions are watched for as long as this agent holds the Session:
         // a change is handed over at the next safe point rather than at the next prompt (D6-08).
-        const root = yield* projectPath(session)
+        const root = yield* workspacePathOf(session)
         watched(sessionId, root)
 
         // A Session opened for the first time starts on the choices its composer made before it

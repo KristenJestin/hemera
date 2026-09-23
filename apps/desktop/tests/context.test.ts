@@ -104,7 +104,8 @@ describe('what a Session is provided', () => {
       }),
     )
 
-    expect(seen.started.base).toEqual(CONTEXT_BASE)
+    // The base, then the line that names where the Session works (D8-08).
+    expect(seen.started.base).toEqual(`${CONTEXT_BASE}\nWorkspace: main at ${root}`)
     expect(seen.started.instructions?.path).toEqual(AGENTS_FILE)
     expect(seen.provided.map((one) => one.kind).sort()).toEqual(['base', 'provided'])
     const file = seen.provided.find((one) => one.kind === 'provided')

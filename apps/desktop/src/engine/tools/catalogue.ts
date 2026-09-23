@@ -36,7 +36,7 @@ import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
-import { Sessions, type ThreadWrite } from '../sessions.ts'
+import { type SessionWorkspace, Sessions, type ThreadWrite } from '../sessions.ts'
 import { Database } from '../storage/database.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
@@ -616,6 +616,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const perform = (
       asked: ToolCall,
       root: string,
+      workspace: SessionWorkspace,
       projectId: string,
       projectName: string,
       repositories: readonly string[],
@@ -901,9 +902,10 @@ export const toolCatalogueLayer: Layer.Layer<
                 portless: entry?.portless ?? false,
                 folder: folder === '.' ? null : folder,
                 cwd: inside.path,
-                // D8-08: the Session's Workspace is wired by the sessions agent.
-                workspaceId: null,
-                workspaceName: 'main',
+                // D8-08: the run belongs to the Session's Workspace, which names it too.
+                workspaceId: workspace.id,
+                workspaceName: workspace.name,
+                // D8-06: the variables are merged in by the integrator once Variables exists
                 environment: {},
                 startedBy: 'agent',
               }),
@@ -1062,7 +1064,20 @@ export const toolCatalogueLayer: Layer.Layer<
             range: null,
           }
         }
-        const root = project.mainPath
+        // The tools act in the Session's Workspace (D8-08): its path is their root.
+        const workspace = yield* answered(sessions.workspace(asked.sessionId))
+        if (workspace === undefined) {
+          return {
+            ok: false,
+            state: 'failed' as const,
+            summary: 'the Workspace of this Session is missing',
+            text: 'this Session works in a Workspace the engine cannot read',
+            paths: [],
+            repeated: false,
+            range: null,
+          }
+        }
+        const root = workspace.path
         // The agent of the Session is what the thread names as the caller, beside the digest of
         // the token: a Session without one is served all the same, and "agent" is what it says.
         const made = {
@@ -1096,6 +1111,7 @@ export const toolCatalogueLayer: Layer.Layer<
           const answer = yield* perform(
             asked,
             root,
+            workspace,
             project.id,
             project.name,
             project.repositories,

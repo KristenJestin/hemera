@@ -48,6 +48,9 @@ const instructions = (text: string): void => {
   writeFileSync(join(workingDirectory, AGENTS_FILE), text)
 }
 
+/** The base a Session on `main` at that folder is given: it names its Workspace (D8-08). */
+const based = (folder: string): string => `${CONTEXT_BASE}\nWorkspace: main at ${folder}`
+
 /** An agent that answers every turn with one line, which is all these suites need of it. */
 const answering = () => fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
 
@@ -80,7 +83,7 @@ describe('The base is provided once, by the agent’s means', () => {
 
     // Handed once, with the session, as the system prompt Claude Code takes on `_meta`.
     const meta = SYSTEM_PROMPT.parse(JSON.parse(agent.answers.metas[0] ?? '{}'))
-    expect(meta.claudeCode.options.systemPrompt.prompt).toBe(CONTEXT_BASE)
+    expect(meta.claudeCode.options.systemPrompt.prompt).toBe(based(workingDirectory))
     // So the prompts are the user's own text, and nothing else.
     expect(agent.answers.prompts).toEqual(['start on the reader', 'carry on'])
     expect(agent.answers.blocks.flat().some((block) => block.type === 'resource')).toBe(false)
@@ -111,7 +114,7 @@ describe('The base is provided once, by the agent’s means', () => {
       { type: 'text', text: DELIVERY_MARKER },
       {
         type: 'resource',
-        resource: { uri: contextUri(''), mimeType: 'text/plain', text: CONTEXT_BASE },
+        resource: { uri: contextUri(''), mimeType: 'text/plain', text: based(workingDirectory) },
       },
       { type: 'text', text: 'start on the reader' },
     ])
