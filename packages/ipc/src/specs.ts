@@ -342,19 +342,23 @@ export const SPEC_REQUESTS = {
   },
   'specs.markReady': {
     // Made against the revision and content the gate was read on: anything newer refuses (D7-10).
+    // `sessionId` is the Session whose panel the click came from, which its Journal line names
+    // (D7-13).
     arguments: z.object({
       specId: z.string(),
       expectedRevisionId: z.string(),
       expectedContentVersion: versionSchema,
+      sessionId: z.string().optional(),
     }),
     response: specSnapshotSchema,
   },
   'specs.reopen': {
-    // The reason is the human's to give or not.
+    // The reason is the human's to give or not; `sessionId` as for `specs.markReady`.
     arguments: z.object({
       specId: z.string(),
       expectedRevisionId: z.string(),
       reason: z.string().optional(),
+      sessionId: z.string().optional(),
     }),
     response: specSnapshotSchema,
   },

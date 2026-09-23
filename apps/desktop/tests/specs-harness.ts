@@ -164,5 +164,6 @@ export const frozen = (specId: string, sessionId: string) =>
       specId,
       expectedRevisionId: attested.revision.id,
       expectedContentVersion: attested.spec.contentVersion,
+      sessionId,
     })
   })

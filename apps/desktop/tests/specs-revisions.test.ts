@@ -15,6 +15,7 @@ import { type SpecSnapshot, SpecNotWritableError, writable } from '@hemera/core'
 import { ReopenRefusedError } from '#engine/specs/revisions.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { Specs } from '#engine/specs/specs.ts'
+import { SqliteClient } from '#engine/storage/database.ts'
 import { agentOf, draft, frozen, openedOn, write } from './specs-harness.ts'
 
 let dataFolder: string
@@ -139,18 +140,29 @@ describe('Rework creates a complete new draft', () => {
   test('revision 2 copies every row under new ids in the same order; revision 1 is untouched', async () => {
     const outcome = await opened()(
       Effect.gen(function* () {
-        const { specId, snapshot } = yield* ready
+        const { specId, session, snapshot } = yield* ready
         const specs = yield* Specs
         const reworked = yield* specs.reopen({
           specId,
           expectedRevisionId: snapshot.revision.id,
           reason: 'Add a CSV option',
+          sessionId: session.id,
         })
-        return { snapshot, reworked, first: yield* specs.read(specId, 1) }
+        const sql = yield* SqliteClient
+        const reopened = yield* sql<{ session_id: string | null }>`
+          SELECT session_id FROM domain_events WHERE type = 'spec.reopened'`
+        return {
+          snapshot,
+          reworked,
+          first: yield* specs.read(specId, 1),
+          reopened: reopened.map((row) => row.session_id),
+          sessionId: session.id,
+        }
       }),
     )
 
     const { snapshot, reworked, first } = outcome
+    expect(outcome.reopened).toEqual([outcome.sessionId])
     expect(reworked.spec.status).toBe('draft')
     expect(reworked.spec.currentRevisionId).toBe(reworked.revision.id)
     expect(reworked.revision).toMatchObject({

@@ -585,6 +585,7 @@ describe('The Journal shows each step', () => {
     }
     expect(types.at(0)).toBe('spec.created')
     expect(types.at(-1)).toBe('spec.ready')
+    expect(entries.at(-1)).toMatchObject({ author: 'human', sessionId: journal.session.id })
     const human = entries.find(
       (entry) => entry.type === 'spec.section_written' && entry.author === 'human',
     )
