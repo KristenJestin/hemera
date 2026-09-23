@@ -50,6 +50,7 @@ import { engineStatusLayer } from './status.ts'
 import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
 import { gitLayer } from './git.ts'
+import { type Preparation, hostLinks, preparationLayer } from './workspaces/preparation.ts'
 import { type Recipe, recipeLayer } from './workspaces/recipe.ts'
 import { type Variables, variablesLayer } from './workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from './workspaces/workspaces.ts'
@@ -137,6 +138,7 @@ type EngineServices =
   | Workspaces
   | Recipe
   | Variables
+  | Preparation
   | Database
   | SqliteClient
 
@@ -193,10 +195,15 @@ function servicesOf(
     Layer.provide(clockLayer),
   )
   // The Workspaces of the Projects, over the machine's `git`, made under the data folder unless a
-  // Project names a folder of its own (D8-02, D8-03).
-  const workspaces = Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer).pipe(
-    Layer.provide(gitLayer()),
+  // Project names a folder of its own (D8-02, D8-03), and prepared by the same supervisor that
+  // starts every other process (D8-05).
+  const git = gitLayer()
+  const workspaces = preparationLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
+    Layer.provide(git),
+    Layer.provide(hostLinks),
     Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
+    Layer.provide(processes),
   )
 
   return Layer.mergeAll(

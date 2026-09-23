@@ -28,6 +28,12 @@ import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type Database, type SqliteClient, databaseLayer } from '#engine/storage/database.ts'
+import {
+  type Links,
+  type Preparation,
+  hostLinks,
+  preparationLayer,
+} from '#engine/workspaces/preparation.ts'
 import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
@@ -45,24 +51,28 @@ export type WorkspaceEngine =
   | Workspaces
   | Recipe
   | Variables
+  | Preparation
   | Database
   | SqliteClient
 
 /**
  * One run of the engine over the suite's folder: its database, and its Workspaces made under
  * `<folder>/workspaces`, as the data folder's own are. `gitProgram` is the `git` asked, which a
- * suite names when it is about a machine that has none.
+ * suite names when it is about a machine that has none, and `links` the system a link is made
+ * by, which a suite has refuse one.
  */
-export function workspaceEngine(folder: string, gitProgram?: string) {
+export function workspaceEngine(
+  folder: string,
+  gitProgram?: string,
+  links: Layer.Layer<Links> = hostLinks,
+) {
   const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
-  const services: Layer.Layer<WorkspaceEngine> = Layer.mergeAll(
-    workspacesLayer,
-    recipeLayer,
-    variablesLayer,
-  ).pipe(
+  const services: Layer.Layer<WorkspaceEngine> = preparationLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
+    Layer.provide(links),
     Layer.provide(Layer.succeed(WorkspacesRoot, join(folder, 'workspaces'))),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(journalLayer),

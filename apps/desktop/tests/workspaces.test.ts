@@ -15,8 +15,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Effect } from 'effect'
 
 import { InvalidRepositoryPathError } from '@hemera/core'
+import { Commands } from '#engine/commands/service.ts'
 import { Projects } from '#engine/projects.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
+import { Preparation } from '#engine/workspaces/preparation.ts'
 import { Recipe, RecipeRefusedError } from '#engine/workspaces/recipe.ts'
 import {
   CleanupRefusedError,
@@ -25,7 +27,7 @@ import {
 } from '#engine/workspaces/workspaces.ts'
 
 import { git } from './repositories.ts'
-import { atlas, atlasMain, saved, workspaceEngine } from './workspace-engine.ts'
+import { aSessionOf, atlas, atlasMain, saved, workspaceEngine } from './workspace-engine.ts'
 
 let folder: string
 let main: string
@@ -77,6 +79,14 @@ const created = (projectId: string) =>
           branch: one.branch,
         })),
     })
+  })
+
+/** The same, prepared: its worktrees made and its recipe run. */
+const prepared = (projectId: string) =>
+  Effect.gen(function* () {
+    const preparation = yield* Preparation
+    const workspace = yield* created(projectId)
+    return yield* preparation.prepare(workspace.id)
   })
 
 describe('A dedicated Workspace assembles one worktree per repository', () => {
@@ -131,6 +141,31 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
     expect(git(join(main, 'sources', 'api'), 'remote')).toBe('')
     expect(git(join(main, 'sources', 'front'), 'remote')).toBe('')
   })
+
+  it('prepares each worktree on the branch from the local HEAD, and the Workspace is ready', async () => {
+    const workspace = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const project = yield* atlas(main, [API, FRONT])
+        return yield* prepared(project.id)
+      }),
+    )
+
+    for (const repository of ['api', 'front']) {
+      const worktree = join(workspace.path, 'sources', repository)
+      expect(existsSync(join(worktree, '.git'))).toBe(true)
+      expect(git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('atlas/HEM-7-login-form')
+      expect(git(worktree, 'rev-parse', 'HEAD')).toBe(
+        git(join(main, 'sources', repository), 'rev-parse', 'HEAD'),
+      )
+    }
+    expect(workspace.path.endsWith(join('workspaces', workspace.projectId, 'login-form'))).toBe(
+      true,
+    )
+    expect(workspace.state).toBe('ready')
+    expect(workspace.specId).toBe('HEM-7')
+    expect(workspace.repositories.map((one) => one.relativePath)).toEqual([API, FRONT])
+    expect(git(join(main, 'sources', 'api'), 'remote')).toBe('')
+  })
 })
 
 describe('A location without a repository gets no worktree', () => {
@@ -162,6 +197,22 @@ describe('A location without a repository gets no worktree', () => {
       { kind: 'worktree', target: FRONT, state: 'pending', message: null },
     ])
     // Nothing was initialised there.
+    expect(existsSync(join(main, 'docs', '.git'))).toBe(false)
+  })
+
+  it('assembles the other repositories, and the Workspace is ready', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const project = yield* atlas(main, [API, './docs', FRONT])
+        const workspace = yield* prepared(project.id)
+        return { workspace, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    expect(seen.steps.map((step) => step.state)).toEqual(['done', 'skipped', 'done'])
+    expect(seen.workspace.state).toBe('ready')
+    expect(existsSync(join(seen.workspace.path, 'sources', 'front', '.git'))).toBe(true)
+    expect(existsSync(join(seen.workspace.path, 'docs'))).toBe(false)
     expect(existsSync(join(main, 'docs', '.git'))).toBe(false)
   })
 })
@@ -360,6 +411,106 @@ describe('A missing git is a named refusal', () => {
     expect(seen.refused.message).toBe('git-that-does-not-exist-hemera was not found on the PATH')
     expect(seen.after).toEqual(seen.before)
     expect(existsSync(seen.plan.path)).toBe(false)
+  })
+})
+
+describe('Cleanup removes the worktrees and keeps the branches', () => {
+  it('removes each worktree and the folder, keeps the row cleaned, and every branch', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        const cleaned = yield* workspaces.cleanup(workspace.id)
+        const sql = yield* SqliteClient
+        const events = yield* sql<{ type: string }>`
+          SELECT type FROM domain_events WHERE type = 'workspace.cleaned'`
+        return { workspace, cleaned, events }
+      }),
+    )
+
+    expect(existsSync(seen.workspace.path)).toBe(false)
+    expect(seen.cleaned.state).toBe('cleaned')
+    expect(seen.cleaned.cleanedAt).not.toBeNull()
+    expect(seen.events).toHaveLength(1)
+    for (const repository of ['api', 'front']) {
+      const source = join(main, 'sources', repository)
+      // The branch stays, and Git no longer holds a worktree of it.
+      expect(git(source, 'branch', '--list', 'atlas/HEM-7-login-form')).toContain(
+        'atlas/HEM-7-login-form',
+      )
+      expect(git(source, 'worktree', 'list')).not.toContain('login-form')
+    }
+  })
+})
+
+describe('Cleanup is refused while a service runs or Git refuses', () => {
+  it('names the running service, then Git’s own message, and removes nothing', async () => {
+    const api = join(main, 'sources', 'api')
+    writeFileSync(join(api, 'tracked.txt'), 'one\n')
+    git(api, 'add', 'tracked.txt')
+    git(api, 'commit', '-q', '-m', 'tracked')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const commands = yield* Commands
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        const session = yield* aSessionOf(project.id)
+        const dev = yield* saved(
+          project.id,
+          'dev',
+          `"${process.execPath}" -e "setInterval(()=>{},1000)"`,
+          'serve',
+        )
+        const running = yield* commands.run({
+          sessionId: session.id,
+          projectId: project.id,
+          commandId: dev.id,
+          name: dev.name,
+          line: dev.line,
+          lineWindows: dev.lineWindows,
+          lineLinux: dev.lineLinux,
+          type: dev.type,
+          scope: dev.scope,
+          portless: dev.portless,
+          folder: null,
+          cwd: workspace.path,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          environment: {},
+          startedBy: 'user',
+        })
+        const whileRunning = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        yield* commands.stop(session.id, running.id)
+
+        // A tracked file changed in the first worktree: Git refuses to remove it.
+        writeFileSync(join(workspace.path, 'sources', 'api', 'tracked.txt'), 'changed\n')
+        const whileChanged = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        const sql = yield* SqliteClient
+        const events = yield* sql<{ payload: string }>`
+          SELECT payload FROM domain_events WHERE type = 'workspace.cleanup_refused'
+          ORDER BY sequence`
+        return {
+          workspace,
+          whileRunning,
+          whileChanged,
+          events,
+          after: yield* workspaces.one(workspace.id),
+        }
+      }),
+    )
+
+    expect(seen.whileRunning).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.whileRunning.message).toBe('the service dev of login-form is running')
+    expect(seen.whileChanged).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.whileChanged.message).toMatch(/^fatal: .*contains modified or untracked files/)
+    expect(seen.events).toHaveLength(2)
+    // Nothing was removed: both worktrees are there, and the Workspace is still ready.
+    expect(existsSync(join(seen.workspace.path, 'sources', 'api', '.git'))).toBe(true)
+    expect(existsSync(join(seen.workspace.path, 'sources', 'front', '.git'))).toBe(true)
+    expect(seen.after.state).toBe('ready')
   })
 })
 
