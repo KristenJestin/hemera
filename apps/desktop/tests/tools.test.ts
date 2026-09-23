@@ -319,26 +319,93 @@ describe('The same write twice has one effect', () => {
     const seen = await engine(human)(
       Effect.gen(function* () {
         const session = yield* opened
-        const first = yield* calling({
-          sessionId: session.sessionId,
-          tool: 'fs_write',
-          arguments: { path: 'once.txt', content: 'first' },
-          key: 'write-1',
-        })
-        const second = yield* calling({
-          sessionId: session.sessionId,
-          tool: 'fs_write',
-          arguments: { path: 'once.txt', content: 'second' },
-          key: 'write-1',
-        })
-        return { first, second }
+        const write = () =>
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'once.txt', content: 'first' },
+            key: 'write-1',
+          })
+        const first = yield* write()
+        yield* Effect.sync(() => writeFileSync(join(root, 'once.txt'), 'changed since'))
+        const second = yield* write()
+        return {
+          first,
+          second,
+          entries: yield* threadEntries(session.sessionId),
+          lines: yield* journalLines(session.projectId),
+        }
       }),
     )
 
     expect(seen.first.ok).toBe(true)
     expect(seen.first.repeated).toBe(false)
     expect(seen.second.repeated).toBe(true)
+    expect(seen.second.summary).toBe(seen.first.summary)
+    // Nothing was written the second time: the file holds what the suite put there since.
+    expect(readFileSync(join(root, 'once.txt'), 'utf8')).toBe('changed since')
+    // One entry in the thread, and the Journal says the second call was a repeat.
+    const calls = seen.entries.filter((entry) => entry.kind === 'hemera_tool_call')
+    expect(calls).toHaveLength(1)
+    expect(
+      seen.lines.filter((line) => line.type.startsWith('tool.')).map((line) => line.type),
+    ).toEqual(['tool.repeated', 'tool.completed'])
+  })
+})
+
+describe('A key used again', () => {
+  it('with other arguments is refused, says why, and writes nothing', async () => {
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const write = (content: string) =>
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'once.txt', content },
+            key: 'write-1',
+          })
+        yield* write('first')
+        const other = yield* write('second')
+        return { other, entries: yield* threadEntries(session.sessionId) }
+      }),
+    )
+
+    expect(seen.other.state).toBe('refused')
+    expect(seen.other.summary).toContain('the key "write-1" was already used')
     expect(readFileSync(join(root, 'once.txt'), 'utf8')).toBe('first')
+    // Two calls, two entries: the refusal is recorded like any call, and the first entry stays.
+    const calls = seen.entries.filter((entry) => entry.kind === 'hemera_tool_call')
+    expect(calls.map((entry) => entry.state)).toEqual(['completed', 'refused'])
+    expect(new Set(calls.map((entry) => entry.correlationId)).size).toBe(2)
+  })
+
+  it('after a refusal is answered the refusal, and nothing is written over its entry', async () => {
+    const outside = join(folder, 'refused.txt')
+    const human = humanSaying('refused', 'allowed')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const write = () =>
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: outside, content: 'no' },
+            key: 'out-1',
+          })
+        const first = yield* write()
+        const second = yield* write()
+        return { first, second, entries: yield* threadEntries(session.sessionId) }
+      }),
+    )
+
+    expect(human.asked).toHaveLength(1)
+    expect(seen.second.repeated).toBe(true)
+    expect(seen.second.ok).toBe(false)
+    expect(existsSync(outside)).toBe(false)
+    expect(
+      seen.entries.filter((entry) => entry.kind === 'hemera_tool_call').map((entry) => entry.state),
+    ).toEqual(['failed'])
   })
 })
 
@@ -742,7 +809,7 @@ describe('the same write twice at the same time', () => {
         // The first call waits on the human; the retry arrives while it does.
         const first = yield* Effect.forkChild(write('first'))
         yield* Effect.sleep('50 millis')
-        const second = yield* Effect.forkChild(write('second'))
+        const second = yield* Effect.forkChild(write('first'))
         yield* Effect.sleep('50 millis')
         Deferred.doneUnsafe(decision, Effect.succeed<OutsideAnswer>('allowed'))
         return { first: yield* Fiber.join(first), second: yield* Fiber.join(second) }

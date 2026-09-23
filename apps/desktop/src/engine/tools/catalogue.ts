@@ -124,6 +124,20 @@ interface Made {
   readonly milliseconds: number
 }
 
+/** An answer kept against its key, with the arguments it was given for. */
+interface Kept {
+  readonly sent: string
+  readonly outcome: ToolOutcome
+}
+
+/**
+ * The arguments of a call as one text, the same whatever order the agent wrote them in: what a
+ * retry is compared by.
+ */
+function argumentsSent(sent: ToolArguments): string {
+  return JSON.stringify(Object.entries(sent).sort(([left], [right]) => (left < right ? -1 : 1)))
+}
+
 /** What a tool hands back before it has been written down. */
 interface Answer {
   readonly ok: boolean
@@ -264,7 +278,7 @@ export const toolCatalogueLayer: Layer.Layer<
      * repeated. A Session's map is ordered by use: a hit moves its key to the end, and the first
      * key is the one let go of when the Session holds more than `KEYS_KEPT`.
      */
-    const done = new Map<string, Map<string, ToolOutcome>>()
+    const done = new Map<string, Map<string, Kept>>()
 
     /**
      * The calls running under a key, reserved before they run.
@@ -273,16 +287,19 @@ export const toolCatalogueLayer: Layer.Layer<
      * command that is starting — and a key only remembered once the call settled would let both
      * run. The second call waits on the first and is answered what the first one was.
      */
-    const inFlight = new Map<string, Deferred.Deferred<ToolOutcome>>()
+    const inFlight = new Map<
+      string,
+      { readonly sent: string; readonly outcome: Deferred.Deferred<ToolOutcome> }
+    >()
 
     /** The answer a key was given in this Session, moved to the end as the most recently asked. */
-    const answeredBefore = (sessionId: string, slot: string): ToolOutcome | undefined => {
+    const answeredBefore = (sessionId: string, slot: string): Kept | undefined => {
       const kept = done.get(sessionId)
-      const outcome = kept?.get(slot)
-      if (kept === undefined || outcome === undefined) return undefined
+      const answer = kept?.get(slot)
+      if (kept === undefined || answer === undefined) return undefined
       kept.delete(slot)
-      kept.set(slot, outcome)
-      return outcome
+      kept.set(slot, answer)
+      return answer
     }
 
     /**
@@ -292,10 +309,10 @@ export const toolCatalogueLayer: Layer.Layer<
      * past: a Session that ran for a day would otherwise be holding every write it ever made,
      * texts and all.
      */
-    const remember = (sessionId: string, slot: string, outcome: ToolOutcome) => {
-      const kept = done.get(sessionId) ?? new Map<string, ToolOutcome>()
+    const remember = (sessionId: string, slot: string, answer: Kept) => {
+      const kept = done.get(sessionId) ?? new Map<string, Kept>()
       kept.delete(slot)
-      kept.set(slot, outcome)
+      kept.set(slot, answer)
       for (const oldest of kept.keys()) {
         if (kept.size <= KEYS_KEPT) break
         kept.delete(oldest)
@@ -306,12 +323,42 @@ export const toolCatalogueLayer: Layer.Layer<
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
 
+    /** The Journal line of one call, under the Session it served. */
+    const journalled = (
+      asked: ToolCall,
+      made: Made,
+      type: string,
+      payload: Readonly<Record<string, string | number | boolean>>,
+    ) =>
+      withDatabase(
+        mutate('recording a tool call', () =>
+          Effect.succeed({
+            result: null,
+            events: [
+              {
+                type,
+                entityKind: 'session' as const,
+                entityId: asked.sessionId,
+                source: 'system' as const,
+                author: 'mcp' as const,
+                projectId: made.projectId,
+                sessionId: asked.sessionId,
+                payload: { tool: asked.tool, caller: asked.caller, ...payload },
+              },
+            ],
+          }),
+        ),
+      ).pipe(Effect.catch(() => Effect.void))
+
     /** The line and the event of one call, written together, in the thread and in the Journal. */
     const note = (asked: ToolCall, state: ToolState, answer: Answer, made: Made) =>
       Effect.gen(function* () {
         const payload = JSON.stringify({
           tool: asked.tool,
           state,
+          // The key the agent sent, which is what a retry is recognised by; the entry itself is
+          // one per call, so a key used again never writes over the entry of an earlier call.
+          key: asked.key,
           // The provenance of the call (D6-06): the Session the token served, the digest of that
           // token, the agent that held it, and how long it took. The row belongs to the Session
           // already; the payload says it too, so an entry read on its own still says whose it is.
@@ -329,38 +376,18 @@ export const toolCatalogueLayer: Layer.Layer<
           kind: 'hemera_tool_call',
           body: answer.summary,
           payload,
-          correlationId: asked.key === null ? null : `tool:${asked.tool}:${asked.key}`,
+          correlationId: `tool:${crypto.randomUUID()}`,
           state,
         }).pipe(
           // A thread that cannot be written is a Session that went away while the call was
           // running: the answer is still the answer, and losing the line is not losing it.
           Effect.catch(() => Effect.void),
         )
-        yield* withDatabase(
-          mutate('recording a tool call', () =>
-            Effect.succeed({
-              result: null,
-              events: [
-                {
-                  type: `tool.${state}`,
-                  entityKind: 'session' as const,
-                  entityId: asked.sessionId,
-                  source: 'system' as const,
-                  author: 'mcp' as const,
-                  projectId: made.projectId,
-                  sessionId: asked.sessionId,
-                  payload: {
-                    tool: asked.tool,
-                    state,
-                    caller: asked.caller,
-                    paths: answer.paths.length,
-                    milliseconds: made.milliseconds,
-                  },
-                },
-              ],
-            }),
-          ),
-        ).pipe(Effect.catch(() => Effect.void))
+        yield* journalled(asked, made, `tool.${state}`, {
+          state,
+          paths: answer.paths.length,
+          milliseconds: made.milliseconds,
+        })
       })
 
     /** Writes the answer down and hands it to the caller. */
@@ -995,17 +1022,37 @@ export const toolCatalogueLayer: Layer.Layer<
           })
           if (asked.key === null) return yield* run
 
-          const slot = `${named}|${asked.key}`
+          const key = asked.key
+          const slot = `${named}|${key}`
+          const sent = argumentsSent(asked.arguments)
+          /**
+           * The answer an earlier call under this key was given, as this call's own: no second
+           * entry in the thread, one Journal line that says the call was a repeat — unless the
+           * arguments differ, which is a new call under an old key and is refused rather than
+           * guessed at, because either answer would be wrong for one of the two.
+           */
+          const again = (first: ToolOutcome, firstSent: string) =>
+            Effect.gen(function* () {
+              if (firstSent !== sent) {
+                return yield* refused(
+                  asked,
+                  made,
+                  `the key "${key}" was already used by a ${named} call with other arguments: send a new key for a new call`,
+                )
+              }
+              yield* journalled(asked, made, 'tool.repeated', { state: first.state, key })
+              return { ...first, repeated: true }
+            })
           const earlier = answeredBefore(asked.sessionId, slot)
-          if (earlier !== undefined) return { ...earlier, repeated: true }
+          if (earlier !== undefined) return yield* again(earlier.outcome, earlier.sent)
           const reservation = `${asked.sessionId}|${slot}`
           const running = inFlight.get(reservation)
           if (running !== undefined) {
-            const first = yield* Deferred.await(running)
-            return { ...first, repeated: true }
+            const first = yield* Deferred.await(running.outcome)
+            return yield* again(first, running.sent)
           }
           const reserved = Deferred.makeUnsafe<ToolOutcome>()
-          inFlight.set(reservation, reserved)
+          inFlight.set(reservation, { sent, outcome: reserved })
           const outcome = yield* run.pipe(
             Effect.onExit((exit) =>
               Effect.gen(function* () {
@@ -1014,11 +1061,10 @@ export const toolCatalogueLayer: Layer.Layer<
               }),
             ),
           )
-          // Only what happened is remembered. A key is there so that a retry after a lost answer
-          // does not write twice, and a call that wrote nothing — a refusal, a read that failed —
-          // wrote nothing to protect: answering it from memory would refuse the corrected call
-          // that comes back under the same key for ever.
-          if (outcome.state === 'completed') remember(asked.sessionId, slot, outcome)
+          // Whatever it answered is remembered: a retry is answered what the first call was, a
+          // refusal included. A corrected call is a call with other arguments, and it is told to
+          // send a new key rather than being answered for the one it replaced.
+          remember(asked.sessionId, slot, { sent, outcome })
           return outcome
         }),
     }
