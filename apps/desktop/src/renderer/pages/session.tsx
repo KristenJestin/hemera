@@ -543,7 +543,8 @@ export function SessionPage({
             />
           )
         }
-        // What the agent is working from, in three lists (D6-10), once the engine has said it.
+        // What the agent is working from, its instructions and its tools (D6-10), once the engine
+        // has said it.
         context={
           !drawn || context === null ? undefined : <ContextView {...contextListsOf(context)} />
         }

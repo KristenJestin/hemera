@@ -4,7 +4,7 @@
  *
  * The page imports the design system's components, which need a browser; what is read here is
  * the pure module the page hands them from — the runs as the panel lists them, the tab a Session
- * opens on, and the three lists of the Context view — and, over the whole engine on the fake
+ * opens on, and the instructions and tools of the Context view — and, over the whole engine on the fake
  * agent, the stores those are read from.
  */
 
@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { AGENTS_FILE } from '@hemera/core'
-import type { CommandRun, ContextView } from '@hemera/ipc'
+import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
@@ -137,71 +137,111 @@ describe('No side column on a Session that has nothing to show', () => {
   })
 })
 
-describe('The view lists the sources with their provenance', () => {
-  test('provided, consultable and private, each said as the view draws it', () => {
-    const view: ContextView = {
-      provided: [
-        {
-          kind: 'base',
-          path: '',
-          fingerprint: 'a'.repeat(64),
-          deliveredAt: '2026-09-23T08:00:00.000Z',
-          reached: 'embedded_resource',
-        },
-        {
-          kind: 'native',
-          path: 'AGENTS.md',
-          fingerprint: 'b'.repeat(64),
-          deliveredAt: '2026-09-23T08:00:00.000Z',
-          reached: 'read_natively',
-        },
-        {
-          kind: 'instructions',
-          path: 'AGENTS.md',
-          fingerprint: 'c'.repeat(64),
-          deliveredAt: '2026-09-23T09:00:00.000Z',
-          reached: 'delivery_prompt',
-        },
-      ],
-      tools: [{ name: 'search', bound: '200 matches and 1 MiB scanned a call' }],
-      commands: [{ name: 'check', line: 'pnpm check' }],
-      private: [{ agent: 'OpenCode', sentence: 'its own configuration still loads.' }],
-    }
+/** One thing a Session was provided, at the time given, reached the way its kind says. */
+function aSource(
+  kind: Provided['kind'],
+  reached: Provided['reached'],
+  deliveredAt = '2026-09-23T08:00:00.000Z',
+): Provided {
+  return {
+    kind,
+    path: kind === 'base' ? '' : 'AGENTS.md',
+    fingerprint: 'f'.repeat(64),
+    deliveredAt,
+    reached,
+  }
+}
 
-    const lists = contextListsOf(view)
-    expect(lists.provided.map((one) => [one.kind, one.label])).toEqual([
-      ['base', 'The base'],
-      ['file', 'AGENTS.md'],
-      ['delivery', 'AGENTS.md'],
+/** A view with the sources given, the tools of a fresh Session and an empty catalogue. */
+function aViewOf(provided: Provided[]): ContextView {
+  return {
+    provided,
+    tools: [{ name: 'search', bound: '200 matches and 1 MiB scanned a call' }],
+    commands: [],
+    private: [],
+  }
+}
+
+/** `HH:MM` of a moment, in the zone the test runs in, which is the one the window reads in. */
+function timeOf(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
+describe('The Context tab says how the instructions reached the agent', () => {
+  test('AGENTS.md given at the start is one line, and the base one line after it', () => {
+    const view = aViewOf([
+      aSource('base', 'embedded_resource'),
+      aSource('provided', 'session_start'),
     ])
-    expect(lists.provided[1]?.detail).toBe(`read by the agent itself · ${'b'.repeat(12)}`)
-    expect(lists.provided[2]?.detail).toBe(`delivered between two turns · ${'c'.repeat(12)}`)
-    expect(lists.tools).toEqual([{ name: 'search', bound: '200 matches and 1 MiB scanned a call' }])
-    expect(lists.commands).toEqual([{ name: 'check', command: 'pnpm check' }])
-    expect(lists.agents).toEqual([
-      { name: 'OpenCode', sentence: 'its own configuration still loads.' },
+
+    expect(contextListsOf(view).instructions).toEqual([
+      { label: 'AGENTS.md', detail: 'given at the start of the Session' },
+      { label: 'The base', detail: 'as a resource of the first prompt' },
     ])
   })
 
-  test('the file Hemera gave at the start is listed as a file, said to be given then', () => {
+  test('AGENTS.md read by the agent says so, and the base goes through its system prompt', () => {
+    const view = aViewOf([aSource('base', 'system_prompt'), aSource('native', 'read_natively')])
+
+    expect(contextListsOf(view).instructions).toEqual([
+      { label: 'AGENTS.md', detail: 'read by the agent' },
+      { label: 'The base', detail: 'through its system prompt' },
+    ])
+  })
+
+  test('a Workspace without AGENTS.md says so in a sentence', () => {
+    const view = aViewOf([aSource('base', 'embedded_resource')])
+
+    expect(contextListsOf(view).instructions).toEqual([
+      { label: 'This Workspace has no AGENTS.md' },
+      { label: 'The base', detail: 'as a resource of the first prompt' },
+    ])
+  })
+
+  test('the last change is the latest delivery, with its time', () => {
+    const view = aViewOf([
+      aSource('base', 'embedded_resource'),
+      aSource('provided', 'session_start'),
+      aSource('instructions', 'delivery_prompt', '2026-09-23T10:05:00.000Z'),
+      aSource('instructions', 'delivery_prompt', '2026-09-23T12:40:00.000Z'),
+    ])
+
+    const [file, change, base] = contextListsOf(view).instructions
+    expect(file).toEqual({ label: 'AGENTS.md', detail: 'given at the start of the Session' })
+    expect(change?.label).toBe('Last change')
+    expect(change?.detail).toBe('delivered between two turns')
+    expect(change?.at).toMatch(/^\d\d Sep/)
+    expect(change?.at?.endsWith(timeOf('2026-09-23T12:40:00.000Z'))).toBe(true)
+    expect(base?.label).toBe('The base')
+  })
+
+  test('a file written during the Session had none at the start, and its delivery is the change', () => {
+    const view = aViewOf([
+      aSource('base', 'embedded_resource'),
+      aSource('instructions', 'delivery_prompt', '2026-09-23T12:40:00.000Z'),
+    ])
+
+    const lines = contextListsOf(view).instructions
+    expect(lines.map((line) => [line.label, line.detail])).toEqual([
+      ['AGENTS.md', 'none at the start of the Session'],
+      ['Last change', 'delivered between two turns'],
+      ['The base', 'as a resource of the first prompt'],
+    ])
+  })
+
+  test('nothing is listed before anything has gone to the agent', () => {
+    expect(contextListsOf(aViewOf([])).instructions).toEqual([])
+  })
+
+  test('the tools and the catalogue are listed as the engine answered them', () => {
     const view: ContextView = {
-      provided: [
-        {
-          kind: 'provided',
-          path: 'AGENTS.md',
-          fingerprint: 'd'.repeat(64),
-          deliveredAt: '2026-09-23T08:00:00.000Z',
-          reached: 'session_start',
-        },
-      ],
-      tools: [],
-      commands: [],
-      private: [],
+      ...aViewOf([]),
+      commands: [{ name: 'check', line: 'pnpm check' }],
     }
 
     const lists = contextListsOf(view)
-    expect(lists.provided.map((one) => [one.kind, one.label])).toEqual([['file', 'AGENTS.md']])
-    expect(lists.provided[0]?.detail).toBe(`given at the start of the Session · ${'d'.repeat(12)}`)
+    expect(lists.tools).toEqual([{ name: 'search', bound: '200 matches and 1 MiB scanned a call' }])
+    expect(lists.commands).toEqual([{ name: 'check', command: 'pnpm check' }])
   })
 })
 

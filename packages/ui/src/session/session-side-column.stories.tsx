@@ -9,8 +9,8 @@ import { SessionSideColumn } from './session-side-column.tsx'
  * The three things a reader checks on while an agent works, beside the thread rather than in it.
  *
  * The plan and the files are what the turn is doing; the commands are what the Session runs, with
- * the address of a server the moment it has one; the context is what the agent is working from,
- * and the part of it Hemera cannot read. Three tabs and not one long column: a reader who comes
+ * the address of a server the moment it has one; the context is what the agent is working from:
+ * its instructions and the tools it is lent. Three tabs and not one long column: a reader who comes
  * back to a Session where a command is running wants that tab, not a scroll.
  */
 const meta = {
@@ -59,24 +59,13 @@ const meta = {
     ),
     context: (
       <ContextView
-        provided={[
-          { kind: 'base', label: 'The base', detail: 'hemera/context/v1' },
-          {
-            kind: 'file',
-            label: 'AGENTS.md',
-            detail: 'a41f8c2e, 9 128 bytes',
-            at: '21 Sep 22:14',
-          },
-          {
-            kind: 'delivery',
-            label: 'The check that failed',
-            detail: 'session: the failing suite',
-            at: '21 Sep 23:02',
-          },
+        instructions={[
+          { label: 'AGENTS.md', detail: 'given at the start of the Session' },
+          { label: 'Last change', detail: 'delivered between two turns', at: '21 Sep 23:02' },
+          { label: 'The base', detail: 'as a resource of the first prompt' },
         ]}
-        tools={[{ name: 'fs_read', bound: '256 KiB, 2 000 lines' }]}
+        tools={[{ name: 'fs_read', bound: '256 KiB a page, inside the Workspace root' }]}
         commands={[{ name: 'check', command: 'pnpm check' }]}
-        agents={[{ name: 'opencode', sentence: 'its own plugins are read by it, not by Hemera' }]}
       />
     ),
   },
@@ -229,9 +218,9 @@ export const ContextOfTheSession: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('tab', { name: 'Context' }))
-    await expect(canvas.getByText('Hemera provides')).toBeVisible()
-    await expect(canvas.getByText('21 Sep 23:02')).toBeVisible()
-    await expect(canvas.getByText('Hemera does not control')).toBeVisible()
+    await expect(canvas.getByText('Instructions')).toBeVisible()
+    await expect(canvas.getByText('· 21 Sep 23:02')).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tools · 1' })).toBeVisible()
   },
 }
 

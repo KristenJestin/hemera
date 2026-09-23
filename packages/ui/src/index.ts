@@ -332,7 +332,6 @@ export {
 } from './session/commands-panel.tsx'
 export {
   ContextView,
-  type ContextAgent,
   type ContextCommand,
   type ContextEntry,
   type ContextTool,

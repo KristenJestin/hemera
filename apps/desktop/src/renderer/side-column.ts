@@ -1,7 +1,6 @@
-import type { CommandRun, ContextView } from '@hemera/ipc'
+import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import type {
   CommandPanelRun,
-  ContextAgent,
   ContextCommand,
   ContextEntry,
   ContextTool,
@@ -12,15 +11,13 @@ import type {
  * What the side column of a Session draws from the tools store (design D6-10, D6-12).
  *
  * The Commands tab is the runs of the Session, the same runs the thread's blocks read; the
- * Context tab is the three lists the engine answered. Both are read as they came: nothing here
- * decides what a run is or what was provided, it only says it in the words the blocks take.
+ * Context tab is its instructions and its tools, as the engine answered them. Both are read as
+ * they came: nothing here decides what a run is or what was provided, it only says it in the
+ * words the blocks take.
  *
  * Kept apart from the page, which imports the design system's components, so a test can read it
  * without a theme or a DOM.
  */
-
-/** How many characters of a fingerprint are shown, enough to tell two apart at a glance. */
-const FINGERPRINT_CHARACTERS = 12
 
 /** Where a run ran, relative to the Workspace root when it is inside it. */
 function folderOf(cwd: string, root: string): string {
@@ -100,17 +97,9 @@ export function openingTabOf(runs: readonly CommandRun[], tabs: SideTabs): SideC
 const REACHED: Record<ContextView['provided'][number]['reached'], string> = {
   system_prompt: 'through its system prompt',
   embedded_resource: 'as a resource of the first prompt',
-  read_natively: 'read by the agent itself',
+  read_natively: 'read by the agent',
   session_start: 'given at the start of the Session',
   delivery_prompt: 'delivered between two turns',
-}
-
-/** Which of the view's three kinds a source is listed under: the base, the file, a delivery. */
-const LISTED_AS: Record<ContextView['provided'][number]['kind'], ContextEntry['kind']> = {
-  base: 'base',
-  native: 'file',
-  provided: 'file',
-  instructions: 'delivery',
 }
 
 /** When a source was provided, `DD Mon HH:MM`, in the one reading the whole window uses. */
@@ -121,26 +110,53 @@ function atOf(iso: string): string {
   return `${day} ${time}`
 }
 
-/** The three lists of the Context view, as the block takes them. */
+/** What the Context view draws: the lines of the instructions, the tools and the catalogue. */
 export interface ContextLists {
-  provided: ContextEntry[]
+  instructions: ContextEntry[]
   tools: ContextTool[]
   commands: ContextCommand[]
-  agents: ContextAgent[]
 }
 
-/** The three lists of the Context view, in the words the view draws them with (D6-10). */
+/**
+ * The instructions of a Session in three lines (trial of 23 September 2026): how `AGENTS.md`
+ * reached the agent, the last change delivered since with its time, and the base.
+ *
+ * Nothing is listed before anything has gone to the agent, which is a Session before its first
+ * message. A Workspace without the file says so in a sentence; one whose file appeared during the
+ * Session had none at its start, and its delivery is the last change. Fingerprints are left out:
+ * the time of the change is what tells a reader the file moved under the Session.
+ */
+function instructionsOf(provided: ContextView['provided']): ContextEntry[] {
+  if (provided.length === 0) return []
+  const file = provided.find((one) => one.kind === 'native' || one.kind === 'provided')
+  const change = provided.findLast((one) => one.kind === 'instructions')
+  const base = provided.find((one) => one.kind === 'base')
+  const lines = [fileLineOf(file, change)]
+  if (change !== undefined) {
+    lines.push({
+      label: 'Last change',
+      detail: REACHED[change.reached],
+      at: atOf(change.deliveredAt),
+    })
+  }
+  if (base !== undefined) lines.push({ label: 'The base', detail: REACHED[base.reached] })
+  return lines
+}
+
+/** The line of `AGENTS.md` itself: how it reached the agent, or that there was none. */
+function fileLineOf(file: Provided | undefined, change: Provided | undefined): ContextEntry {
+  if (file !== undefined) return { label: 'AGENTS.md', detail: REACHED[file.reached] }
+  if (change !== undefined) {
+    return { label: 'AGENTS.md', detail: 'none at the start of the Session' }
+  }
+  return { label: 'This Workspace has no AGENTS.md' }
+}
+
+/** The Context view of a Session, in the words the view draws it with (D6-10). */
 export function contextListsOf(view: ContextView): ContextLists {
   return {
-    // In the order it went in: the base, the file as read at the start, then every delivery.
-    provided: view.provided.map((one) => ({
-      kind: LISTED_AS[one.kind],
-      label: one.kind === 'base' ? 'The base' : one.path,
-      detail: `${REACHED[one.reached]} · ${one.fingerprint.slice(0, FINGERPRINT_CHARACTERS)}`,
-      at: atOf(one.deliveredAt),
-    })),
+    instructions: instructionsOf(view.provided),
     tools: view.tools.map((tool) => ({ name: tool.name, bound: tool.bound })),
     commands: view.commands.map((command) => ({ name: command.name, command: command.line })),
-    agents: view.private.map((one) => ({ name: one.agent, sentence: one.sentence })),
   }
 }

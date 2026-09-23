@@ -4,51 +4,37 @@ import { expect, userEvent, within } from 'storybook/test'
 import { ContextView } from './context-view.tsx'
 
 /**
- * What the agent is working from, and what Hemera has no say over (design D6-10).
+ * What the agent is working from (design D6-10): its instructions, and the tools it is lent.
  *
- * The stories are the three lists: a Session that has been given its file and two deliveries, a
- * Session nothing has gone into yet, and the sentence each agent gets about the sources Hemera
- * cannot read. The split between the lists is the honest part, so it is visible in every story.
+ * One story per state of the instructions — nothing gone yet, `AGENTS.md` given at the start,
+ * read by the agent, missing, and changed since — and one with the tools unfolded. Each is drawn
+ * at the width of the side column it lives in, since that width is what every row has to read
+ * whole at (trial of 23 September 2026).
  */
-const PROVIDED = [
-  { kind: 'base', label: 'The base', detail: 'hemera/context/v1' },
-  {
-    kind: 'file',
-    label: 'AGENTS.md',
-    detail: 'a41f8c2e, 9 128 bytes',
-    at: '21 Sep 22:14',
-  },
-  {
-    kind: 'delivery',
-    label: 'The check that failed',
-    detail: 'session: the failing suite',
-    at: '21 Sep 23:02',
-  },
-  {
-    kind: 'delivery',
-    label: 'docs/product/core.md',
-    detail: 'read at the reader\u2019s request',
-    at: '21 Sep 23:09',
-  },
-] as const
 
+/** The base, as it reaches an agent with no system prompt to take it. */
+const BASE = { label: 'The base', detail: 'as a resource of the first prompt' }
+
+const GIVEN = { label: 'AGENTS.md', detail: 'given at the start of the Session' }
+
+/** The eleven tools a Session is lent, each with the bound it is held to. */
 const TOOLS = [
-  { name: 'fs_read', bound: '256 KiB, 2 000 lines' },
-  { name: 'fs_write', bound: 'inside the Workspace root, 1 MiB' },
-  { name: 'fs_edit', bound: 'unique match, 1 000 lines' },
-  { name: 'search', bound: '200 matches, 1 MiB' },
-  { name: 'commands_run', bound: 'catalogue only, 30 s to first output' },
+  { name: 'fs_read', bound: '256 KiB a page, inside the Workspace root' },
+  { name: 'fs_edit', bound: 'one unique match, inside the Workspace root' },
+  { name: 'fs_write', bound: 'the whole file, inside the Workspace root' },
+  { name: 'fs_list', bound: 'one level, inside the Workspace root' },
+  { name: 'search', bound: '200 matches and 1 MiB scanned a call' },
+  { name: 'commands_list', bound: "the Project's catalogue" },
+  { name: 'commands_run', bound: 'the catalogue, or a one-off line the user allows' },
+  { name: 'commands_output', bound: 'the last 64 KiB a run printed' },
+  { name: 'commands_stop', bound: 'a run of this Project, and all it started' },
+  { name: 'project_get', bound: 'this Project' },
+  { name: 'session_get', bound: 'this Session and its last 20 entries' },
 ]
 
 const COMMANDS = [
   { name: 'check', command: 'pnpm check' },
-  { name: 'dev', command: 'pnpm dev' },
-]
-
-const AGENTS = [
-  { name: 'opencode', sentence: 'its own instructions and plugins are read by it, not by Hemera' },
-  { name: 'claude-code', sentence: 'CLAUDE.md and its memories are outside what Hemera reads' },
-  { name: 'codex', sentence: 'its configuration and skills are its own' },
+  { name: 'dev', command: 'pnpm --filter @hemera/desktop dev' },
 ]
 
 const meta = {
@@ -56,12 +42,22 @@ const meta = {
   title: 'Blocks/Session/ContextView',
   component: ContextView,
   parameters: { layout: 'padded' },
-  args: { provided: PROVIDED, tools: TOOLS, commands: COMMANDS, agents: AGENTS },
+  // The width of the side column's content, which is the width the view is read at.
+  decorators: [
+    (Story) => (
+      <div className="w-sidebar px-4">
+        <Story />
+      </div>
+    ),
+  ],
+  args: { instructions: [GIVEN, BASE], tools: TOOLS, commands: COMMANDS },
   argTypes: {
-    provided: { control: 'object', description: 'What Hemera puts in front of the agent.' },
+    instructions: {
+      control: 'object',
+      description: 'How AGENTS.md, its last change and the base reached the agent.',
+    },
     tools: { control: 'object', description: 'The tools it lends, with the bound of each.' },
-    commands: { control: 'object', description: 'The commands the catalogue holds.' },
-    agents: { control: 'object', description: 'The agents, and what Hemera cannot see of them.' },
+    commands: { control: 'object', description: 'The commands of the catalogue.' },
   },
 } satisfies Meta<typeof ContextView>
 
@@ -69,73 +65,102 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** A Session that has been given its file and two deliveries, each with its date. */
-export const ProvidedWithDeliveries: Story = {
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText('Hemera provides')).toBeVisible()
-    await expect(canvas.getByText('AGENTS.md')).toBeVisible()
-    await expect(canvas.getByText('a41f8c2e, 9 128 bytes')).toBeVisible()
-    // A delivery carries the moment it arrived: a context that came at a time is not a truth.
-    await expect(canvas.getByText('21 Sep 23:02')).toBeVisible()
-    await expect(canvas.getByText('Hemera consults')).toBeVisible()
-    await expect(canvas.getByText('200 matches, 1 MiB')).toBeVisible()
-  },
-}
-
-/** A Session nothing has gone into yet: the tools are there, and the first list is honest. */
-export const Empty: Story = {
-  args: { provided: [] },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText('Nothing has gone in yet.')).toBeVisible()
-    await expect(canvas.getByText('fs_read')).toBeVisible()
-  },
-}
-
-/** A Session with no command in its catalogue: the tools are lent, and nothing else is. */
-export const NoCommand: Story = {
-  args: { commands: [] },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    // The tools are lent whatever the catalogue holds; the catalogue itself shows no command
-    // rather than inventing one to fill the gap.
-    await expect(canvas.getByText('fs_read')).toBeVisible()
-    await expect(canvas.queryByText('pnpm check')).toBeNull()
-    await expect(canvas.queryByText('pnpm dev')).toBeNull()
-  },
-}
-
-/** What Hemera does not control, said per agent and without pretending to read it. */
-export const PersonalSourcesNotControlled: Story = {
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText('Hemera does not control')).toBeVisible()
-    await expect(canvas.getByText(/its own instructions and plugins/)).toBeVisible()
-    await userEvent.click(canvas.getByText('Hemera does not control'))
-    await expect(canvas.getByText(/its configuration and skills are its own/)).toBeVisible()
-  },
+/** The rows wider than the view they are read in, by their text: none, when every row wraps. */
+function cutRowsIn(canvasElement: HTMLElement): string[] {
+  return [...canvasElement.querySelectorAll('li')]
+    .filter((row) => row.scrollWidth > row.clientWidth)
+    .map((row) => row.textContent)
 }
 
 /**
- * A Session on an agent Hemera cannot empty of its own tools (D6-02): nothing has gone in, and
- * what the agent keeps to itself is the reason no Session is opened on it, said rather than hidden.
+ * A fresh Session whose agent was given `AGENTS.md` with its first message: the file, how it went
+ * in, the base, and the tools folded on one line.
  */
-export const UnqualifiedAgent: Story = {
+export const GivenAtTheStart: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Instructions')).toBeVisible()
+    await expect(canvas.getByText(', given at the start of the Session')).toBeVisible()
+    await expect(canvas.getByText(', as a resource of the first prompt')).toBeVisible()
+    // Folded: the count is on the line, and the list is not drawn until it is asked for.
+    await expect(canvas.getByRole('button', { name: 'Tools · 11' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    await expect(canvas.queryByText('fs_read')).toBeNull()
+    // Nothing is said of what the agent keeps to itself: that is Settings' to say.
+    await expect(canvas.queryByText(/does not control/)).toBeNull()
+  },
+}
+
+/** An agent that reads `AGENTS.md` itself, with the base in its system prompt. */
+export const ReadByTheAgent: Story = {
   args: {
-    provided: [],
-    agents: [
-      {
-        name: 'codex',
-        sentence:
-          'not qualified: apply_patch and the three MCP resource tools cannot be switched off, so Hemera would not see those calls and opens no Session on it',
-      },
+    instructions: [
+      { label: 'AGENTS.md', detail: 'read by the agent' },
+      { label: 'The base', detail: 'through its system prompt' },
     ],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Nothing has gone in yet.')).toBeVisible()
-    await userEvent.click(canvas.getByText('Hemera does not control'))
-    await expect(canvas.getByText(/not qualified: apply_patch/)).toBeVisible()
+    await expect(canvas.getByText(', read by the agent')).toBeVisible()
+    await expect(canvas.getByText(', through its system prompt')).toBeVisible()
+  },
+}
+
+/** A Workspace with no `AGENTS.md`: said in a sentence, and the base went in all the same. */
+export const NoAgentsFile: Story = {
+  args: { instructions: [{ label: 'This Workspace has no AGENTS.md' }, BASE] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('This Workspace has no AGENTS.md')).toBeVisible()
+    await expect(canvas.getByText('The base')).toBeVisible()
+  },
+}
+
+/**
+ * `AGENTS.md` changed during the Session and the change was delivered between two turns: the last
+ * change is a line of its own, with its time, and every line reads whole at the column's width.
+ */
+export const AfterADelivery: Story = {
+  args: {
+    instructions: [
+      GIVEN,
+      { label: 'Last change', detail: 'delivered between two turns', at: '23 Sep 09:14' },
+      BASE,
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Last change')).toBeVisible()
+    await expect(canvas.getByText('· 23 Sep 09:14')).toBeVisible()
+    // Whole: no row is cut, and nothing is wider than the column it is read in.
+    await expect(cutRowsIn(canvasElement)).toEqual([])
+  },
+}
+
+/** Before the first message: nothing has gone to the agent, and the tools are lent already. */
+export const NothingGoneYet: Story = {
+  args: { instructions: [] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Nothing has gone to the agent yet.')).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tools · 11' })).toBeVisible()
+  },
+}
+
+/**
+ * The tools unfolded: each with its bound, wrapped under its name when the line is longer than the
+ * column, and the catalogue `commands_run` runs from.
+ */
+export const ToolsOpen: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Tools · 11' }))
+    await expect(canvas.getByText('fs_read')).toBeVisible()
+    await expect(canvas.getByText('the catalogue, or a one-off line the user allows')).toBeVisible()
+    await expect(canvas.getByText('The catalogue commands_run runs from')).toBeVisible()
+    await expect(canvas.getByText('pnpm check')).toBeVisible()
+    await expect(cutRowsIn(canvasElement)).toEqual([])
   },
 }

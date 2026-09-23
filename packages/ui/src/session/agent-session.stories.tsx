@@ -293,32 +293,16 @@ const COMMANDS = (
 
 const CONTEXT = (
   <ContextView
-    provided={[
-      { kind: 'base', label: 'The base', detail: 'hemera/context/v1' },
-      {
-        kind: 'file',
-        label: 'AGENTS.md',
-        detail: 'a41f8c2e, 9 128 bytes',
-        at: '21 Sep 22:14',
-      },
-      {
-        kind: 'delivery',
-        label: 'The check that failed',
-        detail: 'session: the failing suite',
-        at: '21 Sep 23:02',
-      },
+    instructions={[
+      { label: 'AGENTS.md', detail: 'given at the start of the Session' },
+      { label: 'Last change', detail: 'delivered between two turns', at: '23 Sep 14:05' },
+      { label: 'The base', detail: 'as a resource of the first prompt' },
     ]}
     tools={[
-      { name: 'fs_read', bound: '256 KiB, 2 000 lines' },
-      { name: 'commands_run', bound: 'catalogue only, 30 s to first output' },
+      { name: 'fs_read', bound: '256 KiB a page, inside the Workspace root' },
+      { name: 'commands_run', bound: 'the catalogue, or a one-off line the user allows' },
     ]}
     commands={[{ name: 'check', command: 'pnpm check' }]}
-    agents={[
-      {
-        name: 'claude-code',
-        sentence: 'CLAUDE.md and its memories are outside what Hemera reads',
-      },
-    ]}
   />
 )
 
@@ -509,7 +493,8 @@ export const Complete: Story = {
     await userEvent.click(canvas.getByRole('tab', { name: 'Commands' }))
     await expect(canvas.getByText('1 running')).toBeVisible()
     await userEvent.click(canvas.getByRole('tab', { name: 'Context' }))
-    await expect(canvas.getByText('Hemera provides')).toBeVisible()
+    await expect(canvas.getByText('Instructions')).toBeVisible()
+    await expect(canvas.getByText('Last change')).toBeVisible()
     await userEvent.click(canvas.getByRole('tab', { name: 'Activity' }))
     // The agent is waiting for an answer, and the turn it is in can be stopped.
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()

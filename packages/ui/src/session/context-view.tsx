@@ -1,39 +1,36 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { Badge } from '../components/badge/badge.tsx'
-import { IconCommand, IconFileText, IconShield } from '../icons.ts'
+import { Disclosure } from '../activity/disclosure.tsx'
+import { IconCommand, IconFileText } from '../icons.ts'
 
 /**
- * What the agent is working from, and what Hemera has no say over (design D6-10).
+ * What the agent is working from (design D6-10), in the two parts a reader takes in at a glance
+ * (trial of 23 September 2026).
  *
- * Since the agent runs bare, its context is no longer something to guess at: Hemera puts the
- * context in the prompt itself, so it can show what it put there. The view is three lists, and
- * the split between them is the honest part of it.
+ * Since the agent runs bare, its context is no longer something to guess at: Hemera puts it in
+ * the prompt itself, so it can show what it put there.
  *
- * What Hemera provides: the base, the `AGENTS.md` it reads natively — read here rather than
- * asked of the agent, with the fingerprint and the date it was read, so a file that changed
- * under the Session is visible as one — and the deliveries, each with its date, because a
- * context that arrived at a moment is a fact about the Session and not a permanent truth.
+ * Instructions: how the Workspace's `AGENTS.md` reached the agent — given at the start of the
+ * Session, or read by the agent itself — the last change delivered since, with its time, and the
+ * base, on one line. A context that arrived at a moment is a fact about the Session and not a
+ * permanent truth, which is why the change carries its time.
  *
- * What Hemera consults: the tools it lends, each with the bound it is held to, and the commands
- * the catalogue holds. A tool that is offered with a limit is a different promise from a tool
- * that is offered, which is why the limit is on the line and not in a document somewhere.
+ * Tools: the tools Hemera lends, folded on one line that says how many, each with the bound it is
+ * held to once the line is opened, and the catalogue `commands_run` runs from. A tool offered with
+ * a limit is a different promise from a tool offered, so the limit is on its line.
  *
- * What Hemera does not control: the agent's own sources — its personal instructions, its
- * memories, its plugins. Hemera can say they exist and cannot say what is in them, so each one
- * gets a sentence and no detail. A list that pretended otherwise would be a lie told quietly.
+ * What the agent keeps to itself is not this tab's to say: it is said of the agent, in Settings.
+ * Every row reads whole at the column's width: a sentence wraps, and nothing is cut mid-word.
  */
 
-/** What one thing Hemera provides is, and when it came. */
+/** One line of the instructions: what it is, how it reached the agent, and when. */
 export interface ContextEntry {
-  /** Which of the three it belongs to: the base, the file, or something delivered. */
-  kind: 'base' | 'file' | 'delivery'
-  /** What it is, in one line. */
+  /** What it is: `AGENTS.md`, its last change, the base — or the sentence that stands for it. */
   label: string
-  /** What it says for itself: a path, a fingerprint, a source. */
+  /** How it reached the agent, in words. */
   detail?: string | undefined
-  /** When it was read or delivered, as the Session records it. */
+  /** When, as the Session records it. */
   at?: string | undefined
 }
 
@@ -53,137 +50,117 @@ export interface ContextCommand {
   command: string
 }
 
-/** An agent this Session can run, and what Hemera cannot see of it. */
-export interface ContextAgent {
-  /** The agent, as the machine names it. */
-  name: string
-  /** One sentence about the sources Hemera does not read. */
-  sentence: string
-}
-
 export interface ContextViewProps {
-  /** What Hemera puts in front of the agent, in the order it went in. */
-  provided: readonly ContextEntry[]
+  /**
+   * The lines of the instructions, in the order they are read: the file, its last change, the
+   * base. Empty while nothing has gone to the agent yet.
+   */
+  instructions: readonly ContextEntry[]
   /** The tools it lends it. */
   tools: readonly ContextTool[]
-  /** The commands it may run. */
+  /** The commands of the catalogue it may run. */
   commands: readonly ContextCommand[]
-  /** The agents it may run, and what of them Hemera does not control. */
-  agents: readonly ContextAgent[]
   /** Where the view sits; never how it looks. */
   className?: string | undefined
 }
 
-const VIEW = 'flex w-full flex-col gap-3'
+const VIEW = 'flex w-full min-w-0 flex-col gap-3'
 
 const GROUP = 'flex flex-col gap-1'
 
-const HEAD = 'flex items-center gap-2'
+/** The head of a part, laid like the line of a fold so the two parts start on one edge. */
+const HEAD = 'flex items-center gap-2 px-1 py-0.5'
 
 const MARK = 'flex shrink-0 text-muted-foreground'
 
 const TITLE = 'text-sm text-foreground'
 
-const LIST = 'flex flex-col gap-1'
+/** The rows under a head, indented like the body of a fold. */
+const LIST = 'flex flex-col gap-1 pl-8'
 
-const ROW = 'flex items-baseline gap-2 text-sm'
+/** A row, which wraps where the column ends and breaks a word only when it is wider than it. */
+const ROW = 'text-sm break-words'
 
-const LABEL = 'min-w-0 truncate text-foreground'
+const LABEL = 'text-foreground'
 
-const DETAIL = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
+const DETAIL = 'text-muted-foreground'
 
-const AT = 'ml-auto shrink-0 font-mono text-xs text-muted-foreground'
+const NAME = 'font-mono text-foreground'
 
-const TOOL = 'min-w-0 shrink-0 font-mono text-sm text-foreground'
+/** The catalogue under the tools: a heading of its own, quieter than the parts. */
+const CATALOGUE = 'pt-2 text-xs text-muted-foreground'
 
-/** What a Session says when Hemera has provided nothing yet. */
-const NOTHING = 'text-sm text-muted-foreground'
-
-/** The sentence about an agent's own sources, which is all Hemera can honestly say. */
-const SENTENCE = 'text-sm text-muted-foreground'
-
-function Group({
-  icon,
-  title,
-  count,
-  children,
-}: {
-  icon: ReactNode
-  title: string
-  count: number
-  children: ReactNode
-}): ReactNode {
-  return (
-    <section className={GROUP}>
-      <div className={HEAD}>
-        <span aria-hidden="true" className={MARK}>
-          {icon}
-        </span>
-        <span className={TITLE}>{title}</span>
-        <Badge tone="neutral">{`${count}`}</Badge>
-      </div>
-      {children}
-    </section>
-  )
-}
+/** What the instructions say while nothing has gone to the agent. */
+const NOTHING = 'pl-8 text-sm text-muted-foreground'
 
 export function ContextView({
-  provided,
+  instructions,
   tools,
   commands,
-  agents,
   className,
 }: ContextViewProps): ReactNode {
   return (
     <div className={cn(VIEW, className)}>
-      <Group icon={<IconFileText size="sm" />} title="Hemera provides" count={provided.length}>
-        {provided.length === 0 ? (
-          <p className={NOTHING}>Nothing has gone in yet.</p>
+      <section className={GROUP} aria-label="Instructions">
+        <div className={HEAD}>
+          <span aria-hidden="true" className={MARK}>
+            <IconFileText size="sm" />
+          </span>
+          <span className={TITLE}>Instructions</span>
+        </div>
+        {instructions.length === 0 ? (
+          <p className={NOTHING}>Nothing has gone to the agent yet.</p>
         ) : (
           <ul className={LIST}>
-            {provided.map((entry, index) => (
-              <li key={index} className={ROW}>
+            {instructions.map((entry) => (
+              <li key={entry.label} className={ROW}>
                 <span className={LABEL}>{entry.label}</span>
-                {entry.detail !== undefined && <span className={DETAIL}>{entry.detail}</span>}
-                {entry.at !== undefined && <span className={AT}>{entry.at}</span>}
+                {entry.detail !== undefined && (
+                  <span className={DETAIL}>{`, ${entry.detail}`}</span>
+                )}
+                {entry.at !== undefined && <span className={DETAIL}>{` · ${entry.at}`}</span>}
               </li>
             ))}
           </ul>
         )}
-      </Group>
-      <Group icon={<IconCommand size="sm" />} title="Hemera consults" count={tools.length}>
-        {tools.length === 0 ? (
-          <p className={NOTHING}>No tool is offered to this Session.</p>
-        ) : (
-          <ul className={LIST}>
-            {tools.map((tool) => (
-              <li key={tool.name} className={ROW}>
-                <span className={TOOL}>{tool.name}</span>
-                <span className={DETAIL}>{tool.bound}</span>
-              </li>
-            ))}
-          </ul>
+      </section>
+      {/* Folded by default: the count is what a reader checks, and the list is there when asked. */}
+      <Disclosure
+        summary={
+          <span className="flex min-w-0 items-center gap-2">
+            <span aria-hidden="true" className={MARK}>
+              <IconCommand size="sm" />
+            </span>
+            <span className={TITLE}>{`Tools · ${tools.length}`}</span>
+          </span>
+        }
+      >
+        {tools.length + commands.length === 0 ? undefined : (
+          <>
+            <ul className={GROUP}>
+              {tools.map((tool) => (
+                <li key={tool.name} className={ROW}>
+                  <span className={NAME}>{tool.name}</span>
+                  <span className={DETAIL}>{` ${tool.bound}`}</span>
+                </li>
+              ))}
+            </ul>
+            {commands.length > 0 && (
+              <>
+                <p className={CATALOGUE}>The catalogue commands_run runs from</p>
+                <ul className={GROUP}>
+                  {commands.map((command) => (
+                    <li key={command.name} className={ROW}>
+                      <span className={NAME}>{command.name}</span>
+                      <span className={DETAIL}>{` ${command.command}`}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </>
         )}
-        {commands.length > 0 && (
-          <ul className={LIST}>
-            {commands.map((command) => (
-              <li key={command.name} className={ROW}>
-                <span className={LABEL}>{command.name}</span>
-                <span className={DETAIL}>{command.command}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Group>
-      <Group icon={<IconShield size="sm" />} title="Hemera does not control" count={agents.length}>
-        <ul className={LIST}>
-          {agents.map((agent) => (
-            <li key={agent.name} className={ROW}>
-              <span className={SENTENCE}>{`${agent.name}: ${agent.sentence}`}</span>
-            </li>
-          ))}
-        </ul>
-      </Group>
+      </Disclosure>
     </div>
   )
 }
