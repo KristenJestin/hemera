@@ -269,24 +269,48 @@ function installedOf(agent: AgentOnTheMachine): string {
  * The one question a version raises — is it up to date — answered for an agent that is found.
  *
  * Still being asked and asked with no answer are not the same absence, and neither is a version:
- * the line says which it is rather than guessing. An installed command that reports no version
- * cannot be compared, so the line says what was published and leaves the comparison alone.
+ * the line says which it is rather than guessing. A version that cannot be compared — none
+ * reported, or not plain dotted numbers — is not called up to date or behind: the line says what
+ * was published and leaves the comparison alone. An installed version ahead of the published one
+ * (a snapshot, a release the registry has not caught up with) is up to date, not behind.
  */
 function updatesOf(agent: AgentOnTheMachine, checked: boolean): string {
   if (agent.latest === null) return checked ? 'Could not check' : 'Checking…'
-  if (agent.version === null) return `Latest ${agent.latest}`
-  return agent.version === agent.latest ? 'Up to date' : `Update available ${agent.latest}`
+  const order = agent.version === null ? null : compareVersions(agent.version, agent.latest)
+  if (order === null) return `Latest ${agent.latest}`
+  return order < 0 ? `Update available ${agent.latest}` : 'Up to date'
 }
 
 /**
  * The version this agent could be moved to, or null when there is nothing to offer.
  *
- * Offered only where both versions are known and differ, and only where the tool that installed
- * the command is one Hemera can place: an update run with the wrong tool is a second installation
- * rather than an update, and a command from somewhere else is left exactly where it is.
+ * Offered only where the published version is newer than the installed one, and only where the
+ * tool that installed the command is one Hemera can place: an update run with the wrong tool is a
+ * second installation rather than an update, a command from somewhere else is left exactly where
+ * it is, and a published version behind the installed one would be a downgrade.
  */
 function updateOf(agent: AgentOnTheMachine): string | null {
   if (!agent.found || agent.installer === 'unknown') return null
   if (agent.version === null || agent.latest === null) return null
-  return agent.version === agent.latest ? null : agent.latest
+  const order = compareVersions(agent.version, agent.latest)
+  return order !== null && order < 0 ? agent.latest : null
+}
+
+/**
+ * How two versions stand, segment by segment as numbers: negative when `installed` is behind,
+ * zero when they are the same, positive when it is ahead — or null when either is not plain
+ * dotted numbers, which is a version nothing here knows how to order.
+ *
+ * As numbers and not as strings: `2.0.10` is after `2.0.9`, and a missing segment counts as zero.
+ */
+function compareVersions(installed: string, published: string): number | null {
+  const plain = /^\d+(?:\.\d+)*$/
+  if (!plain.test(installed) || !plain.test(published)) return null
+  const mine = installed.split('.').map(Number)
+  const theirs = published.split('.').map(Number)
+  for (let at = 0; at < Math.max(mine.length, theirs.length); at += 1) {
+    const step = (mine[at] ?? 0) - (theirs[at] ?? 0)
+    if (step !== 0) return step
+  }
+  return 0
 }

@@ -175,6 +175,39 @@ export const MissingSaysHowToGetIt: Story = {
   },
 }
 
+/**
+ * An installed version ahead of the registry is up to date: a snapshot, or a release the registry
+ * has not caught up with. Compared as numbers, so `2.0.40` is ahead of `2.0.35` and not behind it,
+ * and nothing is offered, because what the registry published would be a downgrade.
+ */
+export const AheadOfTheRegistry: Story = {
+  args: {
+    agents: [
+      { ...CLAUDE, version: '2.0.40' },
+      { ...CODEX, version: '0.10.0' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByText('Up to date')).toHaveLength(2)
+    await expect(canvas.queryByText(/Update available/)).not.toBeInTheDocument()
+    await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
+  },
+}
+
+/**
+ * A version that is not plain dotted numbers — a pre-release, a build tag — cannot be ordered:
+ * the line says what was published and offers nothing, rather than guessing which is newer.
+ */
+export const VersionThatCannotBeCompared: Story = {
+  args: { agents: [{ ...CLAUDE, version: '2.1.0-beta.3' }] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Latest 2.0.35')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
+  },
+}
+
 /** Installed and not signed in, which is the reader's to fix and nobody else's. */
 export const InstalledButNotSignedIn: Story = {
   args: { agents: [CODEX] },
