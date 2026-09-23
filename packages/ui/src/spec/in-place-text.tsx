@@ -32,6 +32,11 @@ export interface InPlaceTextProps {
   value: string
   /** The text, once, when the caret leaves it changed. */
   onCommit: (text: string) => void
+  /**
+   * When the caret goes in: an edit starts on the text as it stands then, which is what its
+   * commit is checked against (D7-12), and only the caller knows what that is.
+   */
+  onStart?: (() => void) | undefined
   placeholder?: string | undefined
   /** How many lines it shows while it is empty. */
   rows?: number | undefined
@@ -44,6 +49,7 @@ export function InPlaceText({
   label,
   value,
   onCommit,
+  onStart,
   placeholder,
   rows = 1,
   autoFocus = false,
@@ -72,6 +78,7 @@ export function InPlaceText({
         value={draft}
         onFocus={() => {
           editing.current = true
+          onStart?.()
         }}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={() => {

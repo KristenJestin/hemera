@@ -59,7 +59,8 @@ const STAGE = 'px-10 pt-5 pb-10'
 
 /** What a part does with the reader's hand, handed down from the panel. */
 export interface SpecPartHandlers {
-  onSaveSection: (name: SectionName, body: string) => void
+  /** A section's text, with the version its edit was opened on, which the save is checked on. */
+  onSaveSection: (name: SectionName, body: string, baseVersion: number) => void
   onApplyMine: (name: SectionName, body: string) => void
   onDiscardMine: (name: SectionName) => void
   onSaveStory: (story: StoryView) => void
@@ -221,7 +222,7 @@ export function SpecPart({
       section={sectionOf(spec, name)}
       editable={editable}
       revision={spec.revision}
-      onSave={(body) => onSaveSection(name, body)}
+      onSave={(body, baseVersion) => onSaveSection(name, body, baseVersion)}
       onApplyMine={(body) => onApplyMine(name, body)}
       onDiscardMine={() => onDiscardMine(name)}
     />

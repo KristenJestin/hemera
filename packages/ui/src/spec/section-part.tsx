@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { IconButton } from '../components/button/button.tsx'
 import { IconEye, IconLock } from '../icons.ts'
@@ -35,8 +35,12 @@ export interface SectionPartProps {
   editable: boolean
   /** The revision shown, which the facts of a frozen section name. */
   revision: number
-  /** Your text, once, when the caret leaves it changed. */
-  onSave: (body: string) => void
+  /**
+   * Your text, once, when the caret leaves it changed, with the version of the section the edit
+   * was opened on: an agent may have written it meanwhile, and a save checked against the version
+   * on screen by then would be last-writer-wins (D7-12).
+   */
+  onSave: (body: string, baseVersion: number) => void
   /** Writes your text of a conflict on top of the current version. */
   onApplyMine: (body: string) => void
   /** Lets your text of a conflict go. */
@@ -54,6 +58,8 @@ export function SectionPart({
   const [previewing, setPreviewing] = useState(false)
   const [saves, setSaves] = useState(0)
   const [comparing, setComparing] = useState(false)
+  // The version the caret found the section at, noted when it goes in and never after.
+  const openedOn = useRef(section.version)
   const conflict = section.conflict
   // Your text of a conflict is held here while you keep editing it: saving it would only
   // conflict again, so it is handed over by `Apply mine` and by nothing else.
@@ -113,8 +119,11 @@ export function SectionPart({
           value={section.body}
           rows={2}
           placeholder="Nothing written yet. Write it here, or let the agent."
+          onStart={() => {
+            openedOn.current = section.version
+          }}
           onCommit={(body) => {
-            onSave(body)
+            onSave(body, openedOn.current)
             setSaves(saves + 1)
           }}
         />

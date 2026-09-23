@@ -24,7 +24,7 @@ import { SpecPanel } from './spec-panel.tsx'
  */
 
 export interface SpecActions {
-  onSaveSection: (name: SectionName, body: string) => void
+  onSaveSection: (name: SectionName, body: string, baseVersion: number) => void
   onApplyMine: (name: SectionName, body: string) => void
   onDiscardMine: (name: SectionName) => void
   onSaveStory: (story: StoryView) => void
@@ -60,8 +60,8 @@ export function useLiveSpec(
   }
 
   const actions: SpecActions = {
-    onSaveSection: (name, body) => {
-      on.onSaveSection(name, body)
+    onSaveSection: (name, body, baseVersion) => {
+      on.onSaveSection(name, body, baseVersion)
       section(name, (one) => ({
         ...one,
         body,

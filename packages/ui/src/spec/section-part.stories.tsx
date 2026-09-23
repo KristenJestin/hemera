@@ -17,11 +17,15 @@ function sectionOf(sections: SectionView[], name: SectionView['name']): SectionV
   return sections.find((section) => section.name === name)!
 }
 
-/** The part with the section held, as the engine would hold it after a save. */
+/**
+ * The part with the section held, as the engine would hold it after a save. Given `agentWrites`,
+ * the agent writes that text as a new version the moment the caret goes into the section.
+ */
 function Held({
   section: initial,
   editable,
   revision,
+  agentWrites,
   onSave,
   onApplyMine,
   onDiscardMine,
@@ -29,19 +33,26 @@ function Held({
   section: SectionView
   editable: boolean
   revision: number
-  onSave: (body: string) => void
+  agentWrites?: string | undefined
+  onSave: (body: string, baseVersion: number) => void
   onApplyMine: (body: string) => void
   onDiscardMine: () => void
 }): ReactNode {
   const [section, setSection] = useState(initial)
   return (
-    <div className="max-w-xl">
+    <div
+      className="max-w-xl"
+      onFocusCapture={() => {
+        if (agentWrites === undefined || section.body === agentWrites) return
+        setSection({ ...section, body: agentWrites, version: section.version + 1 })
+      }}
+    >
       <SectionPart
         section={section}
         editable={editable}
         revision={revision}
-        onSave={(body) => {
-          onSave(body)
+        onSave={(body, baseVersion) => {
+          onSave(body, baseVersion)
           setSection({
             ...section,
             body,
@@ -89,7 +100,11 @@ const meta = {
     section: { control: 'object', description: 'The section: body, version, author, mark.' },
     editable: { control: 'boolean', description: 'A draft at its current revision.' },
     revision: { control: 'number', description: 'The revision a frozen section names.' },
-    onSave: { description: 'Your text, once, when the caret leaves it changed.' },
+    agentWrites: { control: 'text', description: 'What the agent writes as the caret goes in.' },
+    onSave: {
+      description:
+        'Your text, once, when the caret leaves it changed, and the version it opened on.',
+    },
     onApplyMine: { description: 'Writes your text of a conflict on the current version.' },
     onDiscardMine: { description: 'Lets your text of a conflict go.' },
   },
@@ -137,12 +152,35 @@ export const EditInPlace: Story = {
     await expect(args.onSave).toHaveBeenCalledTimes(1)
     await expect(args.onSave).toHaveBeenCalledWith(
       expect.stringContaining('Credit notes included.'),
+      2,
     )
     await expect(canvas.getByRole('status')).toHaveTextContent('saved')
     await expect(canvas.getByText('sent to the agent next turn')).toBeVisible()
     await expect(canvas.getByText('v3')).toBeVisible()
     // And it goes: `saved` is a flash, not a state.
     await waitFor(() => expect(canvas.queryByRole('status')).toBeNull(), { timeout: 3000 })
+  },
+}
+
+/**
+ * Written under you: the agent writes the section while the caret is in it. Your text is handed
+ * over with the version the edit was opened on, not the one the agent left — which is what lets
+ * the engine refuse it as a conflict instead of writing over the agent (D7-12).
+ */
+export const WrittenUnderYou: Story = {
+  args: { agentWrites: 'Every invoice of the month, in one file the accountant opens as is.' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const text = canvas.getByRole('textbox', { name: 'Expected outcome' })
+    await userEvent.click(text)
+    await expect(canvas.getByText('v3')).toBeVisible()
+    await userEvent.keyboard('{Control>}{End}{/Control} Credit notes included.')
+    await userEvent.tab()
+    await expect(args.onSave).toHaveBeenCalledTimes(1)
+    await expect(args.onSave).toHaveBeenCalledWith(
+      expect.stringContaining('Credit notes included.'),
+      2,
+    )
   },
 }
 
