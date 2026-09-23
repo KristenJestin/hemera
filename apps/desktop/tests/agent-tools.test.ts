@@ -1277,4 +1277,48 @@ describe('A Session torn down with the application writes into an open database'
 
     expect(closing).toBe(true)
   })
+
+  test('a Stop during a delivery leaves no write behind once the database is closed', async () => {
+    writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')
+    const hold = held()
+    const agent = fakeAgent({
+      steps: [{ does: 'says', text: 'done' }],
+      holdsDelivery: () => hold.promise,
+    })
+    const written: string[] = []
+    const rejected: string[] = []
+    const heard = (reason: Error) => {
+      rejected.push(reason.message)
+    }
+    process.on('unhandledRejection', heard)
+
+    try {
+      await toolApplication(dataFolder, written)(agent)(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime
+          const session = yield* aSessionOn(workspace, 'claude')
+          yield* runtime.prompt(session.id, 'start')
+          // The instructions change while nothing runs: the delivery is a turn of its own, the
+          // agent holds it, and the Stop is pressed inside it right before the application quits.
+          writeFileSync(join(workspace, AGENTS_FILE), 'Be brief, and say why.\n')
+          yield* until(
+            Effect.sync(() => agent.answers.blocks.length),
+            (count) => count === 2,
+          )
+          yield* runtime.stop(session.id)
+        }),
+      )
+      // The agent lets go of the delivery once the application is gone: whatever its turn still
+      // had to write — the entry that closes it — would meet a database that is closed.
+      hold.carryOn()
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 200)
+      })
+    } finally {
+      process.off('unhandledRejection', heard)
+    }
+
+    expect(rejected).toEqual([])
+    expect(written.filter((line) => line.startsWith('sessions: write after release'))).toEqual([])
+  })
 })

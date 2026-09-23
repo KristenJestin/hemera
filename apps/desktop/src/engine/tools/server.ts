@@ -42,7 +42,7 @@ import {
   localhostOriginValidation,
   toNodeHandler,
 } from '@modelcontextprotocol/node'
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, FiberSet, Layer } from 'effect'
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http'
 import { type AddressInfo } from 'node:net'
 import { z } from 'zod'
@@ -128,6 +128,12 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
     Effect.gen(function* () {
       const access = yield* ToolAccess
       const catalogue = yield* ToolCatalogue
+      /**
+       * What a request runs, run as this layer's own: a call still in flight when the engine quits
+       * is interrupted and waited for right after the listener closes, before the database under
+       * the catalogue does, rather than left to write its entry into a database that is gone.
+       */
+      const runOwned = yield* FiberSet.makeRuntimePromise()
 
       /**
        * The tools, as one MCP server built for one request and for the grant that request carried.
@@ -154,7 +160,7 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
               const argumentsRead = flatArguments(Object.entries(argumentsSent ?? {}))
               // The request's own signal: an agent that gives up on a call — its timeout, its
               // cancel, a connection closed — stops what the call was doing (D6-05).
-              const outcome = await Effect.runPromise(
+              const outcome = await runOwned(
                 catalogue.call({
                   sessionId: grant.sessionId,
                   tool,
@@ -186,7 +192,7 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
        * tool" rather than served on behalf of nobody.
        */
       const mcp = createMcpHandler(async (context) => {
-        const grant = await Effect.runPromise(access.byId(context.authInfo?.clientId ?? ''))
+        const grant = await runOwned(access.byId(context.authInfo?.clientId ?? ''))
         return grant === null
           ? new McpServer({ name: 'hemera', version: '1.0.0' })
           : serverFor(grant)
@@ -212,15 +218,15 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
        */
       const door: FetchLikeMcpHandler = {
         fetch: async (request) => {
-          const grant = await Effect.runPromise(grantOf(request))
+          const grant = await runOwned(grantOf(request))
           if (grant === null) {
             // The line names the Session the token served and the tool it asked for — what the
             // user needs to tell which agent was turned away — and never the token (D6-01).
-            const sessionId = await Effect.runPromise(
+            const sessionId = await runOwned(
               access.sessionOf(bearerOf(request) ?? queryTokenOf(request)),
             )
             const tool = await toolAskedIn(request)
-            await Effect.runPromise(
+            await runOwned(
               access.refusedAccess(
                 `refused ${tool === null ? 'a request' : `a call to ${tool}`} for ${
                   sessionId === null ? 'no Session this engine knows' : `Session ${sessionId}`
@@ -236,7 +242,7 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
           // the refusal is an entry and a Journal line like any other (D6-03).
           const turnedAway = await refusalOf(request, grant)
           if (turnedAway !== null)
-            await Effect.runPromise(catalogue.refuse(turnedAway.asked, turnedAway.reason))
+            await runOwned(catalogue.refuse(turnedAway.asked, turnedAway.reason))
           // The digest stands where the token would: the agent's own name for itself is not the
           // secret it was handed, and the tools are told the caller, not the credential.
           return mcp.fetch(request, {

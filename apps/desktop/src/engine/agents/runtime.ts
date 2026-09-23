@@ -22,6 +22,7 @@ import {
   Duration,
   Effect,
   type Fiber,
+  FiberSet,
   Layer,
   Predicate,
   Queue,
@@ -524,6 +525,17 @@ export const runtimeLayer = Layer.effect(
 
     const owned = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>): Effect.Effect<A, E> =>
       effect.pipe(Scope.provide(scope))
+
+    /**
+     * Runs, from a callback of Node's, an effect this layer owns: a timer that fired, a question
+     * the agent's connection asked.
+     *
+     * `Effect.runPromise` there would start a fiber of nobody's, which the engine quitting neither
+     * waits for nor stops: a delivery the agent let go of after the quit would then write the entry
+     * that closes its turn into a database already closed. These fibers are this layer's, so its
+     * scope interrupts them, and waits for them, before anything underneath it is let go of.
+     */
+    const runOwned = yield* FiberSet.makeRuntimePromise()
 
     const live = new Map<string, Live>()
     const turns = new Map<string, Turn>()
@@ -1432,7 +1444,7 @@ export const runtimeLayer = Layer.effect(
               }
               Queue.offerUnsafe(queue, event)
             },
-            onPermission: (question) => Effect.runPromise(ask(sessionId, question)),
+            onPermission: (question) => runOwned(ask(sessionId, question)),
           }),
         )
 
@@ -1976,7 +1988,17 @@ export const runtimeLayer = Layer.effect(
           if (held.settle !== null) clearTimeout(held.settle)
           held.settle = setTimeout(() => {
             held.settle = null
-            void Effect.runPromise(owned(deliverWhenSafe(sessionId)))
+            // A delivery the quit interrupted is one the next start hands over, reading the file
+            // again: the promise that says so has nobody to tell. One that died says why.
+            runOwned(
+              owned(deliverWhenSafe(sessionId)).pipe(
+                Effect.tapDefect((defect) =>
+                  diagnostic.write(
+                    `agents: a delivery for Session ${sessionId} died: ${String(defect)}`,
+                  ),
+                ),
+              ),
+            ).catch(() => undefined)
           }, Duration.toMillis(INSTRUCTIONS_SETTLE))
         })
         watcher.on('error', () => unwatched(sessionId))
