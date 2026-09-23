@@ -55,7 +55,7 @@ import {
   subscribeToSpec,
   takeOver,
 } from '../spec-store.ts'
-import { openedOn, readerOf, specViewOf } from '../spec-views.ts'
+import { readerOf, specViewOf } from '../spec-views.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -258,16 +258,6 @@ export function SessionPage({
   const [detailsOpen, setDetailsOpen] = useState(false)
   /** The proposals `Not now` was pressed on: this window's answer, which nothing keeps. */
   const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set())
-  /**
-   * The version each section was at when its text took the caret (D7-12).
-   *
-   * The panel saves a section with its text alone, when the caret leaves it; what the save is
-   * checked against is the version the edit started on, never the one on screen by then — an
-   * agent may have written the section meanwhile, and a save on the newer version would be
-   * last-writer-wins. The document marks each part with `data-part`, which says whose text the
-   * caret went into.
-   */
-  const opened = useRef(new Map<SectionName, number>())
   /** The stories as the list read when a story's text took the caret: what `S2` means then. */
   const openedStories = useRef<readonly string[] | null>(null)
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
@@ -286,8 +276,6 @@ export function SessionPage({
   const noteOpened = (event: FocusEvent<HTMLElement>): void => {
     if (!(event.target instanceof HTMLTextAreaElement) || spec === null) return
     const part = event.target.closest('[data-part]')?.getAttribute('data-part')
-    const section = openedOn(spec.sections, part)
-    if (section !== null) opened.current.set(section.name, section.version)
     if (part === 'stories') openedStories.current = defined?.stories.map((one) => one.id) ?? null
   }
 
@@ -666,15 +654,9 @@ export function SessionPage({
           <SpecPanel
             spec={spec}
             reader={readerOf(defined, session.id, sessions)}
-            onSaveSection={(name, body) => {
-              const base = opened.current.get(name)
-              opened.current.delete(name)
-              // A text whose opening was never seen has no version to be checked against:
-              // saving it on the one on screen now would be last-writer-wins, so it is not
-              // saved, and the Spec is read again.
-              if (base === undefined) void readSpecAgain()
-              else void saveSection(session.id, name, body, base)
-            }}
+            // Checked against the version the edit was opened on, which the panel hands back:
+            // an agent may have written the section meanwhile (D7-12).
+            onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
             onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
             onDiscardMine={(name) => void discardMine(name)}
             onSaveStory={(story) => {
