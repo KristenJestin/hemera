@@ -647,3 +647,46 @@ describe('La règle du curseur marque le défaut du modèle', () => {
     expect([modelStage([fast]), effortStage([fast]), modeStage([fast])]).toEqual([null, null, null])
   })
 })
+
+describe('The agent starts the app and the user opens it', () => {
+  /** A run of a command, as the thread holds its entry. */
+  function aRun(id: string, name: string, kind: 'app' | 'check', state: string): SessionEntry {
+    return {
+      ...reported(id, 'command_run', name, state, null),
+      role: 'hemera',
+      payload: JSON.stringify({
+        runId: `run-${id}`,
+        name,
+        line: `pnpm ${name}`,
+        kind,
+        state,
+        cwd: '/home/ana/atlas',
+        url: null,
+        exitCode: null,
+        oneOff: false,
+      }),
+    }
+  }
+
+  test('a check Hemera is running for the turn is what the row names', () => {
+    const said = entry('e1', 'user', 'Check it')
+    const call = reported('e2', 'tool_call', 'mcp__hemera__commands_run', 'in_progress')
+    const check = aRun('e3', 'check', 'check', 'running')
+
+    expect(activityOf([said, call, check])).toEqual({ state: 'running', detail: 'Running check' })
+    // Once it has ended, the row goes back to what the turn is doing.
+    const ended = aRun('e3', 'check', 'check', 'exited')
+    expect(activityOf([said, call, ended])).toEqual({
+      state: 'running',
+      detail: 'mcp__hemera__commands_run',
+    })
+  })
+
+  test('an app left running is not what the turn is doing', () => {
+    const said = entry('e1', 'user', 'Start the app')
+    const app = aRun('e2', 'dev', 'app', 'running')
+    const answer = reported('e3', 'message', 'It is up.')
+
+    expect(activityOf([said, app, answer], 'e3').state).toBe('streaming')
+  })
+})

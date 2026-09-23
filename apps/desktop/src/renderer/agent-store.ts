@@ -12,6 +12,7 @@ import type {
 import type { ActivityState } from '@hemera/ui'
 
 import { modelDefaultsAfter, NO_DEFAULTS, type ModelDefaults } from './agent-options.ts'
+import { commandRunOf } from './agent-tool-payloads.ts'
 
 /**
  * What the agents of this window are doing (design D5-12, D5-13, D5-17).
@@ -243,6 +244,15 @@ export function activityOf(
   const thought = thoughtOf(running, newest?.turnId ?? null)
 
   if (waiting(running)) return { state: 'waiting', thought }
+
+  // A command Hemera is running for the turn — a check, a utility — is what the turn waits on,
+  // and its name says more than the tool call that asked for it (D6-12). An app is left running
+  // on purpose and is not what the turn is doing once it has started.
+  const command = [...running].reverse().find((entry) => entry.kind === 'command_run')
+  const run = command === undefined ? null : commandRunOf(command)
+  if (run !== null && run.state === 'running' && run.kind !== 'app') {
+    return { state: 'running', detail: `Running ${run.name}`, thought }
+  }
 
   const call = [...running].reverse().find((entry) => entry.kind === 'tool_call')
   if (call !== undefined && UNFINISHED.includes(call.state ?? '')) {

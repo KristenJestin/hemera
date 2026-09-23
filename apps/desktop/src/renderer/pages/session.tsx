@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 
-import type { ConfigOption, Session, SessionEntry } from '@hemera/ipc'
+import type { CommandRun, ConfigOption, Session, SessionEntry } from '@hemera/ipc'
 import {
   ActivityRow,
   AgentModelMenu,
@@ -152,6 +152,12 @@ export interface SessionPageProps {
   onPickFiles: () => Promise<string[]>
   /** Opens one of the files the turn touched, when the page around this one can open one. */
   onOpenFile?: ((path: string) => void) | undefined
+  /** The runs of this Session, as the engine last pushed them (D6-12). */
+  commandRuns: readonly CommandRun[]
+  /** Opens the address a run published, in the browser. */
+  onOpenUrl: (url: string) => void
+  /** Stops a run and everything it started. */
+  onStopRun: (runId: string) => void
 }
 
 export function SessionPage({
@@ -178,6 +184,9 @@ export function SessionPage({
   onSearchFiles,
   onPickFiles,
   onOpenFile,
+  commandRuns,
+  onOpenUrl,
+  onStopRun,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -244,6 +253,9 @@ export function SessionPage({
       now,
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
+      runs: commandRuns,
+      onOpenUrl,
+      onStopRun,
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).

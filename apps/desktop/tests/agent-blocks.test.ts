@@ -132,3 +132,55 @@ describe('A delivery shows in the timeline', () => {
     expect(drawn?.body).toBe(`Hemera gave the agent AGENTS.md. (${'a'.repeat(12)})`)
   })
 })
+
+describe('The agent starts the app and the user opens it', () => {
+  test('a command_run entry draws the address and the output its run pushed since', () => {
+    const entry = entryOf(
+      'command_run',
+      'hemera',
+      'dev',
+      JSON.stringify({
+        runId: 'run-1',
+        name: 'dev',
+        line: 'pnpm dev',
+        kind: 'app',
+        state: 'running',
+        cwd: '/home/ana/atlas',
+        url: null,
+        exitCode: null,
+        oneOff: false,
+      }),
+    )
+    const pushed = {
+      id: 'run-1',
+      projectId: 'atlas',
+      sessionId: 'session-1',
+      commandId: 'command-1',
+      name: 'dev',
+      line: 'pnpm dev',
+      kind: 'app' as const,
+      cwd: '/home/ana/atlas',
+      state: 'running' as const,
+      pid: 4242,
+      url: 'http://localhost:5173',
+      exitCode: null,
+      output: 'ready on http://localhost:5173\n',
+      dropped: 0,
+      startedAt: '2026-09-23T08:00:00.000Z',
+      endedAt: null,
+      joined: false,
+    }
+
+    // Before the window heard of the run, the entry alone: running, no address yet.
+    expect(commandRunOf(entry)).toMatchObject({ runId: 'run-1', url: undefined, output: '' })
+    // Once it has, the address and what it printed are the run's.
+    expect(commandRunOf(entry, [pushed])).toMatchObject({
+      runId: 'run-1',
+      state: 'running',
+      url: 'http://localhost:5173',
+      output: 'ready on http://localhost:5173\n',
+    })
+    // And a run of another entry is not this one's.
+    expect(commandRunOf(entry, [{ ...pushed, id: 'run-2' }])?.url).toBeUndefined()
+  })
+})

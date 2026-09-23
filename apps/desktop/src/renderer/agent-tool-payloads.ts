@@ -1,4 +1,4 @@
-import type { SessionEntry } from '@hemera/ipc'
+import type { CommandRun, SessionEntry } from '@hemera/ipc'
 import type { CommandKind, CommandState, HemeraToolArgument, HemeraToolStatus } from '@hemera/ui'
 import { z } from 'zod'
 
@@ -29,6 +29,8 @@ const hemeraToolCallPayloadSchema = z.object({
 
 /** What a command Hemera ran for a Session carries (engine, `commands/service.ts`). */
 const commandRunPayloadSchema = z.object({
+  /** The run the entry is, which is what the run pushed as it changes is found by. */
+  runId: z.string().optional(),
   name: z.string(),
   line: z.string(),
   kind: z.enum(['app', 'check', 'utility']),
@@ -107,6 +109,8 @@ export function hemeraToolCallOf(entry: SessionEntry): HemeraToolCallDrawn | nul
 
 /** What `CommandRun` needs, read off a `command_run` entry. */
 export interface CommandRunDrawn {
+  /** The run it is, or null for an entry written before runs were named in it. */
+  readonly runId: string | null
   readonly name: string
   readonly command: string
   readonly kind: CommandKind
@@ -115,14 +119,31 @@ export interface CommandRunDrawn {
   readonly url: string | undefined
   readonly exitCode: number | undefined
   readonly oneOff: boolean | undefined
+  /** What it printed, as the run pushed it last; empty until the window has heard of it. */
+  readonly output: string
 }
 
-/** `null` when the payload does not parse: the entry is left out rather than drawn from a guess. */
-export function commandRunOf(entry: SessionEntry): CommandRunDrawn | null {
+/**
+ * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
+ *
+ * The entry is written when the run starts and when it ends; `live` holds the runs of the Session
+ * as they were last pushed, and the one this entry is which knows what came between — the address it published, what it printed, and an end
+ * the entry has not been rewritten with yet. Where the window has heard of the run, it is what is
+ * drawn: the thread's block and the Commands panel show the same run (D6-12).
+ */
+export function commandRunOf(
+  entry: SessionEntry,
+  live: readonly CommandRun[] = [],
+): CommandRunDrawn | null {
   const read = readPayload(commandRunPayloadSchema, entry.payload)
   if (read === null) return null
-  const { name, line, kind, state, cwd, url, exitCode, oneOff } = read
+  const { runId, name, line, kind, cwd, oneOff } = read
+  const heard = runId === undefined ? undefined : live.find((one) => one.id === runId)
+  const state = heard?.state ?? read.state
+  const url = heard === undefined ? read.url : heard.url
+  const exitCode = heard === undefined ? read.exitCode : heard.exitCode
   return {
+    runId: runId ?? null,
     name,
     command: line,
     kind,
@@ -131,6 +152,7 @@ export function commandRunOf(entry: SessionEntry): CommandRunDrawn | null {
     url: url ?? undefined,
     exitCode: exitCode ?? undefined,
     oneOff,
+    output: heard?.output ?? '',
   }
 }
 

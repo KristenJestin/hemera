@@ -1,4 +1,4 @@
-import type { SessionEntry } from '@hemera/ipc'
+import type { CommandRun as Run, SessionEntry } from '@hemera/ipc'
 import {
   AgentText,
   CommandRun,
@@ -272,6 +272,12 @@ export interface AgentContext {
   nextAt: number | null
   /** Answers a permission the agent is waiting on, in the agent's own option. */
   onDecide: (option: PermissionOption) => void
+  /** The runs of the Session as they were last pushed: what a run's block is drawn from (D6-12). */
+  runs: readonly Run[]
+  /** Opens the address a run published, in the browser: this window is not one. */
+  onOpenUrl: (url: string) => void
+  /** Stops a run and everything it started. */
+  onStopRun: (runId: string) => void
 }
 
 /**
@@ -429,12 +435,22 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'command_run') {
-    const drawn = commandRunOf(entry)
+    // The run as the window last heard it, where it has: its address and what it printed arrive
+    // between the two writes of its entry, and the panel beside the thread reads the same run.
+    const drawn = commandRunOf(entry, context.runs)
     if (drawn === null) return null
-    return <CommandRun {...drawn} output="" />
+    const { runId, ...shown } = drawn
+    return (
+      <CommandRun
+        {...shown}
+        onOpenUrl={context.onOpenUrl}
+        onStop={runId === null ? undefined : () => context.onStopRun(runId)}
+      />
+    )
   }
 
   if (entry.kind === 'context_delivery') {
+    // A delivery is Hemera's line and never the user's (D6-08): what changed, and its fingerprint.
     const drawn = contextDeliveryOf(entry)
     if (drawn === null) return null
     return (

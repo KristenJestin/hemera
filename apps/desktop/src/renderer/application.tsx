@@ -83,6 +83,7 @@ import {
   updateAgent,
 } from './agent-store.ts'
 import { bareRowOf, offeredOf } from './bare-mode.ts'
+import { listenToTools, readRuns, stopRun, subscribeToTools, toolsSnapshot } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
   archivedSessions,
@@ -267,6 +268,9 @@ export function Application() {
   // What the agents are doing, per Session: a turn is not a fact about the window, and a window
   // that heard only about the Session on screen would lose the one behind it (design D5-12).
   const agents = useSyncExternalStore(subscribeToAgent, agentSnapshot, agentSnapshot)
+  // The runs of the Sessions, as they were last pushed: the thread's blocks and the Commands
+  // panel read the same run from here (design D6-12).
+  const tools = useSyncExternalStore(subscribeToTools, toolsSnapshot, toolsSnapshot)
   // What a page holds is a name, and what the channels take is one of the agents the engine
   // knows: resolved among them here rather than asserted at each call, so a name that answers to
   // none of them asks for nothing at all.
@@ -463,6 +467,9 @@ export function Application() {
   // about a Session and not about the page on screen, so one subscription holds them all and each
   // page reads the Session it draws (design D5-12).
   useEffect(() => listenToAgents(), [])
+  // And the runs, heard on the same channel: a command a Session started while another was on
+  // screen has moved on by the time the reader comes back to it (D6-12).
+  useEffect(() => listenToTools(), [])
 
   // The list the sidebar draws is read again when a Session gets its first entry: the engine
   // writes the user's own message as part of the prompt (design D5-11), and that message is what
@@ -488,6 +495,13 @@ export function Application() {
     if (openId === null || provider === null) return
     void readOptions(openId)
   }, [openId, provider])
+
+  // The runs of the Session on screen, read when it becomes the one the window is on: a run it
+  // started before this window was opened is a row, and the pushes only tell what changes.
+  useEffect(() => {
+    if (openId === null) return
+    void readRuns(openId)
+  }, [openId])
 
   // What this machine has, read when the window opens. The Home's composer picks the agent a
   // Session is made with, and a list that arrived only once the Settings had been opened would
@@ -1000,6 +1014,13 @@ export function Application() {
               ? []
               : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
           }
+          commandRuns={tools.runs.get(open.id) ?? []}
+          // An address a run published is opened by the browser: the window hands every web
+          // address to the platform and never navigates away itself.
+          onOpenUrl={(url) => {
+            window.open(url, '_blank', 'noopener')
+          }}
+          onStopRun={(runId) => void stopRun(open.id, runId)}
         />
       )
     }
