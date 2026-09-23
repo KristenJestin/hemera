@@ -64,7 +64,7 @@ export const ReadFolded: Story = {
     // The mark is the whole difference from a native call, so it is read on the line.
     await expect(canvas.getByText('Hemera')).toBeVisible()
     await expect(canvas.getByText('fs_read')).toBeVisible()
-    const row = canvas.getByRole('button', { name: /fs\.read/ })
+    const row = canvas.getByRole('button', { name: /fs_read/ })
     await expect(row).toHaveAttribute('aria-expanded', 'false')
     await expect(canvas.getByText('src/billing/export.ts')).toBeVisible()
   },
@@ -75,7 +75,7 @@ export const ReadOpen: Story = {
   args: { defaultOpen: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /fs\.read/ })
+    const row = canvas.getByRole('button', { name: /fs_read/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText('0–262144')).toBeVisible()
     await expect(canvas.getByText('token 7f31c0')).toBeVisible()
@@ -97,7 +97,7 @@ export const Written: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /fs\.write/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /fs_write/ }))
     await expect(canvas.getByText('write-export-test')).toBeVisible()
     await expect(canvas.getByText(/1 204 bytes/)).toBeVisible()
   },
@@ -118,7 +118,7 @@ export const Edited: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /fs\.edit/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /fs_edit/ }))
     await expect(canvas.getByText(/const lines = rows\.map/)).toBeVisible()
     await expect(canvas.getByText(/1 occurrence replaced/)).toBeVisible()
   },
@@ -156,7 +156,7 @@ export const Refused: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /fs\.write/ })
+    const row = canvas.getByRole('button', { name: /fs_write/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText('Refused')).toBeVisible()
     await expect(canvas.getByText(/not in the set of this Session/)).toBeVisible()
@@ -180,7 +180,7 @@ export const WaitingForYou: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Waiting for you')).toBeVisible()
-    await expect(canvas.getByRole('button', { name: /fs\.write/ })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: /fs_write/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
