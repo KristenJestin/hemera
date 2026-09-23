@@ -40,7 +40,7 @@ import {
   type JournalFilter,
   type OfferedAgent,
   type ProfileFacts,
-  type ProjectDraft,
+  type ProjectSettingsDraft,
   type RepositoryLine,
   type ShellProject,
 } from '@hemera/ui'
@@ -1002,8 +1002,13 @@ export function Application() {
             specPrefix: current.specPrefix,
           }}
           repositories={repositories}
-          onSave={async (draft: ProjectDraft) => {
-            const renamed = await renameProject(current, { name: draft.name, tone: draft.tone })
+          onSave={async (draft: ProjectSettingsDraft) => {
+            // The prefix goes with the identity: only the keys minted from now on take it (D7-02).
+            const renamed = await renameProject(current, {
+              name: draft.name,
+              tone: draft.tone,
+              specPrefix: draft.specPrefix,
+            })
             if (!renamed) return projectsSnapshot().refusal
             if (draft.mainPath === current.mainPath) return null
             const moved = await moveMainWorkspace(
