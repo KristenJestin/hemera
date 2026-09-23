@@ -234,6 +234,8 @@ export interface FakeScript {
    * is done in microseconds: this is where a test stops happening and presses Stop.
    */
   readonly between?: () => Promise<void>
+  /** Awaited before a delivery is answered: how a suite catches a turn inside its delivery. */
+  readonly holdsDelivery?: () => Promise<void>
   /** Called with the text of each prompt as it arrives, for a test that watches the pipe. */
   readonly onPrompt?: (text: string) => void
   /**
@@ -868,6 +870,8 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       // A prompt that is only what Hemera provides — the marker and its resources, no word of the
       // user's — is a delivery (D6-08): the agent takes it in and has nothing to do about it.
       if (provisionOnly(request)) {
+        await script.holdsDelivery?.()
+        if (cancelled) return { stopReason: 'cancelled' }
         for (const step of script.answersDelivery ?? []) {
           // oxlint-disable-next-line no-await-in-loop -- what it says is sent in order
           await notify(step)

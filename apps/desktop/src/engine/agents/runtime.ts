@@ -2056,7 +2056,6 @@ export const runtimeLayer = Layer.effect(
 
         return yield* Effect.gen(function* () {
           const held = yield* opened(sessionId)
-          starting.delete(sessionId)
           // Stopped while the agent was being started: nothing is sent, and the turn ends the way
           // a Stop ends one.
           if (turn.closed !== null) {
@@ -2069,7 +2068,10 @@ export const runtimeLayer = Layer.effect(
           // gate, which is what a delivery waits on: the end of this turn is the next safe point.
           const report = yield* turnGate(sessionId).withPermits(1)(
             Effect.suspend(() => {
+              // Still `starting` while it waits on the gate — a delivery can be holding it — so a
+              // Stop pressed meanwhile marks this turn, and it closes as soon as it gets the gate.
               turns.set(sessionId, turn)
+              starting.delete(sessionId)
               return turnBodyOf(sessionId, text, turn, held)
             }),
           )
@@ -2088,10 +2090,22 @@ export const runtimeLayer = Layer.effect(
         yield* pool.used(sessionId)
         yield* pool.busy(sessionId, true).pipe(Effect.ignore)
 
+        /** A Stop that came before the prompt went out: the turn ends there, and says so. */
+        const stoppedBefore = (closed: TurnStopReason) =>
+          Effect.gen(function* () {
+            yield* drained(sessionId, held)
+            yield* closeTurn(sessionId, turn, closed)
+            return { stopReason: closed, usage: null } satisfies TurnReport
+          })
+        if (turn.closed !== null) return yield* stoppedBefore(turn.closed)
+
         // Right before the prompt is a safe point of D6-08: the previous turn is over and
         // this one has not started. A change the watcher has not handed over yet — it was
         // made while the agent was not running — goes now.
         yield* handOver(sessionId, held)
+        // One Stop covers the whole turn: pressed while the delivery was out, it cancelled the
+        // delivery, and the user's prompt is not sent after it.
+        if (turn.closed !== null) return yield* stoppedBefore(turn.closed)
 
         // What the agent is provided goes in front of what the user asked: the base, as a
         // resource, on the first prompt of an agent with no system prompt to take it (D6-07),
@@ -2180,15 +2194,15 @@ export const runtimeLayer = Layer.effect(
         // them: an agent that ran two calls at once is waiting on two.
         yield* permissions.withdrawn(sessionId)
 
+        // A turn whose agent is still being started, or that waits on the gate behind a
+        // delivery, has sent nothing to cancel: it is marked, and the prompt closes it as
+        // cancelled instead of sending it.
+        const early = starting.get(sessionId)
+        if (early !== undefined) early.closed = 'cancelled'
+
         const held = live.get(sessionId)
         const turn = turns.get(sessionId)
-        if (turn === undefined) {
-          // A turn whose agent is still being started has sent nothing to cancel: it is marked,
-          // and the prompt closes it as cancelled instead of sending it.
-          const early = starting.get(sessionId)
-          if (early !== undefined) early.closed = 'cancelled'
-          return
-        }
+        if (turn === undefined) return
 
         const pending = turn.permission
         if (pending !== null) {

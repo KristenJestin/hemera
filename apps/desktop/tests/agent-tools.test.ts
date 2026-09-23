@@ -47,7 +47,7 @@ import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { ToolAccess } from '#engine/tools/access.ts'
 import { ToolServer } from '#engine/tools/server.ts'
-import { aSessionOn, gated, pause, threadOf, toolApplication, until } from './application.ts'
+import { aSessionOn, gated, held, pause, threadOf, toolApplication, until } from './application.ts'
 
 let dataFolder: string
 let workspace: string
@@ -1128,6 +1128,41 @@ describe('A delivery counts as given only once it was sent', () => {
       { before: fingerprintOf(A), after: fingerprintOf(B) },
       { before: fingerprintOf(B), after: fingerprintOf(A) },
     ])
+  })
+})
+
+describe('A Stop during the delivery before a prompt stops the turn', () => {
+  test('the delivery is cancelled, the prompt is never sent, and the turn closes as stopped', async () => {
+    writeFileSync(join(workspace, AGENTS_FILE), 'Be brief.\n')
+    const hold = held()
+    const agent = fakeAgent({
+      steps: [{ does: 'says', text: 'done' }],
+      holdsDelivery: () => hold.promise,
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'start')
+        // Changed and asked right away: the change goes out before the prompt, inside the turn.
+        writeFileSync(join(workspace, AGENTS_FILE), 'Be brief, and say why.\n')
+        const turn = yield* Effect.forkScoped(runtime.prompt(session.id, 'go on'))
+        yield* until(
+          Effect.sync(() => agent.answers.blocks.length),
+          (count) => count === 2,
+        )
+        yield* runtime.stop(session.id)
+        hold.carryOn()
+        const report = yield* Fiber.join(turn)
+        return { report, entries: yield* threadOf(session.id) }
+      }),
+    )
+
+    expect(seen.report.stopReason).toBe('cancelled')
+    expect(agent.answers.prompts).not.toContain('go on')
+    const closed = seen.entries.filter((entry) => entry.kind === 'turn')
+    expect(closed.map((entry) => entry.state)).toEqual(['end_turn', 'cancelled'])
   })
 })
 
