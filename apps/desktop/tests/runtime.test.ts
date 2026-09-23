@@ -583,6 +583,52 @@ describe('A turn that ends mid-flush loses nothing', () => {
 })
 
 /**
+ * An entry the timer wrote whole, and nothing held of it when it settles (Decided 10 of #17).
+ *
+ * An agent pauses between the end of a message and what it does next, and the timer writes the
+ * message in that pause: by the time the call comes, the coalescer holds nothing of it. The
+ * message is over all the same, and the Journal says so once.
+ */
+describe('A message the timer wrote whole still settles', () => {
+  test('the call that follows it settles the message it was written before', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'the reader opens the project', messageId: 'msg-1' },
+        { does: 'calls', call: { id: 'call-1', title: 'Read reader.ts', status: 'completed' } },
+      ],
+      between: gate.between,
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'what does it do'))
+
+        // The timer writes the whole message while the agent is held at the gate.
+        yield* heldInThread(session.id, (held) =>
+          held.some((entry) => entry.correlationId === 'msg-1:message'),
+        )
+        gate.carryOn()
+        expect((yield* Fiber.join(running)).stopReason).toBe('end_turn')
+
+        const answer = entryOf(
+          (yield* threadOf(session.id)).filter((entry) => entry.role === 'agent'),
+          'message',
+        )
+        expect(answer.body).toBe('the reader opens the project')
+        const lines = (yield* journalOf(session.id)).filter((line) => line.seq === answer.seq)
+        expect(lines.map((line) => line.type)).toEqual([
+          'session.entry_written',
+          'session.entry_settled',
+        ])
+      }),
+    )
+  })
+})
+
+/**
  * What an agent offers a Project's Home, before any Session holds it (design D5-17, D5-21).
  *
  * The composer of a Home chooses an agent and what that agent offers before there is a Session

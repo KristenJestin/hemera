@@ -302,6 +302,14 @@ interface Live {
    * of it.
    */
   readonly chunks: Map<string, Coalesced>
+  /**
+   * What the timer wrote of an entry that has not settled yet, by the same key.
+   *
+   * The timer can write the whole of a message in the pause an agent takes before its next step,
+   * and then nothing of it is held when that step settles it: kept here, the entry is written
+   * once more as settled, and the Journal still has its line.
+   */
+  readonly open: Map<string, Coalesced>
   /** The fiber of the flush that is due, or null when this Session holds nothing. */
   timer: Fiber.Fiber<void> | null
 }
@@ -515,9 +523,13 @@ export const runtimeLayer = Layer.effect(
      */
     const flush = (sessionId: string, held: Live, settled: boolean) =>
       Effect.gen(function* () {
-        const writing = [...held.chunks]
+        // What the timer wrote and nothing has settled comes first: its row is already there, so
+        // writing it again moves nothing in the thread, and a settling flush has to reach it.
+        const writing = [...(settled ? new Map([...held.open, ...held.chunks]) : held.chunks)]
         held.chunks.clear()
+        if (settled) held.open.clear()
         for (const [key, chunk] of writing) {
+          if (!settled && chunk.origin === 'live') held.open.set(key, chunk)
           yield* writeNow(sessionId, {
             role: 'agent',
             kind: chunk.kind,
@@ -614,7 +626,10 @@ export const runtimeLayer = Layer.effect(
           })
           return
         }
-        if (!held.chunks.has(key) && held.chunks.size > 0) yield* flush(sessionId, held, true)
+        const other = (heldKey: string) => heldKey !== key
+        if ([...held.chunks.keys(), ...held.open.keys()].some(other)) {
+          yield* flush(sessionId, held, true)
+        }
         held.chunks.set(key, chunk)
         yield* armFlush(sessionId, held)
       })
@@ -1311,6 +1326,7 @@ export const runtimeLayer = Layer.effect(
           window: null,
           pending: 0,
           chunks: new Map(),
+          open: new Map(),
           timer: null,
         }
         live.set(sessionId, started)
