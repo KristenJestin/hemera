@@ -136,7 +136,13 @@ export function CommandRun({
             )}
           </p>
         )}
-        <TerminalOutput terminalId={name} output={output} released={!running} />
+        <TerminalOutput
+          plain
+          className="pt-1"
+          terminalId={name}
+          output={output}
+          released={!running}
+        />
       </Disclosure>
       {running && onStop !== undefined && (
         <Button variant="secondary" size="sm" className="shrink-0" onClick={onStop}>

@@ -26,6 +26,14 @@ export interface TerminalOutputProps {
   output: string
   /** Whether the agent has let it go. A released console keeps its output and loses its mark. */
   released?: boolean | undefined
+  /**
+   * The log alone, with no line and no fold of its own: for a block that already has both.
+   *
+   * A command run is a fold with the name and the state on its line, and a console drawn inside
+   * it with its own line said the same two words twice under two chevrons (trial of
+   * 23 September 2026). On its own, the console keeps its line.
+   */
+  plain?: boolean | undefined
   /** Where the console sits; never how it looks. */
   className?: string | undefined
 }
@@ -41,6 +49,7 @@ export function TerminalOutput({
   terminalId,
   output,
   released = false,
+  plain = false,
   className,
 }: TerminalOutputProps): ReactNode {
   const box = useRef<HTMLPreElement>(null)
@@ -52,6 +61,12 @@ export function TerminalOutput({
     if (node === null || released) return
     node.scrollTop = node.scrollHeight
   }, [output, released])
+  const log = (
+    <pre ref={box} tabIndex={0} role="log" aria-label={`Output of ${terminalId}`} className={BOX}>
+      {output}
+    </pre>
+  )
+  if (plain) return <div className={className}>{log}</div>
   return (
     <Disclosure
       className={className}
@@ -66,9 +81,7 @@ export function TerminalOutput({
         </span>
       }
     >
-      <pre ref={box} tabIndex={0} role="log" aria-label={`Output of ${terminalId}`} className={BOX}>
-        {output}
-      </pre>
+      {log}
     </Disclosure>
   )
 }

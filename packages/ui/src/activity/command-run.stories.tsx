@@ -69,20 +69,34 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/**
+ * One fold, the run's own: its line, and one chevron at the end of it (trial of 23 September
+ * 2026). The console inside used to draw a line of its own, so a running `dev` read `dev
+ * Running` twice, under two chevrons.
+ */
+async function oneHeader(canvasElement: HTMLElement, word: string, name?: string): Promise<void> {
+  const canvas = within(canvasElement)
+  const folds = canvas.queryAllByRole('button', { expanded: true }).length
+  const closed = canvas.queryAllByRole('button', { expanded: false }).length
+  await expect(folds + closed, 'more than one fold in the run').toBe(1)
+  // The name is counted where it is not also the kind or the command line.
+  if (name !== undefined) await expect(canvas.getAllByText(name, { exact: true })).toHaveLength(1)
+  await expect(canvas.getAllByText(new RegExp(`^${word}`))).toHaveLength(1)
+}
+
 /** A server that is up: the address is on the line, and one press opens it. */
 export const AppRunning: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('pnpm dev')).toBeVisible()
-    // Two badges say it: the run's own line and the terminal panel it holds.
-    await expect(canvas.getAllByText('Running').length).toBeGreaterThan(0)
-    // A running process is what the reader is waiting on: the run's line is open, and the console
-    // inside it is open too, so the output is on the page without a press. The console is named
-    // after its terminal, which is what tells the two open lines apart.
-    await expect(canvas.getByRole('button', { name: 'dev Running' })).toHaveAttribute(
+    await oneHeader(canvasElement, 'Running', 'dev')
+    // A running process is what the reader is waiting on: the run's line is open, and the output
+    // is on the page without a press, as the log of that one line.
+    await expect(canvas.getByRole('button', { name: /^dev Running/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
+    await expect(canvas.getByRole('log', { name: 'Output of dev' })).toBeVisible()
     await expect(canvas.getByText(/press h \+ enter to show help/)).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'http://localhost:5173/' }))
     await expect(args.onOpenUrl).toHaveBeenCalledWith('http://localhost:5173/')
@@ -106,14 +120,17 @@ export const CheckExitedClean: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Exited 0')).toBeVisible()
-    await expect(canvas.getByRole('button', { name: /Exited 0/ })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    )
+    const row = canvas.getByRole('button', { name: /Exited 0/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await oneHeader(canvasElement, 'Exited')
+    // Opened, the output is right under the run's line: no second fold to open inside it.
+    await userEvent.click(row)
+    await expect(canvas.getByText(/1192 passed/)).toBeVisible()
+    await oneHeader(canvasElement, 'Exited')
   },
 }
 
-/** A check that failed: the exit code carries the colour, and the output is one press away. */
+/** A check that failed: the exit code carries the colour, and the output is read in place. */
 export const CheckFailed: Story = {
   args: {
     name: 'test',
@@ -128,9 +145,8 @@ export const CheckFailed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Exited 1')).toBeVisible()
-    // The run's line is open on a failure, and the console it holds was released, so it folds like
-    // the rest of the turn: one press brings the output back.
-    await userEvent.click(canvas.getByRole('button', { name: 'test Released' }))
+    // The run's line is open on a failure, and what it holds is the log itself.
+    await oneHeader(canvasElement, 'Exited', 'test')
     await expect(canvas.getByText(/3 failed/)).toBeVisible()
   },
 }
@@ -152,6 +168,9 @@ export const OneOff: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('One-off')).toBeVisible()
     await expect(canvas.getByText('utility')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: /Exited 0/ }))
+    await expect(canvas.getByText(/project_commands 1ms/)).toBeVisible()
+    await oneHeader(canvasElement, 'Exited')
   },
 }
 
@@ -168,5 +187,22 @@ export const Stopped: Story = {
     // The name is exact: the fold's own line carries the word "Stopped", and what is asked for
     // is the press that would end a process that is already over.
     await expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: /^dev Stopped/ }))
+    await expect(canvas.getByText(/\^C/)).toBeVisible()
+    await oneHeader(canvasElement, 'Stopped', 'dev')
+    // The console was released with the process: nothing says it again, not even as "Released".
+    await expect(canvas.queryByText('Released')).toBeNull()
+  },
+}
+
+/** A process that has written nothing yet: the run's line, and an empty log under it. */
+export const Empty: Story = {
+  args: { output: '', url: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await oneHeader(canvasElement, 'Running', 'dev')
+    const log = canvas.getByRole('log', { name: 'Output of dev' })
+    await expect(log).toBeInTheDocument()
+    await expect(log.textContent).toBe('')
   },
 }
