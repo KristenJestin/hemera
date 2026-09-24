@@ -169,7 +169,8 @@ describe("A Workspace on a chosen folder takes the folder's name", () => {
     const spike = join(elsewhere, 'spike')
     mkdirSync(spike)
 
-    expect(await createOnFolder(project.id, spike, 'spike')).toBeNull()
+    // No name given: the engine names it after the folder (D8-02).
+    expect(await createOnFolder(project.id, spike)).toBeNull()
 
     const rows = workspaceRowsOf(workspacesOf(project.id))
     expect(rows.map((one) => [one.name, one.state, one.main, one.dedicated])).toEqual([

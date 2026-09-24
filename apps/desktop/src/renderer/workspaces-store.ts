@@ -203,7 +203,8 @@ export async function readProjectVariables(projectId: string): Promise<void> {
 }
 
 /**
- * Creates a Workspace on a folder the user picked, `ready` at once (D8-02).
+ * Creates a Workspace on a folder the user picked, `ready` at once (D8-02), named after the
+ * folder unless it is given a name.
  *
  * Answers the engine's sentence when it refuses — a name taken, a folder that is not one — and
  * null once the list was read again.
@@ -211,11 +212,14 @@ export async function readProjectVariables(projectId: string): Promise<void> {
 export async function createOnFolder(
   projectId: string,
   path: string,
-  name: string,
+  name?: string,
 ): Promise<string | null> {
   forgetWorkspacesRefusal()
   try {
-    await window.hemera.invoke('workspaces.createOnFolder', { projectId, path, name })
+    await window.hemera.invoke(
+      'workspaces.createOnFolder',
+      name === undefined ? { projectId, path } : { projectId, path, name },
+    )
     await readWorkspaces(projectId)
     return null
   } catch (cause) {
