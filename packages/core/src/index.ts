@@ -117,7 +117,6 @@ export {
   InvalidVariableKeyError,
   InvalidWorkspaceNameError,
   RECIPE_KINDS,
-  RECIPE_SCOPES,
   STEP_KINDS,
   STEP_STATES,
   WORKSPACE_STATES,
@@ -134,7 +133,6 @@ export {
 } from './domain/workspace.ts'
 export type {
   RecipeKind,
-  RecipeScope,
   RecipeStep,
   StepKind,
   StepState,

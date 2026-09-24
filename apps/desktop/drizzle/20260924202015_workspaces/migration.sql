@@ -12,14 +12,13 @@ CREATE TABLE `project_preparation_steps` (
 	`id` text PRIMARY KEY,
 	`project_id` text NOT NULL,
 	`kind` text NOT NULL,
+	`base` text,
 	`path` text,
-	`scope` text DEFAULT 'root' NOT NULL,
 	`command_id` text,
 	`rank` text NOT NULL,
 	CONSTRAINT `fk_project_preparation_steps_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `fk_project_preparation_steps_command_id_project_commands_id_fk` FOREIGN KEY (`command_id`) REFERENCES `project_commands`(`id`) ON DELETE SET NULL,
-	CONSTRAINT "recipe_kind_is_known" CHECK("kind" IN ('copy', 'link', 'run')),
-	CONSTRAINT "recipe_scope_is_known" CHECK("scope" IN ('root', 'repositories'))
+	CONSTRAINT "recipe_kind_is_known" CHECK("kind" IN ('copy', 'link', 'run'))
 );
 --> statement-breakpoint
 CREATE TABLE `workspace_repositories` (
@@ -38,7 +37,7 @@ CREATE TABLE `workspace_steps` (
 	`position` integer NOT NULL,
 	`kind` text NOT NULL,
 	`target` text NOT NULL,
-	`scope` text,
+	`base` text,
 	`command_id` text,
 	`state` text NOT NULL,
 	`message` text,
@@ -48,7 +47,6 @@ CREATE TABLE `workspace_steps` (
 	CONSTRAINT `fk_workspace_steps_run_id_command_runs_id_fk` FOREIGN KEY (`run_id`) REFERENCES `command_runs`(`id`) ON DELETE SET NULL,
 	CONSTRAINT `step_once_in_workspace` UNIQUE(`workspace_id`,`position`),
 	CONSTRAINT "step_kind_is_known" CHECK("kind" IN ('worktree', 'copy', 'link', 'run')),
-	CONSTRAINT "step_scope_is_known" CHECK("scope" IS NULL OR "scope" IN ('root', 'repositories')),
 	CONSTRAINT "step_state_is_known" CHECK("state" IN ('pending', 'running', 'done', 'failed', 'skipped'))
 );
 --> statement-breakpoint

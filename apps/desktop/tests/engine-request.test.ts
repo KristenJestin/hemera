@@ -396,15 +396,15 @@ describe('Every Workspace channel reaches its use case', () => {
         yield* asked('recipe.add', {
           projectId,
           kind: 'copy',
+          base: null,
           path: '.env',
-          scope: 'root',
           commandId: null,
         })
         const added = yield* asked('recipe.add', {
           projectId,
           kind: 'link',
+          base: null,
           path: 'docs',
-          scope: 'root',
           commandId: null,
         })
         const moved = yield* asked('recipe.move', {
@@ -702,7 +702,7 @@ describe('Every Workspace channel reaches its use case', () => {
     ['preparation.prepare', {}, 'workspaceId'],
     [
       'recipe.add',
-      { projectId: 'atlas', kind: 'delete', path: null, scope: 'root', commandId: null },
+      { projectId: 'atlas', kind: 'delete', base: null, path: null, commandId: null },
       'kind',
     ],
     ['variables.set', { projectId: 'atlas', workspaceId: null, key: 'PORT' }, 'value'],

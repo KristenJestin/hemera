@@ -39,7 +39,6 @@ import {
   PHASE_STATES,
   PROJECT_TONES,
   RECIPE_KINDS,
-  RECIPE_SCOPES,
   SECTION_NAMES,
   SESSION_ENTRY_KINDS,
   SESSION_ENTRY_ORIGINS,
@@ -540,11 +539,12 @@ export const commandRuns = sqliteTable(
 /**
  * The recipe a Project prepares each dedicated Workspace with (D8-05), in `rank` order.
  *
- * `copy` puts a file of `main` at the same relative place, `link` makes a link to it, `run`
- * starts a command of the catalogue; `path` is relative, for a copy and a link, and `scope` says
- * whether it applies once at the root or in each repository. A command taken out of the
- * catalogue leaves its step without one rather than taking the step with it: the recipe is the
- * user's, and a step that cannot run is one they are shown.
+ * `copy` puts a file or a folder of `main` at the same relative place, `link` makes a link to
+ * it, `run` starts a command of the catalogue. `base` is where a copy or a link applies (D8-05 as
+ * amended by recette 1): one of the Project's repositories as the Project declares it, null for the
+ * Workspace root, several repositories being several steps; `path` is relative to that base. A
+ * command taken out of the catalogue leaves its step without one rather than taking the step with
+ * it: the recipe is the user's, and a step that cannot run is one they are shown.
  */
 export const projectPreparationSteps = sqliteTable(
   'project_preparation_steps',
@@ -554,14 +554,13 @@ export const projectPreparationSteps = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     kind: text('kind').notNull(),
+    base: text('base'),
     path: text('path'),
-    scope: text('scope').notNull().default('root'),
     commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
     rank: text('rank').notNull(),
   },
   (table) => [
     check('recipe_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(RECIPE_KINDS))})`),
-    check('recipe_scope_is_known', sql`${table.scope} IN (${sql.raw(oneOf(RECIPE_SCOPES))})`),
   ],
 )
 
@@ -571,7 +570,8 @@ export const projectPreparationSteps = sqliteTable(
  * Built at creation — the worktrees in the repositories' order, then the recipe in its order —
  * and written as each step changes, outside any transaction that would hold a process or Git:
  * a failure stops the list and keeps what was done, and a resume reads this table to know what
- * to re-check and what to retry. `message` is what refused a step, as it was said; `run_id` the
+ * to re-check and what to retry. `base` and `target` are a copy's or a link's repository and its
+ * path under it, the recipe's own. `message` is what refused a step, as it was said; `run_id` the
  * run a `run` step started, whose output is where its failure is read.
  */
 export const workspaceSteps = sqliteTable(
@@ -584,7 +584,7 @@ export const workspaceSteps = sqliteTable(
     position: integer('position').notNull(),
     kind: text('kind').notNull(),
     target: text('target').notNull(),
-    scope: text('scope'),
+    base: text('base'),
     commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
     state: text('state').notNull(),
     message: text('message'),
@@ -592,10 +592,6 @@ export const workspaceSteps = sqliteTable(
   },
   (table) => [
     check('step_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(STEP_KINDS))})`),
-    check(
-      'step_scope_is_known',
-      sql`${table.scope} IS NULL OR ${table.scope} IN (${sql.raw(oneOf(RECIPE_SCOPES))})`,
-    ),
     check('step_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(STEP_STATES))})`),
     unique('step_once_in_workspace').on(table.workspaceId, table.position),
   ],

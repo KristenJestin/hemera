@@ -600,7 +600,7 @@ describe('A run step never starts a service', () => {
         const project = yield* atlas(main, [API])
         const dev = yield* saved(project.id, 'dev', 'pnpm dev', 'serve')
         const refused = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'run', path: null, scope: 'root', commandId: dev.id }),
+          recipe.add(project.id, { kind: 'run', base: null, path: null, commandId: dev.id }),
         )
         return { refused, left: yield* recipe.list(project.id) }
       }),
@@ -616,6 +616,8 @@ describe('A run step never starts a service', () => {
 
 describe('The recipe of a Project is kept in the order the user sets', () => {
   it('adds at the end, moves one place, removes, and refuses what it cannot hold', async () => {
+    writeFileSync(join(main, 'sources', 'api', '.env'), 'PORT=3000\n')
+    writeFileSync(join(main, 'CLAUDE.md'), '# Atlas\n')
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
         const recipe = yield* Recipe
@@ -623,30 +625,30 @@ describe('The recipe of a Project is kept in the order the user sets', () => {
         const install = yield* saved(project.id, 'install', 'node --version', 'script')
         yield* recipe.add(project.id, {
           kind: 'copy',
+          base: API,
           path: '.env',
-          scope: 'repositories',
           commandId: null,
         })
         yield* recipe.add(project.id, {
           kind: 'link',
+          base: null,
           path: 'CLAUDE.md',
-          scope: 'root',
           commandId: null,
         })
         const three = yield* recipe.add(project.id, {
           kind: 'run',
+          base: null,
           path: null,
-          scope: 'root',
           commandId: install.id,
         })
         const moved = yield* recipe.move(project.id, three[2]!.id, 'up')
         const first = yield* recipe.move(project.id, moved[0]!.id, 'up')
         const removed = yield* recipe.remove(project.id, moved[0]!.id)
         const outside = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'copy', path: '../x', scope: 'root', commandId: null }),
+          recipe.add(project.id, { kind: 'copy', base: null, path: '../x', commandId: null }),
         )
         const stranger = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'run', path: null, scope: 'root', commandId: 'nobody' }),
+          recipe.add(project.id, { kind: 'run', base: null, path: null, commandId: 'nobody' }),
         )
         const sql = yield* SqliteClient
         const events = yield* sql<{ type: string }>`
@@ -655,10 +657,10 @@ describe('The recipe of a Project is kept in the order the user sets', () => {
       }),
     )
 
-    expect(seen.three.map((step) => [step.kind, step.path, step.scope])).toEqual([
-      ['copy', './.env', 'repositories'],
-      ['link', './CLAUDE.md', 'root'],
-      ['run', null, 'root'],
+    expect(seen.three.map((step) => [step.kind, step.base, step.path])).toEqual([
+      ['copy', API, './.env'],
+      ['link', null, './CLAUDE.md'],
+      ['run', null, null],
     ])
     expect(seen.moved.map((step) => step.kind)).toEqual(['copy', 'run', 'link'])
     // The first stays first, and nothing is written for a move that moves nothing.

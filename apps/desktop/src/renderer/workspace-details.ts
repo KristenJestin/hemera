@@ -87,10 +87,9 @@ export function branchesKeptOf(workspace: Workspace): string[] {
   return [...new Set(workspace.repositories.map((one) => one.branch))]
 }
 
-/** Where a copy or a link of the recipe lands, as the Preparation card says it. */
-const LANDS: Record<'root' | 'repositories', string> = {
-  root: 'at the root',
-  repositories: 'in each repository',
+/** A copy's or a link's path under its repository, as a label reads: `sources/api/.env`. */
+function underBase(base: string, path: string): string {
+  return `${base.replace(/^\.\//, '')}/${path.replace(/^\.\//, '')}`
 }
 
 /** The steps of a preparation, in their order, a failure's message as it was said (D8-05). */
@@ -100,10 +99,8 @@ export function stepLinesOf(steps: readonly WorkspaceStep[]): PreparationStepLin
     .map((step) => ({
       id: step.id,
       kind: step.kind,
-      target:
-        (step.kind === 'copy' || step.kind === 'link') && step.scope !== null
-          ? `${step.target} ${LANDS[step.scope]}`
-          : step.target,
+      // A copy or a link names its path under its base (D8-05 as amended by recette 1).
+      target: step.base === null ? step.target : underBase(step.base, step.target),
       state: step.state,
       message: step.message ?? undefined,
       // The run a `run` step started, whose details the step offers (D8-05, Decided 11).
@@ -206,7 +203,7 @@ export function recipeLinesOf(steps: readonly RecipeStep[]): RecipeStepLine[] {
   return steps.map((step) => ({
     id: step.id,
     kind: step.kind,
-    base: null,
+    base: step.base,
     path: step.path,
     commandId: step.commandId,
   }))
@@ -221,13 +218,12 @@ export function recipeCommandsOf(catalogue: readonly Command[]): RecipeCommand[]
 export type RecipeAdd = Omit<ChannelArguments<'recipe.add'>, 'projectId'>
 
 /**
- * A step the card hands over, as the engine adds it: a command, or a path the engine reads from
- * the root — the base joined to it until the engine keeps a base of its own.
+ * A step the card hands over, as the engine adds it: a command, or a file or a folder under the
+ * base it names (D8-05 as amended by recette 1).
  */
 export function recipeAddOf(draft: RecipeStepDraft): RecipeAdd {
   if (draft.kind === 'run') {
-    return { kind: 'run', path: null, scope: 'root', commandId: draft.commandId }
+    return { kind: 'run', base: null, path: null, commandId: draft.commandId }
   }
-  const path = draft.base === null ? draft.path : `${draft.base}/${draft.path ?? ''}`
-  return { kind: draft.kind, path, scope: 'root', commandId: null }
+  return { kind: draft.kind, base: draft.base, path: draft.path, commandId: null }
 }

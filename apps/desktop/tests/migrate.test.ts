@@ -77,7 +77,7 @@ const SPECS_MIGRATION = '20260924122302_specs'
  * the Workspaces, their steps and variables, and the commands typed by seven types (D8-01, D8-05,
  * D8-06, D8-07).
  */
-const WORKSPACES_MIGRATION = '20260924201731_workspaces'
+const WORKSPACES_MIGRATION = '20260924202015_workspaces'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {

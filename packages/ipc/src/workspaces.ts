@@ -101,20 +101,19 @@ export type RepositoryState = z.infer<typeof repositoryStateSchema>
 /** What a recipe step does (D8-05). */
 export const recipeKindSchema = z.enum(['copy', 'link', 'run'])
 
-/** Where a copy or a link applies: once at the root, or in each repository (D8-05). */
-export const recipeScopeSchema = z.enum(['root', 'repositories'])
-
 /**
  * One step of a Workspace's preparation (D8-05): a worktree, then the recipe's copies, links and
- * runs, in order. `message` is what refused it, in the words of whatever did, or what a `copy`
- * kept; `runId` the run a `run` step started.
+ * runs, in order. `target` is the worktree's path, a copy's or a link's path under its `base` —
+ * a repository, null for the root — or the name of the command a run starts. `message` is what
+ * refused it, in the words of whatever did, or what a `copy` kept; `runId` the run a `run` step
+ * started.
  */
 export const workspaceStepSchema = z.object({
   id: z.string(),
   position: z.number(),
   kind: z.enum(['worktree', 'copy', 'link', 'run']),
   target: z.string(),
-  scope: recipeScopeSchema.nullable(),
+  base: z.string().nullable(),
   commandId: z.string().nullable(),
   state: z.enum(['pending', 'running', 'done', 'failed', 'skipped']),
   message: z.string().nullable(),
@@ -124,14 +123,16 @@ export const workspaceStepSchema = z.object({
 export type WorkspaceStep = z.infer<typeof workspaceStepSchema>
 
 /**
- * One step of a Project's recipe (D8-05): `path` relative to the root for a copy and a link, null
- * for a run; `commandId` the catalogue command a run starts. `rank` is its order.
+ * One step of a Project's recipe (D8-05 as amended by recette 1): `base` one of the Project's
+ * repositories as it declares it, null for the Workspace root; `path` a file or a folder relative
+ * to that base for a copy and a link, null for a run; `commandId` the catalogue command a run
+ * starts. `rank` is its order.
  */
 export const recipeStepSchema = z.object({
   id: z.string(),
   kind: recipeKindSchema,
+  base: z.string().nullable(),
   path: z.string().nullable(),
-  scope: recipeScopeSchema,
   commandId: z.string().nullable(),
   rank: z.string(),
 })

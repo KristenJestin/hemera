@@ -23,11 +23,11 @@ import {
   workspaceStateOf,
 } from '#index.ts'
 
-/** The recipe of the scenario: copy `.env` in the repositories, link CLAUDE.md, run install. */
+/** The recipe of the scenario: copy `.env` in the api, link CLAUDE.md at the root, run install. */
 const RECIPE: RecipeStep[] = [
-  { id: 'r1', kind: 'copy', path: '.env', scope: 'repositories', commandId: null, rank: 'a' },
-  { id: 'r2', kind: 'link', path: 'CLAUDE.md', scope: 'root', commandId: null, rank: 'b' },
-  { id: 'r3', kind: 'run', path: null, scope: 'root', commandId: 'install-id', rank: 'c' },
+  { id: 'r1', kind: 'copy', base: './sources/api', path: '.env', commandId: null, rank: 'a' },
+  { id: 'r2', kind: 'link', base: null, path: 'CLAUDE.md', commandId: null, rank: 'b' },
+  { id: 'r3', kind: 'run', base: null, path: null, commandId: 'install-id', rank: 'c' },
 ]
 
 const NAMES = new Map([['install-id', 'install']])
@@ -51,11 +51,12 @@ describe('The steps follow the recipe in order', () => {
     ])
   })
 
-  test('a recipe step keeps its scope and its command; a worktree has neither', () => {
+  test('a recipe step keeps its base and its command; a worktree has neither', () => {
     const steps = stepsFor(['./sources/api'], RECIPE, NAMES)
-    expect(steps[0]).toMatchObject({ scope: null, commandId: null, message: null, runId: null })
-    expect(steps[1]).toMatchObject({ scope: 'repositories', commandId: null })
-    expect(steps[3]).toMatchObject({ scope: 'root', commandId: 'install-id' })
+    expect(steps[0]).toMatchObject({ base: null, commandId: null, message: null, runId: null })
+    expect(steps[1]).toMatchObject({ base: './sources/api', target: '.env', commandId: null })
+    expect(steps[2]).toMatchObject({ base: null, target: 'CLAUDE.md' })
+    expect(steps[3]).toMatchObject({ base: null, commandId: 'install-id' })
   })
 })
 

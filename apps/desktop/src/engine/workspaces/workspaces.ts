@@ -24,7 +24,6 @@ import {
   ROOT_REPOSITORY,
   STEP_KINDS,
   STEP_STATES,
-  RECIPE_SCOPES,
   WORKSPACE_STATES,
   type WorkspaceState,
   type WorkspaceStep,
@@ -192,14 +191,14 @@ export function workspaceStateIn(state: string): WorkspaceState {
   return WORKSPACE_STATES.find((known) => known === state) ?? 'failed'
 }
 
-/** A step of a Workspace read from its row, whose kind, scope and state the checks closed. */
+/** A step of a Workspace read from its row, whose kind and state the checks closed. */
 export function stepOf(row: typeof workspaceSteps.$inferSelect): WorkspaceStep {
   return {
     id: row.id,
     position: row.position,
     kind: STEP_KINDS.find((kind) => kind === row.kind) ?? 'run',
     target: row.target,
-    scope: RECIPE_SCOPES.find((scope) => scope === row.scope) ?? null,
+    base: row.base,
     commandId: row.commandId,
     state: STEP_STATES.find((state) => state === row.state) ?? 'failed',
     message: row.message,
@@ -734,7 +733,7 @@ export const workspacesLayer = Layer.effect(
                           position: step.position,
                           kind: step.kind,
                           target: step.target,
-                          scope: step.scope,
+                          base: step.base,
                           commandId: step.commandId,
                           state: bareLocation ? 'skipped' : step.state,
                           message: bareLocation

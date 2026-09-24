@@ -116,7 +116,6 @@ export type {
 } from './tools.ts'
 export {
   recipeKindSchema,
-  recipeScopeSchema,
   recipeStepSchema,
   repositoryStateSchema,
   variableSchema,

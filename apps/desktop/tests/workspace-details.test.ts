@@ -61,12 +61,15 @@ describe('The cards say the engine views in their own words', () => {
 
   test('a step of the recipe says where it lands, and a failure keeps its message', () => {
     const lines = stepLinesOf([
-      step(2, { kind: 'copy', target: '.env', scope: 'repositories', state: 'pending' }),
+      step(2, { kind: 'copy', target: './.env', base: './sources/api', state: 'pending' }),
+      step(3, { kind: 'link', target: './CLAUDE.md', base: null, state: 'pending' }),
       step(1, { state: 'failed', message: "fatal: 'sources/front' already exists" }),
     ])
     expect(lines.map((one) => [one.kind, one.target, one.state, one.message])).toEqual([
       ['worktree', 'sources/api', 'failed', "fatal: 'sources/front' already exists"],
-      ['copy', '.env in each repository', 'pending', undefined],
+      // Its path under the repository it applies in (D8-05 as amended by recette 1).
+      ['copy', 'sources/api/.env', 'pending', undefined],
+      ['link', './CLAUDE.md', 'pending', undefined],
     ])
   })
 
@@ -154,26 +157,26 @@ describe('The cards say the engine views in their own words', () => {
     })
   })
 
-  test('a recipe step is added as the engine takes it, its base joined to its path', () => {
+  test('a recipe step is added as the engine takes it, with the base it names', () => {
     expect(
       recipeAddOf({ kind: 'copy', base: './sources/api', path: '.env', commandId: null }),
     ).toEqual({
       kind: 'copy',
-      path: './sources/api/.env',
-      scope: 'root',
+      base: './sources/api',
+      path: '.env',
       commandId: null,
     })
     expect(
       recipeAddOf({ kind: 'run', base: null, path: null, commandId: 'command-install' }),
     ).toEqual({
       kind: 'run',
+      base: null,
       path: null,
-      scope: 'root',
       commandId: 'command-install',
     })
     expect(
       recipeLinesOf([
-        { id: 'r1', kind: 'run', path: null, scope: 'root', commandId: 'command-dev', rank: 'a' },
+        { id: 'r1', kind: 'run', base: null, path: null, commandId: 'command-dev', rank: 'a' },
       ]),
     ).toEqual([{ id: 'r1', kind: 'run', base: null, path: null, commandId: 'command-dev' }])
   })

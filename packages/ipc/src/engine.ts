@@ -32,7 +32,6 @@ import {
 } from './tools.ts'
 import {
   recipeKindSchema,
-  recipeScopeSchema,
   recipeStepSchema,
   repositoryStateSchema,
   variableSchema,
@@ -757,7 +756,10 @@ export const ENGINE_REQUESTS = {
   },
 
   // The Project's recipe, which each dedicated Workspace is prepared from (D8-05). Every change
-  // answers the recipe as it now is.
+  // answers the recipe as it now is. A copy or a link names a file or a folder by its `path`
+  // under its `base` — a repository the Project declares, null for the Workspace root — and is
+  // refused, naming it, when that source is not in `main` (D8-05 as amended by recette 1).
+  // `update` rewrites a step in its place.
   'recipe.list': {
     arguments: z.object({ projectId: z.string() }),
     response: z.array(recipeStepSchema),
@@ -766,8 +768,19 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({
       projectId: z.string(),
       kind: recipeKindSchema,
+      base: z.string().nullable(),
       path: z.string().nullable(),
-      scope: recipeScopeSchema,
+      commandId: z.string().nullable(),
+    }),
+    response: z.array(recipeStepSchema),
+  },
+  'recipe.update': {
+    arguments: z.object({
+      projectId: z.string(),
+      id: z.string(),
+      kind: recipeKindSchema,
+      base: z.string().nullable(),
+      path: z.string().nullable(),
       commandId: z.string().nullable(),
     }),
     response: z.array(recipeStepSchema),

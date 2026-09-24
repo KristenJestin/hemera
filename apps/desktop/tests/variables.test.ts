@@ -116,8 +116,8 @@ describe('A Workspace’s variable overrides the Project’s', () => {
         )
         yield* (yield* Recipe).add(project.id, {
           kind: 'run',
+          base: null,
           path: null,
-          scope: 'root',
           commandId: port.id,
         })
         const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')

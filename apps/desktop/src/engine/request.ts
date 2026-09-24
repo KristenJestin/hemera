@@ -442,6 +442,10 @@ export function answer(
       const { projectId, ...edit } = decision.argument
       return yield* recipe.add(projectId, edit)
     }
+    if (decision.name === 'recipe.update') {
+      const { projectId, id, ...edit } = decision.argument
+      return yield* recipe.update(projectId, id, edit)
+    }
     if (decision.name === 'recipe.remove') {
       const { projectId, id } = decision.argument
       return yield* recipe.remove(projectId, id)

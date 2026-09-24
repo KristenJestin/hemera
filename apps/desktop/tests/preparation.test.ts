@@ -34,7 +34,7 @@ import {
   PreparationRunningError,
   hostLinks,
 } from '#engine/workspaces/preparation.ts'
-import { Recipe, type RecipeEdit } from '#engine/workspaces/recipe.ts'
+import { Recipe, type RecipeEdit, RecipeRefusedError } from '#engine/workspaces/recipe.ts'
 import {
   CleanupRefusedError,
   Workspaces,
@@ -67,8 +67,9 @@ const node = (code: string) => `"${process.execPath}" -e "${code}"`
 /** A path written in a quoted string of that code: a Windows path's backslashes doubled. */
 const quoted = (path: string) => path.replaceAll('\\', '\\\\')
 
-const COPY_ENV: RecipeEdit = { kind: 'copy', path: '.env', scope: 'repositories', commandId: null }
-const LINK_CLAUDE: RecipeEdit = { kind: 'link', path: 'CLAUDE.md', scope: 'root', commandId: null }
+/** The api's `.env`, copied under that repository (D8-05 as amended by recette 1). */
+const COPY_ENV: RecipeEdit = { kind: 'copy', base: API, path: '.env', commandId: null }
+const LINK_CLAUDE: RecipeEdit = { kind: 'link', base: null, path: 'CLAUDE.md', commandId: null }
 
 /**
  * `Atlas` with its two repositories, the recipe given — a `run` names the line of its `install`
@@ -84,8 +85,8 @@ const createdWith = (recipe: readonly (RecipeEdit | { run: string })[]) =>
         const install = yield* saved(project.id, 'install', step.run, 'script')
         yield* edits.add(project.id, {
           kind: 'run',
+          base: null,
           path: null,
-          scope: 'root',
           commandId: install.id,
         })
       } else {
@@ -139,6 +140,9 @@ const shown = (steps: readonly { kind: string; target: string; state: string }[]
 
 describe('The steps follow the recipe in order', () => {
   it('lists the two worktrees, then the copy, the link and the run, all pending', async () => {
+    // The sources are in main: a copy or a link is accepted only then.
+    writeFileSync(join(main, 'sources', 'api', '.env'), 'PORT=3000\n')
+    writeFileSync(join(main, 'CLAUDE.md'), '# Atlas\n')
     const steps = await workspaceEngine(folder)(
       Effect.gen(function* () {
         const workspace = yield* createdWith([
@@ -158,8 +162,9 @@ describe('The steps follow the recipe in order', () => {
       ['run', 'install', 'pending'],
     ])
     expect(steps.map((step) => step.position)).toEqual([1, 2, 3, 4, 5])
-    expect(steps[2]?.scope).toBe('repositories')
-    expect(steps[3]?.scope).toBe('root')
+    // A copy or a link keeps the repository it applies under; the root is none.
+    expect(steps[2]?.base).toBe(API)
+    expect(steps[3]?.base).toBeNull()
   })
 })
 
@@ -184,7 +189,7 @@ describe('A copy never overwrites and skips a missing source', () => {
 
     const copied = seen.steps[2]
     expect(copied?.state).toBe('done')
-    expect(copied?.message).toBe('sources/api: kept as it was; sources/front: no source')
+    expect(copied?.message).toBe('sources/api/.env: kept as it was')
     // The worktree's own checkout, with the line ends the machine's Git gives it (CRLF under
     // Windows' `core.autocrlf`), and never main's copy.
     const kept = readFileSync(join(seen.prepared.path, 'sources', 'api', '.env'), 'utf8')
@@ -193,16 +198,19 @@ describe('A copy never overwrites and skips a missing source', () => {
     expect(seen.prepared.state).toBe('ready')
   })
 
-  it('copies where there is none, and skips a step whose every source is missing', async () => {
+  it('copies where there is none, and skips a step whose source is gone from main since', async () => {
     writeFileSync(join(main, '.env.local'), 'SECRET=local\n')
+    writeFileSync(join(main, 'sources', 'front', '.env.gone'), 'GONE=1\n')
 
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([
-          { kind: 'copy', path: '.env.local', scope: 'root', commandId: null },
-          { kind: 'copy', path: '.env.absent', scope: 'repositories', commandId: null },
+          { kind: 'copy', base: null, path: '.env.local', commandId: null },
+          { kind: 'copy', base: FRONT, path: '.env.gone', commandId: null },
         ])
+        // Accepted while it was there; removed from main before the Workspace is prepared.
+        rmSync(join(main, 'sources', 'front', '.env.gone'))
         const prepared = yield* preparation.prepare(workspace.id)
         return { prepared, steps: yield* stepsOf(workspace.id) }
       }),
@@ -212,9 +220,200 @@ describe('A copy never overwrites and skips a missing source', () => {
     expect(readFileSync(join(seen.prepared.path, '.env.local'), 'utf8')).toBe('SECRET=local\n')
     expect(seen.steps[3]).toMatchObject({
       state: 'skipped',
-      message: 'sources/api: no source; sources/front: no source',
+      message: 'sources/front/.env.gone: no source',
     })
     expect(seen.prepared.state).toBe('ready')
+  })
+})
+
+describe('A folder is copied whole, and never over what is there', () => {
+  it('copies what the worktree lacks under the repository, and keeps the files it has', async () => {
+    const api = join(main, 'sources', 'api')
+    // The branch carries `config/app.json`; main's copy of it has changed since, and main holds
+    // a nested file the branch never had.
+    mkdirSync(join(api, 'config', 'local'), { recursive: true })
+    writeFileSync(join(api, 'config', 'app.json'), '{"from":"branch"}\n')
+    git(api, 'add', 'config/app.json')
+    git(api, 'commit', '-q', '-m', 'config')
+    writeFileSync(join(api, 'config', 'app.json'), '{"from":"main"}\n')
+    writeFileSync(join(api, 'config', 'local', 'secrets.json'), '{"token":"t"}\n')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspace = yield* createdWith([
+          { kind: 'copy', base: API, path: 'config', commandId: null },
+        ])
+        const prepared = yield* preparation.prepare(workspace.id)
+        return { prepared, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    const config = join(seen.prepared.path, 'sources', 'api', 'config')
+    expect(seen.steps[2]).toMatchObject({ kind: 'copy', state: 'done', message: null })
+    // The branch's own file is kept, with the line ends the machine's Git gives it.
+    expect(readFileSync(join(config, 'app.json'), 'utf8').replaceAll('\r\n', '\n')).toBe(
+      '{"from":"branch"}\n',
+    )
+    // What the worktree lacked is copied, nested folder and all.
+    expect(readFileSync(join(config, 'local', 'secrets.json'), 'utf8')).toBe('{"token":"t"}\n')
+    expect(lstatSync(config).isSymbolicLink()).toBe(false)
+    expect(seen.prepared.state).toBe('ready')
+  })
+
+  it('says a folder all of whose files were already there was kept', async () => {
+    const api = join(main, 'sources', 'api')
+    mkdirSync(join(api, 'config'))
+    writeFileSync(join(api, 'config', 'app.json'), '{}\n')
+    git(api, 'add', 'config/app.json')
+    git(api, 'commit', '-q', '-m', 'config')
+
+    const steps = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspace = yield* createdWith([
+          { kind: 'copy', base: API, path: 'config', commandId: null },
+        ])
+        yield* preparation.prepare(workspace.id)
+        return yield* stepsOf(workspace.id)
+      }),
+    )
+
+    expect(steps[2]).toMatchObject({ state: 'done', message: 'sources/api/config: kept as it was' })
+  })
+})
+
+describe('A folder is linked under its repository', () => {
+  it('links main’s folder of the api into the api’s worktree: a junction on Windows', async () => {
+    const api = join(main, 'sources', 'api')
+    mkdirSync(join(api, 'node_modules', 'left-pad'), { recursive: true })
+    writeFileSync(join(api, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1\n')
+
+    const prepared = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspace = yield* createdWith([
+          { kind: 'link', base: API, path: 'node_modules', commandId: null },
+        ])
+        return yield* preparation.prepare(workspace.id)
+      }),
+    )
+
+    const linked = join(prepared.path, 'sources', 'api', 'node_modules')
+    expect(prepared.state).toBe('ready')
+    // Node reads a junction as a symbolic link as well: what matters is that it is no copy.
+    expect(lstatSync(linked).isSymbolicLink()).toBe(true)
+    expect(readFileSync(join(linked, 'left-pad', 'index.js'), 'utf8')).toBe('module.exports = 1\n')
+    if (process.platform === 'win32') {
+      const tag = /Reparse Tag Value : (0x[0-9a-f]+)/i.exec(
+        execFileSync('fsutil', ['reparsepoint', 'query', linked], { encoding: 'utf8' }),
+      )?.[1]
+      expect(tag).toBe('0xa0000003')
+    }
+  })
+})
+
+describe('The step dialog checks the source exists in main before it accepts', () => {
+  it('accepts a file or a folder that is there, and refuses one that is not, naming it', async () => {
+    writeFileSync(join(main, 'sources', 'api', '.env'), 'PORT=3000\n')
+    mkdirSync(join(main, 'shared'))
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const recipe = yield* Recipe
+        const project = yield* atlas(main, [API, FRONT])
+        const file = yield* recipe.add(project.id, COPY_ENV)
+        const directory = yield* recipe.add(project.id, {
+          kind: 'link',
+          base: null,
+          path: 'shared',
+          commandId: null,
+        })
+        const missing = yield* Effect.flip(
+          recipe.add(project.id, { kind: 'copy', base: FRONT, path: '.env', commandId: null }),
+        )
+        const stray = yield* Effect.flip(
+          recipe.add(project.id, { kind: 'copy', base: './web', path: '.env', commandId: null }),
+        )
+        const climbing = yield* Effect.flip(
+          recipe.add(project.id, { kind: 'copy', base: API, path: '../../..', commandId: null }),
+        )
+        return { file, directory, missing, stray, climbing, after: yield* recipe.list(project.id) }
+      }),
+    )
+
+    expect(seen.file.map((one) => [one.kind, one.base, one.path])).toEqual([
+      ['copy', API, './.env'],
+    ])
+    expect(seen.directory.at(-1)).toMatchObject({ kind: 'link', base: null, path: './shared' })
+    expect(seen.missing).toBeInstanceOf(RecipeRefusedError)
+    expect(seen.missing.message).toBe(
+      `${join(main, 'sources', 'front', '.env')} does not exist in main: a copy needs its source`,
+    )
+    expect(seen.stray.message).toBe('./web is not a repository of this Project')
+    expect(seen.climbing.message).toContain('it resolves outside the workspace root')
+    // Nothing refused was written.
+    expect(seen.after).toHaveLength(2)
+  })
+})
+
+describe('A step of the recipe is rewritten in its place', () => {
+  it('changes its base and path, keeps its rank, and refuses a source that is not in main', async () => {
+    writeFileSync(join(main, 'CLAUDE.md'), '# Atlas\n')
+    writeFileSync(join(main, 'sources', 'front', '.env'), 'PORT=3001\n')
+    writeFileSync(join(main, 'sources', 'api', '.env'), 'PORT=3000\n')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const recipe = yield* Recipe
+        const project = yield* atlas(main, [API, FRONT])
+        yield* recipe.add(project.id, LINK_CLAUDE)
+        const [, second] = yield* recipe.add(project.id, COPY_ENV)
+        const install = yield* saved(project.id, 'install', node('process.exit(0)'), 'script')
+        yield* recipe.add(project.id, {
+          kind: 'run',
+          base: null,
+          path: null,
+          commandId: install.id,
+        })
+        const updated = yield* recipe.update(project.id, second?.id ?? '', {
+          kind: 'copy',
+          base: FRONT,
+          path: '.env',
+          commandId: null,
+        })
+        const refused = yield* Effect.flip(
+          recipe.update(project.id, second?.id ?? '', {
+            kind: 'link',
+            base: FRONT,
+            path: 'absent',
+            commandId: null,
+          }),
+        )
+        const unknown = yield* Effect.flip(recipe.update(project.id, 'nothing', LINK_CLAUDE))
+        const sql = yield* SqliteClient
+        const events = yield* sql<{ payload: string }>`
+          SELECT payload FROM domain_events WHERE type = 'project.recipe_changed' ORDER BY sequence`
+        return { second, updated, refused, unknown, events, after: yield* recipe.list(project.id) }
+      }),
+    )
+
+    // Still second, with the rank it had: only what it does changed.
+    expect(seen.updated.map((one) => one.kind)).toEqual(['link', 'copy', 'run'])
+    expect(seen.updated[1]).toMatchObject({
+      id: seen.second?.id,
+      rank: seen.second?.rank,
+      base: FRONT,
+      path: './.env',
+    })
+    expect(seen.refused).toBeInstanceOf(RecipeRefusedError)
+    expect(seen.refused.message).toContain('does not exist in main')
+    expect(seen.unknown.message).toBe('the recipe has no step "nothing"')
+    expect(seen.after).toEqual(seen.updated)
+    expect(JSON.parse(seen.events.at(-1)?.payload ?? '{}')).toEqual({
+      change: 'updated',
+      kind: 'copy',
+    })
   })
 })
 
@@ -389,7 +588,7 @@ describe('A link is a junction for a folder and a symbolic link for a file on Wi
           const preparation = yield* Preparation
           const workspace = yield* createdWith([
             LINK_CLAUDE,
-            { kind: 'link', path: 'shared', scope: 'root', commandId: null },
+            { kind: 'link', base: null, path: 'shared', commandId: null },
           ])
           return yield* preparation.prepare(workspace.id)
         }),

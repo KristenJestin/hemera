@@ -152,6 +152,7 @@ export const CHANNELS = {
   'preparation.resume': ENGINE_REQUESTS['preparation.resume'],
   'recipe.list': ENGINE_REQUESTS['recipe.list'],
   'recipe.add': ENGINE_REQUESTS['recipe.add'],
+  'recipe.update': ENGINE_REQUESTS['recipe.update'],
   'recipe.remove': ENGINE_REQUESTS['recipe.remove'],
   'recipe.move': ENGINE_REQUESTS['recipe.move'],
   'variables.list': ENGINE_REQUESTS['variables.list'],

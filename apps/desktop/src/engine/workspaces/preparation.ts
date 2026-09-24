@@ -13,6 +13,11 @@
  * `run` that is done is not run again: what a command did is not something the disk can be
  * asked about.
  *
+ * A copy or a link is one file or folder under its base — a repository, or the Workspace root
+ * (D8-05 as amended by recette 1). A folder is copied whole and never over what is there: a file
+ * already in the Workspace is kept, the others are copied. A folder is linked as a junction on
+ * Windows and a symbolic link elsewhere; a file is a symbolic link.
+ *
  * A `run` step starts its catalogue command as a real run of the Commands service, with no
  * Session (Decided 11), in the Workspace, and waits for its end: its line, its folder, its
  * variables, its output and its exit code are the run's row, and the step keeps the run's
@@ -25,6 +30,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   statSync,
   symlinkSync,
 } from 'node:fs'
@@ -182,29 +188,41 @@ interface Destination {
 }
 
 /**
- * Where a copy or a link applies: once at the root, or in each worktree of the Workspace, at
- * the same relative place as in `main` (D8-05).
+ * Where a copy or a link applies: its path under its base, a repository or the Workspace root, at
+ * the same relative place as in `main` (D8-05 as amended by recette 1).
  */
-function destinationsOf(place: Place, step: WorkspaceStep): Destination[] {
-  if (step.scope !== 'repositories') {
-    return [
-      {
-        label: labelOf(step.target),
-        from: join(place.main, step.target),
-        to: join(place.workspace.path, step.target),
-      },
-    ]
+function destinationOf(place: Place, step: WorkspaceStep): Destination {
+  const base = step.base ?? ''
+  return {
+    label:
+      step.base === null ? labelOf(step.target) : `${labelOf(step.base)}/${labelOf(step.target)}`,
+    from: join(place.main, base, step.target),
+    to: join(place.workspace.path, base, step.target),
   }
-  return place.worktrees.map((worktree) => ({
-    label: labelOf(worktree.relativePath),
-    from: join(place.main, worktree.relativePath, step.target),
-    to: join(place.workspace.path, worktree.relativePath, step.target),
-  }))
 }
 
 /** Whether something is at a path, a link that points nowhere included. */
 function occupied(path: string): boolean {
   return lstatSync(path, { throwIfNoEntry: false }) !== undefined
+}
+
+/**
+ * Copies a file or a whole folder, never over anything already there (D8-05 as amended by
+ * recette 1): a file present at the destination is kept as it is, and what is missing is copied.
+ * Answers how many files it copied; a refusal of the system is thrown as the system said it.
+ */
+function copiedInto(from: string, to: string): number {
+  if (statSync(from).isDirectory()) {
+    mkdirSync(to, { recursive: true })
+    let copied = 0
+    for (const name of readdirSync(from)) copied += copiedInto(join(from, name), join(to, name))
+    return copied
+  }
+  if (occupied(to)) return 0
+  mkdirSync(dirname(to), { recursive: true })
+  // Exclusive all the same: a file that appeared since is kept, never overwritten.
+  copyFileSync(from, to, constants.COPYFILE_EXCL)
+  return 1
 }
 
 /** A message of the system, as it said it. */
@@ -401,48 +419,43 @@ export const preparationLayer = Layer.effect(
         )
       })
 
-    /** A file of `main` copied at each destination, never over one that is there (D8-05). */
-    const copy = (place: Place, step: WorkspaceStep): Outcome =>
-      outcomeOf(
-        destinationsOf(place, step).map((destination) => {
-          if (!existsSync(destination.from)) return { label: destination.label, result: 'missing' }
-          if (occupied(destination.to)) return { label: destination.label, result: 'kept' }
-          try {
-            mkdirSync(dirname(destination.to), { recursive: true })
-            // Exclusive all the same: a file that appeared since is kept, never overwritten.
-            copyFileSync(destination.from, destination.to, constants.COPYFILE_EXCL)
-            return { label: destination.label, result: 'made' }
-          } catch (cause) {
-            return { label: destination.label, result: { refused: said(cause) } }
-          }
-        }),
-      )
+    /**
+     * A file or a folder of `main` copied under its base, never over what is there (D8-05 as
+     * amended by recette 1): `made` when anything was copied, `kept` when all of it was there.
+     */
+    const copy = (place: Place, step: WorkspaceStep): Outcome => {
+      const destination = destinationOf(place, step)
+      const result = ((): Placed => {
+        if (!existsSync(destination.from)) return 'missing'
+        try {
+          return copiedInto(destination.from, destination.to) > 0 ? 'made' : 'kept'
+        } catch (cause) {
+          return { refused: said(cause) }
+        }
+      })()
+      return outcomeOf([{ label: destination.label, result }])
+    }
 
-    /** A link to a file or a folder of `main` at each destination (D8-05, D8-17). */
+    /** A link to a file or a folder of `main` under its base (D8-05, D8-17). */
     const link = (place: Place, step: WorkspaceStep) =>
       Effect.gen(function* () {
-        const placed: { label: string; result: Placed }[] = []
-        for (const destination of destinationsOf(place, step)) {
-          if (!existsSync(destination.from)) {
-            placed.push({ label: destination.label, result: 'missing' })
-            continue
-          }
-          if (occupied(destination.to)) {
-            placed.push({ label: destination.label, result: 'kept' })
-            continue
-          }
-          const kind = statSync(destination.from).isDirectory() ? 'directory' : 'file'
-          const result = yield* Effect.try({
-            try: () => mkdirSync(dirname(destination.to), { recursive: true }),
-            catch: (cause) => new LinkRefusedError({ message: said(cause) }),
-          }).pipe(
-            Effect.andThen(links.link(destination.from, destination.to, kind)),
-            Effect.as<Placed>('made'),
-            Effect.catch((refused) => Effect.succeed<Placed>({ refused: refused.message })),
-          )
-          placed.push({ label: destination.label, result })
+        const destination = destinationOf(place, step)
+        if (!existsSync(destination.from)) {
+          return outcomeOf([{ label: destination.label, result: 'missing' }])
         }
-        return outcomeOf(placed)
+        if (occupied(destination.to)) {
+          return outcomeOf([{ label: destination.label, result: 'kept' }])
+        }
+        const kind = statSync(destination.from).isDirectory() ? 'directory' : 'file'
+        const result = yield* Effect.try({
+          try: () => mkdirSync(dirname(destination.to), { recursive: true }),
+          catch: (cause) => new LinkRefusedError({ message: said(cause) }),
+        }).pipe(
+          Effect.andThen(links.link(destination.from, destination.to, kind)),
+          Effect.as<Placed>('made'),
+          Effect.catch((refused) => Effect.succeed<Placed>({ refused: refused.message })),
+        )
+        return outcomeOf([{ label: destination.label, result }])
       })
 
     /**
@@ -640,10 +653,10 @@ export const preparationLayer = Layer.effect(
         case 'worktree':
           return existsSync(join(place.workspace.path, step.target, '.git'))
         case 'copy':
-        case 'link':
-          return destinationsOf(place, step)
-            .filter((destination) => existsSync(destination.from))
-            .every((destination) => occupied(destination.to))
+        case 'link': {
+          const destination = destinationOf(place, step)
+          return !existsSync(destination.from) || occupied(destination.to)
+        }
         case 'run':
           return true
       }

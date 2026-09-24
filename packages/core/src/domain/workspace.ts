@@ -35,23 +35,20 @@ export const RECIPE_KINDS = ['copy', 'link', 'run'] as const
 
 export type RecipeKind = (typeof RECIPE_KINDS)[number]
 
-/** Where a recipe step applies: once at the Workspace root, or in each of its repositories. */
-export const RECIPE_SCOPES = ['root', 'repositories'] as const
-
-export type RecipeScope = (typeof RECIPE_SCOPES)[number]
-
 /**
- * One step of a Project's recipe (D8-05).
+ * One step of a Project's recipe (D8-05 as amended by recette 1).
  *
- * `path` is relative, for a copy and a link, and null for a run; `commandId` is the catalogue
- * command a run starts, and null otherwise. `rank` orders the recipe as a repository's rank
- * orders the repositories.
+ * `base` is where a copy or a link applies: one of the Project's repositories as the Project
+ * declares it, or null for the Workspace root — several repositories are several steps. `path` is
+ * relative to that base, a file or a folder, for a copy and a link, and null for a run;
+ * `commandId` is the catalogue command a run starts, and null otherwise. `rank` orders the recipe
+ * as a repository's rank orders the repositories.
  */
 export interface RecipeStep {
   readonly id: string
   readonly kind: RecipeKind
+  readonly base: string | null
   readonly path: string | null
-  readonly scope: RecipeScope
   readonly commandId: string | null
   readonly rank: string
 }
@@ -65,10 +62,13 @@ export interface WorkspaceStep {
   /** Its place in the preparation, counting from one. */
   readonly position: number
   readonly kind: StepKind
-  /** The relative path of the worktree, the recipe's path, or the name of the command it runs. */
+  /**
+   * The relative path of the worktree, the recipe's path relative to its base, or the name of the
+   * command it runs.
+   */
   readonly target: string
-  /** Where a recipe step applies, and null for a worktree. */
-  readonly scope: RecipeScope | null
+  /** The repository a copy or a link applies under, and null for the root, a worktree or a run. */
+  readonly base: string | null
   readonly commandId: string | null
   readonly state: StepState
   /** What refused it, as it was said — Git's own words, the system's — and null otherwise. */
@@ -150,18 +150,18 @@ export function stepsFor(
   recipe: readonly RecipeStep[],
   commandNames: ReadonlyMap<string, string>,
 ): Omit<WorkspaceStep, 'id'>[] {
-  const targets: Pick<WorkspaceStep, 'kind' | 'target' | 'scope' | 'commandId'>[] = [
+  const targets: Pick<WorkspaceStep, 'kind' | 'target' | 'base' | 'commandId'>[] = [
     ...worktrees.map((path) => ({
       kind: 'worktree' as const,
       target: path,
-      scope: null,
+      base: null,
       commandId: null,
     })),
     ...recipe.map((step) => ({
       kind: step.kind,
       target:
         step.kind === 'run' ? (commandNames.get(step.commandId ?? '') ?? '') : (step.path ?? ''),
-      scope: step.scope,
+      base: step.kind === 'run' ? null : step.base,
       commandId: step.commandId,
     })),
   ]
@@ -169,7 +169,7 @@ export function stepsFor(
     position: index + 1,
     kind: step.kind,
     target: step.target,
-    scope: step.scope,
+    base: step.base,
     commandId: step.commandId,
     state: 'pending',
     message: null,

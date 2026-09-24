@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "10a0b912-63d7-4ba9-a6f2-1e4ffcc941bd",
+  "id": "5a0d0d39-7f2d-4722-a8ca-4df3b6ee58e0",
   "prevIds": ["584c3df8-84a3-46a5-b8ed-861e5f6d2c30"],
   "ddl": [
     {
@@ -858,17 +858,17 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "path",
+      "name": "base",
       "entityType": "columns",
       "table": "project_preparation_steps"
     },
     {
       "type": "text",
-      "notNull": true,
+      "notNull": false,
       "autoincrement": false,
-      "default": "'root'",
+      "default": null,
       "generated": null,
-      "name": "scope",
+      "name": "path",
       "entityType": "columns",
       "table": "project_preparation_steps"
     },
@@ -2208,7 +2208,7 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "scope",
+      "name": "base",
       "entityType": "columns",
       "table": "workspace_steps"
     },
@@ -3291,12 +3291,6 @@
       "table": "project_preparation_steps"
     },
     {
-      "value": "\"scope\" IN ('root', 'repositories')",
-      "name": "recipe_scope_is_known",
-      "entityType": "checks",
-      "table": "project_preparation_steps"
-    },
-    {
       "value": "\"tone\" IN ('primary', 'info', 'success', 'warning', 'neutral')",
       "name": "project_tone_is_known",
       "entityType": "checks",
@@ -3419,12 +3413,6 @@
     {
       "value": "\"kind\" IN ('worktree', 'copy', 'link', 'run')",
       "name": "step_kind_is_known",
-      "entityType": "checks",
-      "table": "workspace_steps"
-    },
-    {
-      "value": "\"scope\" IS NULL OR \"scope\" IN ('root', 'repositories')",
-      "name": "step_scope_is_known",
       "entityType": "checks",
       "table": "workspace_steps"
     },

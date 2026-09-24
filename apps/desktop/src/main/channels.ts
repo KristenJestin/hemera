@@ -235,6 +235,7 @@ const RELAYED = [
   'preparation.resume',
   'recipe.list',
   'recipe.add',
+  'recipe.update',
   'recipe.remove',
   'recipe.move',
   'variables.list',

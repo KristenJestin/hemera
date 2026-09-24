@@ -379,6 +379,8 @@ describe('The steps follow the recipe in order', () => {
 
     const run = recipeAddOf({ kind: 'run', base: null, path: null, commandId: installing.id })
     expect(await addRecipeStep(project.id, run)).toBeNull()
+    // The source is in main: the engine accepts a copy only then.
+    writeFileSync(join(main, '.env'), 'PORT=3000\n')
     const copy = recipeAddOf({ kind: 'copy', base: null, path: '.env', commandId: null })
     expect(await addRecipeStep(project.id, copy)).toBeNull()
     // A path that leaves the Workspace is the engine's refusal, in its words.
@@ -393,7 +395,7 @@ describe('The steps follow the recipe in order', () => {
     expect(stepLinesOf(steps).map((one) => [one.kind, one.target])).toEqual([
       ['worktree', './api'],
       // The path as the engine keeps it, relative to the root.
-      ['copy', './.env at the root'],
+      ['copy', './.env'],
       ['run', 'install'],
     ])
 

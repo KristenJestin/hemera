@@ -1,19 +1,25 @@
 /**
  * The recipe a Project prepares each dedicated Workspace with, as its settings edit it (D8-05).
  *
- * An ordered list of `copy`, `link` and `run` steps: a copy and a link name a file of `main` by
- * its path relative to the root, once at the root or in each repository; a run names a command of
- * the Project's catalogue. The order is a rank, as the repositories' is, so moving one step never
- * renumbers the others. A Workspace is prepared from the recipe as it was when the Workspace was
- * created: editing it afterwards changes the next Workspace, not one already made.
+ * An ordered list of `copy`, `link` and `run` steps: a copy and a link name a file or a folder of
+ * `main` by its path under a base — one of the Project's repositories, or the Workspace root — so
+ * several repositories are several steps (D8-05 as amended by recette 1); a run names a command of
+ * the Project's catalogue. A copy or a link is accepted only when its source is in `main`: the step
+ * dialog checks it before the step is written, not the day a Workspace is prepared. The order is a
+ * rank, as the repositories' is, so moving one step never renumbers the others. A Workspace is
+ * prepared from the recipe as it was when the Workspace was created: editing it afterwards changes
+ * the next Workspace, not one already made.
  */
+
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 import {
   InvalidRepositoryPathError,
+  MAIN_WORKSPACE,
   RECIPE_KINDS,
-  RECIPE_SCOPES,
+  ROOT_REPOSITORY,
   type RecipeKind,
-  type RecipeScope,
   type RecipeStep,
   rankBetween,
   repositoryPath,
@@ -27,7 +33,12 @@ import {
   type EngineDatabase,
   type EngineTransaction,
 } from '../storage/database.ts'
-import { projectCommands, projectPreparationSteps } from '../storage/schema.ts'
+import {
+  projectCommands,
+  projectPreparationSteps,
+  projectRepositories,
+  workspaces,
+} from '../storage/schema.ts'
 import { type Mutation, mutate } from '../transaction.ts'
 
 /** A step the recipe cannot hold, or one it does not have. */
@@ -39,12 +50,16 @@ export class RecipeRefusedError extends Data.TaggedError('RecipeRefusedError')<{
   }
 }
 
-/** What the settings hand over to add a step. */
+/** What the settings hand over to add a step, or to rewrite one. */
 export interface RecipeEdit {
   readonly kind: RecipeKind
-  /** The file or folder, relative to the root: for a copy and a link, and null for a run. */
+  /**
+   * Where a copy or a link applies: a repository the Project declares, and null for the Workspace
+   * root. Nothing for a run.
+   */
+  readonly base: string | null
+  /** The file or folder, relative to the base: for a copy and a link, and null for a run. */
   readonly path: string | null
-  readonly scope: RecipeScope
   /** The catalogue command a run starts, and null for a copy and a link. */
   readonly commandId: string | null
 }
@@ -55,6 +70,12 @@ export interface RecipeService {
   /** Adds a step at the end, and answers the recipe as it now is. */
   readonly add: (
     projectId: string,
+    edit: RecipeEdit,
+  ) => Effect.Effect<RecipeStep[], DatabaseError | InvalidRepositoryPathError | RecipeRefusedError>
+  /** Rewrites a step where it stands, and answers the recipe as it now is. */
+  readonly update: (
+    projectId: string,
+    id: string,
     edit: RecipeEdit,
   ) => Effect.Effect<RecipeStep[], DatabaseError | InvalidRepositoryPathError | RecipeRefusedError>
   readonly remove: (
@@ -71,13 +92,13 @@ export interface RecipeService {
 
 export class Recipe extends Context.Service<Recipe, RecipeService>()('Recipe') {}
 
-/** A step of the recipe read from its row, whose kind and scope the table's checks closed. */
+/** A step of the recipe read from its row, whose kind the table's check closed. */
 export function recipeStepOf(row: typeof projectPreparationSteps.$inferSelect): RecipeStep {
   return {
     id: row.id,
     kind: RECIPE_KINDS.find((kind) => kind === row.kind) ?? 'run',
+    base: row.base,
     path: row.path,
-    scope: RECIPE_SCOPES.find((scope) => scope === row.scope) ?? 'root',
     commandId: row.commandId,
     rank: row.rank,
   }
@@ -110,6 +131,15 @@ function changed(projectId: string, change: string, kind: RecipeKind) {
   }
 }
 
+/** What a step is written with once checked: its base, its path, its command. */
+interface Checked {
+  readonly base: string | null
+  readonly path: string | null
+  readonly commandId: string | null
+}
+
+const refuse = (reason: string) => Effect.fail(new RecipeRefusedError({ reason }))
+
 export const recipeLayer = Layer.effect(
   Recipe,
   Effect.gen(function* () {
@@ -130,76 +160,147 @@ export const recipeLayer = Layer.effect(
         }),
       )
 
+    /**
+     * A copy's or a link's base, path and source, checked before anything is written (D8-05 as
+     * amended by recette 1): the base is the root or a repository the Project declares, the path
+     * never leaves it, and the file or folder is in `main` there — read from the disk outside any
+     * transaction, as every disk is.
+     */
+    const placed = (projectId: string, edit: RecipeEdit) =>
+      Effect.gen(function* () {
+        const saidBase = edit.base?.trim() ?? ''
+        const base =
+          saidBase === '' || saidBase === '.' || saidBase === './'
+            ? null
+            : yield* Effect.try({
+                try: () => repositoryPath(saidBase),
+                catch: (cause) =>
+                  cause instanceof InvalidRepositoryPathError
+                    ? cause
+                    : new InvalidRepositoryPathError(saidBase, String(cause)),
+              })
+        if (base !== null) {
+          const declared = yield* database
+            .select({ relativePath: projectRepositories.relativePath })
+            .from(projectRepositories)
+            .where(
+              and(
+                eq(projectRepositories.projectId, projectId),
+                eq(projectRepositories.relativePath, base),
+              ),
+            )
+            .pipe(Effect.mapError(failed('reading the repositories')))
+          if (declared.length === 0) {
+            return yield* refuse(`${saidBase} is not a repository of this Project`)
+          }
+        }
+        // A copy and a link are relative to their base and never leave it (D8-05).
+        const asked = edit.path ?? ''
+        const path = yield* Effect.try({
+          try: () => repositoryPath(asked),
+          catch: (cause) =>
+            cause instanceof InvalidRepositoryPathError
+              ? cause
+              : new InvalidRepositoryPathError(asked, String(cause)),
+        })
+        if (path === ROOT_REPOSITORY) {
+          return yield* refuse(
+            `a ${edit.kind} names a file or a folder under its base, not the base`,
+          )
+        }
+        const mains = yield* database
+          .select({ path: workspaces.path })
+          .from(workspaces)
+          .where(and(eq(workspaces.projectId, projectId), eq(workspaces.name, MAIN_WORKSPACE)))
+          .pipe(Effect.mapError(failed('reading the Workspaces')))
+        const source = join(mains[0]?.path ?? '', base ?? '', path)
+        if (!existsSync(source)) {
+          return yield* refuse(`${source} does not exist in main: a ${edit.kind} needs its source`)
+        }
+        return { base, path, commandId: null } satisfies Checked
+      })
+
+    /** A run's command, checked inside the transaction that writes its step. */
+    const commanded = (transaction: EngineTransaction, projectId: string, edit: RecipeEdit) =>
+      Effect.gen(function* () {
+        // A run starts a command of this Project's catalogue, and nothing else.
+        const found = yield* transaction
+          .select({ id: projectCommands.id, type: projectCommands.type })
+          .from(projectCommands)
+          .where(
+            and(
+              eq(projectCommands.projectId, projectId),
+              eq(projectCommands.id, edit.commandId ?? ''),
+            ),
+          )
+          .pipe(Effect.mapError(failed('reading the commands')))
+        if (found[0] === undefined) {
+          return yield* refuse('a run step starts a command of this Project, and none was named')
+        }
+        // A step waits for its command to end, and a service is up until it is stopped: a
+        // `serve` in the recipe would hold the preparation for ever (D8-05, D8-07).
+        if (found[0].type === 'serve') {
+          return yield* refuse(
+            'a service never ends: a preparation step waits for its command to end',
+          )
+        }
+        return { base: null, path: null, commandId: found[0].id } satisfies Checked
+      })
+
     return {
       list: (projectId) => recipeOf(database, projectId),
 
       add: (projectId, edit) =>
-        withDatabase(
-          mutate('adding a step to the recipe', (transaction) =>
-            Effect.gen(function* () {
-              let path: string | null = null
-              let commandId: string | null = null
-              if (edit.kind === 'run') {
-                // A run starts a command of this Project's catalogue, and nothing else.
-                const found = yield* transaction
-                  .select({ id: projectCommands.id, type: projectCommands.type })
-                  .from(projectCommands)
-                  .where(
-                    and(
-                      eq(projectCommands.projectId, projectId),
-                      eq(projectCommands.id, edit.commandId ?? ''),
-                    ),
-                  )
-                  .pipe(Effect.mapError(failed('reading the commands')))
-                if (found[0] === undefined) {
-                  return yield* Effect.fail(
-                    new RecipeRefusedError({
-                      reason: 'a run step starts a command of this Project, and none was named',
-                    }),
-                  )
-                }
-                // A step waits for its command to end, and a service is up until it is stopped:
-                // a `serve` in the recipe would hold the preparation for ever (D8-05, D8-07).
-                if (found[0].type === 'serve') {
-                  return yield* Effect.fail(
-                    new RecipeRefusedError({
-                      reason:
-                        'a service never ends: a preparation step waits for its command to end',
-                    }),
-                  )
-                }
-                commandId = found[0].id
-              } else {
-                // A copy and a link are relative to the root and never leave it (D8-05).
-                const asked = edit.path ?? ''
-                path = yield* Effect.try({
-                  try: () => repositoryPath(asked),
-                  catch: (cause) =>
-                    cause instanceof InvalidRepositoryPathError
-                      ? cause
-                      : new InvalidRepositoryPathError(asked, String(cause)),
-                })
-              }
-              const steps = yield* recipeOf(transaction, projectId)
-              yield* transaction
-                .insert(projectPreparationSteps)
-                .values({
-                  id: crypto.randomUUID(),
-                  projectId,
-                  kind: edit.kind,
-                  path,
-                  scope: edit.scope,
-                  commandId,
-                  rank: rankBetween(steps.at(-1)?.rank ?? null, null),
-                })
-                .pipe(Effect.mapError(failed('writing the recipe')))
-              return {
-                result: yield* recipeOf(transaction, projectId),
-                events: [changed(projectId, 'added', edit.kind)],
-              } satisfies Mutation<RecipeStep[]>
-            }),
-          ),
-        ),
+        Effect.gen(function* () {
+          // A copy or a link is checked on the disk first; a run, inside the transaction.
+          const place = edit.kind === 'run' ? null : yield* placed(projectId, edit)
+          return yield* withDatabase(
+            mutate('adding a step to the recipe', (transaction) =>
+              Effect.gen(function* () {
+                const step = place ?? (yield* commanded(transaction, projectId, edit))
+                const steps = yield* recipeOf(transaction, projectId)
+                yield* transaction
+                  .insert(projectPreparationSteps)
+                  .values({
+                    id: crypto.randomUUID(),
+                    projectId,
+                    kind: edit.kind,
+                    ...step,
+                    rank: rankBetween(steps.at(-1)?.rank ?? null, null),
+                  })
+                  .pipe(Effect.mapError(failed('writing the recipe')))
+                return {
+                  result: yield* recipeOf(transaction, projectId),
+                  events: [changed(projectId, 'added', edit.kind)],
+                } satisfies Mutation<RecipeStep[]>
+              }),
+            ),
+          )
+        }),
+
+      update: (projectId, id, edit) =>
+        Effect.gen(function* () {
+          // A copy or a link is checked on the disk first; a run, inside the transaction.
+          const place = edit.kind === 'run' ? null : yield* placed(projectId, edit)
+          return yield* withDatabase(
+            mutate('changing a step of the recipe', (transaction) =>
+              Effect.gen(function* () {
+                // Rewritten in its place: its rank is kept, and so is its order in the recipe.
+                yield* stepIn(transaction, projectId, id)
+                const step = place ?? (yield* commanded(transaction, projectId, edit))
+                yield* transaction
+                  .update(projectPreparationSteps)
+                  .set({ kind: edit.kind, ...step })
+                  .where(eq(projectPreparationSteps.id, id))
+                  .pipe(Effect.mapError(failed('writing the recipe')))
+                return {
+                  result: yield* recipeOf(transaction, projectId),
+                  events: [changed(projectId, 'updated', edit.kind)],
+                } satisfies Mutation<RecipeStep[]>
+              }),
+            ),
+          )
+        }),
 
       remove: (projectId, id) =>
         withDatabase(
