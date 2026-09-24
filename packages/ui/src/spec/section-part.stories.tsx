@@ -184,6 +184,27 @@ export const WrittenUnderYou: Story = {
   },
 }
 
+/**
+ * Left untouched while rewritten: the agent writes the section while the caret sits in it, and
+ * the caret leaves without a key typed. Nothing is handed over — no save, so no conflict — and
+ * the text shown is the agent's.
+ */
+export const LeftUntouchedWhileRewritten: Story = {
+  args: { agentWrites: 'Every invoice of the month, in one file the accountant opens as is.' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const text = canvas.getByRole('textbox', { name: 'Expected outcome' })
+    await userEvent.click(text)
+    await expect(canvas.getByText('v3')).toBeVisible()
+    await userEvent.tab()
+    await expect(args.onSave).not.toHaveBeenCalled()
+    await expect(canvas.queryByRole('group', { name: 'Conflict' })).toBeNull()
+    await expect(text).toHaveValue(
+      'Every invoice of the month, in one file the accountant opens as is.',
+    )
+  },
+}
+
 /** Escape leaves the text as it was, and nothing is handed over. */
 export const EscapeKeepsTheText: Story = {
   play: async ({ canvasElement, args }) => {

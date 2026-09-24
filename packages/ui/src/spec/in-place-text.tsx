@@ -11,6 +11,9 @@ import { type ReactNode, type Ref, useEffect, useRef, useState } from 'react'
  * What it was handed is followed while nobody types in it: an agent that rewrites a section the
  * reader is only looking at is seen rewriting it. While the caret is inside, what is typed wins
  * on the screen, and the conflict rule is the section's to apply when the text is handed over.
+ * What is handed over is measured against the text the edit started from, not the one that
+ * stands when the caret leaves: a caret that leaves without typing hands nothing back, even when
+ * the text was rewritten under it.
  */
 
 /**
@@ -57,6 +60,8 @@ export function InPlaceText({
 }: InPlaceTextProps): ReactNode {
   const [draft, setDraft] = useState(value)
   const editing = useRef(false)
+  // The text the edit started from: a draft still equal to it was not typed in.
+  const started = useRef(value)
   // Escape leaves through the same blur as a click elsewhere, and this is what tells the two
   // apart: the blur that follows an Escape hands nothing over.
   const dropping = useRef(false)
@@ -78,6 +83,7 @@ export function InPlaceText({
         value={draft}
         onFocus={() => {
           editing.current = true
+          started.current = draft
           onStart?.()
         }}
         onChange={(event) => setDraft(event.target.value)}
@@ -88,7 +94,12 @@ export function InPlaceText({
             setDraft(value)
             return
           }
-          if (draft !== value) onCommit(draft)
+          if (draft !== started.current) {
+            onCommit(draft)
+            return
+          }
+          // Left untouched: the text as it now stands, rewritten under the caret or not.
+          setDraft(value)
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Escape') return
