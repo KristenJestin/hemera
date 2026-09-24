@@ -18,6 +18,7 @@ import { Effect } from 'effect'
 import { sessions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { failed, now, readSnapshot, reading } from './snapshot.ts'
+import { sessionRow } from './write-right.ts'
 
 export interface Brief {
   /** The text that precedes the turn's own. */
@@ -61,8 +62,16 @@ export function briefFor(sessionId: string) {
           question.resolvedAt !== null && (since === null || question.resolvedAt > since),
       )
       const phase = focusOf(snapshot.phases)
+      // A reader is told it reads, and who writes, so its agent does not try writes that will be
+      // refused (Decided 17).
+      const writer = snapshot.spec.writerSessionId
+      // Every Spec is born with a writer (Decided 20).
+      const readsFrom =
+        writer === sessionId || writer === null
+          ? undefined
+          : (yield* sessionRow(transaction, writer)).title
       const brief: Brief = {
-        block: composeBrief({ snapshot, focus: phase, humanEdits, answers }),
+        block: composeBrief({ snapshot, focus: phase, humanEdits, answers, readsFrom }),
         phase,
         composedAt,
       }

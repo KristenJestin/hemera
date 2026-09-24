@@ -12,9 +12,11 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Fiber } from 'effect'
 
-import { DEFINE_MISSION_BRIEF, PHASE_BRIEFS } from '@hemera/core'
+import { DEFINE_MISSION_BRIEF, PHASE_BRIEFS, readerLine } from '@hemera/core'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime, NoNotices } from '#engine/agents/runtime.ts'
+import { Sessions } from '#engine/sessions.ts'
+import { briefFor } from '#engine/specs/brief.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import {
   application,
@@ -192,6 +194,41 @@ describe('A failed turn keeps the human edits for the next brief', () => {
         const third = agent.answers.prompts[1] ?? ''
         expect(third).toContain(HUMAN_EDITS)
         expect(third.slice(third.indexOf(HUMAN_EDITS))).toContain('CSV only.')
+      }),
+    )
+  })
+})
+
+describe("A reader's brief says who writes", () => {
+  test('a reading Session’s brief opens with the line naming the writer; the writer’s does not', async () => {
+    const agent = fakeAgent()
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const specs = yield* Specs
+        const runtime = yield* AgentRuntime
+        const created = yield* specs.create({
+          sessionId: (yield* aSession(workingDirectory)).id,
+          type: 'feature',
+          title: 'Export the journal',
+        })
+        const sessionId = created.session.id
+        const specId = created.snapshot.spec.id
+        yield* (yield* Sessions).rename(sessionId, created.session.version, 'Shape the export')
+        const reader = (yield* specs.openSession({ specId, provider: 'claude' })).session
+        const { spec } = yield* specs.read(specId)
+
+        // Composed for each Session as its next turn would be: the reader's own agent is another
+        // process, which one fake cannot be twice.
+        const read = (yield* briefFor(reader.id))?.block
+        yield* runtime.prompt(sessionId, 'Carry on.')
+        const [written] = agent.answers.prompts
+        expect(readerLine(spec.key, 'Shape the export')).toBe(
+          `You read ${spec.key}: the Session "Shape the export" writes it, and your writes to it are refused.`,
+        )
+        const opening = `${readerLine(spec.key, 'Shape the export')}\n\n${DEFINE_MISSION_BRIEF}`
+        expect(read?.startsWith(opening)).toBe(true)
+        expect(written?.startsWith(DEFINE_MISSION_BRIEF)).toBe(true)
       }),
     )
   })

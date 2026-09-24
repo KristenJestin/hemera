@@ -92,14 +92,31 @@ export interface BriefInput {
   humanEdits: readonly SpecSection[]
   /** The questions the human answered since the last brief (D7-01, D7-09). */
   answers: readonly SpecQuestion[]
+  /**
+   * What the writer Session is called when this Session only reads the Spec (D7-11, Decided 17);
+   * absent for the writer.
+   */
+  readsFrom?: string | undefined
+}
+
+/** The line a reader's brief opens with: it reads, and who writes (Decided 17). */
+export function readerLine(key: string, writer: string): string {
+  return `You read ${key}: the Session "${writer}" writes it, and your writes to it are refused.`
 }
 
 /**
  * The block that precedes the text of a `define` turn (D7-09): the mission's instructions, the
  * focused phase's brief, the Spec with its section versions, then the human edits since the
  * last turn, each with its section, version and body, and the answers given in the chat since.
+ * A reader's brief opens with one line saying it reads and naming the writer.
  */
-export function composeBrief({ snapshot, focus, humanEdits, answers }: BriefInput): string {
+export function composeBrief({
+  snapshot,
+  focus,
+  humanEdits,
+  answers,
+  readsFrom,
+}: BriefInput): string {
   const parts = [
     DEFINE_MISSION_BRIEF,
     focus === null
@@ -107,6 +124,7 @@ export function composeBrief({ snapshot, focus, humanEdits, answers }: BriefInpu
       : PHASE_BRIEFS[focus],
     `# The Spec\n\n${renderSpecMarkdown(snapshot)}`,
   ]
+  if (readsFrom !== undefined) parts.unshift(readerLine(snapshot.spec.key, readsFrom))
   if (humanEdits.length > 0) {
     const edits = humanEdits.map(
       (section) => `## ${section.name} · version ${section.version}\n\n${section.body}`,

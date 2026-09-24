@@ -168,6 +168,7 @@ export {
   DEFINE_MISSION_BRIEF,
   PHASE_BRIEFS,
   composeBrief,
+  readerLine,
   renderSpecMarkdown,
 } from './protocols/define/index.ts'
 export type { BriefInput } from './protocols/define/index.ts'
