@@ -41,6 +41,7 @@ import {
   workspaceStepSchema,
   worktreeSchema,
 } from './workspaces.ts'
+import { SPEC_REQUESTS, missionSchema, specSnapshotSchema, specTypeSchema } from './specs.ts'
 
 /**
  * Which build this is, and therefore which data folder it opens.
@@ -165,7 +166,7 @@ export const engineStatusSchema = z.object({
 export type EngineStatus = z.infer<typeof engineStatusSchema>
 
 /**
- * The five tones a Project is told apart by, and the three entities an event is about.
+ * The five tones a Project is told apart by, and the four entities an event is about.
  *
  * Written here and produced by these schemas; `packages/core` declares the same names as its
  * domain types. The domain does not depend on `ipc` and `ipc` does not depend on the domain —
@@ -178,6 +179,7 @@ export const entityKindSchema = z.enum([
   'project',
   'profile',
   'session',
+  'spec',
   'workspace',
   'command',
   'launch',
@@ -204,6 +206,8 @@ export const projectSchema = z.object({
   branchPrefix: z.string().nullable(),
   /** The repositories a dedicated Workspace gets a worktree of unless left out (D8-04). */
   included: z.array(z.string()),
+  /** What the keys of its Specs start with, `PREFIX-n` (D7-02). */
+  specPrefix: z.string(),
 })
 
 export type Project = z.infer<typeof projectSchema>
@@ -220,6 +224,11 @@ export const journalEntrySchema = z.object({
   projectId: z.string().nullable(),
   payload: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
   seenAt: z.string().nullable(),
+  // The correlations a Spec's Journal is projected by (D7-13).
+  sessionId: z.string().nullable(),
+  specId: z.string().nullable(),
+  revisionId: z.string().nullable(),
+  phaseId: z.string().nullable(),
 })
 
 export type JournalEntry = z.infer<typeof journalEntrySchema>
@@ -254,8 +263,8 @@ export const nothingSchema = z.object({})
 /**
  * A Session as the interface is handed one, and one message of its thread (design D4b-01).
  *
- * The mission does not cross: this lot writes one kind of Session, and what the interface needs
- * is what it shows — a name, a side of the archive, and a `version` to write against.
+ * What the interface needs is what it shows — a name, a side of the archive, a `version` to write
+ * against, and the mission and Spec its header and panel are drawn from (D7-07).
  *
  * `titleSource` is handed over rather than only used by the engine because the interface asks
  * the question it answers: a title still `derived` is one the first message may still propose.
@@ -292,6 +301,10 @@ export const sessionEntryKindSchema = z.enum([
   'hemera_tool_call',
   'command_run',
   'context_delivery',
+  'mission_brief',
+  'spec_question',
+  'spec_answer',
+  'spec_proposal',
   'command_proposal',
 ])
 
@@ -318,6 +331,9 @@ export const sessionSchema = z.object({
   workspaceId: z.string().nullable(),
   /** Whether that Workspace is fixed: from the first message, or once an agent started (D8-08). */
   workspaceFixed: z.boolean(),
+  /** What the Session is for, and the Spec it defines, independent of each other (D7-07). */
+  mission: missionSchema,
+  specId: z.string().nullable(),
   archivedAt: z.number().nullable(),
   createdAt: z.number(),
   lastWrittenAt: z.number(),
@@ -379,6 +395,7 @@ export const ENGINE_REQUESTS = {
       name: z.string(),
       tone: projectToneSchema,
       mainPath: z.string(),
+      specPrefix: z.string().optional(),
     }),
     response: projectSchema,
   },
@@ -386,6 +403,7 @@ export const ENGINE_REQUESTS = {
     arguments: addressedSchema.extend({
       name: z.string().optional(),
       tone: projectToneSchema.optional(),
+      specPrefix: z.string().optional(),
     }),
     response: projectSchema,
   },
@@ -427,6 +445,7 @@ export const ENGINE_REQUESTS = {
       limit: limitSchema.optional(),
       kinds: z.array(entityKindSchema).optional(),
       authors: z.array(eventAuthorSchema).optional(),
+      specId: z.string().optional(),
     }),
     response: z.object({
       entries: z.array(journalEntrySchema),
@@ -778,6 +797,23 @@ export const ENGINE_REQUESTS = {
     }),
     response: z.void(),
   },
+
+  // The Specs a `define` Session writes and a human freezes (D7-01).
+  ...SPEC_REQUESTS,
+  // The two that make a Session `define` answer the Session as well as the Spec: its mission,
+  // its Spec and its version changed with them (D7-07).
+  'specs.create': {
+    // The agent's proposal accepted: the Spec is created, this Session becomes its writer and
+    // turns `define`, in one transaction. A Session already `define` is refused.
+    arguments: z.object({ sessionId: z.string(), type: specTypeSchema, title: z.string() }),
+    response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
+  },
+  'specs.openSession': {
+    // A new `define` Session on an existing Spec, from a list of Specs: the writer when the Spec
+    // has none, a reader otherwise (D7-11). Its agent is chosen as `sessions.create` chooses it.
+    arguments: z.object({ specId: z.string(), provider: agentProviderSchema }),
+    response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
+  },
 } as const
 
 export type EngineRequests = typeof ENGINE_REQUESTS
@@ -852,6 +888,13 @@ export const ENGINE_EVENTS = {
     event: z.literal('workspace'),
     projectId: z.string(),
     workspaceId: z.string(),
+  }),
+  // A Spec changed, whoever wrote it: about a Spec and not a Session, so a shape of its own, and
+  // never a top-level `id`, which is what tells an answer from an event.
+  spec_changed: z.object({
+    event: z.literal('spec.changed'),
+    specId: z.string(),
+    projectId: z.string(),
   }),
 } as const
 

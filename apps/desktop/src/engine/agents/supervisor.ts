@@ -578,28 +578,6 @@ export const processSupervisorLayer = Layer.effect(
           // whatever the platform; an agent's own command is one everywhere but Windows.
           const grouped = process.platform !== 'win32' && options.script !== true
 
-          const started = host.start(
-            command,
-            args,
-            hostOptionsOf(
-              grouped,
-              options.script === true ? 'script' : 'command',
-              options.cwd,
-              options.env,
-              options.verbatim,
-            ),
-          )
-
-          const child: Child = {
-            process: started,
-            lifecycle,
-            observation,
-            grace,
-            grouped,
-            spawned,
-          }
-          const ended = record(child, null)
-          const refused = (failure: AgentSpawnError) => record(child, failure)(null, null)
           /** Answers the spawn, once: a refusal and a spawn cannot both be the truth. */
           const answerWith = (outcome: Effect.Effect<void, AgentSpawnError>, spawned_: boolean) =>
             Effect.gen(function* () {
@@ -607,9 +585,33 @@ export const processSupervisorLayer = Layer.effect(
               if (first) yield* Ref.set(spawned, spawned_)
             })
 
-          // The four listeners are attached here, before the spawn is awaited, and none of them
-          // is attached after: the events they answer are the child's first moments.
-          yield* Effect.sync(() => {
+          // The child is started and its four listeners attached in one synchronous step, and
+          // none of them is attached after: the events they answer are the child's first moments.
+          // Node emits `spawn` on the next tick, and a fiber that yielded to the scheduler between
+          // the start and the listeners — which it does once it has run its share of operations —
+          // would let that tick pass unheard, and wait for a spawn already gone.
+          const child: Child = yield* Effect.sync(() => {
+            const started = host.start(
+              command,
+              args,
+              hostOptionsOf(
+                grouped,
+                options.script === true ? 'script' : 'command',
+                options.cwd,
+                options.env,
+                options.verbatim,
+              ),
+            )
+            const made: Child = {
+              process: started,
+              lifecycle,
+              observation,
+              grace,
+              grouped,
+              spawned,
+            }
+            const ended = record(made, null)
+            const refused = (failure: AgentSpawnError) => record(made, failure)(null, null)
             started.onSpawn(() => {
               Effect.runSync(answerWith(Effect.void, true))
             })
@@ -626,6 +628,7 @@ export const processSupervisorLayer = Layer.effect(
                 Effect.runSync(sink.write(`${command} (${String(started.pid)}): ${line}`))
               })
             }
+            return made
           })
 
           // The command has to become a process before anything is written to it: a program

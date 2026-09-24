@@ -117,7 +117,7 @@ export function workspaceName(candidate: string): string {
  * A text as a slug: lowercase ASCII letters and digits, one dash between words, none at the ends.
  * An accented letter keeps its letter (`é` is `e`); anything else separates words.
  */
-export function slugOf(text: string): string {
+export function slugify(text: string): string {
   return text
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -128,7 +128,7 @@ export function slugOf(text: string): string {
 
 /** The prefix of a Project's branches when it sets none: its name as a slug (D8-04). */
 export function defaultBranchPrefix(projectName: string): string {
-  const slug = slugOf(projectName)
+  const slug = slugify(projectName)
   return slug === '' ? 'hemera' : slug
 }
 

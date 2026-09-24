@@ -13,7 +13,7 @@ import {
   WorkspaceCard,
   WorkspaceList,
   type CommandLine,
-  type ProjectDraft,
+  type ProjectSettingsDraft,
   type RepositoryLine,
 } from '@hemera/ui'
 
@@ -259,11 +259,11 @@ export function ProjectSettingsPage({
   onRemoveProjectVariable,
   workspacesRefusal,
 }: {
-  project: ProjectDraft
+  project: ProjectSettingsDraft
   subtitle?: string
   repositories: RepositoryLine[]
   folders: RepositoryLine[]
-  onSave: (draft: ProjectDraft) => Promise<string | null>
+  onSave: (draft: ProjectSettingsDraft) => Promise<string | null>
   onBrowse: () => Promise<string | null>
   onCheckFolder: (path: string) => Promise<string | null>
   onMainPathChange: (path: string) => void

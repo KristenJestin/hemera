@@ -1,5 +1,5 @@
 /**
- * The twelve tools, and the one door every call goes through (design D6-03, D6-04, D6-05).
+ * The tools, and the one door every call goes through (design D6-03, D6-04, D6-05).
  *
  * A call arrives here as a name, a flat bag of arguments, and the set the Session was offered.
  * Nothing else about it is trusted: the name is checked against the catalogue, the arguments
@@ -28,6 +28,7 @@ import {
   TOOL_NAMES,
   type ToolName,
   admitTool,
+  offeredTools,
   runsInMain,
 } from '@hemera/core'
 import { Context, Deferred, Effect, Layer } from 'effect'
@@ -39,6 +40,7 @@ import { AgentNotices } from '../agents/notices.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
+import { Specs } from '../specs/specs.ts'
 import type { DescribedWorkspace } from '../workspaces/described.ts'
 import { Database } from '../storage/database.ts'
 import { Variables } from '../workspaces/variables.ts'
@@ -55,6 +57,7 @@ import { type RefusedPathError, resolveInside } from './paths.ts'
 import { type OutsideAnswer, ToolPermissions } from './permissions.ts'
 import { type Page, type ReadRange, numbered, readPage } from './read.ts'
 import { searchIn } from './search.ts'
+import { specTools } from './spec.ts'
 
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
 const ARGUMENTS_KEPT = 400
@@ -153,8 +156,10 @@ function argumentsSent(sent: ToolArguments): string {
 }
 
 /** What a tool hands back before it has been written down. */
-interface Answer {
+export interface Answer {
   readonly ok: boolean
+  /** A failure that is a rule saying no rather than something going wrong: written `refused`. */
+  readonly refused?: boolean
   readonly summary: string
   readonly text: string
   readonly paths: readonly string[]
@@ -261,6 +266,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | ToolPermissions
   | HeldWords
   | AgentNotices
+  | Specs
   | Database
   | Variables
 > = Layer.effect(
@@ -275,6 +281,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const held = yield* HeldWords
     const notices = yield* AgentNotices
     const variables = yield* Variables
+    const specs = yield* Specs
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -288,6 +295,8 @@ export const toolCatalogueLayer: Layer.Layer<
         Effect.andThen(() => sessions.write(sessionId, entry)),
         Effect.tap((written) => Effect.sync(() => notices.wrote(sessionId, written.entry))),
       )
+
+    const spec = specTools({ specs, sessions, held, inThread })
 
     /**
      * The answers already given, per Session and by tool and key, so a retry is answered and not
@@ -1114,6 +1123,11 @@ export const toolCatalogueLayer: Layer.Layer<
               ].join('\n'),
             )
           }
+
+          case 'spec_read':
+          case 'spec_write':
+          case 'spec_propose':
+            return yield* spec(asked.sessionId, call)
         }
       })
 
@@ -1173,7 +1187,14 @@ export const toolCatalogueLayer: Layer.Layer<
         if (named === undefined) {
           return yield* refused(asked, made, `Hemera has no tool named ${asked.tool}`)
         }
-        const decision = admitTool(asked.offered, named)
+        // What the token was minted with, and no more than the Session's mission offers now: a
+        // `free` Session that turned `define` while its agent ran keeps none of the write tools it
+        // was lent, from its very next call (D7-14).
+        const mission = offeredTools(session.mission)
+        const decision = admitTool(
+          asked.offered.filter((name) => mission.includes(name)),
+          named,
+        )
         if (!decision.admitted) return yield* refused(asked, made, decision.reason)
 
         const parsed = parseCall(named, asked.arguments)
@@ -1206,7 +1227,7 @@ export const toolCatalogueLayer: Layer.Layer<
             asked,
             { ...made, milliseconds: Math.round((performance.now() - began) * 1000) / 1000 },
             answer,
-            answer.ok ? 'completed' : 'failed',
+            answer.ok ? 'completed' : answer.refused === true ? 'refused' : 'failed',
           )
         }).pipe(
           // The agent gave up on the call — its request was aborted — and what the call was

@@ -35,8 +35,8 @@ import {
   SEARCH_MATCH_LIMIT,
   SEARCH_SCAN_BYTES,
   type SessionEntry,
-  TOOL_NAMES,
   contextUri,
+  offeredTools,
 } from '@hemera/core'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
@@ -200,9 +200,10 @@ describe("The fake agent reaches Hemera's tools through the MCP server", () => {
       }),
     )
 
-    // What the agent could see is the server's list, and the server lists Hemera's tools.
+    // What the agent could see is the server's list, and the server lists the tools of a `free`
+    // Session.
     expect(agent.answers.tools).toHaveLength(1)
-    expect([...(agent.answers.tools[0] ?? [])].sort()).toEqual([...TOOL_NAMES].sort())
+    expect([...(agent.answers.tools[0] ?? [])].sort()).toEqual([...offeredTools('free')].sort())
     // The call went through the door with the token of the Session: a 200, and the file.
     expect(agent.answers.used).toHaveLength(1)
     expect(agent.answers.used[0]?.status).toBe(200)
@@ -1166,8 +1167,8 @@ describe("A qualified agent has only Hemera's tools", () => {
       }),
     )
 
-    // What the agent was handed to call is Hemera's catalogue, whole, and nothing beside it.
-    expect(agent.answers.tools).toEqual([[...TOOL_NAMES]])
+    // What the agent was handed to call is the set of its Session, whole, and nothing beside it.
+    expect(agent.answers.tools).toEqual([[...offeredTools('free')]])
     // Every call the agent made in the turn is one Hemera answered and recorded.
     const made = entries.filter((entry) => entry.kind === 'tool_call').map((entry) => entry.body)
     const recorded = entries

@@ -12,8 +12,13 @@
  * is a migration.
  */
 
-/** What a Session is for. `free` is the absence of a mission, and the only value of this lot. */
-export type Mission = 'free'
+/**
+ * What a Session is for (design D7-07). `free` is the absence of a mission; `define` turns an
+ * intention into a Spec; `build` is declared and not written yet.
+ */
+export const MISSIONS = ['free', 'define', 'build'] as const
+
+export type Mission = (typeof MISSIONS)[number]
 
 /** Where a title comes from: proposed from the first message, or chosen by the user. */
 export type SessionTitleSource = 'derived' | 'user'
@@ -60,7 +65,12 @@ export type SessionEntryOrigin = (typeof SESSION_ENTRY_ORIGINS)[number]
  *
  * `body` carries what a one-line reader shows — the markdown of a message, the title of a tool
  * call — and `payload` the shape its own reader parses, so a block that needs a diff, a plan or
- * a set of options finds them without a column per kind.
+ * a set of options finds them without a column per kind. `mission_brief` is the folded block of
+ * the mission brief Hemera hands a `define` Session's agent as a delivery at a safe point, never a
+ * human message (D7-09);
+ * `spec_question` is a question of a Spec asked in the chat and `spec_answer` the human's answer
+ * beside it (D7-01, D7-03); `spec_proposal` is the Spec the agent of a `free` Session proposes to
+ * create (D7-07).
  */
 export const SESSION_ENTRY_KINDS = [
   'message',
@@ -77,6 +87,10 @@ export const SESSION_ENTRY_KINDS = [
   'hemera_tool_call',
   'command_run',
   'context_delivery',
+  'mission_brief',
+  'spec_question',
+  'spec_answer',
+  'spec_proposal',
   /** A command the agent proposed for the catalogue, waiting for a human's decision (D8-11). */
   'command_proposal',
 ] as const
@@ -90,6 +104,8 @@ export interface Session {
   /** `derived` until the user renames it, and `user` from then on. */
   titleSource: SessionTitleSource
   mission: Mission
+  /** The Spec this Session defines, independent of its mission (design D7-07). */
+  specId: string | null
   /**
    * The agent this Session talks to, and the model it was last asked for.
    *

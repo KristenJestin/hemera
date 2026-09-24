@@ -4,7 +4,7 @@ import { useState } from 'react'
 
 import { COMMAND_TYPE_LABELS } from '../activity/command-type.ts'
 import { WorkspaceList } from '../workspace/workspace-list.tsx'
-import type { ProjectDraft, RepositoryLine } from './model.ts'
+import type { ProjectSettingsDraft, RepositoryLine } from './model.ts'
 import {
   ProjectSettings,
   type CommandLine,
@@ -22,12 +22,13 @@ import {
  * D8-10), each repository its place in a dedicated Workspace, and the page the folder and the
  * branch prefix of dedicated Workspaces (D8-02, D8-04).
  */
-const ATLAS: ProjectDraft = {
+const ATLAS: ProjectSettingsDraft = {
   name: 'Atlas',
   tone: 'primary',
   mainPath: '/home/someone/Projects/atlas',
   workspacesRoot: null,
   branchPrefix: null,
+  specPrefix: 'ATL',
 }
 
 const REPOSITORIES: RepositoryLine[] = [
@@ -328,6 +329,37 @@ export const States: Story = {
     // Once it is saved, the page is on what it saved, and there is nothing left to do.
     await waitFor(() => {
       expect(canvas.getByRole('button', { name: 'Saved' })).toBeDisabled()
+    })
+  },
+}
+
+/**
+ * The prefix of the Spec keys (lot 19, Decided 2): refused while it is not 2 to 4 capital
+ * letters, and saved with the rest of the identity once it is.
+ */
+export const SpecPrefix: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onSave.mockClear()
+    const canvas = within(canvasElement)
+    const prefix = canvas.getByRole('textbox', { name: 'Spec prefix' })
+    await expect(prefix).toHaveValue('ATL')
+
+    await userEvent.clear(prefix)
+    await userEvent.type(prefix, 'at1')
+    await waitFor(() => {
+      expect(canvas.getByText('A prefix is 2 to 4 capital letters, A to Z.')).toBeVisible()
+    })
+
+    await userEvent.clear(prefix)
+    await userEvent.type(prefix, 'ATX')
+    // Gone before anything else is read: the check of the page's contrast would otherwise read
+    // the message halfway through fading out.
+    await waitFor(() => {
+      expect(canvas.queryByText('A prefix is 2 to 4 capital letters, A to Z.')).toBeNull()
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(args.onSave).toHaveBeenCalledWith({ ...ATLAS, specPrefix: 'ATX' })
     })
   },
 }

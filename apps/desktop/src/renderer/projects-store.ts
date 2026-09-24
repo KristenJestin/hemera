@@ -82,7 +82,7 @@ export async function createProject(asked: {
 
 export async function renameProject(
   project: Project,
-  change: { name?: string; tone?: Project['tone'] },
+  change: { name?: string; tone?: Project['tone']; specPrefix?: string },
 ): Promise<boolean> {
   return await acting(async () => {
     await window.hemera.invoke('projects.update', {

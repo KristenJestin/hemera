@@ -7,9 +7,9 @@
  * repeats them, and a reader that never saw this file still learns from one call that a read is
  * paginated and a search is bounded.
  *
- * The mission is the seam and not a choice: a Session is `free` in this lot and is offered the
- * whole set, and the day a mission exists the same call answers with the set of that mission
- * instead. The guard is a function of what is offered and what is asked for, so a tool the
+ * The mission is the seam and not a choice: a Session is offered the set of its mission — a
+ * `free` Session the code tools, a `define` one the Spec tools beside a read-only code set
+ * (D7-14). The guard is a function of what is offered and what is asked for, so a tool the
  * Session should never have been offered is refused by the same code path as one that was
  * offered and used wrongly (D6-03).
  */
@@ -36,6 +36,9 @@ export const TOOL_NAMES = [
   'commands_propose',
   'project_get',
   'session_get',
+  'spec_read',
+  'spec_write',
+  'spec_propose',
 ] as const
 
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -58,6 +61,9 @@ export type ToolMark =
   | 'propose-command'
   | 'project'
   | 'session'
+  | 'read-spec'
+  | 'write-spec'
+  | 'propose-spec'
 
 /** What a reader calls a tool, and the mark it wears. */
 export interface ToolLabel {
@@ -84,10 +90,16 @@ export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
   commands_propose: { label: 'Propose command', mark: 'propose-command' },
   project_get: { label: 'Project', mark: 'project' },
   session_get: { label: 'Session', mark: 'session' },
+  spec_read: { label: 'Read Spec', mark: 'read-spec' },
+  spec_write: { label: 'Write Spec', mark: 'write-spec' },
+  spec_propose: { label: 'Propose', mark: 'propose-spec' },
 }
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
 export const READ_PAGE_BYTES = 256 * 1024
+
+/** The most `spec_read` hands back in one call, in characters of the Spec rendered for the agent. */
+export const SPEC_PAGE_CHARACTERS = 64 * 1024
 
 /** How many matches a search may return before it stops and says so. */
 export const SEARCH_MATCH_LIMIT = 200
@@ -127,17 +139,33 @@ export interface SearchResult {
   readonly skippedCount: number
 }
 
+/** What a `define` Session reads the code with: nothing that writes a file or runs a command. */
+const READ_ONLY_CODE_TOOLS = [
+  'fs_read',
+  'fs_list',
+  'search',
+  'project_get',
+  'session_get',
+  'commands_list',
+  'commands_output',
+] as const satisfies readonly ToolName[]
+
 /**
  * The tools of a Session, by its mission.
  *
- * `free` is the only mission of this lot and it is offered everything; the mission is a
- * parameter rather than a constant so that the sets of the next issues arrive here and not in
- * eleven tools that each grew a condition.
+ * A `free` Session is offered the code tools, and of the Spec's only `spec_propose`: it has no
+ * Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session produces a Spec and not code (D7-14): it reads the Workspace, never writes
+ * to it nor runs anything, and writes its Spec through the three Spec tools. `build` has no
+ * Session to offer anything to yet.
  */
 export function offeredTools(mission: Mission): readonly ToolName[] {
   switch (mission) {
     case 'free':
-      return TOOL_NAMES
+      return TOOL_NAMES.filter((name) => name !== 'spec_read' && name !== 'spec_write')
+    case 'define':
+      return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
+    case 'build':
+      return []
   }
 }
 

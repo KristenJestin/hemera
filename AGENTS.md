@@ -229,6 +229,10 @@ declared in `packages/ipc/src/engine.ts` — and never opens the file itself.
 The engine holds the agents as well, under `apps/desktop/src/engine/agents/`: the ACP client, the
 supervisor of the agent processes, what the machine has installed and the adapter of each agent.
 An agent is started, stopped and asked from there, and its thread is written from there.
+The Spec lives beside them, under `apps/desktop/src/engine/specs/`: the Spec, its revisions,
+sections and phases, the ready gate and the write right. Every write checks that the Spec is a
+draft on its current revision and, for an agent, that its Session holds the write right, and
+records its Journal line in the same transaction.
 
 The product Workspaces live under `apps/desktop/src/engine/workspaces/`: the Workspaces of a
 Project (created, observed, cleaned up), their preparation step by step, the Project's recipe and
@@ -268,8 +272,8 @@ writes at start-up.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
 - Storybook sidebar, five roots in this order and nothing else: **Foundations** (tokens,
   icons, motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the
-  composed pieces that are not a screen, grouped by family and five families at most
-  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`,
+  composed pieces that are not a screen, grouped by family and six families at most
+  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`, `Blocks/Spec`,
   `Blocks/Workspace`);
   **Surfaces**, one entry per screen (`Surfaces/Session`, `Surfaces/Project/Dialog` when a
   screen has several parts), never one entry per variant; **Shell**, the window frame. The

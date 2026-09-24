@@ -226,11 +226,11 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   /**
    * Whether the thread is following what is being written into it.
    *
-   * It is the reader's own answer and nothing else's: it is set by a scroll — theirs, or the one
-   * the pill makes — and it is never set by a measurement. That is the whole of the fix of the
-   * trial of 22 September 2026: a text streaming in makes the column taller without moving the
-   * scroll, which *measures* as having left the live edge, and a column that read its own
-   * growing as the reader walking away stopped following after the first word.
+   * It is the reader's own answer and nothing else's: it is set by a scroll — theirs, the one the
+   * pill makes, or the one a press on a mark asks for — and it is never set by a measurement. That
+   * is the whole of the fix of the trial of 22 September 2026: a text streaming in makes the column
+   * taller without moving the scroll, which *measures* as having left the live edge, and a column
+   * that read its own growing as the reader walking away stopped following after the first word.
    */
   const pinned = useRef(true)
   /** Where the thread was scrolled to last, which is how a scroll upwards is told from any other. */
@@ -270,14 +270,23 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
    * What lets go of the thread is going *up*, and not being far from the edge: a scroll event
    * arrives a frame after the position changed, and by then a text that is streaming has already
    * written another line — so a thread that read "far from the edge" as "the reader left" let go
-   * of itself while it was following. Going up is the reader and nobody else. Coming back to the
-   * edge takes them with it again, whichever of the two ways there they used.
+   * of itself while it was following. Going up is the reader and nobody else.
+   *
+   * Coming back takes them with it again, and coming back is going *down* into the edge. A scroll
+   * event carries where the thread is and not when it got there, so on a machine busy with the
+   * rest of the run the event of this very opening — the jump to the end the Session arrives on —
+   * is delivered after a press, with the live edge as its position, and the thread read it as the
+   * reader following again: what followed the writing then took the mark pressed off the screen
+   * before the journey there had moved a single frame. A scroll that has not moved is nobody's
+   * answer, and it is not the reader.
    */
   const scrolled = useCallback(() => {
     const node = box.current
     if (node !== null) {
-      if (node.scrollTop < lastTop.current) pinned.current = false
-      if (node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE) pinned.current = true
+      const moved = node.scrollTop - lastTop.current
+      if (moved < 0) pinned.current = false
+      const edge = node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE
+      if (moved > 0 && edge) pinned.current = true
       lastTop.current = node.scrollTop
     }
     look()
@@ -325,9 +334,25 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     node.scrollTo({ top: node.scrollHeight, behavior: still ? 'auto' : 'smooth' })
   }
 
+  /**
+   * A press on a mark: the reader is taken to the message it stands for, on the next laid-out frame.
+   *
+   * Not on the tick the press arrived, because the thread is written into while it is measured and
+   * the two answers can land in either order. What follows the writing puts the scroll back at the
+   * end of the thread, and a journey that has only been asked for is what it puts back: on a
+   * machine busy with the rest of the run a press acted on at once was undone before it moved, and
+   * the mark pressed was never reached. So the press lets go of the live edge first — a reader who
+   * asks for a message has left it, whatever the thread does next — and where to go is only asked
+   * for a frame later, once the thread has finished laying itself out.
+   */
   const goToMark = (id: string): void => {
-    const node = anchors.current[entries.findIndex((entry) => entry.id === id)]
-    node?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
+    const node = box.current
+    const anchor = anchors.current[entries.findIndex((entry) => entry.id === id)]
+    if (node === null || anchor === null || anchor === undefined) return
+    pinned.current = false
+    requestAnimationFrame(() => {
+      anchor.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
+    })
   }
 
   const marks = entries.filter(isMarked).map((entry) => ({ id: entry.id, label: entry.mark }))

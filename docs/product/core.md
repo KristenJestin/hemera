@@ -278,7 +278,8 @@ This base separates the queryable metadata from the written content:
 - `title`, `slug`, `type`, `status` and the relations are structured data known to
   Hemera;
 - `problem`, `expected_outcome`, `scope` and `verification` are four rich, editable
-  sections, not a decomposition into many atomic fields.
+  sections, not a decomposition into many atomic fields. Each is a row of `spec_sections`,
+  versioned on its own and carrying its last author, `human` or `agent`, and Session.
 
 This structure lets the agent evolve a section as a coherent whole and
 the user read the Spec as a document, while letting Hemera drive its identity, its
@@ -317,7 +318,7 @@ the state and the useful constraints; it does not have to orchestrate these inte
 
 The `Spec` is the durable identity and carries its live state. A `spec_revisions` table keeps
 the versions of its complete contract. A revision is a relational aggregate made up of its
-main row, its `UserStory` items and their acceptance criteria. The revision carries
+main row, its sections, its `UserStory` items and their acceptance criteria. The revision carries
 no status of its own: the life cycle belongs to the Spec.
 
 Only the current revision of a `draft` Spec is editable. Moving the Spec from `draft` to
@@ -332,8 +333,9 @@ The agent can write into the new draft once the human action has been performed.
 
 The only return to `draft` starts from the `ready` state. The `ready → draft` transition
 necessarily creates a new revision: in a single transaction, the backend copies the
-current revision, its `UserStory` items and their criteria, points `current_revision_id` to
-the copy, then places the Spec in `draft`. The previous revision remains intact.
+current revision, its sections, its `UserStory` items and their criteria, points
+`current_revision_id` to the copy, then places the Spec in `draft`. The previous revision
+remains intact.
 
 This transition relies on a dedicated business operation of full cloning, not on a series
 of independent writes exposed to clients. The product action targets the Spec, for example
@@ -342,9 +344,9 @@ and not exposed as an MCP tool to the agent. The backend:
 
 1. checks that the Spec is still `ready` and still points to the expected revision;
 2. creates the next revision with a new number and the creation metadata;
-3. copies all the contractual content and all the child rows;
-4. assigns new IDs to the copied `UserStory` items and criteria while keeping their relations
-   and their order;
+3. copies all the contractual content, its sections with their versions, and all the child rows;
+4. assigns new IDs to the copied sections, `UserStory` items and criteria while keeping their
+   relations and their order;
 5. switches `current_revision_id` and the Spec's status to `draft`;
 6. records the reopening event and the reason, if any.
 
@@ -368,12 +370,15 @@ The logical schema retained is:
 ```text
 specs
 - id
+- project_id
 - key
 - slug
 - status
-- priority
+- priority nullable
 - workspace_id nullable
 - current_revision_id
+- writer_session_id nullable
+- content_version
 - created_at
 - updated_at
 
@@ -383,18 +388,25 @@ spec_revisions
 - number
 - title
 - type
-- problem
-- expected_outcome
-- scope
-- verification
-- change_summary
-- change_reason
+- change_summary nullable
+- change_reason nullable
 - created_by
+- attested_content_version nullable
 - created_at
+
+spec_sections
+- id
+- revision_id
+- name
+- body
+- version
+- author
+- session_id nullable
+- updated_at
 
 user_stories
 - id
-- spec_revision_id
+- revision_id
 - title
 - narrative
 - priority nullable
@@ -402,10 +414,27 @@ user_stories
 
 acceptance_criteria
 - id
-- user_story_id
+- story_id
 - body
 - rank
+
+task_sets          id, revision_id, kind (`contract`)
+spec_tasks         id, task_set_id, title, result, type, executor, criteria, rank
+task_dependencies  task_id, depends_on_id
+task_stories       task_id, story_id
+spec_questions     id, revision_id, body, blocking, phase nullable, raised_by, options,
+                   answer_option_id nullable, answer_text nullable, resolved_at nullable,
+                   created_at
+spec_phases        id, revision_id, phase, state, summary nullable, assumptions, basis,
+                   protocol_version, declared_at nullable
+spec_edit_buffers  spec_id, name, body, base_version, updated_at
 ```
+
+A section belongs to a single `SpecRevision`, once per name. Its name comes from a closed
+set: the base `problem`, `expected_outcome`, `scope` and `verification`, then `plan`, and the
+section of each type, `behaviour` for a `feature`, `reproduction` for a `bug` and `invariants`
+for a `maintenance`. Every write to a section bumps its `version` and the Spec's
+`content_version`.
 
 A `UserStory` belongs directly to a single `SpecRevision`. An acceptance criterion
 belongs directly to a single `UserStory`. The relation to the Spec is deduced through the
@@ -443,9 +472,9 @@ entire build and the execution of a `TaskSet` represents a modification pass. An
 interrupted pass remains observable through its task executions without an additional cycle entity.
 
 When a new revision is created, the backend copies in a single transaction the
-`spec_revisions` row, its `user_stories` rows and their `acceptance_criteria` rows. The copies
-receive new IDs. There is no story identity spanning revisions and no
-second versioning mechanism. A possible future need to trace the origin of a copy
+`spec_revisions` row, its `spec_sections` rows, its `user_stories` rows and their
+`acceptance_criteria` rows. The copies receive new IDs. There is no story identity spanning
+revisions and no second versioning mechanism. A possible future need to trace the origin of a copy
 could add a lineage link, but it does not belong to the current core.
 
 The content is therefore not an opaque JSON snapshot. A native list is stored as
@@ -453,9 +482,9 @@ SQL child rows. A JSON field remains possible later for flexible data that has n
 an identity of its own nor a direct relation with other objects.
 
 The result of the `plan` phase is not a standalone entity. It directly complements the
-revision with a rich `plan` field, which gathers the technical approach, the impacts, the
+revision with a rich `plan` section, which gathers the technical approach, the impacts, the
 decisions, the constraints and the risks. The phase can also refine the existing
-`verification` field. This form avoids a parallel table and versioning cycle:
+`verification` section. This form avoids a parallel table and versioning cycle:
 the content is frozen with the rest of the revision.
 
 The native prototype is postponed to a later delivery. Its phase is defined but
@@ -662,6 +691,14 @@ UI prototype, in particular to determine where to create them and find them agai
 The mission determines the instructions and the MCP tools made available. The provider
 indicates which engine executes the Session, for example Claude, Codex or OpenCode.
 
+A `free` Session is offered Hemera's code tools and, of the Spec tools, `spec_propose` alone,
+to propose a Spec. A `define` Session produces a Spec and not code: it reads the Workspace
+(`fs_read`, `fs_list`, `search`, `project_get`, `session_get`, `commands_list`,
+`commands_output`) and writes only its Spec, through `spec_read`, `spec_write` and
+`spec_propose`; it is offered neither `fs_write`, `fs_edit`, `commands_run` nor `commands_stop`.
+The Session, its Spec and its write right are deduced from the caller, never from the arguments
+of a call. The Context view lists the set of the Session's mission.
+
 ## Session view
 
 The chat belongs to all Sessions, but it is not necessarily their main surface
@@ -688,7 +725,8 @@ where it is. Once the user has chosen an effort in the Session, it is kept acros
 The composer of a Project's Home follows the same rule before the Session exists.
 
 The views surrounding the main surface are closable and mutually exclusive:
-the user opens only one at a time. A working surface can display, as
+the user opens only one at a time. The Spec panel of a `define` Session is not one of them: it
+is that Session's working surface, and it has no close control. A working surface can display, as
 needed, a Spec, tasks, a prototype, a diff, a review or a document.
 
 The mission gives a focus and a default behaviour; it does not limit the activities
@@ -696,7 +734,9 @@ possible in the Session. A `define` Session can for example produce a prototype,
 a `build` Session can perform an intermediate code review.
 
 - A `free` Session remains a chat without an imposed work structure.
-- A `define` Session keeps the chat in the centre and allows opening the live Spec beside it.
+- A `define` Session keeps the chat in the centre and the live Spec beside it, in the place of
+  the side column; its header reads its mission, its agent and the key of its Spec. A `free`
+  Session offers no Spec of its own: one begins with its agent's proposal in the thread.
 - An active `build` Session puts task progress and execution activity in the centre.
   The chat remains accessible without taking up all the space.
 - When a `build` is finished or requests an intervention, the chat can take back the
@@ -716,8 +756,21 @@ The user can also directly modify the content of a `draft` Spec from this panel,
 including during a discussion with the agent. Hemera records these modifications with their
 human provenance and signals them to the agent of the `define` Session concerned so that it
 takes them into account. The content remains locked from `ready` on, in accordance with the revision rules.
-The details of the editor and the coordination of human and agent modifications remain to be
-designed.
+
+The panel edits one Markdown text area per section, with a preview toggle, and structured rows
+for the stories, criteria, tasks and questions. A save carries the version of the section it was
+opened on. If the section has moved since, the save is refused: the unsaved text is kept in a
+buffer, one per section of the Spec, that survives a relaunch, and the panel offers to compare
+the two texts, to apply the human's text on the current one as a new human write, or to discard
+it. Last-writer-wins is refused: a conflict never loses an unsaved human text. The agent's writes
+carry their base version the same way and are refused on a mismatch. A human edit reaches the
+writer Session's agent at its next safe point, between two turns, never in the middle of one.
+
+A question of the Spec is asked in the chat, where it is answered. The agent offers its answers
+as options, one of them recommended, and the user picks one or writes their own; a question
+with no option takes a text only. The answer is written beside the question in the thread,
+resolves it, and reaches the agent at its next safe point like a human edit. The questions part
+of the Spec is the register of what was asked and what was decided.
 
 Presentation examples:
 
@@ -740,9 +793,16 @@ briefs can be resources versioned with the application.
 The mission carries the permanent instructions that remain true from start to finish: its
 responsibility, its limits of authority, its relationship with the user and the Spec, its
 common rules and its general definition of success. Each phase adds a temporary objective,
-expected results, suitable tools and exit criteria. At each turn, Hemera
-composes the global rules, the mission's instructions, the active phase's instructions
-and the live context of the Session and the Spec.
+expected results, suitable tools and exit criteria. Hemera composes the mission's
+instructions, the brief of the phase in focus and the Spec as it stands, each section with its
+version, into the mission brief, and hands it to the agent as a delivery at a safe point, the
+way a change of the Workspace's instructions is handed over: before the Session's first turn,
+again each time the phase in focus changes, and to an agent whose own session was opened afresh.
+The brief is a prompt of its own, a Hemera marker and the brief as a resource, never a part of
+the user's message; the thread shows it as a folded Hemera line, and it counts as given only
+once the agent took it. Between two briefs, the human's section edits and answers reach the
+agent the same way, each a delivery of its own and a Hemera line of the thread: at once when no
+turn runs, once the running turn ends otherwise.
 
 The `define` mission defines three main phases and one conditional phase. The
 `prototype` phase remains unavailable and cannot be triggered in the first delivery; its declaration
@@ -778,8 +838,12 @@ it was requested.
 
 Several phases can be open simultaneously. Hemera keeps a phase focus to
 know which phase provides the main brief for the current turn, but this cursor is not
-the global state of the mission. Each phase has its own durable state. If an input on which
-a phase depends changes, its result can become stale. A mere evolution of a prototype's
+the global state of the mission. The focus is the first phase, in the protocol's order, that is
+open or stale: a stale phase has to be declared again, and that is the work the turn points at.
+Each phase has its own durable state. If an input on which a phase depends changes, its result
+can become stale. Writing a section makes stale the finished phase that owns it along with the
+finished phases that depend on it, so the owner's exit checks are asked again rather than kept on
+a text that changed. A mere evolution of a prototype's
 content does not, however, make `decompose` stale, since the tasks reference the prototype
 instead of duplicating its rendering.
 
@@ -794,11 +858,12 @@ the mechanical invariants: it checks that the expected phase is indeed active, t
 required data exists and that no declared blocker makes the transition impossible. The agent
 can therefore neither bypass the protocol's order nor force a failing check.
 
-This declaration goes through a structured Hemera MCP tool, and not through a mere sentence in the
-chat. The backend itself deduces the Session, the agent and the mission; the targeted phase must be
-an open phase assigned to that caller. If the agent's summary and Hemera's checks are
-both met, the phase is recorded as finished, its dependants become eligible and the
-main agent's focus can advance.
+This declaration goes through a structured Hemera MCP tool, `spec_propose` with the kind
+`phase_done`, and not through a mere sentence in the chat. The backend itself deduces the
+Session, the agent and the mission; the targeted phase must be an open phase assigned to that
+caller. If the agent's summary and Hemera's checks are both met, the phase is recorded as
+finished, its dependants become eligible and the main agent's focus can advance; otherwise the
+call answers the failing checks and changes nothing.
 
 Finishing a phase is a work checkpoint, not a contractual validation. A phase
 can be reopened by the user or become stale if its inputs change. Only
@@ -810,8 +875,9 @@ is a protocol gate, not an additional phase: it blocks the proposal as long as a
 contradiction or an activated but unresolved element remains. `shape`, `plan` and `decompose`
 must be finished, as well as `prototype` when it was activated. No
 blocking question may remain; every requirement or `UserStory` must be covered by criteria
-and tasks, whose dependencies and references are valid. The agent then attests that
-the contract is complete and executable without any major decision left to invent. Hemera can propose it,
+and tasks, whose dependencies and references are valid. The agent then attests, through
+`spec_propose` with the kind `ready`, that the contract is complete and executable without any
+major decision left to invent; the attestation holds for the content it was made on. Hemera can propose it,
 but only an explicit action of the user freezes the revision by moving the Spec to `ready`.
 
 The `shape` phase can end when Hemera observes that the title, the type, the problem, the
@@ -1030,7 +1096,8 @@ review loop without creating a separate `review` mission.
 A sub-agent execution is attached to the parent Session and to its phase of origin.
 When it ends, Hemera persists the result then places a signal in a durable
 inbox of the main Session. This signal is never injected in the middle of a generation and
-never passes itself off as a human message: it is delivered at the next safe point. If
+never passes itself off as a human message: it is delivered at the next safe point, as a
+delivery said to be internal. If
 the main agent is idle, Hemera can launch an internal continuation to integrate the
 result without waiting for a new user message. This inbox guarantees
 delivery; `domain_events` separately keeps its history.
@@ -1040,24 +1107,32 @@ delivery; `domain_events` separately keeps its history.
 A Session without a mission can receive its first mission in place, without creating a new
 thread. It can in particular become `define` or `build`.
 
-Moving from `free` to `define` does not automatically create an empty Spec. The
-`define` Session then chooses to create a Spec or to absorb its work into an existing Spec.
-A `define` Session launched directly from a Spec is, on the other hand, attached to it from its
-creation.
+Moving from `free` to `define` never leaves a Session without its Spec. The agent of a `free`
+Session proposes a Spec, a title and a type, in the thread; when the user accepts it, Hemera
+creates the Spec, makes the Session its writer and switches it to `define` in one transaction,
+keeping the thread. A `define` Session opened from a Spec, in the list of a Project's Specs, is
+attached to it from its creation: it writes the draft when nobody does, and reads it otherwise.
+
+The agent proposes through Hemera's `spec_propose` tool, with the kind `spec`, a title and a
+type: of the Spec tools, it is the only one a `free` Session is offered. Hemera writes the
+proposal in the thread, below what the agent said before it, and nothing else; a `define`
+Session is refused a proposal. The tools an agent holds are fixed when it is started, so once
+the proposal is accepted Hemera lets the Session's agent go, and its next turn starts it again,
+its conversation resumed, with the tools of a `define` Session.
 
 Moving from `free` to `build` is only possible if the Session is first attached to an
-existing Spec. Without a Spec, the user must remain in free discussion or go through
-`define` to create or absorb the necessary Spec.
+existing Spec. Without a Spec, the user must remain in free discussion, accept the agent's
+proposal of a Spec to go through `define`, or open a `define` Session on an existing Spec from
+the Project's list of Specs.
 
-Among the specialised missions, only `define` can begin without a Spec, since its
-responsibility is precisely to create one or to absorb its work into an existing
-Spec. The `build` mission requires a linked Spec.
+Among the specialised missions, only `define` is reached from a free discussion without an
+existing Spec, since its responsibility is precisely to create one. The `build` mission
+requires a linked Spec.
 
 Once its first mission is assigned, the Session no longer changes mission. Moving from
 `define` to `build` creates a new Session.
 
-Attachment to a Spec remains independent of the mission: a Session without a mission can
-also join a Spec while remaining a free discussion.
+Attachment to a Spec remains a relation of its own, stored apart from the mission.
 
 The end of a `define` Session is determined by the Spec itself: when the Spec moves to
 the `ready` state from that Session, Hemera offers to create a new `build` Session linked

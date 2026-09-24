@@ -239,6 +239,23 @@ const RELAYED = [
   'variables.list',
   'variables.set',
   'variables.remove',
+  // The Specs, all of them the engine's to answer (D7-01).
+  'specs.list',
+  'specs.read',
+  'specs.revisions',
+  'specs.create',
+  'specs.openSession',
+  'specs.writeSection',
+  'specs.writeStories',
+  'specs.writeTasks',
+  'specs.raiseQuestion',
+  'specs.answerQuestion',
+  'specs.markReady',
+  'specs.reopen',
+  'specs.transferWrite',
+  'specs.buffers.read',
+  'specs.buffers.save',
+  'specs.buffers.discard',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

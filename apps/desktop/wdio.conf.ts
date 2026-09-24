@@ -15,6 +15,7 @@ import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { installFakeAgent } from './e2e/agent/install.ts'
+import { QUALIFIED_VARIABLE } from './src/engine/agents/bare.ts'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
@@ -28,7 +29,10 @@ const application = dirname(fileURLToPath(import.meta.url))
  * holds a thread, which is what reopening the application is. They run in order because the
  * capabilities are read in order and one window runs at a time.
  */
-const CONTINUED = new Map([['sessions.reopened.e2e.ts', 'sessions.e2e.ts']])
+const CONTINUED = new Map([
+  ['sessions.reopened.e2e.ts', 'sessions.e2e.ts'],
+  ['specs.reopened.e2e.ts', 'specs.e2e.ts'],
+])
 
 /**
  * The data folder one spec file runs on, made for it and thrown away after the run (D3-06).
@@ -66,6 +70,12 @@ delete process.env.ELECTRON_RUN_AS_NODE
 // application looks a command up on the machine it runs on, and this is the machine it is given
 // (`e2e/agent/install.ts`). Nothing of the product is aware of it, and no real agent is run.
 installFakeAgent()
+
+// The agent it answers for is OpenCode, whose declaration refuses to run it bare where it has not
+// been qualified (Linux, today): named here, the engine treats that one agent as qualified whatever
+// it declares, and says so once in its diagnostic log (`src/engine/agents/bare.ts`). It reaches
+// the application as `HEMERA_E2E_HEADLESS` does, below.
+process.env[QUALIFIED_VARIABLE] = 'opencode'
 
 // `HEMERA_E2E_HEADLESS` reaches the application the way the agent's `PATH` does: the driver
 // starts it with this process's environment, and the service has no environment of its own to

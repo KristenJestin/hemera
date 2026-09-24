@@ -1,12 +1,15 @@
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import type {
   CommandRun,
   ConfigOption,
   ContextView as Provided,
+  SectionName,
   Session,
   SessionEntry,
+  SpecRevision,
+  SpecSnapshot,
 } from '@hemera/ipc'
 import {
   ActivityRow,
@@ -22,6 +25,7 @@ import {
   SessionEmpty,
   SessionDetails,
   SessionHeader,
+  SpecPanel,
   UsageMeter,
   type MessageLine,
   type MessageState,
@@ -37,6 +41,21 @@ import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
+import { type DefinedSpec, questionAnchor } from '../spec-entries.ts'
+import {
+  answerQuestion,
+  createSpec,
+  discardMine,
+  markReady,
+  rework,
+  saveSection,
+  saveStory,
+  selectRevision,
+  specSnapshot,
+  subscribeToSpec,
+  takeOver,
+} from '../spec-store.ts'
+import { readerOf, specViewOf } from '../spec-views.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -99,10 +118,37 @@ function countOf(entries: number): string {
   return entries === 1 ? '1 message' : `${String(entries)} messages`
 }
 
-/** The line under a Session's title: when it was made, what runs it, and how much is in it. */
-function metaOf(session: Session, entries: number, now: number): string {
+/**
+ * The line under a Session's title: when it was made, what runs it, and how much is in it — or,
+ * for a `define` Session, its mission, its agent and model, and the key of the Spec it defines
+ * (core.md, "Session view": `DEFINE · Claude Sonnet`).
+ */
+function metaOf(session: Session, entries: number, now: number, specKey: string | null): string {
   const agent = session.provider === null ? 'no agent' : session.provider
+  if (session.mission === 'define') {
+    return ['DEFINE', agent, session.model, specKey].filter((one) => one !== null).join(' · ')
+  }
   return `created ${whenOf(session.createdAt, now)} · ${agent} · ${countOf(entries)}`
+}
+
+/** The Spec a Session defines as its first revision named it, once it is read (D7-07). */
+function definedOf(
+  snapshot: SpecSnapshot | null,
+  revisions: readonly SpecRevision[],
+): DefinedSpec | null {
+  const first = revisions.find((one) => one.number === 1)
+  if (snapshot === null || first === undefined) return null
+  return { key: snapshot.spec.key, title: first.title, type: first.type }
+}
+
+/**
+ * Takes the thread to where a question of the Spec is asked, and the keyboard to its first
+ * answer: the register of the panel links there, and the answer is given in the thread.
+ */
+function goToQuestion(id: string): void {
+  const block = document.getElementById(questionAnchor(id))
+  block?.scrollIntoView({ block: 'center' })
+  block?.querySelector('button')?.focus()
 }
 
 /** What the last act of a thread was refused with, when the engine refused it. */
@@ -121,6 +167,10 @@ export interface SessionPageProps {
   refusal: string | null
   /** What the engine has pushed for this Session since it was opened. */
   agent: AgentSessionState
+  /** The Sessions of the Project, which name the Session that writes a Spec this one reads. */
+  sessions: readonly Session[]
+  /** Whether a turn is running in a Session: a reader does not take the right from under one. */
+  running: (sessionId: string) => boolean
   /**
    * The agent this Session runs, as the menu lists it: one, and never another.
    *
@@ -188,6 +238,8 @@ export function SessionPage({
   editing,
   refusal,
   agent,
+  sessions,
+  running,
   agents,
   options,
   onWrite,
@@ -231,6 +283,22 @@ export function SessionPage({
   const deciding = (decision: Promise<string | null>): void => {
     void decision.then(setRefused)
   }
+  /** The proposals `Not now` was pressed on: this window's answer, which nothing keeps. */
+  const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set())
+  const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
+  const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
+  const spec =
+    defined === null
+      ? null
+      : specViewOf({
+          snapshot: defined,
+          revisions: stored.revisions,
+          buffers: stored.buffers,
+          journal: stored.journal,
+          readyRefused: stored.readyRefused,
+        })
+  const versionOf = (name: SectionName): number =>
+    spec?.sections.find((one) => one.name === name)?.version ?? 0
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -314,6 +382,19 @@ export function SessionPage({
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
       onAddToCatalogue: (run) => deciding(onAddToCatalogue(run)),
+      spec: {
+        thread,
+        specId: session.specId,
+        defined: definedOf(defined, stored.revisions),
+        asked:
+          stored.current?.spec.id === session.specId
+            ? new Set(stored.current.questions.map((one) => one.id))
+            : null,
+        declined,
+        onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
+        onCreate: (title, type) => void createSpec(session.id, type, title),
+        onDecline: (entryId) => setDeclined(new Set([...declined, entryId])),
+      },
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
@@ -413,20 +494,51 @@ export function SessionPage({
   // Which tabs have something to show, which is what the details open on.
   const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
 
+  /**
+   * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
+   * Session has its Spec. A `free` Session has no panel and nothing that offers one: a Spec begins
+   * with the agent's proposal in the thread (D7-07). `build` plugs in here, with the panel of its
+   * tasks, workers and evidence standing in the same `MissionPanel` the Spec stands in.
+   */
+  function missionPanel(): ReactNode {
+    if (session.mission !== 'define' || spec === null || defined === null) return null
+    return (
+      <SpecPanel
+        spec={spec}
+        reader={readerOf(defined, session.id, sessions, running)}
+        // Checked against the version the edit was opened on, which the panel hands back:
+        // an agent may have written the section meanwhile (D7-12).
+        onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
+        onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
+        onDiscardMine={(name) => void discardMine(name)}
+        onSaveStory={(story) => void saveStory(session.id, story)}
+        onGoToQuestion={goToQuestion}
+        onMarkReady={() => void markReady(session.id)}
+        onRework={(reason) => void rework(session.id, reason)}
+        onPickRevision={(revision) => {
+          const current = stored.revisions.find((one) => one.id === defined.spec.currentRevisionId)
+          void selectRevision(revision === current?.number ? null : revision)
+        }}
+        onTakeOver={() => void takeOver(session.id)}
+      />
+    )
+  }
+
   return (
     /*
       One column (review of #40, defect 2): the header, the thread and the composer share one
-      width and one left edge, and nothing stands beside them — the Session details are a dialog
-      the reader opens from the head (second review of #18). The screen runs under the frame all
-      the same, and the page's own scroll is the thread's.
+      width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
+      the Session details are a dialog the reader opens from the head (second review of #18). The
+      screen runs under the frame all the same, and the page's own scroll is the thread's. The row
+      is the container the unfolded Spec panel's width is a share of.
     */
-    <div className="flex h-full min-h-0">
+    <div className="@container flex h-full min-h-0">
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
           <SessionHeader
             title={session.title}
             projectName={projectName}
-            meta={metaOf(session, thread.length, now)}
+            meta={metaOf(session, thread.length, now, spec?.key ?? null)}
             onRename={onRename}
             editing={editing}
             onStartEditing={onStartEditing}
@@ -494,9 +606,9 @@ export function SessionPage({
             stack as the meter rather than over the thread, so what it moves is itself and nothing
             above it (D4b-02).
           */}
-          {(refused ?? refusal) !== null && (
+          {(refused ?? refusal ?? stored.refusal) !== null && (
             <p role="alert" className="text-sm text-muted-foreground">
-              {refused ?? refusal}
+              {refused ?? refusal ?? stored.refusal}
             </p>
           )}
           <Composer
@@ -612,6 +724,13 @@ export function SessionPage({
         // is read when the dialog opens, so an open dialog never changes tab under the reader.
         defaultTab={openingTabOf(commandRuns, tabs)}
       />
+      {/*
+        The panel of the Session's mission, beside the chat: the working surface the thread gave
+        up width for, where the side column stood before the Session details took its plan and its
+        files into a dialog. It opens folded to a band beside the chat, and unfolds pushing it
+        aside when the hand or the agent asks (brief revisions 4, 4b).
+      */}
+      {missionPanel()}
     </div>
   )
 }

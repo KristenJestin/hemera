@@ -20,7 +20,7 @@ import { COMMAND_TYPE_ICONS, COMMAND_TYPE_LABELS, type CommandType } from './com
  */
 
 /** Where a proposal stands: waiting for the human, or answered. */
-export type ProposalState = 'pending' | 'accepted' | 'declined'
+export type CommandProposalState = 'pending' | 'accepted' | 'declined'
 
 export interface CommandProposalProps {
   /** The name it would be kept under, which is what the agent asks for afterwards. */
@@ -32,7 +32,7 @@ export interface CommandProposalProps {
   folder: string
   /** Why the agent thinks it is worth keeping, in its own words. */
   why: string
-  state: ProposalState
+  state: CommandProposalState
   /** Writes the command to the catalogue, which is the human's to do. */
   onAccept?: (() => void) | undefined
   onDecline?: (() => void) | undefined

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { AGENTS_FILE, TOOL_NAMES } from '@hemera/core'
+import { AGENTS_FILE, offeredTools } from '@hemera/core'
 import type { CommandRun } from '@hemera/ipc'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
@@ -247,10 +247,33 @@ describe('The view lists the sources with their provenance', () => {
       ['provided', AGENTS_FILE, 'session_start'],
     ])
     expect(view.provided[1]?.fingerprint).toMatch(/^[0-9a-f]{64}$/)
-    expect(view.tools.map((one) => one.name)).toEqual([...TOOL_NAMES])
+    expect(view.tools.map((one) => one.name)).toEqual([...offeredTools('free')])
     expect(view.tools.find((one) => one.name === 'search')?.bound).toBe(
       '200 matches and 1 MiB scanned a call',
     )
     expect(view.commands).toEqual([{ name: 'check', line: 'pnpm check' }])
+  })
+
+  test('a define Session lists the define set: the Spec tools and no write tool', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const { bridge } = opened
+    const project = await aProject(opened)
+    const session = await bridge.invoke('sessions.create', {
+      projectId: project.id,
+      provider: 'claude',
+    })
+    await bridge.invoke('specs.create', {
+      sessionId: session.id,
+      type: 'feature',
+      title: 'Export the Journal',
+    })
+
+    const view = await bridge.invoke('context.read', { sessionId: session.id })
+
+    const listed = view.tools.map((one) => one.name)
+    expect(listed).toEqual([...offeredTools('define')])
+    expect(listed).toContain('spec_write')
+    expect(listed).not.toContain('fs_write')
+    expect(listed).not.toContain('commands_run')
   })
 })

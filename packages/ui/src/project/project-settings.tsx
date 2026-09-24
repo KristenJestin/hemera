@@ -8,7 +8,7 @@ import { SuggestInput, type Suggestion } from '../components/suggest/suggest-inp
 import { Input } from '../components/field/field.tsx'
 import { Select } from '../components/select/select.tsx'
 import { useAppForm } from '../form/app-form.ts'
-import { projectFormSchema, relativePathSchema } from '../form/schemas.ts'
+import { projectSettingsSchema, relativePathSchema } from '../form/schemas.ts'
 import { IconArchive, IconFolder, IconGitBranch, IconPencil, IconPlus, IconX } from '../icons.ts'
 import { causeOf } from './project-dialog.tsx'
 import {
@@ -18,7 +18,7 @@ import {
   type CommandScope,
   type CommandType,
 } from '../activity/command-type.ts'
-import type { ProjectDraft, RepositoryLine } from './model.ts'
+import type { ProjectSettingsDraft, RepositoryLine } from './model.ts'
 
 /**
  * The settings of one Project, in its cards (design D4-07).
@@ -103,14 +103,14 @@ function slugOf(name: string): string {
 
 export interface ProjectSettingsProps {
   /** What the Project is right now; the form opens on it and says when it has moved away. */
-  project: ProjectDraft
+  project: ProjectSettingsDraft
   /** A line under the title: when it was created, what it holds. */
   subtitle?: string | undefined
   repositories: RepositoryLine[]
   /** What sits directly under the Workspace, so a path can be offered instead of asked for. */
   folders?: readonly RepositoryLine[] | undefined
   /** What a Project is saved with; the message it answers is shown above the cards. */
-  onSave: (draft: ProjectDraft) => Promise<string | null>
+  onSave: (draft: ProjectSettingsDraft) => Promise<string | null>
   /** Asks the system for a folder, and answers null when the picker was dismissed. */
   onBrowse: () => Promise<string | null>
   /** Asks whatever has a disk what is at a path, and answers the cause when nothing usable is. */
@@ -171,7 +171,7 @@ export function ProjectSettings({
 
   const form = useAppForm({
     defaultValues: project,
-    validators: { onChange: projectFormSchema },
+    validators: { onChange: projectSettingsSchema },
     onSubmit: async ({ value }) => {
       const said = await onSave(value)
       setRefusal(said)
@@ -206,6 +206,14 @@ export function ProjectSettings({
           </form.AppField>
           <form.AppField name="tone">{(field) => <field.ToneField label="Colour" />}</form.AppField>
         </div>
+        <form.AppField name="specPrefix">
+          {(field) => (
+            <field.TextField
+              label="Spec prefix"
+              description="What the keys of new Specs start with. Keys already given keep theirs."
+            />
+          )}
+        </form.AppField>
       </Card>
 
       <Card

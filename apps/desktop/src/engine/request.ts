@@ -26,6 +26,7 @@ import type {
   EmptyTitleError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
+  InvalidSpecPrefixError,
   InvalidVariableKeyError,
   NoAgentError,
 } from '@hemera/core'
@@ -65,6 +66,7 @@ import {
   type WorkspaceFixedError,
   type WorkspaceNotReadyError,
 } from './sessions.ts'
+import { Specs, type SpecRefusal } from './specs/specs.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
@@ -186,6 +188,7 @@ export function answer(
   | Preparation
   | Recipe
   | Proposals
+  | Specs
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -457,6 +460,74 @@ export function answer(
       return yield* variables.remove(projectId, workspaceId, key)
     }
 
+    // The Spec use cases (D7-03). The renderer is the human actor: whatever it writes carries
+    // human provenance and the Session whose panel it came from (D7-04, D7-11).
+    const specs = yield* Specs
+    if (decision.name === 'specs.list') return yield* specs.list(decision.argument.projectId)
+    if (decision.name === 'specs.read') {
+      return yield* specs.read(decision.argument.specId, decision.argument.revision)
+    }
+    if (decision.name === 'specs.revisions') return yield* specs.revisions(decision.argument.specId)
+    if (decision.name === 'specs.create') {
+      const defining = yield* specs.create(decision.argument)
+      // The Session's agent was granted the tools of a free Session: it is let go of — now, or
+      // once the turn it is running ends — and its next turn starts it again, its conversation
+      // resumed, with the tools of a define one (D7-14).
+      yield* runtime.releaseWhenIdle(defining.session.id)
+      return defining
+    }
+    if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
+    if (decision.name === 'specs.writeSection') {
+      const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
+      const written = yield* specs.writeSection(human, decision.argument)
+      // The agents defining the Spec are handed the edit at their next safe point (D7-09).
+      yield* runtime.specChanged(decision.argument.specId)
+      return written
+    }
+    if (decision.name === 'specs.writeStories') {
+      const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
+      return yield* specs.writeStories(human, decision.argument)
+    }
+    if (decision.name === 'specs.writeTasks') {
+      const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
+      return yield* specs.writeTasks(human, decision.argument)
+    }
+    if (decision.name === 'specs.raiseQuestion') {
+      const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
+      return yield* specs.raiseQuestion(human, decision.argument)
+    }
+    if (decision.name === 'specs.answerQuestion') {
+      const answered = yield* specs.answerQuestion(decision.argument)
+      yield* runtime.specChanged(decision.argument.specId)
+      return answered
+    }
+    if (decision.name === 'specs.markReady') {
+      // Frozen: the agents defining the Spec are told at their next safe point.
+      const frozen = yield* specs.markReady(decision.argument)
+      yield* runtime.specChanged(decision.argument.specId)
+      return frozen
+    }
+    if (decision.name === 'specs.reopen') {
+      // A Rework makes the phases stale: the brief of the one back in focus goes the same way.
+      const reopened = yield* specs.reopen(decision.argument)
+      yield* runtime.specChanged(decision.argument.specId)
+      return reopened
+    }
+    if (decision.name === 'specs.transferWrite') {
+      // Never under a turn the writer is running (Decided 14). Both Sessions are briefed again
+      // at their next safe point, the one that took the right as the writer (D7-11).
+      const taken = yield* specs.transferWrite(decision.argument, runtime.running)
+      yield* runtime.specChanged(decision.argument.specId)
+      return taken
+    }
+    if (decision.name === 'specs.buffers.read') {
+      return yield* specs.buffers.read(decision.argument.specId)
+    }
+    if (decision.name === 'specs.buffers.save') return yield* specs.buffers.save(decision.argument)
+    if (decision.name === 'specs.buffers.discard') {
+      return yield* specs.buffers.discard(decision.argument)
+    }
+
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
   })
@@ -470,6 +541,7 @@ export function answer(
  * something that happens by writing a service.
  */
 export type Refusal =
+  | SpecRefusal
   | AgentRuntimeError
   | AgentUpdateRefusedError
   | DatabaseError
@@ -479,6 +551,7 @@ export type Refusal =
   | InvalidCursorError
   | InvalidProjectNameError
   | InvalidRepositoryPathError
+  | InvalidSpecPrefixError
   | EmptyMessageError
   | EmptyTitleError
   | NoAgentError

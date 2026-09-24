@@ -436,6 +436,28 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'PreparationSteps',
       'WorkspaceList',
       'CleanupDialog',
+      // Lot 19: the Spec panel of a `define` Session, its rail and its parts, and the three
+      // blocks of the thread: what the agent was handed, a question of the Spec asked in the
+      // chat, and the agent proposing a Spec in a `free` Session.
+      'SpecPanel',
+      'SpecPart',
+      'SpecStage',
+      'SpecRail',
+      'SpecHead',
+      'SectionPart',
+      'StoriesPart',
+      'TasksPart',
+      'QuestionsPart',
+      'ConflictBanner',
+      'ReaderBar',
+      'ReworkDialog',
+      'MissionBrief',
+      'SpecQuestion',
+      'CreateSpecProposal',
+      // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
+      // and the rail it is fed with.
+      'MissionPanel',
+      'MissionRail',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

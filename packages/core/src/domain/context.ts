@@ -50,6 +50,14 @@ export function deliveryText(instructions: string): string {
 }
 
 /**
+ * A sub-agent's result as the main agent is handed it at a safe point (D7-14): said to be
+ * internal, so that it is never read as something the user wrote.
+ */
+export function internalText(result: string): string {
+  return `# Internal result\n\nA sub-agent working for you finished; this is its result, not a message of the user's.\n\n${result}`
+}
+
+/**
  * How a source of the context reached the agent, which the Context view says beside it (D6-10).
  *
  * The base goes through the system prompt where the agent has one to hand over — Claude Code's

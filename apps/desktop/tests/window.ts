@@ -44,6 +44,8 @@ import { preferencesLayer } from '#engine/preferences.ts'
 import { projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
 import { sessionsLayer } from '#engine/sessions.ts'
+import { NoSpecNotices } from '#engine/specs/notices.ts'
+import { specsLayer } from '#engine/specs/specs.ts'
 import { engineStatusLayer } from '#engine/status.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
@@ -130,6 +132,8 @@ export async function openWindow(
       Layer.mergeAll(
         projectsLayer,
         sessionsLayer,
+        // The Specs answer the page like the rest; nothing here listens for a Spec changing.
+        specsLayer.pipe(Layer.provide(NoSpecNotices)),
         preferencesLayer,
         listed,
         engineStatusLayer({ directory: dataFolder, channel: 'dev', version: VERSION }),

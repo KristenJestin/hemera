@@ -16,7 +16,7 @@ import {
   mergedEnvironment,
   nextPending,
   resumedSteps,
-  slugOf,
+  slugify,
   stepsFor,
   variableKey,
   workspaceName,
@@ -161,12 +161,12 @@ describe('A Workspace name is one folder name', () => {
 
 describe('A slug is lowercase words joined by dashes', () => {
   test('punctuation and spaces become one dash, none at the ends', () => {
-    expect(slugOf('Login form!')).toBe('login-form')
-    expect(slugOf('  --Add  the OAuth2 flow--  ')).toBe('add-the-oauth2-flow')
+    expect(slugify('Login form!')).toBe('login-form')
+    expect(slugify('  --Add  the OAuth2 flow--  ')).toBe('add-the-oauth2-flow')
   })
 
   test('an accented letter keeps its letter', () => {
-    expect(slugOf('Élan créé')).toBe('elan-cree')
+    expect(slugify('Élan créé')).toBe('elan-cree')
   })
 
   test("a Project's prefix is its name as a slug, hemera when nothing is left", () => {

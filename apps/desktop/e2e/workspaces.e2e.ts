@@ -28,7 +28,7 @@ import { $, browser, expect } from '@wdio/globals'
 import { git, repository } from '../tests/repositories.ts'
 import { e2eDataOf } from '../wdio.conf.ts'
 import { fakeWorkspace } from './agent/install.ts'
-import { AGENT, ANSWERS, MODELS, PROPOSAL, PROPOSE_ANSWER } from './agent/script.ts'
+import { AGENT, ANSWERS, COMMAND_PROPOSAL, COMMAND_PROPOSE_ANSWER, MODELS } from './agent/script.ts'
 import { addProject, awaits, choose, control, fill, press, pressTab, shows, write } from './hand.ts'
 
 /** The folder of `main`, which holds both repositories; kept for the reason `install.ts` gives. */
@@ -431,21 +431,21 @@ describe('A proposal enters the catalogue only when accepted', () => {
   it('shows the proposal in the thread, and writes the catalogue on Accept only', async () => {
     await press('Serve the app in main.')
     await browser.pause(900)
-    await write(`Keep the ${PROPOSAL.name} command, please.`)
+    await write(`Keep the ${COMMAND_PROPOSAL.name} command, please.`)
     await press('Send')
-    await awaits(PROPOSE_ANSWER)
+    await awaits(COMMAND_PROPOSE_ANSWER)
 
-    const proposal = `section[aria-label="Proposed command ${PROPOSAL.name}"]`
+    const proposal = `section[aria-label="Proposed command ${COMMAND_PROPOSAL.name}"]`
     expect(await $(proposal).isExisting()).toBe(true)
     // Proposed is not added: the catalogue is the human's to write (D8-11).
-    expect(await catalogue()).not.toContain(PROPOSAL.name)
+    expect(await catalogue()).not.toContain(COMMAND_PROPOSAL.name)
 
     await $(proposal).$('button=Accept').click()
     await awaitsIn(proposal, 'Added to the catalogue')
 
     await press('Project settings')
     await browser.pause(600)
-    expect(await $(`button[aria-label="Remove ${PROPOSAL.name}"]`).isExisting()).toBe(true)
+    expect(await $(`button[aria-label="Remove ${COMMAND_PROPOSAL.name}"]`).isExisting()).toBe(true)
   })
 })
 

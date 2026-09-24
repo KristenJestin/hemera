@@ -19,6 +19,8 @@ import {
   IconActivity as TablerActivity,
   IconAdjustments as TablerAdjustments,
   IconAdjustmentsFilled as TablerAdjustmentsFilled,
+  IconAlertCircle as TablerAlertCircle,
+  IconAlertCircleFilled as TablerAlertCircleFilled,
   IconAlertTriangle as TablerAlertTriangle,
   IconAlertTriangleFilled as TablerAlertTriangleFilled,
   IconArchive as TablerArchive,
@@ -30,11 +32,16 @@ import {
   IconBellFilled as TablerBellFilled,
   IconBolt as TablerBolt,
   IconBoltFilled as TablerBoltFilled,
+  IconBook as TablerBook,
+  IconBookFilled as TablerBookFilled,
   IconBookmarkPlus as TablerBookmarkPlus,
+  IconBorderOuter as TablerBorderOuter,
   IconBrain as TablerBrain,
   IconBrandOpenai as TablerBrandOpenai,
   IconBug as TablerBug,
   IconBugFilled as TablerBugFilled,
+  IconBulb as TablerBulb,
+  IconBulbFilled as TablerBulbFilled,
   IconCheck as TablerCheck,
   IconCheckFilled as TablerCheckFilled,
   IconChecklist as TablerChecklist,
@@ -50,6 +57,8 @@ import {
   IconClock as TablerClock,
   IconClockFilled as TablerClockFilled,
   IconCommand as TablerCommand,
+  IconCompass as TablerCompass,
+  IconCompassFilled as TablerCompassFilled,
   IconCopy as TablerCopy,
   IconDatabase as TablerDatabase,
   IconDatabaseFilled as TablerDatabaseFilled,
@@ -57,9 +66,15 @@ import {
   IconDeviceDesktopFilled as TablerDeviceDesktopFilled,
   IconDots as TablerDots,
   IconDotsFilled as TablerDotsFilled,
+  IconEye as TablerEye,
+  IconEyeFilled as TablerEyeFilled,
+  IconFileDescription as TablerFileDescription,
+  IconFileDescriptionFilled as TablerFileDescriptionFilled,
   IconFileText as TablerFileText,
   IconFilePlus as TablerFilePlus,
   IconFileTextFilled as TablerFileTextFilled,
+  IconFlag as TablerFlag,
+  IconFlagFilled as TablerFlagFilled,
   IconFlask as TablerFlask,
   IconFlaskFilled as TablerFlaskFilled,
   IconFolder as TablerFolder,
@@ -70,6 +85,7 @@ import {
   IconFolders as TablerFolders,
   IconFoldersFilled as TablerFoldersFilled,
   IconGitBranch as TablerGitBranch,
+  IconGitCompare as TablerGitCompare,
   IconGitFork as TablerGitFork,
   IconHammer as TablerHammer,
   IconHome as TablerHome,
@@ -77,13 +93,20 @@ import {
   IconInfoCircle as TablerInfoCircle,
   IconInfoCircleFilled as TablerInfoCircleFilled,
   IconLayoutSidebar as TablerLayoutSidebar,
+  IconLayoutList as TablerLayoutList,
+  IconLayoutListFilled as TablerLayoutListFilled,
   IconLayoutSidebarFilled as TablerLayoutSidebarFilled,
   IconLink as TablerLink,
+  IconListCheck as TablerListCheck,
   IconListDetails as TablerListDetails,
   IconListDetailsFilled as TablerListDetailsFilled,
+  IconListTree as TablerListTree,
   IconLoader as TablerLoader,
+  IconLock as TablerLock,
+  IconLockFilled as TablerLockFilled,
   IconMessage as TablerMessage,
   IconMessageFilled as TablerMessageFilled,
+  IconMessageQuestion as TablerMessageQuestion,
   IconMessages as TablerMessages,
   IconMessagesFilled as TablerMessagesFilled,
   IconMoon as TablerMoon,
@@ -101,6 +124,7 @@ import {
   IconRestore as TablerRestore,
   IconPlugConnected as TablerPlugConnected,
   IconRobot as TablerRobot,
+  IconRoute as TablerRoute,
   IconScript as TablerScript,
   IconSearch as TablerSearch,
   IconServer as TablerServer,
@@ -111,6 +135,7 @@ import {
   IconShield as TablerShield,
   IconSun as TablerSun,
   IconSunFilled as TablerSunFilled,
+  IconTarget as TablerTarget,
   IconTerminal as TablerTerminal,
   IconTerminal2 as TablerTerminal2,
   IconTimelineEvent as TablerTimelineEvent,
@@ -122,6 +147,8 @@ import {
   IconVariable as TablerVariable,
   IconWorld as TablerWorld,
   IconWorldFilled as TablerWorldFilled,
+  IconWriting as TablerWriting,
+  IconWritingFilled as TablerWritingFilled,
   IconX as TablerX,
   IconXFilled as TablerXFilled,
   type IconProps as TablerIconProps,
@@ -179,6 +206,11 @@ function catalogued(
 }
 
 export const IconActivity = catalogued(TablerActivity, TablerActivity, 'IconActivity')
+export const IconAlertCircle = catalogued(
+  TablerAlertCircleFilled,
+  TablerAlertCircle,
+  'IconAlertCircle',
+)
 export const IconAlertTriangle = catalogued(
   TablerAlertTriangleFilled,
   TablerAlertTriangle,
@@ -195,9 +227,17 @@ export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')
    Solid as well as outlined, because a bolt is a shape and not a contour — at sixteen pixels
    the outlined one is a zigzag of hairlines and the filled one is a bolt. */
 export const IconBolt = catalogued(TablerBoltFilled, TablerBolt, 'IconBolt')
+export const IconBook = catalogued(TablerBookFilled, TablerBook, 'IconBook')
+/* The parts of a Spec each wear a glyph of their own (lot 19, revision 4b), and several of those
+   are lines with no solid twin in Tabler — a frame, a checklist, a tree of lines, a route, a
+   target: the outline stands for both weights, which is what a drawing of lines is anyway. */
+export const IconBorderOuter = catalogued(TablerBorderOuter, TablerBorderOuter, 'IconBorderOuter')
 export const IconBrain = catalogued(TablerBrain, TablerBrain, 'IconBrain')
 export const IconBrandOpenai = catalogued(TablerBrandOpenai, TablerBrandOpenai, 'IconBrandOpenai')
+export const IconBug = catalogued(TablerBugFilled, TablerBug, 'IconBug')
+export const IconBulb = catalogued(TablerBulbFilled, TablerBulb, 'IconBulb')
 export const IconCheck = catalogued(TablerCheckFilled, TablerCheck, 'IconCheck')
+export const IconChecklist = catalogued(TablerChecklist, TablerChecklist, 'IconChecklist')
 export const IconChevronDown = catalogued(
   TablerChevronDownFilled,
   TablerChevronDown,
@@ -214,6 +254,7 @@ export const IconChevronRight = catalogued(
 /* Tabler draws no solid command key: the outline stands for both weights, which is what a
    key cap looks like anyway. */
 export const IconCommand = catalogued(TablerCommand, TablerCommand, 'IconCommand')
+export const IconCompass = catalogued(TablerCompassFilled, TablerCompass, 'IconCompass')
 export const IconDatabase = catalogued(TablerDatabaseFilled, TablerDatabase, 'IconDatabase')
 export const IconDeviceDesktop = catalogued(
   TablerDeviceDesktopFilled,
@@ -221,16 +262,25 @@ export const IconDeviceDesktop = catalogued(
   'IconDeviceDesktop',
 )
 export const IconDots = catalogued(TablerDotsFilled, TablerDots, 'IconDots')
+export const IconEye = catalogued(TablerEyeFilled, TablerEye, 'IconEye')
 /* Tabler draws no solid file with a plus, and no solid second terminal further down: the outline
    stands for both weights. */
+export const IconFileDescription = catalogued(
+  TablerFileDescriptionFilled,
+  TablerFileDescription,
+  'IconFileDescription',
+)
 export const IconFilePlus = catalogued(TablerFilePlus, TablerFilePlus, 'IconFilePlus')
 export const IconFileText = catalogued(TablerFileTextFilled, TablerFileText, 'IconFileText')
+export const IconFlag = catalogued(TablerFlagFilled, TablerFlag, 'IconFlag')
+export const IconFlask = catalogued(TablerFlaskFilled, TablerFlask, 'IconFlask')
 export const IconFolder = catalogued(TablerFolderFilled, TablerFolder, 'IconFolder')
 export const IconFolderOpen = catalogued(TablerFolderOpenFilled, TablerFolderOpen, 'IconFolderOpen')
 /* A folder with a plus in it has no solid twin; the outline is the folder either way. */
 export const IconFolderPlus = catalogued(TablerFolderPlus, TablerFolderPlus, 'IconFolderPlus')
 export const IconFolders = catalogued(TablerFoldersFilled, TablerFolders, 'IconFolders')
 export const IconGitBranch = catalogued(TablerGitBranch, TablerGitBranch, 'IconGitBranch')
+export const IconGitCompare = catalogued(TablerGitCompare, TablerGitCompare, 'IconGitCompare')
 export const IconHome = catalogued(TablerHomeFilled, TablerHome, 'IconHome')
 export const IconInfoCircle = catalogued(TablerInfoCircleFilled, TablerInfoCircle, 'IconInfoCircle')
 export const IconLayoutSidebar = catalogued(
@@ -238,12 +288,21 @@ export const IconLayoutSidebar = catalogued(
   TablerLayoutSidebar,
   'IconLayoutSidebar',
 )
+export const IconLayoutList = catalogued(TablerLayoutListFilled, TablerLayoutList, 'IconLayoutList')
+export const IconListCheck = catalogued(TablerListCheck, TablerListCheck, 'IconListCheck')
 export const IconListDetails = catalogued(
   TablerListDetailsFilled,
   TablerListDetails,
   'IconListDetails',
 )
+export const IconListTree = catalogued(TablerListTree, TablerListTree, 'IconListTree')
+export const IconLock = catalogued(TablerLockFilled, TablerLock, 'IconLock')
 export const IconMessage = catalogued(TablerMessageFilled, TablerMessage, 'IconMessage')
+export const IconMessageQuestion = catalogued(
+  TablerMessageQuestion,
+  TablerMessageQuestion,
+  'IconMessageQuestion',
+)
 export const IconMessages = catalogued(TablerMessagesFilled, TablerMessages, 'IconMessages')
 export const IconMoon = catalogued(TablerMoonFilled, TablerMoon, 'IconMoon')
 export const IconPaperclip = catalogued(TablerPaperclip, TablerPaperclip, 'IconPaperclip')
@@ -267,11 +326,13 @@ export const IconPlugConnected = catalogued(
   'IconPlugConnected',
 )
 export const IconRobot = catalogued(TablerRobot, TablerRobot, 'IconRobot')
+export const IconRoute = catalogued(TablerRoute, TablerRoute, 'IconRoute')
 export const IconSparkles = catalogued(TablerSparkles, TablerSparkles, 'IconSparkles')
 export const IconSearch = catalogued(TablerSearchFilled, TablerSearch, 'IconSearch')
 export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'IconSettings')
 export const IconShield = catalogued(TablerShield, TablerShield, 'IconShield')
 export const IconSun = catalogued(TablerSunFilled, TablerSun, 'IconSun')
+export const IconTarget = catalogued(TablerTarget, TablerTarget, 'IconTarget')
 /* Tabler draws no solid prompt: the outline stands for both weights, which is what a prompt is
    anyway, a chevron and a line. */
 export const IconTerminal = catalogued(TablerTerminal, TablerTerminal, 'IconTerminal')
@@ -283,6 +344,7 @@ export const IconTimelineEvent = catalogued(
 )
 export const IconTrash = catalogued(TablerTrashFilled, TablerTrash, 'IconTrash')
 export const IconUser = catalogued(TablerUserFilled, TablerUser, 'IconUser')
+export const IconWriting = catalogued(TablerWritingFilled, TablerWriting, 'IconWriting')
 export const IconX = catalogued(TablerXFilled, TablerX, 'IconX')
 
 /**
@@ -299,8 +361,6 @@ export const IconBookmarkPlus = catalogued(
   TablerBookmarkPlus,
   'IconBookmarkPlus',
 )
-export const IconBug = catalogued(TablerBugFilled, TablerBug, 'IconBug')
-export const IconChecklist = catalogued(TablerChecklist, TablerChecklist, 'IconChecklist')
 export const IconCircleCheck = catalogued(
   TablerCircleCheckFilled,
   TablerCircleCheck,
@@ -314,7 +374,6 @@ export const IconCircleDashed = catalogued(
 export const IconCircleX = catalogued(TablerCircleXFilled, TablerCircleX, 'IconCircleX')
 export const IconClock = catalogued(TablerClockFilled, TablerClock, 'IconClock')
 export const IconCopy = catalogued(TablerCopy, TablerCopy, 'IconCopy')
-export const IconFlask = catalogued(TablerFlaskFilled, TablerFlask, 'IconFlask')
 export const IconGitFork = catalogued(TablerGitFork, TablerGitFork, 'IconGitFork')
 export const IconHammer = catalogued(TablerHammer, TablerHammer, 'IconHammer')
 export const IconLink = catalogued(TablerLink, TablerLink, 'IconLink')

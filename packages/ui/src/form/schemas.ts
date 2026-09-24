@@ -80,3 +80,14 @@ export const projectFormSchema = z.object({
   workspacesRoot: z.string().nullable(),
   branchPrefix: z.string().nullable(),
 })
+
+/**
+ * The prefix of a Project's Spec keys: 2 to 4 capital letters, A to Z, the domain's own rule
+ * (lot 19, Decided 2) said while it is being typed.
+ */
+export const specPrefixSchema = z
+  .string()
+  .regex(/^[A-Z]{2,4}$/, 'A prefix is 2 to 4 capital letters, A to Z.')
+
+/** What the settings of a Project hold: its identity, its folder and its Spec prefix. */
+export const projectSettingsSchema = projectFormSchema.extend({ specPrefix: specPrefixSchema })

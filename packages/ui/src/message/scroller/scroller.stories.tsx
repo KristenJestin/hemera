@@ -285,7 +285,7 @@ const ASKED: ScrollerEntry[] = THREAD.map((entry) =>
 )
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Message/Scroller',
   component: MessageScroller,
   decorators: [withTooltips],
@@ -554,6 +554,37 @@ export const OnlyWhatAsksForAMark: Story = {
       { timeout: 10_000 },
     )
     expect(marks.filter((mark) => mark.getAttribute('aria-current') === 'true')).toHaveLength(1)
+  },
+}
+
+/**
+ * A mark pressed while the thread is still being measured, which is what an answer arriving is.
+ *
+ * The press is a journey of its own, and the thread does not stop growing under it: what has just
+ * been written into the last entry makes the column taller, and the scroller's answer to a column
+ * that grew is to carry a reader who is following along to the bottom of it. A press that had only
+ * asked for the journey was undone by that answer — on a machine busy with the rest of the run the
+ * two landed in the wrong order, and the mark pressed was never reached.
+ */
+export const AMarkPressedUnderLoad: Story = {
+  render: () => <Streaming />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const write = canvas.getByRole('button', { name: 'Write another line' })
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
+
+    // A line is written into the thread in the same breath as the press: the press is asked for
+    // while the thread is still being measured, and it is the press that has to win.
+    await userEvent.click(marks[4]!)
+    await userEvent.click(write)
+
+    await waitFor(
+      () => {
+        expect(marks[4]).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
   },
 }
 

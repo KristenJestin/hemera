@@ -1,9 +1,9 @@
 /**
  * The Sessions of a Project: the thread the user writes, and nothing else answers it (D4b-02).
  *
- * A Session belongs to a Project and to nothing more — no Spec, no Workspace — and archiving is
- * the only way one ends. There is no `delete` here and there is no use case that could be made
- * to: the absence is the guarantee (design D4b-06).
+ * A Session belongs to a Project, may define a Spec (design D7-07) and has no Workspace, and
+ * archiving is the only way one ends. There is no `delete` here and there is no use case that
+ * could be made to: the absence is the guarantee (design D4b-06).
  *
  * Every change goes through `mutate`, so the entry, the title it may have proposed, the date the
  * Session was last written and the event that says so are one transaction. That is the whole of
@@ -16,6 +16,7 @@
 
 import {
   type AgentProvider,
+  type Mission,
   type NativeState,
   type Session as DomainSession,
   type SessionEntry as DomainSessionEntry,
@@ -330,7 +331,7 @@ function written(candidate: string) {
 const SPOKEN = sql<number>`exists (select 1 from ${sessionEntries} where ${sessionEntries.sessionId} = ${sessions.id} and ${sessionEntries.role} = 'user')`
 
 /** A row of `sessions` as it is read to be a Session: its columns, and whether it was spoken to. */
-const SESSION_ROW = { ...getColumns(sessions), spoken: SPOKEN }
+export const SESSION_ROW = { ...getColumns(sessions), spoken: SPOKEN }
 
 /**
  * Whether a Session's Workspace is fixed (D8-08): "the choice is made before the first message".
@@ -344,8 +345,8 @@ function workspaceFixedOf(row: { spoken: number; cwd: string | null; nativeState
   return row.spoken !== 0 || row.cwd !== null || row.nativeState !== 'none'
 }
 
-/** A row of `sessions`, as the domain's own Session. */
-function sessionOf(row: typeof sessions.$inferSelect & { spoken: number }): Session {
+/** A row of `sessions`, as the domain's own Session; the Specs read one they change (D7-07). */
+export function sessionOf(row: typeof sessions.$inferSelect & { spoken: number }): Session {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -362,8 +363,10 @@ function sessionOf(row: typeof sessions.$inferSelect & { spoken: number }): Sess
     nativeState: row.nativeState as NativeState,
     workspaceId: row.workspaceId,
     workspaceFixed: workspaceFixedOf(row),
-    // This lot writes one kind of Session; a mission is what HEM-48 gives a Session here.
-    mission: 'free',
+    // SAFETY: the same, for the check on `mission`: it admits exactly the missions the domain
+    // declares (design D7-07).
+    mission: row.mission as Mission,
+    specId: row.specId,
     archivedAt: row.archivedAt === null ? null : Date.parse(row.archivedAt),
     createdAt: Date.parse(row.createdAt),
     lastWrittenAt: Date.parse(row.lastWrittenAt),
@@ -371,8 +374,8 @@ function sessionOf(row: typeof sessions.$inferSelect & { spoken: number }): Sess
   }
 }
 
-/** A row of `session_entries`, as the domain's own entry. */
-function entryOf(row: typeof sessionEntries.$inferSelect): SessionEntry {
+/** A row of `session_entries`, as the domain's own entry; the Specs write some (D7-01). */
+export function entryOf(row: typeof sessionEntries.$inferSelect): SessionEntry {
   return {
     id: row.id,
     sessionId: row.sessionId,
@@ -579,7 +582,9 @@ export const sessionsLayer = Layer.effect(
                 projectId,
                 title: NEW_SESSION_TITLE,
                 titleSource: 'derived',
+                // The column defaults: a Session starts free and defines no Spec (design D7-07).
                 mission: 'free',
+                specId: null,
                 // With the row rather than by a second mutation a moment later: the choice is
                 // made before the Session exists, in the composer that starts it, and the agent
                 // is what it is written with.

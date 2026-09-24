@@ -33,8 +33,11 @@ import {
  */
 const PAGE = 'mx-auto flex w-full max-w-5xl flex-col gap-4 px-6 py-10'
 
-/** The entities an entry can be about; `session` is reserved and arrives with HEM-57. */
-export type JournalEntityKind = 'project' | 'session' | 'profile'
+/**
+ * The entities an entry can be about: a Project, a Session, the Profile, and a Spec — each step
+ * of one, from its creation to `ready` and its rework (lot 19, D7-13).
+ */
+export type JournalEntityKind = 'project' | 'session' | 'profile' | 'spec'
 
 /**
  * Who did the thing, which is not the same question as what it was about.
@@ -91,6 +94,7 @@ const TONE: Record<JournalEntityKind, TimelineTone> = {
   project: 'info',
   session: 'primary',
   profile: 'neutral',
+  spec: 'define',
 }
 
 /** One event, as a stop of the timeline: its sequence, what it was about, and what it says. */
@@ -147,6 +151,7 @@ export function JournalFilters({
   const choices: { value: JournalFilter; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'session', label: 'Sessions' },
+    { value: 'spec', label: 'Specs' },
     { value: 'project', label: 'Project' },
     { value: 'profile', label: 'Profile' },
   ]

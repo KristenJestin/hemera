@@ -365,6 +365,15 @@ For Hemera's minimal set (read, edit, write, list, search, run a command):
 
 MCP is the only viable channel. One thing to watch: the **MCP-over-ACP** RFD (`docs/rfds/mcp-over-acp.mdx`) adds `"type": "acp"` as an MCP transport so a client can serve MCP tools "in the client's address space" over the existing ACP connection, with `mcp/connect`, `mcp/message`, `mcp/disconnect`. It exists in `schema/v1/schema.unstable.json` behind `mcpCapabilities.acp`, marked "**UNSTABLE** — not part of the spec yet". Codex explicitly rejects `acp` transport today. Until it stabilises, Hemera's MCP server must be a real stdio child process or an HTTP endpoint.
 
+### What an agent sees depends on its Session's mission (added in lot 19)
+
+Bare mode empties each agent of its own tools; what it holds then is the set of Hemera's tools its Session is offered, registered for its token on Hemera's MCP server — the server Codex's patch lists as well before handing the tools over as dynamic tools. Since lot 19 that set is the Session's mission's (D7-14):
+
+- a `free` Session is offered the eleven tools of #18 and `spec_propose`, through which its agent proposes a Spec: twelve;
+- a `define` Session is offered ten: `fs_read`, `fs_list`, `search`, `project_get`, `session_get`, `commands_list`, `commands_output`, `spec_read`, `spec_write` and `spec_propose`. Neither `fs_write`, `fs_edit`, `commands_run` nor `commands_stop` is registered for it, so none is in the model's context, and a call to one is refused as not offered.
+
+The set is minted with the agent's token when the agent is started. An agent started for a `free` Session keeps the `free` set until it is started again, which is why a Session whose proposal is accepted lets its agent go: its next turn starts it again, its conversation resumed, with the `define` set. The trials above ran before lot 19, on the eleven tools every Session was offered then.
+
 ---
 
 ## 5. What is not established

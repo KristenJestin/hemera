@@ -348,6 +348,7 @@ describe('Text arrives as a stream', () => {
       'entry',
       'permission',
       'run',
+      'spec_changed',
       'turn',
       'turn_start',
       'workspace',

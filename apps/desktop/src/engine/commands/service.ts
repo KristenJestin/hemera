@@ -47,7 +47,7 @@ import {
   MAIN_WORKSPACE,
   mergedEnvironment,
   portOf,
-  slugOf,
+  slugify,
 } from '@hemera/core'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
@@ -1132,7 +1132,7 @@ export const commandsLayer = Layer.effect(
           const lookup = lookupIn(asked.cwd)
           // A Portless command runs as `portless <name> <line>`, the name being its Workspace's
           // and its own, and `portless` is looked for before anything starts (D8-10).
-          const named = slugOf(`${asked.workspaceName}-${asked.name}`)
+          const named = slugify(`${asked.workspaceName}-${asked.name}`)
           const portless = asked.portless ? findOnPath('portless', lookup, platform) : null
           const line = asked.portless ? `portless ${named} ${own}` : own
           const record: Live = {

@@ -284,3 +284,117 @@ export async function awaits(text: string, within = 20_000): Promise<void> {
     timeoutMsg: `the page never showed "${text}"`,
   })
 }
+
+/**
+ * Presses a button inside the first region this selector finds, and says so when there is none.
+ *
+ * `press` takes the first button of the page that says the name, and some names are said twice:
+ * `Create` is the proposal's in the thread and a Dialog's elsewhere, an option of a question is
+ * also a word of the register. A hand presses the one in front of it, so this is `press` held
+ * to one region, read by what the button starts with.
+ */
+export async function pressIn(area: string, name: string): Promise<void> {
+  const pressed = await browser.execute(
+    (scope: string, label: string) => {
+      const within = document.querySelector(scope)
+      if (within === null) return false
+      const button = [...within.querySelectorAll('button')].find(
+        (one) =>
+          (one.textContent ?? '').trim().startsWith(label) ||
+          (one.getAttribute('aria-label') ?? '').startsWith(label),
+      )
+      if (button === undefined) return false
+      button.click()
+      return true
+    },
+    area,
+    name,
+  )
+  expect(pressed).toBe(true)
+  await browser.pause(300)
+}
+
+/**
+ * Puts a part of a Spec on its panel's stage, the way a hand picks it in the rail: the stage
+ * shows one part at a time, and a part that is not on it is not on the page at all.
+ */
+export async function showPart(key: string, part: string): Promise<void> {
+  await pressIn(`nav[aria-label="Parts of ${key}"]`, part)
+}
+
+/**
+ * Unfolds the panel of a Spec from the band it opens folded to, the way a hand does: a Session
+ * opens its panel folded, and what is read in it — the head, the stage, the reader bar — is drawn
+ * only once it is open. A panel already open is left as it is.
+ */
+export async function unfoldSpec(key: string): Promise<void> {
+  await browser.execute((scope: string) => {
+    const band = document
+      .querySelector(scope)
+      ?.querySelector('button[aria-label="Unfold the Spec"]')
+    if (band instanceof HTMLButtonElement) band.click()
+  }, `section[aria-label="Spec ${key}"]`)
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (scope: string) => document.querySelector(scope) !== null,
+        `[role="region"][aria-label="Stage of ${key}"]`,
+      ),
+    { timeout: 5000, timeoutMsg: `the panel of ${key} never unfolded` },
+  )
+  await browser.pause(600)
+}
+
+/** What the region this selector finds says, or an empty string when there is none. */
+export async function region(selector: string): Promise<string> {
+  return await browser.execute(
+    (scope: string) => document.querySelector(scope)?.textContent ?? '',
+    selector,
+  )
+}
+
+/**
+ * Types into a text of the page the way a hand does: the caret goes in, the text is typed, and
+ * the caret stays there until `leave` takes it out — which is when a text edited in place, a
+ * section of the Spec, is handed over.
+ */
+export async function typeIn(label: string, text: string): Promise<void> {
+  const typed = await browser.execute(
+    (name: string, said: string) => {
+      const field = document.querySelector(`textarea[aria-label="${name}"]`)
+      if (!(field instanceof HTMLTextAreaElement)) return false
+      field.focus()
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+        field,
+        said,
+      )
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+      return document.activeElement === field
+    },
+    label,
+    text,
+  )
+  expect(typed).toBe(true)
+  await browser.pause(150)
+}
+
+/** Takes the caret out of the text of this label, which hands an edited text over. */
+export async function leave(label: string): Promise<void> {
+  const left = await browser.execute((name: string) => {
+    const field = document.querySelector(`textarea[aria-label="${name}"]`)
+    if (!(field instanceof HTMLTextAreaElement)) return false
+    field.blur()
+    return true
+  }, label)
+  expect(left).toBe(true)
+  await browser.pause(1200)
+}
+
+/** What the text of this label holds, or null when the page has none. */
+export async function textOf(label: string): Promise<string | null> {
+  return await browser.execute(
+    (name: string) =>
+      document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${name}"]`)?.value ?? null,
+    label,
+  )
+}

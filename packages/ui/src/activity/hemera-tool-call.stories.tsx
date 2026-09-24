@@ -483,11 +483,14 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
   ['commands_propose', 'Propose command', 'propose-command', 'test', 'Proposing test'],
   ['project_get', 'Project', 'project', null, 'Reading the Project'],
   ['session_get', 'Session', 'session', null, 'Reading this Session'],
+  ['spec_read', 'Read Spec', 'read-spec', 'HEM-7', 'Reading HEM-7'],
+  ['spec_write', 'Write Spec', 'write-spec', 'scope', 'Writing the scope'],
+  ['spec_propose', 'Propose', 'propose-spec', 'shape', 'Declaring shape finished'],
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): twelve tools, twelve
- * marks and twelve labels, and what each call is about where it is about something. A mark per
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): fifteen tools, fifteen
+ * marks and fifteen labels, and what each call is about where it is about something. A mark per
  * kind of tool drew `fs_list` as `fs_read` and the four commands as one.
  */
 export const EveryTool: Story = {
@@ -510,11 +513,13 @@ export const EveryTool: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const marks = [...canvasElement.querySelectorAll('[data-mark]')]
-    await expect(marks).toHaveLength(12)
-    await expect(new Set(marks.map((mark) => mark.getAttribute('data-mark'))).size).toBe(12)
-    // Twelve pictures, and not one drawn twice.
+    await expect(marks).toHaveLength(CATALOGUE.length)
+    await expect(new Set(marks.map((mark) => mark.getAttribute('data-mark'))).size).toBe(
+      CATALOGUE.length,
+    )
+    // One picture per tool, and not one drawn twice.
     const pictures = marks.map((mark) => mark.querySelector('svg')?.getAttribute('class') ?? '')
-    await expect(new Set(pictures).size).toBe(12)
+    await expect(new Set(pictures).size).toBe(CATALOGUE.length)
     for (const [tool, label, mark, subject] of CATALOGUE) {
       const name = ['Hemera', label, subject, 'Done'].filter((word) => word !== null).join(' ')
       const row = canvas.getByRole('button', { name })

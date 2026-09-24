@@ -25,12 +25,23 @@ import {
   type FakeStep,
 } from '../../src/engine/agents/fake.ts'
 import {
+  COMMAND_PROPOSAL,
+  COMMAND_PROPOSE_ANSWER,
+  COMPLETE,
+  COMPLETED,
+  CONTRACT_VERSION,
   MODEL_OPTION,
   NOTES,
   PROPOSAL,
-  PROPOSE_ANSWER,
+  PROPOSE,
   READ_ANSWER,
+  REWRITE,
+  REWRITE_ANSWER,
+  REWRITTEN,
+  STORY,
+  TASK,
   VERSION,
+  WRITTEN,
   modelOption,
   turnOf,
 } from './script.ts'
@@ -45,7 +56,7 @@ if (process.argv.includes('--version')) {
 /** How many prompts this process has been sent. */
 let turn = 0
 
-/** What the last prompt said, which is what decides whether this turn reads a file. */
+/** What the last prompt said: whether this turn reads a file, proposes or writes a Spec. */
 let asked = ''
 
 /**
@@ -73,6 +84,43 @@ function continued(): boolean {
  */
 const RUN = randomUUID().slice(0, 8)
 
+/** One write of the Spec through Hemera's `spec_write`, under a key of its own. */
+function writes(sent: Readonly<Record<string, string | number>>, key: string): FakeStep {
+  return { does: 'uses', call: 'spec_write', arguments: { ...sent, key: `${key}-${RUN}` } }
+}
+
+/** A section of the type's contract, written over the empty one the Spec was created with. */
+function contract(section: string, body: string): FakeStep {
+  return writes({ section, body, baseVersion: CONTRACT_VERSION }, section)
+}
+
+/** One declaration through Hemera's `spec_propose`, under a key of its own. */
+function proposes(sent: Readonly<Record<string, string>>, key: string): FakeStep {
+  return { does: 'uses', call: 'spec_propose', arguments: { ...sent, key: `${key}-${RUN}` } }
+}
+
+/**
+ * The Spec finished, in the order the protocol asks (D7-08): what `shape` owns, then `shape`
+ * declared; `plan` written, then declared; the stories and the task, then `decompose` declared;
+ * and the contract attested last, on the content it now has. A section written after the phase
+ * owning it was declared would make that phase stale again.
+ */
+const completing: readonly FakeStep[] = [
+  contract('expected_outcome', WRITTEN.expected_outcome),
+  contract('verification', WRITTEN.verification),
+  contract('behaviour', WRITTEN.behaviour),
+  proposes({ kind: 'phase_done', phase: 'shape', summary: 'The export fix is shaped.' }, 'shape'),
+  writes({ section: 'plan', body: WRITTEN.plan, baseVersion: 0 }, 'plan'),
+  proposes({ kind: 'phase_done', phase: 'plan', summary: 'The approach is planned.' }, 'plan'),
+  writes({ stories: JSON.stringify([STORY]) }, 'stories'),
+  writes({ tasks: JSON.stringify([TASK]) }, 'tasks'),
+  proposes(
+    { kind: 'phase_done', phase: 'decompose', summary: 'One task covers the story.' },
+    'decompose',
+  ),
+  proposes({ kind: 'ready' }, 'ready'),
+]
+
 const script: FakeScript = {
   // It can be loaded as well as resumed: the two ways back into a session are both offered, and
   // which one Hemera takes is Hemera's business (D5-07).
@@ -97,20 +145,42 @@ const script: FakeScript = {
     }
     // A prompt that names the proposed command is a proposal through Hemera's own tool, then an
     // answer: the catalogue is the human's to write (D8-11).
-    if (asked.includes(PROPOSAL.name)) {
+    if (asked.includes(COMMAND_PROPOSAL.name)) {
       return [
-        { does: 'uses', call: 'commands_propose', arguments: { ...PROPOSAL } },
-        { does: 'says', text: PROPOSE_ANSWER, messageId: `propose-${RUN}-${String(turn)}` },
+        { does: 'uses', call: 'commands_propose', arguments: { ...COMMAND_PROPOSAL } },
+        { does: 'says', text: COMMAND_PROPOSE_ANSWER, messageId: `propose-${RUN}-${String(turn)}` },
+      ]
+    }
+    if (asked.includes(COMPLETE)) {
+      return [...completing, { does: 'says', text: COMPLETED, messageId: `spec-${RUN}` }]
+    }
+    if (asked.includes(REWRITE)) {
+      return [
+        writes(
+          { section: 'expected_outcome', body: REWRITTEN, baseVersion: CONTRACT_VERSION + 1 },
+          'again',
+        ),
+        { does: 'says', text: REWRITE_ANSWER, messageId: `again-${RUN}` },
       ]
     }
     const said = turnOf(turn + (continued() ? 1 : 0))
     const id = `${RUN}-${String(turn)}`
     // A thought and an answer, in that order and under two different kinds: the thread folds the
     // first and shows the second, which is the difference the suite reads.
-    return [
+    const answer: FakeStep[] = [
       { does: 'thinks', text: said.thought, messageId: `thought-${id}` },
       { does: 'says', text: said.answer, messageId: `answer-${id}` },
     ]
+    // Asked for a Spec, it proposes one after its answer, through the tool.
+    if (asked.includes(PROPOSE)) {
+      answer.push(
+        proposes(
+          { kind: 'spec', title: PROPOSAL.title, type: PROPOSAL.type },
+          `spec-${String(turn)}`,
+        ),
+      )
+    }
+    return answer
   },
 }
 

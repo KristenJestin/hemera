@@ -25,6 +25,16 @@ export interface ProjectDraft {
 }
 
 /**
+ * What the settings of a Project hold beyond what it was created with: the prefix of its Spec
+ * keys, pre-filled from the name when the Project was made and editable here afterwards
+ * (lot 19, Decided 2). A new prefix renames no key already given.
+ */
+export interface ProjectSettingsDraft extends ProjectDraft {
+  /** `ATL`: what the keys of the Project's Specs start with, `ATL-7`. */
+  specPrefix: string
+}
+
+/**
  * One declared repository, with what the disk says about it right now.
  *
  * `branch` is read at the moment the list is drawn and never stored, so a line says `git ·

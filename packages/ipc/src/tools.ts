@@ -140,8 +140,17 @@ export const contextReachSchema = z.enum([
 
 /** One thing a Session was provided, oldest first, as the Context view lists it. */
 export const providedSchema = z.object({
-  kind: z.enum(['base', 'native', 'provided', 'instructions']),
-  /** The file it came from, and `''` for the base, which is not one. */
+  kind: z.enum([
+    'base',
+    'native',
+    'provided',
+    'instructions',
+    'brief',
+    'answer',
+    'edit',
+    'internal',
+  ]),
+  /** The file it came from, `''` for the base, which is not one, and what a brief was composed for. */
   path: z.string(),
   fingerprint: z.string(),
   deliveredAt: z.string(),

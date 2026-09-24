@@ -82,11 +82,77 @@ export const READ_ANSWER = 'The notes are read through Hemera.'
  * the sentence below: the agent proposes, and only a human's "Accept" writes the catalogue. The
  * line is Node's own, which is on the `PATH` of whatever runs the suite.
  */
-export const PROPOSAL = {
+export const COMMAND_PROPOSAL = {
   name: 'seed',
   line: `node -e "console.log('seeded')"`,
   type: 'script',
   why: 'The data is seeded by hand before every trial.',
 } as const
 
-export const PROPOSE_ANSWER = 'A human decides whether seed is kept.'
+export const COMMAND_PROPOSE_ANSWER = 'A human decides whether seed is kept.'
+
+/**
+ * What makes the agent propose a Spec: a prompt that asks for one (design D7-07).
+ *
+ * The agent answers, then proposes through Hemera's `spec_propose` with kind `spec`, the one Spec
+ * tool a `free` Session is offered: Hemera writes the proposal the thread draws below the answer.
+ * A prompt that does not ask is answered without one.
+ */
+export const PROPOSE = 'Write it down as a Spec.'
+
+/** The Spec it proposes then. */
+export const PROPOSAL = { title: 'CSV export keeps the invoice date', type: 'feature' } as const
+
+/**
+ * What makes the writer's agent finish the Spec (design D7-14): a prompt that asks for it.
+ *
+ * It writes through `spec_write` what the draft still lacks, declares `shape`, `plan` and
+ * `decompose` finished through `spec_propose phase_done`, each once what it owns is written,
+ * attests the contract through `spec_propose ready`, and says so. Only the human's Mark ready
+ * freezes it.
+ */
+export const COMPLETE = 'Write the rest of the Spec, then attest it.'
+
+/**
+ * The sections it writes then, on the version `spec_read` would show: the sections of its type
+ * the Spec was created with, empty, at `CONTRACT_VERSION`; `plan`, which it does not hold yet, at 0.
+ */
+export const WRITTEN = {
+  expected_outcome: 'Every row of the invoice CSV export carries its issue date.',
+  verification: 'An export of a month of invoices has no empty date cell.',
+  behaviour: 'The date column is filled with the issue date, in ISO 8601.',
+  plan: 'Read the issue date in the export query and format it in the CSV writer.',
+} as const
+
+/** The version of a section of the type's contract, created empty with the Spec. */
+export const CONTRACT_VERSION = 1
+
+/** The one story it writes, with its criterion, as the JSON `spec_write` reads. */
+export const STORY = {
+  title: 'Dated export',
+  narrative: 'As an accountant, I read the issue date of each invoice in the CSV.',
+  criteria: ['Every row carries the issue date'],
+} as const
+
+/** The one task, which covers the story, as the JSON `spec_write` reads. */
+export const TASK = {
+  title: 'Write the issue date',
+  result: 'The CSV writer fills the date column',
+  type: 'code',
+  executor: 'agent',
+  criteria: 'The export test passes',
+  stories: [STORY.title],
+} as const
+
+/** What it says once the Spec is written and attested. */
+export const COMPLETED = 'The Spec is written and attested: it is yours to mark ready.'
+
+/**
+ * What makes it write a section once more: `expected_outcome`, on the version its own write left
+ * it at. On a Spec the human marked ready, the call is refused and nothing changes.
+ */
+export const REWRITE = 'Tighten the expected outcome.'
+
+/** What it tries to write then, and what it says after the answer. */
+export const REWRITTEN = 'Every row of every CSV export carries its issue date.'
+export const REWRITE_ANSWER = 'I tried to tighten the expected outcome.'

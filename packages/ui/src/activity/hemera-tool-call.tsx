@@ -3,8 +3,10 @@ import type { ReactNode } from 'react'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import {
   IconBookmarkPlus,
+  IconFileDescription,
   IconFilePlus,
   IconFileText,
+  IconFlag,
   IconFolder,
   IconFolders,
   IconListDetails,
@@ -14,6 +16,7 @@ import {
   IconPlayerStop,
   IconSearch,
   IconTerminal2,
+  IconWriting,
 } from '../icons.ts'
 import { Disclosure } from './disclosure.tsx'
 import { MARKS, SubjectOnLine, type ToolSubject, pressable } from './tool-call-card.tsx'
@@ -87,6 +90,9 @@ export type HemeraToolMark =
   | 'propose-command'
   | 'project'
   | 'session'
+  | 'read-spec'
+  | 'write-spec'
+  | 'propose-spec'
 
 const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'read-file': <IconFileText size="sm" aria-hidden="true" />,
@@ -101,6 +107,9 @@ const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'propose-command': <IconBookmarkPlus size="sm" aria-hidden="true" />,
   project: <IconFolders size="sm" aria-hidden="true" />,
   session: <IconMessages size="sm" aria-hidden="true" />,
+  'read-spec': <IconFileDescription size="sm" aria-hidden="true" />,
+  'write-spec': <IconWriting size="sm" aria-hidden="true" />,
+  'propose-spec': <IconFlag size="sm" aria-hidden="true" />,
 }
 
 /** Where the mark sits on the line, in the tone a native call's mark is drawn in. */
