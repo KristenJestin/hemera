@@ -83,6 +83,7 @@ import {
 import { bareRowOf, offeredOf } from './bare-mode.ts'
 import {
   acceptProposal,
+  addToCatalogue,
   declineProposal,
   listenToTools,
   readCatalogue,
@@ -1088,6 +1089,7 @@ export function Application() {
           onChooseWorkspace={(workspaceId) => void chooseWorkspace(open, workspaceId)}
           onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}
           onDeclineProposal={async (proposalId) => await declineProposal(open.id, proposalId)}
+          onAddToCatalogue={addToCatalogue}
         />
       )
     }

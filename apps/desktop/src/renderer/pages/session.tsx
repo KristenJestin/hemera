@@ -175,6 +175,8 @@ export interface SessionPageProps {
   onAcceptProposal: (proposalId: string) => Promise<string | null>
   /** Declines it; answers the engine's refusal, or null. */
   onDeclineProposal: (proposalId: string) => Promise<string | null>
+  /** Keeps a one-off run in the catalogue; answers the engine's refusal, or null (D8-11). */
+  onAddToCatalogue: (run: CommandRun) => Promise<string | null>
 }
 
 export function SessionPage({
@@ -210,6 +212,7 @@ export function SessionPage({
   onChooseWorkspace,
   onAcceptProposal,
   onDeclineProposal,
+  onAddToCatalogue,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -220,9 +223,9 @@ export function SessionPage({
   /** Whether the reader has the Session details open: only the head's button opens them. */
   const [detailsOpen, setDetailsOpen] = useState(false)
   /**
-   * What the reader's last decision in the thread was refused with — a proposal whose name the
-   * catalogue took meanwhile (D8-11) — or null once one went through. Said where the page's other
-   * refusals are, and before them: it answers the last press.
+   * What the reader's last decision in the thread was refused with — a proposal or a one-off
+   * run whose name the catalogue already holds (D8-11) — or null once one went through. Said
+   * where the page's other refusals are, and before them: it answers the last press.
    */
   const [refused, setRefused] = useState<string | null>(null)
   const deciding = (decision: Promise<string | null>): void => {
@@ -304,6 +307,7 @@ export function SessionPage({
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
+      onAddToCatalogue: (run) => deciding(onAddToCatalogue(run)),
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
@@ -578,7 +582,14 @@ export function SessionPage({
         commands={
           session.provider === null ? undefined : (
             <CommandsPanel
-              runs={panelRunsOf(commandRuns, root)}
+              // A one-off offers "Add to catalogue" here as it does in the thread (D8-11).
+              runs={panelRunsOf(commandRuns, root).map((shown) => {
+                const run = commandRuns.find((one) => one.id === shown.id)
+                if (run !== undefined) {
+                  shown.onAddToCatalogue = () => deciding(onAddToCatalogue(run))
+                }
+                return shown
+              })}
               onStop={onStopRun}
               onOpenUrl={onOpenUrl}
               onRun={onRunCommand}

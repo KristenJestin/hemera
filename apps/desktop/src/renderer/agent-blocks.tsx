@@ -319,6 +319,8 @@ export interface AgentContext {
   onAcceptProposal: (proposalId: string) => void
   /** Leaves it out of the catalogue, and says so on the proposal. */
   onDeclineProposal: (proposalId: string) => void
+  /** Keeps a one-off run in the catalogue, which is the human's to do (D8-11). */
+  onAddToCatalogue: (run: Run) => void
 }
 
 /**
@@ -516,11 +518,15 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const drawn = commandRunOf(entry, context.runs)
     if (drawn === null) return null
     const { runId, ...shown } = drawn
+    // What is kept is the run as it ran — its line and its folder — so only a run the window has
+    // heard of can be added; the block offers it on a one-off alone.
+    const heard = context.runs.find((one) => one.id === runId)
     return (
       <CommandRun
         {...shown}
         onOpenUrl={context.onOpenUrl}
         onStop={runId === null ? undefined : () => context.onStopRun(runId)}
+        onAddToCatalogue={heard === undefined ? undefined : () => context.onAddToCatalogue(heard)}
       />
     )
   }

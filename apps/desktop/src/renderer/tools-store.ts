@@ -227,6 +227,32 @@ export async function saveCommand(draft: CommandDraft, existing: boolean): Promi
 }
 
 /**
+ * Keeps a one-off run in the Project's catalogue: the human adds, the run promotes nothing by
+ * itself (D8-11). The command takes the run's name, the line it ran as its default line, the type
+ * `script` and the folder it ran in (null for the Workspace root); the rest stays at its defaults.
+ * The run is not rewritten — it stays the one-off it was.
+ *
+ * Answers the engine's sentence when it refuses — a name the catalogue already holds — and null
+ * once the catalogue was read again.
+ */
+export async function addToCatalogue(run: CommandRun): Promise<string | null> {
+  return await saveCommand(
+    {
+      projectId: run.projectId,
+      name: run.name,
+      line: run.line,
+      lineWindows: null,
+      lineLinux: null,
+      type: 'script',
+      folder: run.folder,
+      scope: 'workspace',
+      portless: false,
+    },
+    false,
+  )
+}
+
+/**
  * Accepts a command the agent proposed in a Session (D8-11): the engine writes it into the
  * catalogue and the proposal's entry in its outcome, which reaches the thread as any entry does.
  *
