@@ -4,5 +4,13 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["node", "@wdio/globals/types", "@wdio/electron-service", "@wdio/mocha-framework"]
   },
-  "include": ["e2e/**/*.ts", "wdio.conf.ts", "src/renderer/bridge.d.ts"]
+  "include": [
+    // The window options the suite reads its switch from are typed against the design system,
+    // which imports a stylesheet for its text; the declaration only counts where it is seen.
+    "../../packages/ui/src/styles.d.ts",
+    "e2e/**/*.ts",
+    "wdio.conf.ts",
+    "wdio.headless.conf.ts",
+    "src/renderer/bridge.d.ts"
+  ]
 }

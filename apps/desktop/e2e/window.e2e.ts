@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { browser, expect } from '@wdio/globals'
 
 import { addProject } from './hand.ts'
+import { skipWithoutScreen } from './headless.ts'
 
 describe('Renderer sans Node', () => {
   it('has no require, no Node process and no Electron module in the page', async () => {
@@ -117,7 +118,8 @@ describe("Ouverture sous Windows à l'échelle 150 %", () => {
 })
 
 describe("Transition à la fréquence de l'écran", () => {
-  it('plays the witness transition without a frame above two display periods', async () => {
+  it('plays the witness transition without a frame above two display periods', async function () {
+    skipWithoutScreen(this, 'the frame time of the witness transition')
     // Played twice first, and not once: the first fold after the page has been sitting still
     // pays for its compositor layer, and that frame says what waking up costs, not what the
     // fold costs. A fold played back to back with another stays on 6 ms at 165 Hz.

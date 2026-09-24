@@ -11,6 +11,8 @@ import { browser, expect } from '@wdio/globals'
 
 import type { EnvironmentReport } from '@hemera/ipc'
 
+import { skipWithoutScreen } from './headless.ts'
+
 async function report(): Promise<EnvironmentReport> {
   return await browser.execute(async () => await window.hemera.invoke('env.report', {}))
 }
@@ -34,6 +36,8 @@ async function ratioOnDisplay(id: number): Promise<number> {
 
 describe('Échelle fractionnaire par écran', () => {
   it('reports the pixel ratio of the display the window is on', async function () {
+    // Moving the window onto a display is putting it on screen, which the run promised not to do.
+    skipWithoutScreen(this, 'moving the window onto each display')
     const displays = (await report()).displays
     const scales = [...new Set(displays.map((display) => display.scaleFactor))]
     if (scales.length < 2) {
@@ -53,6 +57,7 @@ describe('Échelle fractionnaire par écran', () => {
 
 describe('Compositing matériel constaté', () => {
   it('reports hardware compositing and GPU rasterisation, or skips where there is none', async function () {
+    skipWithoutScreen(this, 'the GPU compositing of the window')
     const graphics = (await report()).graphics
     if (graphics.features.gpu_compositing !== 'enabled') {
       this.skip()
