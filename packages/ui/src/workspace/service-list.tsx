@@ -186,12 +186,12 @@ export function ServiceList({
 }
 
 /** A port conflict as one sentence naming its holder (D8-09). */
-function conflictOf({ port, holderRun, holderWorkspace }: PortConflict): string {
+export function conflictOf({ port, holderRun, holderWorkspace }: PortConflict): string {
   return `Port ${String(port)} is held by ${holderRun} in ${holderWorkspace}`
 }
 
 /** The same conflict, said on the holder, naming the run that came second (Decided 12). */
-function claimOf({ port, run, workspace }: PortClaim): string {
+export function claimOf({ port, run, workspace }: PortClaim): string {
   return `Port ${String(port)} is also published by ${run} in ${workspace}`
 }
 

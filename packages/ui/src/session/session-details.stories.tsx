@@ -69,6 +69,7 @@ const meta = {
             folder: './sources/front',
             output: 'vite v7.1.4\n\n  Local:   http://localhost:5173/',
             url: 'http://localhost:5173/',
+            readiness: 'ready',
           },
           {
             id: 'run-check',

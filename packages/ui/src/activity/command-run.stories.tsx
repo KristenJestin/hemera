@@ -15,6 +15,8 @@ import { COMMAND_TYPES } from './command-type.ts'
  * so it is on the line in every story that has one. A one-off offers `Add to catalogue` beside its
  * command line, and pressing it is a request to the human's catalogue, not a promotion (D8-11).
  * A run in another Workspace than the Session's names it (D8-08).
+ * An address is a link only once it has answered, and a run shows what it ran — its variables, a
+ * port conflict — inside its fold (D8-09).
  */
 const SERVER_OUTPUT = [
   'vite v7.1.4 building for development...',
@@ -44,6 +46,7 @@ const meta = {
     folder: 'apps/desktop',
     output: SERVER_OUTPUT,
     url: 'http://localhost:5173/',
+    readiness: 'ready',
     onOpenUrl: fn(),
     onStop: fn(),
     onAddToCatalogue: fn(),
@@ -64,6 +67,14 @@ const meta = {
     folder: { control: 'text', description: 'The folder it runs in.' },
     output: { control: 'text', description: 'What it has written so far.' },
     url: { control: 'text', description: 'The address its output named.' },
+    readiness: {
+      control: 'inline-radio',
+      options: ['starting', 'ready', 'unanswered'],
+      description: 'Where the address stands: a link only once it has answered (D8-09).',
+    },
+    environment: { control: 'object', description: 'The variables Hemera gave the run (D8-06).' },
+    portConflict: { control: 'object', description: 'The run holding the port it published.' },
+    heldAgainst: { control: 'object', description: 'On the holder: the runs that came second.' },
     exitCode: { control: 'number', description: 'What it exited with.' },
     oneOff: { control: 'boolean', description: 'A line run without being in the catalogue.' },
     workspace: {
@@ -119,6 +130,91 @@ export const AppRunning: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Stop' }))
     await expect(args.onStop).toHaveBeenCalled()
   },
+}
+
+/**
+ * A server whose address has not answered yet: the address is text beside `starting`, and there
+ * is nothing to press — a link to a server that is not listening is a link to an error page.
+ *
+ * Scenario "A URL is ready only after it answers": `AppRunning` is the same run once it has.
+ */
+async function aUrlIsReadyOnlyAfterItAnswers({ canvasElement }: StoryContext): Promise<void> {
+  const canvas = within(canvasElement)
+  await expect(canvas.getByText('http://localhost:5173/')).toBeVisible()
+  await expect(canvas.getByText('starting')).toBeVisible()
+  await expect(canvas.queryByRole('button', { name: 'http://localhost:5173/' })).toBeNull()
+}
+
+export const AddressStarting: Story = {
+  args: { readiness: 'starting' },
+  play: aUrlIsReadyOnlyAfterItAnswers,
+}
+
+/** A minute without an answer: still starting, and said so, still not a link. */
+export const AddressUnanswered: Story = {
+  args: { readiness: 'unanswered' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('No answer after a minute; still starting')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'http://localhost:5173/' })).toBeNull()
+  },
+}
+
+/**
+ * A port another run holds: the conflict names that run and its Workspace, and the holder names
+ * the run that came second (D8-09, Decided 12).
+ *
+ * Scenario "A port conflict names its holder".
+ */
+async function aPortConflictNamesItsHolder({ canvasElement }: StoryContext): Promise<void> {
+  const canvas = within(canvasElement)
+  await expect(canvas.getByText('Port 5173 is held by dev in main')).toBeVisible()
+  await expect(canvas.getByText('Port 5173 is also published by storybook in spike')).toBeVisible()
+}
+
+export const PortConflict: Story = {
+  args: {
+    readiness: 'starting',
+    portConflict: { port: 5173, holderRun: 'dev', holderWorkspace: 'main' },
+    heldAgainst: [{ port: 5173, run: 'storybook', workspace: 'spike' }],
+  },
+  play: aPortConflictNamesItsHolder,
+}
+
+/**
+ * A check that ended, opened: the line it ran, its folder, the variables Hemera gave it, its
+ * output and its exit code, all on the block (D8-06).
+ *
+ * Scenario "A run shows what it ran".
+ */
+async function aRunShowsWhatItRan({ canvasElement }: StoryContext): Promise<void> {
+  const canvas = within(canvasElement)
+  await expect(canvas.getByText('Exited 0')).toBeVisible()
+  await expect(canvas.getByText('sources/api')).toBeVisible()
+  await userEvent.click(canvas.getByRole('button', { name: /Exited 0/ }))
+  await expect(canvas.getByText('pnpm vitest run')).toBeVisible()
+  const variables = canvas.getByRole('list', { name: 'Variables given' })
+  await expect(within(variables).getByText('PORT')).toBeVisible()
+  await expect(within(variables).getByText('3001')).toBeVisible()
+  // Sorted by key: the eye looks one up, it does not read them in the order they were merged.
+  await expect(variables.textContent).toBe('DATABASE_URLpostgres://localhost/atlasPORT3001')
+  await expect(canvas.getByText(/12 passed/)).toBeVisible()
+}
+
+export const WhatItRan: Story = {
+  args: {
+    name: 'test',
+    command: 'pnpm vitest run',
+    type: 'test',
+    state: 'finished',
+    folder: 'sources/api',
+    output: 'Test Files  3 passed (3)\n     Tests  12 passed (12)',
+    url: undefined,
+    readiness: undefined,
+    exitCode: 0,
+    environment: { PORT: '3001', DATABASE_URL: 'postgres://localhost/atlas' },
+  },
+  play: aRunShowsWhatItRan,
 }
 
 /** A check that is over: the exit code is read without opening anything. */

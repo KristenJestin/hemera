@@ -231,6 +231,7 @@ const THREAD: ScrollerEntry[] = [
         state="running"
         folder="./sources/front"
         url="http://localhost:5173/"
+        readiness="ready"
         output={'vite v7.1.4  ready in 412 ms\n\n  Local:   http://localhost:5173/\n'}
         onOpenUrl={fn()}
         onStop={fn()}
@@ -278,6 +279,7 @@ const COMMANDS = (
         state: 'running',
         folder: './sources/front',
         url: 'http://localhost:5173/',
+        readiness: 'ready',
         output: 'vite v7.1.4  ready in 412 ms',
       },
       {
