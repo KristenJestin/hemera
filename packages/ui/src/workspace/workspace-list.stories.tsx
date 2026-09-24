@@ -96,6 +96,8 @@ const meta = {
     onBrowse: { control: false, description: 'Asks the system for a folder.' },
     onCreate: { control: false, description: 'Creates a Workspace on the folder, by name.' },
     onCleanup: { control: false, description: 'Asks to clean one up; the caller confirms.' },
+    onSelect: { control: false, description: 'Shows one under the list.' },
+    selected: { control: 'text', description: 'The one shown, whose row says so.' },
     className: { control: false, description: 'Where the card sits; never how it looks.' },
   },
 } satisfies Meta<typeof WorkspaceList>
@@ -162,6 +164,24 @@ export const Creating: Story = {
   args: { workspaces: [MAIN] },
   render: (args) => <Growing {...args} />,
   play: aWorkspaceOnAChosenFolderTakesTheFoldersName,
+}
+
+/** One Workspace is shown under the list: its row's button is pressed, the others are not. */
+export const Selected: Story = {
+  args: { workspaces: FILLED.slice(0, 3), selected: 'login-form', onSelect: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'Show login-form' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await expect(canvas.getByRole('button', { name: 'Show main' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+    await userEvent.click(canvas.getByRole('button', { name: 'Show billing-export' }))
+    await expect(args.onSelect).toHaveBeenCalledWith('billing-export')
+  },
 }
 
 /** New Workspace, the name, Create, Cancel, then each Clean up, in that order. */

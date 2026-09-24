@@ -19,6 +19,9 @@ import { WorkspaceBadges } from './workspace-card.tsx'
  * Cleaning up is offered on a dedicated Workspace that is not cleaned up yet, and never on
  * `main` nor on a folder the user picked, which is theirs (D8-14). The list asks for it and the caller confirms it: what is removed is said in the
  * cleanup dialog, not here.
+ *
+ * A row can be shown: the settings draw that Workspace under the list, and its row's button is
+ * pressed while it is the one drawn.
  */
 const ROWS = 'flex flex-col gap-2'
 
@@ -51,6 +54,13 @@ export interface WorkspaceListProps {
   onCreate: (path: string, name: string) => Promise<string | null>
   /** Asks to clean one up; the caller confirms it with the cleanup dialog. */
   onCleanup: (id: string) => void
+  /**
+   * Shows one under the list, with its Git state, its steps, its variables and its services;
+   * without it, the rows offer nothing to show.
+   */
+  onSelect?: ((id: string) => void) | undefined
+  /** The one shown, whose row says so; null or absent when none is. */
+  selected?: string | null | undefined
   /** Where the card sits; never how it looks. */
   className?: string | undefined
 }
@@ -60,6 +70,8 @@ export function WorkspaceList({
   onBrowse,
   onCreate,
   onCleanup,
+  onSelect,
+  selected = null,
   className,
 }: WorkspaceListProps): ReactNode {
   /** The folder the picker answered, while its name is being settled; null otherwise. */
@@ -142,6 +154,18 @@ export function WorkspaceList({
                 </span>
                 <span className={PATH}>{workspace.path}</span>
               </span>
+              {onSelect !== undefined && (
+                <Button
+                  variant={selected === workspace.id ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className={CLEANUP}
+                  aria-label={`Show ${workspace.name}`}
+                  aria-pressed={selected === workspace.id}
+                  onClick={() => onSelect(workspace.id)}
+                >
+                  Show
+                </Button>
+              )}
               {workspace.dedicated && workspace.state !== 'cleaned' && (
                 <Button
                   variant="ghost"
