@@ -157,7 +157,10 @@ const ALWAYS = ['Playground', 'Variants', 'States']
  */
 const NAMED_STATES = new Map([
   ['composer/composer', ['Playground', 'Empty', 'Ready', 'Sending', 'Blocked']],
-  ['workspace/variables-editor', ['Project', 'Workspace', 'Empty', 'Keyboard']],
+  [
+    'workspace/variables-editor',
+    ['Project', 'Workspace', 'Empty', 'Adding', 'Editing', 'KeyExists', 'Keyboard'],
+  ],
   [
     'workspace/service-list',
     [
