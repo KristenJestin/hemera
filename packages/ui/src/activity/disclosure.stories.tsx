@@ -10,10 +10,12 @@ import { Disclosure } from './disclosure.tsx'
  * What folds: the line a block is read by, and what it holds once it is asked for (design
  * D17-05).
  *
- * Four stories, which are the four things a fold has to answer for: opened; closed while it is
+ * Six stories, which are the six things a fold has to answer for: opened; closed while it is
  * still opening — the moment it used to grow for a frame after the press instead of turning round
- * (issue #64); a body on its way out, which the keyboard can no longer reach (issue #69); and a
- * row that names a body only once there is one.
+ * (issue #64); a body on its way out, which the keyboard can no longer reach, and a row that names
+ * a body only once there is one (issue #69); a controlled block that folds on its own, where the
+ * focus the body held goes back to the row, and a row that names no body when the body was taken
+ * away while the block was open (issue #78).
  */
 const BODY = Array.from(
   { length: 12 },
@@ -277,23 +279,104 @@ export const NothingReachableWhileFolding: Story = {
   },
 }
 
+/** The press that lets go of a block the caller holds open: what a call that ends well does. */
+const LET_GO = 'Let the call end'
+
+/**
+ * A block the caller holds open, and then lets go of, with a press inside its body: a call that
+ * ends well, told to fold back to where the block starts rather than to stay open (`HemeraToolCall`
+ * and `CommandRun` both hand the fold back the moment what they watched is over).
+ */
+function HeldThenReleased(): ReactNode {
+  const [open, setOpen] = useState<boolean | undefined>(true)
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <Button size="sm" onClick={() => setOpen(undefined)}>
+        {LET_GO}
+      </Button>
+      <Disclosure summary="Read src/session/session.tsx" open={open}>
+        <div className="flex flex-col items-start gap-2">
+          <div className="font-mono text-xs whitespace-pre text-muted-foreground">{BODY}</div>
+          <Button size="sm">{INSIDE}</Button>
+        </div>
+      </Disclosure>
+    </div>
+  )
+}
+
+/**
+ * A controlled block folds on its own, and the focus that was inside its body is on the row
+ * (issue #78).
+ *
+ * A caller stops holding `open` the moment what it was watching is over, and the block folds there
+ * and then: no press on the row to hear it, and so nowhere for the hand-over to live while the
+ * press is the only thing that makes it. The body is out of the reader's reach from that moment —
+ * it is `inert` — and a focus inside it has nowhere to live either: the browser drops it on the
+ * document, in the middle of what the reader was reading.
+ *
+ * What is asserted is where the keyboard is on the frame the line says the fold is closed, the
+ * press that let go having left the focus where it was.
+ */
+export const FocusGoesBackToTheRowWhenTheCallerLetsGo: Story = {
+  render: () => <HeldThenReleased />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const page = canvasElement.ownerDocument
+    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+
+    // The reader is on the press the body holds when the caller lets go: it is the only thing
+    // under the line that the keyboard can land on.
+    const inside = canvas.getByRole('button', { name: INSIDE })
+    inside.focus()
+    await expect(inside).toHaveFocus()
+
+    // A press that does not move the focus: a pointer would put it on the control that lets go
+    // before the press runs, and there would be nothing inside the body left to hand back.
+    canvas.getByRole('button', { name: LET_GO }).click()
+    await expect(
+      await withinFrames(() => row.getAttribute('aria-expanded') === 'false', AT_ONCE),
+    ).toBe(true)
+
+    // The row holds it, and the document does not: a body made `inert` drops what it holds.
+    await expect(page.activeElement).toBe(row)
+  },
+}
+
+/** One moment of a block whose body comes and goes: where the caller holds it, and what it holds. */
+interface Moment {
+  open: boolean
+  body: boolean
+}
+
 /** The three moments of a block whose body comes late, each one a press away from the last. */
-const LATE = [
+const LATE: readonly Moment[] = [
   { open: true, body: false },
   { open: false, body: false },
   { open: false, body: true },
 ]
 
 /**
- * A block told to be open before it has a body, then closed, then handed its body while closed:
- * the order a caller that holds the state and fills the body later can go through.
+ * The four moments of a block whose body is taken away while it is open: the body goes where it
+ * stands, the block closes, and the body comes back under a block that is closed.
  */
-function LateBody(): ReactNode {
+const AWAY: readonly Moment[] = [
+  { open: true, body: true },
+  { open: true, body: false },
+  { open: false, body: false },
+  { open: false, body: true },
+]
+
+/**
+ * A block walked through the moments its caller puts it through, one `Next` press apart: the order
+ * a caller that holds the state and hands the body over later can go through.
+ */
+function Moments({ steps }: { steps: readonly Moment[] }): ReactNode {
   const [moment, setMoment] = useState(0)
-  const { open, body } = LATE[moment]!
+  const { open, body } = steps[moment]!
   return (
     <div className="flex flex-col items-start gap-2">
-      <Button size="sm" onClick={() => setMoment((at) => Math.min(at + 1, LATE.length - 1))}>
+      <Button size="sm" onClick={() => setMoment((at) => Math.min(at + 1, steps.length - 1))}>
         Next
       </Button>
       <Disclosure summary="Read src/session/session.tsx" open={open}>
@@ -313,10 +396,37 @@ function LateBody(): ReactNode {
  * while closed, and the row named a room that was never in the page.
  */
 export const NoBodyNamedBeforeThereIsOne: Story = {
-  render: () => <LateBody />,
+  render: () => <Moments steps={LATE} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const next = canvas.getByRole('button', { name: 'Next' })
+    await userEvent.click(next)
+    await userEvent.click(next)
+    const row = await waitFor(() =>
+      canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ }),
+    )
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await expect(row).not.toHaveAttribute('aria-controls')
+  },
+}
+
+/**
+ * A row names no body when the body was taken away while the block was open (issue #78).
+ *
+ * A body taken away where it stands leaves with no fold to play: the block is drawn with nothing
+ * to open the moment its children go, so there is no exit, and the end of an exit is the only
+ * thing that says a room has left. Counted as still there, the block then closed and was handed a
+ * body while closed, and its row named a room that was never in the page — a reference that
+ * resolves to nothing.
+ */
+export const NoBodyNamedWhenTheBodyLeftWhileOpen: Story = {
+  render: () => <Moments steps={AWAY} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const next = canvas.getByRole('button', { name: 'Next' })
+    // Open with a body, the body taken away where it stands, the block closed, and the body back
+    // under a block that is closed: the moments the row has to have stopped naming it by.
+    await userEvent.click(next)
     await userEvent.click(next)
     await userEvent.click(next)
     const row = await waitFor(() =>
