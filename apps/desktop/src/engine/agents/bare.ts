@@ -23,9 +23,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Context, Data, Effect, Layer } from 'effect'
 
-import type { AgentProvider, BaseReach } from '@hemera/core'
+import { AGENT_PROVIDERS, type AgentProvider, type BaseReach } from '@hemera/core'
 
-import type { AgentAdapter } from './adapter.ts'
+import type { AgentAdapter, Environment } from './adapter.ts'
 
 /**
  * The options Claude Code reads out of `session/new`'s `_meta` (D6-02).
@@ -165,9 +165,46 @@ export class BareModeNotQualifiedError extends Data.TaggedError('BareModeNotQual
   }
 }
 
-/** What this adapter declares about running its agent bare on this platform. */
-export function bareModeOf(adapter: AgentAdapter, platform: NodeJS.Platform): BareMode {
-  return adapter.bareMode(platform)
+/**
+ * The variable the end-to-end suite sets to name the agent it fakes (design D5-16).
+ *
+ * The suite's fake agent answers to OpenCode's command, and OpenCode is not qualified everywhere:
+ * on a platform where its declaration refuses it, every journey that opens a Session would be
+ * refused with it. Named here, that one agent is treated as qualified on this platform whatever
+ * its declaration says, since the fake has no tool of its own to leave behind. The application
+ * never sets it; `wdio.conf.ts` does, for the agent `e2e/agent/install.ts` puts on the `PATH`.
+ * Without it, or with a value that names no agent, every declaration is read as written.
+ */
+export const QUALIFIED_VARIABLE = 'HEMERA_E2E_QUALIFIED'
+
+/** The agent the end-to-end suite has this start treat as qualified, if it names one. */
+export function qualifiedBySuite(environment: Environment): AgentProvider | undefined {
+  const named = environment[QUALIFIED_VARIABLE]
+  return AGENT_PROVIDERS.find((provider) => provider === named)
+}
+
+/**
+ * What this adapter declares about running its agent bare on this platform.
+ *
+ * The one place a declaration can be overruled, and only by the end-to-end suite's variable
+ * above: the agent it names is qualified here, with the means, the base and the options it
+ * declared, and no reason to be refused with.
+ */
+export function bareModeOf(
+  adapter: AgentAdapter,
+  platform: NodeJS.Platform,
+  environment: Environment = process.env,
+): BareMode {
+  const declared = adapter.bareMode(platform)
+  if (declared.qualified || qualifiedBySuite(environment) !== adapter.id) return declared
+  return {
+    means: declared.means,
+    base: declared.base,
+    readsAgentsFile: declared.readsAgentsFile,
+    private: declared.private,
+    options: declared.options,
+    qualified: true,
+  }
 }
 
 /**

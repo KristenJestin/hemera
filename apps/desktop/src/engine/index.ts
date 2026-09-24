@@ -18,7 +18,7 @@ import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
-import { agentDirectoriesLayer } from './agents/bare.ts'
+import { QUALIFIED_VARIABLE, agentDirectoriesLayer, qualifiedBySuite } from './agents/bare.ts'
 import { heldWordsLayer } from './agents/held.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
@@ -282,6 +282,14 @@ if (process.parentPort !== undefined) {
     if (port === undefined) return
 
     const log = openDiagnosticLog(start.directory, 'engine')
+    // Said once, at start, so a log read later tells a run whose declaration the end-to-end
+    // suite overruled from one on a real machine (D5-16).
+    const suite = qualifiedBySuite(process.env)
+    if (suite !== undefined) {
+      log(
+        `${QUALIFIED_VARIABLE}=${suite}: ${suite} is qualified to run bare here, whatever it declares`,
+      )
+    }
 
     void Effect.runPromise(
       Effect.scoped(
