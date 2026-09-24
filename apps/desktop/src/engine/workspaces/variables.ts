@@ -18,7 +18,7 @@ import type { NewEvent } from '../journal.ts'
 import { Database, DatabaseError, type EngineTransaction } from '../storage/database.ts'
 import { environmentVariables, workspaces } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { UnknownWorkspaceError } from './workspaces.ts'
+import { UnknownWorkspaceError } from './described.ts'
 
 /** One variable: the Project's when `workspaceId` is null, that Workspace's otherwise. */
 export interface Variable {

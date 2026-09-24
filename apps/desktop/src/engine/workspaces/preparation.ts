@@ -56,8 +56,8 @@ import {
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { Variables } from './variables.ts'
+import { UnknownWorkspaceError } from './described.ts'
 import {
-  UnknownWorkspaceError,
   type WorkspaceView,
   Workspaces,
   labelOf,

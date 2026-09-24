@@ -21,14 +21,10 @@ import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { runFromPanel } from '#engine/commands/panel.ts'
 import { Commands } from '#engine/commands/service.ts'
 import { Projects } from '#engine/projects.ts'
-import {
-  Sessions,
-  UnknownWorkspaceError,
-  WorkspaceFixedError,
-  WorkspaceNotReadyError,
-} from '#engine/sessions.ts'
+import { Sessions, WorkspaceFixedError, WorkspaceNotReadyError } from '#engine/sessions.ts'
 import { Database } from '#engine/storage/database.ts'
 import { workspaces } from '#engine/storage/schema.ts'
+import { UnknownWorkspaceError } from '#engine/workspaces/described.ts'
 import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { threadOf, toolApplication, until } from './application.ts'
 

@@ -15,7 +15,8 @@ import { InvalidVariableKeyError } from '@hemera/core'
 import { Commands } from '#engine/commands/service.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Variables } from '#engine/workspaces/variables.ts'
-import { UnknownWorkspaceError, Workspaces } from '#engine/workspaces/workspaces.ts'
+import { UnknownWorkspaceError } from '#engine/workspaces/described.ts'
+import { Workspaces } from '#engine/workspaces/workspaces.ts'
 
 import { aSessionOf, atlas, atlasMain, workspaceEngine } from './workspace-engine.ts'
 

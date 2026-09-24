@@ -38,7 +38,8 @@ import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
-import { type SessionWorkspace, Sessions, type ThreadWrite } from '../sessions.ts'
+import { Sessions, type ThreadWrite } from '../sessions.ts'
+import type { DescribedWorkspace } from '../workspaces/described.ts'
 import { Database } from '../storage/database.ts'
 import { Variables } from '../workspaces/variables.ts'
 import { mutate } from '../transaction.ts'
@@ -621,7 +622,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const perform = (
       asked: ToolCall,
       root: string,
-      workspace: SessionWorkspace,
+      workspace: DescribedWorkspace,
       projectId: string,
       projectName: string,
       repositories: readonly string[],

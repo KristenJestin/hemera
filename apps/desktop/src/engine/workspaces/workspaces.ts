@@ -49,15 +49,8 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { UnknownWorkspaceError, describedWorkspace } from './described.ts'
 import { recipeOf } from './recipe.ts'
-
-/** A Workspace was asked for by an identifier nothing answers to. */
-export class UnknownWorkspaceError extends Error {
-  constructor(readonly id: string) {
-    super(`no Workspace has the identifier "${id}"`)
-    this.name = 'UnknownWorkspaceError'
-  }
-}
 
 /** What a creation checks before it writes anything (D8-04). */
 export type CreationCheck = 'base' | 'branch' | 'folder' | 'name' | 'git'
@@ -656,17 +649,10 @@ export const workspacesLayer = Layer.effect(
       status: (id) =>
         Effect.gen(function* () {
           const row = yield* workspaceRow(id)
-          const records = yield* database
-            .select()
-            .from(workspaceRepositories)
-            .where(eq(workspaceRepositories.workspaceId, id))
-            .pipe(Effect.mapError(failed('reading the worktrees')))
-          // A dedicated Workspace's worktrees; `main` and one made on a folder are read where
-          // the Project declares its repositories.
-          const locations =
-            records.length > 0
-              ? records.map((record) => record.relativePath)
-              : (yield* declaredOf(row.projectId)).map((location) => location.relativePath)
+          // The repositories the Workspace holds, as a Session in it reads them (Decided 16);
+          // none declared is the root itself, which Git is asked about all the same (D8-04).
+          const { repositories } = yield* describedWorkspace(database, row.projectId, id)
+          const locations = repositories.length > 0 ? repositories : [ROOT_REPOSITORY]
           return yield* Effect.forEach(locations, (relativePath) =>
             git.status(join(row.path, relativePath)).pipe(
               Effect.map((status): RepositoryState => ({
