@@ -39,7 +39,7 @@ const TONES: Record<StatusTone, string> = {
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/StatusDot',
   component: StatusDot,
   parameters: { layout: 'centered' },

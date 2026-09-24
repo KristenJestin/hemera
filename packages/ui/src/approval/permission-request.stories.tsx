@@ -12,7 +12,7 @@ import { PermissionRequest } from './permission-request.tsx'
 const meta = {
   title: 'Blocks/Session/PermissionRequest',
   component: PermissionRequest,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     toolName: 'Edit',
