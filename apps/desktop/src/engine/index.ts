@@ -65,7 +65,7 @@ export interface EngineStart {
 }
 
 /** The name each change of a Session travels under, on the one channel the page listens on. */
-export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run'>> = {
+export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run' | 'spec_changed'>> = {
   permission_requested: 'permission',
   turn_started: 'turn_start',
   turn_ended: 'turn',
