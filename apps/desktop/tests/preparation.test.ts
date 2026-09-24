@@ -14,6 +14,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -49,7 +50,9 @@ let folder: string
 let main: string
 
 beforeEach(() => {
-  folder = mkdtempSync(join(tmpdir(), 'hemera-preparation-'))
+  // The engine spells a path the way the filesystem does — `realpathSync.native`, the long form
+  // of a short name under a Windows runner — so the fixture is settled the same way before use.
+  folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-preparation-')))
   main = atlasMain(folder)
 })
 

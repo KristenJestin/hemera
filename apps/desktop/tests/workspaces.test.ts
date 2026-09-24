@@ -8,7 +8,15 @@
  * of the machine running the tests.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -33,7 +41,9 @@ let folder: string
 let main: string
 
 beforeEach(() => {
-  folder = mkdtempSync(join(tmpdir(), 'hemera-workspaces-'))
+  // The engine spells a path the way the filesystem does — `realpathSync.native`, the long form
+  // of a short name under a Windows runner — so the fixture is settled the same way before use.
+  folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-workspaces-')))
   main = atlasMain(folder)
 })
 
