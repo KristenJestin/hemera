@@ -43,18 +43,11 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** How long the opening spring is given before the press that closes it, in milliseconds. */
-const MID_OPENING = 50
+/** How much room the opening spring must have made before the press that closes it, in pixels. */
+const MID_OPENING = 4
 
 /** How long a fold is watched for at the most, in frames, so one that never answers still ends. */
 const PATIENCE = 240
-
-/** Waits out a moment of the journey, which a story cannot ask a clock for any other way. */
-function after(milliseconds: number): Promise<void> {
-  return new Promise((settle) => {
-    setTimeout(settle, milliseconds)
-  })
-}
 
 /** The room the body is given, read off the control that names it. */
 function roomOf(canvasElement: HTMLElement, row: HTMLElement): HTMLElement | null {
@@ -133,7 +126,15 @@ export const ClosedWhileOpening: Story = {
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     // Mid-opening, not at the end of it: the spring has made some of its room and is still
     // growing when the press lands.
-    await after(MID_OPENING)
+    // Waited for by frames, never by the clock: a saturated machine may give the spring no frame
+    // in any fixed time, and a press on a room still at 0 px would prove nothing.
+    await expect(
+      await withinFrames(() => {
+        const opening = roomOf(canvasElement, row)
+        return opening !== null && opening.getBoundingClientRect().height > MID_OPENING
+      }, PATIENCE),
+      'the fold never started to open',
+    ).toBe(true)
     const room = roomOf(canvasElement, row)
     expect(room, 'the fold is open, so the body is in the page').not.toBeNull()
 
