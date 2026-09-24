@@ -152,39 +152,28 @@ describe('The cards say the engine views in their own words', () => {
     })
   })
 
-  test('a recipe step is added as the engine takes it, and a run is named by its command', () => {
-    expect(recipeAddOf({ kind: 'copy', path: '.env', scope: 'repositories' })).toEqual({
+  test('a recipe step is added as the engine takes it, its base joined to its path', () => {
+    expect(
+      recipeAddOf({ kind: 'copy', base: './sources/api', path: '.env', commandId: null }),
+    ).toEqual({
       kind: 'copy',
-      path: '.env',
-      scope: 'repositories',
+      path: './sources/api/.env',
+      scope: 'root',
       commandId: null,
     })
-    expect(recipeAddOf({ kind: 'run', commandId: 'command-install' })).toEqual({
+    expect(
+      recipeAddOf({ kind: 'run', base: null, path: null, commandId: 'command-install' }),
+    ).toEqual({
       kind: 'run',
       path: null,
       scope: 'root',
       commandId: 'command-install',
     })
     expect(
-      recipeLinesOf(
-        [{ id: 'r1', kind: 'run', path: null, scope: 'root', commandId: 'command-dev', rank: 'a' }],
-        [
-          {
-            id: 'command-dev',
-            projectId: 'atlas',
-            name: 'dev',
-            line: 'pnpm dev',
-            lineWindows: null,
-            lineLinux: null,
-            type: 'serve',
-            folder: null,
-            scope: 'workspace',
-            portless: false,
-            createdAt: 0,
-          },
-        ],
-      ),
-    ).toEqual([{ id: 'r1', kind: 'run', path: undefined, scope: 'root', commandName: 'dev' }])
+      recipeLinesOf([
+        { id: 'r1', kind: 'run', path: null, scope: 'root', commandId: 'command-dev', rank: 'a' },
+      ]),
+    ).toEqual([{ id: 'r1', kind: 'run', base: null, path: null, commandId: 'command-dev' }])
   })
 
   // Scenario: "A preparation interrupted by a quit can be resumed".

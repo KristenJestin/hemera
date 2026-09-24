@@ -210,8 +210,12 @@ const NAMED_STATES = new Map([
     'workspace/cleanup-dialog',
     ['Confirm', 'RefusedRunningService', 'RefusedGit', 'RefusedBuildSession', 'Keyboard'],
   ],
-  // Lot 20: the recipe of a Project, with nothing in it, in order, being added to, and walked.
-  ['project/preparation-editor', ['Empty', 'Filled', 'Adding', 'Keyboard']],
+  // Lot 20: the recipe of a Project, with nothing in it, in order, being added to and edited, a
+  // source main does not hold, and walked.
+  [
+    'project/preparation-editor',
+    ['Empty', 'Filled', 'Adding', 'Editing', 'SourceMissing', 'Keyboard'],
+  ],
   // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
   [
     'project/project-settings',

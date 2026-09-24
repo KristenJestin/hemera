@@ -107,7 +107,6 @@ export {
   type PreparationEditorProps,
   type RecipeCommand,
   type RecipeKind,
-  type RecipeScope,
   type RecipeStepDraft,
   type RecipeStepLine,
 } from './project/preparation-editor.tsx'

@@ -371,26 +371,23 @@ describe('The steps follow the recipe in order', () => {
     await readRecipe(project.id)
     expect(recipeOf(project.id)).toEqual([])
 
-    const run = recipeAddOf({ kind: 'run', commandId: installing.id })
+    const run = recipeAddOf({ kind: 'run', base: null, path: null, commandId: installing.id })
     expect(await addRecipeStep(project.id, run)).toBeNull()
-    const copy = recipeAddOf({ kind: 'copy', path: '.env', scope: 'repositories' })
+    const copy = recipeAddOf({ kind: 'copy', base: null, path: '.env', commandId: null })
     expect(await addRecipeStep(project.id, copy)).toBeNull()
     // A path that leaves the Workspace is the engine's refusal, in its words.
-    const outside = recipeAddOf({ kind: 'link', path: '../elsewhere', scope: 'root' })
+    const outside = recipeAddOf({ kind: 'link', base: null, path: '../elsewhere', commandId: null })
     expect(await addRecipeStep(project.id, outside)).not.toBeNull()
     const [first, second] = recipeOf(project.id)
     await moveRecipeStep(project.id, second!.id, 'up')
-    expect(recipeLinesOf(recipeOf(project.id), [installing]).map((one) => one.kind)).toEqual([
-      'copy',
-      'run',
-    ])
+    expect(recipeLinesOf(recipeOf(project.id)).map((one) => one.kind)).toEqual(['copy', 'run'])
 
     const workspace = await loginForm(opened!, project.id)
     const steps = await bridge.invoke('preparation.steps', { workspaceId: workspace.id })
     expect(stepLinesOf(steps).map((one) => [one.kind, one.target])).toEqual([
       ['worktree', './api'],
       // The path as the engine keeps it, relative to the root.
-      ['copy', './.env in each repository'],
+      ['copy', './.env at the root'],
       ['run', 'install'],
     ])
 
@@ -421,7 +418,10 @@ describe('A run step fails on a non-zero exit', () => {
       folder: null,
     })
     expect(
-      await addRecipeStep(project.id, recipeAddOf({ kind: 'run', commandId: failing.id })),
+      await addRecipeStep(
+        project.id,
+        recipeAddOf({ kind: 'run', base: null, path: null, commandId: failing.id }),
+      ),
     ).toBeNull()
 
     const workspace = await loginForm(opened!, project.id, 'failed')

@@ -3,6 +3,7 @@ import { type FunctionComponent, type ReactNode, useState } from 'react'
 import { COMMAND_TYPE_ICONS, type CommandType } from '../activity/command-type.ts'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card, CardRow } from '../components/card/card.tsx'
+import { Dialog } from '../components/dialog/dialog.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Select } from '../components/select/select.tsx'
 import { relativePathSchema } from '../form/schemas.ts'
@@ -11,6 +12,7 @@ import {
   IconArrowUp,
   IconCopy,
   IconLink,
+  IconPencil,
   IconPlayerPlay,
   type IconProps,
   IconPlus,
@@ -21,39 +23,42 @@ import {
  * The preparation of a Project: the ordered recipe every dedicated Workspace replays once its
  * worktrees are made (D8-05).
  *
- * Three kinds of step and nothing else: `copy` a file of `main` to the same place, `link` it
- * instead, and `run` a command of the catalogue. A step is read as the sentence it is — `copy
- * .env in each repository`, `run install` — because the order is the point, and a sentence
- * per line is what makes an order readable. The engine keeps the state of each step per
- * Workspace; this card only says what the recipe is.
+ * Three kinds of step and nothing else: `copy` a file or a folder of `main` to the same place,
+ * `link` it instead, and `run` a command of the catalogue. A step is read as the sentence it is —
+ * `copy .env from api`, `link node_modules in web`, `run install` — because the order is the
+ * point, and a sentence per line is what makes an order readable. The engine keeps the state of
+ * each step per Workspace; this card only says what the recipe is.
  *
- * A path is relative to the Workspace root and refused otherwise, here and before anything is
- * asked of anybody. A `run` names a command of the catalogue rather than a line, so what a
- * Workspace runs is what the Project already declared.
+ * A copy or a link works from a base — the Workspace root, or one of the Project's repositories,
+ * named by the last segment of its path — and a path relative to that base. Two repositories are
+ * two steps: a step works in one place. A path that is absolute or climbs out of its base is
+ * refused here, before anybody is asked; whether the source exists in `main` is the engine's to
+ * check, and its answer is shown in the dialog, which stays open on what was typed.
+ *
+ * The list is only a list: a step is added and edited in the same dialog, opened empty by
+ * **Add step** and filled by a row's pencil.
  */
 
 /** What a step does. */
 export type RecipeKind = 'copy' | 'link' | 'run'
 
-/** Where a `copy` or a `link` lands: once at the root, or once in each repository. */
-export type RecipeScope = 'root' | 'repositories'
-
 /** One step of the recipe, as the card draws it. */
 export interface RecipeStepLine {
   id: string
   kind: RecipeKind
-  /** The file a `copy` or a `link` takes, relative to the Workspace root. */
-  path?: string | undefined
-  /** Where a `copy` or a `link` lands. */
-  scope?: RecipeScope | undefined
-  /** The command a `run` starts, by the name the catalogue gives it. */
-  commandName?: string | undefined
+  /**
+   * Where a `copy` or a `link` works: the path of one of the Project's repositories, or null for
+   * the Workspace root. Null for a `run`.
+   */
+  base: string | null
+  /** The file or the folder a `copy` or a `link` takes, relative to its base; null for a `run`. */
+  path: string | null
+  /** The command of the catalogue a `run` starts; null for a `copy` and a `link`. */
+  commandId: string | null
 }
 
-/** A step the form hands over: a file and where it goes, or a command of the catalogue. */
-export type RecipeStepDraft =
-  | { kind: 'copy' | 'link'; path: string; scope: RecipeScope }
-  | { kind: 'run'; commandId: string }
+/** A step the dialog hands over: the line without its id, which the engine gives. */
+export type RecipeStepDraft = Omit<RecipeStepLine, 'id'>
 
 /** A command of the catalogue, as a `run` step offers it. */
 export interface RecipeCommand {
@@ -65,10 +70,16 @@ export interface RecipeCommand {
 export interface PreparationEditorProps {
   /** The recipe, in the order it runs. */
   steps: readonly RecipeStepLine[]
+  /** The Project's repositories, by their path relative to `main`: the bases a step can take. */
+  repositories: readonly string[]
   /** The Project's catalogue, which is what a `run` step may start. */
   commands: readonly RecipeCommand[]
-  /** Adds a step at the end; answers the engine's refusal, or null. */
+  /**
+   * Adds a step at the end; answers the engine's refusal — a source missing in `main` — or null.
+   */
   onAdd: (step: RecipeStepDraft) => Promise<string | null>
+  /** Rewrites a step where it stands; answers the engine's refusal, or null. */
+  onUpdate: (id: string, step: RecipeStepDraft) => Promise<string | null>
   onRemove: (id: string) => void
   /** Moves a step one place up or down the recipe. */
   onMove: (id: string, direction: 'up' | 'down') => void
@@ -86,10 +97,15 @@ const MARK = 'flex shrink-0 text-muted-foreground'
 
 const STEPS = 'flex flex-col gap-2'
 
-/** The form that adds a step: its kind, then what the kind needs, on one line when it fits. */
-const ADD = 'flex flex-wrap items-end gap-3'
+const FORM = 'flex flex-col gap-4'
 
-const FILE_FIELD = 'min-w-0 flex-1'
+/**
+ * The base and the path, on one line when it fits: the path takes what the base leaves, and the
+ * select sits on the path's line, as a select of a dialog does beside a field.
+ */
+const WHERE = 'flex flex-wrap items-end gap-3'
+
+const PATH_FIELD = 'min-w-0 flex-1'
 
 const KIND_ICONS: Record<RecipeKind, FunctionComponent<IconProps>> = {
   copy: IconCopy,
@@ -98,86 +114,165 @@ const KIND_ICONS: Record<RecipeKind, FunctionComponent<IconProps>> = {
 }
 
 const KIND_ITEMS: { value: RecipeKind; label: string; icon: ReactNode }[] = [
-  { value: 'copy', label: 'Copy a file', icon: <IconCopy size="sm" /> },
-  { value: 'link', label: 'Link a file', icon: <IconLink size="sm" /> },
+  { value: 'copy', label: 'Copy a file or a folder', icon: <IconCopy size="sm" /> },
+  { value: 'link', label: 'Link a file or a folder', icon: <IconLink size="sm" /> },
   { value: 'run', label: 'Run a command', icon: <IconPlayerPlay size="sm" /> },
 ]
 
-const SCOPE_WORDS: Record<RecipeScope, string> = {
-  root: 'at the root',
-  repositories: 'in each repository',
-}
-
-const SCOPE_ITEMS: { value: RecipeScope; label: string }[] = [
-  { value: 'root', label: SCOPE_WORDS.root },
-  { value: 'repositories', label: SCOPE_WORDS.repositories },
-]
+/**
+ * The value the base select gives the Workspace root. A select holds strings, and the root is
+ * no repository: `/` is what no relative path can be.
+ */
+const ROOT = '/'
 
 /** The one thing said about a path that is not relative, whatever is wrong with it. */
-const NOT_RELATIVE = 'A path is relative to the Workspace root.'
+const NOT_RELATIVE = 'A path is relative to its base.'
+
+/** The last segment of a path, which is the name a repository goes by. */
+function lastSegmentOf(path: string): string {
+  return path.split(/[\\/]/).findLast((segment) => segment !== '' && segment !== '.') ?? path
+}
+
+/**
+ * The name each repository goes by: the last segment of its path, with the path beside it when
+ * two repositories share that segment.
+ */
+function repositoryNamesOf(repositories: readonly string[]): Map<string, string> {
+  const segments = repositories.map(lastSegmentOf)
+  return new Map(
+    repositories.map((path, index) => {
+      const segment = segments[index] ?? path
+      const shared = segments.filter((other) => other === segment).length > 1
+      return [path, shared ? `${segment} (${path})` : segment]
+    }),
+  )
+}
 
 /** A step read as the sentence it is. */
-function sentenceOf(step: RecipeStepLine): string {
-  if (step.kind === 'run') return `run ${step.commandName ?? ''}`
-  return `${step.kind} ${step.path ?? ''} ${SCOPE_WORDS[step.scope ?? 'root']}`
+function sentenceOf(
+  step: RecipeStepLine,
+  names: ReadonlyMap<string, string>,
+  commands: readonly RecipeCommand[],
+): string {
+  if (step.kind === 'run') {
+    const command = commands.find((one) => one.id === step.commandId)
+    return `run ${command?.name ?? 'a command no longer in the catalogue'}`
+  }
+  const path = step.path ?? ''
+  if (step.base === null) return `${step.kind} ${path} at the root`
+  const where = names.get(step.base) ?? step.base
+  return step.kind === 'copy' ? `copy ${path} from ${where}` : `link ${path} in ${where}`
+}
+
+/** What the dialog holds while it is open: the step being written, and whose it is. */
+interface Editing {
+  /** The step being edited, or null for a new one. */
+  id: string | null
+  kind: RecipeKind
+  /** The base as the select holds it: a repository's path, or `ROOT`. */
+  base: string
+  path: string
+  commandId: string | undefined
+}
+
+const EMPTY: Editing = { id: null, kind: 'copy', base: ROOT, path: '', commandId: undefined }
+
+function editingOf(step: RecipeStepLine): Editing {
+  return {
+    id: step.id,
+    kind: step.kind,
+    base: step.base ?? ROOT,
+    path: step.path ?? '',
+    commandId: step.commandId ?? undefined,
+  }
 }
 
 export function PreparationEditor({
   steps,
+  repositories,
   commands,
   onAdd,
+  onUpdate,
   onRemove,
   onMove,
   className,
 }: PreparationEditorProps): ReactNode {
-  const [kind, setKind] = useState<RecipeKind>('copy')
-  const [path, setPath] = useState('')
-  const [scope, setScope] = useState<RecipeScope>('root')
-  const [commandId, setCommandId] = useState<string | undefined>(undefined)
+  /** What the dialog holds; kept while it closes, so it does not empty on its way out. */
+  const [editing, setEditing] = useState<Editing>(EMPTY)
+  const [open, setOpen] = useState(false)
   const [pathError, setPathError] = useState<string | undefined>(undefined)
   const [refusal, setRefusal] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
-  const running = kind === 'run'
-  const ready = running ? commandId !== undefined : path.trim() !== ''
+  const names = repositoryNamesOf(repositories)
+  const running = editing.kind === 'run'
+  const ready = running ? editing.commandId !== undefined : editing.path.trim() !== ''
 
-  const add = async () => {
+  const show = (next: Editing) => {
+    setEditing(next)
+    setPathError(undefined)
+    setRefusal(null)
+    setOpen(true)
+  }
+
+  const change = (next: Partial<Editing>) => {
+    setEditing({ ...editing, ...next })
+    setPathError(undefined)
+    setRefusal(null)
+  }
+
+  const save = async () => {
     let step: RecipeStepDraft
     if (running) {
-      if (commandId === undefined) return
-      step = { kind: 'run', commandId }
+      if (editing.commandId === undefined) return
+      step = { kind: 'run', base: null, path: null, commandId: editing.commandId }
     } else {
-      // Refused here, before anybody is asked: a path that is absolute or climbs out of the
-      // Workspace is not a place a Workspace has (D8-05).
-      if (!relativePathSchema.safeParse(path).success) {
+      // Refused here, before anybody is asked: a path that is absolute or climbs out of its
+      // base is not a place a Workspace has (D8-05).
+      if (!relativePathSchema.safeParse(editing.path).success) {
         setPathError(NOT_RELATIVE)
         return
       }
-      step = { kind, path: path.trim(), scope }
+      step = {
+        kind: editing.kind,
+        base: editing.base === ROOT ? null : editing.base,
+        path: editing.path.trim(),
+        commandId: null,
+      }
     }
-    const said = await onAdd(step)
+    setSaving(true)
+    const said = editing.id === null ? await onAdd(step) : await onUpdate(editing.id, step)
+    setSaving(false)
     setRefusal(said)
-    // The chosen command stays chosen: the next `run` is as likely to be another as the same.
-    if (said === null) setPath('')
+    if (said === null) setOpen(false)
   }
+
+  const adding = editing.id === null
 
   return (
     <Card
       title="Preparation"
       description="What every dedicated Workspace does, in this order, once its worktrees are made."
       className={className}
+      actions={
+        <Button variant="secondary" size="sm" onClick={() => show(EMPTY)}>
+          <IconPlus size="sm" aria-hidden="true" />
+          Add step
+        </Button>
+      }
     >
       {steps.length === 0 ? (
         <p className={NOTE}>No step: a Workspace is ready as soon as its worktrees are.</p>
       ) : (
-        <ul className={STEPS}>
+        <ul className={STEPS} aria-label="Steps">
           {steps.map((step, index) => {
             const Icon = KIND_ICONS[step.kind]
-            const sentence = sentenceOf(step)
+            const sentence = sentenceOf(step, names, commands)
             return (
               <li key={step.id}>
                 <CardRow>
                   <span className={MARK}>
-                    <Icon size="sm" />
+                    <Icon size="sm" aria-hidden="true" />
                   </span>
                   <span className={SENTENCE}>{sentence}</span>
                   <IconButton
@@ -199,6 +294,13 @@ export function PreparationEditor({
                   <IconButton
                     variant="ghost"
                     size="sm"
+                    icon={<IconPencil size="sm" />}
+                    aria-label={`Edit: ${sentence}`}
+                    onClick={() => show(editingOf(step))}
+                  />
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
                     icon={<IconX size="sm" />}
                     aria-label={`Remove: ${sentence}`}
                     onClick={() => onRemove(step.id)}
@@ -210,59 +312,77 @@ export function PreparationEditor({
         </ul>
       )}
 
-      <div className={ADD}>
-        <Select
-          label="Step kind"
-          value={kind}
-          onValueChange={(next) => {
-            setKind(next)
-            setPathError(undefined)
-            setRefusal(null)
-          }}
-          items={KIND_ITEMS}
-        />
-        {running ? (
-          commands.length === 0 ? (
-            <p className={NOTE}>The catalogue holds no command yet.</p>
-          ) : (
-            <Select
-              label="Command"
-              placeholder="Choose a command"
-              value={commandId}
-              onValueChange={setCommandId}
-              items={commands.map((one) => {
-                const Icon = COMMAND_TYPE_ICONS[one.type]
-                return { value: one.id, label: one.name, icon: <Icon size="sm" /> }
-              })}
-            />
-          )
-        ) : (
+      <Dialog
+        title={adding ? 'Add step' : 'Edit step'}
+        description="A copy or a link takes a file or a folder relative to its base, and is checked against main before it is kept."
+        open={open}
+        onOpenChange={setOpen}
+        actions={
           <>
-            <Input
-              label="File"
-              className={FILE_FIELD}
-              placeholder=".env"
-              value={path}
-              error={pathError}
-              onValueChange={(next) => {
-                setPath(next)
-                setPathError(undefined)
-                setRefusal(null)
-              }}
-            />
-            <Select label="Where" value={scope} onValueChange={setScope} items={SCOPE_ITEMS} />
+            <Button
+              variant="primary"
+              state={saving ? 'loading' : 'idle'}
+              disabled={!ready}
+              onClick={() => void save()}
+            >
+              {adding ? 'Add' : 'Save'}
+            </Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
           </>
-        )}
-        <Button variant="secondary" disabled={!ready} onClick={() => void add()}>
-          <IconPlus size="sm" />
-          Add
-        </Button>
-      </div>
-      {refusal !== null && (
-        <p role="alert" className={REFUSAL}>
-          {refusal}
-        </p>
-      )}
+        }
+      >
+        <div className={FORM}>
+          <Select
+            label="Step kind"
+            value={editing.kind}
+            onValueChange={(kind) => change({ kind })}
+            items={KIND_ITEMS}
+          />
+          {running ? (
+            commands.length === 0 ? (
+              <p className={NOTE}>The catalogue holds no command yet.</p>
+            ) : (
+              <Select
+                label="Command"
+                placeholder="Choose a command"
+                value={editing.commandId}
+                onValueChange={(commandId) => change({ commandId })}
+                items={commands.map((one) => {
+                  const Icon = COMMAND_TYPE_ICONS[one.type]
+                  return { value: one.id, label: one.name, icon: <Icon size="sm" /> }
+                })}
+              />
+            )
+          ) : (
+            <div className={WHERE}>
+              <Select
+                label="Base"
+                value={editing.base}
+                onValueChange={(base) => change({ base })}
+                items={[
+                  { value: ROOT, label: 'Workspace root' },
+                  ...repositories.map((path) => ({ value: path, label: names.get(path) ?? path })),
+                ]}
+              />
+              <Input
+                label="Path"
+                className={PATH_FIELD}
+                placeholder=".env"
+                value={editing.path}
+                error={pathError}
+                onValueChange={(path) => change({ path })}
+              />
+            </div>
+          )}
+          {refusal !== null && (
+            <p role="alert" className={REFUSAL}>
+              {refusal}
+            </p>
+          )}
+        </div>
+      </Dialog>
     </Card>
   )
 }

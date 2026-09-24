@@ -205,17 +205,17 @@ export function runDetailsOf(run: CommandRun): Omit<RunDetailsProps, 'className'
   }
 }
 
-/** The recipe as its card lists it, a run named by its command in the catalogue (D8-05). */
-export function recipeLinesOf(
-  steps: readonly RecipeStep[],
-  catalogue: readonly Command[],
-): RecipeStepLine[] {
+/**
+ * The recipe as its card lists it (D8-05). The engine keeps a path relative to the root, so every
+ * step is read from the root until it keeps a base of its own.
+ */
+export function recipeLinesOf(steps: readonly RecipeStep[]): RecipeStepLine[] {
   return steps.map((step) => ({
     id: step.id,
     kind: step.kind,
-    path: step.path ?? undefined,
-    scope: step.scope,
-    commandName: catalogue.find((one) => one.id === step.commandId)?.name,
+    base: null,
+    path: step.path,
+    commandId: step.commandId,
   }))
 }
 
@@ -227,10 +227,14 @@ export function recipeCommandsOf(catalogue: readonly Command[]): RecipeCommand[]
 /** A step of the recipe as the engine adds it, to the Project it is asked for. */
 export type RecipeAdd = Omit<ChannelArguments<'recipe.add'>, 'projectId'>
 
-/** A step the card hands over, as the engine adds it: a file and where, or a command. */
+/**
+ * A step the card hands over, as the engine adds it: a command, or a path the engine reads from
+ * the root — the base joined to it until the engine keeps a base of its own.
+ */
 export function recipeAddOf(draft: RecipeStepDraft): RecipeAdd {
   if (draft.kind === 'run') {
     return { kind: 'run', path: null, scope: 'root', commandId: draft.commandId }
   }
-  return { kind: draft.kind, path: draft.path, scope: draft.scope, commandId: null }
+  const path = draft.base === null ? draft.path : `${draft.base}/${draft.path ?? ''}`
+  return { kind: draft.kind, path, scope: 'root', commandId: null }
 }

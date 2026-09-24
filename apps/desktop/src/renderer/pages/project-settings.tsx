@@ -366,9 +366,14 @@ export function ProjectSettingsPage({
         }
         preparation={
           <PreparationEditor
-            steps={recipeLinesOf(recipe, commands)}
+            steps={recipeLinesOf(recipe)}
+            repositories={repositories.map((one) => one.path)}
             commands={recipeCommandsOf(commands)}
             onAdd={async (step) => await onAddRecipeStep(recipeAddOf(step))}
+            // The engine has no way yet to rewrite a step where it stands.
+            onUpdate={async () =>
+              await Promise.resolve('A step cannot be edited yet: remove it and add it again.')
+            }
             onRemove={onRemoveRecipeStep}
             onMove={onMoveRecipeStep}
           />

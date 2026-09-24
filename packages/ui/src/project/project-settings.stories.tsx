@@ -152,15 +152,17 @@ const WORKSPACES = (
 const PREPARATION = (
   <PreparationEditor
     steps={[
-      { id: 'copy-env', kind: 'copy', path: '.env', scope: 'repositories' },
-      { id: 'link-claude', kind: 'link', path: 'CLAUDE.md', scope: 'root' },
-      { id: 'run-env', kind: 'run', commandName: 'env' },
+      { id: 'copy-env', kind: 'copy', base: './sources/api', path: '.env', commandId: null },
+      { id: 'link-claude', kind: 'link', base: null, path: 'CLAUDE.md', commandId: null },
+      { id: 'run-env', kind: 'run', base: null, path: null, commandId: 'env' },
     ]}
+    repositories={REPOSITORIES.map((one) => one.path)}
     commands={[
       { id: 'env', name: 'env', type: 'configure' },
       { id: 'check', name: 'check', type: 'test' },
     ]}
     onAdd={fn(async () => await Promise.resolve(null))}
+    onUpdate={fn(async () => await Promise.resolve(null))}
     onRemove={fn()}
     onMove={fn()}
   />
