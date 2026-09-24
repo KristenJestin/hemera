@@ -31,8 +31,11 @@ const THEME_NAME = 'css-variables'
 /** The theme as the highlighter knows it: a name, and a variable per role. */
 const THEME = createCssVariablesTheme({ name: THEME_NAME, variablePrefix: '--shiki-' })
 
+/** The class of a token nothing coloured: the text's own colour, which a plain line wears. */
+const PLAIN = 'text-inherit'
+
 const CLASS_OF = new Map<string, string>([
-  ['foreground', 'text-inherit'],
+  ['foreground', PLAIN],
   ['comment', 'tok-comment'],
   ['constant', 'tok-constant'],
   ['keyword', 'tok-keyword'],
@@ -108,6 +111,8 @@ export interface HighlightedToken {
 /** One line of a diff, as the tokens the grammar found in it. */
 export type HighlightedLine = HighlightedToken[]
 
+/** The languages whose grammar is in hand: `warm` has brought it and its rules are registered. */
+const ARRIVED = new Set<string>()
 /** What was already drawn, so that a re-render reads the same answer and not a new one. */
 const DRAWN = new Map<string, HighlightedLine[] | null>()
 
@@ -120,7 +125,8 @@ const DRAWN = new Map<string, HighlightedLine[] | null>()
  * source and once as its tokens.
  */
 const DRAWN_KEPT = 64
-const LOADED = new Set<string>()
+/** The draws already given their one second chance, by language and code: one, never a loop. */
+const RETRIED = new Set<string>()
 const LISTENERS = new Set<() => void>()
 
 let made: Promise<HighlighterCore> | null = null
@@ -151,14 +157,21 @@ export function languageOf(path: string): string | null {
   return LANGUAGES.get(name.slice(dot + 1).toLowerCase()) ?? null
 }
 
-/** Asks for the grammar of a language, once, and wakes whoever waits for it. */
+/**
+ * Asks for the grammar of a language, once, and wakes whoever waits for it.
+ *
+ * A registered grammar is not a grammar that reads: the draw that first uses one is the draw that
+ * compiles its rules, and a machine busy with the rest of the run can lose that draw to the time
+ * shiki allows a line. So nothing here says that a language is loaded — what wakes is the grammar
+ * being there, and `highlighted` is what decides whether a draw is an answer.
+ */
 export async function warm(language: string | null): Promise<void> {
-  if (language === null || LOADED.has(language)) return
+  if (language === null || ARRIVED.has(language)) return
   const grammar = GRAMMARS.get(language)
   if (grammar === undefined) return
   const instance = await highlighter()
   await instance.loadLanguage(grammar())
-  LOADED.add(language)
+  ARRIVED.add(language)
   for (const listener of LISTENERS) listener()
 }
 
@@ -171,14 +184,31 @@ export function subscribeToHighlight(listener: () => void): () => void {
 }
 
 /**
- * The code as the lines of tokens the grammar found, or null while its grammar is still coming —
+ * The code as the lines of tokens the grammar found, or null while there is nothing to draw with —
  * and null for good for a language nobody here colours, which the caller draws plain.
+ *
+ * Null does not only mean that the grammar is still coming. Shiki hands back a line it could not
+ * tokenize in the time it allows as one token the grammar never looked at, and the draw that first
+ * uses a grammar — the one that compiles its rules — is the draw a busy machine can lose that way.
+ * A draw that found nothing the theme knows is therefore not an answer: nothing is kept, and the
+ * readers are woken once more so that the same code is drawn again, which is the draw that reads.
+ * Once, because a change with nothing to colour is a plain change, and asking for ever would spin.
  */
 export function highlighted(code: string, language: string | null): HighlightedLine[] | null {
-  if (language === null || !LOADED.has(language) || ready === null) return null
+  if (language === null || !ARRIVED.has(language) || ready === null) return null
   const key = `${language}\u0000${code}`
-  if (DRAWN.has(key)) return DRAWN.get(key) ?? null
+  const kept = DRAWN.get(key)
+  if (kept !== undefined) return kept
   const drawn = draw(ready, code, language)
+  if (drawn !== null && !tokenized(drawn) && !RETRIED.has(key)) {
+    RETRIED.add(key)
+    // A task of its own, because `highlighted` is read while a frame is being built, and waking
+    // the readers from inside one is not something React takes.
+    setTimeout(() => {
+      for (const listener of LISTENERS) listener()
+    }, 0)
+    return null
+  }
   DRAWN.set(key, drawn)
   // The oldest go first, which is the diff furthest up a thread nobody is scrolled to: drawing
   // it again is one pass of the grammar, where holding it is the whole file for as long as the
@@ -189,6 +219,17 @@ export function highlighted(code: string, language: string | null): HighlightedL
     DRAWN.delete(oldest.value)
   }
   return drawn
+}
+
+/**
+ * Whether a draw is a tokenization. A line the grammar never looked at comes back as one token
+ * wearing the theme's own foreground — the colour the text already has — and a role this file has
+ * no class for wears none at all, so neither of those is what a colour looks like.
+ */
+function tokenized(lines: HighlightedLine[]): boolean {
+  return lines.some((line) =>
+    line.some((token) => token.className !== '' && token.className !== PLAIN),
+  )
 }
 
 function draw(instance: HighlighterCore, code: string, language: string): HighlightedLine[] | null {
