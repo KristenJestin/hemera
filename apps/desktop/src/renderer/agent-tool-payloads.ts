@@ -132,9 +132,10 @@ function pathSubject(path: string): ToolSubject {
  * named `root`; the query of a search, quoted, and the folder it was kept to; the catalogue name
  * or the one-off line a command was run by; the name of the run a stop or an output is about,
  * which the runs of the Session know and the arguments only hold the identifier of. Of the Spec
- * tools: an older revision read; the section, the list or the question written; the phase
- * declared, `ready`, or the title of a Spec proposed. Nothing for the three that are about nothing
- * but the Project, the catalogue or the Session, nor for a read of the current revision.
+ * tools: an earlier version read, in the reader's words and not the engine's revision number; the
+ * section, the list or the question written; the phase declared, `ready`, or the title of a Spec
+ * proposed. Nothing for the three that are about nothing but the Project, the catalogue or the
+ * Session, nor for a read of the current revision.
  */
 export function subjectOf(
   tool: string,
@@ -170,7 +171,7 @@ export function subjectOf(
     }
     case 'spec_read': {
       const revision = new RegExp(String.raw`"revision"\s*:\s*(\d+)`).exec(bounded)?.[1]
-      return revision === undefined ? undefined : { text: `revision ${revision}` }
+      return revision === undefined ? undefined : { text: 'an earlier version' }
     }
     case 'spec_write': {
       const section = stringArgument(bounded, ['section'])

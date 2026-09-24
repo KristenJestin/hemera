@@ -351,7 +351,9 @@ describe('Every tool shows its subject', () => {
 
   test('the revision read, the section, list or question written, and the phase, ready or title proposed', () => {
     expect(subjectOf('spec_read', '{}')).toBeUndefined()
-    expect(subjectOf('spec_read', JSON.stringify({ revision: 2 }))).toEqual({ text: 'revision 2' })
+    expect(subjectOf('spec_read', JSON.stringify({ revision: 2 }))).toEqual({
+      text: 'an earlier version',
+    })
     expect(
       subjectOf('spec_write', args({ section: 'scope', body: 'CSV only.', key: 'k' })),
     ).toEqual({ text: 'scope' })

@@ -138,7 +138,7 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
         ? `(that is characters ${range.offset}-${range.end} of ${range.size}; the next page starts at offset ${range.end})`
         : `(that is characters ${range.offset}-${range.end} of ${range.size}, the end of the Spec)`
       return completed(
-        `read ${snapshot.spec.key} (revision ${snapshot.revision.number}, characters ${range.offset}-${range.end} of ${range.size})`,
+        `read ${old ? 'an earlier version of ' : ''}${snapshot.spec.key} (characters ${range.offset}-${range.end} of ${range.size})`,
         [page, more, JSON.stringify(range)].join('\n'),
       )
     })
@@ -172,7 +172,7 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
         const version =
           snapshot.sections.find((section) => section.name === call.section)?.version ?? 0
         return completed(
-          `wrote the ${call.section} section of ${snapshot.spec.key} (version ${version})`,
+          `wrote the ${call.section} section of ${snapshot.spec.key}`,
           `The ${call.section} section of ${snapshot.spec.key} is at version ${version}.\n${phasesLine(snapshot)}`,
         )
       }
@@ -228,7 +228,7 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
         const gate = yield* specs.gate(specId)
         const left = gate.failures.map((failure) => `- ${failure.message}`)
         return completed(
-          `attested ${attested.spec.key} at content version ${attested.spec.contentVersion}`,
+          `confirmed ${attested.spec.key} is complete`,
           [
             `${attested.spec.key} is attested at content version ${attested.spec.contentVersion}. It stays a draft: only the user's Mark ready freezes it.`,
             left.length === 0
@@ -245,7 +245,7 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
         supporting: call.supporting,
       })
       return completed(
-        `declared the ${phase} phase of ${snapshot.spec.key} finished`,
+        `finished the ${phase} phase of ${snapshot.spec.key}`,
         `The ${phase} phase of ${snapshot.spec.key} is finished.\n${phasesLine(snapshot)}`,
       )
     })
