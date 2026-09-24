@@ -20,6 +20,7 @@ import { join } from 'node:path'
 import { browser, expect } from '@wdio/globals'
 
 import { addProject, ringBell, strike } from './hand.ts'
+import { skipWithoutScreen } from './headless.ts'
 
 /** Somewhere for the two Projects to point at, made by this spec and removed with it. */
 const SOURCES = mkdtempSync(join(tmpdir(), 'hemera-e2e-shell-sources-'))
@@ -145,7 +146,8 @@ describe('Changement de Projet actif', () => {
 })
 
 describe('Repli mesuré', () => {
-  it('folds the sidebar without a frame above two display periods', async () => {
+  it('folds the sidebar without a frame above two display periods', async function () {
+    skipWithoutScreen(this, 'the frame time of the sidebar fold')
     await unfold()
     // Played twice first, and not once: the first fold after the page has been sitting still
     // pays for its compositor layer, and that frame says what waking up costs, not what the

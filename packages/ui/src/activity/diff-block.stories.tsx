@@ -12,7 +12,7 @@ import { DiffBlock } from './diff-block.tsx'
  * “show me”.
  */
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/DiffBlock',
   component: DiffBlock,
   parameters: { layout: 'padded' },
@@ -110,9 +110,10 @@ export const ColouredInItsOwnLanguage: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('+2')).toBeVisible()
     // The grammar is a module of its own, imported when the first block of that language is
-    // drawn: on a machine busy with the rest of the run that import outlasts the default
-    // patience of a wait, and the wait reports a plain draw that had simply not been coloured
-    // yet. Ten seconds is what the session story gives the same grammar.
+    // drawn, and the change is drawn plain while it comes. On a machine busy with the rest of the
+    // run that import alone outlasts the default patience of a wait (1.6 s was measured for it),
+    // so the wait is given ten seconds. The patience cannot hide a draw kept plain: such a draw
+    // is never coloured again, and the wait fails however long it is.
     await waitFor(
       () => expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0),
       { timeout: 10_000 },
@@ -154,5 +155,38 @@ export const PlainWhereNoGrammarIs: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('exit 1')).toBeVisible()
     await expect(canvasElement.querySelector('[class*="tok-"]')).toBeNull()
+  },
+}
+
+/**
+ * More changes on one screen than the drawn changes the module holds (sixty-four): a long turn
+ * reaches that. Every block is coloured and stays so, and none of them keeps asking for its
+ * tokens again — the thread renders once and settles.
+ */
+export const MoreChangesThanAreHeld: Story = {
+  render: () => (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 65 }, (_, index) => (
+        <DiffBlock
+          key={index}
+          path={`packages/ui/src/change-${index}.ts`}
+          oldText={null}
+          newText={`const answer${index} = ${index}\n`}
+          defaultOpen
+        />
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const blocks = within(canvasElement).getAllByRole('group')
+    await expect(blocks).toHaveLength(65)
+    const uncoloured = (): HTMLElement[] =>
+      blocks.filter((block) => block.querySelector('.tok-keyword') === null)
+    // The grammar's import is given the patience the stories above give it.
+    await waitFor(() => expect(uncoloured()).toHaveLength(0), { timeout: 10_000 })
+    // A frame later, the same: a block whose tokens had been let go of would draw them again
+    // and push another block's out, and the thread would never stop rendering.
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    await expect(uncoloured()).toHaveLength(0)
   },
 }

@@ -6,6 +6,7 @@
  * claims is about a window on a machine, and a mock has neither.
  *
  *   pnpm --filter @hemera/desktop e2e
+ *   pnpm --filter @hemera/desktop e2e:headless   (the same, with no window on screen)
  */
 
 import { readdirSync, rmSync } from 'node:fs'
@@ -68,6 +69,12 @@ delete process.env.ELECTRON_RUN_AS_NODE
 // application looks a command up on the machine it runs on, and this is the machine it is given
 // (`e2e/agent/install.ts`). Nothing of the product is aware of it, and no real agent is run.
 installFakeAgent()
+
+// `HEMERA_E2E_HEADLESS` reaches the application the way the agent's `PATH` does: the driver
+// starts it with this process's environment, and the service has no environment of its own to
+// hand it. `wdio.headless.conf.ts` sets it here, before anything is started; the application
+// then opens its window off screen (`src/main/window-options.ts`), and so does every second
+// start a suite makes with this environment.
 
 export const config: WebdriverIO.Config = {
   runner: 'local',

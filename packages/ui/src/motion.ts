@@ -186,6 +186,17 @@ export const expand = { height: 'auto', filter: 'opacity(1)' } as const
 export const collapse = { height: 0, filter: 'opacity(0)' } as const
 
 /**
+ * The `fold` kind: what a body that was still growing leaves on.
+ *
+ * The same spring by name rather than one written here of its own — and with no speed to carry.
+ * A dimension turned round mid-flight keeps the speed it had, and the room then goes on growing
+ * for the frame the press landed on — 6.8 px in the light theme and 7.4 px in the dark, measured
+ * on a body of twelve lines — which reads as a fold that did not hear the hand (issue #64). A
+ * fold has to leave from where it is, so the spring starts from rest whichever way it is going.
+ */
+export const fold: Transition = { ...morph, velocity: 0 }
+
+/**
  * The `push` kind: what a neighbour does when the thing above it grows or folds away.
  *
  * The same spring the growth itself is played on, deliberately and by name rather than by

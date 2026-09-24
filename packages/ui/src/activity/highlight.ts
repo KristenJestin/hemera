@@ -120,6 +120,18 @@ const DRAWN = new Map<string, HighlightedLine[] | null>()
  * source and once as its tokens.
  */
 const DRAWN_KEPT = 64
+
+/**
+ * How long one line may take to be read, in milliseconds, before shiki gives up on the rest of it.
+ *
+ * Shiki's own limit is half a second a line, and a line that runs out comes back with the rest of
+ * its text folded into its last token, uncoloured. That is not only a long line: a grammar compiles
+ * its rules while the first line that needs them is read, so on a machine busy with something else
+ * the line that runs out is the first line of the first diff of a language — and the draw is kept
+ * that way. Compiling a grammar takes tens of milliseconds here; five seconds leaves a busy machine
+ * the room to do it, and still stops a line that would never end.
+ */
+const LINE_PATIENCE = 5_000
 const LOADED = new Set<string>()
 const LISTENERS = new Set<() => void>()
 
@@ -162,6 +174,11 @@ export async function warm(language: string | null): Promise<void> {
   for (const listener of LISTENERS) listener()
 }
 
+/** Whether the grammar of a language is in hand, so that its code can be drawn. */
+export function loaded(language: string | null): boolean {
+  return language !== null && LOADED.has(language) && ready !== null
+}
+
 /** Watches for a grammar arriving; returns what undoes the watching. */
 export function subscribeToHighlight(listener: () => void): () => void {
   LISTENERS.add(listener)
@@ -193,7 +210,11 @@ export function highlighted(code: string, language: string | null): HighlightedL
 
 function draw(instance: HighlighterCore, code: string, language: string): HighlightedLine[] | null {
   try {
-    const { tokens } = instance.codeToTokens(code, { lang: language, theme: THEME_NAME })
+    const { tokens } = instance.codeToTokens(code, {
+      lang: language,
+      theme: THEME_NAME,
+      tokenizeTimeLimit: LINE_PATIENCE,
+    })
     return tokens.map((line) =>
       line.map((token) => ({ text: token.content, className: classOf(token.color) })),
     )

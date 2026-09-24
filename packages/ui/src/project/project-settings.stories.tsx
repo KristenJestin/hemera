@@ -129,7 +129,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Project/Settings',
   component: ProjectSettings,
   render: (args) => <Controlled {...args} />,
