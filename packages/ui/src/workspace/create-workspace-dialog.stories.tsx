@@ -98,6 +98,7 @@ const meta = {
       control: 'object',
       description: 'The plan: each repository with its base, its branch and whether it is in.',
     },
+    branchOf: { control: false, description: 'The branch a name makes, while it follows it.' },
     gitMissing: { control: 'boolean', description: 'Whether git is missing on this machine.' },
     refusal: { control: 'text', description: 'What the engine answers; null creates it.' },
     onOpenChange: { control: false, description: 'Opens or closes the dialog.' },
@@ -138,7 +139,7 @@ async function aLocationWithoutARepositoryGetsNoWorktree({ args }: Context) {
   const docsRow = within(docs.closest('li')!)
   await expect(docsRow.getByText('./docs')).toBeVisible()
   await expect(docsRow.getByText('no repository in main')).toBeVisible()
-  await expect(docs).toBeDisabled()
+  await expect(docs).toHaveAttribute('aria-disabled', 'true')
   await expect(docs).not.toBeChecked()
   await expect(docsRow.queryByRole('textbox')).toBeNull()
   // The front was left out by hand: its base and branch go quiet, and it is not handed over.
@@ -250,6 +251,53 @@ async function theDialogRefusesWhatCannotBeCreated({ args }: Context) {
 /** What cannot be created is refused before the engine is asked, and Create waits. */
 export const Invalid: Story = {
   play: theDialogRefusesWhatCannotBeCreated,
+}
+
+/**
+ * Opened from the settings, with no Spec: no name proposed, and each branch follows the name as
+ * it is typed until it is written by hand.
+ */
+export const FromSettings: Story = {
+  args: {
+    defaultName: '',
+    repositories: [
+      { ...API, branch: 'atlas/' },
+      { ...FRONT, branch: 'atlas/' },
+    ],
+    branchOf: (name) => `atlas/${name}`,
+  },
+  play: async ({ args }) => {
+    args.onCreate.mockClear()
+    const dialog = within(document.body).getByRole('dialog')
+    const inside = within(dialog)
+    const name = inside.getByRole('textbox', { name: 'Name' })
+    const api = rowOf(dialog, './sources/api')
+    const front = rowOf(dialog, './sources/front')
+    // Nothing is proposed, and nothing is said wrong before anything was typed.
+    await expect(name).toHaveValue('')
+    await expect(inside.queryByText('A Workspace needs a name.')).toBeNull()
+    await expect(inside.getByRole('button', { name: 'Create' })).toBeDisabled()
+    await userEvent.type(name, 'spike')
+    await expect(api.getByRole('textbox', { name: 'Branch' })).toHaveValue('atlas/spike')
+    await expect(front.getByRole('textbox', { name: 'Branch' })).toHaveValue('atlas/spike')
+    // The front's branch written by hand stops following the name; the api's goes on.
+    const frontBranch = front.getByRole('textbox', { name: 'Branch' })
+    await userEvent.clear(frontBranch)
+    await userEvent.type(frontBranch, 'kris/front-spike')
+    await userEvent.type(name, '-auth')
+    await expect(api.getByRole('textbox', { name: 'Branch' })).toHaveValue('atlas/spike-auth')
+    await expect(frontBranch).toHaveValue('kris/front-spike')
+    await userEvent.click(inside.getByRole('button', { name: 'Create' }))
+    await waitFor(() => {
+      expect(args.onCreate).toHaveBeenCalledWith({
+        name: 'spike-auth',
+        repositories: [
+          { path: './sources/api', base: '4f2c9a1', branch: 'atlas/spike-auth' },
+          { path: './sources/front', base: '9b8a7c6', branch: 'kris/front-spike' },
+        ],
+      })
+    })
+  },
 }
 
 /** One repository with the keyboard: its box, its base, its branch. */

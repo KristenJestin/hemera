@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
+import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import type { PlanRepositoryLine, WorkspaceDraft } from './model.ts'
@@ -18,6 +19,10 @@ import type { PlanRepositoryLine, WorkspaceDraft } from './model.ts'
  * folder before it writes anything, and one failed check refuses the whole creation. What it
  * answers is shown under the form as it was said, and the form stays as it was typed. A machine
  * without `git` is said up front, and nothing can be created on it (D8-03).
+ *
+ * Opened from a Spec, the name is the Spec's slug and the branches are the Spec's. Opened from the
+ * settings, there is no Spec: the name may start empty, and each branch follows the name as it is
+ * typed (`branchOf`) until the user writes that branch by hand.
  */
 const FORM = 'flex flex-col gap-4'
 
@@ -31,16 +36,8 @@ const ROWS = 'flex flex-col gap-2'
 
 const ROW = 'flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted px-3 py-2'
 
-/** The checkbox and the path it names, which is what the box is read as. */
-const INCLUDE = 'flex min-w-0 flex-1 basis-full items-center gap-2 text-sm'
-
-const CHECK_RING = 'flex rounded-sm focus-ring'
-
-/**
- * The platform's own box in the theme's accent: the design system has no checkbox yet, and this
- * is the same fallback `project/project-settings.tsx` takes for its ticks.
- */
-const CHECK = 'size-icon-sm accent-primary outline-none disabled:opacity-50'
+/** The box, named by the path it includes, and what is said of a location with no repository. */
+const INCLUDE = 'flex min-w-0 flex-1 basis-full items-center gap-2'
 
 const PATH = 'min-w-0 truncate font-mono'
 
@@ -56,6 +53,8 @@ interface Row {
   base: string
   branch: string
   included: boolean
+  /** Whether the user wrote this branch by hand, after which it stops following the name. */
+  written: boolean
 }
 
 function rowsOf(plan: readonly PlanRepositoryLine[]): Row[] {
@@ -66,6 +65,7 @@ function rowsOf(plan: readonly PlanRepositoryLine[]): Row[] {
     branch: line.branch,
     // A location without a repository cannot be included, whatever the plan says (D8-04).
     included: line.holdsRepository && line.included,
+    written: false,
   }))
 }
 
@@ -91,10 +91,16 @@ export interface CreateWorkspaceDialogProps {
   onOpenChange: (open: boolean) => void
   /** Where the Project's dedicated Workspaces live (D8-02). */
   root: string
-  /** The name proposed: the Spec's slug. */
+  /** The name proposed: the Spec's slug, or empty when there is no Spec to take one from. */
   defaultName: string
   /** The plan: each repository of the Project, with its base and its branch. */
   repositories: readonly PlanRepositoryLine[]
+  /**
+   * The branch a name makes, when the branches follow the name as it is typed: a Workspace made
+   * from the settings has no Spec to name its branches after. A branch the user wrote by hand
+   * stops following it. Left out, the plan's branches stay as they were proposed.
+   */
+  branchOf?: ((name: string) => string) | undefined
   /** Whether `git` is missing on this machine, which refuses any creation (D8-03). */
   gitMissing?: boolean | undefined
   /** Creates the Workspace; answers the refusal to show, or null once it is created. */
@@ -107,10 +113,13 @@ export function CreateWorkspaceDialog({
   root,
   defaultName,
   repositories,
+  branchOf,
   gitMissing = false,
   onCreate,
 }: CreateWorkspaceDialogProps): ReactNode {
   const [name, setName] = useState(defaultName)
+  /** Whether the name was typed in: an empty one is only said to be wrong once it was. */
+  const [typed, setTyped] = useState(false)
   const [rows, setRows] = useState(() => rowsOf(repositories))
   const [refusal, setRefusal] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -119,6 +128,7 @@ export function CreateWorkspaceDialog({
   useEffect(() => {
     if (!open) return
     setName(defaultName)
+    setTyped(false)
     setRows(rowsOf(repositories))
     setRefusal(null)
   }, [open])
@@ -126,6 +136,9 @@ export function CreateWorkspaceDialog({
   // What a form can refuse on its own is refused here, and Create waits until nothing is: the
   // engine is asked only about what only Git and the disk can answer (D8-04).
   const nameRefusal = nameRefusalOf(name)
+  // A dialog opened with no name to propose does not open on a mistake: the empty name holds
+  // Create back all the same, and is said once the name was typed in.
+  const nameShown = typed || name.trim() !== '' ? nameRefusal : undefined
   const included = rows.filter((row) => row.included)
   // A plan with nothing to include is a Project whose Workspace is its folder alone (D8-04):
   // only a plan that offers a repository can be left with none.
@@ -135,6 +148,14 @@ export function CreateWorkspaceDialog({
 
   const change = (path: string, next: Partial<Row>) => {
     setRows(rows.map((row) => (row.path === path ? { ...row, ...next } : row)))
+  }
+
+  const rename = (next: string) => {
+    setName(next)
+    setTyped(true)
+    if (branchOf === undefined) return
+    const branch = branchOf(next.trim())
+    setRows(rows.map((row) => (row.written ? row : { ...row, branch })))
   }
 
   const create = async () => {
@@ -184,26 +205,23 @@ export function CreateWorkspaceDialog({
             git makes them: install it or put it on the PATH, then open this dialog again.
           </p>
         )}
-        <Input label="Name" value={name} onValueChange={setName} error={nameRefusal} />
+        <Input label="Name" value={name} onValueChange={rename} error={nameShown} />
         <p className={NOTE}>
           Folder <span className={FOLDER}>{folderOf(root, name)}</span>
         </p>
         <ul className={ROWS} aria-label="Repositories">
           {rows.map((row) => (
             <li key={row.path} className={ROW}>
-              <label className={INCLUDE}>
-                <span className={CHECK_RING}>
-                  <input
-                    type="checkbox"
-                    className={CHECK}
-                    checked={row.included}
-                    disabled={!row.holdsRepository}
-                    onChange={(event) => change(row.path, { included: event.target.checked })}
-                  />
-                </span>
-                <span className={PATH}>{row.path}</span>
+              <span className={INCLUDE}>
+                <Checkbox
+                  className="min-w-0"
+                  label={<span className={PATH}>{row.path}</span>}
+                  checked={row.included}
+                  disabled={!row.holdsRepository}
+                  onCheckedChange={(checked) => change(row.path, { included: checked })}
+                />
                 {!row.holdsRepository && <Badge tone="neutral">no repository in main</Badge>}
-              </label>
+              </span>
               {row.holdsRepository && (
                 <>
                   <Input
@@ -228,7 +246,7 @@ export function CreateWorkspaceDialog({
                         ? 'An included repository needs a branch.'
                         : undefined
                     }
-                    onValueChange={(branch) => change(row.path, { branch })}
+                    onValueChange={(branch) => change(row.path, { branch, written: true })}
                   />
                 </>
               )}
