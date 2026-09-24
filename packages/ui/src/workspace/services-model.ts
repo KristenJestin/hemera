@@ -39,6 +39,18 @@ export interface PortConflict {
 }
 
 /**
+ * A run that published a port this one already held: the holder's side of a conflict, which
+ * names the run that came second (D8-09, Decided 12).
+ */
+export interface PortClaim {
+  readonly port: number
+  /** The command name of the run that published the port after this one. */
+  readonly run: string
+  /** The Workspace that run is in. */
+  readonly workspace: string
+}
+
+/**
  * One `serve` run, as the services of a Workspace list it (D8-08, D8-09, D8-10).
  *
  * Whoever started it: a service the agent started is a process the reader can see and stop.
@@ -58,6 +70,8 @@ export interface ServiceLine {
   readonly url?: string | undefined
   readonly readiness?: Readiness | undefined
   readonly portConflict?: PortConflict | undefined
+  /** On the holder: the runs that published its port after it, each named (Decided 12). */
+  readonly heldAgainst?: readonly PortClaim[] | undefined
   /** Whether the line runs through Portless, which names the address itself (D8-10). */
   readonly portless?: boolean | undefined
   /** What a failed run said, as it said it. */

@@ -124,13 +124,19 @@ export const Unanswered: Story = {
 async function aPortConflictNamesItsHolder({ canvasElement }: PlayContext) {
   const row = rowOf(canvasElement, 'dev', 'login-form')
   await expect(row.getByText('Port 3000 is held by dev in main')).toBeVisible()
+  // And the holder says it too, naming the run that came second (Decided 12).
+  const holder = rowOf(canvasElement, 'dev', 'main')
+  await expect(holder.getByText('Port 3000 is also published by dev in login-form')).toBeVisible()
 }
 
-/** `login-form` published the port `main` already holds: the row names the holder. */
+/**
+ * `login-form` published the port `main` already holds: its row names the holder, and the
+ * holder's row names it.
+ */
 export const PortConflict: Story = {
   args: {
     services: [
-      DEV_MAIN,
+      { ...DEV_MAIN, heldAgainst: [{ port: 3000, run: 'dev', workspace: 'login-form' }] },
       {
         ...DEV_LOGIN_FORM,
         url: 'http://localhost:3000',

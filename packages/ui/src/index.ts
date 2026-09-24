@@ -384,6 +384,7 @@ export { VariablesEditor, type VariablesEditorProps } from './workspace/variable
 export { ServiceList, type ServiceListProps } from './workspace/service-list.tsx'
 export { RunDetails, type RunDetailsProps, type RunState } from './activity/run-details.tsx'
 export type {
+  PortClaim,
   PortConflict,
   Readiness,
   ServiceLine,

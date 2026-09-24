@@ -5,7 +5,7 @@ import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card, CardRow } from '../components/card/card.tsx'
 import { IconAlertTriangle, IconGitFork, IconPlayerStop } from '../icons.ts'
-import type { PortConflict, Readiness, ServiceLine } from './services-model.ts'
+import type { PortClaim, PortConflict, Readiness, ServiceLine } from './services-model.ts'
 
 /**
  * The services of a Workspace, or of the Project when several Workspaces run (D8-08, D8-09,
@@ -19,7 +19,9 @@ import type { PortConflict, Readiness, ServiceLine } from './services-model.ts'
  * An address is offered only once it has answered (D8-09): until then it is text beside the word
  * `starting`, since a link to a server that is not listening yet is a link to an error page. A
  * port another run already holds is said with its holder, because the fix is to go and stop that
- * one. Hemera assigns no port, so it does not pretend to know which of the two is wrong.
+ * one; and the holder says it too, naming the run that published the same port after it, so the
+ * conflict shows on both rows (Decided 12). Hemera assigns no port, so it does not pretend to
+ * know which of the two is wrong.
  */
 const LIST = 'flex flex-col gap-2'
 
@@ -125,6 +127,16 @@ export function ServiceList({
                         {conflictOf(service.portConflict)}
                       </Badge>
                     )}
+                    {service.heldAgainst?.map((claim) => (
+                      <Badge
+                        key={`${claim.workspace}-${claim.run}`}
+                        tone="destructive"
+                        icon={<IconAlertTriangle size="sm" aria-hidden="true" />}
+                        className="self-start"
+                      >
+                        {claimOf(claim)}
+                      </Badge>
+                    ))}
                     {service.state === 'failed' && service.message !== undefined && (
                       <p className={FAILURE}>{service.message}</p>
                     )}
@@ -155,6 +167,11 @@ export function ServiceList({
 /** A port conflict as one sentence naming its holder (D8-09). */
 function conflictOf({ port, holderRun, holderWorkspace }: PortConflict): string {
   return `Port ${String(port)} is held by ${holderRun} in ${holderWorkspace}`
+}
+
+/** The same conflict, said on the holder, naming the run that came second (Decided 12). */
+function claimOf({ port, run, workspace }: PortClaim): string {
+  return `Port ${String(port)} is also published by ${run} in ${workspace}`
 }
 
 export interface ServiceUrlProps {
