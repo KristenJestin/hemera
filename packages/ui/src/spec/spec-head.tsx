@@ -78,10 +78,11 @@ export function SpecHead({
         <span className={END}>
           {revisions.length > 1 && (
             <Menu
-              label={`rev ${revision}`}
+              // The newest is the Spec as it stands; an older one is said by when it was frozen.
+              label={revision === revisions[0]?.number ? 'Latest' : 'Earlier'}
               groups={[
                 revisions.map((one) => ({
-                  label: `rev ${one.number} · ${one.detail}`,
+                  label: one.detail,
                   onSelect: () => onPickRevision(one.number),
                 })),
               ]}

@@ -155,7 +155,7 @@ const SCREENS = {
     spec: READY,
     thread: [
       ASK,
-      hemera('ready', 'ATL-7 marked ready · rev 2', '11:34'),
+      hemera('ready', 'ATL-7 marked ready', '11:34'),
       agents(
         'answer',
         'The Spec is frozen at revision 2. A build Session can start from it. I can no longer change it unless you rework it.',
@@ -191,7 +191,7 @@ const SCREENS = {
     spec: STALE,
     thread: [
       ASK,
-      hemera('rework', 'ATL-7 reworked · rev 3', '« credit notes keep their invoice number »'),
+      hemera('rework', 'ATL-7 reworked', '« credit notes keep their invoice number »'),
       agents(
         'answer',
         'Revision 3 is a full copy of 2. The reason touches the plan and the tasks, so I am declaring both again; shape still holds.',
@@ -608,7 +608,7 @@ export const ReadyFrozen: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getAllByText('frozen').length).toBeGreaterThan(0)
     await expect(canvas.queryByRole('textbox', { name: 'Expected outcome' })).toBeNull()
-    await expect(canvas.getByRole('button', { name: 'rev 2' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
   },
 }
@@ -639,8 +639,10 @@ export const ReadyReworked: Story = {
     )
     await waitFor(() => expect(says).toBeVisible())
     await userEvent.click(page.getByRole('button', { name: 'Rework' }))
-    await waitFor(() => expect(canvas.getByRole('button', { name: 'rev 3' })).toBeVisible())
-    await expect(canvas.getByText('Rework · the agent re-declares each phase')).toBeVisible()
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible())
+    await expect(
+      canvas.getByText('Every phase to review · the agent goes over each again'),
+    ).toBeVisible()
   },
 }
 
@@ -690,13 +692,13 @@ export const Conflict: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(
-      canvas.getByText('Your text was written on v3; the section is at v5.'),
+      canvas.getByText('The agent changed this part while you were writing yours.'),
     ).toBeVisible()
     await expect(canvas.getByRole('textbox', { name: /^Scope ?, your text/ })).toHaveValue(
       SCOPE_MINE,
     )
     await expect(
-      canvas.getByRole('heading', { name: /^Scope ?, in conflict with your text/ }),
+      canvas.getByRole('heading', { name: /^Scope ?, your text and the agent's differ/ }),
     ).toBeVisible()
     await expect(canvas.getByRole('img', { name: 'Readiness, 3 of 7 checks pass' })).toBeVisible()
   },
@@ -709,11 +711,10 @@ export const ConflictApplied: Story = {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Compare' }))
-    await expect(canvas.getByText('v5 · agent')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Apply mine on v5' }))
+    await expect(canvas.getByText("The agent's text")).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Keep mine' }))
     await expect(canvas.queryByRole('group', { name: 'Conflict' })).toBeNull()
     await expect(canvas.getByRole('heading', { name: /^Scope ?, edited by you/ })).toBeVisible()
-    await expect(canvas.getByText('v6')).toBeVisible()
   },
 }
 
@@ -726,22 +727,24 @@ export const StaleAfterRework: Story = {
   args: { screen: 'stale', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Rework · the agent re-declares each phase')).toBeVisible()
+    await expect(
+      canvas.getByText('Every phase to review · the agent goes over each again'),
+    ).toBeVisible()
     const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(
       within(rail).getByRole('button', {
-        name: 'Plan phase, stale after the rework, show all its parts',
+        name: 'Plan phase, to review, show all its parts',
       }),
     ).toBeVisible()
     await expect(
       within(rail).getByRole('button', {
-        name: 'Decompose phase, stale after the rework, show all its parts',
+        name: 'Decompose phase, to review, show all its parts',
       }),
     ).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Tasks, 4' })).toHaveAccessibleDescription(
       'To review',
     )
-    await expect(canvas.getByText('copied from rev 2')).toBeVisible()
+    await expect(canvas.getAllByText('to review')[0]).toBeVisible()
     await expect(canvas.getByRole('button', { name: '2 things before ready' })).toBeVisible()
   },
 }

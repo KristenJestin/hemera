@@ -73,12 +73,16 @@ describe('Phases survive a restart', () => {
 describe('A conflict keeps the human’s text', () => {
   it('still holds the text refused before the restart, and lets it go on Discard mine', async () => {
     await showPart(KEY, 'Scope')
-    expect(await region(PANEL)).toContain('Your text was written on v3; the section is at v4.')
+    expect(await region(PANEL)).toContain(
+      'The agent changed this part while you were writing yours.',
+    )
     expect(await textOf('Scope, your text')).toBe(KEPT)
 
     await pressIn(PANEL, 'Discard mine')
     await browser.pause(1200)
-    expect(await region(PANEL)).not.toContain('Your text was written on')
+    expect(await region(PANEL)).not.toContain(
+      'The agent changed this part while you were writing yours.',
+    )
     expect(await control('Discard mine')).toBeNull()
     expect(await textOf('Scope')).toBe(THEIRS_AGAIN)
   })

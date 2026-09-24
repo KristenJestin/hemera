@@ -16,10 +16,6 @@ const BANNER =
   'flex flex-col gap-2 rounded-md border border-destructive bg-destructive-muted px-3 py-2.5 text-sm font-medium text-destructive-muted-foreground'
 
 export interface ConflictBannerProps {
-  /** The version your text was written on. */
-  base: number
-  /** The version the section is at. */
-  current: number
   /** Whether the current text is shown beside yours. */
   comparing: boolean
   onCompare: () => void
@@ -30,8 +26,6 @@ export interface ConflictBannerProps {
 }
 
 export function ConflictBanner({
-  base,
-  current,
   comparing,
   onCompare,
   onApply,
@@ -39,13 +33,15 @@ export function ConflictBanner({
 }: ConflictBannerProps): ReactNode {
   return (
     <div role="group" aria-label="Conflict" className={BANNER}>
-      <p>{`Your text was written on v${base}; the section is at v${current}.`}</p>
+      <p>The agent changed this part while you were writing yours.</p>
       <div className="flex flex-wrap gap-1.5">
         <Button size="sm" aria-pressed={comparing} onClick={onCompare}>
           <IconGitCompare size="sm" />
           Compare
         </Button>
-        <Button size="sm" onClick={onApply}>{`Apply mine on v${current}`}</Button>
+        <Button size="sm" onClick={onApply}>
+          Keep mine
+        </Button>
         <Button size="sm" variant="ghost" onClick={onDiscard}>
           Discard mine
         </Button>

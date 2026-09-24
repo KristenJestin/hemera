@@ -217,8 +217,8 @@ export const ROUNDING: SpecQuestionView = {
 
 /** The revisions of ATL-7 once it has been frozen at 2. */
 const FROZEN_REVISIONS = [
-  { number: 2, detail: 'current, frozen' },
-  { number: 1, detail: 'read only · 22 Sep' },
+  { number: 2, detail: 'Latest · frozen' },
+  { number: 1, detail: 'Frozen 22 Sep · read only' },
 ]
 
 /** The same three facts every mid-plan gate says: no task yet, a question, plan still open. */
@@ -233,7 +233,7 @@ const MID_PLAN_GATE = gate(
     { label: 'the tasks', target: 'tasks' },
     { label: 'the credit-note question', target: 'questions' },
     { label: 'plan and decompose', target: 'plan' },
-    { label: 'the attestation' },
+    { label: "the agent's final check" },
   ],
 )
 
@@ -247,7 +247,7 @@ export const MID_PLAN: SpecView = {
   type: 'feature',
   status: 'draft',
   revision: 1,
-  revisions: [{ number: 1, detail: 'current, draft' }],
+  revisions: [{ number: 1, detail: 'Latest · draft' }],
   phases: phases('finished', 'open', 'pending'),
   now: 'Plan · the agent is writing the plan',
   focus: 'plan',
@@ -271,7 +271,7 @@ export const BUG: SpecView = {
   type: 'bug',
   status: 'draft',
   revision: 1,
-  revisions: [{ number: 1, detail: 'current, draft' }],
+  revisions: [{ number: 1, detail: 'Latest · draft' }],
   phases: phases('open', 'pending', 'pending'),
   now: 'Shape · waiting for your answer',
   focus: 'reproduction',
@@ -322,7 +322,7 @@ export const BUG: SpecView = {
       { label: 'the verification', target: 'verification' },
       { label: 'the rounding question', target: 'questions' },
       { label: 'the tasks', target: 'tasks' },
-      { label: 'the attestation' },
+      { label: "the agent's final check" },
     ],
   ),
 }
@@ -331,7 +331,7 @@ export const BUG: SpecView = {
 export const GATE_FULL: SpecView = {
   ...MID_PLAN,
   phases: phases('finished', 'finished', 'finished'),
-  now: 'Decompose · finished, the agent attests the contract is complete',
+  now: 'Decompose · finished, the agent confirmed the Spec is complete',
   focus: 'tasks',
   sections: [PROBLEM, OUTCOME, SCOPE, VERIFICATION, BEHAVIOUR, PLAN],
   tasks: TASKS,
@@ -346,7 +346,7 @@ export const READY: SpecView = {
   status: 'ready',
   revision: 2,
   revisions: FROZEN_REVISIONS,
-  now: 'Ready · frozen at revision 2, a build can start from it',
+  now: 'Ready · frozen, a build can start from it',
   focus: undefined,
   frozenOn: '23 Sep',
 }
@@ -358,7 +358,7 @@ export const READY: SpecView = {
 export const OLDER_REVISION: SpecView = {
   ...READY,
   revision: 1,
-  now: 'Revision 1 · read only, as it was frozen',
+  now: 'An earlier version · read only, as it was frozen',
   frozenOn: '22 Sep',
   replacedBy: 2,
 }
@@ -385,7 +385,7 @@ export const READER: SpecView = {
     [
       { label: 'a task for S2', target: 'tasks' },
       { label: 'decompose', target: 'tasks' },
-      { label: 'the attestation' },
+      { label: "the agent's final check" },
     ],
   ),
 }
@@ -430,12 +430,12 @@ export const STALE: SpecView = {
   ...GATE_FULL,
   revision: 3,
   revisions: [
-    { number: 3, detail: 'current, draft' },
-    { number: 2, detail: 'read only · frozen 23 Sep' },
-    { number: 1, detail: 'read only · 22 Sep' },
+    { number: 3, detail: 'Latest · draft' },
+    { number: 2, detail: 'Frozen 23 Sep · read only' },
+    { number: 1, detail: 'Frozen 22 Sep · read only' },
   ],
   phases: phases('finished', 'stale', 'stale'),
-  now: 'Rework · the agent re-declares each phase',
+  now: 'Every phase to review · the agent goes over each again',
   focus: 'plan',
   sections: [
     PROBLEM,
@@ -451,7 +451,7 @@ export const STALE: SpecView = {
       phases: 'phases · plan and decompose stale',
       attestation: 'attestation · not given',
     },
-    [{ label: 'plan and decompose declared again', target: 'plan' }, { label: 'the attestation' }],
+    [{ label: 'plan and decompose', target: 'plan' }, { label: "the agent's final check" }],
   ),
 }
 
@@ -462,7 +462,7 @@ export const MAINTENANCE: SpecView = {
   type: 'maintenance',
   status: 'draft',
   revision: 1,
-  revisions: [{ number: 1, detail: 'current, draft' }],
+  revisions: [{ number: 1, detail: 'Latest · draft' }],
   phases: phases('finished', 'open', 'pending'),
   now: 'Plan · the agent is reading the storage adapter',
   focus: 'invariants',
@@ -519,7 +519,7 @@ export const MAINTENANCE: SpecView = {
     [
       { label: 'the tasks', target: 'tasks' },
       { label: 'plan and decompose', target: 'plan' },
-      { label: 'the attestation' },
+      { label: "the agent's final check" },
     ],
   ),
 }
@@ -548,7 +548,7 @@ export const JUST_CREATED: SpecView = {
   type: 'feature',
   status: 'draft',
   revision: 1,
-  revisions: [{ number: 1, detail: 'current, draft' }],
+  revisions: [{ number: 1, detail: 'Latest · draft' }],
   phases: phases('open', 'pending', 'pending'),
   now: 'Shape · the agent is writing the problem',
   focus: 'problem',
@@ -579,7 +579,7 @@ export const JUST_CREATED: SpecView = {
       { label: 'the scope', target: 'scope' },
       { label: 'the verification', target: 'verification' },
       { label: 'the tasks', target: 'tasks' },
-      { label: 'the attestation' },
+      { label: "the agent's final check" },
     ],
   ),
 }

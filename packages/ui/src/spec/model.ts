@@ -215,7 +215,7 @@ export interface ReadinessView {
 /** A revision as the picker lists it. */
 export interface RevisionView {
   number: number
-  /** What is said beside it: `current, frozen`, `read only · 22 Sep`. */
+  /** What the picker says of it, in plain words: `Latest · frozen`, `Frozen 22 Sep · read only`. */
   detail: string
 }
 

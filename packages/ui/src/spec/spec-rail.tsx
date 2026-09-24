@@ -176,7 +176,7 @@ const PHASE_STATE_WORDS: Record<PhaseState, string> = {
   finished: 'finished',
   open: 'open',
   pending: 'pending',
-  stale: 'stale after the rework',
+  stale: 'to review',
   unavailable: 'unavailable',
 }
 
@@ -561,7 +561,7 @@ function ReadinessFoot({
           replacedBy === undefined ? (
             `Frozen on ${frozenOn} · nothing changes until you rework it`
           ) : (
-            `Frozen on ${frozenOn} · read only, revision ${replacedBy} replaced it`
+            `Frozen on ${frozenOn} · read only, a newer version replaced it`
           )
         ) : full ? (
           <span className={OK}>Ready to freeze</span>

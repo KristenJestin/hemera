@@ -46,11 +46,11 @@ export const BeforeDecompose: Story = {
   },
 }
 
-/** Copied by a rework, and stale until Decompose is declared again. */
+/** Copied by a Rework, and to review until the agent goes over Decompose again. */
 export const Stale: Story = {
   args: { mark: 'stale' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('stale after the rework')).toBeVisible()
+    await expect(canvas.getByText('to review')).toBeVisible()
   },
 }

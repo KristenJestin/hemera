@@ -24,7 +24,6 @@ function sectionOf(sections: SectionView[], name: SectionView['name']): SectionV
 function Held({
   section: initial,
   editable,
-  revision,
   agentWrites,
   onSave,
   onApplyMine,
@@ -32,7 +31,6 @@ function Held({
 }: {
   section: SectionView
   editable: boolean
-  revision: number
   agentWrites?: string | undefined
   onSave: (body: string, baseVersion: number) => void
   onApplyMine: (body: string) => void
@@ -50,7 +48,6 @@ function Held({
       <SectionPart
         section={section}
         editable={editable}
-        revision={revision}
         onSave={(body, baseVersion) => {
           onSave(body, baseVersion)
           setSection({
@@ -91,7 +88,6 @@ const meta = {
   args: {
     section: sectionOf(GATE_FULL.sections, 'expected_outcome'),
     editable: true,
-    revision: 1,
     onSave: fn(),
     onApplyMine: fn(),
     onDiscardMine: fn(),
@@ -99,7 +95,6 @@ const meta = {
   argTypes: {
     section: { control: 'object', description: 'The section: body, version, author, mark.' },
     editable: { control: 'boolean', description: 'A draft at its current revision.' },
-    revision: { control: 'number', description: 'The revision a frozen section names.' },
     agentWrites: { control: 'text', description: 'What the agent writes as the caret goes in.' },
     onSave: {
       description:
@@ -114,19 +109,19 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** Written by the agent: `agent · v2`, and the text reads as text. */
+/** Written by the agent: nothing among the facts, and the text reads as text. */
 export const ByTheAgent: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: /^Expected outcome/ })).toBeVisible()
-    await expect(canvas.getByText('agent')).toBeVisible()
-    await expect(canvas.getByText('v2')).toBeVisible()
+    await expect(canvas.queryByText('agent')).toBeNull()
+    await expect(canvas.queryByText(/^v\d+$/)).toBeNull()
     await expect(canvas.getByRole('textbox', { name: 'Expected outcome' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /Save|Edit/ })).toBeNull()
   },
 }
 
-/** Edited by you and not yet read by the agent: `you · v2 · sent to the agent next turn`. */
+/** Edited by you and not yet read by the agent: `you · sent to the agent next turn`. */
 export const ByYou: Story = {
   args: { section: sectionOf(BUG.sections, 'reproduction') },
   play: async ({ canvasElement }) => {
@@ -156,7 +151,7 @@ export const EditInPlace: Story = {
     )
     await expect(canvas.getByRole('status')).toHaveTextContent('saved')
     await expect(canvas.getByText('sent to the agent next turn')).toBeVisible()
-    await expect(canvas.getByText('v3')).toBeVisible()
+    await expect(canvas.getByText('you')).toBeVisible()
     // And it goes: `saved` is a flash, not a state.
     await waitFor(() => expect(canvas.queryByRole('status')).toBeNull(), { timeout: 3000 })
   },
@@ -173,7 +168,6 @@ export const WrittenUnderYou: Story = {
     const canvas = within(canvasElement)
     const text = canvas.getByRole('textbox', { name: 'Expected outcome' })
     await userEvent.click(text)
-    await expect(canvas.getByText('v3')).toBeVisible()
     await userEvent.keyboard('{Control>}{End}{/Control} Credit notes included.')
     await userEvent.tab()
     await expect(args.onSave).toHaveBeenCalledTimes(1)
@@ -195,7 +189,6 @@ export const LeftUntouchedWhileRewritten: Story = {
     const canvas = within(canvasElement)
     const text = canvas.getByRole('textbox', { name: 'Expected outcome' })
     await userEvent.click(text)
-    await expect(canvas.getByText('v3')).toBeVisible()
     await userEvent.tab()
     await expect(args.onSave).not.toHaveBeenCalled()
     await expect(canvas.queryByRole('group', { name: 'Conflict' })).toBeNull()
@@ -238,30 +231,28 @@ export const NotWritten: Story = {
   args: { section: sectionOf(BUG.sections, 'scope') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('not written yet')).toBeVisible()
+    await expect(canvas.getByText('empty')).toBeVisible()
     await expect(canvas.getByPlaceholderText(/Write it here, or let the agent/)).toBeVisible()
   },
 }
 
 /** Frozen: the text and a lock, no editing look at all. */
 export const Frozen: Story = {
-  args: { editable: false, revision: 2 },
+  args: { editable: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.getByText('frozen')).toBeVisible()
-    await expect(canvas.getByText('rev 2')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /^Preview .* as Markdown$/ })).toBeNull()
   },
 }
 
-/** Copied into the new revision by a rework, and stale until its phase is declared again. */
+/** Copied by a Rework, and to review until the agent goes over its phase again. */
 export const Stale: Story = {
-  args: { section: sectionOf(STALE.sections, 'plan'), revision: 3 },
+  args: { section: sectionOf(STALE.sections, 'plan') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('copied from rev 2')).toBeVisible()
-    await expect(canvas.getByText('stale after the rework')).toBeVisible()
+    await expect(canvas.getByText('to review')).toBeVisible()
   },
 }
 
@@ -275,22 +266,22 @@ export const Conflict: Story = {
   },
 }
 
-/** Compare shows the current text, and `Apply mine on v5` writes yours on top of it. */
+/** Compare shows the agent's text, and `Keep mine` writes yours on top of it. */
 export const ConflictApplied: Story = {
   args: { section: sectionOf(CONFLICT.sections, 'scope') },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(
-      canvas.getByText('Your text was written on v3; the section is at v5.'),
+      canvas.getByText('The agent changed this part while you were writing yours.'),
     ).toBeVisible()
     const mine = canvas.getByRole('textbox', { name: 'Scope, your text' })
     await expect(mine).toHaveValue(SCOPE_MINE)
     await userEvent.click(canvas.getByRole('button', { name: 'Compare' }))
-    await expect(canvas.getByText('v5 · agent')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Apply mine on v5' }))
+    await expect(canvas.getByText("The agent's text")).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Keep mine' }))
     await expect(args.onApplyMine).toHaveBeenCalledWith(SCOPE_MINE)
     await expect(canvas.queryByRole('group', { name: 'Conflict' })).toBeNull()
-    await expect(canvas.getByText('v6')).toBeVisible()
+    await expect(canvas.getByText('you')).toBeVisible()
   },
 }
 

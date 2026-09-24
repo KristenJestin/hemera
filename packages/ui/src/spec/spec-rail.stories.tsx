@@ -572,8 +572,8 @@ export const FootLinks: Story = {
     const list = await page.findByRole('dialog', { name: 'Things before ready' })
     // The attestation has no part in the document: it is said, not linked.
     // The popover comes down into place; what is asked is where it lands.
-    await waitFor(() => expect(within(list).getByText('the attestation')).toBeVisible())
-    await expect(within(list).queryByRole('button', { name: 'the attestation' })).toBeNull()
+    await waitFor(() => expect(within(list).getByText("the agent's final check")).toBeVisible())
+    await expect(within(list).queryByRole('button', { name: "the agent's final check" })).toBeNull()
     await userEvent.click(within(list).getByRole('button', { name: 'a task for S2' }))
     await expect(args.onSelect).toHaveBeenCalledWith('tasks')
     await expect(canvas.getByRole('button', { name: /^Tasks/ })).toHaveAttribute(
@@ -627,13 +627,13 @@ export const FootFrozen: Story = {
   },
 }
 
-/** An older revision: frozen too, and the line names the revision that replaced it. */
+/** An older revision: frozen too, and the line says a newer version replaced it. */
 export const FootReplaced: Story = {
   args: { groups: railOf(MID_PLAN), readiness: FULL_GATE, frozenOn: '22 Sep', replacedBy: 2 },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(
-      canvas.getByText('Frozen on 22 Sep · read only, revision 2 replaced it'),
+      canvas.getByText('Frozen on 22 Sep · read only, a newer version replaced it'),
     ).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
   },

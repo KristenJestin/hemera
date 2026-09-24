@@ -135,13 +135,13 @@ export function useLiveSpec(
         status: 'ready',
         frozenOn: 'today',
         focus: undefined,
-        now: `Ready · frozen at revision ${now.revision}`,
+        now: 'Ready · frozen, a build can start from it',
         revisions:
           now.revisions.length > 1
             ? now.revisions.map((one) =>
-                one.number === now.revision ? { ...one, detail: 'current, frozen' } : one,
+                one.number === now.revision ? { ...one, detail: 'Latest · frozen' } : one,
               )
-            : [{ number: now.revision, detail: 'current, frozen' }],
+            : [{ number: now.revision, detail: 'Latest · frozen' }],
       }))
     },
     onRework: (reason) => {
@@ -152,13 +152,13 @@ export function useLiveSpec(
         frozenOn: undefined,
         revision: now.revision + 1,
         revisions: [
-          { number: now.revision + 1, detail: 'current, draft' },
+          { number: now.revision + 1, detail: 'Latest · draft' },
           ...now.revisions.map((one) =>
-            one.number === now.revision ? { ...one, detail: 'read only · frozen today' } : one,
+            one.number === now.revision ? { ...one, detail: 'Frozen today · read only' } : one,
           ),
         ],
         phases: phases('finished', 'stale', 'stale'),
-        now: 'Rework · the agent re-declares each phase',
+        now: 'Every phase to review · the agent goes over each again',
         focus: 'plan',
         sections: now.sections.map((one) =>
           one.name === 'plan' ? { ...one, mark: 'stale', copiedFrom: now.revision } : one,
@@ -171,8 +171,8 @@ export function useLiveSpec(
               : check,
           ),
           todo: [
-            { label: 'plan and decompose declared again', target: 'plan' },
-            { label: 'the attestation' },
+            { label: 'plan and decompose', target: 'plan' },
+            { label: "the agent's final check" },
           ],
         },
       }))

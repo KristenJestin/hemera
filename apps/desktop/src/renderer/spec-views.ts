@@ -261,22 +261,22 @@ function attested(snapshot: SpecSnapshot): boolean {
 /**
  * The one sentence under the head: the phase in focus and where it stands.
  *
- * Frozen, it says so; with every phase finished, whether the agent attested; with a phase stale,
- * that the agent re-declares it — every phase after a Rework, the one a new shaping made stale
- * otherwise; with a blocking question of that phase open, that the answer is yours; and
+ * In the reader's words, never the engine's: no revision, no attestation, no stale. Frozen, it
+ * says so; with every phase finished, whether the agent confirmed the Spec complete; with a phase
+ * stale, that it is to review and the agent goes over it again — every phase after a Rework, the
+ * one a new shaping made stale otherwise; with a blocking question of that phase open, that the answer is yours; and
  * otherwise what the agent is writing: the first empty section of the shape, the plan, the tasks.
  */
 export function nowOf(snapshot: SpecSnapshot): string {
-  const number = snapshot.revision.number
-  if (!isCurrent(snapshot)) return `Revision ${String(number)} · read only, as it was frozen`
+  if (!isCurrent(snapshot)) return 'An earlier version · read only, as it was frozen'
   if (snapshot.spec.status !== 'draft') {
-    return `Ready · frozen at revision ${String(number)}, a build can start from it`
+    return 'Ready · frozen, a build can start from it'
   }
   const focus = focusOf(snapshot.phases)
   if (focus === null) {
     return attested(snapshot)
-      ? 'Decompose · finished, the agent attests the contract is complete'
-      : 'Decompose · finished, waiting for the agent to attest the contract'
+      ? 'Decompose · finished, the agent confirmed the Spec is complete'
+      : 'Decompose · finished, waiting for the agent to confirm the Spec is complete'
   }
   const phase = PHASE_WORDS[focus]
   if (phaseState(snapshot, focus) === 'stale') {
@@ -286,8 +286,8 @@ export function nowOf(snapshot: SpecSnapshot): string {
       (one) => one.state === 'stale' || one.state === 'unavailable',
     )
     return reworked
-      ? 'Rework · the agent re-declares each phase'
-      : `${phase} · stale after a new shaping, the agent re-declares it`
+      ? 'Every phase to review · the agent goes over each again'
+      : `${phase} · to review, the agent goes over it again`
   }
   const waiting = snapshot.questions.some(
     (question) => question.blocking && question.resolvedAt === null && question.phase === focus,
@@ -347,7 +347,7 @@ function todoOf(snapshot: SpecSnapshot, failures: readonly GateFailure[]): Readi
     } else if (check === 'phase') {
       add({ label: phases.join(' and '), target: PHASE_TARGETS[phases[0] ?? 'shape'] })
     } else {
-      add({ label: 'the attestation' })
+      add({ label: "the agent's final check" })
     }
   }
   return items
@@ -412,9 +412,21 @@ export function revisionsOf(
       number: revision.number,
       detail:
         revision.id === snapshot.spec.currentRevisionId
-          ? `current, ${snapshot.spec.status === 'draft' ? 'draft' : 'frozen'}`
-          : `read only · frozen ${dayOf(frozenAt(revision, snapshot, revisions, journal))}`,
+          ? `Latest · ${snapshot.spec.status === 'draft' ? 'draft' : 'frozen'}`
+          : `Frozen ${dayOf(frozenAt(revision, snapshot, revisions, journal))} · read only`,
     }))
+}
+
+/**
+ * A refused "Mark ready" in the reader's words. The engine's refusal of a Spec that does not pass
+ * its gate lists the gate's failures in its own vocabulary — phases, attestation — which the bar
+ * above already says plainly; a Spec that changed meanwhile is said as it is.
+ */
+export function plainRefusal(key: string, refused: string | null | undefined): string | undefined {
+  if (refused === null || refused === undefined) return undefined
+  return refused.includes('does not pass its gate')
+    ? `${key} is not ready yet: see what is left above.`
+    : refused
 }
 
 /** The whole view of the panel. */
@@ -443,7 +455,10 @@ export function specViewOf({
     questions: snapshot.questions.map(questionOf),
     questionsMark:
       snapshot.questions.length === 0 ? 'empty' : (snapshot.questions.at(-1)?.raisedBy ?? 'agent'),
-    readiness: { ...readinessOf(snapshot), refused: readyRefused ?? undefined },
+    readiness: {
+      ...readinessOf(snapshot),
+      refused: plainRefusal(snapshot.spec.key, readyRefused),
+    },
     frozenOn: isEditable(snapshot)
       ? undefined
       : dayOf(frozenAt(snapshot.revision, snapshot, revisions, journal)),

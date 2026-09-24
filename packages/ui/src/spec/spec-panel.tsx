@@ -354,7 +354,6 @@ export function SpecPart({
       key={name}
       section={sectionOf(spec, name)}
       editable={editable}
-      revision={spec.revision}
       onSave={(body, baseVersion) => onSaveSection(name, body, baseVersion)}
       onApplyMine={(body) => onApplyMine(name, body)}
       onDiscardMine={() => onDiscardMine(name)}

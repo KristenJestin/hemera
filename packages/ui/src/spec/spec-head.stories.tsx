@@ -27,7 +27,7 @@ const meta = {
     type: 'feature',
     status: 'draft',
     revision: 1,
-    revisions: [{ number: 1, detail: 'current, draft' }],
+    revisions: [{ number: 1, detail: 'Latest · draft' }],
     onPickRevision: fn(),
     onRework: fn(),
     onFold: fn(),
@@ -81,15 +81,15 @@ export const Ready: Story = {
     status: 'ready',
     revision: 2,
     revisions: [
-      { number: 2, detail: 'current, frozen' },
-      { number: 1, detail: 'read only · 22 Sep' },
+      { number: 2, detail: 'Latest · frozen' },
+      { number: 1, detail: 'Frozen 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'rev 2' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Latest' }))
     const older = await within(document.body).findByRole('menuitem', {
-      name: 'rev 1 · read only · 22 Sep',
+      name: 'Frozen 22 Sep · read only',
     })
     await userEvent.click(older)
     await expect(args.onPickRevision).toHaveBeenCalledWith(1)
@@ -105,13 +105,13 @@ export const OlderRevision: Story = {
     revision: 1,
     superseded: true,
     revisions: [
-      { number: 2, detail: 'current, frozen' },
-      { number: 1, detail: 'read only · 22 Sep' },
+      { number: 2, detail: 'Latest · frozen' },
+      { number: 1, detail: 'Frozen 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: 'rev 1' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Earlier' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
   },
 }
@@ -121,14 +121,14 @@ export const Reworked: Story = {
   args: {
     revision: 3,
     revisions: [
-      { number: 3, detail: 'current, draft' },
-      { number: 2, detail: 'read only · frozen 23 Sep' },
-      { number: 1, detail: 'read only · 22 Sep' },
+      { number: 3, detail: 'Latest · draft' },
+      { number: 2, detail: 'Frozen 23 Sep · read only' },
+      { number: 1, detail: 'Frozen 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: 'rev 3' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
   },
 }

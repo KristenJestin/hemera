@@ -48,10 +48,10 @@ export const Unfolded: Story = {
 
 /** A note with nothing to open: a Spec marked ready, said in the thread. */
 export const Note: Story = {
-  args: { title: 'ATL-7 marked ready · rev 2', detail: '11:34', brief: undefined },
+  args: { title: 'ATL-7 marked ready', detail: '11:34', brief: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('button')).toBeNull()
-    await expect(canvas.getByText('ATL-7 marked ready · rev 2')).toBeVisible()
+    await expect(canvas.getByText('ATL-7 marked ready')).toBeVisible()
   },
 }

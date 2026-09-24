@@ -410,8 +410,8 @@ export const OlderRevision: Story = {
   args: { spec: OLDER_REVISION },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Revision 1 · read only, as it was frozen')).toBeVisible()
-    await expect(canvas.getByText(/revision 2 replaced it/)).toBeVisible()
+    await expect(canvas.getByText('An earlier version · read only, as it was frozen')).toBeVisible()
+    await expect(canvas.getByText(/a newer version replaced it/)).toBeVisible()
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()

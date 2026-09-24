@@ -312,7 +312,7 @@ describe('A conflict keeps the human’s text', () => {
     const scope = await sectionOf(specId ?? '', 'scope')
     expect(scope.body).toBe(THEIRS)
     expect(await region(PANEL)).toContain(
-      `Your text was written on v1; the section is at v${String(scope.version)}.`,
+      'The agent changed this part while you were writing yours.',
     )
     expect(await textOf('Scope, your text')).toBe(MINE)
 
@@ -321,13 +321,15 @@ describe('A conflict keeps the human’s text', () => {
   })
 
   it('applies the kept text on the current version, and the banner goes', async () => {
-    await pressIn(PANEL, 'Apply mine on v')
+    await pressIn(PANEL, 'Keep mine')
     await browser.pause(1200)
 
     const { specId } = await sessionOf(ASKED)
     const scope = await sectionOf(specId ?? '', 'scope')
     expect(scope).toEqual({ body: MINE, version: 3, author: 'human' })
-    expect(await region(PANEL)).not.toContain('Your text was written on')
+    expect(await region(PANEL)).not.toContain(
+      'The agent changed this part while you were writing yours.',
+    )
     expect(await textOf('Scope')).toBe(MINE)
   })
 })
@@ -388,7 +390,7 @@ describe('A second Session reads but does not write', () => {
 })
 
 describe('Mark ready is offered only once the checks pass', () => {
-  it('names what is left, the attestation among it, and offers no Mark ready', async () => {
+  it('names what is left and offers no Mark ready', async () => {
     const panel = await region(PANEL)
     expect(panel).toContain('before ready')
     expect(await control('Mark ready')).toBeNull()
@@ -403,7 +405,9 @@ describe('A conflict keeps the human’s text across a relaunch', () => {
     await rewriteScope(specId ?? '', id, THEIRS_AGAIN)
     await leave('Scope')
 
-    expect(await region(PANEL)).toContain('Your text was written on v3; the section is at v4.')
+    expect(await region(PANEL)).toContain(
+      'The agent changed this part while you were writing yours.',
+    )
     expect(await textOf('Scope, your text')).toBe(KEPT)
   })
 })

@@ -36,7 +36,7 @@ export function TasksPart({ tasks, mark }: TasksPartProps): ReactNode {
   if (mark === 'stale') {
     facts.push(
       <span key="stale" className="text-warning-muted-foreground">
-        stale after the rework
+        to review
       </span>,
     )
   }

@@ -172,36 +172,38 @@ describe('The panel says what is happening in one sentence', () => {
     )
   })
 
-  test('every phase finished and attested: the agent attests the contract is complete', () => {
+  test('every phase finished and attested: the agent confirmed the Spec is complete', () => {
     const done = snapshot({ phases: phases('finished', 'finished', 'finished') })
     expect(nowOf({ ...done, revision: { ...done.revision, attestedContentVersion: 3 } })).toBe(
-      'Decompose · finished, the agent attests the contract is complete',
+      'Decompose · finished, the agent confirmed the Spec is complete',
     )
-    expect(nowOf(done)).toBe('Decompose · finished, waiting for the agent to attest the contract')
+    expect(nowOf(done)).toBe(
+      'Decompose · finished, waiting for the agent to confirm the Spec is complete',
+    )
   })
 
   test('ready: frozen at its revision, a build can start from it', () => {
     const frozen = snapshot()
     expect(nowOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } })).toBe(
-      'Ready · frozen at revision 1, a build can start from it',
+      'Ready · frozen, a build can start from it',
     )
   })
 
   test('after a Rework every phase is stale, and the agent re-declares each', () => {
     const reworked = snapshot({ phases: phases('stale', 'stale', 'stale') })
     expect(nowOf({ ...reworked, revision: { ...reworked.revision, number: 2 } })).toBe(
-      'Rework · the agent re-declares each phase',
+      'Every phase to review · the agent goes over each again',
     )
     // A stale phase among finished ones is a new shaping's doing, not a Rework's.
     expect(nowOf(snapshot({ phases: phases('finished', 'stale', 'pending') }))).toBe(
-      'Plan · stale after a new shaping, the agent re-declares it',
+      'Plan · to review, the agent goes over it again',
     )
   })
 
   test('on revision 2, once shape is declared again, a stale plan is a new shaping', () => {
     const redeclared = snapshot({ phases: phases('finished', 'stale', 'stale') })
     expect(nowOf({ ...redeclared, revision: { ...redeclared.revision, number: 2 } })).toBe(
-      'Plan · stale after a new shaping, the agent re-declares it',
+      'Plan · to review, the agent goes over it again',
     )
   })
 })
@@ -313,7 +315,7 @@ describe('The readiness bar says what is left', () => {
       { label: 'the tasks', target: 'tasks' },
       { label: '2 blocking questions', target: 'questions' },
       { label: 'plan and decompose', target: 'plan' },
-      { label: 'the attestation' },
+      { label: "the agent's final check" },
     ])
   })
 
@@ -374,6 +376,20 @@ describe('The readiness bar says what is left', () => {
     expect(specViewOf({ ...reading, readyRefused: said }).readiness.refused).toBe(said)
     expect(specViewOf({ ...reading, readyRefused: null }).readiness.refused).toBe(undefined)
   })
+
+  test("a refusal listing the gate's failures is said without the engine's words", () => {
+    const reading = {
+      snapshot: snapshot(),
+      revisions: [snapshot().revision],
+      buffers: [],
+      journal: [],
+      readyRefused:
+        'ATL-7 does not pass its gate: the decompose phase is open, not finished; the attestation is missing.',
+    }
+    expect(specViewOf(reading).readiness.refused).toBe(
+      'ATL-7 is not ready yet: see what is left above.',
+    )
+  })
 })
 
 describe('An old revision is readable and not editable', () => {
@@ -390,8 +406,8 @@ describe('An old revision is readable and not editable', () => {
 
   test('the picker lists the revisions newest first, the older ones read only', () => {
     expect(revisionsOf(second, revisions, [ready('2026-09-22T10:00:00.000Z', 'rev-1')])).toEqual([
-      { number: 2, detail: 'current, draft' },
-      { number: 1, detail: 'read only · frozen 22 Sep' },
+      { number: 2, detail: 'Latest · draft' },
+      { number: 1, detail: 'Frozen 22 Sep · read only' },
     ])
   })
 
@@ -412,7 +428,7 @@ describe('An old revision is readable and not editable', () => {
     })
     expect(view.status).toBe('ready')
     expect(view.frozenOn).toBe('22 Sep')
-    expect(view.now).toBe('Revision 1 · read only, as it was frozen')
+    expect(view.now).toBe('An earlier version · read only, as it was frozen')
     expect(view.sections.some((one) => one.conflict !== undefined)).toBe(false)
     expect(view.readiness.todo).toEqual([])
     expect(view.replacedBy).toBe(2)
@@ -439,7 +455,7 @@ describe('An old revision is readable and not editable', () => {
       journal: [],
     })
     expect(view.frozenOn).toBe(dayOf(Date.UTC(2026, 8, 23, 12)))
-    expect(view.revisions).toEqual([{ number: 1, detail: 'current, frozen' }])
+    expect(view.revisions).toEqual([{ number: 1, detail: 'Latest · frozen' }])
   })
 })
 

@@ -33,8 +33,6 @@ export interface SectionPartProps {
   section: SectionView
   /** Whether the text can be changed: a draft, at its current revision. */
   editable: boolean
-  /** The revision shown, which the facts of a frozen section name. */
-  revision: number
   /**
    * Your text, once, when the caret leaves it changed, with the version of the section the edit
    * was opened on: an agent may have written it meanwhile, and a save checked against the version
@@ -50,7 +48,6 @@ export interface SectionPartProps {
 export function SectionPart({
   section,
   editable,
-  revision,
   onSave,
   onApplyMine,
   onDiscardMine,
@@ -74,7 +71,7 @@ export function SectionPart({
       <PartHead
         title={title}
         mark={section.mark}
-        facts={factsOf(section, editable, revision)}
+        facts={factsOf(section, editable)}
         saves={saves}
         end={
           editable && conflict === undefined ? (
@@ -92,8 +89,6 @@ export function SectionPart({
       {conflict !== undefined && editable ? (
         <>
           <ConflictBanner
-            base={conflict.base}
-            current={conflict.current}
             comparing={comparing}
             onCompare={() => setComparing(!comparing)}
             onApply={() => onApplyMine(mine)}
@@ -101,7 +96,7 @@ export function SectionPart({
           />
           {comparing && (
             <div className={THEIRS}>
-              <p className={THEIRS_HEAD}>{`v${conflict.current} · agent`}</p>
+              <p className={THEIRS_HEAD}>The agent's text</p>
               <AgentText text={conflict.theirs} />
             </div>
           )}
@@ -133,37 +128,33 @@ export function SectionPart({
   )
 }
 
-/** What the facts say of a section: who, which version, and what is about to happen. */
-function factsOf(section: SectionView, editable: boolean, revision: number): ReactNode[] {
-  const who = section.author === 'human' ? 'you' : 'agent'
-  if (section.conflict !== undefined && editable) {
-    return ['you', `written on v${section.conflict.base}`, 'not saved']
-  }
+/**
+ * What the facts say of a section, in the reader's words: `you` when you wrote it last and
+ * nothing when the agent did, and what is about to happen. No version and no revision: those are
+ * the engine's bookkeeping, not something the reader acts on.
+ */
+function factsOf(section: SectionView, editable: boolean): ReactNode[] {
+  const yours: ReactNode[] = section.author === 'human' ? ['you'] : []
+  if (section.conflict !== undefined && editable) return ['you', 'not saved']
   if (!editable) {
     return [
+      ...yours,
       <span key="lock" className="flex items-center gap-1">
         <IconLock size="sm" />
-        {who}
+        frozen
       </span>,
-      `rev ${revision}`,
-      'frozen',
     ]
   }
-  if (section.author === null) {
-    return section.mark === 'writing' ? ['agent', 'writing…'] : ['not written yet']
-  }
+  if (section.author === null) return section.mark === 'writing' ? ['writing…'] : ['empty']
   if (section.copiedFrom !== undefined) {
     return [
-      who,
-      `copied from rev ${section.copiedFrom}`,
+      ...yours,
       <span key="stale" className={WARN}>
-        stale after the rework
+        to review
       </span>,
     ]
   }
-  if (section.mark === 'writing') return [who, 'writing…']
-  if (section.pendingForAgent === true) {
-    return [who, `v${section.version}`, 'sent to the agent next turn']
-  }
-  return [who, `v${section.version}`]
+  if (section.mark === 'writing') return [...yours, 'writing…']
+  if (section.pendingForAgent === true) return [...yours, 'sent to the agent next turn']
+  return yours
 }

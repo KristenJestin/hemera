@@ -17,12 +17,12 @@ import type { Mark } from './model.ts'
 
 /** What each mark says to whoever cannot see it. */
 export const MARK_WORDS: Record<Mark, string> = {
-  empty: 'not written',
+  empty: 'empty',
   agent: 'written by the agent',
   human: 'edited by you',
-  stale: 'stale after the rework',
-  conflict: 'in conflict with your text',
-  writing: 'being written',
+  stale: 'to review',
+  conflict: "your text and the agent's differ",
+  writing: 'the agent is writing this',
 }
 
 /**
