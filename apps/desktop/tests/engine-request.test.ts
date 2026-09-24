@@ -12,12 +12,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
-import { NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
-import type { AgentRuntime } from '#engine/agents/runtime.ts'
+import { DELIVERY_MARKER, contextUri } from '@hemera/core'
+
+import { AgentRuntime, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import type { Discovery } from '#engine/agents/discovery.ts'
 import { Agents } from '#engine/agents/service.ts'
-import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
+import { type FakeAgent, fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
@@ -27,17 +28,18 @@ import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
-import { type Projects, projectsLayer } from '#engine/projects.ts'
+import { Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
-import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
-import { type Specs, specsLayer } from '#engine/specs/specs.ts'
+import { Specs, specsLayer } from '#engine/specs/specs.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import type { Database } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer } from '#engine/tools/server.ts'
+import { threadOf, until } from './application.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /**
@@ -77,6 +79,7 @@ function running<A, E>(
     | Commands
     | Context
   >,
+  agent: FakeAgent = fakeAgent(),
 ) {
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
   // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
@@ -90,7 +93,7 @@ function running<A, E>(
       holds: () => Effect.succeed(true),
       read: () => Effect.succeed(undefined),
     }),
-    fakeSupervisor(fakeAgent()),
+    fakeSupervisor(agent),
     NoNotices,
     Layer.succeed(StderrSink, { write: () => Effect.void }),
   )
@@ -300,5 +303,121 @@ describe('Une erreur typée traverse la frontière', () => {
 
     expect(failed).toBeInstanceOf(DatabaseError)
     if (failed instanceof DatabaseError) expect(failed.doing).toBe('reading the preferences')
+  })
+})
+
+/**
+ * A `define` Session whose agent took its first turn, the brief with it, on a Workspace of its
+ * own, and a question its agent asked: what a human change of its Spec is handed to.
+ */
+const defined = (workspace: string) =>
+  running(
+    Effect.gen(function* () {
+      const project = yield* (yield* Projects).create({
+        name: 'Atlas',
+        tone: 'primary',
+        mainPath: workspace,
+      })
+      const free = yield* (yield* Sessions).create(project.id, 'claude')
+      const specs = yield* Specs
+      const { snapshot } = yield* specs.create({
+        sessionId: free.id,
+        type: 'feature',
+        title: 'Export the journal',
+      })
+      const specId = snapshot.spec.id
+      yield* (yield* AgentRuntime).prompt(free.id, 'First turn.')
+      const raised = yield* specs.raiseQuestion(
+        { kind: 'agent', sessionId: free.id },
+        { specId, body: 'Which format?', blocking: true, phase: 'shape', options: [] },
+      )
+      const scope = raised.sections.find((section) => section.name === 'scope')
+      return {
+        sessionId: free.id,
+        specId,
+        questionId: raised.questions[0]?.id ?? '',
+        scopeVersion: scope?.version ?? 0,
+      }
+    }),
+  )
+
+/**
+ * Runs a message the window sends, as the entry point does, to a Session whose agent was started
+ * again and runs no turn: what reaches the agent then is what the message handed it, and not what
+ * the end of a turn would have.
+ */
+const sentWhileIdle = (
+  sessionId: string,
+  name: string,
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a message as it arrives, which is what `decideRequest` is for
+  argument: unknown,
+  agent: FakeAgent,
+) =>
+  running(
+    Effect.gen(function* () {
+      yield* (yield* AgentRuntime).start(sessionId)
+      const decision = decideRequest(name, argument)
+      if (!decision.accepted) return yield* Effect.die(decision.reason)
+      yield* answer(decision)
+      // The thread once a turn Hemera opened to hand something over has ended in it (D6-08).
+      return yield* until(threadOf(sessionId), (thread) =>
+        thread.some(
+          (entry) => entry.kind === 'turn' && entry.payload.includes('"kind":"delivery"'),
+        ),
+      )
+    }),
+    agent,
+  )
+
+/** The text of the resource a prompt carried at an address, if it carried one. */
+const handedAt = (agent: FakeAgent, prompt: number, uri: string) => {
+  const block = agent.answers.blocks[prompt]?.find(
+    (one) => one.type === 'resource' && one.resource.uri === uri,
+  )
+  return block?.type === 'resource' && 'text' in block.resource ? block.resource.text : null
+}
+
+describe('An answer resolves the question and reaches the agent at the next safe point', () => {
+  test('answered from the window while no turn runs, it is handed to the agent at once, in a turn of its own', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'hemera-request-workspace-'))
+    const { sessionId, specId, questionId } = await defined(workspace)
+    const agent = fakeAgent()
+
+    const thread = await sentWhileIdle(
+      sessionId,
+      'specs.answerQuestion',
+      { specId, questionId, text: 'CSV' },
+      agent,
+    )
+    rmSync(workspace, { recursive: true, force: true })
+
+    expect(agent.answers.prompts).toEqual([DELIVERY_MARKER])
+    expect(handedAt(agent, 0, contextUri('answer'))).toBe(
+      '# Answers since your last turn\n\n- Which format?\n  The user answered: CSV',
+    )
+    const line = thread.find((entry) => entry.kind === 'context_delivery')
+    expect(line).toMatchObject({ role: 'hemera', turnId: expect.any(String) })
+  })
+})
+
+describe('A human edit is recorded and reaches the agent', () => {
+  test('saved from the panel while no turn runs, it is handed to the agent at once, never as a message', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'hemera-request-workspace-'))
+    const { sessionId, specId, scopeVersion } = await defined(workspace)
+    const agent = fakeAgent()
+
+    const thread = await sentWhileIdle(
+      sessionId,
+      'specs.writeSection',
+      { specId, sessionId, name: 'scope', body: 'CSV only.', baseVersion: scopeVersion },
+      agent,
+    )
+    rmSync(workspace, { recursive: true, force: true })
+
+    expect(agent.answers.prompts).toEqual([DELIVERY_MARKER])
+    expect(handedAt(agent, 0, contextUri('edit'))).toContain('CSV only.')
+    expect(thread.filter((entry) => entry.role === 'user').map((entry) => entry.body)).toEqual([
+      'First turn.',
+    ])
   })
 })

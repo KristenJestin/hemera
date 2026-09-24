@@ -76,7 +76,7 @@ import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
-import { type SpecDelivery, briefFor, briefed } from '../specs/brief.ts'
+import { type SpecDelivery, briefFor, briefed, definedBy } from '../specs/brief.ts'
 import { Database } from '../storage/database.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { ToolPermissions } from '../tools/permissions.ts'
@@ -259,6 +259,12 @@ export interface AgentRuntimeService {
   readonly alive: Effect.Effect<readonly string[]>
   /** Whether a turn is running in the Session, from the prompt until it closes. */
   readonly running: (sessionId: string) => boolean
+  /**
+   * Hands what a human change of a Spec made wait — an edit, an answer, a phase to brief again —
+   * to the agent of every Session defining it, at its next safe point: now when no turn runs,
+   * once the running one is over otherwise (D7-09). Returns at once, never waiting on a turn.
+   */
+  readonly specChanged: (specId: string) => Effect.Effect<void>
 }
 
 export { AgentNotices, NoNotices } from './notices.ts'
@@ -2237,6 +2243,17 @@ export const runtimeLayer = Layer.effect(
       ).catch(() => undefined)
     }
 
+    const specChanged = (specId: string) =>
+      definedBy(specId).pipe(
+        Effect.provideService(Database, database),
+        Effect.map((defining) => {
+          // A Session whose agent is not running is handed it when its next prompt starts one.
+          for (const sessionId of defining) if (live.has(sessionId)) deliverSoon(sessionId, false)
+        }),
+        // Unread, it waits for that next prompt all the same.
+        Effect.ignore,
+      )
+
     /** What watches the Workspace's instructions of each Session whose agent is running. */
     const watchers = new Map<
       string,
@@ -2686,6 +2703,7 @@ export const runtimeLayer = Layer.effect(
       release: (sessionId) => owned(release(sessionId)),
       alive: Effect.sync(() => [...live.keys()]),
       running: (sessionId) => turns.has(sessionId) || starting.has(sessionId),
+      specChanged,
     }
     return service
   }),

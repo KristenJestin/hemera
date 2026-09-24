@@ -73,6 +73,18 @@ export function briefFor(sessionId: string, holdsNone = false) {
   })
 }
 
+/** The Sessions defining a Spec, writer and readers: each is handed what a change of it made wait. */
+export function definedBy(specId: string) {
+  return Effect.gen(function* () {
+    const rows = yield* (yield* Database)
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(and(eq(sessions.specId, specId), eq(sessions.mission, 'define')))
+      .pipe(Effect.mapError(failed('reading the Sessions of a Spec')))
+    return rows.map((row) => row.id)
+  })
+}
+
 /** What waits for a `define` Session, read from the Spec at one moment. */
 function composed(sessionId: string, holdsNone: boolean) {
   return reading('composing the mission brief', (transaction) =>

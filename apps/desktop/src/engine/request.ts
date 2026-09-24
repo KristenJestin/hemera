@@ -339,7 +339,10 @@ export function answer(
     if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
     if (decision.name === 'specs.writeSection') {
       const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
-      return yield* specs.writeSection(human, decision.argument)
+      const written = yield* specs.writeSection(human, decision.argument)
+      // The agents defining the Spec are handed the edit at their next safe point (D7-09).
+      yield* runtime.specChanged(decision.argument.specId)
+      return written
     }
     if (decision.name === 'specs.writeStories') {
       const human = { kind: 'human' as const, sessionId: decision.argument.sessionId }
@@ -354,10 +357,17 @@ export function answer(
       return yield* specs.raiseQuestion(human, decision.argument)
     }
     if (decision.name === 'specs.answerQuestion') {
-      return yield* specs.answerQuestion(decision.argument)
+      const answered = yield* specs.answerQuestion(decision.argument)
+      yield* runtime.specChanged(decision.argument.specId)
+      return answered
     }
     if (decision.name === 'specs.markReady') return yield* specs.markReady(decision.argument)
-    if (decision.name === 'specs.reopen') return yield* specs.reopen(decision.argument)
+    if (decision.name === 'specs.reopen') {
+      // A Rework makes the phases stale: the brief of the one back in focus goes the same way.
+      const reopened = yield* specs.reopen(decision.argument)
+      yield* runtime.specChanged(decision.argument.specId)
+      return reopened
+    }
     if (decision.name === 'specs.transferWrite') {
       // Never under a turn the writer is running (Decided 14).
       return yield* specs.transferWrite(decision.argument, runtime.running)
