@@ -642,7 +642,7 @@ export function SessionPage({
         width for, where the side column stood before the Session details took its plan and its
         files into a dialog. A `free` Session has no panel and nothing that offers one: a Spec
         begins with the agent's proposal in the thread (D7-07). It opens folded to a band beside the
-        chat, and unfolds over it when the hand or the agent asks (brief revision 4).
+        chat, and unfolds pushing it aside when the hand or the agent asks (brief revisions 4, 4b).
       */}
       {session.mission === 'define' && spec !== null && defined !== null && (
         <SpecPanel
