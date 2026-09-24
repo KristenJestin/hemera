@@ -12,10 +12,21 @@ import { ContextView } from './context-view.tsx'
  * there reads whole in the dialog (trial of 23 September 2026).
  */
 
-/** The base, as it reaches an agent with no system prompt to take it. */
-const BASE = { label: 'The base', detail: 'as a resource of the first prompt' }
+/** When the Session's agent was opened: its tools were lent, and the base went in, then. */
+const STARTED = '23 Sep 08:02'
 
-const GIVEN = { label: 'AGENTS.md', detail: 'given at the start of the Session' }
+/** The Workspace the agent works in, which every path of the view is read from. */
+const WORKSPACE = { name: 'main', path: '/home/kris/projects/atlas' }
+
+/** The base, as it reaches an agent with no system prompt to take it. */
+const BASE = { label: 'The base', detail: 'as a resource of the first prompt', at: STARTED }
+
+const GIVEN = {
+  label: 'AGENTS.md',
+  file: true,
+  detail: 'given at the start of the Session',
+  at: STARTED,
+}
 
 /** The eleven tools a Session is lent, each with the bound it is held to. */
 const TOOLS = [
@@ -50,13 +61,21 @@ const meta = {
       </div>
     ),
   ],
-  args: { instructions: [GIVEN, BASE], tools: TOOLS, commands: COMMANDS },
+  args: {
+    workspace: WORKSPACE,
+    instructions: [GIVEN, BASE],
+    tools: TOOLS,
+    lentAt: STARTED,
+    commands: COMMANDS,
+  },
   argTypes: {
+    workspace: { control: 'object', description: 'The Workspace the agent works in.' },
     instructions: {
       control: 'object',
-      description: 'How AGENTS.md, its last change and the base reached the agent.',
+      description: 'How AGENTS.md, its last change and the base reached the agent, and when.',
     },
     tools: { control: 'object', description: 'The tools it lends, with the bound of each.' },
+    lentAt: { control: 'text', description: 'When the tools were lent.' },
     commands: { control: 'object', description: 'The commands of the catalogue.' },
   },
 } satisfies Meta<typeof ContextView>
@@ -64,6 +83,9 @@ const meta = {
 export default meta
 
 type Story = StoryObj<typeof meta>
+
+/** The name the tools' line is read by, once they were lent. */
+const LENT = `Tools · 11 · lent at ${STARTED}`
 
 /** The rows wider than the view they are read in, by their text: none, when every row wraps. */
 function cutRowsIn(canvasElement: HTMLElement): string[] {
@@ -73,17 +95,26 @@ function cutRowsIn(canvasElement: HTMLElement): string[] {
 }
 
 /**
- * A fresh Session whose agent was given `AGENTS.md` with its first message: the file, how it went
- * in, the base, and the tools folded on one line.
+ * A fresh Session whose agent was given `AGENTS.md` with its first message: the Workspace it works
+ * in, the file by its path and the time it went in, the base with its own, and the tools folded on
+ * one line that says when they were lent (recette 5 of 24 September 2026).
  */
 export const GivenAtTheStart: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    // The Workspace first, by its name and its root: what every path below is read from.
+    const workspace = canvas.getByRole('region', { name: 'Workspace' })
+    await expect(within(workspace).getByText('main')).toBeVisible()
+    await expect(within(workspace).getByText('/home/kris/projects/atlas')).toBeVisible()
     await expect(canvas.getByText('Instructions')).toBeVisible()
+    // The file by its path from the root, in the face of a path, and when it reached the agent.
+    const file = canvas.getByText('AGENTS.md')
+    await expect(getComputedStyle(file).fontFamily).toMatch(/mono|Fira/i)
     await expect(canvas.getByText(', given at the start of the Session')).toBeVisible()
     await expect(canvas.getByText(', as a resource of the first prompt')).toBeVisible()
-    // Folded: the count is on the line, and the list is not drawn until it is asked for.
-    await expect(canvas.getByRole('button', { name: 'Tools · 11' })).toHaveAttribute(
+    await expect(canvas.getAllByText(`· ${STARTED}`)).toHaveLength(2)
+    // Folded: the count and the moment are on the line, and the list is not drawn until asked.
+    await expect(canvas.getByRole('button', { name: LENT })).toHaveAttribute(
       'aria-expanded',
       'false',
     )
@@ -97,8 +128,8 @@ export const GivenAtTheStart: Story = {
 export const ReadByTheAgent: Story = {
   args: {
     instructions: [
-      { label: 'AGENTS.md', detail: 'read by the agent' },
-      { label: 'The base', detail: 'through its system prompt' },
+      { label: 'AGENTS.md', file: true, detail: 'read by the agent', at: STARTED },
+      { label: 'The base', detail: 'through its system prompt', at: STARTED },
     ],
   },
   play: async ({ canvasElement }) => {
@@ -108,30 +139,38 @@ export const ReadByTheAgent: Story = {
   },
 }
 
-/** A Workspace with no `AGENTS.md`: said in a sentence, and the base went in all the same. */
+/**
+ * A Workspace with no `AGENTS.md`: said in a sentence under the Workspace it is about, and the
+ * base went in all the same, at its time.
+ */
 export const NoAgentsFile: Story = {
   args: { instructions: [{ label: 'This Workspace has no AGENTS.md' }, BASE] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await expect(canvas.getByText('/home/kris/projects/atlas')).toBeVisible()
     await expect(canvas.getByText('This Workspace has no AGENTS.md')).toBeVisible()
     await expect(canvas.getByText('The base')).toBeVisible()
+    await expect(canvas.getByText(`· ${STARTED}`)).toBeVisible()
+    await expect(canvas.getByRole('button', { name: LENT })).toBeVisible()
   },
 }
 
 /**
- * `AGENTS.md` changed during the Session and the change was delivered between two turns: the last
- * change is a line of its own, with its time, and every line reads whole at the column's width.
+ * `AGENTS.md` changed during the Session and the change was delivered between two turns: the file
+ * says when it last changed, the last change is a line of its own with the time it was delivered,
+ * and every line reads whole at the column's width.
  */
 export const AfterADelivery: Story = {
   args: {
     instructions: [
-      GIVEN,
+      { ...GIVEN, changed: '23 Sep 09:14' },
       { label: 'Last change', detail: 'delivered between two turns', at: '23 Sep 09:14' },
       BASE,
     ],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await expect(canvas.getByText('· changed 23 Sep 09:14')).toBeVisible()
     await expect(canvas.getByText('Last change')).toBeVisible()
     await expect(canvas.getByText('· 23 Sep 09:14')).toBeVisible()
     // Whole: no row is cut, and nothing is wider than the column it is read in.
@@ -139,9 +178,12 @@ export const AfterADelivery: Story = {
   },
 }
 
-/** Before the first message: nothing has gone to the agent, and the tools are lent already. */
+/**
+ * Before the first message: nothing has gone to the agent, and the tools it will be lent are
+ * counted, with no time until they are.
+ */
 export const NothingGoneYet: Story = {
-  args: { instructions: [] },
+  args: { instructions: [], lentAt: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Nothing has gone to the agent yet.')).toBeVisible()
@@ -156,7 +198,7 @@ export const NothingGoneYet: Story = {
 export const ToolsOpen: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Tools · 11' }))
+    await userEvent.click(canvas.getByRole('button', { name: LENT }))
     await expect(canvas.getByText('fs_read')).toBeVisible()
     await expect(canvas.getByText('the catalogue, or a one-off line the user allows')).toBeVisible()
     await expect(canvas.getByText('The catalogue commands_run runs from')).toBeVisible()

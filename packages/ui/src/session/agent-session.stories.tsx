@@ -299,15 +299,23 @@ const COMMANDS = (
 
 const CONTEXT = (
   <ContextView
+    workspace={{ name: 'main', path: '/home/kris/projects/atlas' }}
     instructions={[
-      { label: 'AGENTS.md', detail: 'given at the start of the Session' },
+      {
+        label: 'AGENTS.md',
+        file: true,
+        detail: 'given at the start of the Session',
+        at: '23 Sep 13:40',
+        changed: '23 Sep 14:05',
+      },
       { label: 'Last change', detail: 'delivered between two turns', at: '23 Sep 14:05' },
-      { label: 'The base', detail: 'as a resource of the first prompt' },
+      { label: 'The base', detail: 'as a resource of the first prompt', at: '23 Sep 13:40' },
     ]}
     tools={[
       { name: 'fs_read', bound: '256 KiB a page, inside the Workspace root' },
       { name: 'commands_run', bound: 'the catalogue, or a one-off line the user allows' },
     ]}
+    lentAt="23 Sep 13:40"
     commands={[{ name: 'check', command: 'pnpm check' }]}
   />
 )
@@ -318,6 +326,7 @@ const CONTEXT = (
  */
 const FRESH_CONTEXT = (
   <ContextView
+    workspace={{ name: 'main', path: '/home/kris/projects/atlas' }}
     instructions={[]}
     tools={[
       { name: 'fs_read', bound: '256 KiB a page, inside the Workspace root' },

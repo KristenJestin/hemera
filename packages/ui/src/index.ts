@@ -343,6 +343,7 @@ export {
   type ContextEntry,
   type ContextTool,
   type ContextViewProps,
+  type ContextWorkspace,
 } from './session/context-view.tsx'
 export {
   BareModeState,
