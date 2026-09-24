@@ -3,6 +3,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
 import { COMMAND_TYPE_LABELS } from '../activity/command-type.ts'
+import { WorkspaceList } from '../workspace/workspace-list.tsx'
 import type { ProjectDraft, RepositoryLine } from './model.ts'
 import {
   ProjectSettings,
@@ -658,5 +659,45 @@ export const DedicatedWorkspaces: Story = {
     await waitFor(() => {
       expect(args.onSave).toHaveBeenCalledWith({ ...ATLAS, branchPrefix: 'kris' })
     })
+  },
+}
+
+/**
+ * The cards of what the Project holds beyond itself, handed in by the caller: here its
+ * Workspaces, drawn after the commands and before the archive.
+ */
+export const WorkspaceCards: Story = {
+  args: {
+    children: (
+      <WorkspaceList
+        workspaces={[
+          {
+            id: 'main',
+            name: 'main',
+            path: ATLAS.mainPath,
+            state: 'ready',
+            main: true,
+            dedicated: false,
+          },
+        ]}
+        onBrowse={fn(async () => await Promise.resolve(null))}
+        onCreate={fn(async () => await Promise.resolve(null))}
+        onCleanup={fn()}
+      />
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const workspaces = canvas.getByRole('list', { name: 'Workspaces' })
+    const commands = canvas.getByText('Commands')
+    const archive = canvas.getByText('Archive this Project')
+    await expect(workspaces).toBeVisible()
+    // After the commands and before the archive, which stays the last thing on the page.
+    await expect(
+      commands.compareDocumentPosition(workspaces) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    await expect(
+      workspaces.compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   },
 }

@@ -141,6 +141,11 @@ export interface ProjectSettingsProps {
   onUpdateCommand?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemoveCommand?: ((id: string) => void) | undefined
   onArchive: () => void
+  /**
+   * The cards of what the Project holds beyond itself — its Workspaces, its preparation, its
+   * variables — composed by the caller, drawn after the commands and before the archive.
+   */
+  children?: ReactNode
 }
 
 export function ProjectSettings({
@@ -160,6 +165,7 @@ export function ProjectSettings({
   onUpdateCommand,
   onRemoveCommand,
   onArchive,
+  children,
 }: ProjectSettingsProps): ReactNode {
   const [refusal, setRefusal] = useState<string | null>(null)
 
@@ -276,6 +282,8 @@ export function ProjectSettings({
         onUpdate={onUpdateCommand}
         onRemove={onRemoveCommand}
       />
+
+      {children}
 
       <DangerZone name={project.name} onArchive={onArchive} />
     </div>
