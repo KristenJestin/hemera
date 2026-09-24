@@ -53,7 +53,7 @@ import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { type ToolPermissions, toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
-import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 
 export const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -379,6 +379,7 @@ export type ToolEngine =
   | Database
   | SqliteClient
   | HeldWords
+  | Variables
 
 /**
  * One supervisor for an agent that is the fake and commands that are real (D5-04, D6-11, D6-12).
@@ -449,7 +450,7 @@ export function toolApplication(
     const services: Layer.Layer<ToolEngine> = runtimeLayer.pipe(
       Layer.provideMerge(tools),
       Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),
-      Layer.provide(variablesLayer),
+      Layer.provideMerge(variablesLayer),
       Layer.provideMerge(journalLayer),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
