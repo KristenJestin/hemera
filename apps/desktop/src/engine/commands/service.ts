@@ -360,6 +360,11 @@ export interface CommandsService {
     sessionId: string,
     runId: string,
   ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
+  /**
+   * The same, asked by the Project rather than by a Session: a Workspace's services are stopped
+   * from its settings, one instance at a time, whoever started them (D8-08).
+   */
+  readonly stopIn: (projectId: string, runId: string) => Effect.Effect<RunView, UnknownRunError>
   /** What this Session has running, oldest first: what the panel draws. */
   readonly running: (sessionId: string) => Effect.Effect<RunView[]>
   /**
@@ -818,6 +823,17 @@ export const commandsLayer = Layer.effect(
           yield* record.stop
         }
         yield* Deferred.await(record.ended)
+      })
+
+    /** Stops a running run of the Project; one of another Project, or none, is unknown to it. */
+    const stopIn = (projectId: string | null, runId: string) =>
+      Effect.gen(function* () {
+        const record = live.get(runId)
+        if (record === undefined || record.projectId !== projectId) {
+          return yield* Effect.fail(new UnknownRunError(runId))
+        }
+        yield* stopRun(record)
+        return viewOf(runId, record)
       })
 
     /**
@@ -1284,15 +1300,9 @@ export const commandsLayer = Layer.effect(
         }),
 
       stop: (sessionId, runId) =>
-        Effect.gen(function* () {
-          const projectId = yield* projectOf(sessionId)
-          const record = live.get(runId)
-          if (record === undefined || record.projectId !== projectId) {
-            return yield* Effect.fail(new UnknownRunError(runId))
-          }
-          yield* stopRun(record)
-          return viewOf(runId, record)
-        }),
+        projectOf(sessionId).pipe(Effect.flatMap((projectId) => stopIn(projectId, runId))),
+
+      stopIn: (projectId, runId) => stopIn(projectId, runId),
 
       running: (sessionId) => runningWhere((one) => one.sessionId === sessionId),
 

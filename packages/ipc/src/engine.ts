@@ -642,6 +642,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ projectId: z.string(), workspaceId: z.string().nullable() }),
     response: z.array(commandRunSchema),
   },
+  // Stops one of them from the Workspace's settings, where no Session is asking: the run is found
+  // by its id among the Project's, and that instance alone is stopped (D8-08).
+  'commands.stopService': {
+    arguments: z.object({ projectId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
   // What a human decides of a command the agent proposed in a Session (D8-11): accepted, it is
   // written into the catalogue and answered; declined, nothing enters it.
   'commands.proposeAccept': {

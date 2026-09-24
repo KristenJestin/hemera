@@ -216,6 +216,7 @@ const RELAYED = [
   'commands.stop',
   'commands.output',
   'commands.services',
+  'commands.stopService',
   'commands.proposeAccept',
   'commands.proposeDecline',
   'context.read',

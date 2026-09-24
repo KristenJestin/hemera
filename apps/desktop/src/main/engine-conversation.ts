@@ -40,6 +40,7 @@ export const UNHURRIED: ReadonlySet<EngineRequestName> = new Set([
   'agents.check',
   // A stop gives a run the grace it is owed before its tree is taken down (D5-04, D6-12).
   'commands.stop',
+  'commands.stopService',
 ])
 
 /**

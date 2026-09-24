@@ -373,6 +373,10 @@ export function answer(
       // them, each with the conflicts it is the holder of, derived as they are read (Decided 12).
       return yield* commands.services(projectId, workspaceId)
     }
+    if (decision.name === 'commands.stopService') {
+      const { projectId, runId } = decision.argument
+      return yield* commands.stopIn(projectId, runId)
+    }
     // What a human decides of a command the agent proposed: the one way into the catalogue
     // besides the settings (D8-11).
     if (decision.name === 'commands.proposeAccept') {

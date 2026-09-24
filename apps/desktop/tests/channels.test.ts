@@ -49,7 +49,7 @@ describe('Tout canal déclaré est branché', () => {
     const lent = Object.keys(CHANNELS).filter(
       (channel) => channel.startsWith('commands.') || channel.startsWith('context.'),
     )
-    expect(lent).toHaveLength(12)
+    expect(lent).toHaveLength(13)
     expect(lent.filter((channel) => !names.has(channel))).toEqual([])
   })
 })

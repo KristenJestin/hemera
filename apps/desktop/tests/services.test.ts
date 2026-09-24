@@ -174,6 +174,39 @@ describe('Stopping one instance leaves the other running', () => {
     expect(seen.inMain.map((run) => run.id)).toEqual([seen.here.id])
     expect(seen.inLoginForm).toEqual([])
   })
+
+  it("stops the login-form instance from its Workspace's services, where no Session asks", async () => {
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const { main, workspace, inLoginForm } = yield* twoWorkspaces
+        const commands = yield* Commands
+        const there = yield* commands.run(
+          request(inLoginForm, {
+            ...dev,
+            cwd: workspace.path,
+            workspaceId: workspace.id,
+            workspaceName: workspace.name,
+          }),
+        )
+        const here = yield* commands.run(request(main, dev))
+        // Another Project knows no run of this one: the id alone stops nothing there.
+        const elsewhere = yield* Effect.flip(commands.stopIn('another-project', there.id))
+        const stopped = yield* commands.stopIn(main.projectId, there.id)
+        return {
+          here,
+          elsewhere,
+          stopped,
+          inMain: yield* commands.services(main.projectId, null),
+          inLoginForm: yield* commands.services(main.projectId, workspace.id),
+        }
+      }),
+    )
+
+    expect(seen.elsewhere.name).toBe('UnknownRunError')
+    expect(seen.stopped.state).toBe('stopped')
+    expect(seen.inMain.map((run) => run.id)).toEqual([seen.here.id])
+    expect(seen.inLoginForm).toEqual([])
+  })
 })
 
 /** A port nothing listens on: one the system handed out, closed again before it is used. */

@@ -420,6 +420,7 @@ describe('The agent starts the app and the user opens it', () => {
       'commands.runs',
       'commands.services',
       'commands.stop',
+      'commands.stopService',
       'commands.update',
       'context.read',
     ])
