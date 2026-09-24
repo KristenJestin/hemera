@@ -133,6 +133,36 @@ describe('Un process dédié muet est une erreur, pas une attente', () => {
     expect(Option.isNone(outcome)).toBe(true)
   })
 
+  test('what Git does for a Workspace is not hurried: a cleanup takes as long as Git does', async () => {
+    const silent = engineConversation(port(null), alive, Duration.millis(30))
+
+    /** Whether a use case is still waited on after four times the patience. */
+    const waiting = <A, E>(asked: Effect.Effect<A, E>) =>
+      asked.pipe(Effect.timeoutOption(Duration.millis(120)), Effect.map(Option.isNone))
+    const outcomes = await Effect.runPromise(
+      Effect.all(
+        [
+          waiting(
+            silent.ask('workspaces.plan', { projectId: 'atlas', key: 'HEM-7', slug: 'login-form' }),
+          ),
+          waiting(
+            silent.ask('workspaces.create', {
+              projectId: 'atlas',
+              specId: null,
+              name: 'login-form',
+              repositories: [],
+            }),
+          ),
+          waiting(silent.ask('workspaces.status', { id: 'login-form' })),
+          waiting(silent.ask('workspaces.cleanup', { id: 'login-form' })),
+        ],
+        { concurrency: 'unbounded' },
+      ),
+    )
+
+    expect(outcomes).toEqual([true, true, true, true])
+  })
+
   test('the wait is the one it was given, not one that goes on until something happens', async () => {
     const silent = engineConversation(port(null), alive, Duration.millis(30))
 
