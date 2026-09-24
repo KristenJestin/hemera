@@ -109,8 +109,13 @@ export const ColouredInItsOwnLanguage: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('+2')).toBeVisible()
-    await waitFor(() =>
-      expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0),
+    // The grammar is a module of its own, imported when the first block of that language is
+    // drawn: on a machine busy with the rest of the run that import outlasts the default
+    // patience of a wait, and the wait reports a plain draw that had simply not been coloured
+    // yet. Ten seconds is what the session story gives the same grammar.
+    await waitFor(
+      () => expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0),
+      { timeout: 10_000 },
     )
     await expect(canvasElement.querySelectorAll('.tok-comment').length).toBeGreaterThan(0)
   },
@@ -126,8 +131,10 @@ export const ColouredAsAStylesheet: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('+1')).toBeVisible()
-    await waitFor(() =>
-      expect(canvasElement.querySelectorAll('.tok-constant').length).toBeGreaterThan(0),
+    // A stylesheet grammar is another module, fetched the same way and given the same patience.
+    await waitFor(
+      () => expect(canvasElement.querySelectorAll('.tok-constant').length).toBeGreaterThan(0),
+      { timeout: 10_000 },
     )
   },
 }
