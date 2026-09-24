@@ -349,6 +349,27 @@ describe('Every tool shows its subject', () => {
     expect(subjectOf('session_get', '{}')).toBeUndefined()
   })
 
+  test('the revision read, the section, list or question written, and the phase, ready or title proposed', () => {
+    expect(subjectOf('spec_read', '{}')).toBeUndefined()
+    expect(subjectOf('spec_read', JSON.stringify({ revision: 2 }))).toEqual({ text: 'revision 2' })
+    expect(
+      subjectOf('spec_write', args({ section: 'scope', body: 'CSV only.', key: 'k' })),
+    ).toEqual({ text: 'scope' })
+    expect(subjectOf('spec_write', '{"stories":"[{\\"title\\": \\"Exp')?.text).toBe('stories')
+    expect(subjectOf('spec_write', args({ tasks: '[]', key: 'k' }))?.text).toBe('tasks')
+    expect(subjectOf('spec_write', args({ question: 'Which format first?', key: 'k' }))?.text).toBe(
+      'Which format first?',
+    )
+    expect(
+      subjectOf('spec_propose', args({ kind: 'phase_done', phase: 'shape', key: 'k' }))?.text,
+    ).toBe('shape')
+    expect(subjectOf('spec_propose', args({ kind: 'ready', key: 'k' }))?.text).toBe('ready')
+    expect(
+      subjectOf('spec_propose', args({ kind: 'spec', title: 'Export the Journal', key: 'k' }))
+        ?.text,
+    ).toBe('Export the Journal')
+  })
+
   test('a long line is cut on the line and whole in its title', () => {
     const line = `node -e "${'x'.repeat(80)}"`
     const subject = subjectOf('commands_run', args({ line, key: 'k' }))

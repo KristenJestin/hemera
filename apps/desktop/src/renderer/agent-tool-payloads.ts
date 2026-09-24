@@ -131,8 +131,10 @@ function pathSubject(path: string): ToolSubject {
  * The file of the three that touch one; the folder a listing is of, the Workspace root itself
  * named `root`; the query of a search, quoted, and the folder it was kept to; the catalogue name
  * or the one-off line a command was run by; the name of the run a stop or an output is about,
- * which the runs of the Session know and the arguments only hold the identifier of. Nothing for
- * the three that are about nothing but the Project, the catalogue or the Session.
+ * which the runs of the Session know and the arguments only hold the identifier of. Of the Spec
+ * tools: an older revision read; the section, the list or the question written; the phase
+ * declared, `ready`, or the title of a Spec proposed. Nothing for the three that are about nothing
+ * but the Project, the catalogue or the Session, nor for a read of the current revision.
  */
 export function subjectOf(
   tool: string,
@@ -165,6 +167,25 @@ export function subjectOf(
       const run = stringArgument(bounded, ['run'])
       if (run === undefined) return undefined
       return shortened(runs.find((one) => one.id === run)?.name ?? run)
+    }
+    case 'spec_read': {
+      const revision = new RegExp(String.raw`"revision"\s*:\s*(\d+)`).exec(bounded)?.[1]
+      return revision === undefined ? undefined : { text: `revision ${revision}` }
+    }
+    case 'spec_write': {
+      const section = stringArgument(bounded, ['section'])
+      if (section !== undefined) return { text: section }
+      // A list is JSON text the bound may have cut: its name is enough to say what was written.
+      for (const list of ['stories', 'tasks'])
+        if (bounded.includes(`"${list}"`)) return { text: list }
+      const question = stringArgument(bounded, ['question'])
+      return question === undefined ? undefined : shortened(question)
+    }
+    case 'spec_propose': {
+      const kind = stringArgument(bounded, ['kind'])
+      if (kind === 'ready') return { text: 'ready' }
+      const named = stringArgument(bounded, [kind === 'spec' ? 'title' : 'phase'])
+      return named === undefined ? undefined : shortened(named)
     }
     case 'commands_list':
     case 'project_get':
