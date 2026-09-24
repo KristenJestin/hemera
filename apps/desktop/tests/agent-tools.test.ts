@@ -1010,8 +1010,12 @@ describe('A command saved in the settings is listed to the agent at once', () =>
           projectId: session.projectId,
           name: 'check',
           line: 'bun run check',
-          kind: 'check',
+          lineWindows: null,
+          lineLinux: null,
+          type: 'test',
           folder: null,
+          scope: 'workspace',
+          portless: false,
         })
         yield* runtime.prompt(session.id, 'what can I run?')
       }),
@@ -1019,7 +1023,7 @@ describe('A command saved in the settings is listed to the agent at once', () =>
 
     expect(agent.answers.used[0]?.isError).toBe(false)
     expect(agent.answers.used[0]?.text).toContain(
-      'check  check  in the Workspace root  bun run check',
+      'check  test  in the Workspace root  bun run check',
     )
   })
 })
