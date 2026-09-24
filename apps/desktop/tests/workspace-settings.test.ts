@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
+import { repositoryLinesOf } from '#renderer/project-lines.ts'
 import {
   branchesKeptOf,
   recipeAddOf,
@@ -49,6 +50,7 @@ import {
   setBranchPrefix,
   setRepositoryIncluded,
   setWorkspacesRoot,
+  updateRepository,
 } from '#renderer/projects-store.ts'
 
 import { git, repository } from './repositories.ts'
@@ -493,5 +495,29 @@ describe('A run step fails on a non-zero exit', () => {
     expect(workspacesSnapshot().refusal).toContain('no-such-run')
     await showStepRun(null)
     expect(workspacesSnapshot().shown?.run).toBeNull()
+  })
+})
+
+describe('A repository is rewritten from its dialog', () => {
+  test('its icon and its inclusion are saved, and the row wears them', async () => {
+    const project = await atlas()
+
+    expect(
+      await updateRepository(held(project.id), './api', {
+        path: './api',
+        icon: 'server',
+        included: false,
+      }),
+    ).toBe(true)
+
+    expect(held(project.id)).toMatchObject({
+      included: [],
+      repositoryIcons: { './api': 'server' },
+    })
+    const [line] = repositoryLinesOf(
+      [{ path: './api', git: 'main', exists: true }],
+      held(project.id),
+    )
+    expect(line).toMatchObject({ icon: 'server', includedByDefault: false })
   })
 })

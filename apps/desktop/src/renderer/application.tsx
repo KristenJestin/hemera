@@ -98,6 +98,7 @@ import {
   toolsSnapshot,
 } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
+import { repositoryLinesOf } from './project-lines.ts'
 import {
   addRecipeStep,
   cleanUp,
@@ -164,9 +165,9 @@ import {
   renameProject,
   restoreProject,
   setBranchPrefix,
-  setRepositoryIncluded,
   setWorkspacesRoot,
   subscribeToProjects,
+  updateRepository,
 } from './projects-store.ts'
 import {
   keepActiveProject,
@@ -690,17 +691,9 @@ export function Application() {
       .invoke('repositories.status', { root, paths: current.repositories })
       .then((found) => {
         if (!asking) return
-        setRepositories(
-          found.map((one) => ({
-            path: one.path,
-            branch: one.git,
-            exists: one.exists,
-            // What the Project says of it, which is what a dedicated Workspace takes (D8-04).
-            includedByDefault: current.included.includes(one.path),
-            // The icon is not stored yet: the row draws its folder or its branch.
-            icon: null,
-          })),
-        )
+        // What the Project says of each — whether a dedicated Workspace takes it (D8-04), the
+        // icon it wears — beside what the disk says.
+        setRepositories(repositoryLinesOf(found, current))
       })
       .catch(unanswered('repositories.status'))
     // And what the Workspace holds that has not been declared, which is what the page offers
@@ -1141,12 +1134,18 @@ export function Application() {
             const went = await addRepository(latest, path)
             return went ? null : projectsSnapshot().refusal
           }}
-          onRemoveRepository={(path) => void removeRepository(current, path)}
-          onToggleIncluded={(path, included) => {
+          onUpdateRepository={async (path, next) => {
+            // Read again rather than closed over, as a declaration is: see above.
             const latest =
               projectsSnapshot().projects.find((one) => one.id === current.id) ?? current
-            void setRepositoryIncluded(latest, path, included)
+            const went = await updateRepository(latest, path, {
+              path: next.path,
+              icon: next.icon,
+              included: next.includedByDefault,
+            })
+            return went ? null : projectsSnapshot().refusal
           }}
+          onRemoveRepository={(path) => void removeRepository(current, path)}
           commands={tools.catalogues.get(current.id) ?? []}
           portlessInstalled={tools.portlessInstalled}
           onSaveCommand={async (command, existing) =>

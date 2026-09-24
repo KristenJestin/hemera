@@ -1,4 +1,4 @@
-import type { Project } from '@hemera/ipc'
+import type { Project, RepositoryIcon } from '@hemera/ipc'
 
 /**
  * The Projects of the data folder, as the window holds them (design D4-11).
@@ -180,6 +180,29 @@ export async function setRepositoryIncluded(
       version: project.version,
       path: relativePath,
       included,
+    })
+    return await window.hemera.invoke('projects.list', {})
+  })
+}
+
+/**
+ * Rewrites a declared repository at once (recette 1, item 11): its path, its icon, and whether a
+ * dedicated Workspace takes it by default. The engine moves the commands and the recipe steps that
+ * named its old path along with it; a path it refuses is its sentence, kept as `refusal`.
+ */
+export async function updateRepository(
+  project: Project,
+  relativePath: string,
+  next: { path: string; icon: RepositoryIcon | null; included: boolean },
+): Promise<boolean> {
+  return await acting(async () => {
+    await window.hemera.invoke('repositories.update', {
+      id: project.id,
+      version: project.version,
+      relativePath,
+      newPath: next.path,
+      icon: next.icon,
+      included: next.included,
     })
     return await window.hemera.invoke('projects.list', {})
   })

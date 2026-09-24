@@ -1,9 +1,9 @@
-import type { Command } from '@hemera/ipc'
-import type { CommandLine } from '@hemera/ui'
+import type { Command, Project } from '@hemera/ipc'
+import type { CommandLine, RepositoryLine } from '@hemera/ui'
 
 /**
- * What the Commands section of a Project's settings draws from the engine's views, and what it
- * hands back to it (D6-12, D8-07, D8-10, recette 1).
+ * What the Commands and Repositories sections of a Project's settings draw from the engine's
+ * views, and what they hand back to it (D6-12, D8-04, D8-07, D8-10, recette 1).
  *
  * Both ways, and nothing lost on the way: a command read and saved unchanged is written as it was
  * read. Kept apart from the page, which imports the components, so a test reads it without a DOM.
@@ -58,4 +58,28 @@ export function commandWriteOf(line: CommandLine): CommandWrite {
     portless: line.portless,
     portlessName: line.portlessName,
   }
+}
+
+/** What the disk says of one declared location, as `repositories.status` answers it. */
+export interface LocationFound {
+  readonly path: string
+  readonly git: string | null
+  readonly exists: boolean
+}
+
+/**
+ * The declared repositories as their section lists them: what the disk says of each, and what the
+ * Project says — whether a dedicated Workspace takes it (D8-04) and the icon it wears.
+ */
+export function repositoryLinesOf(
+  found: readonly LocationFound[],
+  project: Pick<Project, 'included' | 'repositoryIcons'>,
+): RepositoryLine[] {
+  return found.map((one) => ({
+    path: one.path,
+    branch: one.git,
+    exists: one.exists,
+    includedByDefault: project.included.includes(one.path),
+    icon: project.repositoryIcons[one.path] ?? null,
+  }))
 }

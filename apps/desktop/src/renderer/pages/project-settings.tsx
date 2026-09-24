@@ -13,6 +13,7 @@ import {
   WorkspaceList,
   WorkspaceRepositories,
   type ProjectSettingsDraft,
+  type RepositoryDraft,
   type RepositoryLine,
 } from '@hemera/ui'
 
@@ -203,8 +204,8 @@ export function ProjectSettingsPage({
   onCheckFolder,
   onMainPathChange,
   onAddRepository,
+  onUpdateRepository,
   onRemoveRepository,
-  onToggleIncluded,
   commands,
   portlessInstalled,
   onSaveCommand,
@@ -233,9 +234,12 @@ export function ProjectSettingsPage({
   onCheckFolder: (path: string) => Promise<string | null>
   onMainPathChange: (path: string) => void
   onAddRepository: (path: string) => Promise<string | null>
+  /**
+   * Rewrites a declared repository, found by the path it had: its path, its icon and whether a
+   * dedicated Workspace takes it (D8-04). Answers the engine's refusal, or null.
+   */
+  onUpdateRepository: (path: string, next: RepositoryDraft) => Promise<string | null>
   onRemoveRepository: (path: string) => void
-  /** Says whether a repository is in every dedicated Workspace unless left out (D8-04). */
-  onToggleIncluded: (path: string, included: boolean) => void
   /** The catalogue of the Project, as the engine answered it (D6-12). */
   commands: readonly Command[]
   /** Whether `portless` is on this machine, as the engine answered it once (D8-10). */
@@ -287,17 +291,7 @@ export function ProjectSettingsPage({
         onMainPathChange={onMainPathChange}
         onAddRepository={onAddRepository}
         onRemoveRepository={onRemoveRepository}
-        onUpdateRepository={async (path, next) => {
-          // Only the inclusion is written for now: a new path or an icon waits for the engine.
-          const current = repositories.find((one) => one.path === path)
-          if (next.path !== path || next.icon !== (current?.icon ?? null)) {
-            return 'Changing the path or the icon of a repository is not available yet.'
-          }
-          if (current?.includedByDefault !== next.includedByDefault) {
-            onToggleIncluded(path, next.includedByDefault)
-          }
-          return null
-        }}
+        onUpdateRepository={onUpdateRepository}
         commands={commands.map(commandLineOf)}
         onAddCommand={async (line) => await onSaveCommand(commandWriteOf(line), false)}
         onUpdateCommand={async (line) => await onSaveCommand(commandWriteOf(line), true)}

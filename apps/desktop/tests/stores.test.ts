@@ -23,6 +23,7 @@ import {
   loadProjects,
   projectsSnapshot,
   renameProject,
+  updateRepository,
 } from '#renderer/projects-store.ts'
 import { readPortless, toolsSnapshot } from '#renderer/tools-store.ts'
 
@@ -139,6 +140,43 @@ describe('Le store des Projets porte ce que le moteur a répondu', () => {
       name: 'projects.update',
       argument: { id: 'atlas', version: 3, name: 'Atlas', tone: 'primary', specPrefix: 'ATX' },
     })
+  })
+
+  test('a repository is rewritten at once, path, icon and inclusion, on the version read', async () => {
+    answers.set('repositories.update', project('atlas', 'Atlas', 5))
+    answers.set('projects.list', [project('atlas', 'Atlas', 5)])
+
+    const went = await updateRepository(project('atlas', 'Atlas', 4), './api', {
+      path: './sources/api',
+      icon: 'server',
+      included: false,
+    })
+
+    expect(went).toBe(true)
+    expect(asked[0]).toEqual({
+      name: 'repositories.update',
+      argument: {
+        id: 'atlas',
+        version: 4,
+        relativePath: './api',
+        newPath: './sources/api',
+        icon: 'server',
+        included: false,
+      },
+    })
+  })
+
+  test("a repository's new path refused is the engine's sentence, kept for its dialog", async () => {
+    answers.set('repositories.update', new Error('./sources/api is already declared'))
+
+    const went = await updateRepository(project('atlas', 'Atlas', 4), './api', {
+      path: './sources/api',
+      icon: null,
+      included: true,
+    })
+
+    expect(went).toBe(false)
+    expect(projectsSnapshot().refusal).toBe('./sources/api is already declared')
   })
 
   test('a refusal is kept in the words it came in, and the list is left alone', async () => {
