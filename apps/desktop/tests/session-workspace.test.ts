@@ -49,9 +49,11 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dataFolder, { recursive: true, force: true })
-  rmSync(main, { recursive: true, force: true })
-  rmSync(loginForm, { recursive: true, force: true })
+  // A service stopped by tree may still be closing when the test ends: Windows keeps its folder
+  // until then, as agent-tools.test.ts says.
+  for (const folder of [dataFolder, main, loginForm]) {
+    rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  }
 })
 
 /** A Workspace of a Project, written as a prepared one is: its row, in the state given. */
