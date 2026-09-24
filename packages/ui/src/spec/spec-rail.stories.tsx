@@ -11,7 +11,7 @@ import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.
 /**
  * The rail of the Spec panel: the parts of the Spec grouped by the phase that writes them, one
  * quiet row each, what is on the stage marked by a thin rule. A row says only what needs
- * attention, by a tint of the whole row, an edge on its left or a fainter name, and says it in a
+ * attention, by a tint of the whole row or a fainter name, and says it in a
  * sentence in its tooltip. A group opens on a header in the small type of a label, which puts the
  * whole phase on the stage; `Show all` shows under the hand and the keyboard. The arrows walk it
  * and Enter opens a row. At its foot, how far the Spec is from ready: seven thin segments and one
@@ -175,8 +175,9 @@ async function tooltipSays(row: HTMLElement, said: string): Promise<void> {
 /**
  * One row per state, and no dot anywhere: a part written and current carries nothing, a part
  * still empty has a fainter name, the part being written, one to review and one whose text
- * differs from yours are each tinted in their own colour, and a part you edited wears an edge on
- * its left. Each says its state in a sentence, in its tooltip and as its accessible description.
+ * differs from yours are each tinted in their own colour, and a part you edited wears nothing on
+ * the row: the only line on a row's left is the rule of what is on the stage, even on a part you
+ * edited. Each says its state in a sentence, in its tooltip and as its accessible description.
  */
 export const States: Story = {
   args: { initial: 'tasks' },
@@ -208,9 +209,9 @@ export const States: Story = {
       await expect(breath === null ? '' : getComputedStyle(breath).animationName).toBe('breathe')
     }
     await expect(getComputedStyle(writing).animationName).toBe('none')
-    // Edited by you: an edge on the left and no fill.
+    // Edited by you: no edge and no fill, the sentence alone.
     await expect(tintOf(edited)).toBe('none')
-    await expect(getComputedStyle(edited).borderLeftWidth).toBe('2px')
+    await expect(getComputedStyle(edited).borderLeftWidth).toBe('0px')
     // Each state in a sentence.
     await expect(empty).toHaveAccessibleDescription('Empty')
     await expect(edited).toHaveAccessibleDescription('Edited by you')
@@ -223,6 +224,11 @@ export const States: Story = {
     await tooltipSays(review, 'To review')
     await tooltipSays(writing, 'The agent is writing this')
     await tooltipSays(written, 'Problem')
+    // On the stage, the part you edited wears the rule and nothing beside it: one line.
+    await userEvent.click(edited)
+    await expect(edited).toHaveAttribute('aria-current', 'true')
+    await expect(ruled(edited)).toBe(true)
+    await expect(getComputedStyle(edited).borderLeftWidth).toBe('0px')
   },
 }
 
@@ -343,6 +349,14 @@ export const GroupHeaders: Story = {
     await expect(top('Shape')).toBe('0px')
     await expect(top('Plan')).toBe('1px')
     await expect(top('Decompose')).toBe('1px')
+    // A header is its glyph and its name: no state dot on any of them.
+    for (const heading of [shape, plan, decompose]) {
+      const dots = [...heading.querySelectorAll('span')].filter((span) => {
+        const box = span.getBoundingClientRect()
+        return span.textContent === '' && box.width > 0 && box.width <= 8 && box.height <= 8
+      })
+      expect(dots).toEqual([])
+    }
     // The hint: hidden at rest, shown under the hand and under the keyboard.
     await expect(hintOf(shape)).toHaveTextContent('Show all')
     await expect(shown(shape)).toBe(false)
@@ -497,7 +511,8 @@ export const Folded: Story = {
     await expect(tints).not.toContain('none')
     await expect(new Set(tints).size).toBe(3)
     await expect(tintOf(square('Problem'))).toBe('none')
-    await expect(getComputedStyle(square('Scope')).borderLeftWidth).toBe('2px')
+    // Edited by you: no edge on its square either, the tooltip says it.
+    await expect(getComputedStyle(square('Scope')).borderLeftWidth).toBe('0px')
     // The name and the state, in the tooltip.
     await tooltipSays(square('Scope'), 'Scope · Edited by you')
     await tooltipSays(square('Behaviour'), 'Behaviour · To review')

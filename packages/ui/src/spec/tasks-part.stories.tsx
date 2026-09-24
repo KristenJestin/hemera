@@ -15,7 +15,11 @@ const meta = {
   args: { tasks: TASKS, mark: 'agent' },
   argTypes: {
     tasks: { control: 'object', description: 'The tasks, in order.' },
-    mark: { control: 'select', options: MARKS, description: 'The mark in the margin.' },
+    mark: {
+      control: 'select',
+      options: MARKS,
+      description: 'The state, said to a screen reader in the heading.',
+    },
   },
 } satisfies Meta<typeof TasksPart>
 

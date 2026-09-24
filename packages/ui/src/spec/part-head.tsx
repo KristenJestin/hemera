@@ -5,8 +5,10 @@ import { crossfade, useTransition } from '../motion.ts'
 import type { Mark } from './model.ts'
 
 /**
- * The top of a part of the Spec document: its mark in the margin, its name, and one quiet line
- * of facts beside it (revision 2 of the brief, "No outline: the Spec is a document").
+ * The top of a part of the Spec document: its name, and one quiet line of facts beside it. The
+ * heading is the title alone: the rail already says the part's state, and the facts say who wrote
+ * it, so no dot stands in the margin; the state is said in words to a screen reader alone
+ * (revision 2 of the brief, "No outline: the Spec is a document").
  *
  * The facts say who wrote it and at which version — `agent · v3`, `you · v4 · sent to the agent
  * next turn` — and whatever the part offers on its own sits at the end of them, as small as they
@@ -25,33 +27,7 @@ export const MARK_WORDS: Record<Mark, string> = {
   writing: 'the agent is writing this',
 }
 
-/**
- * The dot in the margin: an empty ring, the muted foreground of a written text, the primary edge
- * of a human hand, amber when stale, red in conflict, and the primary pulse of a text being
- * written — the only one that moves, on the breath of every running thing in the window, and
- * not at all under reduced motion.
- */
-const MARKS: Record<Mark, string> = {
-  empty: 'size-1.5 rounded-full border border-input',
-  agent: 'size-1.5 rounded-full bg-muted-foreground',
-  human: 'size-1.5 rounded-full bg-muted-foreground outline outline-offset-1 outline-primary',
-  stale: 'size-1.5 rounded-full bg-warning',
-  conflict: 'size-1.5 rounded-full bg-destructive',
-  writing: 'size-1.5 rounded-full bg-primary motion-safe:animate-breathe',
-}
-
-/** The box the dot sits in, in the margin left of the heading, so the headings line up. */
-const MARK_BOX = 'absolute top-2 -left-4 flex size-2 items-center justify-center'
-
-export function StateMark({ mark }: { mark: Mark }): ReactNode {
-  return (
-    <span className={MARK_BOX} aria-hidden="true">
-      <span className={MARKS[mark]} />
-    </span>
-  )
-}
-
-const HEAD = 'relative flex flex-wrap items-baseline gap-x-3 gap-y-0.5'
+const HEAD = 'flex flex-wrap items-baseline gap-x-3 gap-y-0.5'
 
 const HEADING = 'text-base font-semibold'
 
@@ -85,7 +61,6 @@ export function PartHead({ title, mark, facts, saves = 0, end }: PartHeadProps):
   }, [saves])
   return (
     <div className={HEAD}>
-      <StateMark mark={mark} />
       <h3 className={HEADING}>
         {title}
         <span className="sr-only">{`, ${MARK_WORDS[mark]}`}</span>

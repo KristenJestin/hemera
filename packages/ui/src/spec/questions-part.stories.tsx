@@ -18,7 +18,11 @@ const meta = {
   args: { questions: QUESTIONS, mark: 'agent', onGoToQuestion: fn() },
   argTypes: {
     questions: { control: 'object', description: 'The questions, open and answered.' },
-    mark: { control: 'select', options: MARKS, description: 'The mark in the margin.' },
+    mark: {
+      control: 'select',
+      options: MARKS,
+      description: 'The state, said to a screen reader in the heading.',
+    },
     onGoToQuestion: { description: 'Takes the thread to where an open question is asked.' },
   },
 } satisfies Meta<typeof QuestionsPart>

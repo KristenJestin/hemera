@@ -22,9 +22,9 @@ import type { IconProps } from '../icons.ts'
  * needs attention, and says it with the row itself. An item with nothing to say carries nothing.
  * An empty one has its name in a fainter text. The one the agent is working on is tinted in the
  * primary, the tint breathing; one to review is tinted in the warning colour, one in conflict in
- * the destructive one. One edited by the reader wears an edge of the info colour on its left,
- * which goes with a tint rather than replacing it. Each says its state in a sentence, in its
- * tooltip and as its accessible description.
+ * the destructive one. One edited by the reader wears nothing: the part itself says who wrote it,
+ * and the only line on a row's left is the rule of what is on the stage. Each says its state in a
+ * sentence, in its tooltip and as its accessible description.
  *
  * What is on the stage says so with a thin rule of the one accent and nothing else. A group opens
  * on its header, which reads as the header of a section and not as one more row: its name in the
@@ -42,7 +42,7 @@ import type { IconProps } from '../icons.ts'
  * tooltip, beside the state.
  */
 
-/** What needs attention about an item, which the row says with a tint, an edge or a fainter name. */
+/** What needs attention about an item, which the row says with a tint, a fainter name or a sentence. */
 export type RailAttention = 'writing' | 'review' | 'conflict' | 'edited' | 'empty' | 'none'
 
 /** A glyph of the catalogue, at the rail's size. */
@@ -56,11 +56,6 @@ export interface MissionRailItem {
   label: string
   count?: number | undefined
   attention: RailAttention
-  /**
-   * An edit of the reader's the agent has not read yet, when the item also needs another kind of
-   * attention: the edge goes with the tint. `edited` as the attention says it alone.
-   */
-  edited?: boolean | undefined
   /** The state in a sentence, for the tooltip and the accessible description. */
   description?: string | undefined
 }
@@ -99,9 +94,6 @@ const TINTS: Partial<Record<RailAttention, string>> = {
   review: 'bg-warning/15',
   conflict: 'bg-destructive/15',
 }
-
-/** The edge of an item the reader edited, which the agent reads next: beside a tint, not instead. */
-const EDITED = 'rounded-l-none border-l-2 border-info'
 
 /**
  * The name of an empty item, fainter than the others: as faint as small text goes on the panel
@@ -342,7 +334,6 @@ export function MissionRail({
                             folded ? ROW_FOLDED : ROW,
                             on ? ROW_CURRENT : item.attention === 'empty' ? EMPTY : ROW_OFF,
                             (on || whole) && (folded ? RULE_FOLDED : RULE),
-                            (item.attention === 'edited' || item.edited === true) && EDITED,
                           )}
                           onClick={() => onSelect(item.id)}
                         >

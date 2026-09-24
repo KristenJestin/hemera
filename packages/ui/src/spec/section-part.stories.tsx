@@ -7,11 +7,19 @@ import { BUG, CONFLICT, GATE_FULL, SCOPE_MINE, STALE } from './spec-fixtures.ts'
 import { SectionPart } from './section-part.tsx'
 
 /**
- * One section of the Spec document: its mark, its name, the facts beside it, and the text edited where it is read —
+ * One section of the Spec document: its name alone as its heading, the facts beside it, and the text edited where it is read —
  * saved when the caret leaves, `saved` in the meta line for a second, a preview of the Markdown
  * on the eye. Frozen, it is the text and a lock; in conflict, your text stays in the editor under
  * the banner.
  */
+
+/** The marks drawn beside a heading, which a heading no longer wears: empty and dot-sized. */
+function dotsBeside(heading: HTMLElement): Element[] {
+  return [...(heading.parentElement?.querySelectorAll('span') ?? [])].filter((span) => {
+    const box = span.getBoundingClientRect()
+    return span.textContent === '' && box.width > 0 && box.width <= 8 && box.height <= 8
+  })
+}
 
 function sectionOf(sections: SectionView[], name: SectionView['name']): SectionView {
   return sections.find((section) => section.name === name)!
@@ -113,7 +121,10 @@ type Story = StoryObj<typeof meta>
 export const ByTheAgent: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('heading', { name: /^Expected outcome/ })).toBeVisible()
+    const heading = canvas.getByRole('heading', { name: /^Expected outcome/ })
+    await expect(heading).toBeVisible()
+    // The heading is the title alone: no state dot in its margin.
+    await expect(dotsBeside(heading)).toEqual([])
     await expect(canvas.queryByText('agent')).toBeNull()
     await expect(canvas.queryByText(/^v\d+$/)).toBeNull()
     await expect(canvas.getByRole('textbox', { name: 'Expected outcome' })).toBeVisible()
@@ -127,6 +138,7 @@ export const ByYou: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('you')).toBeVisible()
+    await expect(dotsBeside(canvas.getByRole('heading', { name: /^Reproduction/ }))).toEqual([])
     await expect(canvas.getByText('sent to the agent next turn')).toBeVisible()
     await expect(canvas.getByText(/Replayed after the build/)).toBeVisible()
   },

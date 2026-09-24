@@ -17,7 +17,11 @@ const meta = {
   args: { stories: STORIES, mark: 'agent', editable: true, onSaveStory: fn() },
   argTypes: {
     stories: { control: 'object', description: 'The stories, in order, with their criteria.' },
-    mark: { control: 'select', options: MARKS, description: 'The mark in the margin.' },
+    mark: {
+      control: 'select',
+      options: MARKS,
+      description: 'The state, said to a screen reader in the heading.',
+    },
     editable: { control: 'boolean', description: 'A draft at its current revision.' },
     note: { control: 'text', description: 'What the facts add.' },
     onSaveStory: { description: 'A story, once, with what changed in it.' },

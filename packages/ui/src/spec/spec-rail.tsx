@@ -30,7 +30,7 @@ import { SPEC_PART_ICONS, SPEC_PHASE_ICONS } from './spec-icons.ts'
  * maintainer's decisions on the rail's states).
  *
  * What it draws and how is the mission rail's (`session/mission-rail.tsx`): a row says only what
- * needs attention, by a tint, an edge or a fainter name, and says it in a sentence; the headers,
+ * needs attention, by a tint or a fainter name, and says it in a sentence; the headers,
  * the hint, the rule of what is on the stage and the folded band are the same for every mission.
  * What is the Spec's is here: which parts a type has, under which phase, the glyph of each, what
  * each mark asks of the reader, the sentences, and the readiness at the foot. The foot already
@@ -150,7 +150,6 @@ function itemOf(row: RailRow, following: SpecTarget | undefined): MissionRailIte
     label: row.label,
     count: row.count,
     attention: ATTENTION[state],
-    edited,
     description: said.length === 0 ? undefined : said.join('. '),
   }
 }
