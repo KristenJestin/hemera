@@ -101,7 +101,14 @@ import {
   cleanUp,
   createOnFolder,
   listenToWorkspaces,
+  readProjectVariables,
   readWorkspaces,
+  removeVariable,
+  resumePreparation,
+  selectRun,
+  setVariable,
+  showWorkspace,
+  stopService,
   subscribeToWorkspaces,
   workspacesSnapshot,
 } from './workspaces-store.ts'
@@ -543,8 +550,12 @@ export function Application() {
   useEffect(() => {
     if (settingsOf === null) return
     void readCatalogue(settingsOf)
-    // And its Workspaces, which the engine's `workspace` event keeps current from then on (D8-02).
+    // And its Workspaces, which the engine's `workspace` event keeps current from then on (D8-02),
+    // and its own variables, which a Workspace shown lists under its own (D8-06).
     void readWorkspaces(settingsOf)
+    void readProjectVariables(settingsOf)
+    // The Workspace shown is the page's: leaving it puts the Workspace away.
+    return () => void showWorkspace(null)
   }, [settingsOf])
 
   // And what it was provided, for its Context tab: read when it is opened, and again by the store
@@ -1064,6 +1075,21 @@ export function Application() {
           onRemoveCommand={(name) => void removeCommand(current.id, name)}
           onArchive={() => void archiveProject(current)}
           workspaces={places.workspaces.get(current.id) ?? []}
+          shown={places.shown?.projectId === current.id ? places.shown : null}
+          projectVariables={places.variables.get(current.id) ?? []}
+          workspaceActions={{
+            onShow: (id) => {
+              const chosen = places.workspaces.get(current.id)?.find((one) => one.id === id)
+              void showWorkspace(chosen ?? null)
+            },
+            onResume: (id) => void resumePreparation(id),
+            onSetVariable: async (workspaceId, key, value) =>
+              await setVariable(current.id, workspaceId, key, value),
+            onRemoveVariable: (workspaceId, key) =>
+              void removeVariable(current.id, workspaceId, key),
+            onSelectRun: selectRun,
+            onStopService: (runId) => void stopService(runId),
+          }}
           onCreateWorkspace={async (path, name) => await createOnFolder(current.id, path, name)}
           onCleanupWorkspace={async (id) => await cleanUp(current.id, id)}
         />

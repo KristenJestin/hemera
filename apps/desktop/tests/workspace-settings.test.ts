@@ -14,12 +14,25 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
-import { branchesKeptOf, workspaceRowsOf } from '#renderer/workspace-details.ts'
+import {
+  branchesKeptOf,
+  serviceLinesOf,
+  stepLinesOf,
+  workspaceCardOf,
+  workspaceRowsOf,
+  workspaceVariablesOf,
+} from '#renderer/workspace-details.ts'
 import {
   cleanUp,
   createOnFolder,
+  listenToWorkspaces,
+  readProjectVariables,
   readWorkspaces,
+  setVariable,
+  showWorkspace,
+  stopService,
   workspacesOf,
+  workspacesSnapshot,
 } from '#renderer/workspaces-store.ts'
 import {
   loadProjects,
@@ -44,6 +57,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  await showWorkspace(null)
   await opened?.close()
   opened = null
   for (const folder of [dataFolder, main, elsewhere])
@@ -187,5 +201,114 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
     expect(said).toMatch(/untracked|modified/)
     await readWorkspaces(project.id)
     expect(workspacesOf(project.id).find((one) => one.id === workspace.id)?.state).toBe('ready')
+  })
+})
+
+/** Waits for the store to hold what is waited for, in real time. */
+async function until(ready: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 200 && !ready(); tries += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a poll: each look waits for the one before it
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
+describe('A Workspace is shown under the list with its Git state, steps and variables', () => {
+  test("its card says Git's branch, its steps are done, and its PORT overrides the Project's", async () => {
+    const project = await atlas()
+    const workspace = await loginForm(opened!, project.id)
+    await readWorkspaces(project.id)
+
+    // Scenario: "A Workspace's variable overrides the Project's", as the editors write it.
+    expect(await setVariable(project.id, null, 'PORT', '3000')).toBeNull()
+    await readProjectVariables(project.id)
+    await showWorkspace(workspace)
+    expect(await setVariable(project.id, workspace.id, 'PORT', '3001')).toBeNull()
+
+    const shown = workspacesSnapshot().shown!
+    // Scenario: "Each repository shows its branch, commit and changes", read when shown.
+    const [api] = workspaceCardOf(workspace, shown.status).repositories
+    expect(api).toMatchObject({
+      path: './api',
+      git: { ok: true, branch: 'atlas/HEM-7-login-form' },
+    })
+    expect(stepLinesOf(shown.steps).map((one) => [one.kind, one.state])).toEqual([
+      ['worktree', 'done'],
+    ])
+    expect(
+      workspaceVariablesOf(shown.variables, workspacesSnapshot().variables.get(project.id) ?? []),
+    ).toEqual([{ key: 'PORT', value: '3001', overrides: '3000' }])
+    // A key a shell would have to quote is the engine's refusal too, in its words.
+    expect(await setVariable(project.id, workspace.id, 'api-url', 'x')).not.toBeNull()
+  })
+})
+
+/** A line that prints an address on `port` and stays up, never listening on it. */
+const printsOnly = (port: number) =>
+  `"${process.execPath}" -e "console.log('http://localhost:${String(port)}');setInterval(()=>{},1000)"`
+
+describe('A port conflict names its holder', () => {
+  test('the services of each Workspace say the conflict, and one instance is stopped alone', async () => {
+    const project = await atlas()
+    const stop = listenToWorkspaces()
+    try {
+      const workspace = await loginForm(opened!, project.id)
+      await readWorkspaces(project.id)
+      const { bridge } = opened!
+      await bridge.invoke('commands.create', {
+        projectId: project.id,
+        name: 'dev',
+        line: printsOnly(43917),
+        type: 'serve',
+        lineWindows: null,
+        lineLinux: null,
+        scope: 'workspace',
+        portless: false,
+        folder: null,
+      })
+      const inMain = await bridge.invoke('sessions.create', {
+        projectId: project.id,
+        provider: 'claude',
+      })
+      const inLoginForm = await bridge.invoke('sessions.create', {
+        projectId: project.id,
+        provider: 'claude',
+        workspaceId: workspace.id,
+      })
+      const mainMade = workspacesOf(project.id).find((one) => one.main)!
+      await showWorkspace(mainMade)
+      const holder = await bridge.invoke('commands.run', { sessionId: inMain.id, name: 'dev' })
+      await until(() => (workspacesSnapshot().shown?.services[0]?.url ?? null) !== null)
+      await bridge.invoke('commands.run', { sessionId: inLoginForm.id, name: 'dev' })
+
+      // The holder's side, derived as the list is read again on the push (Decided 12).
+      await until(() => (workspacesSnapshot().shown?.services[0]?.heldAgainst.length ?? 0) > 0)
+      expect(serviceLinesOf(workspacesSnapshot().shown!.services, [])).toMatchObject([
+        {
+          id: holder.id,
+          workspace: 'main',
+          heldAgainst: [{ port: 43917, run: 'dev', workspace: 'login-form' }],
+        },
+      ])
+
+      // The second's side, in its own Workspace.
+      await showWorkspace(workspace)
+      await until(() => (workspacesSnapshot().shown?.services[0]?.portConflict ?? null) !== null)
+      const [second] = serviceLinesOf(workspacesSnapshot().shown!.services, [])
+      expect(second).toMatchObject({
+        workspace: 'login-form',
+        portConflict: { port: 43917, holderRun: 'dev', holderWorkspace: 'main' },
+      })
+
+      // Scenario: "Stopping one instance leaves the other running", from the settings.
+      await stopService(second!.id)
+      expect(workspacesSnapshot().shown?.services).toEqual([])
+      const still = await bridge.invoke('commands.services', {
+        projectId: project.id,
+        workspaceId: null,
+      })
+      expect(still.map((one) => one.id)).toEqual([holder.id])
+    } finally {
+      stop()
+    }
   })
 })

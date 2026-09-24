@@ -1,16 +1,31 @@
 import { type ReactNode, useState } from 'react'
 
-import type { Command, Workspace } from '@hemera/ipc'
+import type { Command, Variable, Workspace } from '@hemera/ipc'
 import {
+  Card,
   CleanupDialog,
+  PreparationSteps,
   ProjectSettings,
+  RunDetails,
+  ServiceList,
+  VariablesEditor,
+  WorkspaceCard,
   WorkspaceList,
   type CommandLine,
   type ProjectDraft,
   type RepositoryLine,
 } from '@hemera/ui'
 
-import { branchesKeptOf, workspaceRowsOf } from '../workspace-details.ts'
+import {
+  branchesKeptOf,
+  runDetailsOf,
+  serviceLinesOf,
+  stepLinesOf,
+  workspaceCardOf,
+  workspaceRowsOf,
+  workspaceVariablesOf,
+} from '../workspace-details.ts'
+import type { ShownWorkspace } from '../workspaces-store.ts'
 
 /** A command of the catalogue, as its row draws it: the Workspace root is `.` on screen. */
 function lineOf(command: Command): CommandLine {
@@ -48,18 +63,94 @@ function writeOf(line: CommandLine): CommandWrite {
   }
 }
 
+/** What a Workspace shown under the list is asked through (D8-05, D8-06, D8-08). */
+export interface WorkspaceActions {
+  /** Shows a Workspace under the list, or none. */
+  onShow: (id: string | null) => void
+  /** Resumes its preparation; the steps then follow through the engine's events (D8-05). */
+  onResume: (id: string) => void
+  /** Sets a variable of that Workspace over the Project's; answers the refusal, or null. */
+  onSetVariable: (workspaceId: string, key: string, value: string) => Promise<string | null>
+  onRemoveVariable: (workspaceId: string, key: string) => void
+  /** Shows the details of one of its services, or none. */
+  onSelectRun: (runId: string | null) => void
+  /** Stops that one instance of a service, whoever started it (D8-08). */
+  onStopService: (runId: string) => void
+}
+
+/**
+ * One Workspace, under the list (D8-05, D8-06, D8-08, D8-09, D8-15): what Git says of each of its
+ * repositories, its preparation when it has one, its variables over the Project's, its services
+ * whoever started them and, for the one asked, what that run ran.
+ */
+function ShownWorkspaceCards({
+  workspace,
+  shown,
+  projectVariables,
+  catalogue,
+  actions,
+  onCleanup,
+}: {
+  workspace: Workspace
+  shown: ShownWorkspace
+  projectVariables: readonly Variable[]
+  catalogue: readonly Command[]
+  actions: WorkspaceActions
+  onCleanup: () => void
+}): ReactNode {
+  return (
+    <>
+      {/* "Resume" is the preparation's, under its steps and the note that it re-checks them
+          first: offered on the card as well, the page would hold two buttons for one act. */}
+      <WorkspaceCard {...workspaceCardOf(workspace, shown.status)} onCleanup={onCleanup} />
+      {shown.steps.length > 0 && (
+        <PreparationSteps
+          steps={stepLinesOf(shown.steps)}
+          onResume={() => actions.onResume(workspace.id)}
+        />
+      )}
+      <VariablesEditor
+        scope="workspace"
+        name={workspace.name}
+        variables={workspaceVariablesOf(shown.variables, projectVariables)}
+        onSet={async (key, value) => await actions.onSetVariable(workspace.id, key, value)}
+        onRemove={(key) => actions.onRemoveVariable(workspace.id, key)}
+      />
+      <ServiceList
+        services={serviceLinesOf(shown.services, catalogue)}
+        onStop={actions.onStopService}
+        selected={shown.run?.id ?? null}
+        onSelect={(id) => actions.onSelectRun(shown.run?.id === id ? null : id)}
+      />
+      {shown.run !== null && (
+        <Card>
+          <RunDetails {...runDetailsOf(shown.run)} />
+        </Card>
+      )}
+    </>
+  )
+}
+
 /**
  * The Workspaces of the Project (D8-02, D8-14): the list, a new one on a folder the user picks,
- * and the cleanup of a dedicated one, confirmed in its dialog — which says the branches kept and,
- * when the engine refuses, its reason as it gave it.
+ * the one shown under it, and the cleanup of a dedicated one, confirmed in its dialog — which says
+ * the branches kept and, when the engine refuses, its reason as it gave it.
  */
 function WorkspacesCards({
   workspaces,
+  shown,
+  projectVariables,
+  catalogue,
+  actions,
   onBrowse,
   onCreate,
   onCleanup,
 }: {
   workspaces: readonly Workspace[]
+  shown: ShownWorkspace | null
+  projectVariables: readonly Variable[]
+  catalogue: readonly Command[]
+  actions: WorkspaceActions
   onBrowse: () => Promise<string | null>
   onCreate: (path: string, name: string) => Promise<string | null>
   onCleanup: (id: string) => Promise<string | null>
@@ -73,6 +164,9 @@ function WorkspacesCards({
     setCleaning(workspaces.find((one) => one.id === id) ?? null)
   }
 
+  const selected = shown === null ? null : shown.workspaceId
+  const showing = workspaces.find((one) => one.id === selected)
+
   return (
     <>
       <WorkspaceList
@@ -80,7 +174,20 @@ function WorkspacesCards({
         onBrowse={onBrowse}
         onCreate={onCreate}
         onCleanup={ask}
+        selected={selected}
+        // Pressed again, the Workspace shown is put away.
+        onSelect={(id) => actions.onShow(id === selected ? null : id)}
       />
+      {shown !== null && showing !== undefined && (
+        <ShownWorkspaceCards
+          workspace={showing}
+          shown={shown}
+          projectVariables={projectVariables}
+          catalogue={catalogue}
+          actions={actions}
+          onCleanup={() => ask(showing.id)}
+        />
+      )}
       {cleaning !== null && (
         <CleanupDialog
           open
@@ -120,6 +227,9 @@ export function ProjectSettingsPage({
   onRemoveCommand,
   onArchive,
   workspaces,
+  shown,
+  projectVariables,
+  workspaceActions,
   onCreateWorkspace,
   onCleanupWorkspace,
 }: {
@@ -146,6 +256,11 @@ export function ProjectSettingsPage({
   onArchive: () => void
   /** The Workspaces of the Project, as the engine listed them (D8-02). */
   workspaces: readonly Workspace[]
+  /** The Workspace shown under the list, and what was read of it; null when none is. */
+  shown: ShownWorkspace | null
+  /** The Project's own variables, which a Workspace's are over (D8-06). */
+  projectVariables: readonly Variable[]
+  workspaceActions: WorkspaceActions
   /** Makes a Workspace on a folder the user picked; answers the engine's refusal, or null. */
   onCreateWorkspace: (path: string, name: string) => Promise<string | null>
   /** Cleans a dedicated Workspace up; answers the engine's refusal, or null (D8-14). */
@@ -173,6 +288,10 @@ export function ProjectSettingsPage({
       >
         <WorkspacesCards
           workspaces={workspaces}
+          shown={shown}
+          projectVariables={projectVariables}
+          catalogue={commands}
+          actions={workspaceActions}
           onBrowse={onBrowse}
           onCreate={onCreateWorkspace}
           onCleanup={onCleanupWorkspace}
