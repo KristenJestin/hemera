@@ -572,3 +572,61 @@ describe('Add to catalogue', () => {
     expect(await $('button[aria-label="Remove node"]').isExisting()).toBe(true)
   })
 })
+
+/** The variables a scope holds, asked of the engine: the Project's own, or a Workspace's. */
+async function variablesOf(workspaceId: string | null): Promise<string[]> {
+  const project = await projectId()
+  return await browser.execute(
+    async (id: string, workspace: string | null) => {
+      const variables = await window.hemera.invoke('variables.list', {
+        projectId: id,
+        workspaceId: workspace,
+      })
+      return variables.map((one) => `${one.key}=${one.value}`)
+    },
+    project,
+    workspaceId,
+  )
+}
+
+/** Writes a new value in the dialog the pencil of `key` opens, and saves it. */
+async function edit(key: string, value: string): Promise<void> {
+  await press(`Edit ${key}`)
+  await fill('Value', value)
+  await pressIn('[role="dialog"]', 'Save')
+  await browser.pause(600)
+}
+
+describe('Setting an existing key rewrites its value', () => {
+  it("rewrites the Project's PORT from its pencil, on the page and in the engine", async () => {
+    const list = 'ul[aria-label="Variables of Atlas"]'
+    await settings('Variables')
+    await press('Add variable')
+    await fill('Key', 'PORT')
+    await fill('Value', '3000')
+    await pressIn('[role="dialog"]', 'Add')
+    await awaitsIn(list, '3000')
+
+    await edit('PORT', '4000')
+
+    await awaitsIn(list, '4000')
+    expect(await textOf(list)).not.toContain('3000')
+    expect(await variablesOf(null)).toEqual(['PORT=4000'])
+  })
+
+  it("rewrites a Workspace's own PORT over the Project's, in its row", async () => {
+    const list = 'ul[aria-label="Variables of login-form"]'
+    await show('login-form')
+    await awaitsIn(list, 'inherited')
+    await press('Override PORT')
+    await fill('Value', '4001')
+    await pressIn('[role="dialog"]', 'Add')
+    await awaitsIn(list, 'Overrides 4000')
+
+    await edit('PORT', '4002')
+
+    await awaitsIn(list, '4002')
+    expect(await textOf(list)).not.toContain('4001')
+    expect(await variablesOf(loginForm.id)).toEqual(['PORT=4002'])
+  })
+})
