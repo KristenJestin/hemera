@@ -597,6 +597,54 @@ export const FootFull: Story = {
   },
 }
 
+/** The foot of a Spec that freezes on the press, as the panel does once the engine answered. */
+function Freezing({ onMarkReady }: { onMarkReady: () => void }): ReactNode {
+  const [frozenOn, setFrozenOn] = useState<string | undefined>(undefined)
+  return (
+    <Held
+      groups={railOf(MID_PLAN)}
+      initial="questions"
+      readiness={FULL_GATE}
+      frozenOn={frozenOn}
+      onSelect={fn()}
+      onSelectGroup={fn()}
+      onMarkReady={() => {
+        onMarkReady()
+        setFrozenOn('24 Sep')
+      }}
+    />
+  )
+}
+
+/**
+ * `Mark ready` leaving: pressed, the Spec freezes and the button fades out. While it fades it is
+ * still in the page, and it is inert and hidden from then on: a second press lands on nothing,
+ * and the Spec is marked ready once.
+ */
+export const MarkReadyLeaving: Story = {
+  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE },
+  render: (args) => <Freezing onMarkReady={args.onMarkReady} />,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const mark = canvas.getByRole('button', { name: 'Mark ready' })
+    await userEvent.click(mark)
+    await expect(canvas.getByText(/Frozen on 24 Sep/)).toBeVisible()
+    if (mark.isConnected) {
+      // Still fading: nothing offered, nothing reachable.
+      const leaving = mark.closest('[inert]')
+      expect(leaving).not.toBeNull()
+      expect(leaving).toHaveAttribute('aria-hidden', 'true')
+      expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    }
+    // A second press during the exit, forced past the check a person's pointer would fail.
+    await userEvent.click(mark, { pointerEventsCheck: 0 })
+    await waitFor(() => {
+      expect(mark.isConnected).toBe(false)
+    })
+    await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
+  },
+}
+
 /**
  * An obsolete request refused: the Spec changed between the gate shown and the click, so it was
  * not frozen; the foot says why, under `Mark ready`.

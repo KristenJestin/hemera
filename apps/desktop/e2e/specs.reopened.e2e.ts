@@ -164,6 +164,8 @@ describe('The button is offered only when the checks pass', () => {
 
     expect((await specNow()).status).toBe('ready')
     expect(await region(PANEL)).toContain('Frozen on')
+    // And Mark ready is gone: a frozen Spec offers nothing to freeze.
+    expect(await control('Mark ready')).toBeNull()
   })
 })
 

@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, type Transition, motion, useIsPresent } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
@@ -297,6 +297,39 @@ interface ReadinessFootProps {
 }
 
 /**
+ * `Mark ready`, which fades in when the gate fills and out when the Spec is frozen.
+ *
+ * While it fades out it is still in the page, and a button there is a button a second press
+ * reaches: so the moment it starts leaving it is `inert` and hidden from assistive technology,
+ * and what is on its way out can be neither pressed, focused nor read as offered.
+ */
+function MarkReady({
+  transition,
+  onMarkReady,
+}: {
+  transition: Transition
+  onMarkReady: () => void
+}): ReactNode {
+  const present = useIsPresent()
+  return (
+    <motion.div
+      className="flex"
+      inert={!present}
+      aria-hidden={present ? undefined : true}
+      initial={{ filter: 'opacity(0)' }}
+      animate={{ filter: 'opacity(1)' }}
+      exit={{ filter: 'opacity(0)' }}
+      transition={transition}
+    >
+      {/* A click dispatched by script is not stopped by `inert`: the handler goes with it. */}
+      <Button variant="primary" size="sm" onClick={present ? onMarkReady : undefined}>
+        Mark ready
+      </Button>
+    </motion.div>
+  )
+}
+
+/**
  * How far the Spec is from `ready`, at the foot of the rail (D7-10).
  *
  * Not a list of errors: seven thin segments the width of the rail, one per check of the gate,
@@ -346,18 +379,7 @@ function ReadinessFoot({
       </p>
       <AnimatePresence initial={false}>
         {full && frozenOn === undefined && (
-          <motion.div
-            key="mark-ready"
-            className="flex"
-            initial={{ filter: 'opacity(0)' }}
-            animate={{ filter: 'opacity(1)' }}
-            exit={{ filter: 'opacity(0)' }}
-            transition={transition}
-          >
-            <Button variant="primary" size="sm" onClick={onMarkReady}>
-              Mark ready
-            </Button>
-          </motion.div>
+          <MarkReady key="mark-ready" transition={transition} onMarkReady={onMarkReady} />
         )}
       </AnimatePresence>
       {readiness.refused !== undefined && (
