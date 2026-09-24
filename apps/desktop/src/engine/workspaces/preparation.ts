@@ -42,7 +42,7 @@ import {
 import { and, asc, eq } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
 
-import { ProcessSupervisor } from '../agents/supervisor.ts'
+import { ProcessSupervisor, StderrSink } from '../agents/supervisor.ts'
 import { hostLookup, invocationOf } from '../commands/line.ts'
 import { OUTPUT_KEPT_BYTES } from '../commands/service.ts'
 import { Git } from '../git.ts'
@@ -125,6 +125,19 @@ export interface PreparationService {
   readonly resume: (
     workspaceId: string,
   ) => Effect.Effect<WorkspaceView, DatabaseError | UnknownWorkspaceError | PreparationRunningError>
+  /**
+   * Starts `prepare`, or `resume` when `resume` is true, in the engine's scope and answers at
+   * once with the steps as they stand: a preparation can take minutes, and the window follows it
+   * through the `workspace` event rather than waiting on a request. One already running is still
+   * refused, here, by name.
+   */
+  readonly begin: (
+    workspaceId: string,
+    resume: boolean,
+  ) => Effect.Effect<
+    WorkspaceStep[],
+    DatabaseError | UnknownWorkspaceError | PreparationRunningError
+  >
   /** The steps of a Workspace, in their order. */
   readonly steps: (
     workspaceId: string,
@@ -243,6 +256,10 @@ export const preparationLayer = Layer.effect(
     const variables = yield* Variables
     const workspacesService = yield* Workspaces
     const supervisor = yield* ProcessSupervisor
+    /** The engine's diagnostic log: where a preparation begun in the background says it failed. */
+    const diagnostic = yield* StderrSink
+    /** The engine's own scope: a preparation begun in the background ends when the engine does. */
+    const scope = yield* Effect.scope
 
     const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
 
@@ -256,12 +273,15 @@ export const preparationLayer = Layer.effect(
      * stopped left behind, never one being run now — which is what lets `resumedSteps` start it
      * again (D8-05).
      */
-    const alone = <A, E>(id: string, effect: Effect.Effect<A, E>) =>
-      Effect.suspend((): Effect.Effect<A, E | PreparationRunningError> => {
+    const taken = (id: string) =>
+      Effect.suspend(() => {
         if (running.has(id)) return Effect.fail(new PreparationRunningError({ workspaceId: id }))
         running.add(id)
-        return effect.pipe(Effect.ensuring(Effect.sync(() => running.delete(id))))
+        return Effect.void
       })
+    const released = (id: string) => Effect.sync(() => running.delete(id))
+    const alone = <A, E>(id: string, effect: Effect.Effect<A, E>) =>
+      taken(id).pipe(Effect.andThen(effect.pipe(Effect.ensuring(released(id)))))
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -589,37 +609,56 @@ export const preparationLayer = Layer.effect(
       }
     }
 
+    /** Re-checks what was done against the disk, then carries on (D8-05). */
+    const resuming = (id: string) =>
+      Effect.gen(function* () {
+        const place = yield* placeOf(yield* workspaceRow(id))
+        const steps = yield* stepsOf(id)
+        const resumed = resumedSteps(steps, (step) => present(place, step))
+        const again = new Set(
+          resumed
+            .filter((step, index) => step.state === 'pending' && steps[index]?.state === 'done')
+            .map((step) => step.id),
+        )
+        const retried = resumed.filter(
+          (step, index) => step.state === 'pending' && steps[index]?.state !== step.state,
+        ).length
+        yield* persist(place, workspaceStateIn(place.workspace.state), steps, resumed, [
+          workspaceEvent(
+            place.workspace,
+            'workspace.resumed',
+            { redone: again.size, retried: retried - again.size },
+            'human',
+          ),
+        ])
+        return yield* drive(id, again)
+      })
+
+    const steps = (id: string) => workspaceRow(id).pipe(Effect.andThen(stepsOf(id)))
+
     return {
       prepare: (id) => alone(id, drive(id, new Set())),
 
-      resume: (id) =>
-        alone(
-          id,
-          Effect.gen(function* () {
-            const place = yield* placeOf(yield* workspaceRow(id))
-            const steps = yield* stepsOf(id)
-            const resumed = resumedSteps(steps, (step) => present(place, step))
-            const again = new Set(
-              resumed
-                .filter((step, index) => step.state === 'pending' && steps[index]?.state === 'done')
-                .map((step) => step.id),
-            )
-            const retried = resumed.filter(
-              (step, index) => step.state === 'pending' && steps[index]?.state !== step.state,
-            ).length
-            yield* persist(place, workspaceStateIn(place.workspace.state), steps, resumed, [
-              workspaceEvent(
-                place.workspace,
-                'workspace.resumed',
-                { redone: again.size, retried: retried - again.size },
-                'human',
-              ),
-            ])
-            return yield* drive(id, again)
-          }),
-        ),
+      resume: (id) => alone(id, resuming(id)),
 
-      steps: (id) => workspaceRow(id).pipe(Effect.andThen(stepsOf(id))),
+      begin: (id, resume) =>
+        Effect.gen(function* () {
+          const before = yield* steps(id)
+          yield* taken(id)
+          yield* Effect.forkIn(scope)(
+            (resume ? resuming(id) : drive(id, new Set())).pipe(
+              // Nobody is waiting on it: a failure of the storage goes to the diagnostic, and the
+              // steps say how far it got.
+              Effect.catch((refused) =>
+                diagnostic.write(`preparing the Workspace ${id} failed: ${refused.message}`),
+              ),
+              Effect.ensuring(released(id)),
+            ),
+          )
+          return before
+        }),
+
+      steps,
     } satisfies PreparationService
   }),
 )

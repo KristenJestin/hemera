@@ -208,6 +208,7 @@ function servicesOf(
     Layer.provide(hostLinks),
     Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
     Layer.provide(processes),
+    Layer.provide(diagnostic),
   )
 
   return Layer.mergeAll(
