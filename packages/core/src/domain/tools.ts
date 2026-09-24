@@ -130,11 +130,18 @@ export interface SearchResult {
  * `free` is the only mission of this lot and it is offered everything; the mission is a
  * parameter rather than a constant so that the sets of the next issues arrive here and not in
  * eleven tools that each grew a condition.
+ *
+ * `define` and `build` are offered nothing yet: the `define` set is its own, read-only one
+ * (D7-14), and it is written with the Spec tools; `build` has no Session to offer anything to.
+ * Until then the runtime grants every Session the `free` set, whatever its mission.
  */
 export function offeredTools(mission: Mission): readonly ToolName[] {
   switch (mission) {
     case 'free':
       return TOOL_NAMES
+    case 'define':
+    case 'build':
+      return []
   }
 }
 
