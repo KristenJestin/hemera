@@ -322,6 +322,14 @@ function written(candidate: string) {
   })
 }
 
+/**
+ * Whether a Session's Workspace is fixed (D8-08): its agent has started — a folder was handed to
+ * it, or its own session exists — and that session was opened in the Workspace's folder.
+ */
+function workspaceFixedOf(row: { cwd: string | null; nativeState: string }): boolean {
+  return row.cwd !== null || row.nativeState !== 'none'
+}
+
 /** A row of `sessions`, as the domain's own Session. */
 function sessionOf(row: typeof sessions.$inferSelect): Session {
   return {
@@ -339,6 +347,7 @@ function sessionOf(row: typeof sessions.$inferSelect): Session {
     // domain declares.
     nativeState: row.nativeState as NativeState,
     workspaceId: row.workspaceId,
+    workspaceFixed: workspaceFixedOf(row),
     // This lot writes one kind of Session; a mission is what HEM-48 gives a Session here.
     mission: 'free',
     archivedAt: row.archivedAt === null ? null : Date.parse(row.archivedAt),
@@ -564,6 +573,8 @@ export const sessionsLayer = Layer.effect(
                 model: null,
                 nativeState: 'none',
                 workspaceId,
+                // Nothing has started in it yet: its Workspace can still be chosen (D8-08).
+                workspaceFixed: false,
                 archivedAt: null,
                 createdAt: Date.parse(at),
                 lastWrittenAt: Date.parse(at),
@@ -812,7 +823,7 @@ export const sessionsLayer = Layer.effect(
               if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
               // Fixed once the agent has started (D8-08): it was started in that folder, and its
               // own session knows no other.
-              if (row.cwd !== null || row.nativeState !== 'none') {
+              if (workspaceFixedOf(row)) {
                 return yield* Effect.fail(new WorkspaceFixedError())
               }
               yield* usable(transaction, row.projectId, workspaceId)

@@ -316,6 +316,8 @@ export const sessionSchema = z.object({
   nativeState: nativeStateSchema,
   /** The Workspace it works in, and null for `main` (D8-08). */
   workspaceId: z.string().nullable(),
+  /** Whether that Workspace is fixed: its agent has started there (D8-08). */
+  workspaceFixed: z.boolean(),
   archivedAt: z.number().nullable(),
   createdAt: z.number(),
   lastWrittenAt: z.number(),

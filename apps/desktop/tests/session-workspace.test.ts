@@ -365,6 +365,28 @@ describe('The Workspace is fixed once the agent has started', () => {
     expect(seen.after.session.workspaceId).toBe(seen.workspaceId)
     expect(seen.after.native.cwd).toBe(loginForm)
   })
+
+  test('the Session says whether its Workspace is fixed, by the rule a change is refused on', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const sessions = yield* Sessions
+        const { session, workspaceId } = yield* inLoginForm
+        const chosen = yield* sessions.chooseWorkspace(session.id, session.version, workspaceId)
+        yield* runtime.prompt(session.id, 'hello')
+        const started = yield* sessions.one(session.id)
+        const listed = yield* sessions.list(session.projectId)
+        return { session, chosen, started, listed }
+      }),
+    )
+
+    expect(seen.session.workspaceFixed).toBe(false)
+    expect(seen.chosen.workspaceFixed).toBe(false)
+    expect(seen.started.session.workspaceFixed).toBe(true)
+    expect(seen.listed.map((one) => one.workspaceFixed)).toEqual([true])
+  })
 })
 
 describe('a Session is created only on a ready Workspace of its Project', () => {

@@ -113,6 +113,11 @@ export interface Session {
    * Null on a Session written before Workspaces were real, which is read as `main`.
    */
   workspaceId: string | null
+  /**
+   * Whether that Workspace can no longer be changed (D8-08): once its agent has started, its own
+   * session was opened in that folder. The engine's rule, which a page reads rather than repeats.
+   */
+  workspaceFixed: boolean
   archivedAt: number | null
   createdAt: number
   /** When it was last written to — a message or a rename: what the list is sorted on. */

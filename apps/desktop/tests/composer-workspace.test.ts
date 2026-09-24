@@ -57,6 +57,7 @@ function session(nativeState: Session['nativeState']): Session {
     model: null,
     nativeState,
     workspaceId: null,
+    workspaceFixed: nativeState !== 'none',
     archivedAt: null,
     createdAt: 0,
     lastWrittenAt: 0,
