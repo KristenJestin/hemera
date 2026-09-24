@@ -220,6 +220,16 @@ export const FoldedWithNoSession: Story = {
       { timeout: 3000 },
     )
     expect(canvasElement.querySelectorAll('[data-separator]')).toHaveLength(3)
+    // The labels slide in after the width: the a11y check that follows the play must not read a
+    // label mid-fade (its contrast fails at opacity 0), so the play ends once every one is opaque.
+    await waitFor(
+      () => {
+        for (const label of canvasElement.querySelectorAll<HTMLElement>('span.truncate')) {
+          expect(Number(getComputedStyle(label).opacity)).toBe(1)
+        }
+      },
+      { timeout: 3000 },
+    )
   },
 }
 
