@@ -12,11 +12,11 @@ import {
   VariablesEditor,
   WorkspaceList,
   WorkspaceRepositories,
-  type CommandLine,
   type ProjectSettingsDraft,
   type RepositoryLine,
 } from '@hemera/ui'
 
+import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
 import {
   branchesKeptOf,
   interruptedOf,
@@ -33,60 +33,6 @@ import {
   workspaceVariablesOf,
 } from '../workspace-details.ts'
 import type { ShownWorkspace } from '../workspaces-store.ts'
-
-/**
- * A command of the catalogue, as its row draws it: its base and its folder under it, as the
- * engine keeps them. The engine knows no Portless name yet.
- */
-function lineOf(command: Command): CommandLine {
-  return {
-    id: command.name,
-    name: command.name,
-    command: command.line,
-    lineWindows: command.lineWindows,
-    lineLinux: command.lineLinux,
-    type: command.type,
-    scope: command.scope,
-    portless: command.portless,
-    portlessName: null,
-    // Its base as the engine keeps it, and the folder under it without the leading `./`.
-    folderBase: command.folderBase,
-    folder: command.folder?.replace(/^\.\//, '') ?? '',
-  }
-}
-
-/** What the engine writes a command from: every field the row edits (D8-07, D8-10). */
-type CommandWrite = Pick<
-  Command,
-  | 'name'
-  | 'line'
-  | 'lineWindows'
-  | 'lineLinux'
-  | 'type'
-  | 'folderBase'
-  | 'folder'
-  | 'scope'
-  | 'portless'
-  | 'portlessName'
->
-
-/** A row as the engine writes it. */
-function writeOf(line: CommandLine): CommandWrite {
-  return {
-    name: line.name,
-    line: line.command,
-    lineWindows: line.lineWindows,
-    lineLinux: line.lineLinux,
-    type: line.type,
-    folderBase: line.folderBase,
-    // The base itself is no folder at all.
-    folder: line.folder === '' ? null : line.folder,
-    scope: line.scope,
-    portless: line.portless,
-    // The row has no field for it yet: the Project's name as a slug.
-    portlessName: null,
-  }
-}
 
 /** What a Workspace opened in the list is asked through (D8-05, D8-06, D8-08). */
 export interface WorkspaceActions {
@@ -260,6 +206,7 @@ export function ProjectSettingsPage({
   onRemoveRepository,
   onToggleIncluded,
   commands,
+  portlessInstalled,
   onSaveCommand,
   onRemoveCommand,
   onArchive,
@@ -291,9 +238,11 @@ export function ProjectSettingsPage({
   onToggleIncluded: (path: string, included: boolean) => void
   /** The catalogue of the Project, as the engine answered it (D6-12). */
   commands: readonly Command[]
+  /** Whether `portless` is on this machine, as the engine answered it once (D8-10). */
+  portlessInstalled: boolean
   /**
    * Writes a command: a new one, or the one of the same name when `existing` is true. The
-   * folder is null for the Workspace root. Answers the engine's refusal, or null.
+   * folder is null for its base. Answers the engine's refusal, or null.
    */
   onSaveCommand: (command: CommandWrite, existing: boolean) => Promise<string | null>
   onRemoveCommand: (name: string) => void
@@ -349,12 +298,11 @@ export function ProjectSettingsPage({
           }
           return null
         }}
-        commands={commands.map(lineOf)}
-        onAddCommand={async (line) => await onSaveCommand(writeOf(line), false)}
-        onUpdateCommand={async (line) => await onSaveCommand(writeOf(line), true)}
+        commands={commands.map(commandLineOf)}
+        onAddCommand={async (line) => await onSaveCommand(commandWriteOf(line), false)}
+        onUpdateCommand={async (line) => await onSaveCommand(commandWriteOf(line), true)}
         onRemoveCommand={onRemoveCommand}
-        // Whether portless is on this machine is not asked of the engine yet.
-        portlessInstalled={false}
+        portlessInstalled={portlessInstalled}
         onArchive={onArchive}
         slotRefusal={workspacesRefusal}
         workspaces={

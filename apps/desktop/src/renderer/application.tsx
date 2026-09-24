@@ -88,6 +88,7 @@ import {
   listenToTools,
   readCatalogue,
   readContext,
+  readPortless,
   removeCommand,
   saveCommand,
   readRuns,
@@ -599,6 +600,8 @@ export function Application() {
   useEffect(() => {
     if (settingsOf === null) return
     void readCatalogue(settingsOf)
+    // And whether this machine has Portless, which the engine looks up once (D8-10).
+    void readPortless()
     // And its Workspaces, which the engine's `workspace` event keeps current from then on (D8-02),
     // and its own variables, which a Workspace shown lists under its own (D8-06).
     void readWorkspaces(settingsOf)
@@ -1145,6 +1148,7 @@ export function Application() {
             void setRepositoryIncluded(latest, path, included)
           }}
           commands={tools.catalogues.get(current.id) ?? []}
+          portlessInstalled={tools.portlessInstalled}
           onSaveCommand={async (command, existing) =>
             await saveCommand({ projectId: current.id, ...command }, existing)
           }

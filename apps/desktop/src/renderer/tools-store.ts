@@ -30,6 +30,11 @@ export interface ToolsState {
   contexts: ReadonlyMap<string, ContextView>
   /** The catalogue of each Project the settings have read, oldest first. */
   catalogues: ReadonlyMap<string, readonly Command[]>
+  /**
+   * Whether `portless` is on this machine, asked once (D8-10 as amended by recette 1); false until
+   * the engine answered, so a Portless box is never offered on a machine that may not have it.
+   */
+  portlessInstalled: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
 }
@@ -38,6 +43,7 @@ const EMPTY: ToolsState = {
   runs: new Map(),
   contexts: new Map(),
   catalogues: new Map(),
+  portlessInstalled: false,
   refusal: null,
 }
 
@@ -193,6 +199,26 @@ export async function readCatalogue(projectId: string): Promise<void> {
     catalogues.set(projectId, read)
     replace({ ...state, catalogues })
   } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/** Whether the machine was asked about `portless` already: the engine looks it up once. */
+let portlessAsked = false
+
+/**
+ * Asks the engine whether `portless` is on this machine, the first time the settings open and
+ * never again: the engine looks it up once per start, and a second question has its answer.
+ */
+export async function readPortless(): Promise<void> {
+  if (portlessAsked) return
+  portlessAsked = true
+  try {
+    const { installed } = await window.hemera.invoke('commands.portless', {})
+    replace({ ...state, portlessInstalled: installed })
+  } catch (cause) {
+    // Asked again next time: a question nobody answered was not asked.
+    portlessAsked = false
     replace({ ...state, refusal: message(cause) })
   }
 }

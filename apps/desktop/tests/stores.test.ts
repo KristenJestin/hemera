@@ -24,6 +24,7 @@ import {
   projectsSnapshot,
   renameProject,
 } from '#renderer/projects-store.ts'
+import { readPortless, toolsSnapshot } from '#renderer/tools-store.ts'
 
 /** One Project, as the engine answers with one. */
 function project(id: string, name: string, version = 1): Project {
@@ -151,6 +152,18 @@ describe('Le store des Projets porte ce que le moteur a répondu', () => {
     expect(projectsSnapshot().refusal).toBe('the Project is not at that version any more')
     // Nothing on screen says the change went through.
     expect(projectsSnapshot().projects.map((one) => one.name)).toEqual(['Atlas'])
+  })
+})
+
+describe('Portless is asked of the machine once', () => {
+  test('the first opening asks the engine, and every one after it has the answer', async () => {
+    answers.set('commands.portless', { installed: true })
+
+    await readPortless()
+    await readPortless()
+
+    expect(toolsSnapshot().portlessInstalled).toBe(true)
+    expect(asked.filter((one) => one.name === 'commands.portless')).toHaveLength(1)
   })
 })
 
