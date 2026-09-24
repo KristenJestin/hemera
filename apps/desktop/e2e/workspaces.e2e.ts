@@ -3,14 +3,18 @@
  * and the commands its Sessions keep (issue #20, designs D8-04, D8-05, D8-08, D8-09, D8-11).
  *
  * The Project declares `./sources/api` and `./sources/front`, two repositories made here with the
- * machine's own `git`, without a remote, and removed after the run. Its recipe copies one file at
- * the root of every dedicated Workspace: the file the agent is started from on Windows
- * (`agent/install.ts`), which a Session in a dedicated Workspace needs as much as one in `main`.
+ * machine's own `git`, without a remote, and removed after the run. Its recipe copies the file the
+ * agent is started from on Windows (`agent/install.ts`) at the root of every dedicated Workspace,
+ * which a Session in one needs as much as one in `main`, and the `.env` of `api` into its
+ * worktree. Everything is declared the way a hand does it: a section of the settings' navigation,
+ * its "Add…" or pencil dialog, filled in and confirmed.
  *
- * A dedicated Workspace is made **through the bridge** — `workspaces.plan`, `workspaces.create`,
- * then `preparation.prepare`, from the page — and not through a button: the one that opens the
- * creation dialog is the Spec panel's (D8-12), which waits for the Spec lot. Everything after
- * that is read from the window: the settings page shows it, its steps, its services.
+ * `login-form` is made from the settings: "New Workspace", its name in the creation dialog, and
+ * Create, which prepares it (D8-04, D8-05). `signup` is made **through the bridge** —
+ * `workspaces.plan`, `workspaces.create`, then `preparation.prepare`, from the page — because its
+ * failure is a branch that appears between the checks and the step, which no hand can slip in
+ * between two clicks. Everything after that is read from the window: the settings page shows the
+ * Workspaces, each row opening in place on its steps, its services and its variables.
  *
  * The agent is the suite's fake one (`agent/program.ts`): a turn that names `seed` proposes it for
  * the catalogue through Hemera's `commands_propose`, which only the human's click writes.
@@ -29,7 +33,19 @@ import { git, repository } from '../tests/repositories.ts'
 import { e2eDataOf } from '../wdio.conf.ts'
 import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, COMMAND_PROPOSAL, COMMAND_PROPOSE_ANSWER, MODELS } from './agent/script.ts'
-import { addProject, awaits, choose, control, fill, press, pressTab, shows, write } from './hand.ts'
+import {
+  addProject,
+  awaits,
+  choose,
+  control,
+  fill,
+  press,
+  pressIn,
+  pressTab,
+  region,
+  shows,
+  write,
+} from './hand.ts'
 
 /** The folder of `main`, which holds both repositories; kept for the reason `install.ts` gives. */
 const MAIN = fakeWorkspace('workspaces')
@@ -91,6 +107,8 @@ before(async () => {
   rmSync(GO, { force: true })
   repository(join(SOURCES, 'api'))
   repository(join(SOURCES, 'front'))
+  // What the recipe copies from `api` into its worktree: unversioned, as an `.env` is.
+  writeFileSync(join(SOURCES, 'api', '.env'), 'PORT=3000\n')
   port = await freePort()
   serve = serveLine(port)
 })
@@ -188,27 +206,82 @@ async function itemsOf(selector: string): Promise<string[]> {
   )
 }
 
-/** Waits until an element of the page says this. */
+/** Waits until an element of the page says this, and says what it said instead when it never does. */
 async function awaitsIn(selector: string, text: string, within = 20_000): Promise<void> {
-  await browser.waitUntil(async () => (await textOf(selector)).includes(text), {
-    timeout: within,
-    interval: 200,
-    timeoutMsg: `${selector} never showed "${text}"`,
-  })
+  let said = ''
+  await browser
+    .waitUntil(
+      async () => {
+        said = await textOf(selector)
+        return said.includes(text)
+      },
+      { timeout: within, interval: 200 },
+    )
+    .catch(() => {
+      throw new Error(`${selector} never showed "${text}"; it said "${said}"`)
+    })
 }
 
-/** The row of a Workspace in the settings' list, found by the button that shows it. */
+/** The row of a Workspace in the settings' list, found by the button that opens it. */
 function rowOf(name: string): string {
-  return `ul[aria-label="Workspaces"] li:has(button[aria-label="Show ${name}"])`
+  return `ul[aria-label="Workspaces"] > li:has(button[aria-label="Details of ${name}"])`
 }
 
 const SERVICES = 'ul[aria-label="Services"]'
 
-/** Shows this Workspace under the list, unless it is the one shown already. */
+/** Opens the Project's settings on one section of their navigation. */
+async function settings(section: string): Promise<void> {
+  await press('Project settings')
+  await browser.pause(600)
+  await pressTab(section)
+}
+
+/**
+ * Opens this Workspace's row in place, unless it is the one open already; from the Workspaces
+ * section, which it goes to first when the page is on another one.
+ */
 async function show(name: string): Promise<void> {
-  const button = await $(`button[aria-label="Show ${name}"]`)
-  if ((await button.getAttribute('aria-pressed')) !== 'true') await press(`Show ${name}`)
+  const details = `button[aria-label="Details of ${name}"]`
+  if (!(await $(details).isExisting())) await pressTab('Workspaces')
+  if ((await $(details).getAttribute('aria-expanded')) !== 'true') {
+    await press(`Details of ${name}`)
+  }
   await browser.pause(800)
+}
+
+/** Declares a repository from its section: "Add repository", its path, and the dialog's Add. */
+async function declare(path: string): Promise<void> {
+  await press('Add repository')
+  await fill('Path', path)
+  await pressIn('[role="dialog"]', 'Add repository')
+  await browser.pause(600)
+}
+
+/** Adds a copy of `path` under `base` from the Preparation section's step dialog. */
+async function copyStep(base: string, path: string): Promise<void> {
+  await press('Add step')
+  await choose('Base', base)
+  await fill('Path', path)
+  await pressIn('[role="dialog"]', 'Add')
+  await browser.pause(600)
+}
+
+/** What a dedicated Workspace the list holds was made as, asked of the engine by its name. */
+async function listed(name: string): Promise<Made> {
+  const project = await projectId()
+  return await browser.execute(
+    async (projectOf: string, nameOf: string) => {
+      const all = await window.hemera.invoke('workspaces.list', { projectId: projectOf })
+      const made = all.find((one) => one.name === nameOf)
+      return {
+        id: made?.id ?? '',
+        path: made?.path ?? '',
+        branch: made?.repositories[0]?.branch ?? '',
+      }
+    },
+    project,
+    name,
+  )
 }
 
 /**
@@ -256,47 +329,69 @@ let loginForm: Made
 describe('A dedicated Workspace assembles one worktree per repository', () => {
   it('declares two repositories, a recipe and a serve command in the settings', async () => {
     await addProject('Atlas', MAIN)
-    await press('Project settings')
-    await browser.pause(600)
-    await fill('Add a path', './sources/api')
-    await press('Add a path')
-    await browser.pause(400)
-    await fill('Add a path', './sources/front')
-    await press('Add a path')
-    await browser.pause(400)
+    await settings('Repositories')
+    await declare('./sources/api')
+    await declare('./sources/front')
 
-    // The recipe: the agent's entry file copied at the root (D8-05).
-    await fill('File', 'acp')
-    await $('button=Add').click()
-    // Written as the engine keeps a relative path: from the root, with its `./`.
+    // The recipe (D8-05): the agent's entry file copied at the root, written as the engine keeps
+    // a relative path, with its `./`.
+    await pressTab('Preparation')
+    await copyStep('Workspace root', 'acp')
     await awaits('copy ./acp at the root')
+    // A copy from a repository whose source is not in main is refused in its dialog, in the
+    // engine's words, and the dialog stays open on it until the path is one main holds.
+    await copyStep('api', '.env.missing')
+    expect(await region('[role="dialog"]')).toContain('does not exist in main')
+    await fill('Path', '.env')
+    await pressIn('[role="dialog"]', 'Add')
+    await browser.pause(600)
+    await awaits('copy ./.env from api')
 
-    // A `serve` of scope `workspace`: one instance per Workspace (D8-07).
-    await fill('Command name', 'dev')
+    // A `serve` of scope `workspace`, one instance per Workspace (D8-07), run from `api`.
+    await pressTab('Commands')
+    await press('Add command')
+    await fill('Name', 'dev')
     await fill('Default line', serve)
     await choose('Type', 'Serve')
-    await press('Add a command')
+    await choose('Runs from', 'api')
+    await pressIn('[role="dialog"]', 'Add command')
     await browser.pause(600)
     expect(await $('button[aria-label="Remove dev"]').isExisting()).toBe(true)
+    // Its row says the base it runs from, as it was written.
+    expect(await textOf('ul[aria-label="Commands"]')).toContain('api')
+  })
+
+  it("says on main's row what Git answers of its first repository", async () => {
+    await pressTab('Workspaces')
+    // `api` on its branch `main`, with the `.env` nobody committed.
+    await awaitsIn(rowOf('main'), '1 untracked')
   })
 
   it('makes both worktrees on the plan, offline, and shows the Workspace ready on its branch', async () => {
-    loginForm = await dedicated('HEM-7', 'login-form')
-    const made = loginForm
-    await prepare(made.id)
+    // From the settings, with no Spec: the branches follow the name under the prefix (D8-04).
+    await press('New Workspace')
+    // The dialog opens once the engine answered the plan.
+    await awaits('Nothing is fetched.')
+    await fill('Name', 'login-form')
+    await pressIn('[role="dialog"]', 'Create')
     await awaitsIn(rowOf('login-form'), 'Ready')
+    loginForm = await listed('login-form')
+    const made = loginForm
 
     // In Hemera's own folder for this Project, under the data folder (D8-02), one worktree per
-    // repository at the same relative path, each on the branch of the plan (D8-04).
+    // repository at the same relative path, each on the branch the name made (D8-04), and the
+    // recipe's copy of `api`'s `.env` in its worktree (D8-05).
     expect(made.path).toContain(join(E2E_DATA, 'workspaces'))
-    expect(made.branch).toBe('atlas/HEM-7-login-form')
+    expect(made.branch).toBe('atlas/login-form')
+    expect(existsSync(join(made.path, 'sources', 'api', '.env'))).toBe(true)
     for (const one of ['api', 'front']) {
       const worktree = join(made.path, 'sources', one)
       expect(existsSync(join(worktree, '.git'))).toBe(true)
       expect(git(worktree, 'branch', '--show-current')).toBe(made.branch)
     }
 
-    // The page reads Git when it shows the Workspace (D8-15): both repositories on the branch.
+    // The page reads Git when it opens the Workspace (D8-15): both repositories on the branch.
+    // Made from the settings, it was opened in the list as it was made.
     await show('login-form')
     await awaitsIn('ul[aria-label="Repositories of login-form"]', made.branch)
     const repositories = await itemsOf('ul[aria-label="Repositories of login-form"] li')
@@ -319,12 +414,13 @@ describe('A failed step keeps what succeeded', () => {
     await show('signup')
     await awaitsIn('ul[aria-label="Steps"]', 'Failed')
     const steps = await itemsOf('ul[aria-label="Steps"] li')
-    expect(steps).toHaveLength(3)
+    expect(steps).toHaveLength(4)
     expect(steps[0]).toContain('Done')
     expect(steps[1]).toContain('Failed')
     // Git's own message, in whatever language the machine speaks it: it names the branch.
     expect(steps[1]).toContain(`'${made.branch}'`)
     expect(steps[2]).toContain('Pending')
+    expect(steps[3]).toContain('Pending')
     expect(existsSync(join(made.path, 'sources', 'api', '.git'))).toBe(true)
     expect(await shows('Resume')).toBe(true)
 
@@ -356,8 +452,7 @@ describe('A URL is ready only after it answers', () => {
     await browser.pause(400)
 
     // A Workspace's services are shown with it in the settings (D8-08).
-    await press('Project settings')
-    await browser.pause(600)
+    await settings('Workspaces')
     await show('main')
     await awaitsIn(SERVICES, `http://localhost:${String(port)}`)
     expect(await textOf(SERVICES)).toContain('starting')
@@ -384,8 +479,7 @@ describe('Two Workspaces run the same command as two instances', () => {
     await browser.pause(400)
 
     // One instance per Workspace, each in its own folder.
-    await press('Project settings')
-    await browser.pause(600)
+    await settings('Workspaces')
     await show('login-form')
     await awaitsIn(SERVICES, 'dev')
     const here = await itemsOf(`${SERVICES} > li`)
@@ -443,8 +537,7 @@ describe('A proposal enters the catalogue only when accepted', () => {
     await $(proposal).$('button=Accept').click()
     await awaitsIn(proposal, 'Added to the catalogue')
 
-    await press('Project settings')
-    await browser.pause(600)
+    await settings('Commands')
     expect(await $(`button[aria-label="Remove ${COMMAND_PROPOSAL.name}"]`).isExisting()).toBe(true)
   })
 })
@@ -475,8 +568,7 @@ describe('Add to catalogue', () => {
     await browser.keys('Escape')
     await browser.pause(400)
 
-    await press('Project settings')
-    await browser.pause(600)
+    await settings('Commands')
     expect(await $('button[aria-label="Remove node"]').isExisting()).toBe(true)
   })
 })

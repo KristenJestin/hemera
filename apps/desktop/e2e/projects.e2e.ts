@@ -28,7 +28,19 @@ import { join } from 'node:path'
 import { browser, expect } from '@wdio/globals'
 
 import { e2eDataOf } from '../wdio.conf.ts'
-import { active, addProject, fill, hasTab, openSettings, press, ringBell, shows } from './hand.ts'
+import {
+  active,
+  addProject,
+  fill,
+  hasTab,
+  openSettings,
+  press,
+  pressIn,
+  pressTab,
+  region,
+  ringBell,
+  shows,
+} from './hand.ts'
 
 /** Somewhere for a Project to point at, made by this spec and removed with it. */
 const SOURCES = mkdtempSync(join(tmpdir(), 'hemera-e2e-sources-'))
@@ -39,6 +51,22 @@ const E2E_DATA = e2eDataOf('projects.e2e.ts')
 after(() => {
   rmSync(SOURCES, { recursive: true, force: true })
 })
+
+/** Declares a location from the Repositories section: its dialog, the path, its Add. */
+async function declare(path: string): Promise<void> {
+  await press('Add repository')
+  await fill('Path', path)
+  await pressIn('[role="dialog"]', 'Add repository')
+  await browser.pause(600)
+}
+
+/** What each item of a list of the page says, in order. */
+async function itemsOf(selector: string): Promise<string[]> {
+  return await browser.execute(
+    (css: string) => [...document.querySelectorAll(css)].map((one) => one.textContent ?? ''),
+    selector,
+  )
+}
 
 describe('Aucun Projet au démarrage', () => {
   it('shows no tab, no sidebar, and the one thing there is to do', async () => {
@@ -103,29 +131,39 @@ describe('Édition durable', () => {
 describe('Deux emplacements déclarés', () => {
   it('keeps both, in the order they were added', async () => {
     await press('Project settings')
-    await fill('Add a path', './sources/api')
-    await press('Add a path')
-    await browser.pause(400)
-    await fill('Add a path', './sources/front')
-    await press('Add a path')
-    await browser.pause(400)
+    // The section, then its dialog: a path is typed in the dialog and nowhere else.
+    await pressTab('Repositories')
+    await declare('./sources/api')
+    await declare('./sources/front')
 
-    expect(await shows('./sources/api')).toBe(true)
-    expect(await shows('./sources/front')).toBe(true)
+    expect(await itemsOf('ul[aria-label="Repositories"] li')).toEqual([
+      expect.stringContaining('./sources/api'),
+      expect.stringContaining('./sources/front'),
+    ])
   })
 
   it('refuses one that climbs out of the root, and says why', async () => {
-    await fill('Add a path', '../elsewhere')
-    await press('Add a path')
-    await browser.pause(400)
+    await press('Add repository')
+    await fill('Path', '../elsewhere')
 
     // Refused by the field, before anything is asked of anybody: the three rules a path is
     // refused by are rules a form can check, and a refusal that took a round trip to the engine
     // to say "that climbs out" is a refusal that arrives after the next character was typed.
-    expect(await shows('climbs out of the Workspace')).toBe(true)
+    expect(await region('[role="dialog"]')).toContain('climbs out of the Workspace')
+    // And its Add is off: a path it refuses is never sent.
+    const off = await browser.execute(
+      () =>
+        [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
+          (one) => one.textContent?.trim() === 'Add repository',
+        )?.disabled,
+    )
+    expect(off).toBe(true)
+    await browser.keys('Escape')
+    await browser.pause(400)
+
     // And the list is left exactly as it was: two locations, not three. Counted on the rows, by
     // the button that takes each one away, and not on the page's text: a row also says its path
-    // to a screen reader beside its "In every Workspace by default" box (D8-04).
+    // to a screen reader beside its mark "in every new Workspace" (D8-04).
     const declared = await browser.execute(
       () => document.querySelectorAll('button[aria-label^="Remove ."]').length,
     )
