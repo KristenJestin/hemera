@@ -58,8 +58,8 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The width the panel's sheet stands at now, in pixels. */
-function sheetWidth(canvasElement: HTMLElement): number {
+/** The width the panel stands at now, in pixels. */
+function panelWidth(canvasElement: HTMLElement): number {
   return within(canvasElement).getByRole('region', { name: 'Spec ATL-7' }).getBoundingClientRect()
     .width
 }
@@ -75,7 +75,7 @@ export const Folded: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(sheetWidth(canvasElement)).toBe(BAND)
+    await expect(panelWidth(canvasElement)).toBe(BAND)
     const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(within(band).getByRole('button', { name: 'Plan, being written' })).toBeVisible()
     await expect(within(band).getByRole('button', { name: 'Plan phase, open' })).toBeVisible()
@@ -96,7 +96,7 @@ export const Folded: Story = {
 export const Unfolded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(sheetWidth(canvasElement)).toBeGreaterThan(BAND)
+    await expect(panelWidth(canvasElement)).toBeGreaterThan(BAND)
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
     await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
     const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
@@ -148,7 +148,7 @@ export const GlyphChosen: Story = {
     await expect(args.onFoldChange).toHaveBeenCalledWith(false)
     const stage = await canvas.findByRole('region', { name: 'Stage of ATL-7' })
     await expect(within(stage).getByRole('heading', { name: /^Scope/ })).toBeVisible()
-    await waitFor(() => expect(sheetWidth(canvasElement)).toBeGreaterThan(BAND))
+    await waitFor(() => expect(panelWidth(canvasElement)).toBeGreaterThan(BAND))
   },
 }
 
@@ -169,7 +169,7 @@ export const UnfoldsWhenTheAgentWrites: Story = {
       'aria-current',
       'true',
     )
-    await waitFor(() => expect(sheetWidth(canvasElement)).toBeGreaterThan(BAND))
+    await waitFor(() => expect(panelWidth(canvasElement)).toBeGreaterThan(BAND))
   },
 }
 
@@ -183,7 +183,7 @@ export const HandFoldWins: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
     await expect(args.onFoldChange).toHaveBeenLastCalledWith(true)
-    await waitFor(() => expect(sheetWidth(canvasElement)).toBe(BAND))
+    await waitFor(() => expect(panelWidth(canvasElement)).toBe(BAND))
     // The fold button is gone with the head: the keyboard is on the band's unfold button.
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toHaveFocus()
     await waitFor(() => expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull())
@@ -201,54 +201,109 @@ export const HandFoldWins: Story = {
   },
 }
 
-/** The widths the boxes stand at on each frame, until they have not changed for twenty. */
-function framesOf(boxes: HTMLElement[]): Promise<number[][]> {
-  return new Promise((resolve) => {
-    const frames: number[][] = []
+/** Where the chat and the panel stand on one frame, in pixels. */
+interface Frame {
+  chat: number
+  chatRight: number
+  panel: number
+  panelLeft: number
+}
+
+/** The two boxes of the Session's row: the chat stand-in, and the panel beside it. */
+interface Row {
+  chat: Element
+  panel: HTMLElement
+}
+
+function boxesOf(canvasElement: HTMLElement): Row {
+  const panel = within(canvasElement).getByRole('region', { name: 'Spec ATL-7' })
+  return { chat: panel.previousElementSibling!, panel }
+}
+
+/**
+ * The frames an action moves the row through: the one before it, every frame while it happens,
+ * and every frame after it until nothing has moved for twenty.
+ */
+async function framesOf(canvasElement: HTMLElement, action: () => Promise<void>): Promise<Frame[]> {
+  const { chat, panel } = boxesOf(canvasElement)
+  const measure = (): Frame => {
+    const left = chat.getBoundingClientRect()
+    const right = panel.getBoundingClientRect()
+    return { chat: left.width, chatRight: left.right, panel: right.width, panelLeft: right.left }
+  }
+  const frames = [measure()]
+  let acted = false
+  const sampled = new Promise<Frame[]>((resolve) => {
     let still = 0
     const sample = (): void => {
-      const now = boxes.map((box) => box.getBoundingClientRect().width)
-      const last = frames.at(-1)
-      still =
-        last !== undefined && last.every((width, index) => width === now[index]) ? still + 1 : 0
+      const now = measure()
+      still = acted && frames.at(-1)!.chat === now.chat ? still + 1 : 0
       frames.push(now)
       if (still < 20) requestAnimationFrame(sample)
       else resolve(frames)
     }
     requestAnimationFrame(sample)
   })
+  await action()
+  acted = true
+  return sampled
+}
+
+/** The chat's widths from the first frame it moved on to where it landed. */
+function moved(frames: Frame[]): number[] {
+  const widths = frames.map((frame) => frame.chat)
+  return widths.slice(widths.findIndex((width) => width !== widths[0]) - 1)
 }
 
 /**
- * The width is what moves, and the chat follows once: while the sheet opens over it frame after
- * frame, the slot the chat is laid against stays the band and takes the unfolded width once, when
- * the sheet has landed. Folding, the slot is the band again at once, and the sheet closes over it.
+ * The panel pushes the chat as it opens (brief revision 4b): the slot's own width moves, and the
+ * chat, which takes the rest of the row, narrows with it on every frame from the first one of the
+ * unfold, and widens with it on every frame of the fold. It is never a jump — the first width the
+ * chat moves to is one on the way — and the panel never stands over the chat: its left edge is
+ * on or past the chat's right edge on every frame.
  */
-export const ChatFollowsOnce: Story = {
+export const ChatPushedAsItOpens: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const sheet = canvas.getByRole('region', { name: 'Spec ATL-7' })
-    const slot = sheet.parentElement!
-    await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
-    const opening = await framesOf([sheet, slot])
-    const landed = opening.at(-1)![0]!
-    // The sheet went through the widths in between: it moved, and did not jump.
+    const opening = await framesOf(canvasElement, () =>
+      userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' })),
+    )
+    const narrowing = moved(opening)
+    const [full, first] = narrowing
+    const narrowest = narrowing.at(-1)!
+    await expect(narrowest).toBeLessThan(full!)
+    // Down on every frame, and never back up.
+    await expect(narrowing).toEqual(narrowing.toSorted((a, b) => b - a))
+    // Through the widths in between: the first move is a step, not the landing.
+    await expect(first).toBeGreaterThan(narrowest)
     await expect(
-      opening.filter(([width]) => width! > BAND && width! < landed).length,
+      narrowing.filter((width) => width < full! && width > narrowest).length,
     ).toBeGreaterThan(3)
-    // The slot had two widths only, the band and the landed one: the chat was laid out once.
-    await expect([...new Set(opening.map(([, width]) => width))]).toEqual([BAND, landed])
-    await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
-    const closing = await framesOf([sheet, slot])
-    await expect([...new Set(closing.map(([, width]) => width))]).toEqual([BAND])
-    await expect(closing.at(-1)![0]).toBe(BAND)
+    await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight)).toEqual([])
+    await expect(opening.at(-1)!.panel).toBeGreaterThan(BAND)
+
+    const closing = await framesOf(canvasElement, () =>
+      userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+    )
+    const widening = moved(closing)
+    const widest = widening.at(-1)!
+    await expect(widest).toBeGreaterThan(widening[0]!)
+    // Up on every frame, and never back down.
+    await expect(widening).toEqual(widening.toSorted((a, b) => a - b))
+    await expect(widening[1]).toBeLessThan(widest)
+    await expect(
+      widening.filter((width) => width > widening[0]! && width < widest).length,
+    ).toBeGreaterThan(3)
+    await expect(closing.filter((frame) => frame.panelLeft < frame.chatRight)).toEqual([])
+    await expect(closing.at(-1)!.panel).toBe(BAND)
+    await expect(widest).toBe(full)
   },
 }
 
 /**
- * Told to move less, the width lands at once: on the frame after the hand unfolds it, the sheet is
- * at its unfolded width — a share of the row — and the slot the chat is laid against follows it.
+ * Told to move less, the width lands at once: on the frame after the hand unfolds it, the panel is
+ * at its unfolded width — a share of the row — and the chat has the rest.
  *
  * `MotionConfig` says the preference rather than the browser's media query, which motion reads
  * once when a component mounts: a story that emulated it afterwards would test a tree that never
@@ -267,12 +322,10 @@ export const ReducedMotion: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const sheet = canvas.getByRole('region', { name: 'Spec ATL-7' })
-    const slot = sheet.parentElement!
-    const row = slot.parentElement!
-    const landed = sheet.getBoundingClientRect().width
-    await expect(landed).toBeCloseTo(row.getBoundingClientRect().width * 0.45, 0)
-    await waitFor(() => expect(slot.getBoundingClientRect().width).toBe(landed))
+    const { chat, panel } = boxesOf(canvasElement)
+    const row = panel.parentElement!.getBoundingClientRect().width
+    await expect(panel.getBoundingClientRect().width).toBeCloseTo(row * 0.45, 0)
+    await expect(chat.getBoundingClientRect().width).toBeCloseTo(row * 0.55, 0)
   },
 }
 

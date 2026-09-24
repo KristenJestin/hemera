@@ -447,8 +447,8 @@
 
   /* The Spec panel unfolded: a share of the Session's row, the container it is asked of. A length
      of the row rather than a fraction of the panel's own box, because the panel's box is what
-     changes while it unfolds: the sheet and what it holds are laid at this width from the first
-     frame, so nothing inside it reflows on the way. */
+     changes while it unfolds: what the panel holds is laid at this width from the first frame,
+     so nothing inside it reflows on the way. */
   --spacing-spec-panel: 45cqw;
 
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
@@ -563,6 +563,19 @@
 @utility chrome-columns {
   display: grid;
   grid-template-columns: var(--sidebar-current-width, var(--spacing-sidebar)) 1fr;
+}
+
+/* The slot the Spec panel takes in a Session's row (lot 19, revision 4b): the band, the unfolded
+   width, or a width between the two, which the panel writes as `--spec-open` on every frame of a
+   fold — 0 folded, 1 unfolded — so the chat beside it is pushed as it moves. A share and not a
+   length, because the two ends are lengths of different kinds, rems and a share of the row, and
+   only the browser can put them on one line; at rest it is one of the two tokens exactly, and
+   stays so while the window is resized. The fallback is the band, which the panel opens at. */
+@utility spec-slot {
+  width: calc(
+    var(--spacing-spec-band) + (var(--spacing-spec-panel) - var(--spacing-spec-band)) *
+      var(--spec-open, 0)
+  );
 }
 
 /* Where the active tab meets the sheet it opens (design D2-02).

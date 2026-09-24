@@ -1,10 +1,10 @@
-import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { AnimatePresence, animate, motion, useMotionValue } from 'motion/react'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { IconButton } from '../components/button/button.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconChevronLeft } from '../icons.ts'
-import { CROSSFADE, crossfade, morph, useTransition } from '../motion.ts'
+import { CROSSFADE, crossfade, instant, morph, useTransition } from '../motion.ts'
 import type {
   PhaseName,
   ReaderView,
@@ -41,29 +41,26 @@ import { TasksPart } from './tasks-part.tsx'
  * the agent: the part it writes. A row of the rail, a group heading or a thing left before ready
  * pins the choice, and from then on the agent's part only breathes in the rail.
  *
- * The width, and nothing of the chat, is what moves. The panel stands in its row as a slot, and
- * the sheet it draws hangs from the slot's right edge over whatever is beside it: unfolding, the
- * sheet opens over the chat on `morph` and the slot widens once it has landed; folding, the slot
- * narrows at once and the sheet closes over the chat's new width. The chat is laid out again once
- * each way, never on every frame. The sheet and what it holds are laid at the unfolded width from
- * the first frame (`w-spec-panel`, a share of the row, which is the container that length is
- * asked of), so the stage's text does not reflow on the way either.
+ * The width is what moves, and it pushes the chat (brief revision 4b). The panel is a slot of its
+ * row and the chat takes the rest: unfolding, the slot widens on `morph` from the band to its
+ * unfolded width and the chat narrows with it from the first frame; folding, the other way. Nothing
+ * stands over the chat at any time. The two ends are lengths of different kinds — rems, and a
+ * share of the row (`w-spec-panel`, asked of the row, which is its container) — so what moves is
+ * how far open the panel is, from 0 to 1, which the slot's width is drawn from (`spec-slot`).
+ * What the panel holds is laid at the unfolded width from the first frame and hangs from the
+ * slot's left edge, which clips the rest: the stage's text does not reflow on the way, only the
+ * chat's does.
  *
  * Everything it shows is handed to it, and everything it does is reported: the panel holds only
  * what is on the stage, whether it is folded, and whether the rework dialog is open. What a save
  * becomes — a version, a conflict, a line in the Journal — is the engine's.
  */
 
-/** The slot the panel takes in its row: the band, or the unfolded width. */
-const SLOT = 'relative min-h-0 w-spec-band shrink-0'
+/** The slot the panel takes in its row, whose width moves; what it holds past it is clipped. */
+const SLOT = 'spec-slot relative min-h-0 shrink-0 overflow-hidden border-l border-border'
 
-const SLOT_OPEN = 'relative min-h-0 w-spec-panel shrink-0'
-
-/** The sheet, hanging from the slot's right edge over what stands beside it. */
-const SHEET = 'absolute inset-y-0 right-0 z-10 overflow-hidden border-l border-border'
-
-/** What the unfolded sheet holds, laid at the unfolded width whatever the sheet's own is. */
-const OPEN = 'absolute inset-y-0 right-0 flex w-spec-panel flex-col bg-surface-content'
+/** What the unfolded panel holds, laid at the unfolded width whatever the slot's own is. */
+const OPEN = 'absolute inset-y-0 left-0 flex w-spec-panel flex-col bg-surface-content'
 
 const BAND = 'absolute inset-y-0 left-0 z-10 flex w-spec-band flex-col bg-surface-content'
 
@@ -123,18 +120,20 @@ export function SpecPanel({
   const [pinned, setPinned] = useState<StageChoice | null>(null)
   const [reworking, setReworking] = useState(defaultReworkOpen)
   const [folded, setFolded] = useState(defaultFolded)
-  // Whether the width is on its way. The slot keeps the band until an unfold has landed.
+  // Whether the width is on its way. Folding, what was open stays in the slot until it has closed.
   const [moving, setMoving] = useState(false)
   // The fold as it is now, read by the several hands one click may bubble through.
   const isFolded = useRef(defaultFolded)
   // Whether the last fold was the hand's: it holds against the agent until the hand unfolds.
   const byHand = useRef(false)
   const writing = useRef(spec.focus)
-  const sheet = useRef<HTMLElement>(null)
+  const slot = useRef<HTMLElement>(null)
   // Whether the keyboard was in the panel when the hand folded or unfolded it: the control it
   // was on is gone, and the focus goes to what stands in its place.
   const refocus = useRef(false)
   const width = useTransition(morph)
+  // How far open the panel is, from the band (0) to the unfolded width (1).
+  const open = useMotionValue(defaultFolded ? 0 : 1)
   const fade = useTransition(crossfade)
   const shown: StageChoice = pinned ?? { part: spec.focus ?? 'problem' }
   const reading = reader !== undefined
@@ -143,7 +142,7 @@ export function SpecPanel({
   function fold(next: boolean, hand: boolean): void {
     if (hand) byHand.current = next
     if (isFolded.current === next) return
-    refocus.current = hand && (sheet.current?.contains(document.activeElement) ?? false)
+    refocus.current = hand && (slot.current?.contains(document.activeElement) ?? false)
     isFolded.current = next
     setFolded(next)
     setMoving(true)
@@ -160,12 +159,48 @@ export function SpecPanel({
     fold(false, false)
   }, [spec.focus])
 
+  /**
+   * Writes how far open the panel is onto its slot, which draws its width from it.
+   *
+   * Called on every frame the value moves rather than subscribed to it, as the shell does with
+   * the sidebar's width: a value that changes every frame cannot be a class, and a width
+   * assembled in a style attribute is a length living outside the theme.
+   */
+  function pose(share: number): void {
+    slot.current?.style.setProperty('--spec-open', String(share))
+  }
+
+  // The first frame has no animation to report a width: the resting one is written before it.
+  useLayoutEffect(() => pose(open.get()), [])
+
+  // A fold moves the width on `morph`, from wherever it stands, pushing the chat on every frame.
+  // Told to move less, it lands at once.
+  useLayoutEffect(() => {
+    const target = folded ? 0 : 1
+    if (open.get() === target) return
+    if (width === instant) {
+      open.jump(target)
+      pose(target)
+      setMoving(false)
+      return
+    }
+    let live = true
+    const travel = animate(open, target, { ...width, onUpdate: pose })
+    void travel.then(() => {
+      if (live) setMoving(false)
+    })
+    return () => {
+      live = false
+      travel.stop()
+    }
+  }, [folded])
+
   // Folded, the keyboard lands on the band's unfold button; unfolded, on what is on the stage.
   useEffect(() => {
     if (!refocus.current) return
     refocus.current = false
     const target = folded ? '[data-unfold]' : '[data-row][tabindex="0"]'
-    sheet.current?.querySelector<HTMLElement>(target)?.focus()
+    slot.current?.querySelector<HTMLElement>(target)?.focus()
   }, [folded])
 
   const rail = {
@@ -182,84 +217,68 @@ export function SpecPanel({
   }
 
   return (
-    <div className={folded || moving ? SLOT : SLOT_OPEN}>
-      <motion.section
-        ref={sheet}
-        aria-label={`Spec ${spec.key}`}
-        className={SHEET}
-        initial={false}
-        animate={{ width: folded ? 'var(--spacing-spec-band)' : 'var(--spacing-spec-panel)' }}
-        transition={width}
-        onAnimationComplete={() => setMoving(false)}
-      >
-        {(!folded || moving) && (
-          // Folding, what was open stays under the band until the sheet has closed on it, and
-          // is out of reach of the keyboard and of a screen reader the whole way.
-          <div inert={folded} aria-hidden={folded ? true : undefined} className={OPEN}>
-            <header className={HEAD}>
-              <SpecHead
-                specKey={spec.key}
-                title={spec.title}
-                type={spec.type}
-                status={spec.status}
-                revision={spec.revision}
-                revisions={spec.revisions}
-                superseded={spec.replacedBy !== undefined}
-                onPickRevision={onPickRevision}
-                onRework={() => setReworking(true)}
-                onFold={() => fold(true, true)}
-              />
-              <p className={NOW}>{spec.now}</p>
-            </header>
-            {reader !== undefined && (
-              <ReaderBar
-                writer={reader.writer}
-                takeOverRefused={reader.takeOverRefused}
-                onTakeOver={onTakeOver}
-              />
-            )}
-            <div className={BODY}>
-              <SpecRail {...rail} />
-              <SpecStage
-                spec={spec}
-                shown={shown}
-                groups={groups}
-                reading={reading}
-                {...handlers}
-              />
-            </div>
-          </div>
-        )}
-        <AnimatePresence initial={false}>
-          {folded && (
-            // The band: anything pressed in it unfolds the panel, a glyph onto its part. It comes
-            // up over the closing sheet and goes at once when the sheet opens: the part it was
-            // pressed for is already there under it, and two rails are one too many.
-            <motion.div
-              key="band"
-              className={BAND}
-              initial={CROSSFADE.from}
-              animate={CROSSFADE.to}
-              transition={fade}
-              onClick={() => fold(false, true)}
-            >
-              <div className={BAND_TOP}>
-                <Tooltip label="Unfold the Spec" side="left">
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={<IconChevronLeft size="sm" />}
-                    aria-label="Unfold the Spec"
-                    data-unfold
-                    onClick={() => fold(false, true)}
-                  />
-                </Tooltip>
-              </div>
-              <SpecRail {...rail} folded />
-            </motion.div>
+    <section ref={slot} aria-label={`Spec ${spec.key}`} className={SLOT}>
+      {(!folded || moving) && (
+        // Folding, what was open stays under the band until the slot has closed on it, and
+        // is out of reach of the keyboard and of a screen reader the whole way.
+        <div inert={folded} aria-hidden={folded ? true : undefined} className={OPEN}>
+          <header className={HEAD}>
+            <SpecHead
+              specKey={spec.key}
+              title={spec.title}
+              type={spec.type}
+              status={spec.status}
+              revision={spec.revision}
+              revisions={spec.revisions}
+              superseded={spec.replacedBy !== undefined}
+              onPickRevision={onPickRevision}
+              onRework={() => setReworking(true)}
+              onFold={() => fold(true, true)}
+            />
+            <p className={NOW}>{spec.now}</p>
+          </header>
+          {reader !== undefined && (
+            <ReaderBar
+              writer={reader.writer}
+              takeOverRefused={reader.takeOverRefused}
+              onTakeOver={onTakeOver}
+            />
           )}
-        </AnimatePresence>
-      </motion.section>
+          <div className={BODY}>
+            <SpecRail {...rail} />
+            <SpecStage spec={spec} shown={shown} groups={groups} reading={reading} {...handlers} />
+          </div>
+        </div>
+      )}
+      <AnimatePresence initial={false}>
+        {folded && (
+          // The band: anything pressed in it unfolds the panel, a glyph onto its part. It comes
+          // up over the closing panel and goes at once when the slot opens: the part it was
+          // pressed for is already there under it, and two rails are one too many.
+          <motion.div
+            key="band"
+            className={BAND}
+            initial={CROSSFADE.from}
+            animate={CROSSFADE.to}
+            transition={fade}
+            onClick={() => fold(false, true)}
+          >
+            <div className={BAND_TOP}>
+              <Tooltip label="Unfold the Spec" side="left">
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  icon={<IconChevronLeft size="sm" />}
+                  aria-label="Unfold the Spec"
+                  data-unfold
+                  onClick={() => fold(false, true)}
+                />
+              </Tooltip>
+            </div>
+            <SpecRail {...rail} folded />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <ReworkDialog
         open={reworking}
         onOpenChange={setReworking}
@@ -270,7 +289,7 @@ export function SpecPanel({
           onRework(reason)
         }}
       />
-    </div>
+    </section>
   )
 }
 

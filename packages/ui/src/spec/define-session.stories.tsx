@@ -440,7 +440,7 @@ type Story = StoryObj<typeof meta>
  * start from the folded panel a Session opens on: the hand unfolds it first.
  */
 
-/** The hand unfolding the panel from its band, and the sheet once it is open. */
+/** The hand unfolding the panel from its band, and the panel once it is open. */
 async function unfold(canvasElement: HTMLElement): Promise<void> {
   const canvas = within(canvasElement)
   await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))

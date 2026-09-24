@@ -210,7 +210,7 @@ export interface LiveSpecPanelProps extends SpecActions {
 
 /**
  * The panel over a held Spec, for the stories that show the panel alone: in a Session's row,
- * beside a stand-in for the chat, which is what it folds away from and unfolds over.
+ * beside a stand-in for the chat, which it pushes aside as it unfolds and gives back as it folds.
  */
 export function LiveSpecPanel({
   spec: initial,
@@ -227,7 +227,7 @@ export function LiveSpecPanel({
       <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
         <p>
           The chat of the Session stands here, and takes whatever width the Spec panel leaves it:
-          all of it but the band while the panel is folded, and what is left beside the sheet once
+          all of it but the band while the panel is folded, and what is left beside the panel once
           it is unfolded.
         </p>
         {agentWrites !== undefined && (
