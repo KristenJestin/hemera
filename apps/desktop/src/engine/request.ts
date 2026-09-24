@@ -369,10 +369,9 @@ export function answer(
     }
     if (decision.name === 'commands.services') {
       const { projectId, workspaceId } = decision.argument
-      // D8-09: a Workspace's services are its running `serve` runs, whoever started them. Read
-      // from what it has running until `Commands.services(projectId, workspaceId)` answers it.
-      const running = yield* commands.runningIn(workspaceId, projectId)
-      return running.filter((run) => run.type === 'serve')
+      // D8-08, D8-09: a Workspace's services are its running `serve` runs, whoever started
+      // them, each with the conflicts it is the holder of, derived as they are read (Decided 12).
+      return yield* commands.services(projectId, workspaceId)
     }
     // What a human decides of a command the agent proposed: the one way into the catalogue
     // besides the settings (D8-11).
