@@ -82,10 +82,11 @@ describe('The catalogue is edited and read', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
-      folder: 'api',
+      folderBase: 'api',
+      folder: null,
     })
     // The folder is stored the way the Project declares its repository.
-    expect(made.folder).toBe('./api')
+    expect(made.folderBase).toBe('./api')
     expect(await bridge.invoke('commands.list', { projectId: project.id })).toEqual([made])
 
     const edited = await bridge.invoke('commands.update', {
@@ -97,6 +98,7 @@ describe('The catalogue is edited and read', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      folderBase: null,
       folder: null,
     })
     expect(edited.id).toBe(made.id)
@@ -122,6 +124,7 @@ describe('The catalogue is edited and read', () => {
       lineLinux: null,
       scope: 'workspace' as const,
       portless: false,
+      folderBase: null,
     }
     await bridge.invoke('commands.create', { ...draft, folder: null })
 
@@ -129,9 +132,14 @@ describe('The catalogue is edited and read', () => {
       'a command named dev is already in this Project: it is refused, not replaced',
     )
     await expect(
-      bridge.invoke('commands.create', { ...draft, name: 'web', folder: 'elsewhere' }),
+      bridge.invoke('commands.create', {
+        ...draft,
+        name: 'web',
+        folderBase: 'elsewhere',
+        folder: null,
+      }),
     ).rejects.toThrow(
-      "a command runs in the Workspace root or in one of the Project's repositories",
+      "a command runs under the Workspace root or under one of the Project's repositories",
     )
     await expect(
       bridge.invoke('commands.update', { ...draft, name: 'nothing', folder: null }),
@@ -157,6 +165,7 @@ describe('The agent starts the app and the user opens it', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      folderBase: null,
       folder: null,
     })
 
@@ -232,6 +241,7 @@ describe('The view lists the sources with their provenance', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      folderBase: null,
       folder: null,
     })
     const session = await bridge.invoke('sessions.create', {

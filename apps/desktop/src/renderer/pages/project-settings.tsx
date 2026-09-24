@@ -35,8 +35,8 @@ import {
 import type { ShownWorkspace } from '../workspaces-store.ts'
 
 /**
- * A command of the catalogue, as its row draws it. The engine knows a folder relative to the
- * Workspace root and no base or Portless name yet: every command reads as running from the root.
+ * A command of the catalogue, as its row draws it: its base and its folder under it, as the
+ * engine keeps them. The engine knows no Portless name yet.
  */
 function lineOf(command: Command): CommandLine {
   return {
@@ -49,15 +49,24 @@ function lineOf(command: Command): CommandLine {
     scope: command.scope,
     portless: command.portless,
     portlessName: null,
-    folderBase: null,
-    folder: command.folder === null || command.folder === '.' ? '' : command.folder,
+    // Its base as the engine keeps it, and the folder under it without the leading `./`.
+    folderBase: command.folderBase,
+    folder: command.folder?.replace(/^\.\//, '') ?? '',
   }
 }
 
 /** What the engine writes a command from: every field the row edits (D8-07, D8-10). */
 type CommandWrite = Pick<
   Command,
-  'name' | 'line' | 'lineWindows' | 'lineLinux' | 'type' | 'folder' | 'scope' | 'portless'
+  | 'name'
+  | 'line'
+  | 'lineWindows'
+  | 'lineLinux'
+  | 'type'
+  | 'folderBase'
+  | 'folder'
+  | 'scope'
+  | 'portless'
 >
 
 /** A row as the engine writes it. */
@@ -68,19 +77,12 @@ function writeOf(line: CommandLine): CommandWrite {
     lineWindows: line.lineWindows,
     lineLinux: line.lineLinux,
     type: line.type,
-    folder: folderOf(line),
+    folderBase: line.folderBase,
+    // The base itself is no folder at all.
+    folder: line.folder === '' ? null : line.folder,
     scope: line.scope,
     portless: line.portless,
   }
-}
-
-/**
- * The folder of a command relative to the Workspace root, as the engine knows it: its base
- * joined in front of its path, and no folder at all for the root itself.
- */
-function folderOf(line: CommandLine): string | null {
-  const parts = [line.folderBase ?? '', line.folder].filter((part) => part !== '')
-  return parts.length === 0 ? null : parts.join('/')
 }
 
 /** What a Workspace opened in the list is asked through (D8-05, D8-06, D8-08). */

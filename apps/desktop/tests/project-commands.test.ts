@@ -61,28 +61,30 @@ describe('The catalogue is edited and read', () => {
       scope: 'workspace' as const,
       portless: false,
     }
-    expect(await saveCommand({ ...draft, folder: './api' }, false)).toBeNull()
-    expect(catalogueOf(project.id).map((one) => [one.name, one.type, one.folder])).toEqual([
-      ['test', 'test', './api'],
-    ])
+    expect(await saveCommand({ ...draft, folderBase: './api', folder: null }, false)).toBeNull()
+    expect(
+      catalogueOf(project.id).map((one) => [one.name, one.type, one.folderBase, one.folder]),
+    ).toEqual([['test', 'test', './api', null]])
     // The agent reads the same catalogue, with the type and the folder.
     expect(
       (await opened.bridge.invoke('commands.list', { projectId: project.id })).map(
-        (one) => one.folder,
+        (one) => one.folderBase,
       ),
     ).toEqual(['./api'])
 
     // The same name again is refused, in the engine's sentence, and nothing changes.
-    expect(await saveCommand({ ...draft, folder: null }, false)).toBe(
+    expect(await saveCommand({ ...draft, folderBase: null, folder: null }, false)).toBe(
       'a command named test is already in this Project: it is refused, not replaced',
     )
-    // A folder that is not one of the Project's repositories is refused as well.
-    expect(await saveCommand({ ...draft, name: 'lint', folder: 'scripts' }, false)).toContain(
-      "one of the Project's repositories",
-    )
+    // A base that is not one of the Project's repositories is refused as well.
+    expect(
+      await saveCommand({ ...draft, name: 'lint', folderBase: 'scripts', folder: null }, false),
+    ).toContain("one of the Project's repositories")
 
     // Edited in place, by its name.
-    expect(await saveCommand({ ...draft, line: 'pnpm vitest', folder: null }, true)).toBeNull()
+    expect(
+      await saveCommand({ ...draft, line: 'pnpm vitest', folderBase: null, folder: null }, true),
+    ).toBeNull()
     expect(catalogueOf(project.id).map((one) => [one.name, one.line, one.folder])).toEqual([
       ['test', 'pnpm vitest', null],
     ])

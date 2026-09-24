@@ -197,7 +197,10 @@ export async function readCatalogue(projectId: string): Promise<void> {
   }
 }
 
-/** A command as the settings write it: `folder` null for the Workspace root. */
+/**
+ * A command as the settings write it: `folderBase` null for the Workspace root, `folder` under it
+ * and null for the base itself.
+ */
 export interface CommandDraft {
   readonly projectId: string
   readonly name: string
@@ -205,6 +208,7 @@ export interface CommandDraft {
   readonly lineWindows: string | null
   readonly lineLinux: string | null
   readonly type: CommandType
+  readonly folderBase: string | null
   readonly folder: string | null
   readonly scope: CommandScope
   readonly portless: boolean
@@ -244,6 +248,8 @@ export async function addToCatalogue(run: CommandRun): Promise<string | null> {
       lineWindows: null,
       lineLinux: null,
       type: 'script',
+      // The folder it ran in, relative to the Workspace root: a base of the root.
+      folderBase: null,
       folder: run.folder,
       scope: 'workspace',
       portless: false,

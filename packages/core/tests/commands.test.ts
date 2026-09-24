@@ -8,9 +8,12 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   COMMAND_SCOPES,
   COMMAND_TYPES,
+  InvalidCommandFolderError,
   UnknownCommandScopeError,
   UnknownCommandTypeError,
   addressIn,
+  commandFolder,
+  commandPlace,
   commandScope,
   commandType,
   joinsRunningRun,
@@ -103,5 +106,30 @@ describe('A type and a scope are words the catalogue knows', () => {
       /serve, test, lint, build, configure, debug or script/,
     )
     expect(() => commandScope('everywhere')).toThrow(UnknownCommandScopeError)
+  })
+})
+
+describe("A command's folder resolves under its base", () => {
+  test('the folder is kept relative to its base, and null is the base itself', () => {
+    expect(commandFolder(null)).toBeNull()
+    expect(commandFolder('')).toBeNull()
+    expect(commandFolder('./')).toBeNull()
+    expect(commandFolder('src/')).toBe('./src')
+    expect(commandFolder('packages/app/../web')).toBe('./packages/web')
+  })
+
+  test('a folder that is absolute or climbs out of its base is refused', () => {
+    expect(() => commandFolder('..')).toThrow(InvalidCommandFolderError)
+    expect(() => commandFolder('../api')).toThrow('it climbs out of its base')
+    expect(() => commandFolder('/etc')).toThrow('it is absolute')
+    expect(() => commandFolder('C:/work')).toThrow('it is absolute')
+  })
+
+  test('the place is the folder under the base, relative to the Workspace root', () => {
+    expect(commandPlace({ folderBase: null, folder: null })).toBeNull()
+    expect(commandPlace({ folderBase: '.', folder: null })).toBeNull()
+    expect(commandPlace({ folderBase: './web', folder: null })).toBe('./web')
+    expect(commandPlace({ folderBase: './web', folder: './src' })).toBe('./web/src')
+    expect(commandPlace({ folderBase: null, folder: './tools' })).toBe('./tools')
   })
 })

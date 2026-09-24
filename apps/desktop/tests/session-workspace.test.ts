@@ -18,7 +18,8 @@ import { z } from 'zod'
 
 import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
-import { runFromPanel } from '#engine/commands/panel.ts'
+import { InvalidCommandFolderError } from '@hemera/core'
+import { UnknownCommandFolderError, createCommand, runFromPanel } from '#engine/commands/panel.ts'
 import { Commands } from '#engine/commands/service.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions, WorkspaceFixedError, WorkspaceNotReadyError } from '#engine/sessions.ts'
@@ -161,7 +162,8 @@ describe("A command's folder resolves inside the Workspace", () => {
             lineWindows: null,
             lineLinux: null,
             type: 'script',
-            folder: './sources/api',
+            folderBase: './sources/api',
+            folder: null,
             scope: 'workspace',
             portless: false,
           },
@@ -176,6 +178,63 @@ describe("A command's folder resolves inside the Workspace", () => {
     expect(runs[0]?.cwd).toBe(join(loginForm, 'sources', 'api'))
     expect(runs[0]?.workspaceId).not.toBeNull()
     expect(runs[0]?.output).toContain(join(loginForm, 'sources', 'api'))
+  })
+})
+
+describe("A command's folder resolves under its base inside the Workspace", () => {
+  /** `where`, as the settings send it: the repository it runs under, and a folder below it. */
+  const where = (projectId: string, folderBase: string | null, folder: string | null) => ({
+    projectId,
+    name: 'where',
+    line: `"${process.execPath}" -e "console.log(process.cwd())"`,
+    lineWindows: null,
+    lineLinux: null,
+    type: 'script' as const,
+    folderBase,
+    folder,
+    scope: 'workspace' as const,
+    portless: false,
+  })
+
+  test('src under ./sources/api runs in login-form/sources/api/src, and says so', async () => {
+    mkdirSync(join(loginForm, 'sources', 'api', 'src'))
+    const seen = await toolApplication(dataFolder)(fakeAgent())(
+      Effect.gen(function* () {
+        const commands = yield* Commands
+        const { session } = yield* inLoginForm
+        const saved = yield* createCommand(where(session.projectId, 'sources/api', 'src/'))
+        const started = yield* runFromPanel(session.id, 'where', undefined)
+        return { saved, run: yield* commands.awaited(session.id, started.id, 10_000) }
+      }).pipe(Effect.provide(variablesLayer)),
+    )
+
+    // Stored as the Project declares its repository, the folder relative to it.
+    expect(seen.saved.folderBase).toBe('./sources/api')
+    expect(seen.saved.folder).toBe('./src')
+    expect(seen.run.cwd).toBe(join(loginForm, 'sources', 'api', 'src'))
+    // The run records its folder relative to the Workspace root, base and folder together.
+    expect(seen.run.folder).toBe('./sources/api/src')
+    expect(seen.run.output).toContain(join(loginForm, 'sources', 'api', 'src'))
+  })
+
+  test('a folder climbing out of its base, or a base the Project does not declare, is refused', async () => {
+    const seen = await toolApplication(dataFolder)(fakeAgent())(
+      Effect.gen(function* () {
+        const commands = yield* Commands
+        const { session } = yield* inLoginForm
+        const climbing = yield* Effect.flip(
+          createCommand(where(session.projectId, './sources/api', '../..')),
+        )
+        const stray = yield* Effect.flip(createCommand(where(session.projectId, './web', null)))
+        return { climbing, stray, catalogue: yield* commands.list(session.projectId) }
+      }),
+    )
+
+    expect(seen.climbing).toBeInstanceOf(InvalidCommandFolderError)
+    expect(seen.climbing.message).toContain('it climbs out of its base')
+    expect(seen.stray).toBeInstanceOf(UnknownCommandFolderError)
+    expect(seen.stray.message).toContain('./web')
+    expect(seen.catalogue).toEqual([])
   })
 })
 
@@ -206,7 +265,8 @@ describe('A Project-scoped service is one instance for all', () => {
             lineWindows: null,
             lineLinux: null,
             type: 'serve',
-            folder: './sources/api',
+            folderBase: './sources/api',
+            folder: null,
             scope: 'project',
             portless: false,
           },
@@ -245,6 +305,7 @@ describe('A Project-scoped service is one instance for all', () => {
             lineWindows: null,
             lineLinux: null,
             type: 'serve',
+            folderBase: null,
             folder: null,
             scope: 'project',
             portless: false,
@@ -312,6 +373,7 @@ describe('A variable set on main applies to a Session on main', () => {
             lineWindows: null,
             lineLinux: null,
             type: 'script',
+            folderBase: null,
             folder: null,
             scope: 'workspace',
             portless: false,

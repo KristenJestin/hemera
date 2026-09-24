@@ -145,6 +145,7 @@ export const saved = (projectId: string, name: string, line: string, type: 'serv
         type,
         lineWindows: null,
         lineLinux: null,
+        folderBase: null,
         folder: null,
         scope: 'workspace',
         portless: false,

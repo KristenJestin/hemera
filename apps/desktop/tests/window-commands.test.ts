@@ -75,6 +75,7 @@ describe('The agent starts the app and the user opens it', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      folderBase: null,
       folder: null,
     })
     const session = await bridge.invoke('sessions.create', {

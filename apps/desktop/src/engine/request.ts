@@ -24,6 +24,7 @@ import type {
   EmptyCommandNameError,
   EmptyMessageError,
   EmptyTitleError,
+  InvalidCommandFolderError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
   InvalidSpecPrefixError,
@@ -561,6 +562,7 @@ export type Refusal =
   | EmptyCommandLineError
   | UnknownCommandError
   | UnknownCommandFolderError
+  | InvalidCommandFolderError
   | UnknownRunError
   | NothingToRunError
   | UnreadableInstructionsError

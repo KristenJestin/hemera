@@ -427,10 +427,12 @@ export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
  * The commands of a Project: a name, a line to run, what it is for, and where it runs (D6-12).
  *
  * The catalogue is the Project's and not a Session's: a command written once is offered to
- * every Session of that Project, and the same process answers the agent and the user. `folder`
- * is empty for the Workspace root and is otherwise one of the Project's repositories, stored
- * the way a repository is — relative to the root — so that a Project whose folder moves keeps
- * pointing at what it meant.
+ * every Session of that Project, and the same process answers the agent and the user. Where it
+ * runs is a base and a folder under it (D8-07 as amended by recette 1): `folder_base` is one of
+ * the Project's repositories as the Project declares it, null for the Workspace root, and
+ * `folder` is relative to that base, null for the base itself — so a command of a repository
+ * follows it into every Workspace, and a Project whose folder moves keeps pointing at what it
+ * meant. The migration reads lot 18's `folder`, a repository or empty for the root, as that base.
  *
  * `type` is what the command is for, one of seven with the icon the design system fixes (D8-07),
  * and it replaces lot 18's `kind`: the migration reads `app` as `serve`, `check` as `test` and
@@ -450,13 +452,14 @@ export const projectCommands = sqliteTable(
     name: text('name').notNull(),
     line: text('line').notNull(),
     type: text('type').notNull(),
-    folder: text('folder').notNull().default(''),
+    folder: text('folder'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     lineWindows: text('line_windows'),
     lineLinux: text('line_linux'),
     scope: text('scope').notNull().default('workspace'),
     portless: integer('portless').notNull().default(0),
+    folderBase: text('folder_base'),
   },
   (table) => [
     check('command_type_is_known', sql`${table.type} IN (${sql.raw(oneOf(COMMAND_TYPES))})`),

@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "3e881c3a-77bc-4a25-a782-09a754a1ae11",
+  "id": "6eb15398-b1e9-4080-986c-f0faebfebd99",
   "prevIds": ["584c3df8-84a3-46a5-b8ed-861e5f6d2c30"],
   "ddl": [
     {
@@ -734,9 +734,9 @@
     },
     {
       "type": "text",
-      "notNull": true,
+      "notNull": false,
       "autoincrement": false,
-      "default": "''",
+      "default": null,
       "generated": null,
       "name": "folder",
       "entityType": "columns",
@@ -799,6 +799,16 @@
       "default": "0",
       "generated": null,
       "name": "portless",
+      "entityType": "columns",
+      "table": "project_commands"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "folder_base",
       "entityType": "columns",
       "table": "project_commands"
     },

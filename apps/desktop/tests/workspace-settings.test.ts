@@ -218,6 +218,7 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      folderBase: null,
       folder: null,
     })
     const session = await bridge.invoke('sessions.create', {
@@ -303,6 +304,7 @@ describe('A port conflict names its holder', () => {
         lineLinux: null,
         scope: 'workspace',
         portless: false,
+        folderBase: null,
         folder: null,
       })
       const inMain = await bridge.invoke('sessions.create', {
@@ -366,6 +368,7 @@ describe('The steps follow the recipe in order', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      folderBase: null,
       folder: null,
     })
     await readRecipe(project.id)
@@ -415,6 +418,7 @@ describe('A run step fails on a non-zero exit', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      folderBase: null,
       folder: null,
     })
     expect(

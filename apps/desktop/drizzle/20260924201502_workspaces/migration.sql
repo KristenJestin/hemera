@@ -64,6 +64,7 @@ ALTER TABLE `project_commands` ADD `line_windows` text;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `line_linux` text;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `scope` text DEFAULT 'workspace' NOT NULL;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `portless` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE `project_commands` ADD `folder_base` text;--> statement-breakpoint
 ALTER TABLE `project_repositories` ADD `included_by_default` integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE `projects` ADD `workspaces_root` text;--> statement-breakpoint
 ALTER TABLE `projects` ADD `branch_prefix` text;--> statement-breakpoint
@@ -115,13 +116,14 @@ CREATE TABLE `__new_project_commands` (
 	`name` text NOT NULL,
 	`line` text NOT NULL,
 	`type` text NOT NULL,
-	`folder` text DEFAULT '' NOT NULL,
+	`folder` text,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	`line_windows` text,
 	`line_linux` text,
 	`scope` text DEFAULT 'workspace' NOT NULL,
 	`portless` integer DEFAULT 0 NOT NULL,
+	`folder_base` text,
 	CONSTRAINT `fk_project_commands_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `command_name_in_project` UNIQUE(`project_id`,`name`),
 	CONSTRAINT "command_type_is_known" CHECK("type" IN ('serve', 'test', 'lint', 'build', 'configure', 'debug', 'script')),
@@ -131,6 +133,8 @@ CREATE TABLE `__new_project_commands` (
 INSERT INTO `__new_project_commands`(`id`, `project_id`, `name`, `line`, `type`, `folder`, `created_at`, `updated_at`) SELECT `id`, `project_id`, `name`, `line`, CASE `type` WHEN 'app' THEN 'serve' WHEN 'check' THEN 'test' WHEN 'utility' THEN 'script' ELSE `type` END, `folder`, `created_at`, `updated_at` FROM `project_commands`;--> statement-breakpoint
 DROP TABLE `project_commands`;--> statement-breakpoint
 ALTER TABLE `__new_project_commands` RENAME TO `project_commands`;--> statement-breakpoint
+UPDATE `project_commands` SET `folder_base` = `folder`, `folder` = NULL WHERE `folder` IN (SELECT `relative_path` FROM `project_repositories` WHERE `project_repositories`.`project_id` = `project_commands`.`project_id`);--> statement-breakpoint
+UPDATE `project_commands` SET `folder` = NULL WHERE `folder` = '';--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_workspaces` (

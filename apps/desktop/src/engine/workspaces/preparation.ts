@@ -41,11 +41,11 @@ import {
   workspaceStateOf,
 } from '@hemera/core'
 import { and, asc, eq } from 'drizzle-orm'
-import { Context, Data, Effect, Layer } from 'effect'
+import { Context, Data, Effect, Layer, Result } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
 import { StderrSink } from '../agents/supervisor.ts'
-import { Commands, type RunView, UnknownRunError } from '../commands/service.ts'
+import { Commands, type RunView, UnknownRunError, commandCwd } from '../commands/service.ts'
 import { Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
@@ -469,6 +469,13 @@ export const preparationLayer = Layer.effect(
           } satisfies Outcome
         }
         const { projectId, id: workspaceId } = place.workspace
+        // Its folder under its base, under this Workspace (D8-07 as amended by recette 1); one
+        // that climbs out fails the step, naming it, and nothing runs.
+        const where = yield* commandCwd(place.workspace.path, command).pipe(Effect.result)
+        if (Result.isFailure(where)) {
+          return { state: 'failed', message: where.failure.message } satisfies Outcome
+        }
+        const { folder, cwd } = where.success
         const started = yield* commands.run({
           sessionId: null,
           projectId,
@@ -480,8 +487,8 @@ export const preparationLayer = Layer.effect(
           type: commandType(command.type),
           scope: commandScope(command.scope),
           portless: command.portless === 1,
-          folder: command.folder === '' ? null : command.folder,
-          cwd: join(place.workspace.path, command.folder),
+          folder,
+          cwd,
           workspaceId,
           workspaceName: place.workspace.name,
           environment: yield* variables.givenFor(projectId, workspaceId),

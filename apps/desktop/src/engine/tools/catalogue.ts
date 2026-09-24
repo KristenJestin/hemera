@@ -28,6 +28,7 @@ import {
   TOOL_NAMES,
   type ToolName,
   admitTool,
+  commandPlace,
   offeredTools,
   runsInMain,
 } from '@hemera/core'
@@ -800,7 +801,7 @@ export const toolCatalogueLayer: Layer.Layer<
             // that runs in one of the Project's repositories is not the same one run at the root.
             const lines = listed.map(
               (command) =>
-                `${command.name}  ${command.type}  in ${command.folder ?? 'the Workspace root'}  ${command.line}`,
+                `${command.name}  ${command.type}  in ${commandPlace(command) ?? 'the Workspace root'}  ${command.line}`,
             )
             // And the runs of this Session, whoever started them (recette 4 of 23 September 2026):
             // a line the human ran from the panel is in the thread, and an agent asked about it
@@ -842,6 +843,9 @@ export const toolCatalogueLayer: Layer.Layer<
             }
             const catalogue = yield* answered(commands.list(projectId))
             const entry = catalogue?.find((command) => command.name === named)
+            // Where a catalogue command runs: its folder under its base, relative to the root
+            // (D8-07 as amended by recette 1).
+            const entryPlace = entry === undefined ? null : commandPlace(entry)
             if (named !== undefined && entry === undefined) {
               const known = catalogue?.map((one) => one.name).join(', ') ?? ''
               return failed(
@@ -858,15 +862,15 @@ export const toolCatalogueLayer: Layer.Layer<
             if (
               entry !== undefined &&
               call.arguments.folder !== undefined &&
-              declared(call.arguments.folder) !== declared(entry.folder)
+              declared(call.arguments.folder) !== declared(entryPlace)
             ) {
-              const home = entry.folder ?? 'the Workspace root'
+              const home = entryPlace ?? 'the Workspace root'
               return failed(
                 `${entry.name} runs in ${home}, not in ${call.arguments.folder}`,
                 `the folder of a catalogue command is the Project's: ${entry.name} runs in ${home}. Send no folder to run it there, or a \`line\` to run something else where you need it`,
               )
             }
-            const where = entry?.folder ?? call.arguments.folder ?? null
+            const where = entry === undefined ? (call.arguments.folder ?? null) : entryPlace
             const folder = where === null || where === '' || where === '.' ? '.' : where
             // A Project-scoped service is one instance for all, in `main`, whichever Workspace
             // this Session works in (D8-07): its folder resolves under `main`, not here.

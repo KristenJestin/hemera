@@ -4,18 +4,19 @@
  * The agent reaches the same catalogue and the same runs through its tools; the window reaches
  * them through these, and the two differ in one thing only — who is asking. A command the user
  * runs from the panel is the user's own act: nothing is asked of anyone, and the run is written
- * in the Journal under the user. A folder is one of two things, the Workspace root or one of the
- * Project's repositories as the Project declares it, and anything else is refused here rather
- * than stored and found wrong the day it runs.
+ * in the Journal under the user. Where a command runs is a base — the Workspace root, or one of
+ * the Project's repositories as the Project declares it — and a folder under that base (D8-07 as
+ * amended by recette 1); a base the Project does not declare, and a folder that leaves its base,
+ * are refused here rather than stored and found wrong the day it runs.
  */
-
-import { join } from 'node:path'
 
 import {
   type CommandScope,
   type CommandType,
   EmptyCommandLineError,
   EmptyCommandNameError,
+  InvalidCommandFolderError,
+  commandFolder,
   commandLine,
   commandName,
   repositoryPath,
@@ -26,13 +27,13 @@ import { Effect } from 'effect'
 import { Projects, UnknownProjectError } from '../projects.ts'
 import { Sessions } from '../sessions.ts'
 import { Variables } from '../workspaces/variables.ts'
-import { Commands, UnknownCommandError } from './service.ts'
+import { Commands, UnknownCommandError, commandCwd } from './service.ts'
 
-/** A folder that is neither the Workspace root nor one of the Project's repositories. */
+/** A base that is neither the Workspace root nor one of the Project's repositories. */
 export class UnknownCommandFolderError extends Error {
   constructor(readonly folder: string) {
     super(
-      `a command runs in the Workspace root or in one of the Project's repositories, and ${folder} is neither`,
+      `a command runs under the Workspace root or under one of the Project's repositories, and ${folder} is neither`,
     )
     this.name = 'UnknownCommandFolderError'
   }
@@ -54,6 +55,9 @@ export interface CommandDraft {
   readonly lineWindows: string | null
   readonly lineLinux: string | null
   readonly type: CommandType
+  /** A repository the Project declares, and null for the Workspace root. */
+  readonly folderBase: string | null
+  /** A folder under that base, relative to it, and null for the base itself. */
   readonly folder: string | null
   readonly scope: CommandScope
   readonly portless: boolean
@@ -91,46 +95,55 @@ const read = (draft: CommandDraft) =>
   })
 
 /**
- * The folder of a draft: the root, or a repository the Project declares — nothing else.
+ * Where a draft runs: its base — the root, or a repository the Project declares, nothing else —
+ * and its folder under that base, which never leaves it (D8-07 as amended by recette 1).
  *
- * Read as the Project reads a repository, so `sources/api` and `./sources/api/` are the one
- * location it declared, stored the way it declared it.
+ * The base is read as the Project reads a repository, so `sources/api` and `./sources/api/` are
+ * the one location it declared, stored the way it declared it; the folder is kept as `./<path>`,
+ * and null when it is the base itself.
  */
-const folderOf = (draft: CommandDraft) =>
+const placeOf = (draft: CommandDraft) =>
   Effect.gen(function* () {
-    const said = draft.folder === null ? '' : draft.folder.trim()
-    if (said === '' || said === '.' || said === './') return null
+    const said = draft.folderBase === null ? '' : draft.folderBase.trim()
     const folder = yield* Effect.try({
+      try: () => commandFolder(draft.folder),
+      catch: (refused) =>
+        refused instanceof InvalidCommandFolderError
+          ? refused
+          : new InvalidCommandFolderError(draft.folder ?? '', String(refused)),
+    })
+    if (said === '' || said === '.' || said === './') return { folderBase: null, folder }
+    const folderBase = yield* Effect.try({
       try: () => repositoryPath(said),
       catch: () => new UnknownCommandFolderError(said),
     })
     const project = yield* projectOf(draft.projectId)
-    if (!project.repositories.includes(folder)) {
+    if (!project.repositories.includes(folderBase)) {
       return yield* Effect.fail(new UnknownCommandFolderError(said))
     }
-    return folder
+    return { folderBase, folder }
   })
 
 /** Adds a command to the catalogue; a name it already holds is refused, not replaced. */
 export const createCommand = (draft: CommandDraft) =>
   Effect.gen(function* () {
     const { name, line } = yield* read(draft)
-    const folder = yield* folderOf(draft)
+    const place = yield* placeOf(draft)
     const commands = yield* Commands
-    return yield* commands.save({ ...draft, name, line, folder }, false)
+    return yield* commands.save({ ...draft, name, line, ...place }, false)
   })
 
 /** Rewrites a command the catalogue holds, by its name; one it does not hold is refused. */
 export const updateCommand = (draft: CommandDraft) =>
   Effect.gen(function* () {
     const { name, line } = yield* read(draft)
-    const folder = yield* folderOf(draft)
+    const place = yield* placeOf(draft)
     const commands = yield* Commands
     const held = yield* commands.list(draft.projectId)
     if (!held.some((one) => one.name === name)) {
       return yield* Effect.fail(new UnknownCommandError(name))
     }
-    return yield* commands.save({ ...draft, name, line, folder }, true)
+    return yield* commands.save({ ...draft, name, line, ...place }, true)
   })
 
 /**
@@ -181,6 +194,8 @@ export const runFromPanel = (
       // A Project-scoped service is one instance for all, in `main`, whichever Workspace this
       // Session works in (D8-07), with `main`'s variables.
       const home = runsInMain(entry) ? yield* sessions.mainOf(project.id) : workspace
+      // Its folder under its base, resolved under the Workspace the run is in (D8-07 as amended).
+      const { folder, cwd } = yield* commandCwd(home.path, entry)
       return yield* commands.run({
         sessionId,
         projectId: project.id,
@@ -192,9 +207,8 @@ export const runFromPanel = (
         type: entry.type,
         scope: entry.scope,
         portless: entry.portless,
-        folder: entry.folder,
-        // The folder of a command resolves under the Workspace the run is in (D8-07).
-        cwd: entry.folder === null ? home.path : join(home.path, entry.folder),
+        folder,
+        cwd,
         workspaceId: home.id,
         workspaceName: home.name,
         environment: yield* variables.givenFor(project.id, home.id),

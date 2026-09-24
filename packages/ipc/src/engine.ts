@@ -595,8 +595,9 @@ export const ENGINE_REQUESTS = {
   },
 
   // The commands of a Project and the runs they become (design D6-12). The catalogue is the
-  // Project's, edited in its settings: a command is named once, and `folder` is where it runs —
-  // null for the Workspace root, or one of the Project's repositories as the Project declares it.
+  // Project's, edited in its settings: a command is named once, and it runs in `folder` under
+  // `folderBase` — a base null for the Workspace root or one of the Project's repositories as the
+  // Project declares it, a folder relative to that base and null for the base itself.
   // A name the catalogue already holds is refused by `create` and is what `update` rewrites.
   'commands.list': {
     arguments: z.object({ projectId: z.string() }),
@@ -610,6 +611,7 @@ export const ENGINE_REQUESTS = {
       lineWindows: z.string().nullable(),
       lineLinux: z.string().nullable(),
       type: commandTypeSchema,
+      folderBase: z.string().nullable(),
       folder: z.string().nullable(),
       scope: commandScopeSchema,
       portless: z.boolean(),
@@ -624,6 +626,7 @@ export const ENGINE_REQUESTS = {
       lineWindows: z.string().nullable(),
       lineLinux: z.string().nullable(),
       type: commandTypeSchema,
+      folderBase: z.string().nullable(),
       folder: z.string().nullable(),
       scope: commandScopeSchema,
       portless: z.boolean(),

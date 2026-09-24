@@ -170,7 +170,10 @@ export const proposalsLayer: Layer.Layer<
               name: proposal.name,
               line: proposal.line,
               type: proposal.type,
-              folder: proposal.folder,
+              // A proposal names the root or one of the Project's repositories: the command runs
+              // under that base, in the base itself (D8-07 as amended by recette 1).
+              folderBase: proposal.folder,
+              folder: null,
               lineWindows: null,
               lineLinux: null,
               scope: 'workspace',

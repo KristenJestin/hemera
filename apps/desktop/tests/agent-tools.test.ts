@@ -129,7 +129,7 @@ const inCatalogue = (
   name: string,
   line: string,
   type: CommandType,
-  folder: string | null = null,
+  folderBase: string | null = null,
 ) =>
   Effect.gen(function* () {
     const commands = yield* Commands
@@ -141,7 +141,8 @@ const inCatalogue = (
         lineWindows: null,
         lineLinux: null,
         type,
-        folder,
+        folderBase,
+        folder: null,
         scope: 'workspace',
         portless: false,
       },
@@ -991,11 +992,11 @@ describe('The catalogue is edited and read', () => {
     )
 
     // What the panel offers is the catalogue the user edited.
-    expect(seen.map((one) => [one.name, one.type, one.folder])).toEqual([
-      ['test-api', 'test', 'api'],
+    expect(seen.map((one) => [one.name, one.type, one.folderBase, one.folder])).toEqual([
+      ['test-api', 'test', 'api', null],
     ])
     // And the agent reads the same command, with its type and the folder it runs in.
-    expect(agent.answers.used[0]?.text).toContain('test-api  test  in api  pnpm test')
+    expect(agent.answers.used[0]?.text).toContain('test-api  test  in ./api  pnpm test')
   })
 })
 
@@ -1015,6 +1016,7 @@ describe('A command saved in the settings is listed to the agent at once', () =>
           lineWindows: null,
           lineLinux: null,
           type: 'test',
+          folderBase: null,
           folder: null,
           scope: 'workspace',
           portless: false,

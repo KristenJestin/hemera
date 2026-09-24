@@ -116,6 +116,7 @@ describe('A proposal enters the catalogue only when accepted', () => {
       lineWindows: null,
       lineLinux: null,
       type: 'script',
+      folderBase: null,
       folder: null,
       scope: 'workspace',
       portless: false,

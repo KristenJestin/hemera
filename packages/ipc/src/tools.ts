@@ -30,9 +30,10 @@ export type CommandScope = z.infer<typeof commandScopeSchema>
 /**
  * A command of a Project's catalogue (design D6-12).
  *
- * `folder` is where it runs: null for the Workspace root, or one of the Project's repositories,
- * relative to the root as the Project declares it. `lineWindows` and `lineLinux` are the lines
- * those systems run instead of `line`, null when they run it (D8-07).
+ * Where it runs is `folderBase`, one of the Project's repositories as the Project declares it or
+ * null for the Workspace root, and `folder` under it, relative to that base or null for the base
+ * itself (D8-07 as amended by recette 1). `lineWindows` and `lineLinux` are the lines those
+ * systems run instead of `line`, null when they run it (D8-07).
  */
 export const commandSchema = z.object({
   id: z.string(),
@@ -42,6 +43,7 @@ export const commandSchema = z.object({
   lineWindows: z.string().nullable(),
   lineLinux: z.string().nullable(),
   type: commandTypeSchema,
+  folderBase: z.string().nullable(),
   folder: z.string().nullable(),
   scope: commandScopeSchema,
   portless: z.boolean(),

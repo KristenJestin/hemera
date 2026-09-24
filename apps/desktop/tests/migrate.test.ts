@@ -77,7 +77,7 @@ const SPECS_MIGRATION = '20260924122302_specs'
  * the Workspaces, their steps and variables, and the commands typed by seven types (D8-01, D8-05,
  * D8-06, D8-07).
  */
-const WORKSPACES_MIGRATION = '20260924192500_workspaces'
+const WORKSPACES_MIGRATION = '20260924201502_workspaces'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -989,10 +989,12 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
           VALUES ('main-1', 'atlas', 'main', '/work/atlas', ${at})`
         yield* sql`INSERT INTO project_repositories (id, project_id, relative_path, rank)
           VALUES ('repo-1', 'atlas', './sources/api', 'a')`
-        yield* sql`INSERT INTO project_commands (id, project_id, name, line, kind, created_at, updated_at)
-          VALUES ('c-app', 'atlas', 'dev', 'pnpm dev', 'app', ${at}, ${at}),
-                 ('c-check', 'atlas', 'check', 'pnpm check', 'check', ${at}, ${at}),
-                 ('c-utility', 'atlas', 'seed', './seed.sh', 'utility', ${at}, ${at})`
+        // Lot 18's folder: a repository of the Project, empty for the root, or — never written
+        // by lot 18's settings, but a row may hold it — a path of the root that is not one.
+        yield* sql`INSERT INTO project_commands (id, project_id, name, line, kind, folder, created_at, updated_at)
+          VALUES ('c-app', 'atlas', 'dev', 'pnpm dev', 'app', './sources/api', ${at}, ${at}),
+                 ('c-check', 'atlas', 'check', 'pnpm check', 'check', '', ${at}, ${at}),
+                 ('c-utility', 'atlas', 'seed', './seed.sh', 'utility', './tools', ${at}, ${at})`
         yield* sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version)
           VALUES ('session-1', 'atlas', 'Serve it', 'derived', ${at}, ${at}, 1)`
         yield* sql`INSERT INTO command_runs (id, session_id, command_id, name, line, kind, cwd, state, started_by, started_at)
@@ -1015,8 +1017,14 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       dataFolder,
       Effect.gen(function* () {
         const sql = yield* SqliteClient
-        const commands = yield* sql<{ id: string; type: string; scope: string; portless: number }>`
-          SELECT id, type, scope, portless FROM project_commands ORDER BY id`
+        const commands = yield* sql<{
+          id: string
+          type: string
+          scope: string
+          portless: number
+          folder_base: string | null
+          folder: string | null
+        }>`SELECT id, type, scope, portless, folder_base, folder FROM project_commands ORDER BY id`
         const runs = yield* sql<{
           type: string
           workspace_id: string | null
@@ -1045,11 +1053,35 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       }),
     )
 
-    // The three kinds of lot 18 are read as the types that replace them (D8-07).
+    // The three kinds of lot 18 are read as the types that replace them (D8-07). A folder that is
+    // one of the Project's repositories becomes the command's base, the folder being the base
+    // itself; the root stays the root; any other folder stays relative to the root (D8-07 as
+    // amended by recette 1).
     expect(kept.commands).toEqual([
-      { id: 'c-app', type: 'serve', scope: 'workspace', portless: 0 },
-      { id: 'c-check', type: 'test', scope: 'workspace', portless: 0 },
-      { id: 'c-utility', type: 'script', scope: 'workspace', portless: 0 },
+      {
+        id: 'c-app',
+        type: 'serve',
+        scope: 'workspace',
+        portless: 0,
+        folder_base: './sources/api',
+        folder: null,
+      },
+      {
+        id: 'c-check',
+        type: 'test',
+        scope: 'workspace',
+        portless: 0,
+        folder_base: null,
+        folder: null,
+      },
+      {
+        id: 'c-utility',
+        type: 'script',
+        scope: 'workspace',
+        portless: 0,
+        folder_base: null,
+        folder: './tools',
+      },
     ])
     // The run keeps what it was started as, in the new word, and belongs to no Workspace yet:
     // null is read as `main` (D8-08).

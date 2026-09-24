@@ -44,8 +44,11 @@ export type CommandScope = (typeof COMMAND_SCOPES)[number]
 /**
  * A command of the catalogue, as the Project settings hold it and as the agent reads it.
  *
- * `folder` is the path the command runs in: null is the Workspace root, and anything else is
- * one of the Project's repositories, stored as the Project stores them — relative to the root.
+ * Where it runs is a base and a folder under it (D8-07 as amended by recette 1): `folderBase` is
+ * one of the Project's repositories as the Project declares it, relative to the Workspace root,
+ * and null for the root itself; `folder` is relative to that base, and null for the base itself.
+ * A run resolves `<Workspace>/<base>/<folder>`, so a command of a repository follows its
+ * repository into every Workspace.
  */
 export interface Command {
   readonly id: string
@@ -58,12 +61,26 @@ export interface Command {
   /** The line Linux runs instead of the default one, and null when it runs the default (D8-07). */
   readonly lineLinux: string | null
   readonly type: CommandType
+  /** The repository it runs under, as the Project declares it, and null for the Workspace root. */
+  readonly folderBase: string | null
+  /** The folder under that base, relative to it, and null for the base itself. */
   readonly folder: string | null
   /** Once per Workspace or once for the Project: what a `serve` run joins (D8-07). */
   readonly scope: CommandScope
   /** Whether the line runs through Portless, which names its address (D8-10). */
   readonly portless: boolean
   readonly createdAt: number
+}
+
+/** A folder of a command that is absolute, or leaves the base it is relative to. */
+export class InvalidCommandFolderError extends Error {
+  readonly folder: string
+
+  constructor(folder: string, reason: string) {
+    super(`the folder ${folder} of a command is refused: ${reason}`)
+    this.name = 'InvalidCommandFolderError'
+    this.folder = folder
+  }
 }
 
 export class EmptyCommandNameError extends Error {
@@ -127,6 +144,50 @@ export function commandScope(candidate: string): CommandScope {
   const scope = COMMAND_SCOPES.find((known) => known === candidate)
   if (scope === undefined) throw new UnknownCommandScopeError(candidate)
   return scope
+}
+
+/** The segments of a relative path, refusing one that is absolute or climbs out of its start. */
+function relativeSegments(candidate: string): string[] {
+  const path = candidate.trim().replaceAll('\\', '/')
+  if (path.startsWith('/') || /^[a-zA-Z]:/.test(path)) {
+    throw new InvalidCommandFolderError(candidate, 'it is absolute')
+  }
+  const segments: string[] = []
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      if (segments.length === 0) {
+        throw new InvalidCommandFolderError(candidate, 'it climbs out of its base')
+      }
+      segments.pop()
+      continue
+    }
+    segments.push(segment)
+  }
+  return segments
+}
+
+/**
+ * The folder of a command, relative to its base (D8-07 as amended): null for the base itself —
+ * nothing, `.` or `./` — and `./<segments>` otherwise; one that is absolute or climbs out of its
+ * base is refused.
+ */
+export function commandFolder(candidate: string | null): string | null {
+  if (candidate === null) return null
+  const segments = relativeSegments(candidate)
+  return segments.length === 0 ? null : `./${segments.join('/')}`
+}
+
+/**
+ * Where a command runs, relative to the Workspace root (D8-07 as amended): its folder under its
+ * base, and null for the root itself — `./web` and `./src` are `./web/src`, the base alone is the
+ * base, and a base of `.` is the root.
+ */
+export function commandPlace(command: Pick<Command, 'folderBase' | 'folder'>): string | null {
+  const segments = [command.folderBase, command.folder].flatMap((part) =>
+    part === null ? [] : relativeSegments(part),
+  )
+  return segments.length === 0 ? null : `./${segments.join('/')}`
 }
 
 /**

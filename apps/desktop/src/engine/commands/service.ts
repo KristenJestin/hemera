@@ -36,9 +36,11 @@ import {
   type Command,
   type CommandScope,
   type CommandType,
+  InvalidCommandFolderError,
   addressIn,
   commandLine,
   commandName,
+  commandPlace,
   commandScope,
   commandType,
   DuplicateCommandNameError,
@@ -52,6 +54,7 @@ import {
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
 import { request as httpsRequest } from 'node:https'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import { z } from 'zod'
 
 import { HeldWords } from '../agents/held.ts'
@@ -194,6 +197,29 @@ export class UnknownCommandError extends Error {
 }
 
 /**
+ * Where a command of the catalogue runs in a Workspace (D8-07 as amended by recette 1): its folder
+ * under its base, relative to the Workspace root — what a run records as its `folder` — and the
+ * absolute folder `<Workspace>/<base>/<folder>` it starts in. A place that climbs out of the
+ * Workspace is refused, naming it, and nothing runs.
+ */
+export const commandCwd = (root: string, command: Pick<Command, 'folderBase' | 'folder'>) =>
+  Effect.try({
+    try: () => {
+      const folder = commandPlace(command)
+      const cwd = folder === null ? root : join(root, folder)
+      const below = relative(root, cwd)
+      if (below === '..' || below.startsWith(`..${sep}`) || isAbsolute(below)) {
+        throw new InvalidCommandFolderError(folder ?? '.', 'it climbs out of the Workspace')
+      }
+      return { folder, cwd }
+    },
+    catch: (refused) =>
+      refused instanceof InvalidCommandFolderError
+        ? refused
+        : new InvalidCommandFolderError(command.folder ?? '.', String(refused)),
+  })
+
+/**
  * The run holding the port another run published (D8-09): which run, in which Workspace, under
  * which name — what a conflict is shown with, on both runs.
  */
@@ -322,7 +348,9 @@ export interface CommandEdit {
   readonly lineWindows: string | null
   readonly lineLinux: string | null
   readonly type: string
-  /** The repository it runs in, relative to the root, and null for the root itself. */
+  /** The repository it runs under, as the Project declares it, and null for the root (D8-07). */
+  readonly folderBase: string | null
+  /** The folder under that base, relative to it, and null for the base itself. */
   readonly folder: string | null
   readonly scope: string
   readonly portless: boolean
@@ -986,7 +1014,8 @@ export const commandsLayer = Layer.effect(
                     lineWindows: row.lineWindows,
                     lineLinux: row.lineLinux,
                     type: commandType(row.type),
-                    folder: row.folder === '' ? null : row.folder,
+                    folderBase: row.folderBase,
+                    folder: row.folder,
                     scope: commandScope(row.scope),
                     portless: row.portless === 1,
                     createdAt: Date.parse(row.createdAt),
@@ -1021,7 +1050,7 @@ export const commandsLayer = Layer.effect(
                 return yield* Effect.fail(new DuplicateCommandNameError(name))
               }
               const id = existing[0]?.id ?? crypto.randomUUID()
-              const folder = edit.folder ?? ''
+              const place = { folderBase: edit.folderBase, folder: edit.folder }
               const createdAt = existing[0]?.createdAt ?? at
               if (existing.length === 0) {
                 yield* transaction
@@ -1033,7 +1062,7 @@ export const commandsLayer = Layer.effect(
                     line,
                     ...lines,
                     type,
-                    folder,
+                    ...place,
                     scope: runsIn,
                     portless,
                     createdAt,
@@ -1043,7 +1072,7 @@ export const commandsLayer = Layer.effect(
               } else {
                 yield* transaction
                   .update(projectCommands)
-                  .set({ line, ...lines, type, folder, scope: runsIn, portless, updatedAt: at })
+                  .set({ line, ...lines, type, ...place, scope: runsIn, portless, updatedAt: at })
                   .where(eq(projectCommands.id, id))
                   .pipe(Effect.mapError(failed('writing the commands')))
               }
@@ -1055,7 +1084,7 @@ export const commandsLayer = Layer.effect(
                   line,
                   ...lines,
                   type,
-                  folder: edit.folder,
+                  ...place,
                   scope: runsIn,
                   portless: edit.portless,
                   createdAt: Date.parse(createdAt),
