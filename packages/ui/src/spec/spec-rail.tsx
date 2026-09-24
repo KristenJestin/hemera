@@ -5,7 +5,6 @@ import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
 import { Button } from '../components/button/button.tsx'
 import { Popover } from '../components/popover/popover.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconFileText, IconListCheck, IconMessageQuestion, IconUser } from '../icons.ts'
 import { FILL_STEP, crossfade, fill, instant, useTransition } from '../motion.ts'
 import {
   PHASE_TITLES,
@@ -20,6 +19,7 @@ import {
   shapedSectionsOf,
 } from './model.ts'
 import { MARK_WORDS } from './part-head.tsx'
+import { SPEC_PART_ICONS, SPEC_PHASE_ICONS } from './spec-icons.ts'
 
 /**
  * The rail of the Spec panel: every part of the Spec, one quiet row each, grouped by the phase
@@ -34,9 +34,10 @@ import { MARK_WORDS } from './part-head.tsx'
  *
  * One stop of the tab order, and the arrows walk it: up and down, Home and End, Enter opens.
  *
- * Folded, it is the band the panel folds to beside the chat: the glyph of each part and its dot,
- * the dot of each phase, and the readiness said as `3/7`. The names leave the eye and stay the
- * accessible name and the tooltip.
+ * Each phase and each part wears a glyph of its own, before its name. Folded, the rail is the
+ * band the panel folds to beside the chat: the glyph of each phase heading its group and the glyph
+ * of each part, each with its dot, and the readiness said as `3/7`. The names leave the eye and
+ * stay the accessible name and the tooltip.
  */
 
 /** One row: where it leads, what it is called, its mark and, for a list, its count. */
@@ -133,12 +134,13 @@ const PHASE_STATE_WORDS: Record<PhaseState, string> = {
   unavailable: 'unavailable',
 }
 
-/** The glyph a row is drawn as once the rail is folded: one per kind of part. */
-function glyphOf(target: SpecTarget): ReactNode {
-  if (target === 'stories') return <IconUser size="sm" />
-  if (target === 'tasks') return <IconListCheck size="sm" />
-  if (target === 'questions') return <IconMessageQuestion size="sm" />
-  return <IconFileText size="sm" />
+/** A glyph of the rail, named by `data-icon` so a play can tell one from another. */
+function Glyph({ icon: Icon }: { icon: (typeof SPEC_PART_ICONS)[SpecTarget] }): ReactNode {
+  return (
+    <span aria-hidden="true" data-icon={Icon.displayName} className="flex shrink-0">
+      <Icon size="sm" />
+    </span>
+  )
 }
 
 const RAIL = 'flex w-rail shrink-0 flex-col border-r border-border'
@@ -150,9 +152,9 @@ const LIST = 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 py-3'
 const LIST_FOLDED = 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 py-2'
 
 /**
- * A row: words and no surface. The row on the stage is the foreground text and a 2-pixel rule of
- * the accent on its left; every other row is the muted text, brightening under the hand. Folded,
- * the glyph stands where the words were, its dot on its corner.
+ * A row: its glyph and its words, and no surface. The row on the stage is the foreground text and
+ * a 2-pixel rule of the accent on its left; every other row is the muted text, brightening under
+ * the hand. Folded, the glyph stands alone, its dot on its corner.
  */
 const ROW =
   'relative flex h-control-sm w-full items-center gap-2 rounded-sm px-2 text-left text-sm outline-none focus-ring hover:text-foreground'
@@ -160,7 +162,7 @@ const ROW =
 const ROW_FOLDED =
   'relative flex h-control-sm w-full items-center justify-center rounded-sm text-sm outline-none focus-ring hover:text-foreground'
 
-/** A group's heading: a row of its own, in the small type of a label. */
+/** A group's heading: a row of its own, its phase's glyph and name in the small type of a label. */
 const HEADING =
   'relative flex h-control-sm w-full items-center gap-2 rounded-sm px-2 text-left text-xs outline-none focus-ring hover:text-foreground'
 
@@ -260,9 +262,12 @@ export function SpecRail({
                   className={cn(folded ? HEADING_FOLDED : HEADING, whole ? ROW_ON : ROW_OFF)}
                   onClick={() => onSelectGroup(group.phase)}
                 >
-                  <span aria-hidden="true" className={PHASE_DOTS[group.state]} />
-                  <span className={folded ? 'sr-only' : undefined}>{title}</span>
+                  <Glyph icon={SPEC_PHASE_ICONS[group.phase]} />
+                  <span className={folded ? 'sr-only' : LABEL}>{title}</span>
                   <span className="sr-only">{` phase, ${PHASE_STATE_WORDS[group.state]}`}</span>
+                  <span aria-hidden="true" className={folded ? DOT_BOX_FOLDED : DOT_BOX}>
+                    <span className={PHASE_DOTS[group.state]} />
+                  </span>
                 </button>
               </Tooltip>
               <ul className="flex flex-col">
@@ -285,11 +290,8 @@ export function SpecRail({
                           className={cn(folded ? ROW_FOLDED : ROW, on ? ROW_ON : ROW_OFF)}
                           onClick={() => onSelect(row.target)}
                         >
-                          {folded ? (
-                            <span aria-hidden="true" className="flex shrink-0">
-                              {glyphOf(row.target)}
-                            </span>
-                          ) : (
+                          <Glyph icon={SPEC_PART_ICONS[row.target]} />
+                          {!folded && (
                             <>
                               <span className={LABEL}>{row.label}</span>
                               {row.count !== undefined && (

@@ -41,8 +41,23 @@ const EVERY_MARK: RailGroup[] = [
   },
 ]
 
+/** Every part a Spec of any type can have, under the three phases the rail draws. */
+const EVERY_PART: RailGroup[] = [
+  {
+    ...EVERY_MARK[0]!,
+    rows: [
+      ...EVERY_MARK[0]!.rows,
+      { target: 'reproduction', label: 'Reproduction', mark: 'agent' },
+      { target: 'invariants', label: 'Invariants', mark: 'agent' },
+    ],
+  },
+  EVERY_MARK[1]!,
+  EVERY_MARK[2]!,
+]
+
 /** The rail with what is on the stage held, as the panel holds it. */
 function Held({
+  label = 'Parts of ATL-7',
   groups,
   initial,
   following,
@@ -54,6 +69,8 @@ function Held({
   onMarkReady,
   folded = false,
 }: {
+  /** What the rail is called; two rails side by side need two names. */
+  label?: string | undefined
   groups: RailGroup[]
   initial: SpecTarget
   following?: SpecTarget | undefined
@@ -71,7 +88,7 @@ function Held({
     <TooltipProvider>
       <div className={folded ? 'flex h-screen w-spec-band flex-col' : 'flex h-screen'}>
         <SpecRail
-          label="Parts of ATL-7"
+          label={label}
           groups={groups}
           current={current}
           following={following}
@@ -238,6 +255,41 @@ export const Folded: Story = {
     await expect(scope).toBeVisible()
     scope.focus()
     await expect(await within(document.body).findByRole('tooltip')).toHaveTextContent('Scope')
+  },
+}
+
+/** The `data-icon` of each row of a rail, the group headings among them, in order. */
+function iconsOf(rail: HTMLElement): string[] {
+  return [...rail.querySelectorAll('[data-row]')].map(
+    (row) => row.querySelector('[data-icon]')?.getAttribute('data-icon') ?? '',
+  )
+}
+
+/**
+ * Every phase and every part wears a glyph of its own (brief revision 4b): the three phase
+ * headings and the eleven parts a Spec of any type can have are fourteen different glyphs, the
+ * same ones folded as unfolded, where the glyph stands before the name.
+ */
+export const EveryIcon: Story = {
+  args: { groups: EVERY_PART, initial: 'plan' },
+  render: (args) => (
+    <div className="flex">
+      <Held {...args} label="Parts of ATL-7, unfolded" />
+      <Held {...args} label="Parts of ATL-7, folded" folded />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const unfolded = iconsOf(canvas.getByRole('navigation', { name: 'Parts of ATL-7, unfolded' }))
+    const folded = iconsOf(canvas.getByRole('navigation', { name: 'Parts of ATL-7, folded' }))
+    await expect(unfolded).toHaveLength(14)
+    await expect(unfolded).not.toContain('')
+    await expect(new Set(unfolded).size).toBe(14)
+    await expect(folded).toEqual(unfolded)
+    // The glyph stands before the name.
+    const scope = canvas.getAllByRole('button', { name: 'Scope, edited by you' })[0]!
+    await expect(scope.firstElementChild).toHaveAttribute('data-icon', 'IconBorderOuter')
+    await expect(scope).toHaveTextContent('Scope')
   },
 }
 
