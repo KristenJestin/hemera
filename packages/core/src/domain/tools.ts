@@ -55,6 +55,7 @@ export type ToolMark =
   | 'stop-command'
   | 'list-commands'
   | 'command-output'
+  | 'propose-command'
   | 'project'
   | 'session'
 
@@ -80,6 +81,7 @@ export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
   commands_stop: { label: 'Stop command', mark: 'stop-command' },
   commands_list: { label: 'List commands', mark: 'list-commands' },
   commands_output: { label: 'Command output', mark: 'command-output' },
+  commands_propose: { label: 'Propose command', mark: 'propose-command' },
   project_get: { label: 'Project', mark: 'project' },
   session_get: { label: 'Session', mark: 'session' },
 }

@@ -22,6 +22,7 @@ describe('Every tool has a label and a mark', () => {
     expect(TOOL_LABELS.fs_read.label).toBe('Read file')
     expect(TOOL_LABELS.fs_list.label).toBe('List folder')
     expect(TOOL_LABELS.commands_output.label).toBe('Command output')
+    expect(TOOL_LABELS.commands_propose.label).toBe('Propose command')
     expect(TOOL_LABELS.session_get.label).toBe('Session')
   })
 })
