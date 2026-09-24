@@ -217,8 +217,11 @@ export class InvalidSpecTitleError extends Error {
 
 /** A task write that would close a cycle; `path` is closed, by task title (D7-06). */
 export class TaskCycleError extends Error {
-  constructor(readonly path: string[]) {
+  readonly path: string[]
+
+  constructor(path: string[]) {
     super(`the task dependencies form a cycle: ${path.join(' → ')}`)
+    this.path = path
     this.name = 'TaskCycleError'
   }
 }
@@ -233,14 +236,17 @@ export class SpecNotWritableError extends Error {
 
 /** A section written against a version that is no longer its current one (D7-12). */
 export class StaleSectionError extends Error {
-  constructor(
-    readonly section: SectionName,
-    readonly baseVersion: number,
-    readonly currentVersion: number,
-  ) {
+  readonly section: SectionName
+  readonly baseVersion: number
+  readonly currentVersion: number
+
+  constructor(section: SectionName, baseVersion: number, currentVersion: number) {
     super(
       `the ${section} section changed since version ${baseVersion}: it is at version ${currentVersion}`,
     )
+    this.section = section
+    this.baseVersion = baseVersion
+    this.currentVersion = currentVersion
     this.name = 'StaleSectionError'
   }
 }
@@ -731,8 +737,11 @@ export function specPrefixFrom(projectName: string): string {
 
 /** A Spec key prefix that is not 2 to 4 upper-case Latin letters (Decided 2). */
 export class InvalidSpecPrefixError extends Error {
-  constructor(readonly prefix: string) {
+  readonly prefix: string
+
+  constructor(prefix: string) {
     super(`the Spec key prefix "${prefix}" is refused: it takes 2 to 4 upper-case letters, A to Z`)
+    this.prefix = prefix
     this.name = 'InvalidSpecPrefixError'
   }
 }
