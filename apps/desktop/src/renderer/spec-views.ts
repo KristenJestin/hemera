@@ -467,11 +467,7 @@ export function readerOf(
   const title = sessions.find((one) => one.id === writer)?.title ?? null
   return {
     writer: title ?? 'none',
-    takeOverRefused: takeOverRefusal(
-      snapshot.spec,
-      title,
-      writer !== null && running(writer),
-    ),
+    takeOverRefused: takeOverRefusal(snapshot.spec, title, writer !== null && running(writer)),
   }
 }
 

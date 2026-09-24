@@ -41,8 +41,7 @@ export const Reading: Story = {
  */
 export const TakeOverRefused: Story = {
   args: {
-    takeOverRefused:
-      'The Session "Spec CSV" is running a turn on ATL-7: take over once it ends.',
+    takeOverRefused: 'The Session "Spec CSV" is running a turn on ATL-7: take over once it ends.',
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
