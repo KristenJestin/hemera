@@ -33,6 +33,7 @@ import {
   AGENT_PROVIDERS,
   COMMAND_SCOPES,
   COMMAND_TYPES,
+  LAUNCH_STATES,
   MISSIONS,
   NATIVE_STATES,
   PHASE_IDS,
@@ -139,8 +140,8 @@ export const projects = sqliteTable(
  *
  * There is one kind of Workspace (D8-01): `main`, one the user made on a folder of theirs, and
  * one dedicated to a Spec are rows of this table alike. `spec_id` is the Spec a dedicated one was
- * made for, and null for the two others; a Spec has one at most, which the partial index says —
- * there is no foreign key yet, the Specs being another lot's table. `state` defaults to `ready`
+ * made for, and null for the two others; a Spec has one at most, which the partial index says,
+ * and the foreign key to `specs` keeps it a Spec that exists. `state` defaults to `ready`
  * because that is what every Workspace written before this lot is, `main` first, and what one
  * made on a folder is from its creation; a dedicated one is written `preparing`, explicitly.
  * `cleaned_at` is when a cleanup removed its folder: the row is kept, `cleaned`, and so is every
@@ -160,7 +161,7 @@ export const workspaces = sqliteTable(
     name: text('name').notNull(),
     path: text('path').notNull(),
     createdAt: text('created_at').notNull(),
-    specId: text('spec_id'),
+    specId: text('spec_id').references((): AnySQLiteColumn => specs.id, { onDelete: 'set null' }),
     state: text('state').notNull().default('ready'),
     cleanedAt: text('cleaned_at'),
   },
@@ -313,6 +314,8 @@ export const sessions = sqliteTable(
     nativeState: text('native_state').notNull().default('none'),
     cwd: text('cwd'),
     workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    /** The revision a `build` Session was started on (D8-13); null on every other Session. */
+    revisionId: text('revision_id'),
     mission: text('mission').notNull().default('free'),
     specId: text('spec_id').references((): AnySQLiteColumn => specs.id),
     briefedAt: text('briefed_at'),
@@ -746,7 +749,7 @@ export const specs = sqliteTable(
     slug: text('slug').notNull(),
     status: text('status').notNull(),
     priority: text('priority'),
-    workspaceId: text('workspace_id'),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
     currentRevisionId: text('current_revision_id').notNull(),
     /** The one Session whose agent may write the draft (D7-11). */
     writerSessionId: text('writer_session_id').references((): AnySQLiteColumn => sessions.id),
@@ -994,5 +997,39 @@ export const specEditBuffers = sqliteTable(
   (table) => [
     check('buffer_name_is_known', sql`${table.name} IN (${sql.raw(oneOf(SECTION_NAMES))})`),
     primaryKey({ columns: [table.specId, table.name] }),
+  ],
+)
+
+/**
+ * A launch of a build: the request that waits for its environment, then starts it (D8-13).
+ *
+ * A row per request and not a flag on the Spec, because a request has a life of its own: it
+ * waits, it is being started, it started, it failed with a cause, or a Rework cancelled it.
+ * `revision_id` is the revision the launch was asked on, and stays text rather than a foreign
+ * key (D8-13). `workspace_id` and `session_id` are set to null rather than cascaded: a Workspace
+ * cleaned up or a Session gone leaves the record of the launch where it is. `detail` is what
+ * refused it, as it was said, and null while nothing did.
+ *
+ * The environment is not named here: the launch is a request against what the Spec already
+ * holds, and its Workspace is the one the Spec was given.
+ */
+export const buildLaunches = sqliteTable(
+  'build_launches',
+  {
+    id: text('id').primaryKey(),
+    specId: text('spec_id')
+      .notNull()
+      .references(() => specs.id, { onDelete: 'cascade' }),
+    revisionId: text('revision_id').notNull(),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    state: text('state').notNull(),
+    sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+    detail: text('detail'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('launch_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(LAUNCH_STATES))})`),
+    index('launch_by_spec').on(table.specId, table.state),
   ],
 )

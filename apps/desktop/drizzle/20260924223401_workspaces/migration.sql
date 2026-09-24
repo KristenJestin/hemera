@@ -1,3 +1,19 @@
+CREATE TABLE `build_launches` (
+	`id` text PRIMARY KEY,
+	`spec_id` text NOT NULL,
+	`revision_id` text NOT NULL,
+	`workspace_id` text,
+	`state` text NOT NULL,
+	`session_id` text,
+	`detail` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	CONSTRAINT `fk_build_launches_spec_id_specs_id_fk` FOREIGN KEY (`spec_id`) REFERENCES `specs`(`id`) ON DELETE CASCADE,
+	CONSTRAINT `fk_build_launches_workspace_id_workspaces_id_fk` FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON DELETE SET NULL,
+	CONSTRAINT `fk_build_launches_session_id_sessions_id_fk` FOREIGN KEY (`session_id`) REFERENCES `sessions`(`id`) ON DELETE SET NULL,
+	CONSTRAINT "launch_state_is_known" CHECK("state" IN ('waiting', 'starting', 'started', 'failed', 'cancelled'))
+);
+--> statement-breakpoint
 CREATE TABLE `environment_variables` (
 	`id` text PRIMARY KEY,
 	`project_id` text NOT NULL,
@@ -69,7 +85,8 @@ ALTER TABLE `project_repositories` ADD `icon` text;--> statement-breakpoint
 ALTER TABLE `projects` ADD `workspaces_root` text;--> statement-breakpoint
 ALTER TABLE `projects` ADD `branch_prefix` text;--> statement-breakpoint
 ALTER TABLE `sessions` ADD `workspace_id` text REFERENCES workspaces(id) ON DELETE SET NULL;--> statement-breakpoint
-ALTER TABLE `workspaces` ADD `spec_id` text;--> statement-breakpoint
+ALTER TABLE `sessions` ADD `revision_id` text;--> statement-breakpoint
+ALTER TABLE `workspaces` ADD `spec_id` text REFERENCES specs(id) ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE `workspaces` ADD `state` text DEFAULT 'ready' NOT NULL;--> statement-breakpoint
 ALTER TABLE `workspaces` ADD `cleaned_at` text;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
@@ -165,12 +182,38 @@ CREATE TABLE `__new_workspaces` (
 	`state` text DEFAULT 'ready' NOT NULL,
 	`cleaned_at` text,
 	CONSTRAINT `fk_workspaces_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
+	CONSTRAINT `fk_workspaces_spec_id_specs_id_fk` FOREIGN KEY (`spec_id`) REFERENCES `specs`(`id`) ON DELETE SET NULL,
 	CONSTRAINT "workspace_state_is_known" CHECK("state" IN ('preparing', 'ready', 'failed', 'cleaned'))
 );
 --> statement-breakpoint
 INSERT INTO `__new_workspaces`(`id`, `project_id`, `name`, `path`, `created_at`) SELECT `id`, `project_id`, `name`, `path`, `created_at` FROM `workspaces`;--> statement-breakpoint
 DROP TABLE `workspaces`;--> statement-breakpoint
 ALTER TABLE `__new_workspaces` RENAME TO `workspaces`;--> statement-breakpoint
+PRAGMA foreign_keys=ON;--> statement-breakpoint
+PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE `__new_specs` (
+	`id` text PRIMARY KEY,
+	`project_id` text NOT NULL,
+	`key` text NOT NULL,
+	`slug` text NOT NULL,
+	`status` text NOT NULL,
+	`priority` text,
+	`workspace_id` text,
+	`current_revision_id` text NOT NULL,
+	`writer_session_id` text,
+	`content_version` integer DEFAULT 0 NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	CONSTRAINT `fk_specs_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
+	CONSTRAINT `fk_specs_workspace_id_workspaces_id_fk` FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON DELETE SET NULL,
+	CONSTRAINT `fk_specs_writer_session_id_sessions_id_fk` FOREIGN KEY (`writer_session_id`) REFERENCES `sessions`(`id`),
+	CONSTRAINT `spec_key_in_project` UNIQUE(`project_id`,`key`),
+	CONSTRAINT "spec_status_is_known" CHECK("status" IN ('draft', 'ready', 'in_progress', 'cancelled'))
+);
+--> statement-breakpoint
+INSERT INTO `__new_specs`(`id`, `project_id`, `key`, `slug`, `status`, `priority`, `workspace_id`, `current_revision_id`, `writer_session_id`, `content_version`, `created_at`, `updated_at`) SELECT `id`, `project_id`, `key`, `slug`, `status`, `priority`, `workspace_id`, `current_revision_id`, `writer_session_id`, `content_version`, `created_at`, `updated_at` FROM `specs`;--> statement-breakpoint
+DROP TABLE `specs`;--> statement-breakpoint
+ALTER TABLE `__new_specs` RENAME TO `specs`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_domain_events` (
@@ -227,11 +270,13 @@ CREATE INDEX `run_by_session` ON `command_runs` (`session_id`,`started_at`);--> 
 CREATE INDEX `run_by_workspace` ON `command_runs` (`workspace_id`,`state`);--> statement-breakpoint
 CREATE UNIQUE INDEX `workspace_name_in_project` ON `workspaces` (`project_id`,`name`) WHERE "workspaces"."state" <> 'cleaned';--> statement-breakpoint
 CREATE UNIQUE INDEX `workspace_once_per_spec` ON `workspaces` (`spec_id`) WHERE "workspaces"."spec_id" IS NOT NULL AND "workspaces"."state" <> 'cleaned';--> statement-breakpoint
+CREATE INDEX `spec_by_project` ON `specs` (`project_id`);--> statement-breakpoint
 CREATE INDEX `event_by_project` ON `domain_events` (`project_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `event_by_session` ON `domain_events` (`session_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `event_by_spec` ON `domain_events` (`spec_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `event_unseen` ON `domain_events` (`seen_at`);--> statement-breakpoint
 CREATE INDEX `entry_by_correlation` ON `session_entries` (`session_id`,`correlation_id`);--> statement-breakpoint
 CREATE INDEX `entry_by_turn` ON `session_entries` (`session_id`,`turn_id`);--> statement-breakpoint
+CREATE INDEX `launch_by_spec` ON `build_launches` (`spec_id`,`state`);--> statement-breakpoint
 CREATE UNIQUE INDEX `variable_once_in_project` ON `environment_variables` (`project_id`,`key`) WHERE "environment_variables"."workspace_id" IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `variable_once_in_workspace` ON `environment_variables` (`workspace_id`,`key`) WHERE "environment_variables"."workspace_id" IS NOT NULL;
