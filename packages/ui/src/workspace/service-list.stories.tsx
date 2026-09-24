@@ -65,6 +65,8 @@ const meta = {
     },
     onStop: { control: false, description: 'Stops the chosen instance, and only that one.' },
     onOpenUrl: { control: false, description: 'Opens an address that answered.' },
+    onSelect: { control: false, description: 'Shows what a run ran beside the list.' },
+    selected: { control: 'text', description: 'The run whose details are shown.' },
     className: { control: false, description: 'Where the list sits; never how it looks.' },
   },
 } satisfies Meta<typeof ServiceList>
@@ -225,6 +227,20 @@ async function aProjectScopedServiceIsOneInstanceForAll({ canvasElement }: PlayC
 export const ProjectScoped: Story = {
   args: { services: [AUTH] },
   play: aProjectScopedServiceIsOneInstanceForAll,
+}
+
+/** The details of one run are shown beside the list: its row's button is pressed. */
+export const RunShown: Story = {
+  args: { services: [DEV_MAIN, DEV_LOGIN_FORM], selected: DEV_MAIN.id, onSelect: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'Details of dev in main' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await userEvent.click(canvas.getByRole('button', { name: 'Details of dev in login-form' }))
+    await expect(args.onSelect).toHaveBeenCalledWith(DEV_LOGIN_FORM.id)
+  },
 }
 
 /** Nothing running: the list says so in a sentence. */

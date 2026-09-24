@@ -71,6 +71,13 @@ export interface ServiceListProps {
   onStop?: ((id: string) => void) | undefined
   /** Opens an address that answered, which this surface cannot do. */
   onOpenUrl?: ((url: string) => void) | undefined
+  /**
+   * Shows what a run ran — its line, its folder, its variables and its output — beside the list;
+   * without it, the rows offer nothing to show.
+   */
+  onSelect?: ((id: string) => void) | undefined
+  /** The run whose details are shown, whose row says so; null or absent when none is. */
+  selected?: string | null | undefined
   /** Where the list sits; never how it looks. */
   className?: string | undefined
 }
@@ -79,6 +86,8 @@ export function ServiceList({
   services,
   onStop,
   onOpenUrl,
+  onSelect,
+  selected = null,
   className,
 }: ServiceListProps): ReactNode {
   const Serve = COMMAND_TYPE_ICONS.serve
@@ -142,6 +151,18 @@ export function ServiceList({
                     )}
                     <span className={QUIET}>{STARTED_BY[service.startedBy]}</span>
                   </div>
+                  {onSelect !== undefined && (
+                    <Button
+                      variant={selected === service.id ? 'secondary' : 'ghost'}
+                      size="sm"
+                      className="shrink-0 self-start"
+                      aria-label={`Details of ${service.name} in ${service.workspace}`}
+                      aria-pressed={selected === service.id}
+                      onClick={() => onSelect(service.id)}
+                    >
+                      Details
+                    </Button>
+                  )}
                   {service.state === 'running' && onStop !== undefined && (
                     <Button
                       variant="secondary"
