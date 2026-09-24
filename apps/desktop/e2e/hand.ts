@@ -276,6 +276,29 @@ export async function showPart(key: string, part: string): Promise<void> {
   await pressIn(`nav[aria-label="Parts of ${key}"]`, part)
 }
 
+/**
+ * Unfolds the panel of a Spec from the band it opens folded to, the way a hand does: a Session
+ * opens its panel folded, and what is read in it — the head, the stage, the reader bar — is drawn
+ * only once it is open. A panel already open is left as it is.
+ */
+export async function unfoldSpec(key: string): Promise<void> {
+  await browser.execute((scope: string) => {
+    const band = document
+      .querySelector(scope)
+      ?.querySelector('button[aria-label="Unfold the Spec"]')
+    if (band instanceof HTMLButtonElement) band.click()
+  }, `section[aria-label="Spec ${key}"]`)
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (scope: string) => document.querySelector(scope) !== null,
+        `[role="region"][aria-label="Stage of ${key}"]`,
+      ),
+    { timeout: 5000, timeoutMsg: `the panel of ${key} never unfolded` },
+  )
+  await browser.pause(600)
+}
+
 /** What the region this selector finds says, or an empty string when there is none. */
 export async function region(selector: string): Promise<string> {
   return await browser.execute(

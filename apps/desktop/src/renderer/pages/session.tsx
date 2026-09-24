@@ -465,9 +465,10 @@ export function SessionPage({
       One column (review of #40, defect 2): the header, the thread and the composer share one
       width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
       the Session details are a dialog the reader opens from the head (second review of #18). The
-      screen runs under the frame all the same, and the page's own scroll is the thread's.
+      screen runs under the frame all the same, and the page's own scroll is the thread's. The row
+      is the container the unfolded Spec panel's width is a share of.
     */
-    <div className="flex h-full min-h-0">
+    <div className="@container flex h-full min-h-0">
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
           <SessionHeader
@@ -640,31 +641,30 @@ export function SessionPage({
         A `define` Session has its Spec beside the chat, the working surface the thread gave up
         width for, where the side column stood before the Session details took its plan and its
         files into a dialog. A `free` Session has no panel and nothing that offers one: a Spec
-        begins with the agent's proposal in the thread (D7-07).
+        begins with the agent's proposal in the thread (D7-07). It opens folded to a band beside the
+        chat, and unfolds over it when the hand or the agent asks (brief revision 4).
       */}
       {session.mission === 'define' && spec !== null && defined !== null && (
-        <div className="min-h-0 min-w-0 basis-9/20 border-l border-border">
-          <SpecPanel
-            spec={spec}
-            reader={readerOf(defined, session.id, sessions, running)}
-            // Checked against the version the edit was opened on, which the panel hands back:
-            // an agent may have written the section meanwhile (D7-12).
-            onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
-            onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
-            onDiscardMine={(name) => void discardMine(name)}
-            onSaveStory={(story) => void saveStory(session.id, story)}
-            onGoToQuestion={goToQuestion}
-            onMarkReady={() => void markReady(session.id)}
-            onRework={(reason) => void rework(session.id, reason)}
-            onPickRevision={(revision) => {
-              const current = stored.revisions.find(
-                (one) => one.id === defined.spec.currentRevisionId,
-              )
-              void selectRevision(revision === current?.number ? null : revision)
-            }}
-            onTakeOver={() => void takeOver(session.id)}
-          />
-        </div>
+        <SpecPanel
+          spec={spec}
+          reader={readerOf(defined, session.id, sessions, running)}
+          // Checked against the version the edit was opened on, which the panel hands back:
+          // an agent may have written the section meanwhile (D7-12).
+          onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
+          onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
+          onDiscardMine={(name) => void discardMine(name)}
+          onSaveStory={(story) => void saveStory(session.id, story)}
+          onGoToQuestion={goToQuestion}
+          onMarkReady={() => void markReady(session.id)}
+          onRework={(reason) => void rework(session.id, reason)}
+          onPickRevision={(revision) => {
+            const current = stored.revisions.find(
+              (one) => one.id === defined.spec.currentRevisionId,
+            )
+            void selectRevision(revision === current?.number ? null : revision)
+          }}
+          onTakeOver={() => void takeOver(session.id)}
+        />
       )}
     </div>
   )

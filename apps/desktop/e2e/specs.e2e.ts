@@ -41,6 +41,7 @@ import {
   sidebar,
   textOf,
   typeIn,
+  unfoldSpec,
   write,
 } from './hand.ts'
 
@@ -173,6 +174,8 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
       timeout: 10_000,
       timeoutMsg: 'the Spec panel never opened',
     })
+    // It opens folded to its band beside the chat: the hand unfolds it to read it.
+    await unfoldSpec(KEY)
 
     const panel = await region(PANEL)
     expect(panel).toContain(KEY)
@@ -341,6 +344,11 @@ describe('A second Session reads but does not write', () => {
     })
 
     await press(OPENED)
+    await browser.waitUntil(async () => (await region(PANEL)) !== '', {
+      timeout: 10_000,
+      timeoutMsg: 'the Spec panel of the second Session never showed',
+    })
+    await unfoldSpec(KEY)
     await browser.waitUntil(async () => (await region(READER_BAR)) !== '', {
       timeout: 10_000,
       timeoutMsg: 'the reader bar never showed',
@@ -366,6 +374,11 @@ describe('A second Session reads but does not write', () => {
     // engine (`writable`, tested there): the renderer writes as the human only, whose edits
     // pass from any Session's panel (D7-11).
     await press(ASKED)
+    await browser.waitUntil(async () => (await region(PANEL)) !== '', {
+      timeout: 10_000,
+      timeoutMsg: 'the Spec panel of the first Session never showed again',
+    })
+    await unfoldSpec(KEY)
     await browser.waitUntil(async () => (await region(READER_BAR)) !== '', {
       timeout: 10_000,
       timeoutMsg: 'the first Session never read',

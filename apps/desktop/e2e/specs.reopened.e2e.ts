@@ -17,7 +17,7 @@
 import { browser, expect } from '@wdio/globals'
 
 import { PROPOSAL, PROPOSE } from './agent/script.ts'
-import { awaits, control, press, pressIn, region, showPart, textOf } from './hand.ts'
+import { awaits, control, press, pressIn, region, showPart, textOf, unfoldSpec } from './hand.ts'
 
 /** The first Session of `specs.e2e.ts`, which is the title it is listed under. */
 const ASKED = `The CSV export drops the date. ${PROPOSE}`
@@ -32,13 +32,16 @@ const KEPT = 'Every CSV export of the billing module.'
 
 const PANEL = `section[aria-label="Spec ${KEY}"]`
 
-/** The heading of a phase's group in the rail, which says its state to a screen reader. */
+/**
+ * The heading of a phase's group in the rail — the group's first row — which says its state to a
+ * screen reader.
+ */
 async function phaseHeading(phase: string): Promise<string> {
   return await browser.execute(
     (scope: string, name: string) =>
-      [...(document.querySelector(scope)?.querySelectorAll('[role="group"] > p') ?? [])]
-        .map((one) => one.textContent ?? '')
-        .find((text) => text.startsWith(name)) ?? '',
+      document
+        .querySelector(scope)
+        ?.querySelector(`[role="group"][aria-label="${name}"] [data-row]`)?.textContent ?? '',
     `nav[aria-label="Parts of ${KEY}"]`,
     phase,
   )
@@ -52,14 +55,15 @@ describe('Phases survive a restart', () => {
       timeout: 10_000,
       timeoutMsg: 'the Spec panel never opened',
     })
+    await unfoldSpec(KEY)
 
     const panel = await region(PANEL)
     expect(panel).toContain(PROPOSAL.title)
     expect(panel).toContain('draft')
     expect(await textOf('Problem')).toBe(PROBLEM)
-    expect(await phaseHeading('Shape')).toBe('Shape, open')
-    expect(await phaseHeading('Plan')).toBe('Plan, pending')
-    expect(await phaseHeading('Decompose')).toBe('Decompose, pending')
+    expect(await phaseHeading('Shape')).toBe('Shape phase, open')
+    expect(await phaseHeading('Plan')).toBe('Plan phase, pending')
+    expect(await phaseHeading('Decompose')).toBe('Decompose phase, pending')
     // The write right stayed with the Session that took it.
     expect(await region('[role="group"][aria-label="Write right"]')).toContain(`« ${OPENED} »`)
   })
