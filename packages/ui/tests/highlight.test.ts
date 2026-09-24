@@ -3,8 +3,8 @@
  *
  * The component around it is a browser story; what can be proved without a browser is the part
  * that decides: which language a path is, that a grammar really colours the code of that
- * language, that a draw the grammar never read is drawn again rather than kept, that a file
- * nobody knows is drawn plain, and that none of it leaves the machine.
+ * language — every line of it, even on a machine too busy to read a line in half a second — that
+ * a file nobody knows is drawn plain, and that none of it leaves the machine.
  */
 
 import { describe, expect, test, vi } from 'vite-plus/test'
@@ -27,42 +27,29 @@ function tokens(lines: HighlightedLine[] | null): string[] {
     : lines.flatMap((line) => line.map((token) => `${token.className}:${token.text}`))
 }
 
-/**
- * The tokens of a code, read the way a reader reads them: `highlighted` answers nothing while it
- * has nothing to keep, and the module wakes its readers to draw the same code again — the draw
- * that reads a grammar which had not read yet.
- */
-async function coloured(code: string, language: string): Promise<string[]> {
-  const first = highlighted(code, language)
-  if (first !== null) return tokens(first)
-  const woken = new Promise<void>((resolve) => {
-    const stop = subscribeToHighlight(() => {
-      stop()
-      resolve()
-    })
-  })
-  await woken
-  return tokens(highlighted(code, language))
-}
-
-/** Lets the task the module woke its readers on run. */
-function nextTask(): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, 0)
-  })
+/** The tokens of each line on its own, so a suite can ask what became of one line. */
+function tokensByLine(lines: HighlightedLine[] | null): string[][] {
+  return (lines ?? []).map((line) => line.map((token) => `${token.className}:${token.text}`))
 }
 
 /**
- * A clock that runs out on the time shiki allows a line, which is what a machine busy with the
- * rest of the run does to the draw that first compiles a grammar: the line comes back as one
- * token the grammar never looked at. Returns what stops the pretending.
+ * Reads something while the machine stalls once, for two seconds, inside the first line read:
+ * what a machine busy with the rest of the run does to the line that compiles a grammar's rules.
+ * Shiki times each line on its own and gives up on one after half a second, so only that line
+ * is late — the lines after it are timed from their own start. The first reading of the clock is
+ * when the line starts, the second is its first look at the time, and the stall lands between.
+ * The clock is the machine's own again afterwards, whatever the reading did.
  */
-function busyClock(): () => void {
+function stalledOnce<T>(read: () => T): T {
   const real = Date.now
-  let ticks = 0
-  const busy = vi.spyOn(Date, 'now').mockImplementation(() => real() + (ticks += 10_000))
-  return () => {
-    busy.mockRestore()
+  let readings = 0
+  const clock = vi
+    .spyOn(Date, 'now')
+    .mockImplementation(() => real() + ((readings += 1) >= 2 ? 2_000 : 0))
+  try {
+    return read()
+  } finally {
+    clock.mockRestore()
   }
 }
 
@@ -87,15 +74,10 @@ describe('the language of a diff', () => {
 
   test('a TypeScript diff is coloured, and its keywords are the keywords', async () => {
     await warm('typescript')
-    // Twenty codes, drawn together: the draw that first uses a grammar is the draw that compiles
-    // its rules, and the one a machine busy with the rest of the run can lose — a case that passes
-    // once and fails on the twentieth run is the case this file is here for.
-    const rounds = await Promise.all(
-      Array.from({ length: 20 }, (_, round) =>
-        coloured(`${TYPESCRIPT}// round ${round}\n`, 'typescript'),
-      ),
-    )
-    for (const [round, drawn] of rounds.entries()) {
+    // Twenty codes, each a draw of its own: a case that passes once and fails on the twentieth
+    // run is the case this file is here for.
+    for (let round = 0; round < 20; round += 1) {
+      const drawn = tokens(highlighted(`${TYPESCRIPT}// round ${round}\n`, 'typescript'))
       expect(drawn.join(''), `round ${round} lost the code`).toContain('const')
       expect(drawn, `round ${round} came back plain`).toContain('tok-keyword:const')
       expect(drawn, `round ${round} lost the comment`).toContain('tok-comment:// the end')
@@ -107,13 +89,10 @@ describe('the language of a diff', () => {
     await warm('typescript')
     // The same rule in twenty rounds, each with a comment of its own in it, so that every round is
     // a draw and not the answer the round before it left in the cache.
-    const rounds = await Promise.all(
-      Array.from({ length: 20 }, (_, round) => {
-        const code = `${CSS.trimEnd()} /* round ${round} */\n`
-        return Promise.all([coloured(code, 'css'), coloured(code, 'typescript')])
-      }),
-    )
-    for (const [round, [asCss, asTypeScript]] of rounds.entries()) {
+    for (let round = 0; round < 20; round += 1) {
+      const code = `${CSS.trimEnd()} /* round ${round} */\n`
+      const asCss = tokens(highlighted(code, 'css'))
+      const asTypeScript = tokens(highlighted(code, 'typescript'))
       // The grammar cut it up, something in it was coloured, and the same text read as another
       // language comes out differently: which token a colour name lands in is the grammar's
       // business, and this suite is not the place to pin a version of one.
@@ -127,46 +106,34 @@ describe('the language of a diff', () => {
   })
 
   test('a grammar is reported loaded only once it tokenizes', async () => {
-    await warm('typescript')
-    // `loadLanguage` resolving is not the grammar reading: the draw that first uses a grammar is
-    // the draw that compiles its rules, and one that runs out of the time shiki allows a line comes
-    // back as one token the grammar never looked at — which is what a machine busy with the rest of
-    // the run produces, and what the clock here produces on purpose. Such a draw is not an answer:
-    // nothing is kept, and the readers are woken to draw the same code again, which is the draw
-    // that reads.
-    const onceMore = `${TYPESCRIPT}// once more\n`
-    const woken = new Promise<void>((resolve) => {
-      const stop = subscribeToHighlight(() => {
-        stop()
-        resolve()
-      })
-    })
-    const busy = busyClock()
-    expect(highlighted(onceMore, 'typescript')).toBeNull()
-    busy()
-    await woken
-    expect(tokens(highlighted(onceMore, 'typescript'))).toContain('tok-keyword:const')
+    // A grammar no other case here draws, so that the draw below is the one that compiles its
+    // rules — the draw #51 lost on a busy machine, and kept, uncoloured, for good.
+    const code = 'def answer():\n    return 42  # the end\n'
+    const loading = warm('python')
+    expect(highlighted(code, 'python')).toBeNull()
+    await loading
+    const lines = tokensByLine(stalledOnce(() => highlighted(code, 'python')))
+    expect(lines[0], 'the line that compiled the grammar came back plain').toContain(
+      'tok-keyword:def',
+    )
+    expect(lines[1], 'the line after it came back plain').toContain('tok-comment:# the end')
   })
 
-  test('a draw that found nothing is given one second chance, and no more', async () => {
-    await warm('css')
-    // The same clock, on a code no other case here has drawn: the draw comes back plain, the
-    // readers are woken once, and the code drawn again is kept whatever it says. Once, because a
-    // change with nothing to colour is a plain change, and a language that asked for ever would
-    // spin.
-    const code = `${CSS.trimEnd()} /* once */\n`
-    let wakes = 0
-    const stop = subscribeToHighlight(() => {
-      wakes += 1
-    })
-    const busy = busyClock()
-    expect(highlighted(code, 'css')).toBeNull()
-    busy()
-    await nextTask()
-    expect(highlighted(code, 'css')).not.toBeNull()
-    await nextTask()
-    stop()
-    expect(wakes).toBe(1)
+  test('a line the machine stalls on is still read to its end, and so is every other', async () => {
+    await warm('typescript')
+    // The shape #51 reported: the first line late, the rest on time. The late line is the one
+    // that matters, because the draw it belongs to is kept.
+    const code = `${TYPESCRIPT}// stalled\n`
+    const drawn = stalledOnce(() => highlighted(code, 'typescript'))
+    const [first, second, third] = tokensByLine(drawn)
+    expect(first, 'the stalled line came back plain').toContain('tok-keyword:const')
+    expect(first, 'the stalled line came back as one token').not.toContain(
+      'text-inherit:const answer: number = 42',
+    )
+    expect(second).toContain('tok-comment:// the end')
+    expect(third).toContain('tok-comment:// stalled')
+    // What is kept is that same coloured draw, read again on the machine's own clock.
+    expect(highlighted(code, 'typescript')).toBe(drawn)
   })
 
   test('a language nobody here colours is left plain, not coloured by a guess', () => {
