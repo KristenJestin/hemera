@@ -117,6 +117,7 @@ import {
   showWorkspace,
   stopService,
   subscribeToWorkspaces,
+  updateRecipeStep,
   workspacesSnapshot,
 } from './workspaces-store.ts'
 import {
@@ -1174,6 +1175,7 @@ export function Application() {
           onCleanupWorkspace={async (id) => await cleanUp(current.id, id)}
           recipe={places.recipes.get(current.id) ?? []}
           onAddRecipeStep={async (step) => await addRecipeStep(current.id, step)}
+          onUpdateRecipeStep={async (id, step) => await updateRecipeStep(current.id, id, step)}
           onRemoveRecipeStep={(id) => void removeRecipeStep(current.id, id)}
           onMoveRecipeStep={(id, direction) => void moveRecipeStep(current.id, id, direction)}
           onSetProjectVariable={async (key, value) =>

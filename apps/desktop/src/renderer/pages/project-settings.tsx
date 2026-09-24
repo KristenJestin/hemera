@@ -219,6 +219,7 @@ export function ProjectSettingsPage({
   onCleanupWorkspace,
   recipe,
   onAddRecipeStep,
+  onUpdateRecipeStep,
   onRemoveRecipeStep,
   onMoveRecipeStep,
   onSetProjectVariable,
@@ -266,6 +267,8 @@ export function ProjectSettingsPage({
   recipe: readonly RecipeStep[]
   /** Adds a step at the end of the recipe; answers the engine's refusal, or null. */
   onAddRecipeStep: (step: RecipeAdd) => Promise<string | null>
+  /** Rewrites a step where it stands; answers the engine's refusal, or null. */
+  onUpdateRecipeStep: (id: string, step: RecipeAdd) => Promise<string | null>
   onRemoveRecipeStep: (id: string) => void
   onMoveRecipeStep: (id: string, direction: 'up' | 'down') => void
   /** Sets one of the Project's own variables; answers the engine's refusal, or null (D8-06). */
@@ -317,10 +320,7 @@ export function ProjectSettingsPage({
             repositories={repositories.map((one) => one.path)}
             commands={recipeCommandsOf(commands)}
             onAdd={async (step) => await onAddRecipeStep(recipeAddOf(step))}
-            // The engine has no way yet to rewrite a step where it stands.
-            onUpdate={async () =>
-              await Promise.resolve('A step cannot be edited yet: remove it and add it again.')
-            }
+            onUpdate={async (id, step) => await onUpdateRecipeStep(id, recipeAddOf(step))}
             onRemove={onRemoveRecipeStep}
             onMove={onMoveRecipeStep}
           />

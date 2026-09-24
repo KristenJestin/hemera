@@ -420,6 +420,25 @@ export async function stopService(runId: string): Promise<void> {
   }
 }
 
+/**
+ * Rewrites a step of the recipe where it stands (D8-05 as amended by recette 1); answers the
+ * engine's sentence — a copy or a link whose source is not in `main` — or null.
+ */
+export async function updateRecipeStep(
+  projectId: string,
+  id: string,
+  step: Omit<ChannelArguments<'recipe.update'>, 'projectId' | 'id'>,
+): Promise<string | null> {
+  forgetWorkspacesRefusal()
+  try {
+    const recipe = await window.hemera.invoke('recipe.update', { projectId, id, ...step })
+    replace({ ...state, recipes: withKey(state.recipes, projectId, recipe) })
+    return null
+  } catch (cause) {
+    return message(cause)
+  }
+}
+
 /** Adds a step at the end of the recipe; answers the engine's sentence, or null (D8-05). */
 export async function addRecipeStep(
   projectId: string,

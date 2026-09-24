@@ -17,6 +17,7 @@ import {
   moveRecipeStep,
   readProjectVariables,
   readWorkspaces,
+  recipeOf,
   removeRecipeStep,
   removeVariable,
   resumePreparation,
@@ -26,6 +27,7 @@ import {
   showStepRun,
   showWorkspace,
   stopService,
+  updateRecipeStep,
   workspacesOf,
   workspacesSnapshot,
   type ShownWorkspace,
@@ -558,5 +560,51 @@ describe('The run a step started is shown and followed', () => {
 
     await showStepRun(null)
     expect(workspacesSnapshot().shown?.run).toBeNull()
+  })
+})
+
+describe('A recipe step is rewritten where it stands', () => {
+  test('the step is sent with its id, and the recipe is what the engine answered', async () => {
+    const rewritten = {
+      id: 'r1',
+      kind: 'copy',
+      base: null,
+      path: '.env',
+      commandId: null,
+      rank: 'a',
+    }
+    answers.set('recipe.update', [rewritten])
+
+    expect(
+      await updateRecipeStep('atlas', 'r1', {
+        kind: 'copy',
+        base: null,
+        path: '.env',
+        commandId: null,
+      }),
+    ).toBeNull()
+
+    expect(asked[0]?.argument).toEqual({
+      projectId: 'atlas',
+      id: 'r1',
+      kind: 'copy',
+      base: null,
+      path: '.env',
+      commandId: null,
+    })
+    expect(recipeOf('atlas')).toEqual([rewritten])
+  })
+
+  test("a source absent from main is the engine's sentence, for the dialog to say", async () => {
+    answers.set('recipe.update', new Error('.env.local is not in main'))
+
+    expect(
+      await updateRecipeStep('atlas', 'r1', {
+        kind: 'copy',
+        base: null,
+        path: '.env.local',
+        commandId: null,
+      }),
+    ).toBe('.env.local is not in main')
   })
 })

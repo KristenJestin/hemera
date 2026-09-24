@@ -41,6 +41,7 @@ import {
   showStepRun,
   showWorkspace,
   stopService,
+  updateRecipeStep,
   workspacesOf,
   workspacesSnapshot,
 } from '#renderer/workspaces-store.ts'
@@ -495,6 +496,27 @@ describe('A run step fails on a non-zero exit', () => {
     expect(workspacesSnapshot().refusal).toContain('no-such-run')
     await showStepRun(null)
     expect(workspacesSnapshot().shown?.run).toBeNull()
+  })
+})
+
+describe('A recipe step is edited where it stands', () => {
+  test('its path is rewritten in place, and a source absent from main is refused by name', async () => {
+    const project = await atlas()
+    writeFileSync(join(main, '.env'), 'PORT=3000\n')
+    writeFileSync(join(main, '.env.local'), 'PORT=3001\n')
+    const copy = recipeAddOf({ kind: 'copy', base: null, path: '.env', commandId: null })
+    expect(await addRecipeStep(project.id, copy)).toBeNull()
+    const [step] = recipeOf(project.id)
+
+    const local = recipeAddOf({ kind: 'copy', base: null, path: '.env.local', commandId: null })
+    expect(await updateRecipeStep(project.id, step!.id, local)).toBeNull()
+    expect(recipeOf(project.id)).toMatchObject([
+      { id: step!.id, path: expect.stringContaining('.env.local') },
+    ])
+
+    const absent = recipeAddOf({ kind: 'copy', base: null, path: '.env.prod', commandId: null })
+    expect(await updateRecipeStep(project.id, step!.id, absent)).toMatch(/\.env\.prod/)
+    expect(recipeOf(project.id)).toMatchObject([{ path: expect.stringContaining('.env.local') }])
   })
 })
 
