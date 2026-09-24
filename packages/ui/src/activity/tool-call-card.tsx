@@ -44,15 +44,17 @@ import { Disclosure } from './disclosure.tsx'
  * colour says the same five things in the width of a dot, and the word is kept for whatever
  * reads the page.
  *
- * A call with nothing behind it — no input, no output, no body of its own and no error — does
+ * A call with nothing behind it — no input, no output, no body, no error and no name — does
  * not fold at all: no chevron, no press, nothing to open. A control that opens onto nothing is
  * a control that lied about having something there.
  *
  * The line reads the way a Hemera call's does (recette 3 of 23 September 2026): the mark of the
- * kind, what a reader calls it, what it is about, and the agent's own name for the tool, quieter,
- * when the adapter gives one. The kind is the label — `Read file`, `Run command` — and a call of
- * no kind is read by the title the agent gave it. What it is about is the subject: the file, the
- * query, the command line.
+ * kind, what a reader calls it and what it is about, the whole line in the colour of a caption
+ * (recette 5 of 24 September 2026). The kind is the label — `Read file`, `Run command` — and a
+ * call of no kind is read by the title the agent gave it. What it is about is the subject: the
+ * file, the query, the command line. The agent's own name for the tool, when the adapter gives
+ * one, is the first line of the open body rather than the end of the line: it is for whoever
+ * reads the thread against the agent's log, and a card with a name has something to open.
  *
  * When the subject is the file a call touched and the reader can go there, the subject itself is
  * the press, where it is read: a press at the end of the row was a second copy of the same path.
@@ -90,23 +92,27 @@ const STATUS: Record<ToolStatus, { word: string; tone: StatusTone }> = {
 /** The line that is read: the mark of the kind, the label, the subject and where the call stands. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
-/** What the reader calls the call, in the colour of the thread; it gives way to nothing. */
-const LABEL = 'shrink-0 text-foreground'
+/** What the reader calls the call, in the colour of the whole line; it gives way to nothing. */
+const LABEL = 'shrink-0 text-muted-foreground'
 
 /** A title standing in for a label, which is the agent's sentence and may be long. */
-const TITLE = 'min-w-0 truncate text-foreground'
+const TITLE = 'min-w-0 truncate text-muted-foreground'
 
 /**
  * What the call is about, in the face a path, a query and a command are written in, shortened
  * from its end rather than pushing the line off the card.
  */
-const SUBJECT = 'min-w-0 truncate font-mono text-foreground'
+const SUBJECT = 'min-w-0 truncate font-mono text-muted-foreground'
 
 /** The press a subject becomes: it takes the pointer back from the summary it is drawn in. */
 const PRESS = 'pointer-events-auto flex min-w-0'
 
-/** The tool's own name, as the agent or the catalogue calls it: quieter, and smaller. */
-const NAME = 'shrink-0 font-mono text-xs text-muted-foreground'
+/** The tool's own name, as the agent calls it: the first line of the body, as a Hemera call's. */
+const NAME = 'flex items-baseline gap-2 font-mono text-xs'
+
+const NAME_LABEL = 'shrink-0 text-muted-foreground'
+
+const NAME_VALUE = 'min-w-0 truncate text-foreground'
 
 /** What a reader calls each kind of call; a call of no kind is read by its title. */
 const KIND_LABELS: Record<ToolKind, string | null> = {
@@ -239,7 +245,7 @@ export interface ToolCallCardProps {
    * What the call is about. Left out, the first file it touched is, when it touched one.
    */
   subject?: ToolSubject | undefined
-  /** The tool's own name, when the adapter gives one: drawn quieter, after the subject. */
+  /** The tool's own name, when the adapter gives one: the first line of the open body. */
   name?: string | undefined
   /**
    * Where the call is in its life.
@@ -303,7 +309,7 @@ export function ToolCallCard({
       ? undefined
       : (path: string) => onOpenLocation(locations?.find((one) => one.path === path) ?? { path })
   const sectioned = input !== undefined || output !== undefined
-  const opens = sectioned || children !== undefined || error !== undefined
+  const opens = sectioned || children !== undefined || error !== undefined || name !== undefined
   const summary = (
     <span className={SUMMARY}>
       <span className="flex shrink-0 text-muted-foreground" data-mark={kind}>
@@ -313,7 +319,6 @@ export function ToolCallCard({
         {toolKindLabel(kind, title)}
       </span>
       {about !== undefined && <SubjectOnLine subject={about} onOpen={open} />}
-      {name !== undefined && <span className={NAME}>{name}</span>}
       <StatusDot status={tone} size="sm" label={word} />
     </span>
   )
@@ -330,6 +335,12 @@ export function ToolCallCard({
     >
       {opens ? (
         <div className={BODY}>
+          {name !== undefined && (
+            <dl className={NAME}>
+              <dt className={NAME_LABEL}>tool</dt>
+              <dd className={NAME_VALUE}>{name}</dd>
+            </dl>
+          )}
           {error !== undefined && <p className={ERROR}>{error}</p>}
           {sectioned && (
             <>

@@ -24,8 +24,8 @@ import { MARKS, SubjectOnLine, type ToolSubject, pressable } from './tool-call-c
  * thread is no longer the agent's business alone: it is Hemera's, and the thread has to say so.
  * That is the whole reason this block is not `ToolCallCard` — the two sit side by side in one
  * turn and a reader must tell them apart. The line reads like a native call's — the mark of the
- * tool, what a reader calls it, what it is about, then the catalogue's name in mono, quieter —
- * and the difference is the name itself. Hemera's own mark left the line (recette 2 of 23
+ * tool, what a reader calls it, what it is about, all in the colour of a caption — and the
+ * difference is the tool's own mark. Hemera's own mark left the line (recette 2 of 23
  * September 2026): a brand on every call was louder than the call; the word `Hemera` stays in
  * what the line is announced by. The provenance left the body (recette 4): which Session, which
  * agent and which token is what the entry and the Journal record, where it is looked up, and a
@@ -35,8 +35,10 @@ import { MARKS, SubjectOnLine, type ToolSubject, pressable } from './tool-call-c
  * Each tool wears a mark of its own and a label of its own (recette 3 of 23 September 2026): a
  * mark per kind of tool drew `fs_list` as `fs_read` and the four commands as one, and a line
  * read by `commands_output` is a line read by its plumbing. The label and the mark are the
- * caller's to hand over — the catalogue is Hemera's, and this block knows nothing of it — and the
- * code name stays on the line, quieter, for whoever reads the thread against the agent's log.
+ * caller's to hand over — the catalogue is Hemera's, and this block knows nothing of it. The code
+ * name left the line (recette 5 of 24 September 2026): a folded call reads "List folder root" and
+ * its dot, and `fs_list` heads the arguments in the open body, for whoever reads the thread
+ * against the agent's log.
  *
  * Where a call stands is a dot, as it is on a native call, and not a word: the word is what the
  * dot is announced by.
@@ -102,11 +104,12 @@ const MARK = 'flex shrink-0 text-muted-foreground'
 /** Who the call is, for whatever reads the page rather than looks at it. */
 const WHOSE = 'sr-only'
 
-/** What a reader calls the tool, in the colour of the thread. */
-const NAMED = 'shrink-0 text-foreground'
-
-/** The catalogue's name for the tool: quieter and smaller, after what the call is about. */
-const TOOL = 'shrink-0 font-mono text-xs text-muted-foreground'
+/**
+ * What a reader calls the tool, in the colour of the whole line: a caption's, not the thread's
+ * (recette 5 of 24 September 2026). A column of calls in the colour of what the agent said is a
+ * column where the answer and the plumbing weigh the same.
+ */
+const NAMED = 'shrink-0 text-muted-foreground'
 
 /** What the call answered, quieter than the line above it. */
 const ANSWER = 'text-sm text-muted-foreground'
@@ -210,10 +213,6 @@ export function HemeraToolCall({
           <span className={WHOSE}>Hemera</span>
           <span className={NAMED}>{label}</span>
           {subject !== undefined && <SubjectOnLine subject={subject} onOpen={onOpenPath} />}
-          {/* Heard as the label already: the code name is for the eye that reads a log. */}
-          <span className={TOOL} aria-hidden="true">
-            {tool}
-          </span>
           <StatusDot
             status={tone}
             size="sm"
@@ -227,16 +226,16 @@ export function HemeraToolCall({
       {/* Said once (recette 4 of 23 September 2026): a summary that is the error again, or opens
           with it, is the red line a second time in grey. */}
       {!repeats(summary, error) && <p className={ANSWER}>{summary}</p>}
-      {args !== undefined && args.length > 0 && (
-        <dl className={ARGUMENTS}>
-          {args.map((argument) => (
-            <div key={argument.label} className={PAIR}>
-              <dt className={LABEL}>{argument.label}</dt>
-              <dd className={VALUE}>{argument.value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      {/* The catalogue's name heads the arguments (recette 5 of 24 September 2026): it is for
+          the eye that reads the thread against a log, and that eye opens the call first. */}
+      <dl className={ARGUMENTS}>
+        {[{ label: 'tool', value: tool }, ...(args ?? [])].map((argument) => (
+          <div key={argument.label} className={PAIR}>
+            <dt className={LABEL}>{argument.label}</dt>
+            <dd className={VALUE}>{argument.value}</dd>
+          </div>
+        ))}
+      </dl>
       {children}
     </Disclosure>
   )

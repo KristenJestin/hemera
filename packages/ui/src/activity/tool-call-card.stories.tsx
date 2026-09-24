@@ -441,10 +441,15 @@ export const EveryKind: Story = {
       expect(canvas.getByText(label)).toBeVisible()
       if (subject !== null) expect(canvas.getByText(subject)).toBeVisible()
     }
-    // The agent's own name for the tool, when the adapter gives one, is quieter than the label.
-    const name = canvas.getByText('Read')
-    await expect(getComputedStyle(name).color).not.toBe(
-      getComputedStyle(canvas.getByText('Read file')).color,
-    )
+    // The whole line is a caption (recette 5 of 24 September 2026): the label and the subject in
+    // the tone of the mark.
+    const quiet = getComputedStyle(canvasElement.querySelector('[data-mark]')!).color
+    await expect(getComputedStyle(canvas.getByText('Read file')).color).toBe(quiet)
+    await expect(getComputedStyle(canvas.getByText('AGENTS.md')).color).toBe(quiet)
+    // The agent's own name for the tool is not on the line: it heads the body once it is opened.
+    await expect(canvas.queryByText('Read')).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: /^Read file/ }))
+    await expect(canvas.getByText('Read')).toBeVisible()
+    await expect(canvas.getByText('Read').previousElementSibling).toHaveTextContent('tool')
   },
 }

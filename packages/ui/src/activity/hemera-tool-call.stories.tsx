@@ -83,12 +83,12 @@ export const AFoldOpening: Story = {
     await expect(row.contains(path)).toBe(false)
     // Once: the subject is the press, and nothing else on the line names the file.
     await expect(canvas.getAllByText('src/billing/export.ts')).toHaveLength(1)
-    // Where it is read: after the label, before the catalogue's name.
+    // Where it is read: after the label, before the dot.
     const label = canvas.getByText('Read file').getBoundingClientRect()
-    const name = canvas.getByText('fs_read').getBoundingClientRect()
+    const dot = canvas.getByRole('img', { name: 'Done' }).getBoundingClientRect()
     const at = path.getBoundingClientRect()
     await expect(at.left).toBeGreaterThan(label.right)
-    await expect(at.right).toBeLessThanOrEqual(name.left)
+    await expect(at.right).toBeLessThanOrEqual(dot.left)
     await userEvent.click(path)
     await expect(args.onOpenPath).toHaveBeenCalledWith('src/billing/export.ts')
     await expect(row, 'a press on the path opened the block').toHaveAttribute(
@@ -143,20 +143,16 @@ export const ReadFolded: Story = {
     await expect(mark).toHaveAttribute('data-mark', 'read-file')
     await expect(mark?.querySelector('svg')).toBeVisible()
     await expect(canvas.queryByRole('img', { name: 'Hemera' })).toBeNull()
-    // The label is read in the colour of the thread; the catalogue's name is mono, quieter and
-    // smaller, the tone the mark is drawn in.
+    // The whole line is a caption (recette 5 of 24 September 2026): the label and the subject are
+    // drawn in the tone of the mark, and the catalogue's name is not on the line at all.
     const label = canvas.getByText('Read file')
-    const tool = canvas.getByText('fs_read')
-    await expect(tool).toBeVisible()
-    await expect(getComputedStyle(tool).color).toBe(getComputedStyle(mark ?? tool).color)
-    await expect(getComputedStyle(label).color).not.toBe(getComputedStyle(tool).color)
-    await expect(parseFloat(getComputedStyle(tool).fontSize)).toBeLessThan(
-      parseFloat(getComputedStyle(label).fontSize),
-    )
-    // The subject is mono and in the colour of the thread, as a path is read.
+    const quiet = getComputedStyle(mark ?? label).color
+    await expect(getComputedStyle(label).color).toBe(quiet)
+    await expect(canvas.queryByText('fs_read')).toBeNull()
+    // The subject is mono, as a path is read, and in the same tone.
     const subject = canvas.getByText('src/billing/export.ts')
     await expect(getComputedStyle(subject).fontFamily).toMatch(/mono|Fira/i)
-    await expect(getComputedStyle(subject).color).toBe(getComputedStyle(label).color)
+    await expect(getComputedStyle(subject).color).toBe(quiet)
     // Where it stands is a dot, and the word is only what the dot is announced by.
     await expect(canvas.getByRole('img', { name: 'Done' })).toBeVisible()
     await expect(canvas.queryByText('Done')).toBeNull()
@@ -180,6 +176,9 @@ export const ReadOpen: Story = {
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText('0–262144')).toBeVisible()
     await expect(canvas.getByText(/4 812 bytes read/)).toBeVisible()
+    // The catalogue's name heads the arguments, as the first pair of the list.
+    const first = canvasElement.querySelector('dl > div')
+    await expect(first).toHaveTextContent('toolfs_read')
     // No foot: no token, no agent, no duration written on the page.
     await expect(canvas.queryByText(/token/)).toBeNull()
     await expect(canvas.queryByText(/ms/)).toBeNull()
@@ -485,8 +484,15 @@ export const EveryTool: Story = {
       const name = ['Hemera', label, subject, 'Done'].filter((word) => word !== null).join(' ')
       const row = canvas.getByRole('button', { name })
       expect(row.querySelector('[data-mark]')).toHaveAttribute('data-mark', mark)
-      expect(within(row).getByText(tool)).toBeVisible()
+      // Folded, a call reads its label, its subject and its dot, and not its code name.
+      expect(within(row).queryByText(tool)).toBeNull()
       if (subject !== null) expect(within(row).getByText(subject)).toBeVisible()
     }
+    // The code name is in the body, heading the arguments: "List folder src/billing" reads
+    // `fs_list` once it is opened.
+    const list = canvas.getByRole('button', { name: 'Hemera List folder src/billing Done' })
+    await userEvent.click(list)
+    await expect(canvas.getByText('fs_list')).toBeVisible()
+    await expect(canvas.getByText('fs_list').previousElementSibling).toHaveTextContent('tool')
   },
 }
