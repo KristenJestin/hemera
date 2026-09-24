@@ -461,7 +461,9 @@ export const MidPlan: Story = {
     await expect(
       within(band).getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),
     ).toHaveTextContent('3/7')
-    await expect(within(band).getByRole('button', { name: 'Plan phase, open' })).toBeVisible()
+    await expect(
+      within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
+    ).toBeVisible()
     await expect(within(band).getByRole('button', { name: 'Plan, being written' })).toHaveAttribute(
       'aria-current',
       'true',
@@ -722,8 +724,16 @@ export const StaleAfterRework: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Rework · the agent re-declares each phase')).toBeVisible()
     const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(within(rail).getByRole('group', { name: 'Plan' })).toHaveTextContent('stale')
-    await expect(within(rail).getByRole('group', { name: 'Decompose' })).toHaveTextContent('stale')
+    await expect(
+      within(rail).getByRole('button', {
+        name: 'Plan phase, stale after the rework, show all its parts',
+      }),
+    ).toBeVisible()
+    await expect(
+      within(rail).getByRole('button', {
+        name: 'Decompose phase, stale after the rework, show all its parts',
+      }),
+    ).toBeVisible()
     await expect(
       canvas.getByRole('button', { name: 'Tasks, 4, stale after the rework' }),
     ).toBeVisible()

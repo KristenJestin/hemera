@@ -78,7 +78,9 @@ export const Folded: Story = {
     await expect(panelWidth(canvasElement)).toBe(BAND)
     const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(within(band).getByRole('button', { name: 'Plan, being written' })).toBeVisible()
-    await expect(within(band).getByRole('button', { name: 'Plan phase, open' })).toBeVisible()
+    await expect(
+      within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
+    ).toBeVisible()
     await expect(
       within(band).getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),
     ).toHaveTextContent('3/7')
@@ -100,7 +102,9 @@ export const Unfolded: Story = {
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
     await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
     const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(within(rail).getByRole('group', { name: 'Plan' })).toHaveTextContent('open')
+    await expect(
+      within(rail).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
+    ).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Plan, being written' })).toHaveAttribute(
       'aria-current',
       'true',
@@ -356,7 +360,7 @@ export const RowChosen: Story = {
 export const GroupOnStage: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const shape = canvas.getByRole('button', { name: 'Shape phase, finished' })
+    const shape = canvas.getByRole('button', { name: 'Shape phase, finished, show all its parts' })
     await userEvent.click(shape)
     await expect(shape).toHaveAttribute('aria-current', 'true')
     const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })

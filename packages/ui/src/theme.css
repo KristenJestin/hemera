@@ -437,9 +437,10 @@
   --spacing-dialog-wide: 70vh;
 
   /* How wide the rail of a Spec stands beside its stage (lot 19, revisions 3, 4 and 4b): wide
-     enough for `Expected outcome` between its glyph and its dot, and for
+     enough for `Expected outcome` between its glyph and its dot, for `Decompose` and `Showing all`
+     between its glyph and its dot, and for
      `3/7 · 4 things before ready` on one line at its foot. */
-  --spacing-rail: 12rem;
+  --spacing-rail: 13rem;
 
   /* The Spec panel folded (lot 19, revision 4): the band of the rail's glyphs beside the chat,
      one glyph, its dot and the margin around them. */

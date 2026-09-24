@@ -28,16 +28,20 @@ import { SPEC_PART_ICONS, SPEC_PHASE_ICONS } from './spec-icons.ts'
  *
  * The rows are words in normal case with no surface of their own, the state of each is a small
  * dot at its end, and what is on the stage says so with a thin rule of the one accent and nothing
- * else. A group's heading is a row like the others: it puts every part of its phase on the stage,
- * one under the other. The row of the part the agent is writing keeps breathing, whichever part
- * the reader is on.
+ * else. A group opens on its heading, which reads as the header of a section and not as one more
+ * row: the phase's name in the small type of a label, a hairline above every group but the first,
+ * the rows set in under it. Pressed, it puts every part of its phase on the stage, one under the
+ * other, and says so: `Show all` under the hand or the keyboard, `Showing all` while it is on the
+ * stage. The row of the part the agent is writing keeps breathing, whichever part the reader is
+ * on.
  *
  * One stop of the tab order, and the arrows walk it: up and down, Home and End, Enter opens.
  *
  * Each phase and each part wears a glyph of its own, before its name. Folded, the rail is the
  * band the panel folds to beside the chat: the glyph of each phase heading its group and the glyph
  * of each part, each with its dot, and the readiness said as `3/7`. The names leave the eye and
- * stay the accessible name and the tooltip.
+ * stay the accessible name and the tooltip; a phase's glyph separates its group and its tooltip
+ * says what it does, `Shape · show all`.
  */
 
 /** One row: where it leads, what it is called, its mark and, for a list, its count. */
@@ -149,6 +153,12 @@ const RAIL_FOLDED = 'flex min-h-0 flex-1 flex-col'
 
 const LIST = 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 py-3'
 
+/** A group unfolded: a hairline above it but the first, more room above its header than under. */
+const GROUP = 'flex flex-col gap-0.5 border-t border-border pt-3 first:border-t-0 first:pt-0'
+
+/** The rows of a group, set in under its header. */
+const ROWS = 'flex flex-col pl-3'
+
 const LIST_FOLDED = 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 py-2'
 
 /**
@@ -162,9 +172,12 @@ const ROW =
 const ROW_FOLDED =
   'relative flex h-control-sm w-full items-center justify-center rounded-sm text-sm outline-none focus-ring hover:text-foreground'
 
-/** A group's heading: a row of its own, its phase's glyph and name in the small type of a label. */
+/**
+ * A group's header: its phase's glyph and name in the small type of a label — smaller, heavier,
+ * a little spaced, and muted even on the stage, where only the rule says so — and never cut.
+ */
 const HEADING =
-  'relative flex h-control-sm w-full items-center gap-2 rounded-sm px-2 text-left text-xs outline-none focus-ring hover:text-foreground'
+  'group/head relative flex h-6 w-full items-center gap-1.5 rounded-sm px-2 text-left text-xs font-medium tracking-wide whitespace-nowrap text-muted-foreground outline-none focus-ring'
 
 const HEADING_FOLDED =
   'relative flex h-control-sm w-full items-center justify-center rounded-sm text-xs outline-none focus-ring hover:text-foreground'
@@ -173,6 +186,21 @@ const ROW_OFF = 'text-muted-foreground'
 
 const ROW_ON =
   'text-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary'
+
+/** The same rule on a header whose group is on the stage. */
+const HEADING_ON =
+  'before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary'
+
+const HEADING_LABEL = 'flex-1'
+
+/**
+ * What pressing a header does, at its end: hidden until the hand or the keyboard is on it, and
+ * kept while its group is on the stage. The hand is followed in state rather than by `:hover`,
+ * so that a play can drive it.
+ */
+const HINT = 'font-normal tracking-normal opacity-0 group-focus/head:opacity-100'
+
+const HINT_SHOWN = 'font-normal tracking-normal opacity-100'
 
 const LABEL = 'min-w-0 flex-1 truncate'
 
@@ -223,6 +251,8 @@ export function SpecRail({
   folded = false,
 }: SpecRailProps): ReactNode {
   const list = useRef<HTMLDivElement>(null)
+  // The header under the hand, whose hint shows.
+  const [pointed, setPointed] = useState<PhaseName | null>(null)
   // The band stands at the window's right edge: what names a glyph opens away from it.
   const side = folded ? 'left' : 'right'
 
@@ -250,27 +280,46 @@ export function SpecRail({
         {groups.map((group) => {
           const title = PHASE_TITLES[group.phase]
           const whole = 'group' in current && current.group === group.phase
+          const hinted = whole || pointed === group.phase
           return (
-            <div key={group.phase} role="group" aria-label={title}>
-              <Tooltip label={`All of ${title}`} side={side}>
+            <div
+              key={group.phase}
+              role="group"
+              aria-label={title}
+              className={folded ? undefined : GROUP}
+            >
+              <Tooltip label={`${title} · show all`} side={side}>
                 <button
                   type="button"
                   data-row
+                  data-heading
                   // One stop of the tab order: what is on the stage. The arrows do the rest.
                   tabIndex={whole ? 0 : -1}
                   aria-current={whole ? 'true' : undefined}
-                  className={cn(folded ? HEADING_FOLDED : HEADING, whole ? ROW_ON : ROW_OFF)}
+                  aria-label={`${title} phase, ${PHASE_STATE_WORDS[group.state]}, show all its parts`}
+                  className={cn(
+                    folded ? HEADING_FOLDED : HEADING,
+                    folded ? (whole ? ROW_ON : ROW_OFF) : whole && HEADING_ON,
+                  )}
                   onClick={() => onSelectGroup(group.phase)}
+                  onPointerEnter={() => setPointed(group.phase)}
+                  onPointerLeave={() => setPointed(null)}
                 >
                   <Glyph icon={SPEC_PHASE_ICONS[group.phase]} />
-                  <span className={folded ? 'sr-only' : LABEL}>{title}</span>
-                  <span className="sr-only">{` phase, ${PHASE_STATE_WORDS[group.state]}`}</span>
+                  {!folded && (
+                    <>
+                      <span className={HEADING_LABEL}>{title}</span>
+                      <span aria-hidden="true" data-hint className={hinted ? HINT_SHOWN : HINT}>
+                        {whole ? 'Showing all' : 'Show all'}
+                      </span>
+                    </>
+                  )}
                   <span aria-hidden="true" className={folded ? DOT_BOX_FOLDED : DOT_BOX}>
                     <span className={PHASE_DOTS[group.state]} />
                   </span>
                 </button>
               </Tooltip>
-              <ul className="flex flex-col">
+              <ul className={folded ? 'flex flex-col' : ROWS}>
                 {group.rows.map((row) => {
                   const on = 'part' in current && current.part === row.target
                   const name =

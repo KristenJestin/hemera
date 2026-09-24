@@ -9,8 +9,9 @@ import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.
 
 /**
  * The rail of the Spec panel: the parts of the Spec grouped by the phase that writes them, one
- * quiet row each with its state dot, what is on the stage marked by a thin rule; a group's
- * heading is a row too, which puts the whole phase on the stage. The arrows walk it and Enter
+ * quiet row each with its state dot, what is on the stage marked by a thin rule; a group opens on
+ * a header in the small type of a label, which puts the whole phase on the stage and says so with
+ * `Show all` under the hand, `Showing all` once it has. The arrows walk it and Enter
  * opens a row. At its foot, how far the Spec is from ready: seven thin segments and one line,
  * whose things left open a popover of links, and `Mark ready` once every check passes. Folded,
  * it is the band of glyphs the panel folds to.
@@ -168,7 +169,11 @@ export const Feature: Story = {
   args: { groups: railOf(MID_PLAN), initial: 'plan', following: 'plan' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('group', { name: 'Plan' })).toHaveTextContent('Plan phase, open')
+    await expect(
+      within(canvas.getByRole('group', { name: 'Plan' })).getByRole('button', {
+        name: 'Plan phase, open, show all its parts',
+      }),
+    ).toBeVisible()
     await expect(
       canvas.getByRole('button', { name: 'Behaviour, written by the agent' }),
     ).toBeVisible()
@@ -187,15 +192,90 @@ export const Bug: Story = {
   },
 }
 
-/** A group heading chosen: the whole phase on the stage, the heading wearing the rule. */
+/** The hint at the end of a header, `Show all` or `Showing all`. */
+function hintOf(header: HTMLElement): HTMLElement {
+  const hint = header.querySelector<HTMLElement>('[data-hint]')
+  if (hint === null) throw new Error('A header of the rail has no hint.')
+  return hint
+}
+
+/** Whether the hint of a header can be seen: it is there all along, and fades in. */
+function shown(header: HTMLElement): boolean {
+  return getComputedStyle(hintOf(header)).opacity === '1'
+}
+
+/**
+ * The headers of the groups read as the headers of sections, not as rows: a smaller, heavier type
+ * in the muted colour, a hairline above every group but the first, the rows set in under them.
+ * The hand or the keyboard on a header shows what it does, `Show all`; its group on the stage, it
+ * says `Showing all` and wears the rule a row on the stage wears, and keeps its colour.
+ */
+export const GroupHeaders: Story = {
+  args: { groups: railOf(MID_PLAN), initial: 'plan' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const shape = canvas.getByRole('button', { name: 'Shape phase, finished, show all its parts' })
+    const plan = canvas.getByRole('button', { name: 'Plan phase, open, show all its parts' })
+    const decompose = canvas.getByRole('button', {
+      name: 'Decompose phase, pending, show all its parts',
+    })
+    const problem = canvas.getByRole('button', { name: /^Problem/ })
+    const onStage = canvas.getByRole('button', { name: 'Plan, being written' })
+    const header = getComputedStyle(shape)
+    const row = getComputedStyle(problem)
+    await expect(header.fontSize).not.toBe(row.fontSize)
+    await expect(Number(header.fontWeight)).toBeGreaterThan(Number(row.fontWeight))
+    await expect(header.color).not.toBe(getComputedStyle(onStage).color)
+    // The rows are set in under their header.
+    await expect(problem.getBoundingClientRect().left).toBeGreaterThan(
+      shape.getBoundingClientRect().left,
+    )
+    // A hairline above every group but the first.
+    const top = (name: string): string =>
+      getComputedStyle(canvas.getByRole('group', { name })).borderTopWidth
+    await expect(top('Shape')).toBe('0px')
+    await expect(top('Plan')).toBe('1px')
+    await expect(top('Decompose')).toBe('1px')
+    // The hint: hidden at rest, shown under the hand and under the keyboard.
+    await expect(hintOf(shape)).toHaveTextContent('Show all')
+    await expect(shown(shape)).toBe(false)
+    await userEvent.hover(shape)
+    await waitFor(() => expect(shown(shape)).toBe(true))
+    await userEvent.unhover(shape)
+    await waitFor(() => expect(shown(shape)).toBe(false))
+    plan.focus()
+    await waitFor(() => expect(shown(plan)).toBe(true))
+    plan.blur()
+    await waitFor(() => expect(shown(plan)).toBe(false))
+    // Its group on the stage: `Showing all`, kept without the hand, and the rule of a row.
+    const rule = getComputedStyle(onStage, '::before').backgroundColor
+    await userEvent.click(decompose)
+    await userEvent.unhover(decompose)
+    decompose.blur()
+    await expect(decompose).toHaveAttribute('aria-current', 'true')
+    await expect(hintOf(decompose)).toHaveTextContent('Showing all')
+    await expect(shown(decompose)).toBe(true)
+    // Never cut: the longest name and the longest hint hold in the rail's width.
+    await expect(decompose.scrollWidth).toBeLessThanOrEqual(decompose.clientWidth)
+    await expect(getComputedStyle(decompose, '::before').backgroundColor).toBe(rule)
+    await expect(getComputedStyle(decompose).color).toBe(header.color)
+  },
+}
+
+/** A group header chosen: the whole phase on the stage, the header wearing the rule. */
 export const GroupChosen: Story = {
   args: { groups: railOf(MID_PLAN) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const decompose = canvas.getByRole('button', { name: 'Decompose phase, pending' })
+    const decompose = canvas.getByRole('button', {
+      name: 'Decompose phase, pending, show all its parts',
+    })
+    await expect(getComputedStyle(decompose, '::before').content).toBe('none')
     await userEvent.click(decompose)
     await expect(args.onSelectGroup).toHaveBeenCalledWith('decompose')
     await expect(decompose).toHaveAttribute('aria-current', 'true')
+    await expect(getComputedStyle(decompose, '::before').content).not.toBe('none')
+    await expect(hintOf(decompose)).toHaveTextContent('Showing all')
     await expect(canvas.getByRole('button', { name: /^Questions/ })).not.toHaveAttribute(
       'aria-current',
     )
@@ -217,8 +297,12 @@ export const Keyboard: Story = {
     await userEvent.keyboard('{ArrowUp}')
     await expect(canvas.getByRole('button', { name: /^Tasks/ })).toHaveFocus()
     await userEvent.keyboard('{ArrowUp}{ArrowUp}')
-    const decompose = canvas.getByRole('button', { name: 'Decompose phase, pending' })
+    const decompose = canvas.getByRole('button', {
+      name: 'Decompose phase, pending, show all its parts',
+    })
     await expect(decompose).toHaveFocus()
+    // The keyboard on a header shows what it does.
+    await waitFor(() => expect(shown(decompose)).toBe(true))
     await userEvent.keyboard('{ArrowUp}')
     const plan = canvas.getByRole('button', { name: 'Plan, being written' })
     await expect(plan).toHaveFocus()
@@ -231,8 +315,11 @@ export const Keyboard: Story = {
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await expect(args.onSelectGroup).toHaveBeenCalledWith('decompose')
     await expect(decompose).toHaveAttribute('aria-current', 'true')
+    await expect(hintOf(decompose)).toHaveTextContent('Showing all')
     await userEvent.keyboard('{Home}')
-    await expect(canvas.getByRole('button', { name: 'Shape phase, finished' })).toHaveFocus()
+    await expect(
+      canvas.getByRole('button', { name: 'Shape phase, finished, show all its parts' }),
+    ).toHaveFocus()
     await userEvent.keyboard('{End}')
     await expect(questions).toHaveFocus()
   },
@@ -255,6 +342,11 @@ export const Folded: Story = {
     await expect(scope).toBeVisible()
     scope.focus()
     await expect(await within(document.body).findByRole('tooltip')).toHaveTextContent('Scope')
+    // A phase's glyph separates its group, and says what it does.
+    canvas.getByRole('button', { name: 'Shape phase, finished, show all its parts' }).focus()
+    await waitFor(() =>
+      expect(within(document.body).getByRole('tooltip')).toHaveTextContent('Shape · show all'),
+    )
   },
 }
 

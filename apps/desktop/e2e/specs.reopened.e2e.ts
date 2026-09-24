@@ -41,7 +41,8 @@ async function phaseHeading(phase: string): Promise<string> {
     (scope: string, name: string) =>
       document
         .querySelector(scope)
-        ?.querySelector(`[role="group"][aria-label="${name}"] [data-row]`)?.textContent ?? '',
+        ?.querySelector(`[role="group"][aria-label="${name}"] [data-heading]`)
+        ?.getAttribute('aria-label') ?? '',
     `nav[aria-label="Parts of ${KEY}"]`,
     phase,
   )
@@ -61,9 +62,9 @@ describe('Phases survive a restart', () => {
     expect(panel).toContain(PROPOSAL.title)
     expect(panel).toContain('draft')
     expect(await textOf('Problem')).toBe(PROBLEM)
-    expect(await phaseHeading('Shape')).toBe('Shape phase, open')
-    expect(await phaseHeading('Plan')).toBe('Plan phase, pending')
-    expect(await phaseHeading('Decompose')).toBe('Decompose phase, pending')
+    expect(await phaseHeading('Shape')).toBe('Shape phase, open, show all its parts')
+    expect(await phaseHeading('Plan')).toBe('Plan phase, pending, show all its parts')
+    expect(await phaseHeading('Decompose')).toBe('Decompose phase, pending, show all its parts')
     // The write right stayed with the Session that took it.
     expect(await region('[role="group"][aria-label="Write right"]')).toContain(`« ${OPENED} »`)
   })
