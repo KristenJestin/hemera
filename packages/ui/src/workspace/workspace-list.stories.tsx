@@ -184,9 +184,12 @@ export const Selected: Story = {
   },
 }
 
-/** New Workspace, the name, Create, Cancel, then each Clean up, in that order. */
+/**
+ * New Workspace, the name, Create, Cancel, then each row's Show and its Clean up, in reading
+ * order.
+ */
 export const Keyboard: Story = {
-  args: { workspaces: FILLED.slice(0, 3) },
+  args: { workspaces: FILLED.slice(0, 3), onSelect: fn() },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const add = canvas.getByRole('button', { name: 'New Workspace' })
@@ -200,7 +203,15 @@ export const Keyboard: Story = {
     await userEvent.tab()
     await expect(canvas.getByRole('button', { name: 'Cancel' })).toHaveFocus()
     await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Show main' })).toHaveFocus()
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Show login-form' })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSelect).toHaveBeenCalledWith('login-form')
+    await userEvent.tab()
     await expect(canvas.getByRole('button', { name: 'Clean up login-form' })).toHaveFocus()
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Show billing-export' })).toHaveFocus()
     await userEvent.tab()
     await expect(canvas.getByRole('button', { name: 'Clean up billing-export' })).toHaveFocus()
     await userEvent.keyboard('{Enter}')

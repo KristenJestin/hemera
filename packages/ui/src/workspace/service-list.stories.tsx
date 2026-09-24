@@ -255,19 +255,32 @@ export const Empty: Story = {
   },
 }
 
-/** The list by the keyboard: each row's controls in reading order, the link before its Stop. */
+/**
+ * The list by the keyboard: each row's controls in reading order, the link, then its Details,
+ * then its Stop.
+ */
 export const Keyboard: Story = {
-  args: { services: [DEV_MAIN, DEV_LOGIN_FORM] },
+  args: { services: [DEV_MAIN, DEV_LOGIN_FORM], onSelect: fn() },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.tab()
     await expect(document.activeElement).toBe(canvas.getByRole('button', { name: DEV_MAIN.url! }))
     await userEvent.tab()
     await expect(document.activeElement).toBe(
+      canvas.getByRole('button', { name: 'Details of dev in main' }),
+    )
+    await userEvent.tab()
+    await expect(document.activeElement).toBe(
       canvas.getByRole('button', { name: 'Stop dev in main' }),
     )
     await userEvent.tab()
-    // `login-form`'s address is still starting: text, so nothing to stop on before its Stop.
+    // `login-form`'s address is still starting: text, so nothing to stop on before its Details.
+    await expect(document.activeElement).toBe(
+      canvas.getByRole('button', { name: 'Details of dev in login-form' }),
+    )
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSelect).toHaveBeenCalledWith(DEV_LOGIN_FORM.id)
+    await userEvent.tab()
     await expect(document.activeElement).toBe(
       canvas.getByRole('button', { name: 'Stop dev in login-form' }),
     )
