@@ -11,7 +11,7 @@
  * is a script of the suite standing in for it.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { type AddressInfo, createServer } from 'node:net'
@@ -31,6 +31,7 @@ import { Sessions } from '#engine/sessions.ts'
 import { Database } from '#engine/storage/database.ts'
 import { workspaces } from '#engine/storage/schema.ts'
 
+import { localhostCertificate } from './certificate.ts'
 import {
   PUBLISHES_AN_ADDRESS,
   engine,
@@ -324,13 +325,10 @@ describe('An address is probed as printed', () => {
 })
 
 describe('An https address answers on a certificate of its own', () => {
-  /** A self-signed pair for `localhost`, made once for this suite and trusted by nothing. */
-  const fixture = (name: string) => readFileSync(join(import.meta.dirname, 'fixtures', name))
-
   it('answers true for a local https server on an untrusted certificate, and false once closed', async () => {
-    const server = createHttpsServer(
-      { key: fixture('localhost-key.pem'), cert: fixture('localhost.pem') },
-      (_request, response) => response.end('ok'),
+    // A self-signed pair for `localhost`, made for this test and trusted by nothing.
+    const server = createHttpsServer(localhostCertificate(), (_request, response) =>
+      response.end('ok'),
     )
     await new Promise<void>((resolve) => server.listen(0, resolve))
     // SAFETY: a server listening on a TCP port answers its address as an object, never a pipe name.
