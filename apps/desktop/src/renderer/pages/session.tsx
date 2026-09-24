@@ -168,6 +168,8 @@ export interface SessionPageProps {
   agent: AgentSessionState
   /** The Sessions of the Project, which name the Session that writes a Spec this one reads. */
   sessions: readonly Session[]
+  /** Whether a turn is running in a Session: a reader does not take the right from under one. */
+  running: (sessionId: string) => boolean
   /**
    * The agent this Session runs, as the menu lists it: one, and never another.
    *
@@ -226,6 +228,7 @@ export function SessionPage({
   refusal,
   agent,
   sessions,
+  running,
   agents,
   options,
   onWrite,
@@ -643,7 +646,7 @@ export function SessionPage({
         <div className="min-h-0 min-w-0 basis-9/20 border-l border-border">
           <SpecPanel
             spec={spec}
-            reader={readerOf(defined, session.id, sessions)}
+            reader={readerOf(defined, session.id, sessions, running)}
             // Checked against the version the edit was opened on, which the panel hands back:
             // an agent may have written the section meanwhile (D7-12).
             onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}

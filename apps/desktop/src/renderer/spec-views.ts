@@ -1,4 +1,11 @@
-import { type GateFailure, contractOf, focusOf, readyGate, sectionOwner } from '@hemera/core'
+import {
+  type GateFailure,
+  contractOf,
+  focusOf,
+  readyGate,
+  sectionOwner,
+  takeOverRefusal,
+} from '@hemera/core'
 import type {
   ChannelArguments,
   EditBuffer,
@@ -446,16 +453,26 @@ export function specViewOf({
 
 /**
  * Present when this Session reads a draft another Session writes (D7-11): the name of the
- * writer, which is the only thing the bar says.
+ * writer, and why `Take over` is refused while the writer runs a turn — the engine's own rule,
+ * so the button is disabled exactly when the engine would refuse it (Decided 14).
  */
 export function readerOf(
   snapshot: SpecSnapshot,
   sessionId: string,
   sessions: readonly Session[],
+  running: (sessionId: string) => boolean,
 ): ReaderView | undefined {
   const writer = snapshot.spec.writerSessionId
   if (writer === sessionId || !isEditable(snapshot)) return undefined
-  return { writer: sessions.find((one) => one.id === writer)?.title ?? 'none' }
+  const title = sessions.find((one) => one.id === writer)?.title ?? null
+  return {
+    writer: title ?? 'none',
+    takeOverRefused: takeOverRefusal(
+      snapshot.spec,
+      title,
+      writer !== null && running(writer),
+    ),
+  }
 }
 
 /**

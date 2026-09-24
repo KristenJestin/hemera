@@ -223,6 +223,11 @@ export interface RevisionView {
 export interface ReaderView {
   /** The Session that writes it. */
   writer: string
+  /**
+   * Why the write right cannot be taken over now — the writer is running a turn — or `null`
+   * when it can (Decided 14).
+   */
+  takeOverRefused: string | null
 }
 
 export interface SpecView {

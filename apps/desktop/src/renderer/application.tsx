@@ -1057,6 +1057,7 @@ export function Application() {
           refusal={sessions.refusal ?? agents.refusal}
           agent={agentOf(open.id)}
           sessions={sessions.sessions}
+          running={(sessionId) => agentOf(sessionId).running}
           agents={runsOn(open, agents.agents)}
           options={optionsOf(open.id)}
           onWrite={async (body) => await writeInto(open.id, body)}

@@ -617,15 +617,53 @@ describe('A second Session reads but does not write', () => {
   })
   const listed = [session('writer', 'Spec CSV'), session('reader', 'Billing review')]
 
+  /** No Session has a turn running. */
+  const idle = () => false
+
   test('a Session that is not the writer reads, told which Session writes', () => {
-    expect(readerOf(snapshot(), 'reader', listed)).toEqual({ writer: 'Spec CSV' })
+    expect(readerOf(snapshot(), 'reader', listed, idle)).toEqual({
+      writer: 'Spec CSV',
+      takeOverRefused: null,
+    })
   })
 
   test('the writer does not read, and nobody reads a frozen Spec', () => {
-    expect(readerOf(snapshot(), 'writer', listed)).toBe(undefined)
+    expect(readerOf(snapshot(), 'writer', listed, idle)).toBe(undefined)
     const frozen = snapshot()
     expect(
-      readerOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } }, 'reader', listed),
+      readerOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } }, 'reader', listed, idle),
     ).toBe(undefined)
+  })
+})
+
+describe('Take over is refused while the writer runs a turn, and on a Spec that is not a draft', () => {
+  const session = (id: string, title: string): Session => ({
+    id,
+    projectId: 'atlas',
+    title,
+    titleSource: 'user',
+    provider: 'opencode',
+    model: null,
+    nativeState: 'none',
+    mission: 'define',
+    specId: 'spec-7',
+    archivedAt: null,
+    createdAt: 0,
+    lastWrittenAt: 0,
+    version: 1,
+  })
+  const listed = [session('writer', 'Spec CSV'), session('reader', 'Billing review')]
+
+  test('the writer running a turn disables Take over, with the reason the engine refuses with', () => {
+    expect(readerOf(snapshot(), 'reader', listed, (id) => id === 'writer')).toEqual({
+      writer: 'Spec CSV',
+      takeOverRefused: 'The Session "Spec CSV" is running a turn on ATL-7: take over once it ends.',
+    })
+  })
+
+  test('a turn running in another Session than the writer refuses nothing', () => {
+    expect(readerOf(snapshot(), 'reader', listed, (id) => id === 'reader')).toMatchObject({
+      takeOverRefused: null,
+    })
   })
 })

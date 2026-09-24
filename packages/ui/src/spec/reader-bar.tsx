@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useId } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 
@@ -10,6 +10,9 @@ import { Button } from '../components/button/button.tsx'
  * and offers the one human action that changes it: taking the write right over, at once. You
  * can still edit the text in place from here — your edits carry this Session as their origin —
  * what is refused is the agent of a reading Session writing.
+ *
+ * While the writer is running a turn the right is not taken from under it (Decided 14): the
+ * button is disabled and the bar says why, which the button is described by.
  */
 
 const BAR =
@@ -18,18 +21,31 @@ const BAR =
 export interface ReaderBarProps {
   /** The Session that holds the write right. */
   writer: string
+  /** Why `Take over` is refused now, or `null` when it can be pressed. */
+  takeOverRefused: string | null
   onTakeOver: () => void
 }
 
-export function ReaderBar({ writer, onTakeOver }: ReaderBarProps): ReactNode {
+export function ReaderBar({ writer, takeOverRefused, onTakeOver }: ReaderBarProps): ReactNode {
+  const reason = useId()
   return (
     <div role="group" aria-label="Write right" className={BAR}>
       <p className="min-w-0 truncate">
         Written by Session <span className="font-medium text-foreground">{`« ${writer} »`}</span> ·
         you read
       </p>
-      <span className="ml-auto flex">
-        <Button size="sm" onClick={onTakeOver}>
+      <span className="ml-auto flex min-w-0 items-center gap-2">
+        {takeOverRefused !== null && (
+          <p id={reason} className="min-w-0 truncate">
+            {takeOverRefused}
+          </p>
+        )}
+        <Button
+          size="sm"
+          disabled={takeOverRefused !== null}
+          aria-describedby={takeOverRefused === null ? undefined : reason}
+          onClick={onTakeOver}
+        >
           Take over
         </Button>
       </span>

@@ -131,7 +131,13 @@ export function SpecPanel({
           onMarkReady={onMarkReady}
         />
       </header>
-      {reader !== undefined && <ReaderBar writer={reader.writer} onTakeOver={onTakeOver} />}
+      {reader !== undefined && (
+        <ReaderBar
+          writer={reader.writer}
+          takeOverRefused={reader.takeOverRefused}
+          onTakeOver={onTakeOver}
+        />
+      )}
       <div className={BODY}>
         <SpecRail
           label={`Parts of ${spec.key}`}

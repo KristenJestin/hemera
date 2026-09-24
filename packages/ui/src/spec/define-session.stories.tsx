@@ -163,7 +163,7 @@ const SCREENS = {
   reader: {
     title: 'Billing review',
     spec: READER,
-    reader: { writer: 'Spec CSV' },
+    reader: { writer: 'Spec CSV', takeOverRefused: null },
     thread: [
       yours('ask', '14:05', 'What does ATL-7 say about credit notes?'),
       agents(
