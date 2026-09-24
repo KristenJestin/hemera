@@ -1,11 +1,12 @@
 import { cn } from 'cn'
-import { useCallback, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from 'react'
 
 import { IconGitBranch } from '../icons.ts'
 import { Disclosure } from './disclosure.tsx'
 import {
   highlighted,
   languageOf,
+  loaded,
   subscribeToHighlight,
   warm,
   type HighlightedLine,
@@ -127,6 +128,13 @@ function compare(oldText: string | null, newText: string): Change {
 /**
  * The tokens of the code, once its grammar is in hand — and null until then, so the first
  * frame draws the change plain rather than drawing nothing at all.
+ *
+ * What the block watches is whether the grammar is in hand, which reads the same every time it is
+ * asked; the tokens are then drawn once per code and held by the block. Watching the tokens
+ * themselves would ask the cache of drawn changes for the same array on every read, and a cache
+ * that lets go of the oldest cannot promise that: with more changes on screen than it holds, each
+ * block's draw pushed another block's out, React saw a new answer at every read, and the thread
+ * rendered until React gave up.
  */
 function useHighlighted(code: string, language: string | null): HighlightedLine[] | null {
   const subscribe = useCallback(
@@ -136,11 +144,12 @@ function useHighlighted(code: string, language: string | null): HighlightedLine[
     },
     [language],
   )
-  return useSyncExternalStore(
+  const ready = useSyncExternalStore(
     subscribe,
-    () => highlighted(code, language),
-    () => null,
+    () => loaded(language),
+    () => false,
   )
+  return useMemo(() => (ready ? highlighted(code, language) : null), [ready, code, language])
 }
 
 /** One line of the change: what the grammar found in it, or the line itself, plain. */

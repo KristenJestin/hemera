@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useId, useState } from 'react'
 
 import { IconChevronDown } from '../icons.ts'
-import { arrival, collapse, expand, instant, morph, useTransition } from '../motion.ts'
+import { arrival, collapse, expand, fold, instant, useTransition } from '../motion.ts'
 
 /**
  * What folds: a line that is read while it is closed, and what is inside once it is asked for
@@ -19,7 +19,9 @@ import { arrival, collapse, expand, instant, morph, useTransition } from '../mot
  * pointer that lands anywhere on the row is a pointer that opens it.
  *
  * **The body grows and folds, and the fold is the growth played backwards** — the `expand` and
- * `collapse` kinds of the preset, on `morph`, which is the spring made for a dimension. Until
+ * `collapse` kinds of the preset, on the `fold` kind: `morph`, the spring made for a dimension,
+ * with no speed to carry, so a press that catches the body still opening turns it round where it
+ * is rather than on the frame after it (issue #64). Until
  * the trial of 22 September 2026 it opened with a `clip-path` walking down a body already laid
  * out at full height, and closed by vanishing: D0-06 forbade animating a height, so there was
  * no opening to play backwards, and Base UI's `Collapsible` took the body out of the page the
@@ -145,8 +147,10 @@ export function Disclosure({
   const shown = open ?? asked
   const transition = useTransition(arrival)
   // A dimension has a spring of its own: it arrives without ever turning round, and a body that
-  // overshot its height would take the whole column below it along.
-  const folding = useTransition(morph)
+  // overshot its height would take the whole column below it along. The fold's own kind is that
+  // spring with no speed to carry, so a press that catches it still opening turns it round where
+  // it is rather than from wherever the opening got to by the end of the frame (issue #64).
+  const folding = useTransition(fold)
   // `useTransition` hands back this very object when the system asks for less movement, and a
   // block travelling to its new place is movement: the fold stops being a layout element at all
   // then, rather than being one with no time to move in.

@@ -31,6 +31,7 @@ import { openDiagnosticLog, reported, writeDiagnosticTo } from './diagnostic.ts'
 import { readSidecar } from './display-sidecar.ts'
 import { collectReport } from './environment.ts'
 import { startEngine } from './engine-client.ts'
+import { headless } from './window-options.ts'
 import { createWindow, loadWindow } from './window.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
@@ -112,7 +113,9 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => {
     const [first] = BrowserWindow.getAllWindows()
-    if (first === undefined) return
+    // Under the end-to-end suite with no window on screen, handing the window back would put it
+    // on screen and take the focus of whoever is using the machine: it stays where it is.
+    if (first === undefined || headless(process.env)) return
     if (first.isMinimized()) first.restore()
     first.focus()
   })
