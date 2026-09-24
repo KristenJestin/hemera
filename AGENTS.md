@@ -268,8 +268,9 @@ writes at start-up.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
 - Storybook sidebar, five roots in this order and nothing else: **Foundations** (tokens,
   icons, motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the
-  composed pieces that are not a screen, grouped by family and four families at most
-  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`);
+  composed pieces that are not a screen, grouped by family and five families at most
+  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`,
+  `Blocks/Workspace`);
   **Surfaces**, one entry per screen (`Surfaces/Session`, `Surfaces/Project/Dialog` when a
   screen has several parts), never one entry per variant; **Shell**, the window frame. The
   order of the roots and the alphabetical order inside are forced by `storySort` in
