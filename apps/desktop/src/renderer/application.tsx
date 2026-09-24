@@ -618,6 +618,15 @@ export function Application() {
     return () => void showWorkspace(null)
   }, [settingsOf])
 
+  // And what Git says of `main` again whenever the Project changes while its settings are open: a
+  // repository declared, moved or removed is another first repository for its row to sum up, or
+  // the first one at all (D8-15). Before its Workspaces were ever listed, this asks nothing.
+  const settingsVersion = settingsOf === null ? null : (current?.version ?? null)
+  useEffect(() => {
+    if (settingsOf === null) return
+    void readMainStatus(settingsOf)
+  }, [settingsOf, settingsVersion])
+
   // And what it was provided, for its Context tab: read when it is opened, and again by the store
   // whenever a turn ends or a change of the Workspace's instructions is delivered (D6-10).
   useEffect(() => {
