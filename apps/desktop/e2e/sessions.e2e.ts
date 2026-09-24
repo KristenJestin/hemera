@@ -167,9 +167,9 @@ describe('A read inside the Workspace goes through on its own', () => {
     // The agent called Hemera's `fs_read` over MCP, inside the root: no question was asked, and
     // the thread draws the call as Hemera's, beside the agent's own answer.
     await awaits(READ_ANSWER)
-    expect(await shows('fs_read')).toBe(true)
     // The call wears the mark of `fs_read`, is announced as Hemera's and read by its label, and
-    // says which file it read: which is how it is found.
+    // says which file it read: which is how it is found. The code name itself is in the body,
+    // which a completed call folds away (recette 5 of 24 September 2026).
     const marked = await browser.execute(
       (notes) =>
         [...document.querySelectorAll('button')].some(

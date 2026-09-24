@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { movesLess } from '../../.storybook/reduced-motion.ts'
 import { CommandRun } from './command-run.tsx'
 
 /**
@@ -247,9 +248,13 @@ export const ARunningRunStaysOpen: Story = {
   },
 }
 
-/** A check that runs, then fails: the line, and the button that ends it, as a Session would. */
-function EndingRun(): ReactNode {
+/**
+ * A check that runs, then exits with the code it is told: the line, and the button that ends it,
+ * as a Session would.
+ */
+function EndingRun({ exitCode }: { exitCode: number }): ReactNode {
   const [over, setOver] = useState(false)
+  const failed = exitCode !== 0
   return (
     <div className="flex flex-col items-start gap-2">
       <button type="button" onClick={() => setOver(true)}>
@@ -259,21 +264,49 @@ function EndingRun(): ReactNode {
         name="check"
         command="pnpm check"
         kind="check"
-        state={over ? 'failed' : 'running'}
+        state={over ? (failed ? 'failed' : 'finished') : 'running'}
         folder="."
-        output={over ? 'Tests  3 failed (3)' : 'Running the tests...'}
-        exitCode={over ? 1 : undefined}
+        output={over ? (failed ? 'Tests  3 failed (3)' : 'Tests  3 passed (3)') : 'Running...'}
+        exitCode={over ? exitCode : undefined}
       />
     </div>
   )
 }
 
 /**
- * A run that ends while it is open stays open: it does not snap shut to how it was first drawn,
- * and folds under the reader's next press.
+ * A run that exits 0 folds itself at that moment (recette 5 of 24 September 2026): held open
+ * while it ran, folded on `collapse` once it is over — the output folds away rather than
+ * vanishing — with its exit code on the line, and the reader can open it again.
  */
-export const ARunThatEndsStaysOpen: Story = {
-  render: () => <EndingRun />,
+export const ARunThatEndsFolds: Story = {
+  render: () => <EndingRun exitCode={0} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /^check Running/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(canvas.getByRole('button', { name: 'End the run' }))
+    await expect(canvas.getByText('Exited 0')).toBeVisible()
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    if (!movesLess()) {
+      // Mid-exit: the line already says it is folded, and the output is still in the page
+      // folding away. An output that snapped shut would be gone here.
+      await expect(canvas.getByText('pnpm check')).toBeInTheDocument()
+    }
+    await waitFor(() => {
+      expect(canvas.queryByRole('log', { name: 'Output of check' })).toBeNull()
+    })
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(canvas.getByText(/3 passed/)).toBeVisible()
+  },
+}
+
+/**
+ * A run that exits non-zero stays open on its output, as decided in recette 4 of 23 September
+ * 2026, and folds under the reader's next press.
+ */
+export const AFailedRunStaysOpen: Story = {
+  render: () => <EndingRun exitCode={1} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /^check Running/ })

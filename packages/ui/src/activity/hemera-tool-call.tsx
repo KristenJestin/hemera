@@ -50,8 +50,10 @@ import { MARKS, SubjectOnLine, type ToolSubject, pressable } from './tool-call-c
  *
  * What is held open is what is still happening: a call in flight is what the reader is waiting
  * on, and a call waiting for a human decision is the one thing in the thread that is asking for
- * something. A call that failed or was refused opens on its reason, since that is when the
- * details matter, and folds under the reader's hand like everything that is over (recette 4).
+ * something. A call that ends done folds itself at that moment (recette 5 of 24 September 2026):
+ * what it did is on its line, and a turn of twenty calls left open is a turn nobody scrolls past.
+ * A call that failed or was refused opens on its reason, since that is when the details matter,
+ * and folds under the reader's hand like everything that is over (recette 4).
  */
 
 /** Where a call stands, in the word the dot is announced by and the tone it is drawn in. */
@@ -197,8 +199,9 @@ export function HemeraToolCall({
   return (
     <Disclosure
       className={className}
-      // Uncontrolled once the call is over: `undefined` hands the fold back to the reader, and
-      // a call that ends while it is held open is handed back open.
+      // Uncontrolled once the call is over: `undefined` hands the fold back to the reader, at
+      // where it starts — folded for a call that ended done, open on the reason of one that did
+      // not — and the fold plays rather than snaps.
       open={forced ? true : undefined}
       defaultOpen={defaultOpen || ended}
       // A subject that is a path is the press that goes there, where it is read: on the line that

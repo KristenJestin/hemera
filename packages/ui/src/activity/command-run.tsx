@@ -17,8 +17,8 @@ import { TerminalOutput } from './terminal-output.tsx'
  * forgotten is what this lot exists to end, so the address is on the line, one press away.
  *
  * The line stays open while the process runs, for the same reason a console does: what the
- * reader is waiting on is the output. Once it is over it folds like the rest of the turn, and
- * its exit code is what is read instead — a check that failed says so without being opened.
+ * reader is waiting on is the output. Once it exits 0 it folds itself, like the rest of the turn,
+ * and its exit code is what is read instead; a check that failed stays open on its output.
  *
  * A one-off command line is marked as one: it runs inside the Workspace root, shows here, and
  * is never promoted to the catalogue by itself. The reader is the one who decides what a
@@ -104,9 +104,11 @@ export function CommandRun({
   const shown = STATE[state]
   const running = state === 'running'
   // A process the reader is waiting on is held open: the output is the answer rather than a
-  // detail to go and open. A run that failed opens on it too, and is the reader's to fold once it
-  // is over (recette 4 of 23 September 2026): an ended block that cannot be folded is a block
-  // that stays in the way of the whole thread. One that ends while it is open stays open.
+  // detail to go and open. A run that exits 0 folds itself the moment it does (recette 5 of 24
+  // September 2026): its exit code on the line is the answer. A run that failed opens on its
+  // output, and stays open when it ends failing, and is the reader's to fold once it is over
+  // (recette 4 of 23 September 2026): an ended block that cannot be folded is a block that stays
+  // in the way of the whole thread. A run the reader stopped folds, as one that ended well.
   return (
     <div className={cn(ROW, className)}>
       <Disclosure

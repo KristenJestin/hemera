@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { withinFrames } from '../../.storybook/reduced-motion.ts'
+import { movesLess, withinFrames } from '../../.storybook/reduced-motion.ts'
 import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
 
 /**
@@ -12,7 +12,7 @@ import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
  * opened by the reader, an edit, a write, a search that hit its limit, a call in flight, a call
  * that failed, a call Hemera refused, and a write waiting for the reader's decision, then the
  * whole catalogue, one line per tool. The line carries the tool's own mark, its label, what the
- * call is about and the catalogue's name, quieter (recette 3 of 23 September 2026), and no brand;
+ * call is about, in the tone of a caption (recettes 3 and 5), and no brand;
  * the word `Hemera` is still what the line is announced by. Where the call stands is the dot,
  * and how long it took is the dot's hover (recette 4): the provenance is the entry's and the
  * Journal's, and no foot of identifiers closes the body.
@@ -48,7 +48,7 @@ const meta = {
     status: {
       control: 'inline-radio',
       options: ['pending', 'in_progress', 'completed', 'failed', 'refused'],
-      description: 'Where the call stands: running, failed and waiting are open, and stay open.',
+      description: 'Where the call stands: running and waiting are held open, done folds.',
     },
     summary: { control: 'text', description: 'What the call returned, in one line.' },
     arguments: { control: 'object', description: 'The arguments as they were bounded.' },
@@ -372,9 +372,11 @@ export const ARunningCallStaysOpen: Story = {
   },
 }
 
-/** A call that runs, then ends: the line, and the button that ends it, as a turn would. */
-function EndingCall(): ReactNode {
+/** A call that runs, then ends as it is told: the line, and the button that ends it, as a turn would. */
+function EndingCall({ ending }: { ending: 'completed' | 'failed' }): ReactNode {
   const [over, setOver] = useState(false)
+  const failed = ending === 'failed'
+  const answer = failed ? 'src/ could not be read.' : '3 match(es) for "exportInvoices"'
   return (
     <div className="flex flex-col items-start gap-2">
       <button type="button" onClick={() => setOver(true)}>
@@ -384,8 +386,10 @@ function EndingCall(): ReactNode {
         tool="search"
         label="Search"
         mark="search"
-        status={over ? 'completed' : 'in_progress'}
-        summary={over ? '3 match(es) for "exportInvoices"' : 'Searching for exportInvoices.'}
+        status={over ? ending : 'in_progress'}
+        summary={over ? answer : 'Searching for exportInvoices.'}
+        error={over && failed ? answer : undefined}
+        arguments={[{ label: 'query', value: 'exportInvoices' }]}
         ms={over ? 64 : undefined}
       />
     </div>
@@ -393,19 +397,49 @@ function EndingCall(): ReactNode {
 }
 
 /**
- * A call that ends while it is open stays open: it does not snap shut to how it was first drawn,
- * and folds under the reader's next press.
+ * A call that ends done folds itself at that moment (recette 5 of 24 September 2026): held open
+ * while it ran, folded on `collapse` once it is over — the body folds away rather than vanishing —
+ * and the reader can open it again.
  */
-export const ACallThatEndsStaysOpen: Story = {
-  render: () => <EndingCall />,
+export const ACallThatEndsFolds: Story = {
+  render: () => <EndingCall ending="completed" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /Search/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(canvas.getByText('exportInvoices')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'End the call' }))
+    await expect(canvas.getByRole('img', { name: 'Done' })).toBeVisible()
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    if (!movesLess()) {
+      // Mid-exit: the line already says it is folded, and the body is still in the page folding
+      // away. A body that snapped shut would be gone here.
+      await expect(canvas.getByText('exportInvoices')).toBeInTheDocument()
+    }
+    await waitFor(() => {
+      expect(canvas.queryByText('exportInvoices')).toBeNull()
+    })
+    // Over, and the reader's: it opens again on what it answered.
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(canvas.getByText(/3 match\(es\)/)).toBeVisible()
+  },
+}
+
+/**
+ * A call that ends failing stays open on its reason, as decided in recette 4 of 23 September
+ * 2026, and folds under the reader's next press.
+ */
+export const AFailedCallStaysOpen: Story = {
+  render: () => <EndingCall ending="failed" />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /Search/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await userEvent.click(canvas.getByRole('button', { name: 'End the call' }))
-    await expect(canvas.getByRole('img', { name: 'Done' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Failed' })).toBeVisible()
     await expect(row).toHaveAttribute('aria-expanded', 'true')
-    await expect(canvas.getByText(/3 match\(es\)/)).toBeVisible()
+    await expect(canvas.getByText('src/ could not be read.')).toBeVisible()
     await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'false')
   },

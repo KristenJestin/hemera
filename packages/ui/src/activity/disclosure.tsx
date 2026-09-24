@@ -110,7 +110,8 @@ export interface DisclosureProps {
    *
    * A tool card holds the reader's answer itself, so that it survives the entry being written
    * again. Left out, the fold holds it and opens on `defaultOpen`; let go after being held, it
-   * starts from what it was last held at, so a block forced open while it ran stays open.
+   * goes back to `defaultOpen`, folding on the way when that is closed: a call held open while it
+   * ran folds once it is done.
    */
   open?: boolean | undefined
   /** Whether it starts open, for a block the reader is expected to want. */
@@ -131,11 +132,16 @@ export function Disclosure({
   className,
 }: DisclosureProps): ReactNode {
   const [asked, setAsked] = useState(open ?? defaultOpen)
-  // What the caller held is what the reader is handed once it lets go: a block forced open while
-  // it ran stays open the moment it ends, rather than snapping shut to how it was first drawn,
-  // and folds under the reader's next press (recette 4 of 23 September 2026). Kept in step while
-  // rendering, so the hand-over is never a frame late.
-  if (open !== undefined && asked !== open) setAsked(open)
+  const [held, setHeld] = useState(open)
+  // A caller that lets go hands the fold back to where it starts: a block held open while it ran
+  // folds the moment it ends well, and stays open when it ends on something the reader has to
+  // read — which is the caller's `defaultOpen` (recette 5 of 24 September 2026). The fold plays on
+  // the same `collapse` a press plays: nothing snaps shut. Kept in step while rendering, so the
+  // hand-over is never a frame late.
+  if (held !== open) {
+    setHeld(open)
+    setAsked(open ?? defaultOpen)
+  }
   const shown = open ?? asked
   const transition = useTransition(arrival)
   // A dimension has a spring of its own: it arrives without ever turning round, and a body that
