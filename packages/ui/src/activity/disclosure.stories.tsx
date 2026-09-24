@@ -10,10 +10,11 @@ import { Disclosure } from './disclosure.tsx'
  * What folds: the line a block is read by, and what it holds once it is asked for (design
  * D17-05).
  *
- * Four stories, which are the four things a fold has to answer for: opened; closed while it is
+ * Five stories, which are the five things a fold has to answer for: opened; closed while it is
  * still opening — the moment it used to grow for a frame after the press instead of turning round
- * (issue #64); a body on its way out, which the keyboard can no longer reach (issue #69); and a
- * row that names a body only once there is one.
+ * (issue #64); a body on its way out, which the keyboard can no longer reach, and a row that names
+ * a body only once there is one (issue #69); and a controlled block that folds on its own, where
+ * the focus the body held goes back to the row (issue #78).
  */
 const BODY = Array.from(
   { length: 12 },
@@ -274,6 +275,70 @@ export const NothingReachableWhileFolding: Story = {
     await expect(await withinFrames(() => roomOf(canvasElement, row) === null, PATIENCE)).toBe(true)
     await expect(row).not.toHaveAttribute('aria-controls')
     await expect(canvas.queryByText(written)).toBeNull()
+  },
+}
+
+/** The press that lets go of a block the caller holds open: what a call that ends well does. */
+const LET_GO = 'Let the call end'
+
+/**
+ * A block the caller holds open, and then lets go of, with a press inside its body: a call that
+ * ends well, told to fold back to where the block starts rather than to stay open (`HemeraToolCall`
+ * and `CommandRun` both hand the fold back the moment what they watched is over).
+ */
+function HeldThenReleased(): ReactNode {
+  const [open, setOpen] = useState<boolean | undefined>(true)
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <Button size="sm" onClick={() => setOpen(undefined)}>
+        {LET_GO}
+      </Button>
+      <Disclosure summary="Read src/session/session.tsx" open={open}>
+        <div className="flex flex-col items-start gap-2">
+          <div className="font-mono text-xs whitespace-pre text-muted-foreground">{BODY}</div>
+          <Button size="sm">{INSIDE}</Button>
+        </div>
+      </Disclosure>
+    </div>
+  )
+}
+
+/**
+ * A controlled block folds on its own, and the focus that was inside its body is on the row
+ * (issue #78).
+ *
+ * A caller stops holding `open` the moment what it was watching is over, and the block folds there
+ * and then: no press on the row to hear it, and so nowhere for the hand-over to live while the
+ * press is the only thing that makes it. The body is out of the reader's reach from that moment —
+ * it is `inert` — and a focus inside it has nowhere to live either: the browser drops it on the
+ * document, in the middle of what the reader was reading.
+ *
+ * What is asserted is where the keyboard is on the frame the line says the fold is closed, the
+ * press that let go having left the focus where it was.
+ */
+export const FocusGoesBackToTheRowWhenTheCallerLetsGo: Story = {
+  render: () => <HeldThenReleased />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const page = canvasElement.ownerDocument
+    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+
+    // The reader is on the press the body holds when the caller lets go: it is the only thing
+    // under the line that the keyboard can land on.
+    const inside = canvas.getByRole('button', { name: INSIDE })
+    inside.focus()
+    await expect(inside).toHaveFocus()
+
+    // A press that does not move the focus: a pointer would put it on the control that lets go
+    // before the press runs, and there would be nothing inside the body left to hand back.
+    canvas.getByRole('button', { name: LET_GO }).click()
+    await expect(
+      await withinFrames(() => row.getAttribute('aria-expanded') === 'false', AT_ONCE),
+    ).toBe(true)
+
+    // The row holds it, and the document does not: a body made `inert` drops what it holds.
+    await expect(page.activeElement).toBe(row)
   },
 }
 

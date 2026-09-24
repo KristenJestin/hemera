@@ -1,6 +1,6 @@
 import { cn } from 'cn'
 import { AnimatePresence, motion, useIsPresent } from 'motion/react'
-import { type ReactNode, useId, useRef, useState } from 'react'
+import { type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { IconChevronDown } from '../icons.ts'
 import { arrival, collapse, expand, fold, instant, useTransition } from '../motion.ts'
@@ -40,8 +40,9 @@ import { arrival, collapse, expand, fold, instant, useTransition } from '../moti
  * and nothing it holds is announced (issue #69). The row goes on naming it until it has left — a
  * reference that resolves to nothing is a broken one — and the end of the exit is what says when
  * that is, where a timer would be a guess at the length of a spring. A focus that was inside the
- * body at the press is handed back to the row rather than dropped on the document the moment the
- * browser reaches it.
+ * body when it stopped being the reader's — at the press, or at a caller that lets go of `open` —
+ * goes back to the row rather than being dropped on the document the moment the browser reaches it
+ * (issue #78).
  *
  * What the fold moves is not this component's business, and is not teleported either: whatever
  * holds a column of folds — the thread, in `message/scroller` — carries the blocks under it on
@@ -165,15 +166,6 @@ export function Disclosure({
 }: DisclosureProps): ReactNode {
   const [asked, setAsked] = useState(open ?? defaultOpen)
   const [held, setHeld] = useState(open)
-  // A caller that lets go hands the fold back to where it starts: a block held open while it ran
-  // folds the moment it ends well, and stays open when it ends on something the reader has to
-  // read — which is the caller's `defaultOpen` (recette 5 of 24 September 2026). The fold plays on
-  // the same `collapse` a press plays: nothing snaps shut. Kept in step while rendering, so the
-  // hand-over is never a frame late.
-  if (held !== open) {
-    setHeld(open)
-    setAsked(open ?? defaultOpen)
-  }
   const shown = open ?? asked
   const transition = useTransition(arrival)
   // A dimension has a spring of its own: it arrives without ever turning round, and a body that
@@ -191,6 +183,30 @@ export function Disclosure({
   // the body is taken out of the page through.
   const row = useRef<HTMLButtonElement>(null)
   const room = useRef<HTMLDivElement>(null)
+  /**
+   * Whether the focus is inside the room the body is given, read off the page.
+   *
+   * What the focus is in is not what the fold decided, so it is not read off the fold's own state:
+   * where the reader is, only the page knows.
+   */
+  const holdsTheFocus = (): boolean => {
+    const holding = room.current
+    return holding !== null && holding.contains(holding.ownerDocument.activeElement)
+  }
+  /** Whether a focus the body held still has to go back to the row once the page has taken it. */
+  const handed = useRef(false)
+  // A caller that lets go hands the fold back to where it starts: a block held open while it ran
+  // folds the moment it ends well, and stays open when it ends on something the reader has to
+  // read — which is the caller's `defaultOpen` (recette 5 of 24 September 2026). The fold plays on
+  // the same `collapse` a press plays: nothing snaps shut. Kept in step while rendering, so the
+  // hand-over is never a frame late. A close the reader never pressed for is read here too: this
+  // render is the last one where a focus inside the body is still the body's, and the commit that
+  // follows is what makes the body `inert` (issue #78).
+  if (held !== open) {
+    if (shown && !(open ?? defaultOpen) && holdsTheFocus()) handed.current = true
+    setHeld(open)
+    setAsked(open ?? defaultOpen)
+  }
   // Named only while it is there, and it is there for the whole of the exit: the fold is the
   // opening played backwards, so the body outlives the state that closed it. What says it has
   // left is the end of the exit and nothing else — a timer would be a guess at the length of a
@@ -201,15 +217,20 @@ export function Disclosure({
   const [left, setLeft] = useState(!present)
   if (present && left) setLeft(false)
   const controls = left ? undefined : body
+  // Where a focus the body held goes once the page has taken the body away: back to the row, which
+  // is where the reading was happening. A body that is `inert` drops what it holds on the document,
+  // and the fold hears no press for a caller that lets go (issue #78).
+  useLayoutEffect(() => {
+    if (!handed.current) return
+    handed.current = false
+    row.current?.focus()
+  }, [shown])
   // A controlled block is the caller's answer: the reader's press is reported and the shown state
   // stays whatever the caller said.
   const press = () => {
     // A focus inside the body has nowhere to live once the body is `inert`: the browser drops it
     // on the document. It goes back to the row, which is where the reading was happening.
-    const holding = room.current
-    if (shown && holding !== null && holding.contains(holding.ownerDocument.activeElement)) {
-      row.current?.focus()
-    }
+    if (shown && holdsTheFocus()) row.current?.focus()
     setAsked(!shown)
     onOpenChange?.(!shown)
   }
