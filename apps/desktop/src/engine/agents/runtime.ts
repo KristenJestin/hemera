@@ -257,6 +257,8 @@ export interface AgentRuntimeService {
   readonly release: (sessionId: string) => Effect.Effect<void>
   /** The Sessions whose agent is running right now. */
   readonly alive: Effect.Effect<readonly string[]>
+  /** Whether a turn is running in the Session, from the prompt until it closes. */
+  readonly running: (sessionId: string) => boolean
 }
 
 export { AgentNotices, NoNotices } from './notices.ts'
@@ -2519,6 +2521,7 @@ export const runtimeLayer = Layer.effect(
       resume: (sessionId) => owned(resume(sessionId)),
       release: (sessionId) => owned(release(sessionId)),
       alive: Effect.sync(() => [...live.keys()]),
+      running: (sessionId) => turns.has(sessionId) || starting.has(sessionId),
     }
     return service
   }),

@@ -667,6 +667,25 @@ export function writable(
   return null
 }
 
+/**
+ * Why the write right of a Spec may not be taken over now (D7-11, Decided 14), or `null` when it
+ * may: only a draft's right moves, and never under a turn the writer Session is running. The
+ * engine refuses with this sentence, and the reader bar disables its button with it.
+ */
+export function takeOverRefusal(
+  spec: Spec,
+  writerTitle: string | null,
+  writerRunning: boolean,
+): WriteRefusal | null {
+  if (spec.status !== 'draft') {
+    return `${spec.key} is ${spec.status}: only a draft's write right is taken over.`
+  }
+  if (spec.writerSessionId !== null && writerRunning) {
+    return `The Session "${writerTitle ?? 'another Session'}" is running a turn on ${spec.key}: take over once it ends.`
+  }
+  return null
+}
+
 /** The prefix used when a Project name gives nothing usable (Decided 2). */
 export const DEFAULT_SPEC_PREFIX = 'SPEC'
 

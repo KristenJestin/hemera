@@ -9,7 +9,12 @@
  * which names the new writer.
  */
 
-import { type AgentProvider, NEW_SESSION_TITLE, type SpecSnapshot } from '@hemera/core'
+import {
+  type AgentProvider,
+  NEW_SESSION_TITLE,
+  type SpecSnapshot,
+  takeOverRefusal,
+} from '@hemera/core'
 import { eq, sql } from 'drizzle-orm'
 import { Data, Effect } from 'effect'
 
@@ -141,12 +146,14 @@ export function openSessionIn(
 
 /**
  * "Take the write right" (D7-11): a human action, effective at once, for a Session on this
- * Spec. The previous writer is named in the Journal.
+ * Spec. The previous writer is named in the Journal. Refused on a Spec that is not a draft, and
+ * while the writer Session has a turn running, which `running` says (Decided 14).
  */
 export function transferWrite(
   transaction: EngineTransaction,
   snapshot: SpecSnapshot,
   sessionId: string,
+  running: (sessionId: string) => boolean,
 ) {
   return Effect.gen(function* () {
     const { spec } = snapshot
@@ -159,6 +166,11 @@ export function transferWrite(
       )
     }
     if (spec.writerSessionId === sessionId) return []
+    const writer = spec.writerSessionId
+    const writerRunning = writer !== null && running(writer)
+    const writerTitle = writerRunning ? (yield* sessionRow(transaction, writer)).title : null
+    const refused = takeOverRefusal(spec, writerTitle, writerRunning)
+    if (refused !== null) return yield* Effect.fail(new SpecAnchorRefusedError({ reason: refused }))
     yield* giveWriteRight(transaction, spec.id, sessionId)
     return [
       specEvent(spec, snapshot.revision.id, 'spec.write_right_transferred', {

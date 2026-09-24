@@ -266,8 +266,14 @@ export interface SpecsService {
   readonly markReady: (request: ReadyRequest) => Answer<SpecSnapshot>
   /** Human only: Rework (D7-05). */
   readonly reopen: (request: ReopenRequest) => Answer<SpecSnapshot>
-  /** Human only: "Take the write right" (D7-11). */
-  readonly transferWrite: (input: WriteRightTaking) => Answer<SpecSnapshot>
+  /**
+   * Human only: "Take the write right" (D7-11). `running` says whether a Session has a turn
+   * running, which the agents know and the Spec does not (Decided 14).
+   */
+  readonly transferWrite: (
+    input: WriteRightTaking,
+    running: (sessionId: string) => boolean,
+  ) => Answer<SpecSnapshot>
   readonly buffers: {
     readonly read: (specId: string) => Answer<EditBuffer[]>
     readonly save: (input: BufferSave) => Answer<EditBuffer[]>
@@ -1073,9 +1079,9 @@ export const specsLayer = Layer.effect(
           reopen(transaction, snapshot, request),
         ),
 
-      transferWrite: (input) =>
+      transferWrite: (input, running) =>
         onSpec('moving the write right', input.specId, (transaction, snapshot) =>
-          transferWrite(transaction, snapshot, input.sessionId).pipe(Effect.map(only)),
+          transferWrite(transaction, snapshot, input.sessionId, running).pipe(Effect.map(only)),
         ),
 
       buffers: {

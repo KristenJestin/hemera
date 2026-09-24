@@ -359,7 +359,8 @@ export function answer(
     if (decision.name === 'specs.markReady') return yield* specs.markReady(decision.argument)
     if (decision.name === 'specs.reopen') return yield* specs.reopen(decision.argument)
     if (decision.name === 'specs.transferWrite') {
-      return yield* specs.transferWrite(decision.argument)
+      // Never under a turn the writer is running (Decided 14).
+      return yield* specs.transferWrite(decision.argument, runtime.running)
     }
     if (decision.name === 'specs.buffers.read') {
       return yield* specs.buffers.read(decision.argument.specId)

@@ -50,6 +50,9 @@ afterEach(() => {
 
 const opened = () => openedOn(dataFolder)
 
+/** No Session has a turn running. */
+const idle = () => false
+
 describe('A Spec exists before any Workspace', () => {
   test('HEM-7 is a draft at revision 1 with no Workspace, and the counter is 8', async () => {
     const created = await opened()(
@@ -287,7 +290,7 @@ describe('A second Session reads but does not write', () => {
         const refusedSecond = yield* Effect.flip(
           write(agentOf(second.id), specId, 'problem', 'From the second Session.'),
         )
-        yield* specs.transferWrite({ specId, sessionId: second.id })
+        yield* specs.transferWrite({ specId, sessionId: second.id }, idle)
         const passed = yield* write(agentOf(second.id), specId, 'problem', 'Now it writes.')
         const refusedFirst = yield* Effect.flip(
           write(agentOf(first.id), specId, 'scope', 'From the first Session.'),
@@ -315,6 +318,52 @@ describe('A second Session reads but does not write', () => {
     })
     expect(outcome.refusedFirst).toBeInstanceOf(SpecNotWritableError)
     expect(outcome.refusedFirst.message).toContain('belongs to the Session "Read the export"')
+  })
+})
+
+describe('Take over is refused while the writer runs a turn, and on a Spec that is not a draft', () => {
+  test('a writer with a turn running keeps the right, and the refusal names it', async () => {
+    const outcome = await opened()(
+      Effect.gen(function* () {
+        const { specId, session: drafted } = yield* draft()
+        const specs = yield* Specs
+        const sessions = yield* Sessions
+        yield* sessions.rename(drafted.id, drafted.version, 'Shape the export')
+        const reader = (yield* specs.openSession({ specId, provider: 'codex' })).session
+        const refused = yield* Effect.flip(
+          specs.transferWrite(
+            { specId, sessionId: reader.id },
+            (sessionId) => sessionId === drafted.id,
+          ),
+        )
+        return { drafted, refused, after: yield* specs.read(specId) }
+      }),
+    )
+    expect(outcome.refused).toBeInstanceOf(SpecAnchorRefusedError)
+    expect(outcome.refused.message).toBe(
+      'The Session "Shape the export" is running a turn on HEM-1: take over once it ends.',
+    )
+    expect(outcome.after.spec.writerSessionId).toBe(outcome.drafted.id)
+  })
+
+  test('a ready Spec keeps its writer, and the refusal says only a draft moves', async () => {
+    const outcome = await opened()(
+      Effect.gen(function* () {
+        const { specId, session: drafted } = yield* draft()
+        const specs = yield* Specs
+        const reader = (yield* specs.openSession({ specId, provider: 'codex' })).session
+        yield* frozen(specId, drafted.id)
+        const refused = yield* Effect.flip(
+          specs.transferWrite({ specId, sessionId: reader.id }, idle),
+        )
+        return { drafted, refused, after: yield* specs.read(specId) }
+      }),
+    )
+    expect(outcome.refused).toBeInstanceOf(SpecAnchorRefusedError)
+    expect(outcome.refused.message).toBe(
+      "HEM-1 is ready: only a draft's write right is taken over.",
+    )
+    expect(outcome.after.spec.writerSessionId).toBe(outcome.drafted.id)
   })
 })
 

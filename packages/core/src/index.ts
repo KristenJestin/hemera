@@ -130,6 +130,7 @@ export {
   specPrefix,
   specPrefixFrom,
   staleAfterWrite,
+  takeOverRefusal,
   taskGraph,
   writable,
 } from './domain/spec.ts'
