@@ -216,6 +216,11 @@ export function Disclosure({
   const present = shown && children !== undefined
   const [left, setLeft] = useState(!present)
   if (present && left) setLeft(false)
+  // A body taken away where it stands leaves with no fold to play: the block is drawn with nothing
+  // to open the moment its children go, so there is no exit, and the end of an exit is the only
+  // thing that says a room has left. Counted as still there, a block that was then closed and
+  // handed a body again named, while it was closed, a room that was never in the page (issue #78).
+  if (children === undefined && !left) setLeft(true)
   const controls = left ? undefined : body
   // Where a focus the body held goes once the page has taken the body away: back to the row, which
   // is where the reading was happening. A body that is `inert` drops what it holds on the document,
