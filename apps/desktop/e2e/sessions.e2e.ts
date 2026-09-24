@@ -27,7 +27,19 @@ import { browser, expect } from '@wdio/globals'
 
 import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, MODELS, NOTES, READ_ANSWER, THOUGHTS } from './agent/script.ts'
-import { addProject, awaits, control, fill, press, shows, sidebar, strike, write } from './hand.ts'
+import {
+  addProject,
+  awaits,
+  control,
+  fill,
+  press,
+  pressIn,
+  pressTab,
+  shows,
+  sidebar,
+  strike,
+  write,
+} from './hand.ts'
 
 /**
  * Somewhere for the Project to point at, which is also where the agent is started.
@@ -187,13 +199,16 @@ describe('A read inside the Workspace goes through on its own', () => {
 
 describe('The agent starts the app and the user opens it', () => {
   it('starts a command of the catalogue from the Commands panel, and shows how it ended', async () => {
-    // The catalogue is the Project's: the command is added in its settings.
+    // The catalogue is the Project's: the command is added in its settings, from the dialog of
+    // their Commands section.
     await press('Project settings')
     await browser.pause(600)
-    await fill('Command name', 'check')
+    await pressTab('Commands')
+    await press('Add command')
+    await fill('Name', 'check')
     // The default line: a command may carry a line of its own for Windows or Linux (D8-07).
     await fill('Default line', CHECK)
-    await press('Add a command')
+    await pressIn('[role="dialog"]', 'Add command')
     await awaits('Workspace root')
 
     // Back in the Session, the Commands tab of its details runs it by name.
