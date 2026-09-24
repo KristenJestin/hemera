@@ -382,6 +382,19 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
     expect(activityOf([said, done, inTurn]).state).toBe('done')
   })
 
+  test('A brief handed over alone starts its turn', () => {
+    const said = entry('e1', 'user', 'Shape it')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn', 'turn-1')
+    // The brief of the phase the last turn finished, folded in the delivery's own turn (D7-09).
+    const brief = reported('e3', 'mission_brief', '# Mission: define', null, 'turn-2')
+    const answer = reported('e4', 'message', 'Planning now', null, 'turn-2')
+
+    expect(activityOf([said, done, brief, answer]).state).toBe('streaming')
+    // The brief of a first turn goes inside the turn the user started, and starts nothing.
+    const inTurn = reported('e3', 'mission_brief', '# Mission: define', null, null)
+    expect(activityOf([said, done, inTurn]).state).toBe('done')
+  })
+
   test('A refused prompt is a failed turn, not a stopped one', () => {
     const said = entry('e1', 'user', 'Read the notes')
     const refused = reported('e2', 'turn', 'The agent could not answer.', 'failed')
