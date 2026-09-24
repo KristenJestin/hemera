@@ -15,6 +15,7 @@ import { hemeraToolNamed } from '@hemera/core'
 import type { SessionEntry } from '@hemera/ipc'
 
 import {
+  commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
   foldedCallsOf,
@@ -119,6 +120,46 @@ describe('A one-off command shows and is not promoted', () => {
     expect(drawn?.oneOff).toBe(true)
     // `exited` is what the engine writes; `finished` is the word the block reads it as.
     expect(drawn?.state).toBe('finished')
+  })
+})
+
+describe('A proposal enters the catalogue only when accepted', () => {
+  /** A proposal entry as `commands_propose` writes it, and as a decision writes it again. */
+  const proposal = (state: string, folder: string | null) =>
+    entryOf(
+      'command_proposal',
+      'hemera',
+      'seed',
+      JSON.stringify({
+        proposalId: 'proposal-1',
+        name: 'seed',
+        line: 'node scripts/seed.js',
+        type: 'script',
+        folder,
+        why: 'the seed is run before every test',
+        state,
+      }),
+    )
+
+  test('a proposal entry is read with its outcome', () => {
+    expect(commandProposalOf(proposal('pending', null))).toEqual({
+      proposalId: 'proposal-1',
+      name: 'seed',
+      line: 'node scripts/seed.js',
+      type: 'script',
+      // The Workspace root, in the word the block reads it in.
+      folder: '.',
+      why: 'the seed is run before every test',
+      state: 'pending',
+    })
+    expect(commandProposalOf(proposal('accepted', './sources/api'))?.state).toBe('accepted')
+    expect(commandProposalOf(proposal('accepted', './sources/api'))?.folder).toBe('./sources/api')
+    expect(commandProposalOf(proposal('declined', null))?.state).toBe('declined')
+  })
+
+  test('an entry that does not parse is left out', () => {
+    expect(commandProposalOf(proposal('withdrawn', null))).toBeNull()
+    expect(commandProposalOf(entryOf('command_proposal', 'hemera', 'seed', '{'))).toBeNull()
   })
 })
 

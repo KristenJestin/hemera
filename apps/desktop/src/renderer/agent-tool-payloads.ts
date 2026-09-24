@@ -5,13 +5,15 @@ import type {
   CommandType,
   HemeraToolArgument,
   HemeraToolStatus,
+  ProposalState,
   ToolKind,
   ToolSubject,
 } from '@hemera/ui'
 import { z } from 'zod'
 
 /**
- * The three kinds this lot writes, read out of their payload (design D6-06, D6-12, D6-10).
+ * The kinds Hemera writes into a thread, read out of their payload (design D6-06, D6-12, D6-10,
+ * D8-11).
  *
  * Kept apart from `agent-blocks.tsx`, which draws them: that module imports `@hemera/ui`'s
  * components, which read the theme at module scope, so nothing that only wants to parse a
@@ -47,6 +49,21 @@ const commandRunPayloadSchema = z.object({
   url: z.string().nullable().optional(),
   exitCode: z.number().nullable().optional(),
   oneOff: z.boolean().optional(),
+})
+
+/**
+ * What a command the agent proposed carries (engine, `tools/catalogue.ts`), and what the human
+ * decided of it: the entry is written again in its outcome (engine, `commands/proposals.ts`).
+ */
+const commandProposalPayloadSchema = z.object({
+  proposalId: z.string(),
+  name: z.string(),
+  line: z.string(),
+  type: z.enum(COMMAND_TYPES),
+  /** A repository of the Project, or null for the Workspace root. */
+  folder: z.string().nullable(),
+  why: z.string(),
+  state: z.enum(['pending', 'accepted', 'declined']),
 })
 
 /** What one thing delivered to the agent carries (engine, `context/service.ts`). */
@@ -321,6 +338,26 @@ export function commandRunOf(
     oneOff,
     output: heard?.output ?? '',
   }
+}
+
+/** What `CommandProposal` needs, read off a `command_proposal` entry (D8-11). */
+export interface CommandProposalDrawn {
+  /** What Accept and Decline name the proposal by. */
+  readonly proposalId: string
+  readonly name: string
+  readonly line: string
+  readonly type: CommandType
+  /** Where it would run, `.` for the Workspace root, which is what the block says it as. */
+  readonly folder: string
+  readonly why: string
+  readonly state: ProposalState
+}
+
+/** `null` when the payload does not parse: the entry is left out rather than drawn from a guess. */
+export function commandProposalOf(entry: SessionEntry): CommandProposalDrawn | null {
+  const read = readPayload(commandProposalPayloadSchema, entry.payload)
+  if (read === null) return null
+  return { ...read, folder: read.folder ?? '.' }
 }
 
 /** What the thread shows of a `context_delivery` entry: one line, like a `note`. */

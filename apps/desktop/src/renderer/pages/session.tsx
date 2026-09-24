@@ -171,6 +171,10 @@ export interface SessionPageProps {
   workspaces: readonly OfferedWorkspace[]
   /** Moves the Session to another Workspace, null for `main`, before its agent has started. */
   onChooseWorkspace: (workspaceId: string | null) => void
+  /** Accepts a command the agent proposed; answers the engine's refusal, or null (D8-11). */
+  onAcceptProposal: (proposalId: string) => Promise<string | null>
+  /** Declines it; answers the engine's refusal, or null. */
+  onDeclineProposal: (proposalId: string) => Promise<string | null>
 }
 
 export function SessionPage({
@@ -204,6 +208,8 @@ export function SessionPage({
   context,
   workspaces,
   onChooseWorkspace,
+  onAcceptProposal,
+  onDeclineProposal,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -213,6 +219,15 @@ export function SessionPage({
   const [attempted, setAttempted] = useState<string | null>(null)
   /** Whether the reader has the Session details open: only the head's button opens them. */
   const [detailsOpen, setDetailsOpen] = useState(false)
+  /**
+   * What the reader's last decision in the thread was refused with — a proposal whose name the
+   * catalogue took meanwhile (D8-11) — or null once one went through. Said where the page's other
+   * refusals are, and before them: it answers the last press.
+   */
+  const [refused, setRefused] = useState<string | null>(null)
+  const deciding = (decision: Promise<string | null>): void => {
+    void decision.then(setRefused)
+  }
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -287,6 +302,8 @@ export function SessionPage({
       onOpenUrl,
       onStopRun,
       reportedCall: (toolCallId) => reported.get(toolCallId),
+      onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
+      onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
@@ -471,9 +488,9 @@ export function SessionPage({
             stack as the meter rather than over the thread, so what it moves is itself and nothing
             above it (D4b-02).
           */}
-          {refusal !== null && (
+          {(refused ?? refusal) !== null && (
             <p role="alert" className="text-sm text-muted-foreground">
-              {refusal}
+              {refused ?? refusal}
             </p>
           )}
           <Composer

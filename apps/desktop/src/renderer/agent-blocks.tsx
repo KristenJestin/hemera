@@ -2,6 +2,7 @@ import { hemeraToolNamed } from '@hemera/core'
 import type { CommandRun as Run, SessionEntry } from '@hemera/ipc'
 import {
   AgentText,
+  CommandProposal,
   CommandRun,
   DecisionSummary,
   DiffBlock,
@@ -27,6 +28,7 @@ import type { ReactNode } from 'react'
 import { z } from 'zod'
 
 import {
+  commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
   hemeraPermissionOf,
@@ -313,6 +315,10 @@ export interface AgentContext {
    * 2026).
    */
   reportedCall: (toolCallId: string) => SessionEntry | undefined
+  /** Writes a command the agent proposed into the catalogue: the human's click (D8-11). */
+  onAcceptProposal: (proposalId: string) => void
+  /** Leaves it out of the catalogue, and says so on the proposal. */
+  onDeclineProposal: (proposalId: string) => void
 }
 
 /**
@@ -515,6 +521,21 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         {...shown}
         onOpenUrl={context.onOpenUrl}
         onStop={runId === null ? undefined : () => context.onStopRun(runId)}
+      />
+    )
+  }
+
+  if (entry.kind === 'command_proposal') {
+    // A command the agent proposes, and nothing more until a human decides (D8-11): the decision
+    // comes back as this same entry in its outcome, which draws the block again without buttons.
+    const drawn = commandProposalOf(entry)
+    if (drawn === null) return null
+    const { proposalId, ...shown } = drawn
+    return (
+      <CommandProposal
+        {...shown}
+        onAccept={() => context.onAcceptProposal(proposalId)}
+        onDecline={() => context.onDeclineProposal(proposalId)}
       />
     )
   }

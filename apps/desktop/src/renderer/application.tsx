@@ -82,6 +82,8 @@ import {
 } from './agent-store.ts'
 import { bareRowOf, offeredOf } from './bare-mode.ts'
 import {
+  acceptProposal,
+  declineProposal,
   listenToTools,
   readCatalogue,
   readContext,
@@ -1084,6 +1086,8 @@ export function Application() {
           }}
           workspaces={offeredWorkspacesOf(sessions.workspaces, open.workspaceId)}
           onChooseWorkspace={(workspaceId) => void chooseWorkspace(open, workspaceId)}
+          onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}
+          onDeclineProposal={async (proposalId) => await declineProposal(open.id, proposalId)}
         />
       )
     }

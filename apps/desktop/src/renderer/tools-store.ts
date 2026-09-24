@@ -226,6 +226,39 @@ export async function saveCommand(draft: CommandDraft, existing: boolean): Promi
   }
 }
 
+/**
+ * Accepts a command the agent proposed in a Session (D8-11): the engine writes it into the
+ * catalogue and the proposal's entry in its outcome, which reaches the thread as any entry does.
+ *
+ * Answers the engine's sentence when it refuses — a name the catalogue took since the proposal,
+ * a proposal already decided — and null once the catalogue was read again.
+ */
+export async function acceptProposal(
+  sessionId: string,
+  proposalId: string,
+): Promise<string | null> {
+  try {
+    const command = await window.hemera.invoke('commands.proposeAccept', { sessionId, proposalId })
+    await readCatalogue(command.projectId)
+    return null
+  } catch (cause) {
+    return message(cause)
+  }
+}
+
+/** Declines it: nothing enters the catalogue. Answers the engine's refusal, or null. */
+export async function declineProposal(
+  sessionId: string,
+  proposalId: string,
+): Promise<string | null> {
+  try {
+    await window.hemera.invoke('commands.proposeDecline', { sessionId, proposalId })
+    return null
+  } catch (cause) {
+    return message(cause)
+  }
+}
+
 /** Takes a command out of the catalogue, by its name. What it already ran is not touched. */
 export async function removeCommand(projectId: string, name: string): Promise<void> {
   try {
