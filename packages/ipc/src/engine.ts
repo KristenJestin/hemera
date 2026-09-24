@@ -821,11 +821,24 @@ export const ENGINE_EVENTS = {
    * and a thread entry per line printed is what the panel exists to avoid.
    */
   run: z.object({ event: z.literal('run'), sessionId: z.string(), run: commandRunSchema }),
+  /**
+   * A Workspace or its steps changed (D8-01, D8-05): it was created, made on a folder, cleaned
+   * up, a step of its preparation changed state, or the preparation ended. Only the names cross:
+   * the page that shows that Workspace asks for it again, as it stands.
+   *
+   * It is about a Project and not a Session, which is why it carries no `sessionId`. What a run
+   * of a preparation step does travels as any run does, on `run` above.
+   */
+  workspace: z.object({
+    event: z.literal('workspace'),
+    projectId: z.string(),
+    workspaceId: z.string(),
+  }),
 } as const
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the seven names it carries. */
+/** One pushed message, of whichever of the eight names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

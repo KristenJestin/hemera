@@ -98,6 +98,7 @@ export async function openWindow(
     wrote: (sessionId, entry) => push({ event: 'entry', sessionId, entry }),
     changed: (sessionId, what) => push({ event: PUSHED[what], sessionId, entry: null }),
     ran: (sessionId, run) => push({ event: 'run', sessionId, run }),
+    workspace: (projectId, workspaceId) => push({ event: 'workspace', projectId, workspaceId }),
   })
   // Nothing here asks a registry or updates an agent: the Agents section's own suites do.
   const listed = Layer.succeed(Agents, {

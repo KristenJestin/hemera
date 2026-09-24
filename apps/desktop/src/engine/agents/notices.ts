@@ -4,7 +4,8 @@
  * A file of its own rather than a corner of the runtime, because several services push a notice:
  * the runtime, for everything an agent says; `ToolPermissions`, for a question Hemera's own tools
  * raise; the tool catalogue and the commands, for the entries they write into the same thread and
- * the runs they start (D6-06, D6-12). The port would otherwise be imported from the runtime by
+ * the runs they start (D6-06, D6-12); the Workspaces and their preparation, for what changes of a
+ * Workspace (D8-05). The port would otherwise be imported from the runtime by
  * services the runtime itself is built on, and that circle is not a dependency anyone should have
  * to reason about.
  */
@@ -35,6 +36,12 @@ export interface AgentNoticesService {
    * window that missed one push reads the next one whole.
    */
   readonly ran: (sessionId: string, run: CommandRun) => void
+  /**
+   * A Workspace or its steps changed (D8-05): created, made on a folder, cleaned up, a step of
+   * its preparation written, or the preparation over. About a Project rather than a Session: the
+   * page showing that Workspace reads it again.
+   */
+  readonly workspace: (projectId: string, workspaceId: string) => void
 }
 
 export class AgentNotices extends Context.Service<AgentNotices, AgentNoticesService>()(
@@ -52,4 +59,5 @@ export const NoNotices = Layer.succeed(AgentNotices, {
   wrote: () => undefined,
   changed: () => undefined,
   ran: () => undefined,
+  workspace: () => undefined,
 })

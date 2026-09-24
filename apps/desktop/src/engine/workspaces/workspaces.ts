@@ -35,6 +35,7 @@ import {
 import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
 
+import { AgentNotices } from '../agents/notices.ts'
 import { Git, type GitStatus } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
@@ -222,6 +223,10 @@ export const workspacesLayer = Layer.effect(
     const database = yield* Database
     const git = yield* Git
     const hemeraRoot = yield* WorkspacesRoot
+    /** The window, told when a Workspace is made or cleaned up: it reads it again (D8-05). */
+    const notices = yield* AgentNotices
+    const told = (view: WorkspaceView) =>
+      Effect.sync(() => notices.workspace(view.projectId, view.id))
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -624,7 +629,7 @@ export const workspacesLayer = Layer.effect(
                 }
               }),
             ),
-          )
+          ).pipe(Effect.tap(told))
         }),
 
       createOnFolder: (projectId, asked, named) =>
@@ -663,7 +668,7 @@ export const workspacesLayer = Layer.effect(
                 }
               }),
             ),
-          )
+          ).pipe(Effect.tap(told))
         }),
 
       status: (id) =>
@@ -810,7 +815,7 @@ export const workspacesLayer = Layer.effect(
                 ),
             ),
           )
-          return yield* viewOf(id)
+          return yield* viewOf(id).pipe(Effect.tap(told))
         }),
     } satisfies WorkspacesService
   }),

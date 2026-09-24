@@ -14,7 +14,7 @@ import { Effect, Layer } from 'effect'
 
 import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
 
-import { NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
+import { AgentNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime } from '#engine/agents/runtime.ts'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
 import type { Discovery } from '#engine/agents/discovery.ts'
@@ -59,9 +59,13 @@ const LAST_MIGRATION = carriedMigrations(SHIPPED).at(-1)?.name
 
 let dataFolder: string
 
+/** Every Workspace the window was told had changed, in the order it was told (D8-05). */
+let told: { projectId: string; workspaceId: string }[]
+
 beforeEach(() => {
   dataFolder = mkdtempSync(join(tmpdir(), 'hemera-request-'))
   mkdirSync(dataFolder, { recursive: true })
+  told = []
 })
 
 afterEach(() => {
@@ -104,7 +108,15 @@ function running<A, E>(
       read: () => Effect.succeed(undefined),
     }),
     fakeSupervisor(fakeAgent()),
-    NoNotices,
+    // Nobody watches a Session here; a Workspace that changed is kept, for the suite about it.
+    Layer.succeed(AgentNotices, {
+      wrote: () => undefined,
+      changed: () => undefined,
+      ran: () => undefined,
+      workspace: (projectId, workspaceId) => {
+        told.push({ projectId, workspaceId })
+      },
+    }),
     Layer.succeed(StderrSink, { write: () => Effect.void }),
   )
   // The tools an agent would be lent: the tokens are the engine's own, and the address is one
@@ -581,6 +593,60 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.services).toEqual([])
     expect(seen.accepted).toMatchObject({ name: 'seed', line: 'node seed.js' })
     expect(seen.catalogue.map((command) => command.name)).toEqual(['seed'])
+  })
+
+  test('the window is told when a Workspace is created, prepared and cleaned up', async () => {
+    const seen = await running(
+      Effect.gen(function* () {
+        const created = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: main,
+        })
+        const project = yield* asked('repositories.add', {
+          id: created.id,
+          version: created.version,
+          relativePath: './sources/api',
+        })
+        const plan = yield* asked('workspaces.plan', {
+          projectId: project.id,
+          key: 'HEM-7',
+          slug: 'login-form',
+        })
+        const workspace = yield* asked('workspaces.create', {
+          projectId: project.id,
+          specId: null,
+          name: plan.name,
+          repositories: plan.repositories.map((one) => ({
+            relativePath: one.relativePath,
+            base: one.base ?? '',
+            branch: one.branch,
+          })),
+        })
+        const afterCreation = [...told]
+        yield* asked('preparation.prepare', { workspaceId: workspace.id })
+        yield* until(asked('preparation.steps', { workspaceId: workspace.id }), (steps) =>
+          steps.every((step) => step.state === 'done'),
+        )
+        // The end of the preparation is told after its last step is written.
+        const afterPreparation = yield* until(
+          Effect.sync(() => [...told]),
+          (all) => all.length >= afterCreation.length + 3,
+        )
+        yield* asked('workspaces.cleanup', { id: workspace.id })
+        const picked = yield* asked('workspaces.createOnFolder', {
+          projectId: project.id,
+          path: join(dataFolder, 'spike'),
+        })
+        return { project, workspace, picked, afterCreation, afterPreparation, all: [...told] }
+      }),
+    )
+
+    const about = (workspaceId: string) => ({ projectId: seen.project.id, workspaceId })
+    expect(seen.afterCreation).toEqual([about(seen.workspace.id)])
+    // The one step going to `running`, then to `done` with the Workspace `ready`, then the end.
+    expect(seen.afterPreparation).toEqual(Array(4).fill(about(seen.workspace.id)))
+    expect(seen.all.slice(4)).toEqual([about(seen.workspace.id), about(seen.picked.id)])
   })
 
   test.each([

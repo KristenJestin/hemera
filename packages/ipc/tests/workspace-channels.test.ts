@@ -1,5 +1,6 @@
 /**
- * What the settings of a Project's Workspaces send (Decided 17).
+ * What the settings of a Project's Workspaces send (Decided 17), and what the engine pushes when
+ * a Workspace changes (D8-05).
  *
  * The engine reads null as the default — Hemera's own folder, the Project's name as a slug —
  * and a field the user cleared is sent as it reads: empty, or a few spaces. The declaration is
@@ -8,7 +9,7 @@
 
 import { describe, expect, test } from 'vite-plus/test'
 
-import { CHANNELS, ENGINE_REQUESTS } from '#index.ts'
+import { CHANNELS, ENGINE_EVENTS, ENGINE_REQUESTS } from '#index.ts'
 
 const ROOT = ENGINE_REQUESTS['projects.setWorkspacesRoot'].arguments
 const PREFIX = ENGINE_REQUESTS['projects.setBranchPrefix'].arguments
@@ -41,5 +42,20 @@ describe('A blank workspaces folder or prefix is the default', () => {
   test('the window sends through the very same reading', () => {
     expect(CHANNELS['projects.setWorkspacesRoot'].arguments).toBe(ROOT)
     expect(CHANNELS['projects.setBranchPrefix'].arguments).toBe(PREFIX)
+  })
+})
+
+describe('A Workspace change is pushed about its Project', () => {
+  test('a change names the Project and the Workspace, and no Session', () => {
+    expect(
+      ENGINE_EVENTS.workspace.safeParse({
+        event: 'workspace',
+        projectId: 'atlas',
+        workspaceId: 'login-form',
+      }).success,
+    ).toBe(true)
+    expect(
+      ENGINE_EVENTS.workspace.safeParse({ event: 'workspace', sessionId: 'session-1' }).success,
+    ).toBe(false)
   })
 })

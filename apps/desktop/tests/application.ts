@@ -107,6 +107,8 @@ export function watching() {
       // A run is pushed as the run it is and not as an entry: the suites that watch the window
       // read the thread, and the Commands panel has suites of its own.
       ran: () => undefined,
+      // A Workspace change is about a Project: the suites about Workspaces read it of their own.
+      workspace: () => undefined,
     }),
   }
 }

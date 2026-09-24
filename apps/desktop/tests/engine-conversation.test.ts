@@ -184,6 +184,9 @@ describe('What the engine pushes on its own is heard', () => {
     push({ event: 'permission', sessionId: 'session-1', entry: null })
 
     expect(heard.map((event) => event.event)).toEqual(['turn', 'permission'])
-    expect(heard.every((event) => event.sessionId === 'session-1')).toBe(true)
+    expect(heard).toEqual([
+      { event: 'turn', sessionId: 'session-1', entry: null },
+      { event: 'permission', sessionId: 'session-1', entry: null },
+    ])
   })
 })

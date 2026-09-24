@@ -68,7 +68,7 @@ export interface EngineStart {
 }
 
 /** The name each change of a Session travels under, on the one channel the page listens on. */
-export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run'>> = {
+export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run' | 'workspace'>> = {
   permission_requested: 'permission',
   turn_started: 'turn_start',
   turn_ended: 'turn',
@@ -109,6 +109,13 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
         port.postMessage({ event: 'run', sessionId, run })
       } catch (died) {
         log(`pushing a run failed: ${named(died)}`)
+      }
+    },
+    workspace: (projectId, workspaceId) => {
+      try {
+        port.postMessage({ event: 'workspace', projectId, workspaceId })
+      } catch (died) {
+        log(`pushing a Workspace failed: ${named(died)}`)
       }
     },
   })
@@ -208,7 +215,8 @@ function servicesOf(
     Layer.provide(hostLinks),
     Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
     Layer.provide(processes),
-    Layer.provide(diagnostic),
+    // Its diagnostic, and the window it tells when a Workspace or its steps change.
+    Layer.provide(agents),
   )
 
   return Layer.mergeAll(

@@ -42,6 +42,7 @@ import {
 import { and, asc, eq } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
 
+import { AgentNotices } from '../agents/notices.ts'
 import { ProcessSupervisor, StderrSink } from '../agents/supervisor.ts'
 import { hostLookup, invocationOf } from '../commands/line.ts'
 import { OUTPUT_KEPT_BYTES } from '../commands/service.ts'
@@ -260,6 +261,10 @@ export const preparationLayer = Layer.effect(
     const diagnostic = yield* StderrSink
     /** The engine's own scope: a preparation begun in the background ends when the engine does. */
     const scope = yield* Effect.scope
+    /** The window, told of every step written and of the end of a preparation (D8-05). */
+    const notices = yield* AgentNotices
+    const told = (workspace: typeof workspaces.$inferSelect) =>
+      Effect.sync(() => notices.workspace(workspace.projectId, workspace.id))
 
     const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
 
@@ -544,7 +549,7 @@ export const preparationLayer = Layer.effect(
             return { result: state, events: [...events, ...ready] }
           }),
         ),
-      )
+      ).pipe(Effect.tap(() => told(place.workspace)))
 
     /**
      * Runs the pending steps in order until none is left or one fails. `again` names the steps
@@ -591,6 +596,7 @@ export const preparationLayer = Layer.effect(
         // A Workspace whose steps were all skipped from its creation is ready without running
         // any: its state is what its steps say.
         if (stored !== 'cleaned' && workspaceStateOf(steps) !== stored) yield* advance(steps, [])
+        yield* told(place.workspace)
         return yield* workspacesService.one(id)
       })
 
