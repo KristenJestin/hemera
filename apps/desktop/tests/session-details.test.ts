@@ -95,6 +95,42 @@ describe('The agent starts the app and the user opens it', () => {
   })
 })
 
+describe('A URL is ready only after it answers', () => {
+  test('the panel and the block carry the readiness the run was pushed with', () => {
+    const starting = aRun('r1', '/home/ana/atlas', 'running', 'c1')
+    const ready = { ...starting, readiness: 'ready' as const, readyAt: '2026-09-23T08:00:02.000Z' }
+    expect(panelRunsOf([starting], '/home/ana/atlas')[0]?.readiness).toBe('starting')
+    expect(panelRunsOf([ready], '/home/ana/atlas')[0]?.readiness).toBe('ready')
+    // A run with no address has no readiness to say.
+    expect(panelRunsOf([aRun('r2', '/a', 'exited', 'c1')], '/a')[0]?.readiness).toBeUndefined()
+  })
+})
+
+describe('A run shows what it ran', () => {
+  test('the panel carries its variables and a port conflict on either side', () => {
+    const run = {
+      ...aRun('r1', '/home/ana/login-form', 'running', 'c1'),
+      workspaceName: 'login-form',
+      environment: { PORT: '3001' },
+      portConflict: {
+        port: 3001,
+        runId: 'r0',
+        workspaceId: null,
+        workspaceName: 'main',
+        name: 'dev',
+      },
+      heldAgainst: [
+        { port: 3001, runId: 'r9', workspaceId: 'spike', workspaceName: 'spike', name: 'web' },
+      ],
+    }
+    expect(panelRunsOf([run], '/home/ana/login-form')[0]).toMatchObject({
+      environment: { PORT: '3001' },
+      portConflict: { port: 3001, holderRun: 'dev', holderWorkspace: 'main' },
+      heldAgainst: [{ port: 3001, run: 'web', workspace: 'spike' }],
+    })
+  })
+})
+
 /** What the engine answers of a Session's context, with the sources and the catalogue given. */
 function aView(
   provided: ContextView['provided'][number]['kind'][],

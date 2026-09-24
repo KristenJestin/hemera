@@ -5,7 +5,10 @@ import type {
   CommandType,
   HemeraToolArgument,
   HemeraToolStatus,
+  PortClaim,
+  PortConflict,
   ProposalState,
+  Readiness,
   ToolKind,
   ToolSubject,
 } from '@hemera/ui'
@@ -291,8 +294,41 @@ export function hemeraToolCallOf(
   }
 }
 
+/**
+ * What a run shows of what it ran beside its line (D8-06, D8-09): where its address stands, the
+ * variables it was given, and a port conflict on either side of it. Nothing until the window has
+ * heard of the run: the entry alone carries none of it.
+ */
+export interface RunFacts {
+  readonly readiness: Readiness | undefined
+  readonly environment: Readonly<Record<string, string>>
+  readonly portConflict: PortConflict | undefined
+  readonly heldAgainst: readonly PortClaim[]
+}
+
+export function runFactsOf(run: CommandRun | undefined): RunFacts {
+  const conflict = run?.portConflict ?? null
+  return {
+    readiness: run?.readiness ?? undefined,
+    environment: run?.environment ?? {},
+    portConflict:
+      conflict === null
+        ? undefined
+        : {
+            port: conflict.port,
+            holderRun: conflict.name,
+            holderWorkspace: conflict.workspaceName,
+          },
+    heldAgainst: (run?.heldAgainst ?? []).map((one) => ({
+      port: one.port,
+      run: one.name,
+      workspace: one.workspaceName,
+    })),
+  }
+}
+
 /** What `CommandRun` needs, read off a `command_run` entry. */
-export interface CommandRunDrawn {
+export interface CommandRunDrawn extends RunFacts {
   /** The run it is, or null for an entry written before runs were named in it. */
   readonly runId: string | null
   readonly name: string
@@ -337,6 +373,7 @@ export function commandRunOf(
     exitCode: exitCode ?? undefined,
     oneOff,
     output: heard?.output ?? '',
+    ...runFactsOf(heard),
   }
 }
 

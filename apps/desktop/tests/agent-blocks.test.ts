@@ -242,6 +242,15 @@ describe('The agent starts the app and the user opens it', () => {
     // And a run of another entry is not this one's.
     expect(commandRunOf(entry, [{ ...pushed, id: 'run-2' }])?.url).toBeUndefined()
 
+    // Its address stands where the run says (D8-09), and nothing is said before it was heard of.
+    expect(commandRunOf(entry, [pushed])?.readiness).toBe('starting')
+    expect(commandRunOf(entry)).toMatchObject({
+      readiness: undefined,
+      environment: {},
+      portConflict: undefined,
+      heldAgainst: [],
+    })
+
     // A Project-scoped service runs in `main` whichever Session asked for it (D8-07): the block
     // of a Session in another Workspace names `main`, and a Session in `main` names nothing.
     expect(elsewhereOf(pushed, 'login-form')).toBe('main')

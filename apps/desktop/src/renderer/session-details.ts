@@ -9,6 +9,8 @@ import type {
   SessionDetailsTab,
 } from '@hemera/ui'
 
+import { runFactsOf } from './agent-tool-payloads.ts'
+
 /**
  * What the details of a Session draw from the tools store (design D6-10, D6-12).
  *
@@ -43,6 +45,8 @@ export function panelRunsOf(runs: readonly CommandRun[], root: string): CommandP
     url: run.url ?? undefined,
     exitCode: run.exitCode ?? undefined,
     oneOff: run.commandId === null,
+    // Its address as it stands, its variables and its conflict, as the thread's block shows them.
+    ...runFactsOf(run),
   }))
 }
 
