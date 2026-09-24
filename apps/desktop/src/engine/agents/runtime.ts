@@ -76,7 +76,7 @@ import { Context as AgentContext } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
-import { briefFor } from '../specs/brief.ts'
+import { briefFor, briefed } from '../specs/brief.ts'
 import { Database } from '../storage/database.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { ToolPermissions } from '../tools/permissions.ts'
@@ -2265,6 +2265,14 @@ export const runtimeLayer = Layer.effect(
         const outcome = yield* Effect.result(held.connection.prompt(sent, provisions))
         if (Result.isSuccess(outcome)) {
           const answered = outcome.success
+          // The agent took the turn, and the brief with it: what it listed is not listed
+          // again. A turn that failed leaves it all for the next brief (Decided 17).
+          if (brief !== null) {
+            yield* attempt(
+              'marking the brief',
+              briefed(sessionId, brief).pipe(Effect.provideService(Database, database)),
+            )
+          }
           // What is in the thread is read before the window is: the announcement travels as a
           // notification of its own, and the entry is written from it once everything the agent
           // said is held rather than racing it.

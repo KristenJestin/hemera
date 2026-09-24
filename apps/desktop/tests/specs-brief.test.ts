@@ -14,9 +14,17 @@ import { Effect, Fiber } from 'effect'
 
 import { DEFINE_MISSION_BRIEF, PHASE_BRIEFS } from '@hemera/core'
 import { fakeAgent } from '#engine/agents/fake.ts'
-import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { AgentRuntime, NoNotices } from '#engine/agents/runtime.ts'
 import { Specs } from '#engine/specs/specs.ts'
-import { application, aSession, gated, heldInThread, threadOf } from './application.ts'
+import {
+  application,
+  aSession,
+  failing,
+  gated,
+  heldInThread,
+  machine,
+  threadOf,
+} from './application.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -151,6 +159,39 @@ describe('A human edit is recorded and reaches the agent', () => {
 
         yield* runtime.prompt(sessionId, 'Third turn.')
         expect(agent.answers.prompts[2]).not.toContain(HUMAN_EDITS)
+      }),
+    )
+  })
+})
+
+describe('A failed turn keeps the human edits for the next brief', () => {
+  test('the brief of a turn the agent never took is composed again, the human edit still in it', async () => {
+    const storage = failing()
+    const agent = fakeAgent()
+
+    await application(dataFolder, NoNotices, machine, undefined, storage)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        const runtime = yield* AgentRuntime
+        const specs = yield* Specs
+        yield* runtime.prompt(sessionId, 'First turn.')
+
+        const before = yield* specs.read(specId)
+        const scope = before.sections.find((section) => section.name === 'scope')
+        yield* specs.writeSection(
+          { kind: 'human', sessionId },
+          { specId, name: 'scope', body: 'CSV only.', baseVersion: scope?.version ?? 0 },
+        )
+
+        // The second turn fails before the agent is given anything: its brief cannot be written.
+        storage.nextWrite((entry) => entry.kind === 'mission_brief')
+        yield* Effect.flip(runtime.prompt(sessionId, 'Second turn.'))
+        expect(agent.answers.prompts).toHaveLength(1)
+
+        yield* runtime.prompt(sessionId, 'Third turn.')
+        const third = agent.answers.prompts[1] ?? ''
+        expect(third).toContain(HUMAN_EDITS)
+        expect(third.slice(third.indexOf(HUMAN_EDITS))).toContain('CSV only.')
       }),
     )
   })
