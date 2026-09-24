@@ -327,7 +327,11 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
 
   const goToMark = (id: string): void => {
     const node = anchors.current[entries.findIndex((entry) => entry.id === id)]
-    node?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
+    if (node === null || node === undefined) return
+    // A press on a mark is the reader leaving the edge, said now rather than by the scroll event
+    // a frame later: the thread growing in between would otherwise carry them back to the bottom.
+    pinned.current = false
+    node.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
   }
 
   const marks = entries.filter(isMarked).map((entry) => ({ id: entry.id, label: entry.mark }))
