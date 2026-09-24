@@ -27,6 +27,7 @@ import {
   TOOL_NAMES,
   type ToolName,
   admitTool,
+  offeredTools,
 } from '@hemera/core'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -1079,7 +1080,14 @@ export const toolCatalogueLayer: Layer.Layer<
         if (named === undefined) {
           return yield* refused(asked, made, `Hemera has no tool named ${asked.tool}`)
         }
-        const decision = admitTool(asked.offered, named)
+        // What the token was minted with, and no more than the Session's mission offers now: a
+        // `free` Session that turned `define` while its agent ran keeps none of the write tools it
+        // was lent, from its very next call (D7-14).
+        const mission = offeredTools(session.mission)
+        const decision = admitTool(
+          asked.offered.filter((name) => mission.includes(name)),
+          named,
+        )
         if (!decision.admitted) return yield* refused(asked, made, decision.reason)
 
         const parsed = parseCall(named, asked.arguments)

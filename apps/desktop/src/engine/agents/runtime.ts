@@ -254,6 +254,11 @@ export interface AgentRuntimeService {
   readonly resume: (sessionId: string) => Effect.Effect<ResumeReport, AgentRuntimeError>
   /** Lets go of an agent nobody is talking to; the next prompt starts it again. */
   readonly release: (sessionId: string) => Effect.Effect<void>
+  /**
+   * Lets go of the agent at once when no turn runs, or once the running turn ends: its next turn
+   * starts it again, its conversation resumed, with the tools of the Session's mission (D7-14).
+   */
+  readonly releaseWhenIdle: (sessionId: string) => Effect.Effect<void>
   /** The Sessions whose agent is running right now. */
   readonly alive: Effect.Effect<readonly string[]>
   /** Whether a turn is running in the Session, from the prompt until it closes. */
@@ -586,6 +591,11 @@ export const runtimeLayer = Layer.effect(
      * was pressed on is closed as cancelled instead of being sent.
      */
     const starting = new Map<string, Turn>()
+    /**
+     * The Sessions whose agent is to be let go of once no turn runs: its tools are minted with it,
+     * and the Session's mission changed under a turn (D7-14).
+     */
+    const releasing = new Set<string>()
     /**
      * What a load replayed so far, per Session and per message it named.
      *
@@ -2249,6 +2259,7 @@ export const runtimeLayer = Layer.effect(
               Effect.gen(function* () {
                 turns.delete(sessionId)
                 yield* pool.busy(sessionId, false).pipe(Effect.ignore)
+                yield* releasedIfDue(sessionId)
                 notices.changed(sessionId, 'turn_ended')
               }),
             ),
@@ -2527,6 +2538,7 @@ export const runtimeLayer = Layer.effect(
           Effect.gen(function* () {
             turns.delete(sessionId)
             yield* pool.busy(sessionId, false).pipe(Effect.ignore)
+            yield* releasedIfDue(sessionId)
             // The idle time is counted from the end of the turn, not from its start: a sweep
             // that ran during a long turn found it busy and struck it out of the book.
             if (live.has(sessionId)) yield* kept(sessionId)
@@ -2696,6 +2708,24 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
+     * Lets go of an agent marked to be, once no turn runs: called as a turn ends. A turn the user
+     * started meanwhile holds the agent it opened, so the mark waits for that one's end.
+     */
+    const releasedIfDue = (sessionId: string) =>
+      Effect.gen(function* () {
+        if (!releasing.has(sessionId)) return
+        if (turns.has(sessionId) || starting.has(sessionId)) return
+        releasing.delete(sessionId)
+        yield* release(sessionId)
+      })
+
+    const releaseWhenIdle = (sessionId: string) =>
+      Effect.gen(function* () {
+        releasing.add(sessionId)
+        yield* releasedIfDue(sessionId)
+      })
+
+    /**
      * The pool's own timer, for as long as the engine runs (D5-05).
      *
      * The pool says which agents have been idle long enough; something has to ask it. One fiber
@@ -2730,6 +2760,7 @@ export const runtimeLayer = Layer.effect(
       decide: (sessionId, toolCallId, optionId) => owned(decide(sessionId, toolCallId, optionId)),
       resume: (sessionId) => owned(resume(sessionId)),
       release: (sessionId) => owned(release(sessionId)),
+      releaseWhenIdle: (sessionId) => owned(releaseWhenIdle(sessionId)),
       alive: Effect.sync(() => [...live.keys()]),
       running: (sessionId) => turns.has(sessionId) || starting.has(sessionId),
       specChanged,

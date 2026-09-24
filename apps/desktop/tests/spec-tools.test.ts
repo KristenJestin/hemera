@@ -24,7 +24,7 @@ import { Journal } from '#engine/journal.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { SpecNotices } from '#engine/specs/notices.ts'
 import { Specs } from '#engine/specs/specs.ts'
-import { aSessionOn, threadOf, toolApplication } from './application.ts'
+import { aSessionOn, gated, pause, threadOf, toolApplication } from './application.ts'
 import { agentOf, contracted, frozen, write } from './specs-harness.ts'
 import { type OpenWindow, openWindow } from './window.ts'
 
@@ -595,6 +595,60 @@ describe('A Session whose proposal is accepted is offered the define set at its 
     await bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Shape it.' })
 
     expect(proposing.answers.tools).toEqual([[...offeredTools('free')]])
+    expect(restarted.answers.resumes).toBe(1)
+    expect([...(restarted.answers.tools[0] ?? [])].toSorted()).toEqual(
+      [...offeredTools('define')].toSorted(),
+    )
+  })
+})
+
+describe('A proposal accepted during a turn takes the write tools away at once and lends the Spec tools at the next turn', () => {
+  test('the running agent is refused fs_write once the Session is define, and is started again with the define set', async () => {
+    const gate = gated(1)
+    const proposing = fakeAgent({
+      steps: [
+        uses('spec_propose', { kind: 'spec', title: 'Export the Journal', type: 'feature' }),
+        uses('fs_write', { path: 'notes.md', content: 'Written anyway.', key: 'write-1' }),
+        { does: 'says', text: 'Carrying on.' },
+      ],
+      between: gate.between,
+    })
+    const restarted = fakeAgent({ listsTools: true })
+    opened = await openWindow(dataFolder, proposing, restarted)
+    const { bridge } = opened
+    const project = await bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: workspace,
+    })
+    const session = await bridge.invoke('sessions.create', {
+      projectId: project.id,
+      provider: 'claude',
+    })
+    // The agent proposes, and its turn is held there, still running.
+    const running = bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Export it.' })
+    for (let look = 0; look < 200; look += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a poll: each look waits for the one before it
+      const read = await bridge.invoke('sessions.read', { sessionId: session.id })
+      if (read.entries.some((entry) => entry.kind === 'spec_proposal')) break
+      // oxlint-disable-next-line no-await-in-loop -- the same poll, after its pause
+      await Effect.runPromise(pause(25))
+    }
+    // The user creates the Spec while the turn runs: the Session is define from now on.
+    await bridge.invoke('specs.create', {
+      sessionId: session.id,
+      type: 'feature',
+      title: 'Export the Journal',
+    })
+    gate.carryOn()
+    await running
+    await bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Shape it.' })
+
+    // Lent with the free set, the running agent is refused a write tool as not offered.
+    expect(proposing.answers.used[1]).toMatchObject({ tool: 'fs_write', isError: true })
+    expect(proposing.answers.used[1]?.text).toContain('the tool fs_write is not offered')
+    expect(readdirSync(workspace)).not.toContain('notes.md')
+    // Its next turn starts the agent again, its conversation resumed, with the define set.
     expect(restarted.answers.resumes).toBe(1)
     expect([...(restarted.answers.tools[0] ?? [])].toSorted()).toEqual(
       [...offeredTools('define')].toSorted(),

@@ -337,9 +337,10 @@ export function answer(
     if (decision.name === 'specs.revisions') return yield* specs.revisions(decision.argument.specId)
     if (decision.name === 'specs.create') {
       const defining = yield* specs.create(decision.argument)
-      // The Session's agent was granted the tools of a free Session: it is let go of, and the next
-      // turn starts it again, its conversation resumed, with the tools of a define one (D7-14).
-      yield* runtime.release(defining.session.id)
+      // The Session's agent was granted the tools of a free Session: it is let go of — now, or
+      // once the turn it is running ends — and its next turn starts it again, its conversation
+      // resumed, with the tools of a define one (D7-14).
+      yield* runtime.releaseWhenIdle(defining.session.id)
       return defining
     }
     if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
