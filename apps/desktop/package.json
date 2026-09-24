@@ -28,6 +28,8 @@
     "@hemera/core": "workspace:*",
     "@hemera/ipc": "workspace:*",
     "@hemera/ui": "workspace:*",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@tanstack/react-hotkeys": "0.10.0",
     "drizzle-orm": "1.0.0-rc.5-5935859",
     "effect": "4.0.0-rc.112",

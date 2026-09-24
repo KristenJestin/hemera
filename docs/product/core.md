@@ -527,7 +527,22 @@ When a modification of the Project's instructions occurs during a Session, Hemer
 signals its content to the agent at the next safe resumption point, without interrupting a response
 in progress or recreating its ACP session. Only the useful update is transmitted, without reinjecting
 the whole context. New Sessions directly use the updated instructions.
-The delivery modalities according to the provider's capabilities remain to be specified.
+
+The delivery modalities are specified since issue #18 (designs D6-07 and D6-08). The base reaches
+each agent once, at the start of the Session, by that agent's own means: through the system prompt
+where the agent takes one (Claude Code), and as an embedded resource of the first prompt elsewhere
+(Codex, OpenCode). The Project's instructions are the Workspace's `AGENTS.md`, and whether an
+agent reads it itself under bare mode is its adapter's declaration. Codex does: Hemera does not
+send it, records its fingerprint when the Session starts and lists it as read natively. Claude Code
+does not (it reads `CLAUDE.md`, and with no settings source it reads nothing), nor does OpenCode
+(project instructions are skipped under `OPENCODE_DISABLE_PROJECT_CONFIG`): Hemera gives them the
+file at the start of the Session, as a resource of the first prompt, records its fingerprint and
+lists it as given at the start. A `CLAUDE.md` of the Workspace is never sent by Hemera. While a
+Session's agent runs, Hemera watches that file; a change is delivered
+at the next safe point — when the turn in progress ends, or at once between two turns — as a
+prompt of its own made of a Hemera marker and the new text as a resource. The thread records it as
+a delivery, never as a message of the user, and no new native session is opened for it. A change
+made while no agent runs is delivered before the next prompt.
 
 Instruction files already present in the repositories, such as `AGENTS.md` or
 `CLAUDE.md`, can serve as context sources from the first version on. Their content
@@ -600,6 +615,13 @@ Journal. The composer carries what the agent says it can do — its models, its 
 permission modes — and, beside them, what the turn used: the reading the agent gave of its context
 window, with "not provided" for whatever it did not announce. Hemera divides by no window an agent
 never named.
+
+The effort scale marks the level the agent recommends for the current model, and nothing where it
+recommends none. While the user has chosen no effort in the Session, a model change puts the
+agent on the level the new model recommends, so the scale stands on its recommended mark instead
+of on whatever the agent's own settings kept; a model that recommends no level leaves the effort
+where it is. Once the user has chosen an effort in the Session, it is kept across model changes.
+The composer of a Project's Home follows the same rule before the Session exists.
 
 The views surrounding the main surface are closable and mutually exclusive:
 the user opens only one at a time. A working surface can display, as

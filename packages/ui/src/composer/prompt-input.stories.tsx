@@ -82,7 +82,7 @@ function Played({ variant, onSend }: PromptInputProps) {
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Composer/PromptInput',
   component: PromptInput,
   render: (args) => (

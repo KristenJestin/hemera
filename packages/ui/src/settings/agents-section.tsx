@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { Disclosure } from '../activity/disclosure.tsx'
 import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
@@ -26,6 +27,12 @@ import { IconRefresh } from '../icons.ts'
  * It is the shape of the other sections and not a shape of its own: the same card, the same rows
  * of key and value, the same quiet buttons under them. A reader who has read the Profile block
  * has read this one.
+ *
+ * Only what a reader acts on is a row (trial of 23 September 2026): whether the agent is signed
+ * in, what is installed, and one line for the only question a version raises — is it up to date.
+ * What was published, which tool installed it and how bare mode is reached were rows the reader
+ * had to read past to get there. Bare mode is one folded line under the agent: what it keeps
+ * that Hemera does not control, or why it is not available here.
  *
  * Nothing here chooses and nothing here fetches. The choice of the agent belongs to the session
  * that is about to start, where the reader is the one who makes it; what the registries published
@@ -85,9 +92,32 @@ export interface AgentOnTheMachine {
   loginHint: string
   /** The tool that installed it, which is the only one that can move it. */
   installer: string
-  /** What its registry published, or null when nobody has asked it yet. */
+  /** What its registry published, or null when nobody has asked it yet or it answered nothing. */
   latest: string | null
+  /**
+   * Where its adapter stands with bare mode (design D6-15), or nothing when it has not been asked.
+   *
+   * Asked of the adapter and not guessed from the agent. Drawn as one folded line: an agent that
+   * runs with Hemera's tools only opens on what it still keeps out of Hemera's sight, one that
+   * does not opens on why.
+   */
+  bare?: BareMode | undefined
 }
+
+/** What an adapter answered about bare mode on this machine. */
+export type BareMode =
+  | {
+      /** This agent runs with Hemera's tools only. */
+      qualified: true
+      /** What its means does not reach: its own sources that still load, which Hemera does not read. */
+      private: string
+    }
+  | {
+      /** This agent cannot run here: a Session is not opened on it. */
+      qualified: false
+      /** Why it cannot, in its adapter's words. */
+      reason: string
+    }
 
 export interface AgentsSectionProps {
   /** Every agent Hemera knows about, with what this machine says about it. */
@@ -137,12 +167,16 @@ export function AgentsSection({
                 <dl className={ROW}>
                   <Pair label="Signed in">{agent.authenticated ? 'yes' : 'no'}</Pair>
                   <Pair label="Installed">{installedOf(agent)}</Pair>
-                  <Pair label="Published">{publishedOf(agent, checked)}</Pair>
-                  <Pair label={agent.found ? 'Installed with' : 'How to get it'}>
-                    {agent.found ? agent.installer : agent.installHint}
-                  </Pair>
+                  {agent.found ? (
+                    <Pair label="Updates">{updatesOf(agent, checked)}</Pair>
+                  ) : (
+                    <Pair label="How to get it">{agent.installHint}</Pair>
+                  )}
                   {agent.authenticated ? null : <Pair label="To sign in">{agent.loginHint}</Pair>}
                 </dl>
+                {agent.bare === undefined ? null : (
+                  <BareFold agent={agent.name} bare={agent.bare} />
+                )}
                 {update === null ? null : (
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
@@ -191,6 +225,34 @@ function Pair({ label, children }: { label: string; children: ReactNode }): Reac
   )
 }
 
+/**
+ * Bare mode, in one line that opens on the rest (D6-02, D6-09).
+ *
+ * The line is what a reader needs to know at a glance — this agent runs with Hemera's tools only,
+ * or it is not available here — and the fold is the sentence behind it, which is long and read
+ * once: what the agent still keeps out of Hemera's sight, or the adapter's reason for refusing it.
+ *
+ * The agent's name is part of the control's name and not of the line: the eye reads the line under
+ * the agent's header, and whoever walks the page from control to control hears three folds that
+ * would otherwise all say the same words.
+ */
+function BareFold({ agent, bare }: { agent: string; bare: BareMode }): ReactNode {
+  return (
+    <Disclosure
+      summary={
+        <span className={NOTE}>
+          <span className="sr-only">{`${agent}: `}</span>
+          {bare.qualified ? "Runs with Hemera's tools only" : 'Not available here'}
+        </span>
+      }
+    >
+      <p className={NOTE}>
+        {bare.qualified ? `Hemera does not control: ${bare.private}` : bare.reason}
+      </p>
+    </Disclosure>
+  )
+}
+
 /** The three answers, which are read off what the machine said rather than stored beside it. */
 function standingOf(agent: AgentOnTheMachine): AgentStanding {
   if (!agent.found) return 'missing'
@@ -204,25 +266,51 @@ function installedOf(agent: AgentOnTheMachine): string {
 }
 
 /**
- * What the registry answered, and which of the two ways of not knowing it is.
+ * The one question a version raises — is it up to date — answered for an agent that is found.
  *
- * A version nobody asked for and a registry that answered nothing are not the same absence, and
- * neither of them is a version. Saying which one it is is the whole value of the line.
+ * Still being asked and asked with no answer are not the same absence, and neither is a version:
+ * the line says which it is rather than guessing. A version that cannot be compared — none
+ * reported, or not plain dotted numbers — is not called up to date or behind: the line says what
+ * was published and leaves the comparison alone. An installed version ahead of the published one
+ * (a snapshot, a release the registry has not caught up with) is up to date, not behind.
  */
-function publishedOf(agent: AgentOnTheMachine, checked: boolean): string {
-  if (agent.latest !== null) return agent.latest
-  return checked ? 'no registry answered' : 'not asked yet'
+function updatesOf(agent: AgentOnTheMachine, checked: boolean): string {
+  if (agent.latest === null) return checked ? 'Could not check' : 'Checking…'
+  const order = agent.version === null ? null : compareVersions(agent.version, agent.latest)
+  if (order === null) return `Latest ${agent.latest}`
+  return order < 0 ? `Update available ${agent.latest}` : 'Up to date'
 }
 
 /**
  * The version this agent could be moved to, or null when there is nothing to offer.
  *
- * Offered only where both versions are known and differ, and only where the tool that installed
- * the command is one Hemera can place: an update run with the wrong tool is a second installation
- * rather than an update, and a command from somewhere else is left exactly where it is.
+ * Offered only where the published version is newer than the installed one, and only where the
+ * tool that installed the command is one Hemera can place: an update run with the wrong tool is a
+ * second installation rather than an update, a command from somewhere else is left exactly where
+ * it is, and a published version behind the installed one would be a downgrade.
  */
 function updateOf(agent: AgentOnTheMachine): string | null {
   if (!agent.found || agent.installer === 'unknown') return null
   if (agent.version === null || agent.latest === null) return null
-  return agent.version === agent.latest ? null : agent.latest
+  const order = compareVersions(agent.version, agent.latest)
+  return order !== null && order < 0 ? agent.latest : null
+}
+
+/**
+ * How two versions stand, segment by segment as numbers: negative when `installed` is behind,
+ * zero when they are the same, positive when it is ahead — or null when either is not plain
+ * dotted numbers, which is a version nothing here knows how to order.
+ *
+ * As numbers and not as strings: `2.0.10` is after `2.0.9`, and a missing segment counts as zero.
+ */
+function compareVersions(installed: string, published: string): number | null {
+  const plain = /^\d+(?:\.\d+)*$/
+  if (!plain.test(installed) || !plain.test(published)) return null
+  const mine = installed.split('.').map(Number)
+  const theirs = published.split('.').map(Number)
+  for (let at = 0; at < Math.max(mine.length, theirs.length); at += 1) {
+    const step = (mine[at] ?? 0) - (theirs[at] ?? 0)
+    if (step !== 0) return step
+  }
+  return 0
 }

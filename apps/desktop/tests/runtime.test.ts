@@ -17,6 +17,7 @@ import * as TestClock from 'effect/testing/TestClock'
 import type { SessionEntry } from '@hemera/core'
 
 import { MachineEnvironment } from '#engine/agents/discovery.ts'
+import { HeldWords } from '#engine/agents/held.ts'
 import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
 import {
@@ -29,6 +30,7 @@ import {
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Preferences } from '#engine/preferences.ts'
 import { Projects } from '#engine/projects.ts'
+import { Sessions } from '#engine/sessions.ts'
 import {
   ASKED,
   application,
@@ -99,7 +101,7 @@ describe('A permission request blocks the turn', () => {
         ])
         expect(asked.state).toBe('pending')
 
-        yield* runtime.decide(session.id, 'allow-once')
+        yield* runtime.decide(session.id, 'call-1', 'allow-once')
         const report = yield* Fiber.join(running)
 
         expect(report.stopReason).toBe('end_turn')
@@ -118,7 +120,7 @@ describe('A permission request blocks the turn', () => {
         const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'touch the config'))
 
         yield* heldInThread(session.id, (held) => waiting(held) === 1)
-        yield* runtime.decide(session.id, 'allow-once')
+        yield* runtime.decide(session.id, 'call-1', 'allow-once')
         yield* Fiber.join(running)
 
         const entries = yield* heldInThread(session.id, (held) =>
@@ -155,13 +157,13 @@ describe('A permission request blocks the turn', () => {
         // The turn is held by the question: nothing goes on until it is answered, and no turn
         // entry has been written yet.
         expect((yield* threadOf(session.id)).some((entry) => entry.kind === 'turn')).toBe(false)
-        yield* runtime.decide(session.id, 'allow-once')
+        yield* runtime.decide(session.id, 'call-1', 'allow-once')
 
         // The same tool asks again, and it blocks the turn again: allowing once is not a
         // permission remembered anywhere.
         yield* heldInThread(session.id, (held) => waiting(held) === 1)
         expect((yield* threadOf(session.id)).some((entry) => entry.kind === 'turn')).toBe(false)
-        yield* runtime.decide(session.id, 'allow-once')
+        yield* runtime.decide(session.id, 'call-2', 'allow-once')
 
         const report = yield* Fiber.join(running)
         expect(report.stopReason).toBe('end_turn')
@@ -171,6 +173,50 @@ describe('A permission request blocks the turn', () => {
         const asked = entries.filter((entry) => entry.kind === 'permission_request')
         expect(asked.map((entry) => entry.correlationId)).toEqual(['perm:call-1', 'perm:call-2'])
         expect(asked.map((entry) => entry.state)).toEqual(['decided', 'decided'])
+      }),
+    )
+  })
+})
+
+describe("The agent's own permission for one of Hemera's tools", () => {
+  test('is allowed once without the human, since Hemera gates its tools itself', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'asks', call: { ...ASKED, title: 'mcp__hemera__fs_read' } },
+        { does: 'asks', call: { ...ASKED, id: 'call-2', title: 'hemera_fs_write' } },
+        { does: 'says', text: 'done' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const report = yield* runtime.prompt(session.id, 'read it')
+
+        expect(report.stopReason).toBe('end_turn')
+        // "Allow once" and never "always": nothing is remembered on the agent's side (D6-05).
+        expect(agent.answers.optionIds).toEqual(['allow-once', 'allow-once'])
+        const entries = yield* threadOf(session.id)
+        expect(entries.some((entry) => entry.kind === 'permission_request')).toBe(false)
+      }),
+    )
+  })
+
+  test('a bare name is not taken for one of them: the human is asked', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'asks', call: { ...ASKED, title: 'fs_write' } }] })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'write it'))
+
+        yield* heldInThread(session.id, (held) => waiting(held) === 1)
+        yield* runtime.decide(session.id, 'call-1', 'reject-once')
+        yield* Fiber.join(running)
+
+        expect(agent.answers.optionIds).toEqual(['reject-once'])
       }),
     )
   })
@@ -590,6 +636,68 @@ describe('A turn that ends mid-flush loses nothing', () => {
 })
 
 /**
+ * A tool call or a command run written while the agent is holding words (Decided 10 of #17,
+ * D6-04, D6-12).
+ *
+ * The runtime is not the only thing that writes into a Session's thread during a turn: Hemera's
+ * tools write the call they answered, and the commands the run they started. The agent said what
+ * it held before it asked for either, so those words are written first — through the port the
+ * two services ask, which the runtime answers with its own flush.
+ */
+describe('What an agent holds is written before a call or a run', () => {
+  test('the words held when a tool call is written are above it in the thread', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'reading the reader first', messageId: 'msg-1' },
+        { does: 'says', text: ', then the project', messageId: 'msg-1' },
+      ],
+      between: gate.between,
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const sessions = yield* Sessions
+        const words = yield* HeldWords
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'read the reader'))
+
+        // The suite's clock never moves here, so the timer never writes: what reaches the thread
+        // is what the port wrote, and nothing else could have.
+        let entries: readonly SessionEntry[] = []
+        for (let look = 0; look < 400; look++) {
+          yield* words.flushed(session.id)
+          entries = yield* threadOf(session.id)
+          if (entries.some((entry) => entry.role === 'agent' && entry.kind === 'message')) break
+          yield* pause(5)
+        }
+        yield* sessions.write(session.id, {
+          role: 'agent',
+          kind: 'hemera_tool_call',
+          body: 'read src/reader.ts',
+          correlationId: 'tool:fs_read:k1',
+          state: 'completed',
+        })
+        gate.carryOn()
+        yield* Fiber.join(running)
+
+        // The words said before the call are in the thread above it: the row of the message was
+        // written first, and what the agent said after the call grew that same row.
+        const thread = yield* threadOf(session.id)
+        const call = entryOf(thread, 'hemera_tool_call')
+        const said = entryOf(
+          thread.filter((entry) => entry.role === 'agent'),
+          'message',
+        )
+        expect(said.body).toBe('reading the reader first, then the project')
+        expect(said.seq).toBeLessThan(call.seq)
+      }),
+    )
+  })
+})
+
+/**
  * An entry the timer wrote whole, and nothing held of it when it settles (Decided 10 of #17).
  *
  * An agent pauses between the end of a message and what it does next, and the timer writes the
@@ -666,8 +774,9 @@ describe('A chunk write that fails', () => {
         expect(entryOf(entries, 'turn').state).toBe('end_turn')
         // Dropped, and said so: the message had no chunk after the one that failed.
         expect(entries.filter((entry) => entry.correlationId === 'msg-1:message')).toHaveLength(0)
-        expect(storage.diagnosed).toHaveLength(1)
-        expect(storage.diagnosed[0]).toContain('msg-1:message')
+        const dropped = storage.diagnosed.filter((line) => line.includes('was dropped'))
+        expect(dropped).toHaveLength(1)
+        expect(dropped[0]).toContain('msg-1:message')
       }),
     )
   })
@@ -700,11 +809,13 @@ describe('A chunk write that fails', () => {
         const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'what does it do'))
 
         // The timer's write of the first chunk fails.
-        for (let look = 0; look < 40 && storage.diagnosed.length === 0; look++) {
+        // The engine's other lines — how the agent was started — are not what is counted.
+        const dropped = () => storage.diagnosed.filter((line) => line.includes('was dropped'))
+        for (let look = 0; look < 40 && dropped().length === 0; look++) {
           yield* pause(5)
           yield* TestClock.adjust(CHUNK_FLUSH)
         }
-        expect(storage.diagnosed).toHaveLength(1)
+        expect(dropped()).toHaveLength(1)
 
         // The second chunk is written by a timer of its own, while the agent is still held.
         first.carryOn()
@@ -957,6 +1068,7 @@ describe('An agent that cannot be asked', () => {
     bundled: (packageName: string) => Effect.succeed(join('/opt/hemera', packageName, 'index.js')),
     readVersion: () => Effect.succeed('1.0.0'),
     holds: () => Effect.succeed(false),
+    read: () => Effect.succeed(undefined),
   })
 
   test('An agent not signed in is refused before any process starts', async () => {
@@ -1276,6 +1388,7 @@ describe('A turn announces its start before its first chunk', () => {
         Effect.succeed(join('/opt/hemera', packageName, 'index.js')),
       readVersion: () => Effect.succeed('1.0.0'),
       holds: () => Effect.succeed(false),
+      read: () => Effect.succeed(undefined),
     })
     const agent = fakeAgent({})
     const window = watching()
@@ -1452,6 +1565,37 @@ describe('The composer’s choices are kept per Project', () => {
           provider: 'claude',
           options: { model: 'opus' },
         })
+      }),
+    )
+  })
+})
+
+describe('A refused prompt is a failed turn, not a stopped one', () => {
+  test("the turn ends failed, and the provider's sentence is written beside it", async () => {
+    const refusal =
+      "Internal error: Error from provider (Console): OpenCode's free tier can only be used from within OpenCode"
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'on it' }], failsPrompt: refusal })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+
+        const report = yield* runtime.prompt(session.id, 'read the notes')
+        expect(report.stopReason).toBe('failed')
+
+        const entries = yield* threadOf(session.id)
+        const turn = entryOf(entries, 'turn')
+        expect(turn.state).toBe('failed')
+        expect(turn.body).toBe('The agent could not answer.')
+        // The sentence is the agent's own, without the name of an error class in front of it,
+        // and it belongs to the turn it ended.
+        const note = entryOf(entries, 'note')
+        expect(note.body).toBe(refusal)
+        expect(note.turnId).toBe(turn.turnId)
+        // Nobody pressed Stop: nothing of the turn says it was stopped.
+        expect(entries.some((entry) => entry.state === 'cancelled')).toBe(false)
+        expect(agent.answers.cancels).toBe(0)
       }),
     )
   })

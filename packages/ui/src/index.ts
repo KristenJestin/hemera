@@ -12,7 +12,12 @@ export {
   type ButtonState,
   type IconButtonProps,
 } from './components/button/button.tsx'
-export { Dialog, DialogClose, type DialogProps } from './components/dialog/dialog.tsx'
+export {
+  Dialog,
+  DialogClose,
+  type DialogProps,
+  type DialogSize,
+} from './components/dialog/dialog.tsx'
 export { Badge, type BadgeProps } from './components/badge/badge.tsx'
 export { Input, Textarea, type InputProps, type TextareaProps } from './components/field/field.tsx'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
@@ -75,9 +80,11 @@ export { Sidebar, type SidebarProps } from './shell/sidebar.tsx'
 /** The Project surfaces: where one is created, and where the one in front is configured. */
 export { EMPTY_DRAFT, ProjectDialog, type ProjectDialogProps } from './project/project-dialog.tsx'
 export {
+  CommandList,
   DangerZone,
   ProjectSettings,
   RepositoryList,
+  type CommandLine,
   type ProjectSettingsProps,
 } from './project/project-settings.tsx'
 
@@ -245,9 +252,26 @@ export {
   type ToolKind,
   type ToolLocation,
   type ToolStatus,
+  type ToolSubject,
+  toolKindLabel,
 } from './activity/tool-call-card.tsx'
 export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
 export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
+/** The tools Hemera lends the agent (HEM-18): the call it made, and the command it ran. A call
+ * to one of Hemera's own tools is not the agent's business alone, so it says whose it is. */
+export {
+  HemeraToolCall,
+  type HemeraToolArgument,
+  type HemeraToolCallProps,
+  type HemeraToolMark,
+  type HemeraToolStatus,
+} from './activity/hemera-tool-call.tsx'
+export {
+  CommandRun,
+  type CommandKind,
+  type CommandRunProps,
+  type CommandState,
+} from './activity/command-run.tsx'
 
 /** The gate a turn stops at, and the one line the answer leaves behind. */
 export {
@@ -290,6 +314,7 @@ export {
   type AgentOnTheMachine,
   type AgentStanding,
   type AgentsSectionProps,
+  type BareMode,
 } from './settings/agents-section.tsx'
 
 /** What a Session says about itself beside its thread: its plan, its files, a turn that was
@@ -302,10 +327,29 @@ export {
   type PlanStatus,
 } from './session/plan-panel.tsx'
 export {
-  SessionSideColumn,
-  type SessionSideColumnProps,
+  SessionDetails,
+  type SessionDetailsProps,
+  type SessionDetailsTab,
   type TouchedFile,
-} from './session/session-side-column.tsx'
+} from './session/session-details.tsx'
+export {
+  CommandsPanel,
+  type CommandPanelRun,
+  type CommandsPanelProps,
+} from './session/commands-panel.tsx'
+export {
+  ContextView,
+  type ContextCommand,
+  type ContextEntry,
+  type ContextTool,
+  type ContextViewProps,
+  type ContextWorkspace,
+} from './session/context-view.tsx'
+export {
+  BareModeState,
+  type BareModeEntry,
+  type BareModeStateProps,
+} from './session/bare-mode-state.tsx'
 export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
 /** What the turn is doing right now, at the end of the thread while it runs. */
 export { ActivityRow, type ActivityRowProps, type ActivityState } from './session/activity-row.tsx'

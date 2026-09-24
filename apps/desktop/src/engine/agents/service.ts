@@ -5,9 +5,9 @@
  * questions rather than one. `list` is local and answers in milliseconds: which commands the
  * machine has, what version each prints, and the tool that put it there. `check` is the same
  * answer with one more field filled in, and it is the only thing in this file that leaves the
- * machine — it reads the registry of each agent's own installer, which is why it is asked for
- * when the section is opened and never on a schedule, and why a registry that says nothing
- * leaves a version unknown rather than making the section fail.
+ * machine — it reads what was published for every agent that is found, whatever installed it,
+ * which is why it is asked for when the section is opened and never on a schedule, and why a
+ * registry that says nothing leaves a version unknown rather than making the section fail.
  *
  * `update` is the one thing here that changes the machine, and it happens only because somebody
  * pressed a button. It runs the tool that installed the agent — never a command of Hemera's own,
@@ -20,6 +20,7 @@ import { Context, Data, Effect, Layer } from 'effect'
 
 import type { AgentAvailability, AgentProvider, AgentUpdate } from '@hemera/ipc'
 
+import { bareModeOf } from './bare.ts'
 import type { DiscoveredAgent } from './discovery.ts'
 import { ADAPTERS, Discovery } from './discovery.ts'
 import { AgentRegistry, AgentUpdater } from './installer.ts'
@@ -57,8 +58,12 @@ export class Agents extends Context.Service<Agents, AgentsService>()('Agents') {
  * Nothing is decided here: discovery has already said which command was found, where, and the
  * tool that put it there, so this is the same answer with the one field discovery never fills —
  * the version a registry publishes, which is `latest` and is null until somebody asks (D5-18).
+ *
+ * Its bare mode is the adapter's own declaration for the platform this engine runs on (D6-02):
+ * what the Agents section shows per agent, and what the Home's composer refuses an agent for.
  */
 export function availabilityOf(agent: DiscoveredAgent, latest: string | null): AgentAvailability {
+  const bare = bareModeOf(ADAPTERS[agent.id], globalThis.process.platform)
   return {
     id: agent.id,
     label: agent.label,
@@ -69,6 +74,12 @@ export function availabilityOf(agent: DiscoveredAgent, latest: string | null): A
     loginHint: agent.loginHint,
     installer: agent.installer,
     latest,
+    bareMode: {
+      means: bare.means,
+      qualified: bare.qualified,
+      reason: bare.qualified ? null : bare.reason,
+      private: bare.private,
+    },
   }
 }
 
@@ -98,8 +109,10 @@ export const agentsLayer = Layer.effect(
             found,
             (agent) =>
               Effect.gen(function* () {
-                const asked = agent.found && agent.installer !== 'unknown'
-                const latest = asked
+                // A read, so the installer does not decide it: a command nothing here can place
+                // is still one whose version the section compares with what was published. The
+                // installer gates `update`, below, and nothing else.
+                const latest = agent.found
                   ? yield* registry.latest(ADAPTERS[agent.id], agent.installer)
                   : null
                 return availabilityOf(agent, latest)

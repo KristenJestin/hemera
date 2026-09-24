@@ -3,6 +3,7 @@ import { LayoutGroup, motion } from 'motion/react'
 import { type ReactNode, useId, useState } from 'react'
 
 import { arrival, useTransition } from '../../motion.ts'
+import { Tooltip } from '../tooltip/tooltip.tsx'
 
 /**
  * The tabs, on Base UI (design D2-04).
@@ -48,6 +49,15 @@ export interface TabsProps<Value extends string> {
   value?: Value | undefined
   defaultValue?: Value | undefined
   onValueChange?: ((value: Value) => void) | undefined
+  /**
+   * Whether each tab shows its icon alone, its label kept as the tab's name and said in a tooltip
+   * under the hand.
+   *
+   * For a strip laid in a box narrower than its words: three labelled tabs are wider than the side
+   * column of a Session, and a strip wider than its box is a box that scrolls sideways (trial of
+   * 23 September 2026). Every item then needs its icon.
+   */
+  iconsOnly?: boolean | undefined
   /** Where the strip sits; never how it looks. */
   className?: string | undefined
 }
@@ -58,6 +68,7 @@ export function Tabs<Value extends string>({
   value,
   defaultValue,
   onValueChange,
+  iconsOnly = false,
   className,
 }: TabsProps<Value>): ReactNode {
   const transition = useTransition(arrival)
@@ -80,10 +91,18 @@ export function Tabs<Value extends string>({
               {item.value === current && (
                 <motion.span layoutId={`${group}-tab`} className={MARK} transition={transition} />
               )}
-              <BaseTabs.Tab value={item.value} className={TAB}>
-                {item.icon}
-                {item.label}
-              </BaseTabs.Tab>
+              {iconsOnly ? (
+                <Tooltip label={item.label} side="bottom">
+                  <BaseTabs.Tab value={item.value} className={TAB} aria-label={item.label}>
+                    {item.icon}
+                  </BaseTabs.Tab>
+                </Tooltip>
+              ) : (
+                <BaseTabs.Tab value={item.value} className={TAB}>
+                  {item.icon}
+                  {item.label}
+                </BaseTabs.Tab>
+              )}
             </span>
           ))}
         </LayoutGroup>

@@ -112,6 +112,10 @@ const meta = {
     onStartEditing: { control: false, description: 'Opens the field.' },
     onCancelEditing: { control: false, description: 'Closes it without keeping what was typed.' },
     onArchive: { control: false, description: 'Takes the Session out of the sidebar.' },
+    onOpenDetails: {
+      control: false,
+      description: 'Opens the Session details: its activity, its commands and its context.',
+    },
   },
 } satisfies Meta<typeof Harness>
 
@@ -462,6 +466,23 @@ export const TheHeadCommands: Story = {
     await waitFor(() => {
       expect(within(document.body).queryByRole('menu')).toBeNull()
     })
+  },
+}
+
+/**
+ * The Session's details are one press away, at the end of the head's line, before the `…`: what
+ * the turn has done, what the Session runs and what its agent works from.
+ */
+export const DetailsWithinReach: Story = {
+  parameters: { controls: { disable: true } },
+  args: { onOpenDetails: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const details = canvas.getByRole('button', { name: 'Session details' })
+    const menu = canvas.getByRole('button', { name: 'Commands for CSV invoice export' })
+    expect(details.compareDocumentPosition(menu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await userEvent.click(details)
+    expect(args.onOpenDetails).toHaveBeenCalledTimes(1)
   },
 }
 

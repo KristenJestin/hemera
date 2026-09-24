@@ -64,3 +64,13 @@ export function turnOf(turn: number) {
   const at = Math.min(Math.max(turn, 1), ANSWERS.length) - 1
   return { thought: THOUGHTS[at] ?? THOUGHTS[0], answer: ANSWERS[at] ?? ANSWERS[0] }
 }
+
+/**
+ * The file a turn asks the agent to read, and what the agent answers once it has (design D6-11).
+ *
+ * A prompt that names it is answered with a call to Hemera's `fs_read` over the MCP server the
+ * agent was handed, then this sentence: the read goes through Hemera's tools, never the agent's.
+ */
+export const NOTES = 'notes.md'
+
+export const READ_ANSWER = 'The notes are read through Hemera.'

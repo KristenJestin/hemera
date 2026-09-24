@@ -240,7 +240,9 @@ writes at start-up.
   closed set: `press` for what answers the hand (hover, press, a width following it — stiff and
   light), `arrival` for what puts itself in place (panels, popups — the prototype's "Calme"
   spring, `stiffness 170, damping 26`, no overshoot), `instant` for a system asking for less
-  movement, `slide`, `expand`, `collapse` and `push` for what changes place or size.
+  movement, `slide`, `expand`, `collapse` and `push` for what changes place or size,
+  `crossfade` for one content giving way to another in the same place, and `ping` for a ring
+  leaving what is running, over and over.
   Components read `useTransition(kind)`, never a kind directly: it answers the reduced-motion
   preference with the end state for every property, where motion's own `reducedMotion` would
   keep animating opacity. The tree runs under `MotionConfig reducedMotion="user"` all the same,

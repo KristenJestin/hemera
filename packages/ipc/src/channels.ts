@@ -99,6 +99,18 @@ export const CHANNELS = {
   'agents.check': ENGINE_REQUESTS['agents.check'],
   'agents.update': ENGINE_REQUESTS['agents.update'],
 
+  // What Hemera lends the agent, relayed the same way: a Project's commands and the runs they
+  // became, and what a Session was provided (design D6-10, D6-12).
+  'commands.list': ENGINE_REQUESTS['commands.list'],
+  'commands.create': ENGINE_REQUESTS['commands.create'],
+  'commands.update': ENGINE_REQUESTS['commands.update'],
+  'commands.remove': ENGINE_REQUESTS['commands.remove'],
+  'commands.runs': ENGINE_REQUESTS['commands.runs'],
+  'commands.run': ENGINE_REQUESTS['commands.run'],
+  'commands.stop': ENGINE_REQUESTS['commands.stop'],
+  'commands.output': ENGINE_REQUESTS['commands.output'],
+  'context.read': ENGINE_REQUESTS['context.read'],
+
   /**
    * The four the main process answers itself, because each of them is something only it can do.
    *

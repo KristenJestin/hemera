@@ -19,6 +19,10 @@ import { ToolCallCard, type ToolCallCardProps } from './tool-call-card.tsx'
  * Where a call stands is a dot and no longer a word since the trial of 22 September 2026: `Done`
  * under `Done` under `Done` said nothing the reader did not already know and took the eye off
  * the one line that had gone wrong. The word is still there, for whatever reads the page.
+ *
+ * The line reads the way a Hemera call's does since recette 3 of 23 September 2026: the mark of
+ * the kind, the label the kind is read by, and what the call is about — the file, the query, the
+ * command — which is the press that goes to the file when it is one.
  */
 const OUTPUT = `export function SessionPage() {
   return <SessionThread />
@@ -26,7 +30,7 @@ const OUTPUT = `export function SessionPage() {
 `
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/ToolCallCard',
   component: ToolCallCard,
   parameters: { layout: 'padded' },
@@ -40,12 +44,21 @@ const meta = {
     onOpenLocation: fn(),
   },
   argTypes: {
-    title: { control: 'text', description: 'What the call is called, as the agent wrote it.' },
+    title: {
+      control: 'text',
+      description:
+        'What the call is called, as the agent wrote it: the label of a call of no kind.',
+    },
     kind: {
       control: 'inline-radio',
       options: ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'other'],
-      description: 'The kind of the call, which decides the mark and nothing else.',
+      description: 'The kind of the call, which decides the mark and the label.',
     },
+    subject: {
+      control: 'object',
+      description: 'What the call is about; the first file it touched when left out.',
+    },
+    name: { control: 'text', description: 'The tool’s own name, when the adapter gives one.' },
     status: {
       control: 'inline-radio',
       options: ['pending', 'in_progress', 'completed', 'failed', 'cancelled'],
@@ -67,6 +80,44 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/** How many frames a fold is watched for: the better part of the journey of the spring. */
+const A_FOLD = 30
+
+/**
+ * The fold opening, with the file the call touched on its line (trial of 23 September 2026).
+ *
+ * The press on the file sat beside the whole fold and was centred on it, so it slid down the
+ * card while the body opened under it. It is on the fold's own line now, the one line that never
+ * moves, and pressing it goes to the file without opening the card.
+ */
+export const AFoldOpening: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /^Read file/ })
+    const path = canvas.getByRole('button', { name: 'packages/ui/src/session/session.tsx:42' })
+    // A press inside the fold's own button would be one the keyboard walks over.
+    await expect(row.contains(path)).toBe(false)
+    await userEvent.click(path)
+    await expect(args.onOpenLocation).toHaveBeenCalledWith({
+      path: 'packages/ui/src/session/session.tsx',
+      line: 42,
+    })
+    await expect(row, 'a press on the file opened the card').toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+
+    const closed = path.getBoundingClientRect().top
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    const moved = () => Math.abs(path.getBoundingClientRect().top - closed) > 0.5
+    await expect(await withinFrames(moved, A_FOLD), 'the file slid while the card opened').toBe(
+      false,
+    )
+    await expect(canvas.getByText('Input')).toBeVisible()
+  },
+}
+
 /**
  * The fold closing, which is the fold opening played backwards (trial of 22 September 2026).
  *
@@ -80,8 +131,11 @@ export const AFoldClosing: Story = {
   args: { defaultOpen: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const row = canvas.getByRole('button', { name: /^Read file/ })
+    const path = canvas.getByRole('button', { name: 'packages/ui/src/session/session.tsx:42' })
     await expect(canvas.getByText('Input')).toBeVisible()
+    const open = path.getBoundingClientRect().top
+    const moved = () => Math.abs(path.getBoundingClientRect().top - open) > 0.5
 
     await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'false')
@@ -96,10 +150,15 @@ export const AFoldClosing: Story = {
     // Mid-exit: the row already says it is closed, and the body is still in the page folding
     // away. A body that vanished under the press would fail here.
     await expect(canvas.getByText('Input')).toBeInTheDocument()
+    // The file stays on its line the whole way: it was centred on the card and slid with it.
+    await expect(await withinFrames(moved, A_FOLD), 'the file slid while the card closed').toBe(
+      false,
+    )
 
     await waitFor(() => {
       expect(canvas.queryByText('Input')).toBeNull()
     })
+    await expect(moved()).toBe(false)
   },
 }
 
@@ -107,17 +166,20 @@ export const AFoldClosing: Story = {
 export const CompletedFolded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const row = canvas.getByRole('button', { name: /^Read file/ })
     // A finished call says so on its line and keeps its body shut: the parameters of a read are
     // noise once the read worked.
     await expect(row).toHaveAttribute('aria-expanded', 'false')
     // The word is announced and not drawn: the colour of the dot is what the eye reads.
     await expect(canvas.getByRole('img', { name: 'Done' })).toBeInTheDocument()
     await expect(canvas.queryByText('Done')).toBeNull()
-    // The title is a caption rather than a line of the thread: quieter than what the agent said.
-    const title = canvas.getByText('Read src/session/session.tsx')
-    await expect(getComputedStyle(title).color).not.toBe(getComputedStyle(canvasElement).color)
-    await expect(canvas.getByText('packages/ui/src/session/session.tsx:42')).toBeVisible()
+    // The line is read by the label of its kind, and what it is about is the file, in mono.
+    await expect(canvas.getByText('Read file')).toBeVisible()
+    await expect(canvas.queryByText('Read src/session/session.tsx')).toBeNull()
+    const subject = canvas.getByText('packages/ui/src/session/session.tsx:42')
+    await expect(subject).toBeVisible()
+    await expect(getComputedStyle(subject).fontFamily).toMatch(/mono|Fira/i)
+    await expect(canvasElement.querySelector('[data-mark]')).toHaveAttribute('data-mark', 'read')
   },
 }
 
@@ -126,7 +188,7 @@ export const WithOutput: Story = {
   args: { defaultOpen: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const row = canvas.getByRole('button', { name: /^Read file/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText('Input')).toBeVisible()
     await expect(canvas.getByText('Output')).toBeVisible()
@@ -168,7 +230,7 @@ export const NothingToOpen: Story = {
     const canvas = within(canvasElement)
     // No chevron, no press: a control that opens onto nothing is a control that lied.
     await expect(canvas.queryByRole('button')).toBeNull()
-    await expect(canvas.getByText('Read src/session/session.tsx')).toBeVisible()
+    await expect(canvas.getByText('Read file')).toBeVisible()
     await expect(canvas.getByRole('img', { name: 'Done' })).toBeInTheDocument()
   },
 }
@@ -183,7 +245,7 @@ export const Running: Story = {
   render: (args) => <Rewritten {...args} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const row = canvas.getByRole('button', { name: /^Read file/ })
     await expect(row, 'a running call opened itself').toHaveAttribute('aria-expanded', 'false')
     // The one dot of the five that moves, because it is the one the reader is waiting on.
     const dot = canvas.getByRole('img', { name: 'Running' })
@@ -211,7 +273,7 @@ export const OpenedByDefault: Story = {
   render: (args) => <Rewritten {...args} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const row = canvas.getByRole('button', { name: /^Read file/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await userEvent.click(row)
     await expect(row, 'a card opened by default cannot be closed').toHaveAttribute(
@@ -260,7 +322,7 @@ export const Expanded: Story = {
   args: { defaultOpen: true, input: undefined, output: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const row = canvas.getByRole('button', { name: /^Read file/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText(/export function SessionPage/)).toBeVisible()
   },
@@ -287,6 +349,7 @@ export const Failed: Story = {
   args: {
     title: 'pnpm test --project=repository',
     kind: 'execute',
+    subject: { text: 'pnpm test --project=repository' },
     status: 'failed',
     input: undefined,
     output: 'FAIL packages/ui/tests/stories.test.ts\n  3 tests failed',
@@ -320,6 +383,7 @@ export const Cancelled: Story = {
   args: {
     title: 'pnpm build',
     kind: 'execute',
+    subject: { text: 'pnpm build' },
     status: 'cancelled',
     input: 'cwd: .',
     output: undefined,
@@ -334,26 +398,58 @@ export const Cancelled: Story = {
   },
 }
 
-/** The kinds, each on its own line: the mark is what tells a read from a command at a glance. */
+/** The kinds, each with its subject, as the thread reads them in a Session. */
+const KINDS = [
+  ['read', 'Read AGENTS.md', 'Read file', 'AGENTS.md'],
+  ['edit', 'Edit session.tsx', 'Edit file', 'src/session/session.tsx'],
+  ['delete', 'Delete draft.md', 'Delete file', 'notes/draft.md'],
+  ['move', 'Move notes.md', 'Move file', 'notes.md'],
+  ['search', 'Search for resumeSession', 'Search', '"resumeSession"'],
+  ['execute', 'pnpm test', 'Run command', 'pnpm test --project=repository'],
+  ['think', 'Think about the migration', 'Thinking', null],
+  ['fetch', 'Fetch the ACP schema', 'Fetch', 'https://agentclientprotocol.com/schema'],
+  ['other', 'Something else entirely', 'Something else entirely', null],
+] as const
+
+/**
+ * The kinds, each on its own line (recette 3 of 23 September 2026): the mark and the label say
+ * what the call is, the subject what it is about, and a call of no kind is read by its title.
+ */
 export const EveryKind: Story = {
   args: { status: 'in_progress' },
   render: () => (
     <div className="flex flex-col gap-1">
-      {(
-        [
-          ['read', 'Read AGENTS.md'],
-          ['edit', 'Edit session.tsx'],
-          ['delete', 'Delete draft.md'],
-          ['move', 'Move notes.md'],
-          ['search', 'Search for resumeSession'],
-          ['execute', 'pnpm test'],
-          ['think', 'Think about the migration'],
-          ['fetch', 'Fetch the ACP schema'],
-          ['other', 'Something else entirely'],
-        ] as const
-      ).map(([kind, title]) => (
-        <ToolCallCard key={kind} kind={kind} title={title} status="in_progress" />
+      {KINDS.map(([kind, title, , subject]) => (
+        <ToolCallCard
+          key={kind}
+          kind={kind}
+          title={title}
+          subject={subject === null ? undefined : { text: subject }}
+          name={kind === 'read' ? 'Read' : undefined}
+          status="in_progress"
+        />
       ))}
     </div>
   ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const marks = [...canvasElement.querySelectorAll('[data-mark]')].map((mark) =>
+      mark.getAttribute('data-mark'),
+    )
+    await expect(marks).toEqual(KINDS.map(([kind]) => kind))
+    for (const [, , label, subject] of KINDS) {
+      expect(canvas.getByText(label)).toBeVisible()
+      if (subject !== null) expect(canvas.getByText(subject)).toBeVisible()
+    }
+    // The whole line is a caption (recette 5 of 24 September 2026): the label and the subject in
+    // the tone of the mark.
+    const quiet = getComputedStyle(canvasElement.querySelector('[data-mark]')!).color
+    await expect(getComputedStyle(canvas.getByText('Read file')).color).toBe(quiet)
+    await expect(getComputedStyle(canvas.getByText('AGENTS.md')).color).toBe(quiet)
+    // The agent's own name for the tool is not on the line: it heads the body once it is opened.
+    await expect(canvas.queryByText('Read')).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: /^Read file/ }))
+    await expect(canvas.getByText('Read')).toBeVisible()
+    await expect(canvas.getByText('Read').previousElementSibling).toHaveTextContent('tool')
+  },
 }

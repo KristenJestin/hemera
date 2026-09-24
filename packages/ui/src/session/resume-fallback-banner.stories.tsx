@@ -9,7 +9,7 @@ import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
 const meta = {
   title: 'Blocks/Session/ResumeFallbackBanner',
   component: ResumeFallbackBanner,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { agent: 'Codex', session: 'codex-4f21', kept: 'the last 40 entries', onDismiss: fn() },
   argTypes: {

@@ -69,7 +69,13 @@ const preview: Preview = {
   },
   parameters: {
     layout: 'centered',
-    a11y: { test: 'error' },
+    a11y: {
+      test: 'error',
+      // Base UI's focus guards (`aria-hidden` with `tabindex="0"`, by construction, as Radix's)
+      // trip `aria-hidden-focus` while a popup is open: they are the trap's mechanism, not
+      // content, so the check leaves them out rather than the rule being turned off.
+      context: { include: [['body']], exclude: [['[data-base-ui-focus-guard]']] },
+    },
     /**
      * The sidebar is five roots and nothing else (`AGENTS.md`, "Storybook sidebar, five roots"):
      * the roots in the order written here, and the alphabetical order inside them, which

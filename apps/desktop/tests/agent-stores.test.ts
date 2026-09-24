@@ -22,19 +22,17 @@ import {
   effortStage,
   modeStage,
   modelStage,
-  NO_DEFAULTS,
   openingAgentOf,
 } from '#renderer/agent-options.ts'
 import {
   activityOf,
   agentOf,
-  carryModelDefaults,
   chooseOption,
   forgetAgentRefusal,
   listenToAgents,
-  modelDefaultsOf,
   offerAgent,
   offeringOf,
+  optionsOf,
   readOptions,
   say,
   setOffered,
@@ -184,7 +182,6 @@ describe("Le choix fait avant la Session s'applique sur le sondage", () => {
       options: [],
       refusal: 'Sign in with `claude login`.',
       loading: false,
-      modelDefaults: NO_DEFAULTS,
     })
     // Asked once per agent and Project: the engine starts the agent to be told.
     await offerAgent('atlas', 'claude')
@@ -361,6 +358,34 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
     const died = reported('e3', 'turn', 'The agent stopped running.', 'interrupted')
     expect(activityOf([said, call, died])).toEqual({ state: 'failed' })
   })
+
+  test('A delivery outside a turn is its own turn', () => {
+    const said = entry('e1', 'user', 'Start')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn', 'turn-1')
+    const delivered = reported(
+      'e3',
+      'context_delivery',
+      'The instructions changed.',
+      null,
+      'turn-2',
+    )
+    const answer = reported('e4', 'message', 'Noted', null, 'turn-2')
+
+    // The answer to the delivery is the turn that runs now, not the end of the one before it.
+    expect(activityOf([said, done, delivered, answer]).state).toBe('streaming')
+    const closed = reported('e5', 'turn', 'The agent finished its turn.', 'end_turn', 'turn-2')
+    expect(activityOf([said, done, delivered, answer, closed]).state).toBe('done')
+    // A delivery inside the user's turn carries no turn of its own and starts nothing.
+    const inTurn = reported('e3', 'context_delivery', 'The instructions changed.', null, null)
+    expect(activityOf([said, done, inTurn]).state).toBe('done')
+  })
+
+  test('A refused prompt is a failed turn, not a stopped one', () => {
+    const said = entry('e1', 'user', 'Read the notes')
+    const refused = reported('e2', 'turn', 'The agent could not answer.', 'failed')
+
+    expect(activityOf([said, refused])).toEqual({ state: 'failed' })
+  })
 })
 
 describe('Le tour tourne dès que la question est écrite', () => {
@@ -527,106 +552,76 @@ describe('Ce que l’agent dit de ses valeurs arrive jusqu’au menu', () => {
       { id: 'high', label: 'high', description: undefined, recommended: undefined },
     ])
   })
+
+  test('a choice in a Session is sent to its agent, and what it is on is read back', async () => {
+    answers.set('agents.options', { options: claudeOn('fable', 'high') })
+    await readOptions('session-13')
+    answers.set('agents.setOption', {})
+    answers.set('agents.options', { options: claudeOn('opus', 'xhigh') })
+
+    await chooseOption('session-13', 'model', 'opus')
+
+    expect(asked.slice(1).map((one) => [one.name, one.argument])).toEqual([
+      ['agents.setOption', { sessionId: 'session-13', optionId: 'model', value: 'opus' }],
+      ['agents.options', { sessionId: 'session-13' }],
+    ])
+    // What the menu shows is the list read back: the effort Opus is on was never sent.
+    expect(modelStage(optionsOf('session-13'))?.current).toBe('opus')
+    expect(effortStage(optionsOf('session-13'))?.current).toBe('xhigh')
+  })
 })
 
-/** What Claude announces on a model, with the effort it is on: none at all for Haiku. */
-function claudeOn(model: string, effort: string | null): ConfigOption[] {
+/**
+ * What Claude announces on a model: the effort it is on and the one it recommends, or no effort
+ * at all for Haiku. The recommendation is marked on its value, as the engine hands it over.
+ */
+function claudeOn(
+  model: string,
+  effort: string | null,
+  recommended: string | null = null,
+): ConfigOption[] {
   const models = option('model', ['fable', 'opus', 'sonnet', 'haiku'], model)
   if (effort === null) return [models]
-  return [models, option('effort', ['low', 'medium', 'high', 'xhigh', 'max'], effort)]
+  const efforts = option('effort', ['low', 'medium', 'high', 'xhigh', 'max'], effort)
+  const values = efforts.values.map((one) =>
+    one.value === recommended ? { ...one, recommended: true } : one,
+  )
+  return [models, { ...efforts, values }]
 }
 
-/** The default a Home's composer learned for a model, or null where it learned none. */
-function homeDefault(projectId: string, model: string): string | null {
-  return effortDefaultOf(offeringOf(projectId, 'claude').modelDefaults, model)
+/** The level the scale of a Home's composer marks, or null where it marks none. */
+function homeDefault(projectId: string): string | null {
+  return effortDefaultOf(offeringOf(projectId, 'claude').options)
 }
 
-/** And the one a Session learned. */
-function sessionDefault(sessionId: string, model: string): string | null {
-  return effortDefaultOf(modelDefaultsOf(sessionId), model)
-}
-
-describe('La règle du curseur marque le défaut du modèle', () => {
-  test("The model's own default effort is the one the agent lands on when the model changes", async () => {
-    // The Home: the first offer is what the agent started on, Fable at High (probe of
-    // 22 September 2026), and a model set is answered with the effort the new model lands on.
-    answers.set('agents.offer', offer(claudeOn('fable', 'high')))
+describe('The rule of the scale marks the recommended level', () => {
+  test('The default bar follows the recommended value, not the announced one', async () => {
+    // Claude Code announces the effort its own settings set on every model it is switched to,
+    // Xhigh here, whatever the model's default is (trial of 23 September 2026).
+    answers.set('agents.offer', offer(claudeOn('fable', 'xhigh', 'medium')))
     await offerAgent('vega', 'claude')
-    expect(homeDefault('vega', 'fable')).toBe('high')
+    expect(homeDefault('vega')).toBe('medium')
 
-    answers.set('agents.offerSet', offer(claudeOn('opus', 'xhigh')))
+    // The recommendation comes with the effort each model announces, and the bar goes with it.
+    answers.set('agents.offerSet', offer(claudeOn('opus', 'xhigh', 'high')))
     await setOffered('vega', 'claude', 'model', 'opus')
-    expect(homeDefault('vega', 'opus')).toBe('xhigh')
-    expect(homeDefault('vega', 'fable')).toBe('high')
+    expect(homeDefault('vega')).toBe('high')
 
-    // A model that announces no effort has no default to mark.
-    answers.set('agents.offerSet', offer(claudeOn('haiku', null)))
-    await setOffered('vega', 'claude', 'model', 'haiku')
-    expect(homeDefault('vega', 'haiku')).toBeNull()
+    // An effort chosen is what the agent is on from then, and the bar does not follow it.
+    answers.set('agents.offerSet', offer(claudeOn('opus', 'low', 'high')))
+    await setOffered('vega', 'claude', 'effort', 'low')
+    expect(homeDefault('vega')).toBe('high')
 
-    // The Session: the same reading, off the list read back after the option is set.
-    answers.set('agents.options', { options: claudeOn('fable', 'high') })
+    // The Session reads it off the list it is handed, the same way.
+    answers.set('agents.options', { options: claudeOn('sonnet', 'max', 'medium') })
     await readOptions('session-9')
-    expect(sessionDefault('session-9', 'fable')).toBe('high')
-
-    answers.set('agents.setOption', {})
-    answers.set('agents.options', { options: claudeOn('sonnet', 'xhigh') })
-    await chooseOption('session-9', 'model', 'sonnet')
-    expect(sessionDefault('session-9', 'sonnet')).toBe('xhigh')
+    expect(effortDefaultOf(optionsOf('session-9'))).toBe('medium')
   })
 
-  test("Moving the effort does not move the model's default", async () => {
-    answers.set('agents.offer', offer(claudeOn('fable', 'high')))
-    await offerAgent('orion', 'claude')
-    answers.set('agents.offerSet', offer(claudeOn('fable', 'max')))
-    await setOffered('orion', 'claude', 'effort', 'max')
-    expect(homeDefault('orion', 'fable')).toBe('high')
-
-    answers.set('agents.options', { options: claudeOn('opus', 'xhigh') })
-    await readOptions('session-10')
-    answers.set('agents.setOption', {})
-    answers.set('agents.options', { options: claudeOn('opus', 'low') })
-    await chooseOption('session-10', 'effort', 'low')
-    expect(sessionDefault('session-10', 'opus')).toBe('xhigh')
-    // And a list read again for no choice at all leaves it where it was.
-    await readOptions('session-10')
-    expect(sessionDefault('session-10', 'opus')).toBe('xhigh')
-  })
-
-  test("A pinned effort does not become a model's default", async () => {
-    // Claude Code keeps an effort the user chose across model changes (its `effortPinnedLevel`):
-    // Opus, first visited after Low was pinned, is announced on Low — which is the pin, not Opus.
-    answers.set('agents.offer', offer(claudeOn('fable', 'high')))
-    await offerAgent('lyra', 'claude')
-    answers.set('agents.offerSet', offer(claudeOn('fable', 'low')))
-    await setOffered('lyra', 'claude', 'effort', 'low')
-    answers.set('agents.offerSet', offer(claudeOn('opus', 'low')))
-    await setOffered('lyra', 'claude', 'model', 'opus')
-    expect(homeDefault('lyra', 'opus')).toBeNull()
-
-    // A Session made from that Home starts pinned: its first announcement is the pin the engine
-    // carried over, and it teaches nothing either.
-    carryModelDefaults('lyra', 'claude', 'session-11')
-    answers.set('agents.options', { options: claudeOn('sonnet', 'low') })
-    await readOptions('session-11')
-    expect(sessionDefault('session-11', 'sonnet')).toBeNull()
-    expect(sessionDefault('session-11', 'fable')).toBe('high')
-  })
-
-  test('A model visited before pinning keeps its default after pinning', async () => {
-    answers.set('agents.options', { options: claudeOn('fable', 'high') })
-    await readOptions('session-12')
-    answers.set('agents.setOption', {})
-    answers.set('agents.options', { options: claudeOn('opus', 'xhigh') })
-    await chooseOption('session-12', 'model', 'opus')
-
-    // Max is pinned on Opus, and Fable is announced on Max when it comes back: Fable keeps High.
-    answers.set('agents.options', { options: claudeOn('opus', 'max') })
-    await chooseOption('session-12', 'effort', 'max')
-    answers.set('agents.options', { options: claudeOn('fable', 'max') })
-    await chooseOption('session-12', 'model', 'fable')
-    expect(sessionDefault('session-12', 'fable')).toBe('high')
-    expect(sessionDefault('session-12', 'opus')).toBe('xhigh')
+  test('No bar is drawn where the agent recommends no effort', () => {
+    expect(effortDefaultOf(claudeOn('opus', 'xhigh'))).toBeNull()
+    // Nor on a model that announces no effort at all.
+    expect(effortDefaultOf(claudeOn('haiku', null))).toBeNull()
   })
 
   test('an option of a category the menu does not know is skipped', () => {
@@ -645,5 +640,151 @@ describe('La règle du curseur marque le défaut du modèle', () => {
     expect(modeStage(announced)?.optionId).toBe('mode')
     // Alone, it is none of the three: no stage, so no row in the menu.
     expect([modelStage([fast]), effortStage([fast]), modeStage([fast])]).toEqual([null, null, null])
+  })
+})
+
+/** What Claude recommends on each model: Haiku announces no effort, Sonnet advises none. */
+const ADVISED: ReadonlyMap<string, string | null> = new Map([
+  ['fable', 'medium'],
+  ['opus', 'high'],
+  ['sonnet', null],
+])
+
+/**
+ * An engine that answers like Claude Code: a model change keeps the effort its settings put it
+ * on, Xhigh here, and each model announces its own recommendation. Both the Session's channels
+ * and the Home's answer from it, and every question is still written down in `asked`.
+ */
+function claudeEngine(): void {
+  let model = 'fable'
+  let effort = 'xhigh'
+  const announced = (): ConfigOption[] =>
+    claudeOn(model, model === 'haiku' ? null : effort, ADVISED.get(model) ?? null)
+  const hemera = Reflect.get(Reflect.get(globalThis, 'window'), 'hemera')
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- stands in for the preload's bridge, whose job is to carry an argument it never reads
+  Reflect.set(hemera, 'invoke', async (name: string, argument: unknown) => {
+    asked.push({ name, argument })
+    const set = Reflect.get(Object(argument), 'optionId')
+    const value = Reflect.get(Object(argument), 'value')
+    if (set === 'model') model = String(value)
+    if (set === 'effort') effort = String(value)
+    if (name === 'agents.options') return await Promise.resolve({ options: announced() })
+    if (name === 'agents.offer' || name === 'agents.offerSet') {
+      return await Promise.resolve(offer(announced()))
+    }
+    return await Promise.resolve({})
+  })
+}
+
+/** The options set, in order, as `[optionId, value]`. */
+function setsOf(): [unknown, unknown][] {
+  return asked
+    .filter((one) => one.name === 'agents.setOption' || one.name === 'agents.offerSet')
+    .map((one) => [
+      Reflect.get(Object(one.argument), 'optionId'),
+      Reflect.get(Object(one.argument), 'value'),
+    ])
+}
+
+describe('A new model lands the effort on its recommended level', () => {
+  test('A model change lands the effort on the recommended level while nothing is chosen', async () => {
+    claudeEngine()
+    await readOptions('session-21')
+
+    await chooseOption('session-21', 'model', 'opus')
+    // The agent stayed on Xhigh; Hemera put it on the level Opus recommends.
+    expect(setsOf()).toEqual([
+      ['model', 'opus'],
+      ['effort', 'high'],
+    ])
+    expect(effortStage(optionsOf('session-21'))?.current).toBe('high')
+
+    // A model that recommends no level, or has no effort at all, leaves the effort alone.
+    await chooseOption('session-21', 'model', 'sonnet')
+    await chooseOption('session-21', 'model', 'haiku')
+    expect(setsOf().slice(2)).toEqual([
+      ['model', 'sonnet'],
+      ['model', 'haiku'],
+    ])
+
+    // And the Home's composer follows the same rule before any Session holds the agent.
+    asked = []
+    await offerAgent('orion', 'claude')
+    await setOffered('orion', 'claude', 'model', 'fable')
+    expect(setsOf()).toEqual([
+      ['model', 'fable'],
+      ['effort', 'medium'],
+    ])
+    expect(effortStage(offeringOf('orion', 'claude').options)?.current).toBe('medium')
+  })
+
+  test('A chosen effort survives a model change', async () => {
+    claudeEngine()
+    await readOptions('session-22')
+
+    await chooseOption('session-22', 'effort', 'low')
+    await chooseOption('session-22', 'model', 'opus')
+    await chooseOption('session-22', 'model', 'fable')
+    // Nothing but what was asked for: Low stays across both models.
+    expect(setsOf()).toEqual([
+      ['effort', 'low'],
+      ['model', 'opus'],
+      ['model', 'fable'],
+    ])
+    expect(effortStage(optionsOf('session-22'))?.current).toBe('low')
+
+    // The Home's composer keeps a chosen effort the same way.
+    asked = []
+    await offerAgent('lyra', 'claude')
+    await setOffered('lyra', 'claude', 'effort', 'max')
+    await setOffered('lyra', 'claude', 'model', 'opus')
+    expect(setsOf()).toEqual([
+      ['effort', 'max'],
+      ['model', 'opus'],
+    ])
+    expect(effortStage(offeringOf('lyra', 'claude').options)?.current).toBe('max')
+  })
+})
+
+describe('The agent starts the app and the user opens it', () => {
+  /** A run of a command, as the thread holds its entry. */
+  function aRun(id: string, name: string, kind: 'app' | 'check', state: string): SessionEntry {
+    return {
+      ...reported(id, 'command_run', name, state, null),
+      role: 'hemera',
+      payload: JSON.stringify({
+        runId: `run-${id}`,
+        name,
+        line: `pnpm ${name}`,
+        kind,
+        state,
+        cwd: '/home/ana/atlas',
+        url: null,
+        exitCode: null,
+        oneOff: false,
+      }),
+    }
+  }
+
+  test('a check Hemera is running for the turn is what the row names', () => {
+    const said = entry('e1', 'user', 'Check it')
+    const call = reported('e2', 'tool_call', 'mcp__hemera__commands_run', 'in_progress')
+    const check = aRun('e3', 'check', 'check', 'running')
+
+    expect(activityOf([said, call, check])).toEqual({ state: 'running', detail: 'Running check' })
+    // Once it has ended, the row goes back to what the turn is doing.
+    const ended = aRun('e3', 'check', 'check', 'exited')
+    expect(activityOf([said, call, ended])).toEqual({
+      state: 'running',
+      detail: 'mcp__hemera__commands_run',
+    })
+  })
+
+  test('an app left running is not what the turn is doing', () => {
+    const said = entry('e1', 'user', 'Start the app')
+    const app = aRun('e2', 'dev', 'app', 'running')
+    const answer = reported('e3', 'message', 'It is up.')
+
+    expect(activityOf([said, app, answer], 'e3').state).toBe('streaming')
   })
 })

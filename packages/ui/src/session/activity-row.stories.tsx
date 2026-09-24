@@ -17,7 +17,7 @@ const THOUGHT = `The join on invoice_lines is the cost, not the formatting. Stre
 it on its own, so the query goes first and the loop after.`
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Session/ActivityRow',
   component: ActivityRow,
   parameters: { layout: 'padded' },

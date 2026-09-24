@@ -18,13 +18,23 @@ import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
+import { agentDirectoriesLayer } from './agents/bare.ts'
+import { heldWordsLayer } from './agents/held.ts'
+import { AgentNotices } from './agents/notices.ts'
+import type { Notice } from './agents/notices.ts'
 import { clockLayer, poolLayer } from './agents/pool.ts'
-import { AgentNotices, runtimeLayer } from './agents/runtime.ts'
-import type { AgentRuntime, Notice } from './agents/runtime.ts'
+import { runtimeLayer } from './agents/runtime.ts'
+import type { AgentRuntime } from './agents/runtime.ts'
 import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
+import { type Commands, commandsLayer } from './commands/service.ts'
+import { type Context, contextLayer } from './context/service.ts'
+import { toolAccessLayer } from './tools/access.ts'
+import { toolCatalogueLayer } from './tools/catalogue.ts'
+import { toolPermissionsLayer } from './tools/permissions.ts'
+import { toolServerLayer } from './tools/server.ts'
 import { openProfile } from './migrate.ts'
 import { journalLayer } from './journal.ts'
 import type { Journal } from './journal.ts'
@@ -51,6 +61,16 @@ export interface EngineStart {
   migrations: string
 }
 
+/** The name each change of a Session travels under, on the one channel the page listens on. */
+export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run'>> = {
+  permission_requested: 'permission',
+  turn_started: 'turn_start',
+  turn_ended: 'turn',
+  agent_died: 'agent',
+  session_fallback: 'agent',
+  context_delivered: 'delivery',
+}
+
 /**
  * The window, as the runtime's notices.
  *
@@ -60,14 +80,6 @@ export interface EngineStart {
  * reasons the runtime changes something map onto them here, in the one place that knows the wire.
  */
 function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.Layer<AgentNotices> {
-  const PUSHED: Record<Notice, EngineEventName> = {
-    permission_requested: 'permission',
-    turn_started: 'turn_start',
-    turn_ended: 'turn',
-    agent_died: 'agent',
-    session_fallback: 'agent',
-  }
-
   return Layer.succeed(AgentNotices, {
     wrote: (sessionId, entry) => {
       try {
@@ -84,6 +96,13 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
         port.postMessage({ event, sessionId, entry: null })
       } catch (died) {
         log(`pushing ${event} failed: ${named(died)}`)
+      }
+    },
+    ran: (sessionId, run) => {
+      try {
+        port.postMessage({ event: 'run', sessionId, run })
+      } catch (died) {
+        log(`pushing a run failed: ${named(died)}`)
       }
     },
   })
@@ -107,6 +126,8 @@ type EngineServices =
   | AgentRuntime
   | Discovery
   | Agents
+  | Commands
+  | Context
   | Database
   | SqliteClient
 
@@ -116,16 +137,20 @@ function servicesOf(
   log: (line: string) => void,
 ): Layer.Layer<EngineServices> {
   const channel = channelSchema.parse(start.channel)
+  // The engine's diagnostic log, which a child's `stderr` and a write dropped at the quit go to.
+  const diagnostic = Layer.succeed(StderrSink, {
+    write: (line: string) => Effect.sync(() => log(line)),
+  })
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very
   // same ones: `provideMerge` hands them up rather than hiding them.
-  const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer).pipe(Layer.provide(diagnostic))
   // The machine the agents are looked for on, the processes they are started as, where their
   // `stderr` goes, and the window that hears about all of it: everything the runtime needs that
   // is not a row.
   const agents = Layer.mergeAll(
     machineEnvironmentLayer,
     hostProcessesLayer,
-    Layer.succeed(StderrSink, { write: (line: string) => Effect.sync(() => log(line)) }),
+    diagnostic,
     noticesTo(port, log),
   )
   // What the Agents section of the settings asks about: the three agents this machine has, and
@@ -136,6 +161,28 @@ function servicesOf(
   const discovery = discoveryLayer.pipe(Layer.provide(rows), Layer.provide(agents))
   const sources = Layer.mergeAll(registryLayer, updaterLayer).pipe(Layer.provide(agents))
   const listed = agentsLayer.pipe(Layer.provide(discovery), Layer.provide(sources))
+  // The processes a command becomes and the processes an agent is are started by the same
+  // supervisor, built once: a quit closes one scope and every tree of both goes with it (D5-04).
+  const processes = processSupervisorLayer.pipe(Layer.provide(agents))
+  // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
+  // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
+  // rather than minting a second one, and a token of one book means nothing to the other.
+  const tools = toolServerLayer.pipe(
+    Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(toolAccessLayer),
+    Layer.provideMerge(toolPermissionsLayer),
+    Layer.provideMerge(commandsLayer),
+    Layer.provide(rows),
+    Layer.provide(processes),
+    Layer.provide(agents),
+    // What an agent holds in memory, written before a call or a run is: the runtime hands its
+    // flush to this very instance, which is why the same layer is given to both.
+    Layer.provide(heldWordsLayer),
+  )
+  // What a Session is provided with, and the book of which agents are live (D6-07, D5-05).
+  const provisions = Layer.mergeAll(contextLayer.pipe(Layer.provide(rows)), poolLayer).pipe(
+    Layer.provide(clockLayer),
+  )
 
   return Layer.mergeAll(
     preferencesLayer,
@@ -151,11 +198,17 @@ function servicesOf(
       // What each Project's composer was left on: the runtime seeds the Home's choices from it
       // at start and writes them back as they are made (D5-17).
       Layer.provide(preferencesLayer),
-      Layer.provide(processSupervisorLayer),
-      // The book of what is running, on the engine's own clock: it is what closes the agent a
-      // Home's composer started once nobody is looking at that composer any more (D5-05).
-      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
+      // Handed up rather than hidden: the Commands panel, the Project settings and the Context
+      // view ask this process for the very catalogue, runs and provisions the runtime lends.
+      Layer.provideMerge(tools),
+      // What a Session is provided with, and the book of what is running on the engine's own
+      // clock: it is what closes an agent nobody is talking to any more (D5-05).
+      Layer.provideMerge(provisions),
+      Layer.provide(processes),
       Layer.provide(agents),
+      Layer.provide(heldWordsLayer),
+      // A directory of Hemera's per agent, inside the data folder, where its bare means is written.
+      Layer.provide(agentDirectoriesLayer(start.directory)),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
 }

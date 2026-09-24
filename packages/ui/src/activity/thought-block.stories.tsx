@@ -12,7 +12,7 @@ import { ThoughtBlock } from './thought-block.tsx'
  * the forty lines have to cost the thread one.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Message/ThoughtBlock',
   component: ThoughtBlock,
   parameters: { layout: 'padded' },

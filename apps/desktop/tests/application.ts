@@ -16,13 +16,30 @@ import { Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
 import * as TestClock from 'effect/testing/TestClock'
 
-import type { SessionEntry } from '@hemera/core'
+import type { AgentProvider, SessionEntry } from '@hemera/core'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
-import { fakeSupervisor, type FakeAgent, type FakeStep } from '#engine/agents/fake.ts'
-import { StderrSink, type ProcessSupervisor } from '#engine/agents/supervisor.ts'
+import {
+  fakeSupervisor,
+  fakeSupervisorService,
+  type FakeAgent,
+  type FakeStep,
+} from '#engine/agents/fake.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { AgentNotices, CHUNK_FLUSH, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime, Notice } from '#engine/agents/runtime.ts'
+import {
+  type HostProcesses,
+  ProcessSupervisor,
+  type ProcessSupervisorService,
+  StderrSink,
+  hostProcessesLayer,
+  processSupervisorLayer,
+} from '#engine/agents/supervisor.ts'
+import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
+import { type Commands, commandsLayer } from '#engine/commands/service.ts'
+import { type Context as AgentContext, contextLayer } from '#engine/context/service.ts'
+import { type Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { preferencesLayer } from '#engine/preferences.ts'
 import type { Preferences } from '#engine/preferences.ts'
@@ -30,11 +47,16 @@ import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer, type ThreadWrite } from '#engine/sessions.ts'
 import { DatabaseError, databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
+import { toolAccessLayer } from '#engine/tools/access.ts'
+import type { ToolAccess } from '#engine/tools/access.ts'
+import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
+import { type ToolPermissions, toolPermissionsLayer } from '#engine/tools/permissions.ts'
+import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 
-const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
+export const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
 /** The version the shipped migrations are opened with, as the application opens them. */
-const VERSION = '0.4.0'
+export const VERSION = '0.4.0'
 
 /**
  * A machine that has every agent, signed in, at a path nothing has to be installed at.
@@ -52,6 +74,7 @@ export const machine = Layer.succeed(MachineEnvironment, {
     Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
   readVersion: () => Effect.succeed('1.0.0'),
   holds: () => Effect.succeed(true),
+  read: () => Effect.succeed(undefined),
 })
 
 /** One push the engine made, as the window would have received it. */
@@ -79,9 +102,26 @@ export function watching() {
       changed: (sessionId: string, what: Notice) => {
         pushed.push({ sessionId, entry: null, what })
       },
+      // A run is pushed as the run it is and not as an entry: the suites that watch the window
+      // read the thread, and the Commands panel has suites of its own.
+      ran: () => undefined,
     }),
   }
 }
+
+/**
+ * The tools of an engine whose suite never calls one.
+ *
+ * The runtime is handed an address to configure its agent with and nothing listens on it: what
+ * these suites are about is the turn, and a real socket per test is a port taken for nothing. The
+ * tokens themselves are real — `toolAccessLayer` is the engine's own — because a Session that
+ * lets go of its agent lets go of its token, and that is a thing a suite reads.
+ */
+const server = Layer.succeed(ToolServer, {
+  origin: 'http://127.0.0.1:1',
+  forAgent: () => 'http://127.0.0.1:1/mcp',
+  gaveUp: () => Effect.void,
+})
 
 /**
  * A storage that fails when a suite says so, and the diagnostic the engine writes to.
@@ -146,10 +186,16 @@ export function application(
       | Sessions
       | Preferences
       | AgentRuntime
+      | ToolAccess
       | Database
       | SqliteClient
       | TestClock.TestClock
+      | HeldWords
+      | AgentContext
     > = runtimeLayer.pipe(
+      Layer.provideMerge(toolAccessLayer),
+      Layer.provideMerge(contextLayer),
+      Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer)),
       Layer.provideMerge(
         Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
           Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
@@ -163,6 +209,8 @@ export function application(
       // idle minutes are a `TestClock.adjust` here rather than five minutes of waiting (D5-05).
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(TestClock.layer()),
+      Layer.provideMerge(heldWordsLayer),
+      Layer.provide(agentDirectoriesLayer(dataFolder)),
     )
     return <A, E>(
       program: Effect.Effect<
@@ -172,22 +220,27 @@ export function application(
         | Sessions
         | Preferences
         | AgentRuntime
+        | ToolAccess
         | Database
         | SqliteClient
         | TestClock.TestClock
+        | HeldWords
+        | AgentContext
         | Scope.Scope
       >,
     ) =>
       Effect.runPromise(
-        Effect.scoped(
-          Effect.provide(
+        // The program's scope closes inside the services': what it holds — the agents, the fibers
+        // draining them, their death watchers — ends before the database closes, never after.
+        Effect.provide(
+          Effect.scoped(
             Effect.gen(function* () {
               mkdirSync(dataFolder, { recursive: true })
               yield* openProfile(dataFolder, SHIPPED, VERSION)
               return yield* program
             }),
-            services,
           ),
+          services,
         ),
       )
   }
@@ -306,3 +359,153 @@ export function gated(after: number) {
 
 /** Joins a fiber the way a suite does when it only wants the turn to be over. */
 export const joined = <A, E>(fiber: Fiber.Fiber<A, E>) => Fiber.join(fiber)
+
+/** Everything a suite of the tools reads, beside what `application` hands it. */
+export type ToolEngine =
+  | Projects
+  | Sessions
+  | Preferences
+  | AgentRuntime
+  | ToolAccess
+  | ToolServer
+  | ToolPermissions
+  | Commands
+  | AgentContext
+  | Journal
+  | Database
+  | SqliteClient
+  | HeldWords
+
+/**
+ * One supervisor for an agent that is the fake and commands that are real (D5-04, D6-11, D6-12).
+ *
+ * The agent is the one thing started as a script or with `acp` — the two ways an adapter starts
+ * one — and everything else is a line of the Project's catalogue or of the agent's, started for
+ * real on this machine: a run that says it ended has ended, and a tree that says it was stopped
+ * was stopped.
+ */
+export const besideTheAgent = (
+  agents: readonly FakeAgent[],
+): Layer.Layer<ProcessSupervisor, never, HostProcesses | StderrSink> =>
+  Layer.effect(
+    ProcessSupervisor,
+    Effect.gen(function* () {
+      const real = yield* ProcessSupervisor
+      // Each start is handed the next agent, and the last one stays: a fake that was stopped is
+      // dead, so a suite about two Sessions hands over two.
+      let started = 0
+      const fake = fakeSupervisorService(() => {
+        const next = agents[Math.min(started, agents.length - 1)]
+        started += 1
+        if (next === undefined) throw new Error('the suite handed over no agent')
+        return next
+      })
+      return {
+        start: (command, args, options) =>
+          options.script === true || args[0] === 'acp'
+            ? fake.start(command, args, options)
+            : real.start(command, args, options),
+      } satisfies ProcessSupervisorService
+    }),
+  ).pipe(Layer.provide(processSupervisorLayer))
+
+/**
+ * A run of the whole engine over one fake agent that reaches Hemera's tools (design D6-11).
+ *
+ * `application` hands its runtime an address nothing listens on; this one is the composition the
+ * engine process builds — the tool server on a port of the loopback interface, the catalogue
+ * behind it, the commands on the real supervisor, the context over the Workspace — so a scripted
+ * agent calls a tool over MCP with the token it was handed, and what a scenario reads is what the
+ * user and the agent would each read. The clock is the machine's: a command takes the time it
+ * takes, and the flush of an answer happens when it happens. `written` receives the engine's
+ * diagnostic lines, which is where a refused access is told.
+ */
+export function toolApplication(
+  dataFolder: string,
+  written: string[] = [],
+  environment: Layer.Layer<MachineEnvironment> = machine,
+  // A storage that never fails, unless the suite is about one that does; its diagnostic is not
+  // the one read here, which is `written`.
+  storage: ReturnType<typeof failing> = failing(),
+) {
+  return (agent: FakeAgent, ...others: readonly FakeAgent[]) => {
+    const lines = Layer.succeed(StderrSink, {
+      write: (line: string) =>
+        Effect.sync(() => {
+          written.push(line)
+        }),
+    })
+    const tools = toolServerLayer.pipe(
+      Layer.provideMerge(toolCatalogueLayer),
+      Layer.provideMerge(toolAccessLayer),
+      Layer.provideMerge(toolPermissionsLayer),
+      Layer.provideMerge(commandsLayer),
+    )
+    const services: Layer.Layer<ToolEngine> = runtimeLayer.pipe(
+      Layer.provideMerge(tools),
+      Layer.provideMerge(contextLayer),
+      Layer.provideMerge(journalLayer),
+      Layer.provideMerge(
+        Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
+          Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
+        ),
+      ),
+      Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
+      Layer.provide(
+        besideTheAgent([agent, ...others]).pipe(
+          Layer.provide(Layer.mergeAll(hostProcessesLayer, lines)),
+        ),
+      ),
+      Layer.provide(NoNotices),
+      Layer.provide(lines),
+      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
+      Layer.provideMerge(heldWordsLayer),
+      Layer.provide(agentDirectoriesLayer(dataFolder)),
+    )
+    return <A, E>(program: Effect.Effect<A, E, ToolEngine | Scope.Scope>) =>
+      Effect.runPromise(
+        // The program's scope closes inside the services': what it holds — the agents, the fibers
+        // draining them, their death watchers — ends before the database closes, never after.
+        Effect.provide(
+          Effect.scoped(
+            Effect.gen(function* () {
+              mkdirSync(dataFolder, { recursive: true })
+              yield* openProfile(dataFolder, SHIPPED, VERSION)
+              return yield* program
+            }),
+          ),
+          services,
+        ),
+      )
+  }
+}
+
+/** A Project on a real folder, and a Session in it on the agent named. */
+export const aSessionOn = (workingDirectory: string, provider: AgentProvider) =>
+  Effect.gen(function* () {
+    const projects = yield* Projects
+    const sessions = yield* Sessions
+    const project = yield* projects.create({
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: workingDirectory,
+    })
+    return yield* sessions.create(project.id, provider)
+  })
+
+/**
+ * Reads until what is waited for is true, in real time, and answers the last thing it read.
+ *
+ * A real process ends when the machine says so and a real server answers when it answers: what
+ * `heldInThread` does with the suite's clock, this does with the machine's. Bounded, so something
+ * that never happens fails a test rather than hanging it.
+ */
+export const until = <A, E, R>(read: Effect.Effect<A, E, R>, ready: (seen: A) => boolean) =>
+  Effect.gen(function* () {
+    let seen = yield* read
+    for (let tries = 0; tries < 200 && !ready(seen); tries += 1) {
+      yield* pause(25)
+      seen = yield* read
+    }
+    return seen
+  })

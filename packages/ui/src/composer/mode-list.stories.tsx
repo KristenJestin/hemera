@@ -20,7 +20,7 @@ import { ModeList } from './mode-list.tsx'
  * what it costs is five lines of the column it stands in, beside the models.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Composer/ModeList',
   component: ModeList,
   render: (args) => <SetMode {...args} render={(props) => <ModeList {...props} />} />,

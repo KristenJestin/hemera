@@ -23,9 +23,10 @@ import { AgentMark } from './agent-mark.tsx'
  * **Nothing jumps.** The panel's box is the same while the agent's options are being read and
  * once they have landed, and the same on both of its stages. It opens upwards out of the
  * foot of a window, so a panel that grew as its answer arrived would push past the top of the
- * screen and be flipped to the other side under the hand that opened it. While `loading`, the
- * list that is already there stays where it is and a small indicator sits in the header: a
- * panel that replaced its list with a sentence is a panel that changed under the reader.
+ * screen and be flipped to the other side under the hand that opened it. While `loading`, a
+ * list that is already there stays where it is: a panel that replaced its list with a sentence
+ * is a panel that changed under the reader. Where there is no list yet — an agent just picked,
+ * whose models are still being asked for — the room the list will take says so, in its middle.
  *
  * **A mode is read whole.** "Ask before edits" and "Bypass permissions" are the agent's own
  * words; five of them across a row truncates every one into a guess. They are a list, one per
@@ -79,9 +80,9 @@ export interface EffortChoice {
    * an agent that says nothing keeps its `Default` entry and marks nothing. A list holding a
    * `Default` beside the level it names would be offering the same thing twice.
    *
-   * It is not the model's default and the scale draws no rule for it: Claude advises one level
-   * for every model, where each model puts a Session on a level of its own — which is what the
-   * scale marks, handed over as `defaultId` (probe of 22 September 2026).
+   * It is the level the scale draws its rule at, handed over as `defaultId`: the level the agent
+   * announces it is on is whatever its own settings put every model on, and says nothing of what
+   * any of them defaults to (trial of 23 September 2026).
    */
   recommended?: boolean | undefined
 }
@@ -99,8 +100,8 @@ export interface EffortProps {
   effort: string | null
   onEffortChange: (id: string) => void
   /**
-   * The level the model on screen puts a Session on by itself: where the rule is drawn and where
-   * the scale opens while nothing is set. Null where nobody knows it — no rule, then.
+   * The level the agent recommends: where the rule is drawn and where the scale opens while
+   * nothing is set. Null where the agent recommends none — no rule, then.
    */
   defaultId?: string | null | undefined
   disabled?: boolean | undefined
@@ -128,7 +129,7 @@ export interface AgentModelMenuProps {
   efforts: EffortChoice[]
   effort: string | null
   onEffortChange: (id: string) => void
-  /** The level the chosen model defaults to, which the scale marks (`EffortProps.defaultId`). */
+  /** The level the agent recommends, which the scale marks (`EffortProps.defaultId`). */
   effortDefault?: string | null | undefined
   /** The modes of the chosen agent; empty when it announced none, and then no row at all. */
   modes: ModeChoice[]
@@ -162,7 +163,7 @@ const SEPARATOR = ' · '
  */
 export const ADVISED_SAID = 'recommended'
 
-/** What the level a model puts a Session on by itself is called, on the scale. */
+/** What the level the agent recommends is called, on the scale. */
 export const DEFAULT_SAID = 'default'
 
 /** The same word beside a level's name, which is how a scale writes it. */
@@ -170,7 +171,7 @@ export const DEFAULT_BESIDE = ` ${SEPARATOR.trim()} ${DEFAULT_SAID}`
 
 /**
  * What a scale says it stands on: the agent's word for the level, its sentence, and whether it
- * is the model's default — read as one phrase by whoever cannot see the rule.
+ * is the default — read as one phrase by whoever cannot see the rule.
  */
 export function levelSaid(level: EffortChoice | undefined, defaultId?: string | null): string {
   if (level === undefined) return 'Not set'
@@ -211,6 +212,9 @@ export const ITEM_ACTIVE = 'bg-accent text-accent-foreground'
 
 export const STATE = 'text-xs text-muted-foreground'
 
+/** Where a row's check stands, held open whether the row is chosen or not. */
+const CHECK_SLOT = 'flex size-icon-sm shrink-0 items-center justify-center'
+
 /** One provider's models, held together so the group is read as one. */
 const GROUP = 'flex flex-col gap-0.5'
 
@@ -226,7 +230,10 @@ export const SEARCH =
   'flex shrink-0 items-center gap-2 rounded-md border border-input bg-muted px-2'
 
 export const QUERY =
-  'min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground'
+  'min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50'
+
+/** What the room of the model list says while the models are being asked for. */
+const WAITING = 'Loading models…'
 
 /** What stands where a list would be when there is none: the room, kept, and a word in it. */
 export const INSTEAD =
@@ -400,6 +407,12 @@ export function AgentList({
  *
  * `aria-controls` and `aria-activedescendant` name an element by its id, and a name that
  * resolves to nothing is a broken reference: where nothing matches, the field points at nothing.
+ *
+ * While the models are being asked for and none has arrived yet (third review of #18), the room
+ * of the list holds the indicator and says what it is waiting on, in the middle of it rather than
+ * as a dot in a corner beside the name of the agent: the list is where the eye goes, and an empty
+ * list with a dot somewhere else read as an agent that has no model. The field is off meanwhile —
+ * there is nothing yet to search.
  */
 export function ModelPicker({
   models,
@@ -445,6 +458,7 @@ export function ModelPicker({
   // highlight on whatever happens to have moved into that place.
   const selected = Math.min(active, Math.max(matching.length - 1, 0))
   const listed = matching.length > 0
+  const waiting = loading && models.length === 0
 
   return (
     <>
@@ -456,6 +470,7 @@ export function ModelPicker({
         <input
           autoFocus={autoFocus}
           ref={fieldRef}
+          disabled={waiting}
           className={QUERY}
           type="text"
           role="combobox"
@@ -500,9 +515,19 @@ export function ModelPicker({
         />
       </div>
       {matching.length === 0 ? (
-        // The room the list had, kept: while the agent is being read there is nothing to say,
-        // and the sentence only stands where the reader's own query is what emptied it.
-        <div className={INSTEAD}>{loading ? null : <span>{empty}</span>}</div>
+        // The room the list had, kept: while there is no model yet it is what is being waited
+        // on, and the sentence only stands where the reader's own query is what emptied it.
+        <div className={INSTEAD}>
+          {waiting ? (
+            <>
+              <Loading size="md" label={WAITING} />
+              {/* Said once: the indicator already carries it to whatever reads the page. */}
+              <span aria-hidden="true">{WAITING}</span>
+            </>
+          ) : (
+            <span>{empty}</span>
+          )}
+        </div>
       ) : (
         <div className={LIST} id={list} role="listbox" aria-label={listLabel}>
           {sectionsOf(matching).map((section) => (
@@ -561,7 +586,9 @@ export function ModelGroup({
       {/* The model the agent itself advises, said beside it and quietly: it is the one the
           `Default` entry used to stand for, and it is a word about this row rather than a row. */}
       {one.recommended === true && <span className={STATE}>{ADVISED_SAID}</span>}
-      {one.id === chosen && <IconCheck size="sm" />}
+      {/* The check has its slot on every row, empty or not: a mark that only took room once
+          its row was chosen pushed the word before it aside under the hand. */}
+      <span className={CHECK_SLOT}>{one.id === chosen && <IconCheck size="sm" />}</span>
     </button>
   ))
 

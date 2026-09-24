@@ -196,6 +196,30 @@ export const collapse = { height: 0, filter: 'opacity(0)' } as const
 export const push: Transition = morph
 
 /**
+ * The `crossfade` kind: one content giving way to another in the same place, in opacity alone.
+ *
+ * For a box whose frame does not move while what it holds is replaced — the tabs of the details
+ * of a Session, where the dialog keeps its height and only the panel inside it changes. A slide
+ * there would say the new panel came from somewhere; it did not, it was behind its tab all
+ * along, and what has to be read is the same room showing something else.
+ *
+ * The panel that is left goes at once and the one that is chosen comes up from transparent on
+ * the theme's `fast` beat: short enough that the two read as one crossing, where a panel that
+ * took its time would read as a page loading. A tween and not a spring, because an opacity has
+ * no weight to carry and nothing to overshoot.
+ *
+ * The fade is a `filter`, for the reason `expand` gives: the accessibility check of the
+ * catalogue measures a text's contrast through an opacity and refuses what it reads mid-flight.
+ * `CROSSFADE` is where the content starts and where it lands; a reader asking for less movement
+ * is answered by `useTransition` with `instant`, which is the landing and no fade at all.
+ */
+export const crossfade: Transition = { duration: durations.fast, ease: easing }
+export const CROSSFADE = {
+  from: { filter: 'opacity(0)' },
+  to: { filter: 'opacity(1)' },
+} as const
+
+/**
  * The `ping` kind: a ring leaving what is running, over and over.
  *
  * A dot that is breathing says "this is the state you are waiting on" in opacity alone, which

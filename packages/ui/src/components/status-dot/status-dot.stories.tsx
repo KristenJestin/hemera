@@ -39,7 +39,7 @@ const TONES: Record<StatusTone, string> = {
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/StatusDot',
   component: StatusDot,
   parameters: { layout: 'centered' },
@@ -59,6 +59,10 @@ const meta = {
     label: {
       control: 'text',
       description: 'What a screen reader hears. Left out, the dot is hidden from it.',
+    },
+    title: {
+      control: 'text',
+      description: 'A detail beside the state, on hover and in the description: how long it took.',
     },
     className: { table: { disable: true } },
   },
@@ -186,5 +190,19 @@ export const ReducedMotion: Story = {
     } finally {
       await restore()
     }
+  },
+}
+
+/**
+ * A dot that says how long the work took (recette 4 of 23 September 2026): on hover, and to
+ * whatever reads the page after the state, and nowhere on the line itself.
+ */
+export const Timed: Story = {
+  args: { status: 'success', label: 'Done', title: '1301 ms' },
+  play: async ({ canvasElement }) => {
+    const dot = within(canvasElement).getByRole('img', { name: 'Done' })
+    await expect(dot).toHaveAttribute('title', '1301 ms')
+    await expect(dot).toHaveAccessibleDescription('1301 ms')
+    await expect(within(canvasElement).queryByText('1301 ms')).toBeNull()
   },
 }

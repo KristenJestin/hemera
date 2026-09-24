@@ -1,7 +1,7 @@
 import { cn } from 'cn'
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { Loading } from '../components/loading/loading.tsx'
@@ -69,8 +69,10 @@ import { ModeList } from './mode-list.tsx'
  * caret once the travelling is over — not while the panel is still crossing under it, which is
  * what typing into a field halfway across a box reads as.
  *
- * **While the agent is being read**, the list that is there stays there and the indicator sits
- * in the header beside the name of what is under it.
+ * **While the agent is being read**, a list that is there stays there. An agent just picked has
+ * none yet, and its models are waited on in the middle of the room they will take, the search
+ * field off until they arrive — and handed the caret then, if nothing else took it meanwhile.
+ * The agent stage keeps its indicator in its header, beside the name of what is under it.
  *
  * The types, and the two lists this is built out of, live in `agent-model-menu-shared.tsx`.
  */
@@ -153,6 +155,22 @@ export function AgentModelMenu({
   /** The stage the panel opens on, which is the one whose control is handed the caret. */
   const opened: Stage = fixed || agent !== null ? 'model' : 'agent'
 
+  /**
+   * Whether the models are still being asked for, with none to show yet: the field is off, so the
+   * caret it would have taken on arriving is handed to it when they land — unless the reader put
+   * it on another control of the same stage meanwhile.
+   */
+  const waiting = loading && models.length === 0
+  const waited = useRef(waiting)
+  const modelStage = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const was = waited.current
+    waited.current = waiting
+    if (!was || waiting || !open || shown !== 'model') return
+    if (modelStage.current?.contains(document.activeElement) === true) return
+    field.current?.focus()
+  }, [waiting])
+
   /** Closes the panel and hands the focus back to what opened it. */
   const close = () => {
     setOpen(false)
@@ -221,7 +239,7 @@ export function AgentModelMenu({
               </div>
             )}
 
-            <div className={BLOCK}>
+            <div ref={modelStage} className={BLOCK}>
               {/* The agent stays in sight while its models are read, and pressing it is the way
                   back: a panel that swapped its whole content with no way out would be a dead
                   end for anyone who picked the wrong agent. A Session's agent cannot be
@@ -230,7 +248,6 @@ export function AgentModelMenu({
                 <p className={HELD}>
                   {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
                   <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
-                  {loading && shown === 'model' && <Loading size="sm" label="Loading" />}
                 </p>
               ) : (
                 <div className="flex shrink-0 items-center gap-2">
@@ -244,7 +261,6 @@ export function AgentModelMenu({
                     <span className="min-w-0 flex-1 truncate">{chosen?.name ?? 'Agent'}</span>
                     <span className={STATE}>Change</span>
                   </button>
-                  {loading && shown === 'model' && <Loading size="sm" label="Loading" />}
                 </div>
               )}
 
@@ -253,7 +269,9 @@ export function AgentModelMenu({
                   <ModelPicker
                     models={models}
                     model={model}
-                    loading={loading}
+                    // The wait is said on the stage being looked at, and only there: both stages
+                    // are on the rail at once, and one machine is not reported twice.
+                    loading={loading && shown === 'model'}
                     autoFocus={opened === 'model'}
                     fieldRef={field}
                     onChoose={(one) => onModelChange(one.id)}

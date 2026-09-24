@@ -59,7 +59,14 @@ export function updateCommandFor(
 
 /** What a registry answers with, once it has answered at all. */
 export interface AgentRegistryService {
-  /** The latest published version, or null when this tool publishes none for that agent. */
+  /**
+   * The latest published version, or null when the registry answered none.
+   *
+   * Asked whatever installed the agent: it is a read, and a command nothing here can place is
+   * still a command whose version can be compared with what was published. The installer only
+   * says which catalogue answers — Homebrew's for a formula, npm's for everything else — and it
+   * is the update, not this question, that it gates.
+   */
   readonly latest: (adapter: AgentAdapter, installer: InstallerTool) => Effect.Effect<string | null>
 }
 
@@ -149,14 +156,6 @@ function runCommand(command: string, args: readonly string[]): Promise<string> {
 /** The registry of the machine this application runs on, as the two catalogues it reads. */
 export const registryLayer = Layer.succeed(AgentRegistry, {
   latest: (adapter, installer) => {
-    if (installer === 'npm' || installer === 'pnpm' || installer === 'bun') {
-      return Effect.promise(() =>
-        readVersion(
-          npmAddress(adapter.package),
-          npmEntry.transform((entry) => entry.version),
-        ),
-      )
-    }
     if (installer === 'brew') {
       return Effect.promise(() =>
         readVersion(
@@ -165,7 +164,12 @@ export const registryLayer = Layer.succeed(AgentRegistry, {
         ),
       )
     }
-    return Effect.succeed(null)
+    return Effect.promise(() =>
+      readVersion(
+        npmAddress(adapter.package),
+        npmEntry.transform((entry) => entry.version),
+      ),
+    )
   },
 })
 

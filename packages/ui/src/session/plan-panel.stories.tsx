@@ -25,7 +25,7 @@ const PLANNED: PlanEntry[] = [
 const meta = {
   title: 'Blocks/Activity/PlanPanel',
   component: PlanPanel,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { entries: PLANNED },
   argTypes: {

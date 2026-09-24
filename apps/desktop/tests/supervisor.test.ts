@@ -446,6 +446,27 @@ describe('Standard error is handed to the sink and never swallowed', () => {
     expect(lines.some((line) => line.endsWith(': and something else'))).toBe(true)
   })
 
+  test('the same lines are handed to a reader that asked for them', async () => {
+    const sink = sinkOf()
+    const writesOnStderr = script(WRITES_ON_STDERR)
+    const read: string[] = []
+
+    await opened(sink)(
+      Effect.gen(function* () {
+        const child = yield* starting(process.execPath, [writesOnStderr], {})
+        child.onStderr((line) => read.push(line))
+        yield* Effect.promise(() => untilTrue(() => read.length >= 2, 2_000))
+        yield* child.stop
+      }),
+    )
+
+    // What a command printed while failing is what its output has to show: the lines arrive
+    // whole, as lines, exactly as `onStdout` hands them over.
+    expect(read).toEqual(['a tool said something', 'and something else'])
+    // And the diagnostic still has them: a reader is one more ear and never a redirection.
+    expect(said(sink).some((line) => line.endsWith(': a tool said something'))).toBe(true)
+  })
+
   test('a command this machine does not have is refused, naming the command', async () => {
     const sink = sinkOf()
     const absent = join(folder, 'an-agent-that-is-not-here')

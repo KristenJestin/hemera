@@ -254,8 +254,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
     // Neither `DialogClose` nor `Kbd` is a component of its own: the first is the dialog's own
     // way of saying that a button of the caller's closes it, the second is a keystroke drawn as
     // keys, which every component that shows one borrows, and `CardRow` is a row of a card and
-    // nothing outside one.
+    // nothing outside one. `toolKindLabel` is no component either: it is the words a native
+    // call's line is read by, which a permission card about that call is headed with as well.
     const parts = [
+      'toolKindLabel',
       'DialogClose',
       'Kbd',
       'TooltipProvider',
@@ -328,7 +330,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // HEM-17: a turn with an agent, from the call it makes to the gate it stops at. The blocks
       // of a turn (its calls, its thoughts, its console, its changes), the permission card and
       // the line an answer leaves, what the agent advertises and the reader sets, the agents this
-      // machine has, and what a Session says about itself beside its thread.
+      // machine has, and what a Session says about itself in its details.
       'Disclosure',
       'ThoughtBlock',
       'ToolCallCard',
@@ -350,9 +352,18 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
-      'SessionSideColumn',
+      'SessionDetails',
       'StoppedTurn',
       'ResumeFallbackBanner',
+      // HEM-18: Hemera lends the agent its own tools. A call to one of them is a block of the
+      // thread with the mark that tells it from a native call, a command it runs is a block of
+      // its own, and the Session says what it runs and what it works from in its details.
+      'HemeraToolCall',
+      'CommandRun',
+      'CommandsPanel',
+      'ContextView',
+      'BareModeState',
+      'CommandList',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

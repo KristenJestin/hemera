@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Effect, Exit, Layer, Scope } from 'effect'
 
 import {
   type AgentProvider,
@@ -22,6 +22,7 @@ import {
   NoActiveProjectError,
   NoAgentError,
 } from '@hemera/core'
+import { StderrSink } from '#engine/agents/supervisor.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
@@ -45,12 +46,11 @@ afterEach(() => {
  * A data folder opened and migrated, with both services standing on it.
  *
  * Called twice, it is a second run of the application: the layers are built again and the
- * database is opened again, which is the closest a test gets to a restart.
+ * database is opened again, which is the closest a test gets to a restart. `written` receives the
+ * engine's diagnostic lines.
  */
-function opened() {
-  const services = Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
-    Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
-  )
+function opened(written: string[] = []) {
+  const services = servicesOn(written)
   return <A, E>(program: Effect.Effect<A, E, Projects | Sessions | SqliteClient>) =>
     Effect.runPromise(
       Effect.scoped(
@@ -63,6 +63,21 @@ function opened() {
         ),
       ),
     )
+}
+
+/** Both services on the suite's data folder, telling their diagnostic lines to `written`. */
+function servicesOn(written: string[]) {
+  return Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
+    Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
+    Layer.provide(
+      Layer.succeed(StderrSink, {
+        write: (line: string) =>
+          Effect.sync(() => {
+            written.push(line)
+          }),
+      }),
+    ),
+  )
 }
 
 /** One Project, created the way the Dialog creates one. */
@@ -828,5 +843,50 @@ describe('Le fil que l’agent écrit', () => {
       }),
     )
     expect(readBack?.nativeState).toBe('lost')
+  })
+})
+
+describe('A write after release is dropped and said, never thrown', () => {
+  test('nothing is written, one line names the entry and its Session, and the caller is refused', async () => {
+    const written: string[] = []
+
+    const late = await Effect.runPromise(
+      Effect.gen(function* () {
+        // The engine's own order: the services are built into a scope, and the quit closes it.
+        const scope = yield* Scope.make()
+        const context = yield* Layer.build(servicesOn(written)).pipe(Scope.provide(scope))
+        const { sessions, created } = yield* Effect.provide(
+          Effect.gen(function* () {
+            yield* openProfile(dataFolder, SHIPPED, '0.4.0')
+            const project = yield* atlas
+            return { sessions: yield* Sessions, created: yield* sessionIn(project.id) }
+          }),
+          context,
+        )
+        yield* Scope.close(scope, Exit.void)
+
+        // A fiber that outlived the quit writes the entry that closes its turn: a refusal its
+        // caller handles, where the driver would have thrown a defect nobody catches.
+        const refused = yield* Effect.flip(
+          sessions.write(created.id, {
+            role: 'hemera',
+            kind: 'turn',
+            body: 'The turn ended.',
+            payload: JSON.stringify({ stopReason: 'interrupted' }),
+          }),
+        )
+        return { sessionId: created.id, refused }
+      }),
+    )
+
+    expect(late.refused).toBeInstanceOf(DatabaseError)
+    expect(written).toEqual([`sessions: write after release dropped: turn ${late.sessionId}`])
+    const thread = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        return yield* sessions.read(late.sessionId)
+      }),
+    )
+    expect(thread.entries).toEqual([])
   })
 })

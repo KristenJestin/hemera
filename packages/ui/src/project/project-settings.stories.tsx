@@ -3,7 +3,11 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
 import type { ProjectDraft, RepositoryLine } from './model.ts'
-import { ProjectSettings, type ProjectSettingsProps } from './project-settings.tsx'
+import {
+  ProjectSettings,
+  type CommandLine,
+  type ProjectSettingsProps,
+} from './project-settings.tsx'
 
 /**
  * The settings of one Project, on fixtures (design D4-07).
@@ -24,11 +28,36 @@ const REPOSITORIES: RepositoryLine[] = [
   { path: './docs', branch: null, exists: true },
 ]
 
+/**
+ * The catalogue of a Project that has three commands (design D6-12).
+ *
+ * Named the way a reader names them, and each with the folder it runs in: `dev` in the front,
+ * `check` at the root, and a `seed` that is a utility — a line that does something and stops.
+ */
+const COMMANDS: CommandLine[] = [
+  { id: 'check', name: 'check', command: 'pnpm check', kind: 'check', folder: '.' },
+  { id: 'dev', name: 'dev', command: 'pnpm dev', kind: 'app', folder: './sources/front' },
+  { id: 'seed', name: 'seed', command: 'pnpm db:seed', kind: 'utility', folder: './sources/api' },
+]
+
+/**
+ * What the disk holds under the root: the declared paths, and folders that are not repositories.
+ *
+ * The page offers these when a repository is declared. A command's folder is offered among the
+ * declared repositories only: it runs in the Workspace root or in one of them (D6-12).
+ */
+const FOLDERS: RepositoryLine[] = [
+  ...REPOSITORIES,
+  { path: './scripts', branch: null, exists: true },
+]
+
 interface Extra {
   /** What saving answers: nothing, or the refusal the engine sent back. */
   saveRefusal?: string | null
   /** What adding a path answers: nothing, or the refusal the domain sent back. */
   addRefusal?: string | null
+  /** What adding a command answers: nothing, or the refusal the engine sent back. */
+  commandRefusal?: string | null
 }
 
 /**
@@ -42,13 +71,18 @@ function Controlled({
   repositories,
   saveRefusal = null,
   addRefusal = null,
+  commandRefusal = null,
   onSave,
   onAddRepository,
   onRemoveRepository,
+  onAddCommand,
+  onUpdateCommand,
+  onRemoveCommand,
   ...rest
 }: ProjectSettingsProps & Extra) {
   const [kept, setKept] = useState(project)
   const [lines, setLines] = useState(repositories)
+  const [catalogue, setCatalogue] = useState(rest.commands ?? [])
   return (
     <div className="mx-auto flex max-w-3xl flex-col p-6">
       <ProjectSettings
@@ -71,13 +105,30 @@ function Controlled({
           onRemoveRepository(path)
           setLines(lines.filter((one) => one.path !== path))
         }}
+        commands={catalogue}
+        onAddCommand={async (command) => {
+          await onAddCommand?.(command)
+          if (commandRefusal !== null) return commandRefusal
+          setCatalogue([...catalogue, command])
+          return null
+        }}
+        onUpdateCommand={async (command) => {
+          await onUpdateCommand?.(command)
+          if (commandRefusal !== null) return commandRefusal
+          setCatalogue(catalogue.map((one) => (one.name === command.name ? command : one)))
+          return null
+        }}
+        onRemoveCommand={(id) => {
+          onRemoveCommand?.(id)
+          setCatalogue(catalogue.filter((one) => one.id !== id))
+        }}
       />
     </div>
   )
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Project/Settings',
   component: ProjectSettings,
   render: (args) => <Controlled {...args} />,
@@ -86,9 +137,15 @@ const meta = {
     project: ATLAS,
     subtitle: 'Atlas · created 12 days ago',
     repositories: REPOSITORIES,
+    folders: FOLDERS,
     saveRefusal: null,
     addRefusal: null,
+    commandRefusal: null,
+    commands: COMMANDS,
     onSave: fn(async () => await Promise.resolve(null)),
+    onAddCommand: fn(async () => await Promise.resolve(null)),
+    onUpdateCommand: fn(async () => await Promise.resolve(null)),
+    onRemoveCommand: fn(),
     onBrowse: fn(async () => await Promise.resolve('/home/someone/Projects/atlas-2')),
     onAddRepository: fn(async () => await Promise.resolve(null)),
     onRemoveRepository: fn(),
@@ -98,6 +155,10 @@ const meta = {
     project: { control: 'object', description: 'What the Project is right now.' },
     subtitle: { control: 'text', description: 'A line under the title of the page.' },
     repositories: { control: 'object', description: 'The declared paths and what the disk says.' },
+    folders: {
+      control: 'object',
+      description: 'The folders of the Workspace, offered to fill in.',
+    },
     saveRefusal: {
       control: 'text',
       description: 'What saving answers; null accepts the change.',
@@ -106,7 +167,15 @@ const meta = {
       control: 'text',
       description: 'What adding a path answers; null accepts it.',
     },
+    commands: { control: 'object', description: 'The commands this Project may run.' },
+    commandRefusal: {
+      control: 'text',
+      description: 'What adding a command answers; null accepts it.',
+    },
     onSave: { action: 'saved' },
+    onAddCommand: { action: 'command added' },
+    onUpdateCommand: { action: 'command updated' },
+    onRemoveCommand: { action: 'command removed' },
     onBrowse: { action: 'folder picked' },
     onAddRepository: { action: 'repository added' },
     onRemoveRepository: { action: 'repository removed' },
@@ -213,7 +282,12 @@ export const PathOutsideTheRoot: Story = {
     await waitFor(() => {
       expect(canvas.getByText(/is absolute/)).toHaveStyle({ opacity: '1' })
     })
-    expect(canvas.getAllByRole('listitem')).toHaveLength(REPOSITORIES.length)
+    // The page holds two lists now, and the same path can be read in both: what is counted here
+    // is the rows of declared paths, which the Repositories card draws before the Commands card.
+    // SAFETY: the first reading of the path is that card's row, so the `<ul>` above it is the
+    // list; the count below fails loudly if it ever is not.
+    const paths = canvas.getAllByText('./sources/api')[0]?.closest('ul') as HTMLElement
+    expect(within(paths).getAllByRole('listitem')).toHaveLength(REPOSITORIES.length)
     expect(canvas.getByRole('textbox', { name: 'Add a path' })).toHaveValue('/tmp/x')
   },
 }
@@ -255,5 +329,132 @@ export const Archiving: Story = {
 
     await userEvent.click(within(asking).getByRole('button', { name: 'Archive it' }))
     expect(args.onArchive).toHaveBeenCalled()
+  },
+}
+
+/** Scenario « Catalogue du projet » of `specs/agent-tools/spec.md`: what a Session may run. */
+export const CommandCatalogue: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onRemoveCommand?.mockClear()
+    const canvas = within(canvasElement)
+
+    expect(canvas.getByText('Commands')).toBeInTheDocument()
+    // The name is what the agent asks for; the line is what runs, and it is shown as written.
+    expect(canvas.getByText('pnpm check')).toBeInTheDocument()
+    // The folder is read on the command's own row, and the same path is a declared repository:
+    // both are true, and both are shown.
+    expect(canvas.getAllByText('./sources/front')).toHaveLength(2)
+    // A command in the root says so in words: a dot is not a folder a reader recognises.
+    expect(canvas.getByText('Workspace root')).toBeInTheDocument()
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Remove seed' }))
+    await waitFor(() => {
+      expect(canvas.queryByText('pnpm db:seed')).toBeNull()
+    })
+    expect(args.onRemoveCommand).toHaveBeenCalledWith('seed')
+  },
+}
+
+/**
+ * Scenario « Catalogue vide » of `specs/agent-tools/spec.md`: no command, and the page says why
+ * the agent's `commands_run` would be refused.
+ */
+export const NoCommandDeclared: Story = {
+  args: { commands: [] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText(/No command is declared/)).toBeInTheDocument()
+    expect(canvas.queryByText('pnpm check')).toBeNull()
+  },
+}
+
+/** Adding one, and the refusal when the engine will not have it. */
+export const ACommandIsAdded: Story = {
+  args: { commandRefusal: 'a command named "check" is already declared' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Command name' }), 'check')
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Command line' }), 'pnpm check')
+    await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
+
+    // The refusal lands under the folder field, and what was typed stays: a refusal is not a
+    // reason to throw the line away.
+    await waitFor(() => {
+      expect(canvas.getByText(/already declared/)).toHaveStyle({ opacity: '1' })
+    })
+    expect(canvas.getByRole('textbox', { name: 'Command line' })).toHaveValue('pnpm check')
+  },
+}
+
+/**
+ * Scenario « Dossier du projet » of `specs/agent-tools/spec.md`: a command runs in a folder of
+ * the Project, and the folders it already holds are offered rather than asked for.
+ */
+export const CommandFolderIsARepository: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onAddCommand?.mockClear()
+    const canvas = within(canvasElement)
+
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Command name' }), 'test')
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Command line' }), 'pnpm test')
+    const folder = canvas.getByRole('textbox', { name: 'Command folder' })
+    await userEvent.type(folder, 'sou')
+
+    // The folders the Project already holds are offered rather than asked for, and the popover is
+    // drawn outside the story's canvas: it is read where it lands.
+    await waitFor(() => {
+      expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0)
+    })
+    const offered = document.querySelectorAll('[role="option"]')[0]
+    expect(offered?.textContent).toBe('./sources/api')
+    await userEvent.keyboard('{Enter}')
+    expect(folder).toHaveValue('./sources/api')
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
+    await waitFor(() => {
+      expect(args.onAddCommand).toHaveBeenCalledWith({
+        id: 'test',
+        name: 'test',
+        command: 'pnpm test',
+        kind: 'utility',
+        folder: './sources/api',
+      })
+    })
+  },
+}
+
+/**
+ * Scenario « The catalogue is edited and read »: a command of the catalogue is edited in place.
+ * Its name is what it is found by, so the name stays and the line, the kind and the folder are
+ * rewritten.
+ */
+export const ACommandIsEdited: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onUpdateCommand?.mockClear()
+    const canvas = within(canvasElement)
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Edit dev' }))
+    const name = canvas.getByRole('textbox', { name: 'Command name' })
+    expect(name).toHaveValue('dev')
+    expect(name).toBeDisabled()
+    const line = canvas.getByRole('textbox', { name: 'Command line' })
+    expect(line).toHaveValue('pnpm dev')
+    await userEvent.clear(line)
+    await userEvent.type(line, 'pnpm dev --host')
+    await userEvent.click(canvas.getByRole('button', { name: 'Save dev' }))
+
+    await waitFor(() => {
+      expect(args.onUpdateCommand).toHaveBeenCalledWith({
+        id: 'dev',
+        name: 'dev',
+        command: 'pnpm dev --host',
+        kind: 'app',
+        folder: './sources/front',
+      })
+    })
+    expect(canvas.getByText('pnpm dev --host')).toBeInTheDocument()
+    // The form is back to adding one.
+    expect(canvas.getByRole('button', { name: 'Add a command' })).toBeInTheDocument()
   },
 }

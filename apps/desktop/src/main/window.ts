@@ -14,8 +14,10 @@ import { join } from 'node:path'
 
 import type { ThemePreference } from '@hemera/ipc'
 import { type Theme, titleBarHeight, windowColors } from '@hemera/ui/window'
+import { shell } from 'electron/common'
 import { BrowserWindow, nativeTheme } from 'electron/main'
 
+import { guardNavigation } from './navigation-guard.ts'
 import { rendererSource } from './renderer-source.ts'
 
 /**
@@ -90,6 +92,8 @@ export function createWindow(main: string): BrowserWindow {
   nativeTheme.on('updated', () => {
     if (!window.isDestroyed()) paintWindow(window, systemTheme())
   })
+
+  guardNavigation(window.webContents, rendererSource(), shell.openExternal)
 
   return window
 }

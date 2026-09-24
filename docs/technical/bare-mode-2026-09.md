@@ -11,7 +11,7 @@ Research date 2026-09-21. Primary sources only (GitHub source, official docs, np
 | | Means to remove native tools | Exhaustive? | MCP tools kept? | ACP `fs`/`terminal` delegation? | Personal config controllable? |
 |---|---|---|---|---|---|
 | **Claude Code**<br>`@agentclientprotocol/claude-agent-acp` 0.79.0 | `session/new._meta.claudeCode.options.tools: []` (or legacy `_meta.disableBuiltInTools: true`) | **Yes** — documented "All built-ins are removed". Residue: adapter force-adds `disallowedTools:["AskUserQuestion"]` and `canUseTool` | **Yes** — "Claude can only use your MCP tools" | **No** — the ACP-backed MCP server was deleted 2026-02-18; built-ins run natively in the CLI subprocess | **Yes**: `options.settingSources: []` + `options.env` (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`). Managed/policy settings still load |
-| **Codex**<br>`@agentclientprotocol/codex-acp` 1.12.0 | `CODEX_CONFIG` JSON / `$CODEX_HOME/config.toml`: `[features] shell_tool=false`, `view_image=false`, … + `web_search="disabled"` + `[tools.*] enabled=false` | **No** — ~14 separate defaults to switch off, and `apply_patch` + the three `*_mcp_resource*` tools have no config switch | **Yes** — MCP registration is a separate path from the built-in registry | **No** — the adapter never calls `fs/*` or `terminal/*`; Codex does its own I/O | **Partly**: `CODEX_HOME` isolates the user dir, but project `.codex/config.toml` still layers in; `$CODEX_HOME/requirements.toml` is the only unoverridable floor |
+| **Codex**<br>`@agentclientprotocol/codex-acp` 1.12.0, patched by Hemera (`patches/`) | `session/new._meta.hemera` read by the patch: `environments: []` on `thread/start` and every `turn/start`, Hemera's tools as `dynamicTools`; plus `CODEX_CONFIG` (nested) turning off every tool a key reaches | **Yes, tried** on 23 September 2026 (Windows, codex-cli 0.154.0): the model's `ALL_TOOLS` held the eleven `hemera_*` tools and nothing else. Residue: code mode's `exec`/`wait`, a V8 isolate that reaches only those tools | **No MCP server at all**: Hemera's tools are Codex's own dynamic tools, and the patch answers their calls through Hemera's MCP server | **No** — the adapter never calls `fs/*` or `terminal/*` | **Partly**: `CODEX_HOME` stays the user's (the login lives there); their `config.toml` still loads under Hemera's overrides, their MCP servers are turned off by name |
 | **OpenCode**<br>`opencode acp` (anomalyco/opencode 1.18.31) | A custom primary agent with `permission: {"*":"deny", "<ns>_*":"allow"}`, set as `default_agent` | **Yes** for a catch-all deny — the definition is dropped from the provider request. A *granular* deny is call-time refusal only | **Only if re-allowed**: a blanket `"*":"deny"` kills MCP tools too; the namespace re-allow is mandatory | **Almost no** — `fs/write_text_file` used cosmetically for diff preview; `fs/read_text_file` and `terminal/*` never called | **Yes, with residue**: `XDG_CONFIG_HOME` + `OPENCODE_DISABLE_PROJECT_CONFIG` + `OPENCODE_CONFIG_CONTENT`. `$HOME/.opencode` and managed config survive |
 
 One conclusion across all three: **the ACP client capabilities are not a tool channel.** In September 2026 none of the three adapters routes its native tools through the client's `fs/*` or `terminal/*`. Hemera's tools must go through MCP.
@@ -107,6 +107,82 @@ The SDK's `toolAliases` (`sdk.d.ts` ~1535) is the documented bridge for prompts 
 }
 ```
 
+This is the spike's proposal, and Hemera does not send `CLAUDE_CONFIG_DIR`, although the
+issue's design (D6-02) listed it. The directory it names is where Claude Code keeps its login, as
+`.credentials.json` wherever a file holds it. `claude auth status` run with a directory of its
+own answers `loggedIn: false` on a machine that is signed in (checked on 23 September 2026,
+Windows, Claude Code 2.1.280). Copying or linking the credentials into a directory of Hemera's
+would mean handling a secret that is not Hemera's. What the move was for is done without it:
+`settingSources: []` reads none of the user's settings files, and `strictMcpConfig: true` loads
+no MCP server but Hemera's. What still loads, `~/.claude.json` and the managed and policy
+settings, is named as residue under the agent in Settings › Agents (D6-09). Hemera also sends
+`strictMcpConfig: true`, `MCP_TOOL_TIMEOUT` and `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` in `env`, both
+at ten minutes, and `allowedTools` (below).
+
+The two timeouts are not the same limit. `MCP_TOOL_TIMEOUT` bounds the whole call; Claude Code
+2.1 also aborts a call that sends no response and no progress for 300 s, and a Hemera call waiting
+on the human's permission sends nothing until they answer. The Linux trial of 23 September 2026
+(Claude Code 2.1.280, adapter 0.79.0) hit it with `MCP_TOOL_TIMEOUT` alone: a `commands_run` left
+waiting came back after exactly 300 s with `MCP server "hemera" tool "commands_run" sent no
+response or progress for 300s; aborting. If this server is configured in your MCP settings, set a
+per-server "timeout" (ms) to allow longer silent runs for just this server; otherwise set
+CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT (ms) globally (0 disables).` Hemera's server reaches the adapter
+as an ACP `http` entry of `session/new.mcpServers`, which has no per-server `timeout`, so
+`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` is the lever that lifts it.
+
+### The Workspace's instructions under bare mode (added in lot 2b)
+
+Each adapter declares `readsAgentsFile`: whether the agent, run bare, still reads the Workspace's
+`AGENTS.md` itself.
+
+- **Claude Code: no.** Claude Code reads `CLAUDE.md`, never `AGENTS.md`, and `settingSources: []`
+  loads no project memory at all. The trial of 23 September 2026 showed it: a rule in `AGENTS.md`
+  ("End every answer with KESTREL") was ignored by a fresh Session while the Context view listed
+  the file as read natively. Hemera now gives the file at the start of the Session, as a resource
+  of the first prompt behind its marker, and the Context view lists it as `provided`, reached at
+  `session_start`.
+- **OpenCode: no.** `session/instruction.ts` (`systemPaths`, v1.18.30) looks for the project's
+  `AGENTS.md` only when `OPENCODE_DISABLE_PROJECT_CONFIG` is unset, which bare mode sets; the global
+  `AGENTS.md` it reads lives under `XDG_CONFIG_HOME`, which bare mode points at Hemera's directory.
+  Given at the start, like Claude Code.
+- **Codex: yes.** `codex-rs/core/src/agents_md.rs` collects every `AGENTS.md` from the project root
+  down to the working directory, and neither the patch nor `CODEX_CONFIG` changes that. Recorded as
+  read natively and never sent.
+
+A change of the file during a Session goes to every agent the same way, as a delivery between two
+turns. A `CLAUDE.md` in the Workspace is never sent by Hemera: Claude Code does not read it either
+under `settingSources: []`, but the rule that a native instruction file is not injected twice
+stands, and Hemera's one file of instructions is `AGENTS.md`.
+
+### Permissions for Hemera's own tools (added in lot 2b)
+
+Emptying the built-ins does not stop Claude Code from asking about the MCP tools that remain.
+The adapter passes `permissionMode`, read from its own `SettingsManager`, which reads
+`~/.claude/settings.json` and the Workspace's `.claude/settings*.json` whatever `settingSources`
+says. It also passes `canUseTool`, which forwards anything the CLI does not allow on its own to
+ACP `session/request_permission`, with persistent "always allow" options (`dist/acp-agent.js`,
+`canUseTool` and the `options` object built for `query`). In `default` mode Claude Code asks
+before an MCP tool runs. Each Hemera call would then meet Claude's permission block before
+Hemera's own gate, and an "always allow" would be written into Claude's local settings. D6-05
+rules out both.
+
+Hemera does two things about it:
+
+- Its `_meta.claudeCode.options` carry `allowedTools: ["mcp__hemera__*"]`. The adapter spreads
+  `userProvidedOptions` into the SDK's `Options`, and `allowedTools` is the SDK's list of "tool
+  names that are auto-allowed without prompting" (`sdk.d.ts` ~1496). `mcp__hemera__*` is the
+  permission rule for every tool of the server named `hemera`.
+- The runtime answers a permission request about one of Hemera's tools itself, with the
+  agent's "allow once" option. The tool is read from `_meta.claudeCode.toolName` when the adapter
+  sends it, and from the title otherwise. Only a name under an agent's prefix counts
+  (`mcp__hemera__*`, `hemera_*`), so a native tool that happens to share a bare name is not
+  allowed this way. The call then goes through Hemera's own gate: inside the root on its own,
+  outside it through Hemera's block. Nothing is remembered on the agent's side.
+
+The second one also covers an agent or a version that ignores `allowedTools`. Whether Claude
+Code 2.1 still prompts with `allowedTools` set has not been run here yet; the phase-3 Windows
+trial checks it.
+
 ---
 
 ## 2. Codex over ACP
@@ -122,71 +198,77 @@ Architecture change that dominates everything: the adapter is no longer a Rust b
 | Model-visible tool | Registered at | Switch that removes it |
 |---|---|---|
 | `exec_command`, `write_stdin` | `spec_plan.rs:1032-1070` | `[features] shell_tool=false`, or model catalog `shell_type="disabled"`. `unified_exec=false` only downgrades to one-shot |
-| `apply_patch` | `:1197-1200` — `environment_mode.has_environment() && model_info.apply_patch_tool_type.is_some()` | **no config key**; model-catalog data only |
+| `apply_patch` | `:1197-1200` — `environment_mode.has_environment() && model_info.apply_patch_tool_type.is_some()` | **no config key**; `environments: []` (patch, below) |
 | `update_plan` | `:1101-1103` | `[tools.update_plan] enabled` (default **false**) |
 | `view_image` | `:1219-1230` | `[features] view_image=false` (default true) |
 | hosted `web_search` | `hosted_model_tool_specs` `:593-623` | top-level `web_search="disabled"` (default `cached`) |
 | standalone `web.run` | `:991-1000` | `[features] standalone_web_search` (default false) |
-| `list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource` | `:1085-1092`, gated on `mcp.has_servers()` | **no switch** — appear as soon as any MCP server exists |
+| `list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource` | `:1085-1092`, gated on `mcp.has_servers()` | **no switch** — absent when there is no MCP server: Hemera's tools as `dynamicTools` (patch, below) |
 | `request_user_input` | `:1111-1118` | `[tools.experimental_request_user_input] enabled=false` (default true) |
 | `request_permissions` | `:1157-1159` | `[features] request_permissions_tool=false` |
 | `new_context`, `get_context_remaining` | `:1161-1164` | `[features] token_budget` |
 | `clock.curr_time`, `clock.sleep` | `:1166-1192` | `[features] current_time_reminder`, `sleep_tool=false` (default true) |
 | `wait_for_environment` | `:1105-1109` | `[features] deferred_executor` |
-| multi-agent (`spawn_agent`, `send_message`, `wait_agent`, …) | `add_collaboration_tools` `:1241+` | `[features] multi_agent`, `multi_agent_v2` = false |
+| multi-agent (`spawn_agent`, `send_message`, `wait_agent`, …) | `add_collaboration_tools` `:1241+` | `[features] multi_agent`, `multi_agent_v2` = false, and `[agents] enabled = false`: a model catalogue that names a multi-agent version wins over the two features |
 | code-mode `exec`/`wait` | `register_code_mode_executors` `:786` | `[features] code_mode=false` |
 
 There is **no `read_file` built-in**: Codex reads files through `exec_command`. `ConfigShellToolType` has only `UnifiedExec` and `Disabled` (`codex-rs/protocol/src/openai_models.rs:314-318`), so the shell tool *is* removable — but it is on by default, as are `view_image`, `sleep_tool`, `request_user_input` and `web_search`.
 
-### Config surface
+### What no key reaches, and the two fields that do
 
-`[tools]` has exactly three keys (`codex-rs/config/src/config_toml.rs:650-658`): `web_search` (shape only — the on/off is the top-level `web_search` enum), `experimental_request_user_input`, `update_plan`. The old flat keys (`include_apply_patch_tool`, `include_plan_tool`, `experimental_use_exec_command_tool`, `tools.deep_research`) return zero hits in `openai/codex`. Everything else is `[features]`, a flattened `BTreeMap<String,bool>` of ~148 keys (`codex-rs/features/src/lib.rs:812-816`; specs at `:961-1000`).
+`[tools]` has exactly three keys (`codex-rs/config/src/config_toml.rs:650-658`): `web_search` (shape only — the on/off is the top-level `web_search` enum), `experimental_request_user_input`, `update_plan`. Everything else is `[features]`, a flattened `BTreeMap<String,bool>` (`codex-rs/features/src/lib.rs`). `sandbox_mode` and `approval_policy` remove no tool.
 
-`sandbox_mode` and `approval_policy` **remove no tool** — they gate execution and approval. A read-only sandbox still advertises `exec_command` to the model.
+Two families have no configuration key: `apply_patch` (gated on an environment and on the model catalogue's `apply_patch_tool_type`) and the three `*_mcp_resource*` tools (registered as soon as any MCP server exists, which an MCP-only bare mode requires). Nor can Hemera move `CODEX_HOME` to a directory of its own: `auth.json` lives there, and the keyring store is keyed by a hash of that path (`login/src/auth/storage.rs`), so a moved home is a signed-out Codex — `codex login status` said "Not logged in" with a `CODEX_HOME` of its own on a machine that is signed in (23 September 2026).
 
-```toml
-# $CODEX_HOME/config.toml — nearest thing to bare mode
-web_search = "disabled"
-[tools.update_plan]
-enabled = false
-[tools.experimental_request_user_input]
-enabled = false
-[features]
-shell_tool = false
-view_image = false
-sleep_tool = false
-current_time_reminder = false
-request_permissions_tool = false
-token_budget = false
-deferred_executor = false
-code_mode = false
-multi_agent = false
-multi_agent_v2 = false
-image_generation = false
-standalone_web_search = false
-tool_suggest = false
-```
+`codex app-server`'s `thread/start` has two fields behind `experimentalApi` that reach both families (`app-server-protocol` v2, `ThreadStartParams`):
 
-Irreducible residue: `apply_patch` (model-catalog gated; the documented escape is a custom `model_catalog_json` with `apply_patch_tool_type: null`, **not verified end-to-end**), and the three `*_mcp_resource*` tools, which appear precisely because bare mode requires MCP servers.
+- **`environments: []`** — "Empty disables environment access for turns that do not provide a turn override". The shell, `apply_patch` and `view_image` are all gated on an environment (`core/src/tools/spec_plan.rs`). `turn/start` takes the same field, "for this turn and subsequent turns"; `thread/resume` does not, and a resumed thread gets the default environment back unless each turn says none.
+- **`dynamicTools`** — function specs (`name`, `description`, `inputSchema`) Codex offers the model as its own. A call comes back to the client as the server request `item/tool/call` (`{threadId, turnId, callId, namespace, tool, arguments}`), answered with `{success, contentItems}`. With Hemera's tools there, no MCP server exists and the `*_mcp_resource*` tools are never registered. Codex keeps the specs in the thread's rollout and restores them on `thread/resume` (`core/src/session/mod.rs`, `get_dynamic_tools`).
 
-There **is** a "permits no tools" ceiling — `ToolPolicy { allowed_tools: Some(vec![]) }` (`codex-rs/ext/extension-api/src/tool_policy.rs:1-33`) — but it is only supplied through `StartThreadOptions::thread_extension_init` when embedding `codex-core` as a Rust library. It has no app-server, CLI or config call site, so **it is not reachable through ACP**. It would also filter MCP tools (`spec_plan.rs:349`).
+`codex-acp` 1.12.0 sets `experimentalApi: true` but forwards neither field, and does not handle `item/tool/call`.
 
-### Passing config, and isolation
+### Hemera's means: a patch of the adapter, and `CODEX_CONFIG`
 
-`CODEX_CONFIG` is a JSON object read at `src/index.ts:77-80`, merged into every `thread/start` (`src/CodexAcpClient.ts:743-751`) as `ThreadStartParams.config`, which the app-server treats as `cli_overrides` — the same channel as `-c key=value`. Both nested and dotted shapes work:
+**The patch** (`patches/@agentclientprotocol__codex-acp@1.12.0.patch`, applied by `pnpm install` through `pnpm-workspace.yaml` `patchedDependencies`; about 130 changed lines of `dist/index.js`). A `session/new`, `session/load` or `session/resume` whose `_meta` carries `{"hemera": {"bare": true, "toolServer": "hemera"}}`:
 
-```bash
-CODEX_CONFIG='{"web_search":"disabled","features":{"shell_tool":false,"view_image":false}}'
-CODEX_CONFIG='{"features.shell_tool":false,"web_search":"disabled"}'
-```
+- takes the HTTP server named `toolServer` out of `mcpServers`, asks it `tools/list` (a minimal MCP client over `node:http`, not `fetch`: a call may wait on the human past undici's five-minute timeouts) and hands the tools to `thread/start` as `dynamicTools` named `hemera_<tool>`, with `environments: []`;
+- sends `environments: []` on every `turn/start` of such a thread, which covers a resumed one;
+- turns off by name the MCP servers the user's configuration declares (`config/read`, then `mcp_servers.<name>.enabled = false`);
+- answers `item/tool/call` with the server's `tools/call`, the session's bearer header and `_meta: {"hemera/callId": <callId>}` — the id the adapter's own `tool_call` report carries, which Hemera's thread pairs the two by;
+- starts no title thread: the adapter otherwise names a session on an ephemeral thread of its own, started with the user's full configuration and an environment;
+- disables by path every skill `skills/list` returns for the cwd (`skills.config += { path, enabled = false }`, below).
 
-`CODEX_HOME` redirects the Codex state directory (`codex-rs/core/src/config/mod.rs:4819-4828`); the adapter passes `process.env` straight to the child, and its own tests use that pattern (`src/__tests__/CodexACPAgent/mcp-config-merge.test.ts:37-40`). **Caveat**: `CODEX_HOME` does not isolate project-level `<cwd>/.codex/config.toml`, which still layers in and can re-add `mcp_servers`. `$CODEX_HOME/requirements.toml` `[features]` (`codex-rs/config/src/config_requirements.rs:885-895`, enforced in `core/src/config/managed_features.rs:20-27`) is the only layer project config cannot relax. There is no `--config` flag on the adapter.
+**`CODEX_CONFIG`** on the adapter's process (`adapters/codex.ts`): `web_search = "disabled"`, `approval_policy = "on-request"`, `tools.update_plan` and `tools.experimental_request_user_input` off, `agents.enabled = false` (the model catalogue asks for the v2 sub-agent tools otherwise), `orchestrator.skills.enabled = false` and `orchestrator.mcp.enabled = false` (`skills__list`, `skills__read`), `skills.include_instructions = false` and `skills.bundled.enabled = false` (the skills index and the bundled skills, below), and `[features]` `shell_tool`, `unified_exec`, `view_image`, `sleep_tool`, `current_time_reminder`, `request_permissions_tool`, `token_budget`, `deferred_executor`, `code_mode`, `multi_agent`, `multi_agent_v2`, `image_generation`, `standalone_web_search`, `tool_suggest`, `apps`, `plugins`, `goals`, `browser_use`, `computer_use` all `false`.
 
-### MCP and ACP capabilities
+It must be **nested**, never dotted. The adapter adds a `features` table of its own to every thread (`forceGitRootTurnDiffPaths`), and dotted `features.x` keys beside it were lost: the first trial, dotted, still offered image generation and the goal tools.
 
-ACP `mcpServers` become an `mcp_servers` config override on `thread/start` (`CodexAcpClient.ts:753-771`); `stdio` and `http` are supported, `sse` and `acp` throw. Name collisions with config.toml silently favour the configured server unless `DISABLE_MCP_CONFIG_FILTERING=true`. MCP tools are registered on a path separate from `add_core_tool_sources` (`spec_plan.rs:150-156`), so they survive built-in gating. Wire names are `mcp__<server>__<tool>` (`core/src/tools/handlers/mcp.rs:100-108`); the `mcp__` prefix can be dropped per server via `[features.non_prefixed_mcp_tool_names]`. Per-server allowlists exist: `enabled_tools`, `disabled_tools`, `omit_tools_from`, `tools.<tool>.approval_mode` (`codex-rs/codex-mcp/src/tools.rs:63-95`).
+**Skills.** Codex 0.154 discovers skills whatever the configuration says: `$CODEX_HOME/skills`, `~/.agents/skills`, the bundled cache under `$CODEX_HOME`, a trusted project's `.codex/skills` and the repository's `.agents/skills` from the project root down to the working directory (`ext/skills/src/host_roots.rs`; no key names these roots). Left alone, the skills extension puts their index in the prompt as a developer message ("How to use skills" and the catalog), on the thread and on every turn, and a `$name` or a skill's path in the user's text injects that skill's whole `SKILL.md` as a user message. `orchestrator.skills.enabled = false` only removes the `skills__list` and `skills__read` tools. So:
 
-**The adapter never calls ACP `fs/*` or `terminal/*`.** Grep over `src/` finds those names only in test fixtures. `src/TerminalOutputMode.ts` is an outbound `_meta` streaming extension (`terminal_output` / `terminal_output_delta`), not the ACP terminal client capability. Codex does all file and process I/O itself, in the app-server child, under its own sandbox.
+- `skills.include_instructions = false` removes the index, and `skills.bundled.enabled = false` the bundled skills (both in `CODEX_CONFIG`);
+- the patch disables every skill `skills/list` returns, by its `SKILL.md` path, in the thread's `skills.config`: a mention selects only an enabled skill (`ext/skills/src/selection.rs`), so it injects nothing. Codex lists the files; Hemera reads none.
+
+`baseInstructions` and `developerInstructions` of `thread/start` would not have done it: the skills block is a fragment of its own, beside them. What is still not reachable is discovery itself, and a skill added during a Session is disabled only at the next open. The upstream ask is a `skills.enabled = false` (or `skills.roots = []`) key that skips discovery, or a `thread/start` flag that turns the skills extension off for a thread, as `environments: []` does for tools.
+
+`CODEX_HOME` is left where the user has it, so the login is theirs and Hemera never touches a file of theirs. The price: Codex still reads their `config.toml` (model, profiles, hooks) beneath Hemera's overrides, their global `AGENTS.md`, and the trusted project's `.codex/config.toml`, and still lists their skills. That is the agent's private part, said under it in Settings › Agents.
+
+### What stays
+
+- **Code mode.** The model catalogue decides it (`model_info.tool_mode` wins over `features.code_mode`, `core/src/tools/mod.rs`), so the model sees `exec` and `wait` at the top level. `exec` "runs raw JavaScript — no Node, no file system, no network access, no console" in a V8 isolate (`code-mode-protocol/src/description.rs`), and its `tools` object holds exactly the registered tools: here the eleven `hemera_*`. It adds no native capability.
+- **Two experimental fields.** `environments` and `dynamicTools` can change between Codex releases. Tried on **codex-cli 0.154.0** (the machine's own, through `CODEX_PATH`); a Codex upgrade needs the trial again.
+- **Not verified on Linux or macOS.** Nothing in the means depends on the platform, but the trial ran on Windows only.
+
+### The trial (23 September 2026, Windows, codex-cli 0.154.0, the user's signed-in Codex)
+
+Run with `pnpm dev --data-dir <fresh folder> --remote-debugging-port=9333`, driven over `window.hemera`, the adapter's JSON-RPC traffic logged with `APP_SERVER_LOGS`.
+
+- **Tools.** `thread/start` carried `environments: []`, the eleven `hemera_*` names as `dynamicTools`, the nested configuration and `mcp_servers: {"node_repl": {"enabled": false}}` (the user's one declared server); no MCP server started on the thread. Asked to run `exec` with `text(JSON.stringify(ALL_TOOLS.map(t => t.name)))`, the model answered the eleven `hemera_*` names and nothing else; its top-level function was `exec`. No `apply_patch`, no shell, no `*_mcp_resource*`. The same after a restart of the application, on the resumed thread.
+- **A read.** "Read notes.md …" gave one `item/tool/call` for `hemera_fs_read`, one `hemera_tool_call` entry "read notes.md (bytes 0-69 of 69)" whose `callId` is the adapter report's `toolCallId`, and the thread drew one Hemera block for it.
+- **A write outside the root.** `hemera_fs_write` on a path under `%TEMP%` wrote a `permission_request` ("fs_write asks to act outside the Workspace") and the window showed "Waiting for your permission". Refused, the call ended `failed` after 221 s of waiting, and no file was written.
+- **The login.** No `account/login` request; every `account/read` answered the user's ChatGPT account; the diagnostic line reads `agents: Codex started bare for Session … (Hemera's patch of the adapter: …); Hemera's MCP server handed at http://127.0.0.1:… as <digest>`.
+
+### ACP capabilities
+
+**The adapter never calls ACP `fs/*` or `terminal/*`.** Grep over `src/` finds those names only in test fixtures. `src/TerminalOutputMode.ts` is an outbound `_meta` streaming extension (`terminal_output` / `terminal_output_delta`), not the ACP terminal client capability. Codex does all file and process I/O itself, in the app-server child — which, bare, has no environment to do it in.
 
 ---
 
@@ -289,7 +371,23 @@ MCP is the only viable channel. One thing to watch: the **MCP-over-ACP** RFD (`d
 
 Only a live trial can settle these.
 
-**Claude Code**
+**Claude Code** — run bare by the Linux trial of 23 September 2026 (Arch Linux under Wayland,
+Claude Code 2.1.280 signed in, adapter `claude-agent-acp` 0.79.0, model `haiku`), qualified on
+Linux with the three fixes it brought.
+- Six scenarios passed, through Hemera's window: a read of `notes.md`; a request for its Bash tool,
+  answered with Hemera's tools alone (asked for its tool names, it gave the eleven `mcp__hemera__*`
+  and nothing else); `fs_write` inside the root without a question and outside it after an Allow;
+  a one-off `git status` refused; `AGENTS.md` changed while idle and delivered on a turn of its
+  own; a Stop while a question waited, which withdrew it. No permission of Claude Code's own stood
+  in front of Hemera's, the base reached it as its system prompt, and quitting left no `claude`
+  process behind. A second run through a symlinked root allowed a one-off `ls -la` and answered a
+  question after 330 s.
+- The three fixes: the idle timeout of §1 (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, which aborted a
+  silent call after 300 s); a question withdrawn when the agent reports the call it gave up on as
+  failed, where it stayed decidable for a call nobody waited on; a decided question drawn as
+  decided when a thread is read back, where it was drawn waiting with its buttons.
+- So the agent loop does run end-to-end with zero built-ins, on Linux. Not run on macOS; nothing
+  looked at by a human beyond the DOM and two screenshots.
 - Whether the `claude_code` system-prompt preset prunes its tool-describing sections when
   `tools: []` (the prompt is inside the bundled CLI binary). Docs are silent.
 - Whether the agent loop actually runs end-to-end with zero built-ins. The adapter's test
@@ -302,18 +400,22 @@ Only a live trial can settle these.
   "list the tools you have". Observe: the `SDKSystemMessage` init `tools: string[]` (enable
   `_meta.claudeCode.emitRawSDKMessages: true`), and whether the MCP tool is called.
 
-**Codex**
-- Whether a custom `model_catalog_json` with `apply_patch_tool_type: null` and
-  `shell_type: "disabled"` actually removes `apply_patch`. Untested end-to-end.
-- Whether `[features] shell_tool = false` survives the app-server path (all Rust citations are
-  `openai/codex@main`; the adapter pins `@openai/codex ^0.155.1`, which may lag).
-- Whether the three `*_mcp_resource*` tools can be suppressed at all when MCP servers exist.
-- **Trial**: spawn `npx @agentclientprotocol/codex-acp` with `CODEX_HOME=<tmp>` containing the
-  §2 `config.toml`, and `session/new` carrying one MCP server. Prompt "list every tool you can
-  call". Observe: whether `exec_command` is absent, whether `apply_patch` remains, whether
-  `mcp__hemera__*` is present.
+**Codex** — settled by the trial of 23 September 2026 (§2), on Windows and codex-cli 0.154.0 only.
+- Not run on Linux or macOS.
+- Not established: whether the two experimental `thread/start` fields keep their meaning in a later
+  Codex. Every upgrade of Codex or of the adapter needs the trial again, and an upgrade of the
+  adapter needs the patch rewritten against its `dist/index.js`.
 
-**OpenCode**
+**OpenCode** — qualified on Windows, **not qualified on Linux**: its adapter declares "not run on
+Linux yet: no signed-in OpenCode on the qualification machine", which the Agents section shows
+under it and a Session on it is refused with. Nothing in the means depends on the platform; the
+flag says where it ran bare, and it has not run on Linux. The Linux trial of 23 September 2026
+found OpenCode 1.17.13 not signed in, and its free tier refused ("OpenCode 1.18.0 or newer is
+required"); what it could check held: discovery, the refusal before any process, and the reads of
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` without a write. The flag is flipped
+after a run of the six scenarios with a signed-in OpenCode 1.18 or later. Worth a look then:
+1.17.13 announced `opencode-login` at `initialize` even with an `auth.json` present, and
+`isAuthenticated` reads any announced method as "not signed in".
 - Whether `XDG_CONFIG_HOME` really redirects `Global.Path.config` at runtime (it follows from
   the `xdg-basedir` import, but was not executed).
 - Whether an MCP server registered at runtime is torn down on `session/close` — `closeClient`

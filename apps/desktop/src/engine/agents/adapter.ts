@@ -27,6 +27,8 @@
 
 import { AGENT_PROVIDERS, type AgentProvider } from '@hemera/core'
 
+import type { BareMode } from './bare.ts'
+
 export { AGENT_PROVIDERS, type AgentProvider }
 
 /**
@@ -100,6 +102,36 @@ export interface AgentAdapter {
   readonly isAuthenticated: (
     methods: readonly { readonly id: string; readonly name?: string }[],
   ) => boolean
+  /**
+   * What running this agent bare means here, and whether it removes everything it ships.
+   *
+   * The platform is asked rather than read: the answer is declared per platform (D6-02), and a
+   * machine cannot try the other one's answer.
+   */
+  readonly bareMode: (platform: NodeJS.Platform) => BareMode
+  /**
+   * What of the user's own choices a bare Session keeps, for an agent whose means moves its
+   * configuration away (D6-09).
+   *
+   * An agent pointed at a directory of Hemera's no longer reads the user's own file, and with it
+   * goes the model they work with: the agent falls back on a default of its own, which may be
+   * one it refuses to serve outside its own interface. The files are read, never written, and
+   * `kept` takes out of them the settings that are a choice of the user's and nothing else —
+   * never a key, a token or a provider's options. An agent whose configuration stays where it
+   * was declares none.
+   */
+  readonly own?: OwnSettings
+}
+
+/** Where an agent's own settings are read from, and the ones a bare Session keeps (D6-09). */
+export interface OwnSettings {
+  /** The files to read, from the home and the environment of the machine they are read on. */
+  readonly files: (home: string, env: Environment) => readonly string[]
+  /**
+   * The settings kept, out of what those files hold: their texts in the order `files` named
+   * them, `undefined` for a file that is not there or could not be read.
+   */
+  readonly kept: (texts: readonly (string | undefined)[]) => Readonly<Record<string, string>>
 }
 
 /**

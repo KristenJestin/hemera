@@ -430,6 +430,12 @@
      stop says, so this is the one number the two of them are built from. */
   --spacing-timeline-mark: 1.25rem;
 
+  /* How tall a wide dialog is drawn, whatever it holds: the details of a Session change tab
+     inside it, and a dialog that took the height of each tab changed size under the hand that
+     switched them (third review of #18). A share of the window rather than a length, because it
+     is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
+  --spacing-dialog-wide: 70vh;
+
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);

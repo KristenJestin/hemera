@@ -72,11 +72,16 @@ export interface StatusDotProps extends VariantProps<typeof dotVariants> {
    * a second voice saying the same thing.
    */
   label?: string | undefined
+  /**
+   * What the dot says on hover, and what whatever reads the page hears after its label: how long
+   * the work took, say. A detail beside the state, never the state itself.
+   */
+  title?: string | undefined
   /** Where the dot sits; never how it looks. */
   className?: string | undefined
 }
 
-export function StatusDot({ status, size, label, className }: StatusDotProps): ReactNode {
+export function StatusDot({ status, size, label, title, className }: StatusDotProps): ReactNode {
   const transition = useTransition(pinging)
   // No ring where there is nothing to wait on, and none where the reader asked for less
   // movement: `useTransition` hands back `instant` then, and a ring repeating at no duration is
@@ -91,6 +96,8 @@ export function StatusDot({ status, size, label, className }: StatusDotProps): R
         role={label === undefined ? undefined : 'img'}
         aria-label={label}
         aria-hidden={label === undefined ? true : undefined}
+        // Named by its label, a title is what the dot is described by, and the hover says it too.
+        title={title}
         className={dotVariants({ status, size })}
       />
     </span>

@@ -9,7 +9,7 @@
  * before it ever reaches the engine.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -113,6 +113,27 @@ describe('Création sur un dossier vide', () => {
       }),
     )
     expect(entries).toEqual([])
+  })
+})
+
+describe('A Workspace is kept as the disk spells it', () => {
+  test('a root reached through a link, or a short name, is written in its canonical form', async () => {
+    const real = join(dataFolder, 'the-real-workspace')
+    mkdirSync(real)
+    // A junction on Windows, which needs no privilege; a directory link elsewhere. A DOS short
+    // name is the same case on a runner that has one: another spelling of one place.
+    const link = join(dataFolder, 'through-a-link')
+    symlinkSync(real, link, 'junction')
+
+    const project = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const made = yield* projects.create({ name: 'Linked', tone: 'primary', mainPath: link })
+        return yield* projects.moveMain(made.id, made.version, link)
+      }),
+    )
+
+    expect(project.mainPath).toBe(realpathSync.native(real))
   })
 })
 

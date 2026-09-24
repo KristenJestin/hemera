@@ -27,6 +27,7 @@ import {
   type ContentBlock,
   type ToolCallContent,
   type Cost,
+  type McpServer,
   type SessionNotification,
   type StopReason,
   type Usage,
@@ -34,9 +35,20 @@ import {
   type SessionConfigSelectOptions,
 } from '@agentclientprotocol/sdk'
 import { Data, Effect } from 'effect'
+import { DELIVERY_MARKER } from '@hemera/core'
 import { z } from 'zod'
 
 import { type AgentAdapter } from './adapter.ts'
+import type { ClaudeCodeMeta, CodexMeta } from './bare.ts'
+
+/**
+ * What a session is opened with on `_meta`, beside the servers: the options of the agents that
+ * read their bare mode there (D6-02). Carried by the three ways into a session alike.
+ */
+export type SessionMeta = ClaudeCodeMeta | CodexMeta
+
+/** Where Claude Code names the tool a permission is about, beside a title made for reading. */
+const CLAUDE_TOOL = z.object({ claudeCode: z.object({ toolName: z.string() }) })
 
 /** What went wrong while speaking the protocol, and at which step. */
 export class AgentProtocolError extends Data.TaggedError('AgentProtocolError')<{
@@ -237,6 +249,11 @@ export interface AgentOptionValue {
 export interface PermissionQuestion {
   readonly toolCallId: string
   readonly title: string
+  /**
+   * The tool the question is about, as the agent names it: Claude Code says it under
+   * `_meta.claudeCode.toolName`, and its title is only a title; the other agents' title is it.
+   */
+  readonly tool: string
   readonly options: readonly {
     readonly id: string
     readonly name: string
@@ -274,8 +291,18 @@ export interface AgentConnection {
     optionId: string,
     value: string,
   ) => Effect.Effect<readonly AgentOption[], AgentProtocolError>
-  /** Opens a session in that directory and answers the handle the agent gave it. */
-  readonly open: (workingDirectory: string) => Effect.Effect<string, AgentProtocolError>
+  /**
+   * Opens a session in that directory and answers the handle the agent gave it.
+   *
+   * The MCP servers are the caller's: Hemera hands over one, its own tools on a loopback address
+   * with the token of this Session in it, and the three ways into a session all carry it (D6-01).
+   * So does `meta`, for the agent that takes its bare mode from `_meta`.
+   */
+  readonly open: (
+    workingDirectory: string,
+    mcpServers: readonly McpServer[],
+    meta?: SessionMeta,
+  ) => Effect.Effect<string, AgentProtocolError>
   /**
    * Asks the agent to carry the session on as it stands, without sending its history back.
    *
@@ -285,6 +312,8 @@ export interface AgentConnection {
   readonly resume: (
     nativeSessionId: string,
     workingDirectory: string,
+    mcpServers: readonly McpServer[],
+    meta?: SessionMeta,
   ) => Effect.Effect<void, AgentProtocolError>
   /**
    * Asks the agent to stream the session's history back, so the thread can be matched to it.
@@ -295,9 +324,21 @@ export interface AgentConnection {
   readonly load: (
     nativeSessionId: string,
     workingDirectory: string,
+    mcpServers: readonly McpServer[],
+    meta?: SessionMeta,
   ) => Effect.Effect<void, AgentProtocolError>
-  /** Sends one turn and waits for the agent to be done with it. */
-  readonly prompt: (text: string) => Effect.Effect<PromptOutcome, AgentProtocolError>
+  /**
+   * Sends one turn and waits for the agent to be done with it.
+   *
+   * What Hemera provides goes in front of the text, as embedded resources behind its marker
+   * (D6-07, D6-08): the base on an agent with no system prompt to hand it through, a change of
+   * the instructions between two turns. A prompt of provisions alone, with an empty text, is a
+   * delivery — no word of the user's is in it.
+   */
+  readonly prompt: (
+    text: string,
+    provided?: readonly Provision[],
+  ) => Effect.Effect<PromptOutcome, AgentProtocolError>
   /** Asks the agent to stop what it is doing; its answer to the turn is `cancelled`. */
   readonly cancel: () => Effect.Effect<void, AgentProtocolError>
 }
@@ -311,6 +352,48 @@ export interface ConnectionOptions {
   readonly adapter: AgentAdapter
   readonly onEvent: (event: AgentEvent) => void
   readonly onPermission: (question: PermissionQuestion) => Promise<PermissionAnswer>
+}
+
+/** One text Hemera provides an agent, named by the address it is known by (D6-07). */
+export interface Provision {
+  readonly uri: string
+  readonly text: string
+  readonly mimeType: string
+}
+
+/**
+ * The blocks of one prompt: Hemera's marker and what it provides, then the user's text.
+ *
+ * A provision is an embedded resource on an agent that advertised `embeddedContext`, which the
+ * three do; on one that did not, it is the same text in a text block under its address, because
+ * a resource the agent said it cannot read is a provision that never arrived. The marker comes
+ * first either way, so what Hemera provided is never read as the user's words (D6-08).
+ */
+function blocksOf(text: string, provided: readonly Provision[], embeds: boolean): ContentBlock[] {
+  const blocks: ContentBlock[] = []
+  if (provided.length > 0) blocks.push({ type: 'text', text: DELIVERY_MARKER })
+  for (const one of provided) {
+    blocks.push(
+      embeds
+        ? { type: 'resource', resource: { uri: one.uri, mimeType: one.mimeType, text: one.text } }
+        : { type: 'text', text: `${one.uri}\n${one.text}` },
+    )
+  }
+  if (text !== '') blocks.push({ type: 'text', text })
+  return blocks
+}
+
+/**
+ * A request of the three ways into a session, with `_meta` when there is one to carry.
+ *
+ * Left out rather than sent empty: an agent that reads nothing there is not told anything.
+ */
+function withMeta<T extends object>(
+  request: T,
+  meta: SessionMeta | undefined,
+): T & { _meta?: SessionMeta } {
+  if (meta === undefined) return request
+  return { ...request, _meta: meta }
 }
 
 /** The text of a content block, or null when it carries something other than text. */
@@ -644,9 +727,12 @@ export function connect(
     const client: AcpClient = {
       // ACP's own contract: whatever the user answered, in the shape the protocol takes it in.
       requestPermission: async (request) => {
+        // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
+        const named = CLAUDE_TOOL.safeParse(request.toolCall._meta)
         const answer = await options.onPermission({
           toolCallId: request.toolCall.toolCallId,
           title: request.toolCall.title ?? '',
+          tool: named.success ? named.data.claudeCode.toolName : (request.toolCall.title ?? ''),
           options: request.options.map((option) => ({
             id: option.optionId,
             name: option.name,
@@ -685,6 +771,9 @@ export function connect(
       id: method.id,
       name: method.name,
     }))
+
+    // Whether a provision can be handed over as a resource, as the agent said at `initialize`.
+    const embeds = handshake.agentCapabilities?.promptCapabilities?.embeddedContext === true
 
     const named = (value: string, what: string): Effect.Effect<string, AgentProtocolError> =>
       sessionId === null
@@ -725,10 +814,13 @@ export function connect(
           return announced
         }),
 
-      open: (workingDirectory) =>
+      open: (workingDirectory, mcpServers, meta) =>
         Effect.gen(function* () {
           const opened = yield* Effect.tryPromise({
-            try: () => connection.newSession({ cwd: workingDirectory, mcpServers: [] }),
+            try: () =>
+              connection.newSession(
+                withMeta({ cwd: workingDirectory, mcpServers: [...mcpServers] }, meta),
+              ),
             catch: (cause) => new AgentProtocolError({ what: 'newSession', cause: String(cause) }),
           })
           sessionId = opened.sessionId
@@ -736,15 +828,20 @@ export function connect(
           return opened.sessionId
         }),
 
-      resume: (nativeSessionId, workingDirectory) =>
+      resume: (nativeSessionId, workingDirectory, mcpServers, meta) =>
         Effect.gen(function* () {
           const answered = yield* Effect.tryPromise({
             try: () =>
-              connection.resumeSession({
-                sessionId: nativeSessionId,
-                cwd: workingDirectory,
-                mcpServers: [],
-              }),
+              connection.resumeSession(
+                withMeta(
+                  {
+                    sessionId: nativeSessionId,
+                    cwd: workingDirectory,
+                    mcpServers: [...mcpServers],
+                  },
+                  meta,
+                ),
+              ),
             catch: (cause) =>
               new AgentProtocolError({ what: 'resumeSession', cause: String(cause) }),
           })
@@ -752,25 +849,30 @@ export function connect(
           announced = optionsOf(answered.configOptions)
         }),
 
-      load: (nativeSessionId, workingDirectory) =>
+      load: (nativeSessionId, workingDirectory, mcpServers, meta) =>
         Effect.gen(function* () {
           // Every chunk a load sends back is a replay: the flag is set for the whole call, so a
           // notification that arrives while the history is streaming is marked as what it is.
           replaying = true
           const answered = yield* Effect.tryPromise({
             try: () =>
-              connection.loadSession({
-                sessionId: nativeSessionId,
-                cwd: workingDirectory,
-                mcpServers: [],
-              }),
+              connection.loadSession(
+                withMeta(
+                  {
+                    sessionId: nativeSessionId,
+                    cwd: workingDirectory,
+                    mcpServers: [...mcpServers],
+                  },
+                  meta,
+                ),
+              ),
             catch: (cause) => new AgentProtocolError({ what: 'loadSession', cause: String(cause) }),
           }).pipe(Effect.ensuring(Effect.sync(() => (replaying = false))))
           sessionId = nativeSessionId
           announced = optionsOf(answered.configOptions)
         }),
 
-      prompt: (text) =>
+      prompt: (text, provided = []) =>
         Effect.gen(function* () {
           const open = sessionId
           if (open === null) {
@@ -782,9 +884,15 @@ export function connect(
             try: () =>
               connection.prompt({
                 sessionId: open,
-                prompt: [{ type: 'text', text }],
+                prompt: blocksOf(text, provided, embeds),
               }),
-            catch: (cause) => new AgentProtocolError({ what: 'prompt', cause: String(cause) }),
+            // The agent's own sentence, without the name of the error class in front of it: a
+            // provider's refusal is what the thread shows of a turn that failed.
+            catch: (cause) =>
+              new AgentProtocolError({
+                what: 'prompt',
+                cause: cause instanceof Error ? cause.message : String(cause),
+              }),
           })
           return { stopReason: answered.stopReason, usage: usageOf(answered.usage) }
         }),

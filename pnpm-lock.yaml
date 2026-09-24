@@ -162,6 +162,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@agentclientprotocol/codex-acp@1.12.0': a48343764ae2c853350d7f846fc671faea0a132e4d9137735c0de9b8a68d0864
+
 importers:
 
   .:
@@ -207,7 +210,7 @@ importers:
         version: 0.79.0(@anthropic-ai/sdk@0.127.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.5))
       '@agentclientprotocol/codex-acp':
         specifier: 1.12.0
-        version: 1.12.0
+        version: 1.12.0(patch_hash=a48343764ae2c853350d7f846fc671faea0a132e4d9137735c0de9b8a68d0864)
       '@agentclientprotocol/sdk':
         specifier: 1.4.0
         version: 1.4.0(zod@4.6.5)
@@ -223,6 +226,12 @@ importers:
       '@hemera/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@modelcontextprotocol/node':
+        specifier: 2.0.0
+        version: 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.8)
+      '@modelcontextprotocol/server':
+        specifier: 2.0.0
+        version: 2.0.0
       '@tanstack/react-hotkeys':
         specifier: 0.10.0
         version: 0.10.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -1074,6 +1083,12 @@ packages:
   '@fontsource-variable/inter@5.3.0':
     resolution: {integrity: sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA==}
 
+  '@hono/node-server@1.19.17':
+    resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
+    engines: {node: '>=18.14.1'}
+    peerDependencies:
+      hono: ^4
+
   '@hono/node-server@2.1.1':
     resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
     engines: {node: '>=20'}
@@ -1312,6 +1327,20 @@ packages:
     resolution: {integrity: sha512-9QOtNffcOF/c1seMCDnjckb3R9WHcG34tky+FHpNKKCW0wc/scYLwMtO+ptyGUfMW0/b/n4qRiALlaFHc9Oj7Q==}
     engines: {node: '>= 10.0.0'}
 
+  '@modelcontextprotocol/core@2.0.0':
+    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
+    engines: {node: '>=20'}
+
+  '@modelcontextprotocol/node@2.0.0':
+    resolution: {integrity: sha512-Y4hAC2XdGDUdDOCbLDOCA4+aL3NUldjsOWlDL/YwpAxrPhRm1xHd7lZ+mLacvZ9t3PaH28wgNoaLQGrIk1P2pg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@modelcontextprotocol/server': ^2.0.0
+      hono: ^4.11.4
+    peerDependenciesMeta:
+      hono:
+        optional: true
+
   '@modelcontextprotocol/sdk@1.30.0':
     resolution: {integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==}
     engines: {node: '>=18'}
@@ -1321,6 +1350,10 @@ packages:
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
+
+  '@modelcontextprotocol/server@2.0.0':
+    resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
+    engines: {node: '>=20'}
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
     resolution: {integrity: sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ==}
@@ -7557,7 +7590,7 @@ snapshots:
       - '@anthropic-ai/sdk'
       - '@modelcontextprotocol/sdk'
 
-  '@agentclientprotocol/codex-acp@1.12.0':
+  '@agentclientprotocol/codex-acp@1.12.0(patch_hash=a48343764ae2c853350d7f846fc671faea0a132e4d9137735c0de9b8a68d0864)':
     dependencies:
       '@agentclientprotocol/sdk': 1.4.0(zod@4.6.5)
       '@openai/codex': 0.154.0
@@ -8175,6 +8208,10 @@ snapshots:
 
   '@fontsource-variable/inter@5.3.0': {}
 
+  '@hono/node-server@1.19.17(hono@4.13.8)':
+    dependencies:
+      hono: 4.13.8
+
   '@hono/node-server@2.1.1(hono@4.13.8)':
     dependencies:
       hono: 4.13.8
@@ -8412,6 +8449,17 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@modelcontextprotocol/core@2.0.0':
+    dependencies:
+      zod: 4.6.5
+
+  '@modelcontextprotocol/node@2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.8)':
+    dependencies:
+      '@hono/node-server': 1.19.17(hono@4.13.8)
+      '@modelcontextprotocol/server': 2.0.0
+    optionalDependencies:
+      hono: 4.13.8
+
   '@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.5)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.8)
@@ -8433,6 +8481,11 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@4.6.5)
     transitivePeerDependencies:
       - supports-color
+
+  '@modelcontextprotocol/server@2.0.0':
+    dependencies:
+      '@modelcontextprotocol/core': 2.0.0
+      zod: 4.6.5
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
     optional: true

@@ -62,6 +62,11 @@ const AGENTS: SettingsProps['agents'] = {
       loginHint: 'claude auth login',
       installer: 'npm',
       latest: '2.0.35',
+      bare: {
+        qualified: true,
+        private:
+          'its managed and policy settings and ~/.claude.json still load; Hemera does not read them.',
+      },
     },
     {
       id: 'codex',
@@ -73,6 +78,11 @@ const AGENTS: SettingsProps['agents'] = {
       loginHint: 'codex login',
       installer: 'pnpm',
       latest: '0.9.4',
+      bare: {
+        qualified: false,
+        reason:
+          'apply_patch has no configuration key, and the MCP resource tools appear as soon as an MCP server exists. Hemera would not see those calls, so this Session is not opened.',
+      },
     },
     {
       id: 'opencode',
@@ -84,6 +94,11 @@ const AGENTS: SettingsProps['agents'] = {
       loginHint: 'opencode auth login',
       installer: 'unknown',
       latest: null,
+      bare: {
+        qualified: true,
+        private:
+          '$HOME/.opencode, its managed configuration and a remote .well-known/opencode still load; Hemera does not read them.',
+      },
     },
   ],
   checked: true,
@@ -93,7 +108,7 @@ const AGENTS: SettingsProps['agents'] = {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Settings',
   component: Settings,
   render: (args) => <Controlled {...args} />,

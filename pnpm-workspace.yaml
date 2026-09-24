@@ -29,3 +29,6 @@ minimumReleaseAgeExclude:
   - motion-dom@13.3.0
   - motion-utils@13.3.0
   - motion@13.3.0
+
+patchedDependencies:
+  '@agentclientprotocol/codex-acp@1.12.0': patches/@agentclientprotocol__codex-acp@1.12.0.patch

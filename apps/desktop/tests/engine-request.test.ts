@@ -20,6 +20,10 @@ import { Agents } from '#engine/agents/service.ts'
 import { fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
+import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { heldWordsLayer } from '#engine/agents/held.ts'
+import { type Commands, commandsLayer } from '#engine/commands/service.ts'
+import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
@@ -29,6 +33,9 @@ import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import type { Database } from '#engine/storage/database.ts'
+import { toolAccessLayer } from '#engine/tools/access.ts'
+import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
+import { ToolServer } from '#engine/tools/server.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /**
@@ -64,6 +71,8 @@ function running<A, E>(
     | AgentRuntime
     | Discovery
     | Agents
+    | Commands
+    | Context
   >,
 ) {
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
@@ -76,14 +85,28 @@ function running<A, E>(
       bundled: () => Effect.succeed('/opt/hemera/node_modules/adapter/dist/index.js'),
       readVersion: () => Effect.succeed('1.0.0'),
       holds: () => Effect.succeed(true),
+      read: () => Effect.succeed(undefined),
     }),
     fakeSupervisor(fakeAgent()),
     NoNotices,
     Layer.succeed(StderrSink, { write: () => Effect.void }),
   )
+  // The tools an agent would be lent: the tokens are the engine's own, and the address is one
+  // nothing listens on — what this suite asks is whether a message reaches its use case.
+  const tools = Layer.mergeAll(
+    toolAccessLayer,
+    toolPermissionsLayer,
+    contextLayer,
+    commandsLayer,
+    Layer.succeed(ToolServer, {
+      origin: 'http://127.0.0.1:1',
+      forAgent: () => 'http://127.0.0.1:1/mcp',
+      gaveUp: () => Effect.void,
+    }),
+  )
   // The rows of a Session and its thread stand on one file, and the runtime is built on the very
   // same ones: `provideMerge` hands them up rather than hiding them.
-  const rows = Layer.mergeAll(projectsLayer, sessionsLayer)
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer).pipe(Layer.provide(agents))
   // Nothing here asks the three agents of the machine: their own suite is where that is proved,
   // and what this one is about is whether a message reaches the use case it names.
   const listed = Layer.succeed(Agents, {
@@ -100,6 +123,8 @@ function running<A, E>(
     | AgentRuntime
     | Discovery
     | Agents
+    | Commands
+    | Context
     | Database
     | SqliteClient
   > = Layer.mergeAll(
@@ -112,20 +137,26 @@ function running<A, E>(
       Layer.provideMerge(discoveryLayer),
       Layer.provide(rows),
       Layer.provide(preferencesLayer),
+      // Handed up, as the engine hands them up: the settings and the Commands panel ask for the
+      // very catalogue and runs the runtime lends.
+      Layer.provideMerge(tools.pipe(Layer.provide(rows), Layer.provide(agents))),
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provide(agents),
+      Layer.provide(heldWordsLayer),
+      Layer.provide(agentDirectoriesLayer(dataFolder)),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
 
   return Effect.runPromise(
-    Effect.scoped(
-      Effect.provide(
+    // The program's scope closes before the services': what it holds ends first.
+    Effect.provide(
+      Effect.scoped(
         Effect.gen(function* () {
           yield* openProfile(dataFolder, SHIPPED, '0.3.0')
           return yield* program
         }),
-        services,
       ),
+      services,
     ),
   )
 }

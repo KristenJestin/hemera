@@ -201,6 +201,17 @@ const RELAYED = [
   'agents.resume',
   'agents.check',
   'agents.update',
+  // What Hemera lends the agent: the commands of a Project and the runs they became, and what a
+  // Session was provided. A process and a file are the engine's, like the rest (D6-10, D6-12).
+  'commands.list',
+  'commands.create',
+  'commands.update',
+  'commands.remove',
+  'commands.runs',
+  'commands.run',
+  'commands.stop',
+  'commands.output',
+  'context.read',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

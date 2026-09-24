@@ -52,12 +52,14 @@ export class InvalidProjectNameError extends Error {
 }
 
 export class InvalidRepositoryPathError extends Error {
-  constructor(
-    readonly path: string,
-    reason: string,
-  ) {
+  // A field and not a parameter property: the fake agent of the end-to-end suite is run by Node
+  // with its types stripped, and stripping refuses a parameter property.
+  readonly path: string
+
+  constructor(path: string, reason: string) {
     super(`the repository location "${path}" is refused: ${reason}`)
     this.name = 'InvalidRepositoryPathError'
+    this.path = path
   }
 }
 

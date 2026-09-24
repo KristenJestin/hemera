@@ -16,10 +16,19 @@
  */
 
 import { sql } from 'drizzle-orm'
-import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  text,
+  unique,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core'
 
 import {
   AGENT_PROVIDERS,
+  COMMAND_KINDS,
   NATIVE_STATES,
   PROJECT_TONES,
   SESSION_ENTRY_KINDS,
@@ -265,6 +274,138 @@ export const sessionEntries = sqliteTable(
     // An update finds the row it updates by what it is about, inside its own session.
     index('entry_by_correlation').on(table.sessionId, table.correlationId),
     index('entry_by_turn').on(table.sessionId, table.turnId),
+  ],
+)
+
+/** Where a run of a command is: it is running, or it has ended in one of three ways. */
+export const COMMAND_RUN_STATES = ['running', 'exited', 'failed', 'stopped'] as const
+
+export type RunState = (typeof COMMAND_RUN_STATES)[number]
+
+/**
+ * What a delivery of the context was: the base, the record of a native read, the file given at
+ * the start to an agent that does not read it, or a change.
+ */
+export const CONTEXT_DELIVERY_KINDS = ['base', 'native', 'provided', 'instructions'] as const
+
+export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
+
+/**
+ * The commands of a Project: a name, a line to run, what it is for, and where it runs (D6-12).
+ *
+ * The catalogue is the Project's and not a Session's: a command written once is offered to
+ * every Session of that Project, and the same process answers the agent and the user. `folder`
+ * is empty for the Workspace root and is otherwise one of the Project's repositories, stored
+ * the way a repository is — relative to the root — so that a Project whose folder moves keeps
+ * pointing at what it meant.
+ *
+ * `kind` decides whether a second run starts a second process, and it is a closed set in the
+ * database rather than a convention: an `app` command already running is returned, and a
+ * `check` or a `utility` run twice is two runs.
+ */
+export const projectCommands = sqliteTable(
+  'project_commands',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    line: text('line').notNull(),
+    kind: text('kind').notNull(),
+    folder: text('folder').notNull().default(''),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('command_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(COMMAND_KINDS))})`),
+    // One name per Project: a catalogue with two `dev` entries is a name nobody can ask for.
+    unique('command_name_in_project').on(table.projectId, table.name),
+  ],
+)
+
+/**
+ * One run of a command, what it printed, and what it published (D6-12).
+ *
+ * A run belongs to the Session that asked for it and not to the process that held it: the row
+ * outlives the process, and the Commands panel of a Session reads what it did. `command_id` is
+ * null for a one-off command line, which is the one thing that tells the two apart — a one-off
+ * is never promoted to the catalogue by itself.
+ *
+ * The output is kept here and bounded: a process that prints for an hour must not become an
+ * hour of rows, so the store keeps the last `OUTPUT_KEPT_BYTES` and says it truncated the rest.
+ * `url` is the first `http://localhost:<port>` the output named, which is what the panel offers
+ * to open and what the agent reads back.
+ */
+export const commandRuns = sqliteTable(
+  'command_runs',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The catalogue entry this ran, and null for a one-off command line. */
+    commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    line: text('line').notNull(),
+    kind: text('kind').notNull(),
+    cwd: text('cwd').notNull(),
+    state: text('state').notNull(),
+    pid: integer('pid'),
+    url: text('url'),
+    exitCode: integer('exit_code'),
+    output: text('output').notNull().default(''),
+    outputBytes: integer('output_bytes').notNull().default(0),
+    truncated: integer('truncated').notNull().default(0),
+    /** Who started it: the agent through its tool, or the user through the panel. */
+    startedBy: text('started_by').notNull(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (table) => [
+    check('run_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(COMMAND_RUN_STATES))})`),
+    check('run_starter_is_known', sql`${table.startedBy} IN ('agent', 'user')`),
+    index('run_by_session').on(table.sessionId, table.startedAt),
+  ],
+)
+
+/**
+ * What the agent was provided, and when (D6-07, D6-08).
+ *
+ * Four kinds of row, and they are the four answers the Context view gives. `base` is the
+ * session's own start: the sentences every Session is given once, by whatever means its agent
+ * has. `native` is not a delivery at all — it is the record that `AGENTS.md` was read by the
+ * agent itself, with its fingerprint, which is why the view can say it was read natively rather
+ * than sent. `provided` is that file given by Hemera at the start of the Session, to an agent
+ * whose bare mode keeps it from reading it. `instructions` is a change of that file delivered
+ * between two turns.
+ *
+ * The fingerprint is what makes a delivery identifiable. The base and the file as the Session
+ * started with it are recorded once per Session and fingerprint, which the unique index enforces. A delivery is not
+ * held to that: a file edited A, then B, then back to A is delivered each time it changes, and
+ * what decides that is the last fingerprint given, not every one ever given.
+ */
+export const contextDeliveries = sqliteTable(
+  'context_deliveries',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    /** What was provided: the file's path, and `''` for the base, which is not a file. */
+    path: text('path').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    deliveredAt: text('delivered_at').notNull(),
+  },
+  (table) => [
+    check(
+      'delivery_kind_is_known',
+      sql`${table.kind} IN (${sql.raw(oneOf(CONTEXT_DELIVERY_KINDS))})`,
+    ),
+    uniqueIndex('delivery_once_per_change')
+      .on(table.sessionId, table.kind, table.path, table.fingerprint)
+      .where(sql`${table.kind} <> 'instructions'`),
   ],
 )
 

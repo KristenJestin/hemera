@@ -75,6 +75,7 @@ export {
   agentOfferSchema,
   agentProviderSchema,
   agentUpdateSchema,
+  bareModeSchema,
   configOptionSchema,
   installerToolSchema,
   resumeStateSchema,
@@ -87,9 +88,20 @@ export type {
   AgentOfferRefusal,
   AgentProvider,
   AgentUpdate,
+  BareModeState,
   ConfigOption,
   InstallerTool,
   ResumeState,
   StopReason,
   ToolCallStatus,
 } from './agents.ts'
+export {
+  commandKindSchema,
+  commandRunSchema,
+  commandSchema,
+  contextReachSchema,
+  contextViewSchema,
+  providedSchema,
+  runStateSchema,
+} from './tools.ts'
+export type { Command, CommandKind, CommandRun, ContextView, Provided, RunState } from './tools.ts'

@@ -1,19 +1,27 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 
-import type { ConfigOption, Session, SessionEntry } from '@hemera/ipc'
+import type {
+  CommandRun,
+  ConfigOption,
+  ContextView as Provided,
+  Session,
+  SessionEntry,
+} from '@hemera/ipc'
 import {
   ActivityRow,
   AgentModelMenu,
   BlockedBanner,
+  CommandsPanel,
   Composer,
+  ContextView,
   MessageDaySeparator,
   MessageGroup,
   MessageScroller,
   MessageText,
   SessionEmpty,
+  SessionDetails,
   SessionHeader,
-  SessionSideColumn,
   UsageMeter,
   type MessageLine,
   type MessageState,
@@ -23,15 +31,11 @@ import {
 } from '@hemera/ui'
 
 import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
-import {
-  effortDefaultOf,
-  effortStage,
-  modeStage,
-  modelStage,
-  type ModelDefaults,
-} from '../agent-options.ts'
+import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
+import { foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
+import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -126,8 +130,6 @@ export interface SessionPageProps {
   agents: OfferedAgent[]
   /** What the agent of this Session offers, as its own handshake answered. */
   options: readonly ConfigOption[]
-  /** What this Session learned of its models' own default efforts. */
-  modelDefaults: ModelDefaults
   onWrite: (body: string) => Promise<string | null>
   /**
    * Says something to the agent, which writes the user's own message itself.
@@ -140,8 +142,8 @@ export interface SessionPageProps {
   onSay: (text: string) => void
   /** Cancels the running turn, when there is one. */
   onStop: () => void
-  /** Answers the permission the agent is waiting on. */
-  onDecide: (option: PermissionOption) => void
+  /** Answers the question the block of `toolCallId` was drawn for. */
+  onDecide: (toolCallId: string, option: PermissionOption) => void
   /** Sets one of the agent's own options for the turn to come. */
   onChooseOption: (optionId: string, value: string) => void
   onRename: (title: string) => void
@@ -152,6 +154,18 @@ export interface SessionPageProps {
   onPickFiles: () => Promise<string[]>
   /** Opens one of the files the turn touched, when the page around this one can open one. */
   onOpenFile?: ((path: string) => void) | undefined
+  /** The runs of this Session, as the engine last pushed them (D6-12). */
+  commandRuns: readonly CommandRun[]
+  /** Opens the address a run published, in the browser. */
+  onOpenUrl: (url: string) => void
+  /** Stops a run and everything it started. */
+  onStopRun: (runId: string) => void
+  /** The Workspace root, which is what a run's folder is said relative to. */
+  root: string
+  /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
+  onRunCommand: (line: string) => void
+  /** What this Session was provided, may consult, and keeps to its agent; null until read. */
+  context: Provided | null
 }
 
 export function SessionPage({
@@ -165,7 +179,6 @@ export function SessionPage({
   agent,
   agents,
   options,
-  modelDefaults,
   onWrite,
   onSay,
   onStop,
@@ -178,6 +191,12 @@ export function SessionPage({
   onSearchFiles,
   onPickFiles,
   onOpenFile,
+  commandRuns,
+  onOpenUrl,
+  onStopRun,
+  root,
+  onRunCommand,
+  context,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -185,6 +204,8 @@ export function SessionPage({
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /** What was last handed to the engine, so `Retry` has something to send again. */
   const [attempted, setAttempted] = useState<string | null>(null)
+  /** Whether the reader has the Session details open: only the head's button opens them. */
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -236,14 +257,29 @@ export function SessionPage({
    */
   const byLine = new Map(runs.map((run, index) => [run.lines[0]?.id ?? '', index]))
   const byEntry = new Map<string, ScrollerEntry>()
+  // A call to one of Hemera's tools is drawn once, as Hemera's block, where the agent reported
+  // it: the agent's own report of it stays in the thread and is not drawn a second time (D6-06).
+  const folded = foldedCallsOf(thread)
+  // The agent's reports of its calls, by the identifier it gave each: a question it asks about one
+  // is headed by that call's line.
+  const reported = new Map<string, SessionEntry>()
+  for (const entry of thread) {
+    const id = entry.correlationId ?? ''
+    if (entry.kind === 'tool_call' && id.startsWith('call:'))
+      reported.set(id.slice('call:'.length), entry)
+  }
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
-    if (entry === undefined) continue
+    if (entry === undefined || folded.hidden.has(entry.id)) continue
     const next = thread[at + 1]
-    const block = drawEntry(entry, {
+    const block = drawEntry(folded.inPlaceOf.get(entry.id) ?? entry, {
       now,
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
+      runs: commandRuns,
+      onOpenUrl,
+      onStopRun,
+      reportedCall: (toolCallId) => reported.get(toolCallId),
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
@@ -334,19 +370,21 @@ export function SessionPage({
   const effort = effortStage(options)
   const mode = modeStage(options)
 
-  // What the column beside the thread would hold: the plan the agent last published and the files
-  // the turn has touched. Both are states rather than events, and they are read here because the
-  // meter above the box and the column are two readings of the same turn.
+  // What the Session details hold: the plan the agent last published and the files the turn has
+  // touched. Both are states rather than events, and they are read here because the meter above
+  // the box and the details are two readings of the same turn.
   const plan = planOf(thread)
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
+  // Which tabs have something to show, which is what the details open on.
+  const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
 
   return (
     /*
-      One column, with the side column beside it (review of #40, defect 2). The header, the thread
-      and the composer share one width and one left edge: a composer centred in the whole window
-      while the thread was centred in what the column left over is what put them visibly out of
-      line. The screen runs under the frame all the same, and the page's own scroll is the thread's.
+      One column (review of #40, defect 2): the header, the thread and the composer share one
+      width and one left edge, and nothing stands beside them — the Session details are a dialog
+      the reader opens from the head (second review of #18). The screen runs under the frame all
+      the same, and the page's own scroll is the thread's.
     */
     <div className="flex h-full min-h-0">
       <div className="flex min-h-0 flex-1 flex-col">
@@ -364,6 +402,8 @@ export function SessionPage({
             // than one they are done with, and putting it away is a press they would come to
             // regret: the archive is where threads go.
             archiveDisabled={thread.length === 0}
+            // The one way to the Session details: nothing the agent does opens them.
+            onOpenDetails={() => setDetailsOpen(true)}
           />
         </div>
         {/*
@@ -461,8 +501,8 @@ export function SessionPage({
                 onEffortChange={(chosen) => {
                   if (effort !== null) onChooseOption(effort.optionId, chosen)
                 }}
-                // The level this model puts the Session on by itself, which the scale marks.
-                effortDefault={effortDefaultOf(modelDefaults, model?.current ?? null)}
+                // The level the agent recommends, which the scale marks.
+                effortDefault={effortDefaultOf(options)}
                 // The mode is a row of that same panel since the trial of 22 September 2026: it
                 // is one of the four things the agent is set on, and a control of its own beside
                 // the menu was a second control asking about one agent.
@@ -484,13 +524,37 @@ export function SessionPage({
         </div>
       </div>
       {/*
-        The column stands beside the thread and not under it, and it is the width the thread gave
-        up for it. A Session whose agent has sent neither a plan nor a file draws no column at all
-        (review of #40, defect 3): `Plan 0 of 0` and `Files 0` take that width and say nothing with
-        it. The box is the page's and the emptiness is the column's — there is no wrapper here, so
-        a column that draws nothing leaves the width where it was.
+        The Session details: a centred dialog the reader opens from the head, and nothing else
+        opens (second review of #18). A permission, a run or a plan that arrives updates the thread
+        and, while the dialog is open, the tab it concerns — never which tab is shown.
       */}
-      <SessionSideColumn plan={plan} files={touched} onSelectFile={onOpenFile} />
+      <SessionDetails
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        plan={plan}
+        files={touched}
+        onSelectFile={onOpenFile}
+        // The commands of a Session with an agent, whoever started them (D6-12): the same runs
+        // the thread's blocks read, and the line a one-off is run from. A Session nothing
+        // answers has no agent to lend a command to, and says so on the tab.
+        commands={
+          session.provider === null ? undefined : (
+            <CommandsPanel
+              runs={panelRunsOf(commandRuns, root)}
+              onStop={onStopRun}
+              onOpenUrl={onOpenUrl}
+              onRun={onRunCommand}
+            />
+          )
+        }
+        // What the agent works from, its Workspace, instructions and tools (D6-10), once the engine
+        // has said it.
+        context={context === null ? undefined : <ContextView {...contextListsOf(context, root)} />}
+        // The tab it opens on follows what is happening: a command running opens on Commands,
+        // then the tab that has something, and the Context when no tab has anything (D6-12). It
+        // is read when the dialog opens, so an open dialog never changes tab under the reader.
+        defaultTab={openingTabOf(commandRuns, tabs)}
+      />
     </div>
   )
 }

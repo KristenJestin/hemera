@@ -80,11 +80,7 @@ export const CLAUDE_MODELS = ungrouped([
  * The five levels of Claude Code, with the one it advises marked — which is the shape an
  * announcement takes once the engine has resolved the agent's own `Default` (decision of
  * 22 September 2026). `UNRESOLVED_EFFORTS` is the other half of that rule, for the agent that
- * never said what its `Default` stood for.
- *
- * The advice is `Medium` whatever the model, as the real adapter answers it (probe of
- * 22 September 2026): a generic word, which is why the scale's rule marks the model's own
- * default (`CLAUDE_DEFAULTS`) rather than this.
+ * never said what its `Default` stood for. The level it advises is where the scale's rule is.
  */
 export const CLAUDE_EFFORTS: EffortChoice[] = [
   { id: 'low', label: 'Low' },
@@ -95,19 +91,8 @@ export const CLAUDE_EFFORTS: EffortChoice[] = [
 ]
 
 /**
- * The level each Claude model puts a Session on by itself — the effort the adapter announces as
- * current right after the model is set (probe of 22 September 2026). Haiku announces no effort
- * at all, and `Sonnet 3.7` stands for a model whose default nobody has seen.
- */
-export const CLAUDE_DEFAULTS: ReadonlyMap<string, string> = new Map([
-  ['fable', 'high'],
-  ['opus-4-5', 'xhigh'],
-  ['sonnet-4-5', 'xhigh'],
-])
-
-/**
- * And what it announces for `Sonnet 3.7`: three levels and no default known, which is the model
- * the rule has to leave the scale for.
+ * And what it announces for `Sonnet 3.7`: three levels and none of them advised, which is the
+ * model the rule has to leave the scale for.
  */
 export const SONNET_3_7_EFFORTS = scale(['Low', 'Medium', 'High'])
 
@@ -189,11 +174,9 @@ export interface Offer {
   models: ModelChoice[]
   efforts: EffortChoice[]
   modes: ModeChoice[]
-  /** The level the model puts a Session on by itself, or null where none is known. */
-  effortDefault: string | null
 }
 
-const NOTHING: Offer = { models: [], efforts: [], modes: [], effortDefault: null }
+const NOTHING: Offer = { models: [], efforts: [], modes: [] }
 
 /**
  * The levels Claude Code announces on a model, which is an answer of that model and not of the
@@ -212,19 +195,13 @@ export function offerOf(agent: string | null, model: string | null = null): Offe
       models: CLAUDE_MODELS,
       efforts: claudeEffortsOn(model),
       modes: CLAUDE_MODES,
-      effortDefault: CLAUDE_DEFAULTS.get(model ?? '') ?? null,
     }
   }
   if (agent === 'codex') {
-    return { models: CODEX_MODELS, efforts: [], modes: CODEX_MODES, effortDefault: null }
+    return { models: CODEX_MODELS, efforts: [], modes: CODEX_MODES }
   }
   if (agent === 'opencode') {
-    return {
-      models: OPENCODE_MODELS,
-      efforts: OPENCODE_EFFORTS,
-      modes: OPENCODE_MODES,
-      effortDefault: null,
-    }
+    return { models: OPENCODE_MODELS, efforts: OPENCODE_EFFORTS, modes: OPENCODE_MODES }
   }
   return NOTHING
 }
@@ -240,9 +217,12 @@ export function offerOf(agent: string | null, model: string | null = null): Offe
  *
  * Changing the agent clears the model, the effort and the mode: a model id belongs to the agent
  * that announced it, and carrying one across would ask an agent for a model it never published.
- * Changing the model puts the effort on that model's own default, as the real agent does, and
- * the rule across the scale goes with it — until an effort is chosen, which the agent then keeps
- * across models, and after which a model it had not been on before shows no rule at all.
+ * Changing the model lands the effort on the level the new model advises while nobody has chosen
+ * one, which is what Hemera asks the agent for (decision of 23 September 2026): the agent on its
+ * own keeps whatever its settings say, and a thumb left there reads as the model's default. Once
+ * a level is chosen it stays across the models, and a model that advises none leaves the effort
+ * where it was. The rule across the scale is where the page puts it: at the level the efforts
+ * on offer mark as advised, and nowhere when none of them is.
  */
 export function Controlled({
   render,
@@ -260,50 +240,40 @@ export function Controlled({
   const [picked, setPicked] = useState(agent)
   const [run, setRun] = useState(model)
   const [thinking, setThinking] = useState(effort)
+  // Whether a level was chosen on this page, which is what keeps it across the models.
+  const [chose, setChose] = useState(false)
   const [allowed, setAllowed] = useState(mode)
-  /**
-   * Whether an effort was chosen, and the models visited before it was: Claude Code keeps a
-   * chosen effort across model changes, so only a model visited before that choice ever showed
-   * its own default, and one first visited after it shows none (its adapter's pinned level).
-   */
-  const [pinned, setPinned] = useState(false)
-  const [visited, setVisited] = useState<readonly (string | null)[]>([model])
 
   const offer = offerOf(picked, run)
-  const known = !pinned || visited.includes(run)
+  const efforts = rest.efforts.length > 0 ? rest.efforts : offer.efforts
   return (
     <div className="flex justify-end p-6">
       {render({
         ...rest,
         models: rest.models.length > 0 ? rest.models : offer.models,
-        efforts: rest.efforts.length > 0 ? rest.efforts : offer.efforts,
+        efforts,
         modes: rest.modes.length > 0 ? rest.modes : offer.modes,
-        effortDefault: effortDefault ?? (known ? offer.effortDefault : null),
+        effortDefault: effortDefault ?? efforts.find((one) => one.recommended === true)?.id ?? null,
         agent: picked,
         onAgentChange: (id) => {
           setPicked(id)
           setRun(null)
           setThinking(null)
+          setChose(false)
           setAllowed(null)
-          setPinned(false)
-          setVisited([null])
           onAgentChange(id)
         },
         model: run,
         onModelChange: (id) => {
           setRun(id)
-          // Nothing pinned: the agent lands on the model's own default, and the model has shown
-          // it. Pinned: the agent keeps the effort that was chosen.
-          if (!pinned) {
-            setThinking(offerOf(picked, id).effortDefault)
-            setVisited([...visited, id])
-          }
+          const advised = offerOf(picked, id).efforts.find((one) => one.recommended === true)
+          if (!chose && advised !== undefined) setThinking(advised.id)
           onModelChange(id)
         },
         effort: thinking,
         onEffortChange: (id) => {
           setThinking(id)
-          setPinned(true)
+          setChose(true)
           onEffortChange(id)
         },
         mode: allowed,
@@ -405,7 +375,7 @@ export function SetMode({
 export const EFFORT_ARG_TYPES = {
   efforts: { control: 'object', description: 'What the agent says it can think with.' },
   effort: { control: 'text', description: 'The effort the next turn will run at.' },
-  defaultId: { control: 'text', description: 'The level the model puts a Session on by itself.' },
+  defaultId: { control: 'text', description: 'The level the agent recommends.' },
   disabled: { control: 'boolean' },
   onEffortChange: { action: 'effort chosen', description: 'Called with the id, never the label.' },
 } as const
@@ -428,7 +398,7 @@ export const ARG_TYPES = {
   effort: { control: 'text', description: 'The effort the next turn will run at.' },
   effortDefault: {
     control: 'text',
-    description: 'The level the model puts a Session on by itself, which the scale marks.',
+    description: 'The level the agent recommends, which the scale marks.',
   },
   modes: { control: 'object', description: 'What the agent says it may be told to do.' },
   mode: { control: 'text', description: 'What the next turn may do without asking.' },

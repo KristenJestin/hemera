@@ -33,6 +33,9 @@ import { type AgentAdapter, versionIn } from '../adapter.ts'
  * a note rather than starting on an account the user did not choose (D5-17).
  */
 
+/** How long this agent waits for one of Hemera's tools before it gives up on it: ten minutes. */
+export const TOOL_WAIT_MS = 600_000
+
 /** The two logins this adapter publishes when the machine has one still to do. */
 const LOGINS: ReadonlySet<string> = new Set(['claude-ai-login', 'console-login'])
 
@@ -53,5 +56,66 @@ export const claude: AgentAdapter = {
     agentVariable: 'CLAUDE_CODE_EXECUTABLE',
   },
   readVersion: versionIn,
+
   isAuthenticated: (methods) => !methods.some((method) => LOGINS.has(method.id)),
+  /**
+   * Every lever this agent has is in one place, which is why it needs no configuration file of
+   * Hemera's: `session/new` carries its options on `_meta`, and the ACP field beside them
+   * carries Hemera's server.
+   *
+   * What survives the means is managed and policy settings, which load whatever `settingSources`
+   * says, and `~/.claude.json`, which is always read (D6-09): the Context view names them, and
+   * nothing here pretends otherwise.
+   *
+   * `CLAUDE_CONFIG_DIR` is left where the user has it. The login lives in it — `.credentials.json`
+   * wherever a file holds it — and `claude auth status` run with a directory of its own answers
+   * `loggedIn: false` on a machine that is signed in (checked
+   * on 23 September 2026, Windows, Claude Code 2.1.280). Nothing secret is copied or linked into
+   * a directory of Hemera's instead: what the move was for is done by `settingSources: []`, which
+   * reads none of the user's settings files, and `strictMcpConfig`, which loads none of the MCP
+   * servers they configured — only Hemera's.
+   */
+  bareMode: () => ({
+    means:
+      'session/new _meta: no built-in tool, no settings source, no MCP server but Hemera, the base as the system prompt',
+    base: 'system_prompt',
+    // Claude Code reads CLAUDE.md, not AGENTS.md, and with no settings source it reads neither:
+    // the Workspace's instructions reach it only if Hemera gives them.
+    readsAgentsFile: false,
+    private:
+      'its managed and policy settings and ~/.claude.json still load; Hemera does not read them.',
+    qualified: true,
+    options: (input) => ({
+      meta: {
+        claudeCode: {
+          options: {
+            // Documented as removing every built-in, with the MCP tools kept — which is what
+            // makes this agent qualified rather than merely configured.
+            tools: [],
+            // Hemera's tools are gated by Hemera (D6-05): allowed here so Claude Code does not
+            // put its own permission, with its "always allow", in front of Hemera's gate.
+            allowedTools: ['mcp__hemera__*'],
+            settingSources: [],
+            strictMcpConfig: true,
+            systemPrompt: { type: 'custom', prompt: input.base, snapshot: true },
+            env: {
+              CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+              ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+              // A tool call can wait on the human — a path outside the root, a one-off command —
+              // for as long as they take to answer, and the agent's own limits must not end it
+              // first: ten minutes, as the prototype had it. Claude Code has two of them, one on
+              // the whole call and one on a call that sends nothing, and a call waiting on the
+              // human sends nothing: with the total one alone, 2.1 aborted it after 300 s.
+              MCP_TOOL_TIMEOUT: String(TOOL_WAIT_MS),
+              CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(TOOL_WAIT_MS),
+            },
+          },
+        },
+      },
+      // This agent is handed its environment inside `_meta` and not on its process, which is the
+      // one thing the three do not agree on.
+      env: {},
+      files: [],
+    }),
+  }),
 }

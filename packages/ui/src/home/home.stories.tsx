@@ -152,7 +152,7 @@ function Writing(): ReactNode {
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Home',
   component: ActivityFrame,
   parameters: { layout: 'padded' },

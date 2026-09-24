@@ -8,7 +8,14 @@ import { Card } from '../components/card/card.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
 import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconArchive, IconDots, IconMessages, IconPencil, IconRestore } from '../icons.ts'
+import {
+  IconArchive,
+  IconDots,
+  IconInfoCircle,
+  IconMessages,
+  IconPencil,
+  IconRestore,
+} from '../icons.ts'
 import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
 
 /**
@@ -110,6 +117,13 @@ export interface SessionHeaderProps {
    * head and the eye does not have to find the control again when the first line is written.
    */
   archiveDisabled?: boolean | undefined
+  /**
+   * Opens the Session's details: its plan and files, its commands, and what its agent works from.
+   *
+   * They are a dialog the reader opens and never a column beside the thread (second review of
+   * #18), and this is the one way to them, at the end of the head's line.
+   */
+  onOpenDetails?: (() => void) | undefined
 }
 
 /**
@@ -139,6 +153,7 @@ export function SessionHeader({
   onCancelEditing,
   onArchive,
   archiveDisabled = false,
+  onOpenDetails,
 }: SessionHeaderProps): ReactNode {
   const titleControl = useRef<HTMLButtonElement>(null)
   const wasEditing = useRef(false)
@@ -189,6 +204,17 @@ export function SessionHeader({
         <p className={SUB}>{`${projectName} · ${meta}`}</p>
       </div>
       <div className={ACTIONS}>
+        {onOpenDetails !== undefined && (
+          <Tooltip label="Session details">
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={<IconInfoCircle size="sm" />}
+              aria-label="Session details"
+              onClick={onOpenDetails}
+            />
+          </Tooltip>
+        )}
         {commands.length > 0 && (
           <Menu label={`Commands for ${title}`} icon={<IconDots size="sm" />} groups={[commands]} />
         )}

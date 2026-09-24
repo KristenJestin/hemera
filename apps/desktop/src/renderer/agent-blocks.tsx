@@ -1,13 +1,18 @@
-import type { SessionEntry } from '@hemera/ipc'
+import { hemeraToolNamed } from '@hemera/core'
+import type { CommandRun as Run, SessionEntry } from '@hemera/ipc'
 import {
   AgentText,
+  CommandRun,
   DecisionSummary,
   DiffBlock,
+  HemeraToolCall,
+  type HemeraToolStatus,
   MessageGroup,
   PermissionRequest,
   StoppedTurn,
   ThoughtBlock,
   ToolCallCard,
+  toolKindLabel,
   type PermissionOption,
   type PermissionOptionKind,
   type PlanEntry,
@@ -21,13 +26,24 @@ import {
 import type { ReactNode } from 'react'
 import { z } from 'zod'
 
+import {
+  commandRunOf,
+  contextDeliveryOf,
+  hemeraPermissionOf,
+  hemeraToolCallOf,
+  hemeraToolLabelOf,
+  nativeSubjectOf,
+  questionOpen,
+  subjectOf,
+} from './agent-tool-payloads.ts'
+
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
  *
  * The thread a Session holds is not a list of messages: it is what the agent reported, entry by
  * entry, and the kind of an entry is what says which block draws it. This is the one place that
- * reads that — a page asks for the blocks of a thread and draws them, and the side column asks
- * for the same thread for the two things it keeps beside it.
+ * reads that — a page asks for the blocks of a thread and draws them, and the Session details ask
+ * for the same thread for the two things they keep.
  *
  * Everything is parsed and nothing is assumed. `payload` is JSON text on the wire rather than a
  * shape of its own — the same column holds every kind's details, and each kind validates what it
@@ -101,6 +117,17 @@ const choiceSchema = z.object({
 const permissionSchema = z.object({
   toolCallId: z.string(),
   options: z.array(choiceSchema),
+  /**
+   * What one of Hemera's own tools asks about, beside the agent's own questions (D6-05): the
+   * tool, the place it would act on as the path resolves, the root it is outside of, and the
+   * line a one-off command would run. Absent from a question the agent asked itself.
+   */
+  tool: z.string().optional(),
+  /** The place as the agent named it, before it was resolved. */
+  named: z.string().optional(),
+  resolved: z.string().optional(),
+  root: z.string().optional(),
+  line: z.string().nullable().optional(),
 })
 
 const decisionSchema = z.object({
@@ -251,20 +278,47 @@ function countsOf(oldText: string | null, newText: string) {
   return { added: after.length - head - tail, removed: before.length - head - tail }
 }
 
+/** The states of Hemera's block a report of the agent can be in, before Hemera answered. */
+const REPORTED_STATES: readonly HemeraToolStatus[] = [
+  'pending',
+  'in_progress',
+  'completed',
+  'failed',
+]
+
+/** How the agent's report of one of Hemera's calls stands, in the block's words. */
+function reportedStatus(status: string | null): HemeraToolStatus {
+  // A call the turn was stopped under did not answer: the block has no word for a stop.
+  if (status === 'cancelled') return 'failed'
+  return among(REPORTED_STATES, status, 'pending')
+}
+
 /** Which Session block an entry is, when the thread is read in order. */
 export interface AgentContext {
   /** When this render happened, so a line about time is written once. */
   now: number
   /** When the next entry was written, which is what a thought's seconds are measured to. */
   nextAt: number | null
-  /** Answers a permission the agent is waiting on, in the agent's own option. */
-  onDecide: (option: PermissionOption) => void
+  /** Answers the question of one block, by its identifier, in one of the options it offered. */
+  onDecide: (toolCallId: string, option: PermissionOption) => void
+  /** The runs of the Session as they were last pushed: what a run's block is drawn from (D6-12). */
+  runs: readonly Run[]
+  /** Opens the address a run published, in the browser: this window is not one. */
+  onOpenUrl: (url: string) => void
+  /** Stops a run and everything it started. */
+  onStopRun: (runId: string) => void
+  /**
+   * The agent's report of a call, by the identifier the agent gave it: what a question about
+   * that call is headed by — the label and the subject of its line (recette 3 of 23 September
+   * 2026).
+   */
+  reportedCall: (toolCallId: string) => SessionEntry | undefined
 }
 
 /**
  * The block an entry is drawn as, or null when the page draws it elsewhere.
  *
- * Two kinds are not blocks of the thread: the plan is the side column's, and the usage is the
+ * Two kinds are not blocks of the thread: the plan is the Session details', and the usage is the
  * composer's — both are states rather than events, and the thread already carries every call
  * they add up. The console is the third: what a terminal would show is not in the thread (the
  * engine does not answer `terminal/output`), so an entry that only names a console says its name
@@ -291,16 +345,33 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const read = readPayload(callPayloadSchema, entry.payload)
     if (read === null) return null
     const { call } = read
+    // One of Hemera's own calls, reported by the agent before Hemera answered it: drawn as
+    // Hemera's block, in the state the agent reports, until Hemera's entry takes its place.
+    const hemera = hemeraToolNamed(call.title)
+    if (hemera !== null) {
+      return (
+        <HemeraToolCall
+          tool={hemera}
+          {...hemeraToolLabelOf(hemera)}
+          subject={subjectOf(hemera, call.rawInput?.text ?? '', context.runs)}
+          status={reportedStatus(call.status)}
+          summary={call.title}
+          defaultOpen={false}
+        />
+      )
+    }
     const said = textOf(call.content)
     // What came back is the tool's own answer where it gave one, and what it attached where it
     // did not. What it was called with is the raw input, and the attached text stands in for it
     // only when that text is not already the answer above — one box of a card is one thing.
     const output = call.rawOutput ?? said
     const input = call.rawInput ?? (output === said ? null : said)
+    const kind = among(TOOL_KINDS, call.kind, 'other')
     return (
       <ToolCallCard
         title={call.title}
-        kind={among(TOOL_KINDS, call.kind, 'other')}
+        kind={kind}
+        subject={nativeSubjectOf(kind, call)}
         status={among(TOOL_STATES, call.status, 'pending')}
         locations={call.locations.map((location) => ({
           path: location.path,
@@ -332,19 +403,59 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'permission_request') {
+    // A question already answered is drawn by the decision written after it, without buttons.
+    if (!questionOpen(entry)) return null
     const read = readPayload(permissionSchema, entry.payload)
     if (read === null) return null
+    // A question of Hemera's own tools (D6-05): the tool by its name, the place it would act on
+    // as the path resolves and the root it leaves, the line a one-off would run. Its two options
+    // are this call's only — nothing is remembered, so there is no "always" to offer.
+    if (read.tool !== undefined && read.resolved !== undefined) {
+      return (
+        <PermissionRequest
+          toolName={read.tool}
+          {...hemeraPermissionOf(read.tool, entry.body, read)}
+          parameters={[
+            { label: 'Resolved path', value: read.resolved },
+            { label: 'Outside', value: read.root ?? 'the Workspace root' },
+          ]}
+          command={read.line ?? read.resolved}
+          options={read.options.map((option) => ({
+            optionId: option.optionId,
+            name: option.name,
+            kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
+          }))}
+          onDecide={(option) => context.onDecide(read.toolCallId, option)}
+        />
+      )
+    }
+    // An agent's own question is headed by the line of the call it is about, where the thread
+    // holds the agent's report of it: the kind's label and what the call is about.
+    const asked = context.reportedCall(read.toolCallId)
+    const reported = asked === undefined ? null : readPayload(callPayloadSchema, asked.payload)
+    const head =
+      reported === null
+        ? { label: undefined, subject: undefined, intent: entry.body }
+        : {
+            label: toolKindLabel(
+              among(TOOL_KINDS, reported.call.kind, 'other'),
+              reported.call.title,
+            ),
+            subject: nativeSubjectOf(among(TOOL_KINDS, reported.call.kind, 'other'), reported.call)
+              ?.text,
+            intent: 'asks for your permission',
+          }
     return (
       <PermissionRequest
         toolName={entry.body}
-        intent={entry.body}
+        {...head}
         options={read.options.map((option) => ({
           optionId: option.optionId,
           name: option.name,
           kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
         }))}
         scope="For this Session"
-        onDecide={context.onDecide}
+        onDecide={(option) => context.onDecide(read.toolCallId, option)}
       />
     )
   }
@@ -384,6 +495,36 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   if (entry.kind === 'note') {
     return (
       <MessageGroup author="hemera" name="Hemera" lines={[{ id: entry.id, body: entry.body }]} />
+    )
+  }
+
+  if (entry.kind === 'hemera_tool_call') {
+    const drawn = hemeraToolCallOf(entry, context.runs)
+    if (drawn === null) return null
+    return <HemeraToolCall {...drawn} />
+  }
+
+  if (entry.kind === 'command_run') {
+    // The run as the window last heard it, where it has: its address and what it printed arrive
+    // between the two writes of its entry, and the panel beside the thread reads the same run.
+    const drawn = commandRunOf(entry, context.runs)
+    if (drawn === null) return null
+    const { runId, ...shown } = drawn
+    return (
+      <CommandRun
+        {...shown}
+        onOpenUrl={context.onOpenUrl}
+        onStop={runId === null ? undefined : () => context.onStopRun(runId)}
+      />
+    )
+  }
+
+  if (entry.kind === 'context_delivery') {
+    // A delivery is Hemera's line and never the user's (D6-08): what changed, and its fingerprint.
+    const drawn = contextDeliveryOf(entry)
+    if (drawn === null) return null
+    return (
+      <MessageGroup author="hemera" name="Hemera" lines={[{ id: drawn.id, body: drawn.body }]} />
     )
   }
 

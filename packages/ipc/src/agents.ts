@@ -32,6 +32,24 @@ export const installerToolSchema = z.enum(['npm', 'pnpm', 'bun', 'brew', 'unknow
 export type InstallerTool = z.infer<typeof installerToolSchema>
 
 /**
+ * What an agent's adapter declares about running it bare on this platform (design D6-02).
+ *
+ * `means` is how its own tools are taken away, in the agent's own terms. `reason` is the
+ * adapter's sentence for a combination that is not qualified, and null for one that is: a
+ * Session is not made on an agent that is not qualified, and this is why. `private` is what the
+ * means does not reach — the agent's own sources that still load and that Hemera does not read —
+ * in one sentence, which Settings › Agents says under the agent (D6-09).
+ */
+export const bareModeSchema = z.object({
+  means: z.string(),
+  qualified: z.boolean(),
+  reason: z.string().nullable(),
+  private: z.string(),
+})
+
+export type BareModeState = z.infer<typeof bareModeSchema>
+
+/**
  * One agent, as this machine answers for it (design D5-02, D5-17, D5-21).
  *
  * The agent, and never the adapter that may expose it: every name and every command on this wire
@@ -51,9 +69,14 @@ export type InstallerTool = z.infer<typeof installerToolSchema>
  * `installHint` is the one sentence that says how to get the agent, and `loginHint` the command
  * that signs it in, which the page offers when it is not signed in.
  *
- * `latest` is the version published by the registry of `installer`, and it is null whenever
- * nobody asked: the list a Session is created from is read locally, and only the Agents section
- * goes to the network, when it is opened (D5-18).
+ * `latest` is the version published for the agent — Homebrew's formula for a `brew` install, the
+ * npm registry for any other, `unknown` included — and it is null whenever nobody asked or the
+ * registry answered nothing: the list a Session is created from is read locally, and only the
+ * Agents section goes to the network, when it is opened (D5-18). The installer decides whether
+ * an update is offered, never whether the version is read.
+ *
+ * `bareMode` is what the adapter declares and not what the machine answered: it is read off
+ * Hemera's own adapter for this platform, so it is there whether or not the agent is (D6-02).
  */
 export const agentAvailabilitySchema = z.object({
   id: agentProviderSchema,
@@ -65,6 +88,7 @@ export const agentAvailabilitySchema = z.object({
   loginHint: z.string(),
   installer: installerToolSchema,
   latest: z.string().nullable(),
+  bareMode: bareModeSchema,
 })
 
 export type AgentAvailability = z.infer<typeof agentAvailabilitySchema>
@@ -177,6 +201,12 @@ export const stopReasonSchema = z.enum([
    * the two it is showing (design D5-12).
    */
   'interrupted',
+  /**
+   * Hemera's own, for a turn the agent answered with an error rather than a stop reason: its
+   * provider refused the request, most often. Never `cancelled`, which is a Stop someone pressed;
+   * the agent's sentence is the `note` written beside it.
+   */
+  'failed',
 ])
 
 export type StopReason = z.infer<typeof stopReasonSchema>

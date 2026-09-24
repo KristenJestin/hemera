@@ -16,6 +16,7 @@ import {
   ENGINE_REQUESTS,
   agentAvailabilitySchema,
   agentProviderSchema,
+  bareModeSchema,
   configOptionSchema,
   resumeStateSchema,
   sessionEntrySchema,
@@ -74,6 +75,12 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'claude auth login',
         installer: 'pnpm',
         latest: '2.2.0',
+        bareMode: {
+          means: 'its own means',
+          qualified: true,
+          reason: null,
+          private: 'its own sources',
+        },
       }).success,
     ).toBe(true)
 
@@ -88,6 +95,12 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'codex login',
         installer: 'unknown',
         latest: null,
+        bareMode: {
+          means: 'its own means',
+          qualified: true,
+          reason: null,
+          private: 'its own sources',
+        },
       }).success,
     ).toBe(true)
   })
@@ -104,6 +117,12 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'opencode auth login',
         installer: 'npm',
         latest: null,
+        bareMode: {
+          means: 'its own means',
+          qualified: true,
+          reason: null,
+          private: 'its own sources',
+        },
       }).success,
     ).toBe(true)
 
@@ -118,6 +137,12 @@ describe('The Agents page tells what is available', () => {
         loginHint: 'opencode auth login',
         installer: 'npm',
         latest: null,
+        bareMode: {
+          means: 'its own means',
+          qualified: true,
+          reason: null,
+          private: 'its own sources',
+        },
       }).success,
     ).toBe(false)
   })
@@ -241,15 +266,27 @@ describe('Stop during a permission', () => {
   test('a decision with no option is the user closing the request', () => {
     const decision = ENGINE_REQUESTS['agents.decide'].arguments
 
-    expect(decision.safeParse({ sessionId: 'session-1', optionId: 'allow-once' }).success).toBe(
-      true,
-    )
-    expect(decision.safeParse({ sessionId: 'session-1', optionId: null }).success).toBe(true)
+    const asked = { sessionId: 'session-1', toolCallId: 'call-1' }
+
+    expect(decision.safeParse({ ...asked, optionId: 'allow-once' }).success).toBe(true)
+    expect(decision.safeParse({ ...asked, optionId: null }).success).toBe(true)
   })
 
   test('a decision that names no option at all is refused', () => {
     expect(
-      ENGINE_REQUESTS['agents.decide'].arguments.safeParse({ sessionId: 'session-1' }).success,
+      ENGINE_REQUESTS['agents.decide'].arguments.safeParse({
+        sessionId: 'session-1',
+        toolCallId: 'call-1',
+      }).success,
+    ).toBe(false)
+  })
+
+  test('a decision that names no question is refused: a Session can wait on several', () => {
+    expect(
+      ENGINE_REQUESTS['agents.decide'].arguments.safeParse({
+        sessionId: 'session-1',
+        optionId: 'allowed',
+      }).success,
     ).toBe(false)
   })
 
@@ -304,11 +341,13 @@ describe('No tool is replayed on resume', () => {
 })
 
 describe('Text arrives as a stream', () => {
-  test('the five things the engine pushes are the ones declared', () => {
+  test('the seven things the engine pushes are the ones declared', () => {
     expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
       'agent',
+      'delivery',
       'entry',
       'permission',
+      'run',
       'turn',
       'turn_start',
     ])
@@ -356,5 +395,110 @@ describe('Text arrives as a stream', () => {
 
   test('every pushed message travels under one name, declared once', () => {
     expect(ENGINE_EVENT_CHANNEL).toBe('agents.event')
+  })
+})
+
+describe('The agent starts the app and the user opens it', () => {
+  test('every use case of the commands and the context is a channel of the same name', () => {
+    const relayed = Object.keys(ENGINE_REQUESTS).filter(
+      (name) => name.startsWith('commands.') || name.startsWith('context.'),
+    )
+    const channels = Object.keys(CHANNELS).filter(
+      (name) => name.startsWith('commands.') || name.startsWith('context.'),
+    )
+
+    expect(channels.toSorted()).toEqual(relayed.toSorted())
+    expect(relayed.toSorted()).toEqual([
+      'commands.create',
+      'commands.list',
+      'commands.output',
+      'commands.remove',
+      'commands.run',
+      'commands.runs',
+      'commands.stop',
+      'commands.update',
+      'context.read',
+    ])
+  })
+
+  test('a run is pushed whole, with its address, and no entry', () => {
+    const run = {
+      id: 'run-1',
+      projectId: 'atlas',
+      sessionId: 'session-1',
+      commandId: 'command-1',
+      name: 'dev',
+      line: 'pnpm dev',
+      kind: 'app',
+      cwd: '/home/ana/atlas',
+      state: 'running',
+      pid: 4242,
+      url: 'http://localhost:5173',
+      exitCode: null,
+      output: 'ready in 300 ms',
+      dropped: 0,
+      startedAt: '2026-09-23T08:00:00.000Z',
+      endedAt: null,
+      joined: false,
+    }
+    expect(ENGINE_EVENTS.run.safeParse({ event: 'run', sessionId: 'session-1', run }).success).toBe(
+      true,
+    )
+    expect(
+      ENGINE_EVENTS.run.safeParse({
+        event: 'run',
+        sessionId: 'session-1',
+        run: { ...run, state: 'up' },
+      }).success,
+    ).toBe(false)
+  })
+})
+
+describe('A change during a turn leaves at the next safe point', () => {
+  test('a delivery is pushed about its Session, beside the entry it wrote', () => {
+    expect(
+      ENGINE_EVENTS.delivery.safeParse({ event: 'delivery', sessionId: 'session-1', entry: null })
+        .success,
+    ).toBe(true)
+  })
+})
+
+describe('An unqualified combination is refused with its reason', () => {
+  test('an agent says whether it runs bare here, and why not when it does not', () => {
+    const codex = {
+      id: 'codex',
+      label: 'Codex',
+      found: true,
+      version: '1.12.0',
+      authenticated: true,
+      installHint: 'npm install -g @openai/codex',
+      loginHint: 'codex login',
+      installer: 'npm',
+      latest: null,
+      bareMode: {
+        means: "a config.toml in a directory of Hemera's",
+        qualified: false,
+        reason: 'apply_patch has no configuration key',
+        private: "the project's own .codex/config.toml still layers in",
+      },
+    }
+    expect(agentAvailabilitySchema.safeParse(codex).success).toBe(true)
+    // Nothing optional over this wire: an agent that said nothing about bare mode is refused.
+    const { bareMode: _dropped, ...silent } = codex
+    expect(agentAvailabilitySchema.safeParse(silent).success).toBe(false)
+  })
+})
+
+describe('What Hemera does not control is said under the agent', () => {
+  test('an agent says what its bare means leaves out of Hemera’s sight', () => {
+    const bareMode = {
+      means: 'session/new _meta',
+      qualified: true,
+      reason: null,
+      private: '~/.claude.json still loads; Hemera does not read it.',
+    }
+    expect(bareModeSchema.safeParse(bareMode).success).toBe(true)
+    const { private: _dropped, ...silent } = bareMode
+    expect(bareModeSchema.safeParse(silent).success).toBe(false)
   })
 })

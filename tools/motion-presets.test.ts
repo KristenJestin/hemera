@@ -28,6 +28,7 @@ describe('Les kinds du preset', () => {
     expect(kinds).toContain('expand')
     expect(kinds).toContain('collapse')
     expect(kinds).toContain('push')
+    expect(kinds).toContain('crossfade')
     expect(kinds).toContain('useTransition')
   })
 

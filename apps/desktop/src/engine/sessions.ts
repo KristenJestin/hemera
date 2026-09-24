@@ -35,6 +35,7 @@ import {
 import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
+import { StderrSink } from './agents/supervisor.ts'
 import { InvalidCursorError, PAGE, type NewEvent } from './journal.ts'
 import { UnknownProjectError } from './projects.ts'
 import { Database, DatabaseError } from './storage/database.ts'
@@ -224,8 +225,14 @@ type Refusal =
   | NoAgentError
 
 /** The date every row of one mutation shares, so an entry and its event agree on when. */
+let last = 0
 function now(): string {
-  return new Date().toISOString()
+  // `Sessions.list` orders by `desc(lastWrittenAt), desc(createdAt)`: two writes landing in the
+  // same millisecond must still come out in the order they happened, so the clock is forced to
+  // advance by at least one millisecond on every call instead of ticking on its own.
+  const at = Math.max(Date.now(), last + 1)
+  last = at
+  return new Date(at).toISOString()
 }
 
 /**
@@ -312,11 +319,49 @@ export const sessionsLayer = Layer.effect(
   Sessions,
   Effect.gen(function* () {
     const database = yield* Database
+    /** The engine's diagnostic log: where a write that came too late is told. */
+    const diagnostic = yield* StderrSink
+
+    /**
+     * Whether the engine has let go of this service, and of the database under it.
+     *
+     * Set as this layer's scope closes, which is before the database's own does. Nothing the
+     * engine runs should write after it — every fiber of a Session is its scope's and ends first
+     * — and one that does anyway is a bug to find, not a reason for the quit to throw: it is
+     * dropped and said, as a refusal its caller already handles, rather than left to meet a
+     * statement the driver has finalized, which is a defect nobody catches.
+     */
+    let released = false
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        released = true
+      }),
+    )
+
+    /** A write that came after the release: nothing written, one line said, a refusal answered. */
+    const dropped = (id: string, entry: ThreadWrite) =>
+      diagnostic
+        .write(`sessions: write after release dropped: ${entry.kind} ${id}`)
+        .pipe(
+          Effect.andThen(
+            Effect.fail(
+              new DatabaseError({ doing: 'writing an entry', cause: 'the database was released' }),
+            ),
+          ),
+        )
 
     const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
+
+    /** An entry's write, on the database while it is held, and dropped once it was let go of. */
+    const whileOpen =
+      (id: string, entry: ThreadWrite) =>
+      <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E | DatabaseError> =>
+        Effect.suspend((): Effect.Effect<A, E | DatabaseError> =>
+          released ? dropped(id, entry) : withDatabase(effect),
+        )
 
     /** The one Session a change was about, read inside the transaction that is changing it. */
     const readOne = (transaction: Parameters<Parameters<typeof mutate>[1]>[0], id: string) =>
@@ -717,7 +762,10 @@ export const sessionsLayer = Layer.effect(
         ),
 
       write: (id, entry) =>
-        withDatabase(
+        whileOpen(
+          id,
+          entry,
+        )(
           mutate('writing an entry', (transaction) =>
             Effect.gen(function* () {
               const at = now()

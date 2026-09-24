@@ -71,8 +71,6 @@ import {
   listenToAgents,
   loadAgents,
   offerAgent,
-  carryModelDefaults,
-  modelDefaultsOf,
   offeringOf,
   optionsOf,
   readOptions,
@@ -82,6 +80,19 @@ import {
   subscribeToAgent,
   updateAgent,
 } from './agent-store.ts'
+import { bareRowOf, offeredOf } from './bare-mode.ts'
+import {
+  listenToTools,
+  readCatalogue,
+  readContext,
+  removeCommand,
+  saveCommand,
+  readRuns,
+  runCommand,
+  stopRun,
+  subscribeToTools,
+  toolsSnapshot,
+} from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
   archivedSessions,
@@ -227,19 +238,6 @@ async function checkFolder(path: string): Promise<string | null> {
 }
 
 /**
- * What is said about an agent that cannot be picked, in the engine's own words (design D5-21).
- *
- * The way out of it and not the state alone: the menu can say "not installed" by itself, and
- * what it cannot say is the command that installs this agent or signs it in — which is the one
- * thing the reader can do about either.
- */
-function hintOf(agent: AgentAvailability): string | undefined {
-  if (!agent.found) return agent.installHint
-  if (!agent.authenticated) return agent.loginHint
-  return undefined
-}
-
-/**
  * The agent a Session runs, as its composer's menu lists it (design D5-06, D17-11).
  *
  * One, already chosen and never changed: a Session keeps the agent it was made with, and the
@@ -279,6 +277,9 @@ export function Application() {
   // What the agents are doing, per Session: a turn is not a fact about the window, and a window
   // that heard only about the Session on screen would lose the one behind it (design D5-12).
   const agents = useSyncExternalStore(subscribeToAgent, agentSnapshot, agentSnapshot)
+  // The runs of the Sessions, as they were last pushed: the thread's blocks and the Commands
+  // panel read the same run from here (design D6-12).
+  const tools = useSyncExternalStore(subscribeToTools, toolsSnapshot, toolsSnapshot)
   // What a page holds is a name, and what the channels take is one of the agents the engine
   // knows: resolved among them here rather than asserted at each call, so a name that answers to
   // none of them asks for nothing at all.
@@ -475,6 +476,9 @@ export function Application() {
   // about a Session and not about the page on screen, so one subscription holds them all and each
   // page reads the Session it draws (design D5-12).
   useEffect(() => listenToAgents(), [])
+  // And the runs, heard on the same channel: a command a Session started while another was on
+  // screen has moved on by the time the reader comes back to it (D6-12).
+  useEffect(() => listenToTools(), [])
 
   // The list the sidebar draws is read again when a Session gets its first entry: the engine
   // writes the user's own message as part of the prompt (design D5-11), and that message is what
@@ -499,6 +503,28 @@ export function Application() {
   useEffect(() => {
     if (openId === null || provider === null) return
     void readOptions(openId)
+  }, [openId, provider])
+
+  // The runs of the Session on screen, read when it becomes the one the window is on: a run it
+  // started before this window was opened is a row, and the pushes only tell what changes.
+  useEffect(() => {
+    if (openId === null) return
+    void readRuns(openId)
+  }, [openId])
+
+  // The catalogue of the Project whose settings are open, read when they are opened: the agent
+  // may have been told of a command the page has not heard of, and the list is the engine's.
+  const settingsOf = shell.activeEntryId === PROJECT_SETTINGS_ENTRY ? (current?.id ?? null) : null
+  useEffect(() => {
+    if (settingsOf === null) return
+    void readCatalogue(settingsOf)
+  }, [settingsOf])
+
+  // And what it was provided, for its Context tab: read when it is opened, and again by the store
+  // whenever a turn ends or a change of the Workspace's instructions is delivered (D6-10).
+  useEffect(() => {
+    if (openId === null || provider === null) return
+    void readContext(openId)
   }, [openId, provider])
 
   // What this machine has, read when the window opens. The Home's composer picks the agent a
@@ -860,6 +886,9 @@ export function Application() {
               loginHint: one.loginHint,
               installer: one.installer,
               latest: one.latest,
+              // What its adapter declares about running it bare here (D6-02): what it keeps that
+              // Hemera does not control, or the adapter's own reason when it cannot run here.
+              bare: bareRowOf(one),
             })),
             checked: agents.checked,
             updating,
@@ -962,6 +991,11 @@ export function Application() {
             return went ? null : projectsSnapshot().refusal
           }}
           onRemoveRepository={(path) => void removeRepository(current, path)}
+          commands={tools.catalogues.get(current.id) ?? []}
+          onSaveCommand={async (command, existing) =>
+            await saveCommand({ projectId: current.id, ...command }, existing)
+          }
+          onRemoveCommand={(name) => void removeCommand(current.id, name)}
           onArchive={() => void archiveProject(current)}
         />
       )
@@ -986,11 +1020,10 @@ export function Application() {
           agent={agentOf(open.id)}
           agents={runsOn(open, agents.agents)}
           options={optionsOf(open.id)}
-          modelDefaults={modelDefaultsOf(open.id)}
           onWrite={async (body) => await writeInto(open.id, body)}
           onSay={(text) => void say(open.id, text)}
           onStop={() => void stopTurn(open.id)}
-          onDecide={(option) => void decide(open.id, option.optionId)}
+          onDecide={(toolCallId, option) => void decide(open.id, toolCallId, option.optionId)}
           onChooseOption={(optionId, value) => void chooseOption(open.id, optionId, value)}
           onRename={(title) => void renameTo(open, title)}
           onStartEditing={() => setNaming(open.id)}
@@ -1009,6 +1042,21 @@ export function Application() {
               ? []
               : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
           }
+          commandRuns={tools.runs.get(open.id) ?? []}
+          // An address a run published is opened by the browser: the window hands every web
+          // address to the platform and never navigates away itself.
+          onOpenUrl={(url) => {
+            window.open(url, '_blank', 'noopener')
+          }}
+          onStopRun={(runId) => void stopRun(open.id, runId)}
+          root={current?.mainPath ?? ''}
+          context={tools.contexts.get(open.id) ?? null}
+          // A line that names a command of the catalogue runs that command, in its folder; any
+          // other line is a one-off, run in the Workspace root and not added to the catalogue.
+          onRunCommand={(line) => {
+            const known = tools.contexts.get(open.id)?.commands.some((one) => one.name === line)
+            void runCommand(open.id, known === true ? { name: line } : { line })
+          }}
         />
       )
     }
@@ -1021,13 +1069,7 @@ export function Application() {
         projectName={active.name}
         sessions={recent}
         entries={linesOf(journal.entries).slice(0, ACTIVITY)}
-        agents={agents.agents.map((one) => ({
-          id: one.id,
-          name: one.label,
-          available: one.found,
-          signedIn: one.authenticated,
-          hint: hintOf(one),
-        }))}
+        agents={agents.agents.map(offeredOf)}
         // What this Project's composer was left on, which is what the Home opens on.
         choice={composers[active.id] ?? null}
         offeringOf={(chosen) => offeringOf(active.id, providerOf(chosen))}
@@ -1067,9 +1109,6 @@ export function Application() {
           const asked = providerOf(chosen)
           const made = await startSession(active.id, asked)
           if (made === null) return sessionsSnapshot().refusal
-          // What the Home learned of its models' defaults goes with it: the Session starts on the
-          // effort pinned there, which its own first answer would otherwise teach as a default.
-          if (asked !== null) carryModelDefaults(active.id, asked, made.id)
           goTo(made.id)
           // The thread is read before the agent is spoken to: the message the engine writes as
           // part of the prompt then lands on a thread that is already on screen (D5-11).

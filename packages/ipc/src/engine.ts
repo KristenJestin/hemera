@@ -23,6 +23,7 @@ import {
   resumeStateSchema,
   stopReasonSchema,
 } from './agents.ts'
+import { commandKindSchema, commandRunSchema, commandSchema, contextViewSchema } from './tools.ts'
 
 /**
  * Which build this is, and therefore which data folder it opens.
@@ -248,6 +249,9 @@ export const sessionEntryKindSchema = z.enum([
   'usage',
   'turn',
   'note',
+  'hemera_tool_call',
+  'command_run',
+  'context_delivery',
 ])
 
 /**
@@ -472,8 +476,14 @@ export const ENGINE_REQUESTS = {
   },
   'agents.decide': {
     // An option of null is not a missing answer: it is the user closing the request without
-    // choosing one, which the agent has to be told either way (design D5-13).
-    arguments: z.object({ sessionId: z.string(), optionId: z.string().nullable() }),
+    // choosing one, which the agent has to be told either way (design D5-13). The question is
+    // named, because a Session can be waiting on several at once and the block the user clicked
+    // is the one they decided about.
+    arguments: z.object({
+      sessionId: z.string(),
+      toolCallId: z.string(),
+      optionId: z.string().nullable(),
+    }),
     response: z.void(),
   },
   'agents.resume': {
@@ -494,6 +504,68 @@ export const ENGINE_REQUESTS = {
   'agents.update': {
     arguments: z.object({ id: agentProviderSchema }),
     response: agentUpdateSchema,
+  },
+
+  // The commands of a Project and the runs they become (design D6-12). The catalogue is the
+  // Project's, edited in its settings: a command is named once, and `folder` is where it runs —
+  // null for the Workspace root, or one of the Project's repositories as the Project declares it.
+  // A name the catalogue already holds is refused by `create` and is what `update` rewrites.
+  'commands.list': {
+    arguments: z.object({ projectId: z.string() }),
+    response: z.array(commandSchema),
+  },
+  'commands.create': {
+    arguments: z.object({
+      projectId: z.string(),
+      name: z.string(),
+      line: z.string(),
+      kind: commandKindSchema,
+      folder: z.string().nullable(),
+    }),
+    response: commandSchema,
+  },
+  'commands.update': {
+    arguments: z.object({
+      projectId: z.string(),
+      name: z.string(),
+      line: z.string(),
+      kind: commandKindSchema,
+      folder: z.string().nullable(),
+    }),
+    response: commandSchema,
+  },
+  'commands.remove': {
+    arguments: z.object({ projectId: z.string(), name: z.string() }),
+    response: z.void(),
+  },
+  // The runs are a Session's: the Commands panel lists what this Session started, runs a command
+  // of the catalogue by name or a one-off line inside the Workspace root, reads a run's output
+  // and stops it. The agent and the user start the same process and read the same run (D6-12).
+  'commands.runs': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.array(commandRunSchema),
+  },
+  'commands.run': {
+    arguments: z.object({
+      sessionId: z.string(),
+      name: z.string().optional(),
+      line: z.string().optional(),
+    }),
+    response: commandRunSchema,
+  },
+  'commands.stop': {
+    arguments: z.object({ sessionId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
+  'commands.output': {
+    arguments: z.object({ sessionId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
+
+  // What a Session was provided, what it may consult, and what stays its agent's (design D6-10).
+  'context.read': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: contextViewSchema,
   },
 } as const
 
@@ -539,11 +611,24 @@ export const ENGINE_EVENTS = {
   turn: pushedEvent('turn'),
   permission: pushedEvent('permission'),
   agent: pushedEvent('agent'),
+  /**
+   * A change of the Workspace's instructions was handed to the agent (design D6-08). The
+   * `context_delivery` entry it wrote arrived as an `entry` of its own; this says the Context view
+   * has something new to list, and it reads its lists again.
+   */
+  delivery: pushedEvent('delivery'),
+  /**
+   * A run changed: it started, published its address, printed something, or ended (D6-12).
+   *
+   * The run itself crosses rather than an entry: the Commands panel draws its output as it grows,
+   * and a thread entry per line printed is what the panel exists to avoid.
+   */
+  run: z.object({ event: z.literal('run'), sessionId: z.string(), run: commandRunSchema }),
 } as const
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the five names it carries. */
+/** One pushed message, of whichever of the seven names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

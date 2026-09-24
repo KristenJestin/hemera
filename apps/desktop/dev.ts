@@ -98,7 +98,9 @@ const described = spawnSync('git describe --tags --always', {
   shell: true,
 })
 
-const started = spawn(binary, [application], {
+// What `pnpm dev` was given goes to the application: `--data-dir <folder>` is how a trial run
+// stays away from the real data folder, and a development run is the one build that takes it.
+const started = spawn(binary, [application, ...process.argv.slice(2)], {
   stdio: 'inherit',
   env: {
     ...environment,

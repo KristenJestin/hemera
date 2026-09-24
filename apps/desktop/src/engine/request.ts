@@ -19,6 +19,9 @@ import {
 import { Effect } from 'effect'
 
 import type {
+  DuplicateCommandNameError,
+  EmptyCommandLineError,
+  EmptyCommandNameError,
   EmptyMessageError,
   EmptyTitleError,
   InvalidProjectNameError,
@@ -29,7 +32,19 @@ import type {
 import { type AgentOption } from './agents/client.ts'
 import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
-import { Discovery } from './agents/discovery.ts'
+import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
+import { ADAPTERS, Discovery } from './agents/discovery.ts'
+import {
+  type NothingToRunError,
+  type UnknownCommandFolderError,
+  createCommand,
+  runFromPanel,
+  runsOf,
+  updateCommand,
+} from './commands/panel.ts'
+import { Commands, type UnknownCommandError, type UnknownRunError } from './commands/service.ts'
+import { type Context, type UnreadableInstructionsError } from './context/service.ts'
+import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
 import { Projects, type UnknownProjectError } from './projects.ts'
@@ -131,7 +146,16 @@ export function answer(
 ): Effect.Effect<
   EngineResponse<EngineRequestName>,
   Refusal,
-  Preferences | EngineStatus | Projects | Journal | Sessions | Discovery | AgentRuntime | Agents
+  | Preferences
+  | EngineStatus
+  | Projects
+  | Journal
+  | Sessions
+  | Discovery
+  | AgentRuntime
+  | Agents
+  | Commands
+  | Context
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -159,6 +183,11 @@ export function answer(
       // The agent the Session is made with crosses with the Project (D5-06): it is chosen once,
       // in the composer that starts it, and every turn of that Session runs it.
       const { projectId, provider } = decision.argument
+      // Bare, or no Session at all (D6-02): an agent whose means leaves a tool of its own behind
+      // is refused here, with its adapter's reason, before anything is written.
+      if (provider !== null) {
+        yield* refusedUnlessBare(ADAPTERS[provider], globalThis.process.platform)
+      }
       return yield* sessions.create(projectId, provider)
     }
     if (decision.name === 'sessions.rename') {
@@ -247,8 +276,8 @@ export function answer(
     }
     if (decision.name === 'agents.stop') return yield* runtime.stop(decision.argument.sessionId)
     if (decision.name === 'agents.decide') {
-      const { sessionId, optionId } = decision.argument
-      return yield* runtime.decide(sessionId, optionId)
+      const { sessionId, toolCallId, optionId } = decision.argument
+      return yield* runtime.decide(sessionId, toolCallId, optionId)
     }
     if (decision.name === 'agents.resume') {
       const report = yield* runtime.resume(decision.argument.sessionId)
@@ -267,6 +296,33 @@ export function answer(
       const agents = yield* Agents
       return yield* agents.update(decision.argument.id)
     }
+
+    // The commands of a Project and the runs of a Session, as the settings and the Commands panel
+    // ask for them (D6-12): the agent reaches the same catalogue and the same runs through its
+    // tools, and the window through these.
+    const commands = yield* Commands
+    if (decision.name === 'commands.list') return yield* commands.list(decision.argument.projectId)
+    if (decision.name === 'commands.create') return yield* createCommand(decision.argument)
+    if (decision.name === 'commands.update') return yield* updateCommand(decision.argument)
+    if (decision.name === 'commands.remove') {
+      const { projectId, name } = decision.argument
+      return yield* commands.remove(projectId, name)
+    }
+    if (decision.name === 'commands.runs') return yield* runsOf(decision.argument.sessionId)
+    if (decision.name === 'commands.run') {
+      const { sessionId, name, line } = decision.argument
+      return yield* runFromPanel(sessionId, name, line)
+    }
+    if (decision.name === 'commands.stop') {
+      const { sessionId, runId } = decision.argument
+      return yield* commands.stop(sessionId, runId)
+    }
+    if (decision.name === 'commands.output') {
+      const { sessionId, runId } = decision.argument
+      return yield* commands.output(sessionId, runId)
+    }
+    // What a Session was provided, may consult, and keeps to its agent (D6-10).
+    if (decision.name === 'context.read') return yield* contextOf(decision.argument.sessionId)
 
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
@@ -293,3 +349,12 @@ export type Refusal =
   | EmptyMessageError
   | EmptyTitleError
   | NoAgentError
+  | BareModeNotQualifiedError
+  | DuplicateCommandNameError
+  | EmptyCommandNameError
+  | EmptyCommandLineError
+  | UnknownCommandError
+  | UnknownCommandFolderError
+  | UnknownRunError
+  | NothingToRunError
+  | UnreadableInstructionsError

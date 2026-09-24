@@ -11,7 +11,8 @@ import type {
 } from '@hemera/ipc'
 import type { ActivityState } from '@hemera/ui'
 
-import { modelDefaultsAfter, NO_DEFAULTS, type ModelDefaults } from './agent-options.ts'
+import { effortStage, effortToLand, modelStage } from './agent-options.ts'
+import { commandRunOf } from './agent-tool-payloads.ts'
 
 /**
  * What the agents of this window are doing (design D5-12, D5-13, D5-17).
@@ -62,6 +63,13 @@ const QUIET: AgentSessionState = { entries: [], running: false, stopReason: null
 const announced = new Set<string>()
 
 /**
+ * Where the user has chosen an effort: a Session by its id, a Home's composer by its
+ * `projectId:provider` key. A model change there keeps the effort; anywhere else it lands on
+ * the level the new model recommends (`effortToLand`).
+ */
+const effortChosen = new Set<string>()
+
+/**
  * What one agent offers one Project before a Session holds it (design D5-17, D5-21).
  *
  * The three cross together because the composer draws all three: the options the agent
@@ -73,25 +81,16 @@ export interface AgentOffering {
   options: readonly ConfigOption[]
   refusal: string | null
   loading: boolean
-  /** What this composer learned of its models' own default efforts, from the answers. */
-  modelDefaults: ModelDefaults
 }
 
 /** What an agent nobody has asked yet offers: nothing, for no reason, and not being asked. */
-const UNASKED: AgentOffering = {
-  options: [],
-  refusal: null,
-  loading: false,
-  modelDefaults: NO_DEFAULTS,
-}
+const UNASKED: AgentOffering = { options: [], refusal: null, loading: false }
 
 export interface AgentState {
   /** What has been pushed, per Session, since it was last read. */
   sessions: ReadonlyMap<string, AgentSessionState>
   /** What each agent offers, per Session, as its own handshake answered. */
   options: ReadonlyMap<string, readonly ConfigOption[]>
-  /** What each Session learned of its models' own default efforts (`ModelDefaults`). */
-  modelDefaults: ReadonlyMap<string, ModelDefaults>
   /**
    * What each agent offers a Project no Session holds yet, keyed `projectId:provider` (D5-17).
    *
@@ -111,7 +110,6 @@ export interface AgentState {
 const EMPTY: AgentState = {
   sessions: new Map(),
   options: new Map(),
-  modelDefaults: new Map(),
   offerings: new Map(),
   agents: [],
   checked: false,
@@ -176,21 +174,28 @@ export function hasEnded(activity: Activity): boolean {
 /**
  * How a turn ended, from the stop reason its `turn` entry carries.
  *
- * `cancelled` is the user's Stop, and `interrupted` is the agent gone from under the turn — the
- * one ending Hemera wrote rather than the agent. Every other reason is an agent that answered and
+ * `cancelled` is the user's Stop, `interrupted` is the agent gone from under the turn, and
+ * `failed` is an agent that answered with an error — the two endings Hemera wrote rather than the
+ * agent. Every other reason is an agent that answered and
  * stopped where it chose to, which is a turn that is done.
  */
 function endOf(stopReason: string | null): ActivityState {
   if (stopReason === 'cancelled') return 'stopped'
-  if (stopReason === 'interrupted') return 'failed'
+  if (stopReason === 'interrupted' || stopReason === 'failed') return 'failed'
   return 'done'
 }
 
-/** Where the last message the user wrote is, or -1 in a thread they never wrote in. */
+/**
+ * Where the last turn began: the last message the user wrote, or a change of the instructions
+ * Hemera handed over while no turn ran, which is a turn of its own (D6-08) — or -1 in a thread
+ * where neither happened. A delivery made inside a turn the user started belongs to that turn,
+ * and carries no turn of its own.
+ */
 function lastSaid(entries: readonly SessionEntry[]): number {
   for (let at = entries.length - 1; at >= 0; at -= 1) {
     const entry = entries[at]
     if (entry?.role === 'user' && entry.kind === 'message') return at
+    if (entry?.kind === 'context_delivery' && entry.turnId !== null) return at
   }
   return -1
 }
@@ -244,6 +249,15 @@ export function activityOf(
 
   if (waiting(running)) return { state: 'waiting', thought }
 
+  // A command Hemera is running for the turn — a check, a utility — is what the turn waits on,
+  // and its name says more than the tool call that asked for it (D6-12). An app is left running
+  // on purpose and is not what the turn is doing once it has started.
+  const command = [...running].reverse().find((entry) => entry.kind === 'command_run')
+  const run = command === undefined ? null : commandRunOf(command)
+  if (run !== null && run.state === 'running' && run.kind !== 'app') {
+    return { state: 'running', detail: `Running ${run.name}`, thought }
+  }
+
   const call = [...running].reverse().find((entry) => entry.kind === 'tool_call')
   if (call !== undefined && UNFINISHED.includes(call.state ?? '')) {
     return { state: 'running', detail: call.body, thought }
@@ -286,31 +300,6 @@ function thoughtOf(entries: readonly SessionEntry[], turnId: string | null): str
 export function optionsOf(sessionId: string | null): readonly ConfigOption[] {
   if (sessionId === null) return []
   return state.options.get(sessionId) ?? []
-}
-
-/** What a Session learned of its models' own default efforts, which is nothing at first. */
-export function modelDefaultsOf(sessionId: string | null): ModelDefaults {
-  if (sessionId === null) return NO_DEFAULTS
-  return state.modelDefaults.get(sessionId) ?? NO_DEFAULTS
-}
-
-/**
- * Hands what a Home's composer learned over to the Session it has just made (D5-17).
- *
- * The engine starts that Session on the choices made in the Home, an effort pinned there
- * included, so the Session's first announcement is not the model's own landing: read on its
- * own, it would teach the pin as the model's default. The Session starts from what the Home knew.
- */
-export function carryModelDefaults(
-  projectId: string,
-  provider: AgentProvider,
-  sessionId: string,
-): void {
-  const held = state.offerings.get(`${projectId}:${provider}`)
-  if (held === undefined) return
-  const modelDefaults = new Map(state.modelDefaults)
-  modelDefaults.set(sessionId, held.modelDefaults)
-  replace({ ...state, modelDefaults })
 }
 
 /** What a refusal says, without the shape of whatever carried it. */
@@ -401,24 +390,13 @@ export function listenToAgents(): () => void {
  * Read when the Session is opened and after an option is changed: an agent announces its models
  * and its modes when it starts, and what it is on now is the agent's own answer and not a value
  * this window remembers.
- *
- * `setOptionId` is the option whose change this read answers, and null for a plain read: what
- * each model defaults to is read off the answers until an effort is pinned (`modelDefaultsAfter`).
  */
-export async function readOptions(
-  sessionId: string,
-  setOptionId: string | null = null,
-): Promise<void> {
+export async function readOptions(sessionId: string): Promise<void> {
   try {
     const answered = await window.hemera.invoke('agents.options', { sessionId })
     const options = new Map(state.options)
     options.set(sessionId, answered.options)
-    const modelDefaults = new Map(state.modelDefaults)
-    modelDefaults.set(
-      sessionId,
-      modelDefaultsAfter(modelDefaultsOf(sessionId), answered.options, setOptionId),
-    )
-    replace({ ...state, options, modelDefaults, refusal: null })
+    replace({ ...state, options, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }
@@ -445,21 +423,12 @@ function offering(key: string, next: AgentOffering): void {
   replace({ ...state, offerings })
 }
 
-/**
- * The offer an answer carries: what the agent announced, or the sentence it was refused with,
- * and what the composer has learned of its models' defaults with that answer — from what it knew
- * before and the option the answer is to, null for the first offer (`modelDefaultsAfter`).
- */
-function offered(
-  answer: AgentOffer,
-  held: ModelDefaults,
-  setOptionId: string | null,
-): AgentOffering {
+/** The offer an answer carries: what the agent announced, or the sentence it was refused with. */
+function offered(answer: AgentOffer): AgentOffering {
   return {
     options: answer.options,
     refusal: answer.refusal === null ? null : answer.refusal.message,
     loading: false,
-    modelDefaults: modelDefaultsAfter(held, answer.options, setOptionId),
   }
 }
 
@@ -477,7 +446,7 @@ export async function offerAgent(projectId: string, provider: AgentProvider): Pr
   offering(key, { ...UNASKED, loading: true })
   try {
     const answer = await window.hemera.invoke('agents.offer', { projectId, provider })
-    offering(key, offered(answer, NO_DEFAULTS, null))
+    offering(key, offered(answer))
   } catch (cause) {
     offering(key, { ...UNASKED, refusal: message(cause) })
   }
@@ -507,7 +476,22 @@ export async function setOffered(
       optionId,
       value,
     })
-    offering(key, offered(answer, held.modelDefaults, optionId))
+    if (effortStage(held.options)?.optionId === optionId) effortChosen.add(key)
+    const landing =
+      modelStage(held.options)?.optionId === optionId
+        ? effortToLand(answer.options, effortChosen.has(key))
+        : null
+    if (landing === null) {
+      offering(key, offered(answer))
+      return
+    }
+    // The same rule as in a Session: a new model while no effort was chosen takes its own.
+    const landed = await window.hemera.invoke('agents.offerSet', {
+      projectId,
+      provider,
+      ...landing,
+    })
+    offering(key, offered(landed))
   } catch (cause) {
     offering(key, { ...held, refusal: message(cause), loading: false })
   }
@@ -550,29 +534,46 @@ export async function stopTurn(sessionId: string): Promise<void> {
 }
 
 /**
- * Answers the permission the agent is waiting on, from the page.
+ * Answers the question one block was drawn for, from the page.
  *
  * A null option is not a missing answer: it is the request closed without choosing anything,
  * and the agent is told either way (design D5-13).
  */
-export async function decide(sessionId: string, optionId: string | null): Promise<void> {
+export async function decide(
+  sessionId: string,
+  toolCallId: string,
+  optionId: string | null,
+): Promise<void> {
   try {
-    await window.hemera.invoke('agents.decide', { sessionId, optionId })
+    await window.hemera.invoke('agents.decide', { sessionId, toolCallId, optionId })
     replace({ ...state, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }
 }
 
-/** Puts the agent of a Session on another of its own options, and reads back what it is on. */
+/**
+ * Puts the agent of a Session on another of its own options, and reads back what it is on.
+ *
+ * A model changed while no effort was chosen in the Session is followed by the effort that model
+ * recommends (`effortToLand`); an effort chosen once is kept across the models.
+ */
 export async function chooseOption(
   sessionId: string,
   optionId: string,
   value: string,
 ): Promise<void> {
+  const held = optionsOf(sessionId)
   try {
     await window.hemera.invoke('agents.setOption', { sessionId, optionId, value })
-    await readOptions(sessionId, optionId)
+    if (effortStage(held)?.optionId === optionId) effortChosen.add(sessionId)
+    await readOptions(sessionId)
+    if (modelStage(held)?.optionId !== optionId) return
+    // A new model while no effort was chosen: the effort goes to the level that model advises.
+    const landing = effortToLand(optionsOf(sessionId), effortChosen.has(sessionId))
+    if (landing === null) return
+    await window.hemera.invoke('agents.setOption', { sessionId, ...landing })
+    await readOptions(sessionId)
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }

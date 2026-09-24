@@ -90,7 +90,7 @@ describe('Ce que l’agent dit de ses propres valeurs', () => {
         },
       ],
     })
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
 
     const values = connection.options()[0]?.values ?? []
     // The agent's own sentence, kept: it is the only thing that can say what a value stands for.
@@ -118,7 +118,7 @@ describe('Ce que l’agent dit de ses propres valeurs', () => {
         },
       ],
     })
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
 
     const values = connection.options()[0]?.values ?? []
     expect(values.map((value) => value.recommended)).toEqual([undefined, true, undefined])
@@ -140,7 +140,7 @@ describe('Ce que l’agent dit de ses propres valeurs', () => {
         },
       ],
     })
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
 
     const values = connection.options()[0]?.values ?? []
     expect(values.every((value) => value.recommended === undefined)).toBe(true)
@@ -182,7 +182,7 @@ describe('Le « Default » d’un agent est le sien ou n’est pas', () => {
         },
       ],
     })
-    await Effect.runPromise(effort.connection.open('/tmp/atlas'))
+    await Effect.runPromise(effort.connection.open('/tmp/atlas', []))
 
     const level = effort.connection.options()[0]
     expect(level?.values.map((value) => value.id)).toEqual(['low', 'medium', 'high'])
@@ -207,7 +207,7 @@ describe('Le « Default » d’un agent est le sien ou n’est pas', () => {
         },
       ],
     })
-    await Effect.runPromise(model.connection.open('/tmp/atlas'))
+    await Effect.runPromise(model.connection.open('/tmp/atlas', []))
 
     const models = model.connection.options()[0]
     // `Opus 4.5` and not `Opus 4`: the longer name the sentence spells out is the one it names.
@@ -232,7 +232,7 @@ describe('Le « Default » d’un agent est le sien ou n’est pas', () => {
         },
       ],
     })
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
 
     const option = connection.options()[0]
     // No meta, no sentence: the entry stays at the head and nothing is guessed for it.
@@ -273,7 +273,7 @@ describe('Le « Default » d’un agent est le sien ou n’est pas', () => {
         },
       ],
     })
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
     const after = await Effect.runPromise(connection.setOption('model', 'opus-4-5'))
 
     for (const option of [connection.options()[0], after[0]]) {
@@ -297,7 +297,7 @@ describe('Un tour en cours', () => {
       usage: { totalTokens: 120, inputTokens: 100, outputTokens: 20 },
     })
 
-    const openedNative = await Effect.runPromise(connection.open('/tmp/atlas'))
+    const openedNative = await Effect.runPromise(connection.open('/tmp/atlas', []))
     expect(openedNative).toBe('native-session')
 
     const outcome = await Effect.runPromise(connection.prompt('fix the parser'))
@@ -334,7 +334,7 @@ describe('Un tour en cours', () => {
         { does: 'updates', call: { id: 'call-1', status: 'completed' } },
       ],
     })
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
     await Effect.runPromise(connection.prompt('look at it'))
 
     const calls = events.filter((event) => event.type === 'tool_call')
@@ -361,7 +361,7 @@ describe('Un tour en cours', () => {
         },
       ],
     })
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
     await Effect.runPromise(connection.prompt('plan it'))
 
     expect(events).toEqual([
@@ -400,7 +400,7 @@ describe('Une permission demandée en cours de tour', () => {
       codex,
       { optionId: 'reject-once' },
     )
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
     const outcome = await Effect.runPromise(connection.prompt('run them'))
 
     // The question reached the user with the options the agent offered...
@@ -408,6 +408,7 @@ describe('Une permission demandée en cours de tour', () => {
       {
         toolCallId: 'call-2',
         title: 'Run the tests',
+        tool: 'Run the tests',
         options: [
           { id: 'allow-once', name: 'Allow once', kind: 'allow_once' },
           { id: 'allow-always', name: 'Always allow', kind: 'allow_always' },
@@ -460,7 +461,7 @@ describe('A stopped turn and a session kept', () => {
         onPermission: async () => ALLOWED,
       }),
     )
-    await Effect.runPromise(connection.open('/tmp/atlas'))
+    await Effect.runPromise(connection.open('/tmp/atlas', []))
 
     const running = Effect.runPromise(connection.prompt('go'))
     await reached
@@ -482,7 +483,7 @@ describe('A stopped turn and a session kept', () => {
       steps: [{ does: 'says', text: 'and this one is new' }],
     })
 
-    await Effect.runPromise(connection.resume('native-session', '/tmp/atlas'))
+    await Effect.runPromise(connection.resume('native-session', '/tmp/atlas', []))
 
     // `session/resume` hands the conversation over as it stands: the agent still holds it, so
     // there is no history to match and nothing is asked of it a second time.
@@ -506,7 +507,7 @@ describe('A stopped turn and a session kept', () => {
       steps: [{ does: 'says', text: 'and this one is new' }],
     })
 
-    await Effect.runPromise(connection.load('native-session', '/tmp/atlas'))
+    await Effect.runPromise(connection.load('native-session', '/tmp/atlas', []))
 
     expect(events.map((event) => event.replay)).toEqual([true, true])
     expect(fake.answers.loads).toBe(1)

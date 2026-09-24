@@ -153,7 +153,7 @@ describe('La liste des agents', () => {
 })
 
 describe('Le contrôle des versions publiées', () => {
-  test('ne demande au registre que ce qui est là et plaçable', async () => {
+  test('the published version is asked whatever the installer', async () => {
     const registry = registryAnswering('1.9.0')
     const updater = updaterAnswering('', null)
 
@@ -164,11 +164,13 @@ describe('Le contrôle des versions publiées', () => {
       updater.layer,
     )
 
-    expect(registry.asked).toEqual(['claude'])
+    // OpenCode came from somewhere nothing here can place, and its version is asked all the
+    // same; Codex is not on the machine, so there is no version to compare and nothing is asked.
+    expect(registry.asked).toEqual(['claude', 'opencode'])
     expect(checked.map((agent) => [agent.id, agent.version, agent.latest])).toEqual([
       ['claude', '1.4.0', '1.9.0'],
       ['codex', null, null],
-      ['opencode', '0.9.1', null],
+      ['opencode', '0.9.1', '1.9.0'],
     ])
   })
 })

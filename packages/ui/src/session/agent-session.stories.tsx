@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
-import { expect, fn, waitFor, within } from 'storybook/test'
+import { expect, userEvent, fn, waitFor, within } from 'storybook/test'
 
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { DiffBlock } from '../activity/diff-block.tsx'
@@ -26,8 +26,12 @@ import { MessageScroller, type ScrollerEntry } from '../message/scroller/scrolle
 import { ActivityRow } from './activity-row.tsx'
 import type { PlanEntry } from './plan-panel.tsx'
 import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
-import { SessionHeader } from './session.tsx'
-import { SessionSideColumn, type TouchedFile } from './session-side-column.tsx'
+import { SessionEmpty, SessionHeader } from './session.tsx'
+import { CommandRun } from '../activity/command-run.tsx'
+import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
+import { CommandsPanel } from './commands-panel.tsx'
+import { ContextView } from './context-view.tsx'
+import { SessionDetails, type SessionDetailsTab, type TouchedFile } from './session-details.tsx'
 import { StoppedTurn } from './stopped-turn.tsx'
 
 /**
@@ -35,7 +39,7 @@ import { StoppedTurn } from './stopped-turn.tsx'
  *
  * Every other story here shows one surface at a time; this one is the surface the reader
  * actually has, and it is the one the lot is judged on: the head, a thread carrying each kind of
- * block an agent reports, the column that holds what is a state rather than an event, and the
+ * block an agent reports, the details that hold what is a state rather than an event, and the
  * box the next turn is written in, with what the Session runs on at the end of its own row. A
  * block that reads well alone and badly here is a block that reads badly.
  *
@@ -153,6 +157,25 @@ const THREAD: ScrollerEntry[] = [
     ),
   },
   {
+    id: 'hemera-read',
+    content: (
+      <HemeraToolCall
+        tool="fs_read"
+        label="Read file"
+        mark="read-file"
+        subject={{ text: 'src/billing/export.ts', path: 'src/billing/export.ts' }}
+        status="completed"
+        summary="1 842 lines, 61 KiB"
+        arguments={[
+          { label: 'path', value: 'src/billing/export.ts' },
+          { label: 'limit', value: '2 000 lines' },
+        ]}
+        ms={38}
+        onOpenPath={fn()}
+      />
+    ),
+  },
+  {
     id: 'change',
     content: (
       <DiffBlock path="src/billing/export.ts" oldText={BEFORE} newText={AFTER} defaultOpen />
@@ -177,6 +200,7 @@ const THREAD: ScrollerEntry[] = [
       <ToolCallCard
         title="pnpm test --project=repository"
         kind="execute"
+        subject={{ text: 'pnpm test --project=repository' }}
         status="failed"
         output={'FAIL src/billing/export.test.ts\n  streams a large export\n'}
         error={
@@ -187,7 +211,31 @@ const THREAD: ScrollerEntry[] = [
   },
   {
     id: 'cancelled',
-    content: <ToolCallCard title="pnpm build" kind="execute" status="cancelled" input="cwd: ." />,
+    content: (
+      <ToolCallCard
+        title="pnpm build"
+        kind="execute"
+        subject={{ text: 'pnpm build' }}
+        status="cancelled"
+        input="cwd: ."
+      />
+    ),
+  },
+  {
+    id: 'command',
+    content: (
+      <CommandRun
+        name="dev"
+        command="pnpm dev"
+        kind="app"
+        state="running"
+        folder="./sources/front"
+        url="http://localhost:5173/"
+        output={'vite v7.1.4  ready in 412 ms\n\n  Local:   http://localhost:5173/\n'}
+        onOpenUrl={fn()}
+        onStop={fn()}
+      />
+    ),
   },
   {
     id: 'permission',
@@ -218,10 +266,87 @@ const THREAD: ScrollerEntry[] = [
   },
 ]
 
+/** What the details of this Session hold: the runs it has made, and what it works from. */
+const COMMANDS = (
+  <CommandsPanel
+    runs={[
+      {
+        id: 'run-dev',
+        name: 'dev',
+        command: 'pnpm dev',
+        kind: 'app',
+        state: 'running',
+        folder: './sources/front',
+        url: 'http://localhost:5173/',
+        output: 'vite v7.1.4  ready in 412 ms',
+      },
+      {
+        id: 'run-check',
+        name: 'check',
+        command: 'pnpm check',
+        kind: 'check',
+        state: 'failed',
+        folder: '.',
+        exitCode: 1,
+        output: 'Test Files  154 passed | 1 failed (155)',
+      },
+    ]}
+    onStop={fn()}
+    onOpenUrl={fn()}
+    onRun={fn()}
+  />
+)
+
+const CONTEXT = (
+  <ContextView
+    workspace={{ name: 'main', path: '/home/kris/projects/atlas' }}
+    instructions={[
+      {
+        label: 'AGENTS.md',
+        file: true,
+        detail: 'given at the start of the Session',
+        at: '23 Sep 13:40',
+        changed: '23 Sep 14:05',
+      },
+      { label: 'Last change', detail: 'delivered between two turns', at: '23 Sep 14:05' },
+      { label: 'The base', detail: 'as a resource of the first prompt', at: '23 Sep 13:40' },
+    ]}
+    tools={[
+      { name: 'fs_read', bound: '256 KiB a page, inside the Workspace root' },
+      { name: 'commands_run', bound: 'the catalogue, or a one-off line the user allows' },
+    ]}
+    lentAt="23 Sep 13:40"
+    commands={[{ name: 'check', command: 'pnpm check' }]}
+  />
+)
+
+/**
+ * The Context view of a Session nothing has gone into yet, which is what the details open on
+ * before the first message: the tools are lent already.
+ */
+const FRESH_CONTEXT = (
+  <ContextView
+    workspace={{ name: 'main', path: '/home/kris/projects/atlas' }}
+    instructions={[]}
+    tools={[
+      { name: 'fs_read', bound: '256 KiB a page, inside the Workspace root' },
+      { name: 'commands_run', bound: 'the catalogue, or a one-off line the user allows' },
+    ]}
+    commands={[]}
+  />
+)
+
 interface PageProps {
-  /** The plan the column stands beside the thread with, and the files the turn has touched. */
+  /** The plan the agent works to, and the files the turn has touched. */
   plan?: PlanEntry[] | undefined
   touched?: TouchedFile[] | undefined
+  /** What the details hold beside them, handed over already drawn. */
+  commands?: ReactNode
+  context?: ReactNode
+  /** The tab the details open on, which the renderer reads from what is happening. */
+  openOn?: SessionDetailsTab | undefined
+  /** Whether nothing has been written yet: no thread, no turn running, nothing spent. */
+  fresh?: boolean | undefined
 }
 
 /**
@@ -232,7 +357,17 @@ interface PageProps {
  * The plan and the files are props, because a Session whose agent has published neither is a
  * state of this page and not a second page (review of #40, defect 3).
  */
-function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
+function Page({
+  plan = PLAN,
+  touched = TOUCHED,
+  commands = COMMANDS,
+  context = CONTEXT,
+  openOn = 'commands',
+  fresh = false,
+}: PageProps): ReactNode {
+  // Whether the reader has the details open: the same state the renderer's page holds, and only
+  // the head's button sets it.
+  const [details, setDetails] = useState(false)
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [agent, setAgent] = useState<string | null>('claude-code')
@@ -242,47 +377,62 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
   return (
     <TooltipProvider>
       {/*
-        One column, and the side column beside it (review of #40, defect 2). The head, the thread
-        and the composer share one width and one left edge: a composer centred in the whole window
-        while the thread was centred in what the column left over is exactly what put them out of
-        line. The column stands beside all three, and it is not opened at all when it holds
-        nothing — the thread keeps its width and its line (defect 3).
+        One column (review of #40, defect 2): the head, the thread and the composer share one width
+        and one left edge, and nothing stands beside them — the details are a dialog the reader
+        opens from the head (second review of #18).
       */}
       <div className="flex h-screen min-h-0 bg-background text-foreground">
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
             <SessionHeader
-              title="CSV invoice export"
+              title={fresh ? 'Untitled' : 'CSV invoice export'}
               projectName="Atlas"
-              meta="started 12 minutes ago · 9 entries"
+              meta={fresh ? 'created just now · 0 entries' : 'started 12 minutes ago · 9 entries'}
               onRename={fn()}
               onStartEditing={fn()}
               onCancelEditing={fn()}
               onArchive={fn()}
+              archiveDisabled={fresh}
+              // What the turn has done, what the Session runs and what the agent works from.
+              onOpenDetails={() => setDetails(true)}
             />
           </div>
-          {/* The thread takes the whole width under the head and lays its own column on the
-              head's and the composer's, so a wheel beside it scrolls it; the banner is not
-              scrolled, and stands in the column above it. */}
-          <div className="mx-auto w-full max-w-3xl px-6">
-            <ResumeFallbackBanner
-              agent="claude-code"
-              session="CSV invoice export"
-              kept="everything up to the last tool call"
-              onDismiss={fn()}
-            />
-          </div>
-          <MessageScroller className="flex-1" label="The thread of this Session" entries={THREAD} />
+          {fresh ? (
+            <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
+              <SessionEmpty />
+            </div>
+          ) : (
+            <>
+              {/* The thread takes the whole width under the head and lays its own column on the
+                  head's and the composer's, so a wheel beside it scrolls it; the banner is not
+                  scrolled, and stands in the column above it. */}
+              <div className="mx-auto w-full max-w-3xl px-6">
+                <ResumeFallbackBanner
+                  agent="claude-code"
+                  session="CSV invoice export"
+                  kept="everything up to the last tool call"
+                  onDismiss={fn()}
+                />
+              </div>
+              <MessageScroller
+                className="flex-1"
+                label="The thread of this Session"
+                entries={THREAD}
+              />
+            </>
+          )}
           {/* What the turn has spent stands above the box rather than in its foot: the foot is
               the Workspace and the send alone since the trial of 22 September 2026, and a figure
               read at a glance is a figure that must not be what makes a row wrap. What the turn
               is *doing* shares that row, at its other end: one reading of one turn, what it is
               doing on the left where the agent writes, what it has cost on the right. */}
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-            <div className="flex items-center justify-between gap-3">
-              <ActivityRow state="waiting" />
-              <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
-            </div>
+            {!fresh && (
+              <div className="flex items-center justify-between gap-3">
+                <ActivityRow state="waiting" />
+                <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
+              </div>
+            )}
             <Composer
               value={value}
               onValueChange={setValue}
@@ -293,9 +443,13 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
               action="Send"
               placeholder="Say something to claude-code…"
               onSend={() => Promise.resolve(null)}
-              running
+              running={!fresh}
               onStop={fn()}
-              blocked={<BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />}
+              blocked={
+                fresh ? undefined : (
+                  <BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />
+                )
+              }
               agentMenu={
                 // A Session runs the agent it was made with, so the panel opens on that agent's
                 // models and offers no way back to a list of agents. No `spec` either: a Spec
@@ -324,14 +478,23 @@ function Page({ plan = PLAN, touched = TOUCHED }: PageProps): ReactNode {
             />
           </div>
         </div>
-        <SessionSideColumn plan={plan} files={touched} onSelectFile={fn()} />
+        <SessionDetails
+          open={details}
+          onOpenChange={setDetails}
+          plan={plan}
+          files={touched}
+          onSelectFile={fn()}
+          commands={commands}
+          context={context}
+          defaultTab={openOn}
+        />
       </div>
     </TooltipProvider>
   )
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
@@ -359,11 +522,13 @@ export const Complete: Story = {
   render: () => <Page />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    // The plan is the column's, and the thread does not repeat it.
-    await expect(canvas.getByText('2 of 4')).toBeVisible()
-    // The column is the state: the plan the agent works to, and the files the turn touched.
-    await expect(canvas.getByText('Files')).toBeVisible()
-    await expect(canvas.getByText('src/billing/export.ts')).toBeVisible()
+    // A Session with a plan, files, runs and a delivery draws nothing beside its thread: no
+    // column, no tab strip, and no dialog until the reader asks for one.
+    expect(canvas.queryByRole('complementary')).toBeNull()
+    expect(canvas.queryByRole('tab')).toBeNull()
+    expect(within(document.body).queryByRole('dialog')).toBeNull()
+    // The plan is the details', and the thread does not repeat it.
+    expect(canvas.queryByText('2 of 4')).toBeNull()
     // The change is read in the language of its file, which is what the extension bought. The
     // grammar of that language is a module loaded on demand, so the first diff of a session waits
     // for it: on a cold machine that load is slower than the default patience of a wait.
@@ -373,11 +538,56 @@ export const Complete: Story = {
       },
       { timeout: 10_000 },
     )
+    // A call to one of Hemera's own tools wears the mark of its kind, as a native call does, and
+    // is announced as Hemera's, so it is not read as a native call.
+    await expect(canvas.getByRole('button', { name: /^Hemera Read file/ })).toBeVisible()
+    // Folded, it reads its label and its file; the code name waits in the body (recette 5).
+    await expect(canvas.queryByText('fs_read')).toBeNull()
+    // The command the agent started is a block of the thread, with the address one press away.
+    await expect(canvas.getByText('pnpm dev')).toBeVisible()
+    await expect(
+      canvas.getAllByRole('button', { name: 'http://localhost:5173/' }).length,
+    ).toBeGreaterThan(0)
+    // The head's button opens the details, on the Commands tab since a command is running.
+    const button = canvas.getByRole('button', { name: 'Session details' })
+    await userEvent.click(button)
+    const dialog = await waitFor(() =>
+      within(document.body).getByRole('dialog', { name: 'Session details' }),
+    )
+    // It rises into place from transparent: what is read inside is read once it can be seen.
+    await waitFor(() => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+    })
+    const details = within(dialog)
+    await expect(details.getByRole('tab', { name: 'Commands' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(details.getByText('1 running')).toBeVisible()
+    // What the agent works from, on its own tab.
+    await userEvent.click(details.getByRole('tab', { name: 'Context' }))
+    await expect(details.getByText('Instructions')).toBeVisible()
+    await expect(details.getByText('Last change')).toBeVisible()
+    // The plan the agent works to, and the files the turn touched.
+    await userEvent.click(details.getByRole('tab', { name: 'Activity' }))
+    await expect(details.getByText('2 of 4')).toBeVisible()
+    await expect(details.getByText('Files')).toBeVisible()
+    // Whatever the tab, the details never scroll sideways (trial of 23 September 2026).
+    await expect(dialog.scrollWidth, 'the details scroll sideways').toBe(dialog.clientWidth)
+    // Escape closes them, and the focus is back on the button that opened them.
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    await waitFor(() => {
+      expect(document.activeElement).toBe(button)
+    })
     // The agent is waiting for an answer, and the turn it is in can be stopped.
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
-    // One Stop on the box and one on the strip that says why the box is waiting.
+    // One Stop on the command run, one on the box, and one on the strip that says why the box
+    // is waiting.
     const stops = canvas.getAllByRole('button', { name: 'Stop' })
-    await expect(stops).toHaveLength(2)
+    await expect(stops).toHaveLength(3)
 
     /*
      * What the turn is doing shares the meter's row, at its left end: it is not an entry of the
@@ -414,7 +624,7 @@ export const Complete: Story = {
     await expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
     const pill = canvas.getByRole('combobox', { name: 'Workspace' })
-    await expect(onOneLine(pill, stops[1]!), 'the foot of the composer wrapped').toBe(true)
+    await expect(onOneLine(pill, stops[2]!), 'the foot of the composer wrapped').toBe(true)
 
     /*
      * The thread is the column the composer is written in, to the pixel, on both edges (trial of
@@ -473,23 +683,57 @@ export const Complete: Story = {
 }
 
 /**
- * The same page before the agent has published a plan or touched a file: no column at all.
+ * A fresh Session: nothing written, no plan, no file touched, no command run, nothing delivered.
  *
- * A column with no section is not drawn (review of #40, defect 3), and the thread keeps the width
- * it had — which is the state a Session is in for its first turns, and the one the empty column
- * used to take a third of a window to say.
+ * Nothing stands beside the thread, and the thread keeps its width. The details are one press
+ * away at the end of the head's line all the same, and with no tab holding anything they open on
+ * the Context: the tools are lent already, and the base goes in with the first message.
  */
-export const NoColumn: Story = {
-  render: () => <Page plan={[]} touched={[]} />,
+export const Empty: Story = {
+  render: () => (
+    <Page
+      fresh
+      plan={[]}
+      touched={[]}
+      commands={<CommandsPanel runs={[]} onStop={fn()} onOpenUrl={fn()} onRun={fn()} />}
+      context={FRESH_CONTEXT}
+      openOn="context"
+    />
+  ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.queryByText('2 of 4')).toBeNull()
-    expect(canvas.queryByText('Files')).toBeNull()
-    // The thread and its foot are still the page, and the head is still its head: the thread is
-    // drawn the width the column used to take.
-    await expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
-    await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()
-    // One Stop on the box and one on the strip that says why the box is waiting.
-    await expect(canvas.getAllByRole('button', { name: 'Stop' })).toHaveLength(2)
+    // No column at all: not an empty box, not three tabs with nothing under them.
+    expect(canvas.queryByRole('complementary')).toBeNull()
+    expect(canvas.queryByRole('tab')).toBeNull()
+    await expect(canvas.getByText('Nothing written yet')).toBeVisible()
+    // The details are reached from the head, and open on the Context.
+    await userEvent.click(canvas.getByRole('button', { name: 'Session details' }))
+    const dialog = await waitFor(() =>
+      within(document.body).getByRole('dialog', { name: 'Session details' }),
+    )
+    // It rises into place from transparent: what is read inside is read once it can be seen.
+    await waitFor(() => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+    })
+    const details = within(dialog)
+    await expect(details.getByRole('tab', { name: 'Context' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(details.getByText('Nothing has gone to the agent yet.')).toBeVisible()
+    await expect(details.getByRole('button', { name: 'Tools · 2' })).toBeVisible()
+    // The two other tabs say they have nothing yet, rather than showing an empty panel.
+    await userEvent.click(details.getByRole('tab', { name: 'Activity' }))
+    await expect(
+      details.getByText('No plan and no file touched in this Session yet.'),
+    ).toBeVisible()
+    await userEvent.click(details.getByRole('tab', { name: 'Commands' }))
+    await expect(details.getByText('No command has run in this Session.')).toBeVisible()
+    // The close button closes them, and the head's button is still there.
+    await userEvent.click(details.getByRole('button', { name: 'Close' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    await expect(canvas.getByRole('button', { name: 'Session details' })).toBeVisible()
   },
 }
