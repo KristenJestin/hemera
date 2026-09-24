@@ -219,8 +219,12 @@ export const NothingReachableWhileFolding: Story = {
     inside.focus()
     await expect(inside).toHaveFocus()
 
-    await userEvent.click(row)
-    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    // A press that does not move the focus: a pointer would put it on the row before the press
+    // runs, and the hand-over below would then pass with nothing handed over.
+    row.click()
+    await expect(
+      await withinFrames(() => row.getAttribute('aria-expanded') === 'false', AT_ONCE),
+    ).toBe(true)
 
     if (movesLess()) {
       // Asked for less movement there is no journey to walk into: the body is gone with the few
