@@ -7,7 +7,7 @@ import { ConflictBanner } from './conflict-banner.tsx'
 const meta = {
   title: 'Blocks/Spec/ConflictBanner',
   component: ConflictBanner,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     comparing: false,

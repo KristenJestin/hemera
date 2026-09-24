@@ -13,7 +13,7 @@ const MARKS = ['empty', 'agent', 'human', 'stale', 'conflict', 'writing']
 const meta = {
   title: 'Blocks/Spec/QuestionsPart',
   component: QuestionsPart,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { questions: QUESTIONS, mark: 'agent', onGoToQuestion: fn() },
   argTypes: {

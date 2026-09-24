@@ -117,7 +117,7 @@ function Held({
 const meta = {
   title: 'Blocks/Spec/SpecRail',
   component: Held,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   args: {
     groups: EVERY_MARK,

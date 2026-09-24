@@ -148,7 +148,7 @@ function Row({
 const meta = {
   title: 'Blocks/Session/MissionPanel',
   component: Row,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   args: { onFoldChange: fn() },
   argTypes: {
