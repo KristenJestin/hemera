@@ -245,6 +245,11 @@ export interface Run {
    */
   readonly heldAgainst: PortConflict[]
   readonly exitCode: number | null
+  /**
+   * Who asked for it: the agent through its tool, or the user through a panel or a preparation.
+   * A Workspace's services list runs whoever started them, and say which (D8-08).
+   */
+  readonly startedBy: 'agent' | 'user'
   /** The end of what it printed, bounded: what fits in `OUTPUT_KEPT_BYTES`. */
   readonly output: string
   /** How many bytes of the beginning were dropped, and 0 when nothing was. */
@@ -563,6 +568,7 @@ export const commandsLayer = Layer.effect(
       portConflict: one.portConflict,
       heldAgainst: [],
       exitCode: one.exitCode,
+      startedBy: one.startedBy,
       output: one.kept,
       dropped: one.dropped,
       startedAt: one.startedAt,
@@ -638,6 +644,8 @@ export const commandsLayer = Layer.effect(
       portConflict: row.portConflict === null ? null : conflictOf(row.portConflict),
       heldAgainst: [],
       exitCode: row.exitCode,
+      // The table's check closed it to these two.
+      startedBy: row.startedBy === 'agent' ? 'agent' : 'user',
       output: row.output,
       dropped: row.truncated === 1 ? row.outputBytes - row.output.length : 0,
       startedAt: row.startedAt,

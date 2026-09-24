@@ -222,6 +222,7 @@ describe('The agent starts the app and the user opens it', () => {
       portConflict: null,
       heldAgainst: [],
       exitCode: null,
+      startedBy: 'agent' as const,
       output: 'ready on http://localhost:5173\n',
       dropped: 0,
       startedAt: '2026-09-23T08:00:00.000Z',

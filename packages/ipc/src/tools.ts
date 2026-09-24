@@ -90,7 +90,8 @@ export const readinessSchema = z.enum(['starting', 'ready', 'unanswered']).nulla
  * (D8-06); `readyAt` when its address first answered, `readiness` where that address stands, and
  * `portConflict` the run holding the port it published (D8-09); `heldAgainst` the runs that
  * published the port this one holds, filled when a Workspace's services are read and empty
- * elsewhere (Decided 12).
+ * elsewhere (Decided 12). `startedBy` is who asked for it: the agent through its tool, or the user
+ * through a panel or a preparation — a Workspace's services say it of each (D8-08).
  */
 export const commandRunSchema = z.object({
   id: z.string(),
@@ -114,6 +115,7 @@ export const commandRunSchema = z.object({
   portConflict: portConflictSchema.nullable(),
   heldAgainst: z.array(portConflictSchema),
   exitCode: z.number().nullable(),
+  startedBy: z.enum(['agent', 'user']),
   output: z.string(),
   dropped: z.number(),
   startedAt: z.string(),

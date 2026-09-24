@@ -53,6 +53,7 @@ function aRun(id: string, cwd: string, state: CommandRun['state'], commandId: st
     portConflict: null,
     heldAgainst: [],
     exitCode: state === 'running' ? null : 0,
+    startedBy: 'agent' as const,
     output: 'ready\n',
     dropped: 0,
     startedAt: '2026-09-23T08:00:00.000Z',

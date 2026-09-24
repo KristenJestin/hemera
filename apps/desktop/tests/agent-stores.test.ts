@@ -817,6 +817,7 @@ describe("A run no Session asked for is in no Session's panel", () => {
         folder: null,
         workspaceId: 'login-form',
         workspaceName: 'login-form',
+        startedBy: 'user',
         environment: {},
         state: 'exited',
         pid: null,

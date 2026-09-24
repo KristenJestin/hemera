@@ -448,6 +448,7 @@ describe('The agent starts the app and the user opens it', () => {
       portConflict: null,
       heldAgainst: [],
       exitCode: null,
+      startedBy: 'agent',
       output: 'ready in 300 ms',
       dropped: 0,
       startedAt: '2026-09-23T08:00:00.000Z',

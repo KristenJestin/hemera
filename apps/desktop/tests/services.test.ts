@@ -389,7 +389,7 @@ describe('A port conflict names its holder', () => {
   })
 })
 
-describe('A run reaches the window with its Workspace, scope, folder and readiness', () => {
+describe('A run reaches the window with its Workspace, scope, folder, readiness and starter', () => {
   it('keeps what the engine says of a starting service in login-form through the wire schema', async () => {
     const port = await freePort()
     const seen = await engine()(
@@ -423,8 +423,13 @@ describe('A run reaches the window with its Workspace, scope, folder and readine
       folder: './sources/api',
       readiness: 'starting',
       heldAgainst: [],
+      // Who asked for it, which a Workspace's services say of each (D8-08).
+      startedBy: 'user',
     })
-    expect(commandRunSchema.parse(seen.services[0]).id).toBe(seen.view.id)
+    expect(commandRunSchema.parse(seen.services[0])).toMatchObject({
+      id: seen.view.id,
+      startedBy: 'user',
+    })
   })
 })
 
