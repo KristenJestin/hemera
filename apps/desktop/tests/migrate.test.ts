@@ -70,7 +70,7 @@ const AGENTS_MIGRATION = '20260921133441_sessions_with_agents'
  */
 const TOOLS_MIGRATION = '20260922075631_tools_commands_and_context'
 /** The migration lot 19 adds, the Specs (design D7-01): one a profile of lot 5 has never run. */
-const SPECS_MIGRATION = '20260923183104_specs'
+const SPECS_MIGRATION = '20260924074930_specs'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -626,6 +626,22 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
       specEvent: true,
       unknownKind: false,
     })
+  })
+
+  test('a Spec’s Journal lines are read through an index on spec_id', async () => {
+    const dataFolder = join(workspace, 'spec-index')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+
+    const plan = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        return yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+          SELECT sequence FROM domain_events WHERE spec_id = 'spec-1' ORDER BY sequence DESC`
+      }),
+    )
+
+    expect(plan.map((row) => row.detail).join('\n')).toContain('INDEX event_by_spec (spec_id=?)')
   })
 })
 

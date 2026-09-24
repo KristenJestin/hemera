@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "23c62558-e0d7-4346-89a1-b7270f0f9a29",
+  "id": "dacf5811-db58-4271-aa81-5158693c67f9",
   "prevIds": ["afd29bb9-b5c5-4a02-8ef9-8fa8a2b1284f"],
   "ddl": [
     {
@@ -2358,6 +2358,24 @@
       "where": null,
       "origin": "manual",
       "name": "event_by_session",
+      "entityType": "indexes",
+      "table": "domain_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "spec_id",
+          "isExpression": false
+        },
+        {
+          "value": "sequence",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "event_by_spec",
       "entityType": "indexes",
       "table": "domain_events"
     },

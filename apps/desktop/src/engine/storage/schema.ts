@@ -488,6 +488,7 @@ export const domainEvents = sqliteTable(
     check('event_author_is_known', sql`${table.author} IN (${sql.raw(oneOf(EVENT_AUTHORS))})`),
     index('event_by_project').on(table.projectId, table.sequence),
     index('event_by_session').on(table.sessionId, table.sequence),
+    index('event_by_spec').on(table.specId, table.sequence),
     index('event_unseen').on(table.seenAt),
   ],
 )

@@ -236,6 +236,7 @@ PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE INDEX `session_by_project` ON `sessions` (`project_id`,`last_written_at`);--> statement-breakpoint
 CREATE INDEX `event_by_project` ON `domain_events` (`project_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `event_by_session` ON `domain_events` (`session_id`,`sequence`);--> statement-breakpoint
+CREATE INDEX `event_by_spec` ON `domain_events` (`spec_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `event_unseen` ON `domain_events` (`seen_at`);--> statement-breakpoint
 CREATE INDEX `entry_by_correlation` ON `session_entries` (`session_id`,`correlation_id`);--> statement-breakpoint
 CREATE INDEX `entry_by_turn` ON `session_entries` (`session_id`,`turn_id`);--> statement-breakpoint
