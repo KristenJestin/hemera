@@ -50,7 +50,12 @@ import { engineStatusLayer } from './status.ts'
 import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
 import { gitLayer } from './git.ts'
-import { type Preparation, hostLinks, preparationLayer } from './workspaces/preparation.ts'
+import {
+  type Preparation,
+  hostLinks,
+  preparationLayer,
+  recovered,
+} from './workspaces/preparation.ts'
 import { type Recipe, recipeLayer } from './workspaces/recipe.ts'
 import { type Variables, variablesLayer } from './workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from './workspaces/workspaces.ts'
@@ -301,6 +306,9 @@ if (process.parentPort !== undefined) {
             context,
           )
           log(`opened the database of ${start.directory}`)
+          // What the last engine left going is not going any more: its runs are ended and its
+          // steps wait for a resume (D8-05, D6-12).
+          yield* Effect.provide(recovered, context)
 
           port.on('message', (event) => {
             // SAFETY: what the main process put on the port; `decideRequest` is what reads it.

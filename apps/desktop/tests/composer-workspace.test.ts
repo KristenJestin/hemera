@@ -39,6 +39,7 @@ function workspace(id: string, state: Workspace['state'], main = false): Workspa
     state,
     main,
     dedicated: !main,
+    live: false,
     createdAt: '2026-09-24T08:00:00.000Z',
     cleanedAt: state === 'cleaned' ? '2026-09-24T09:00:00.000Z' : null,
     repositories: [],

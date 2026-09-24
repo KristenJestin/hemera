@@ -15,7 +15,7 @@ import { Effect, Layer } from 'effect'
 import type { Scope } from 'effect'
 
 import { heldWordsLayer } from '#engine/agents/held.ts'
-import { NoNotices } from '#engine/agents/notices.ts'
+import { type AgentNotices, NoNotices } from '#engine/agents/notices.ts'
 import {
   StderrSink,
   hostProcessesLayer,
@@ -33,6 +33,7 @@ import {
   type Preparation,
   hostLinks,
   preparationLayer,
+  recovered,
 } from '#engine/workspaces/preparation.ts'
 import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
@@ -58,13 +59,14 @@ export type WorkspaceEngine =
 /**
  * One run of the engine over the suite's folder: its database, and its Workspaces made under
  * `<folder>/workspaces`, as the data folder's own are. `gitProgram` is the `git` asked, which a
- * suite names when it is about a machine that has none, and `links` the system a link is made
- * by, which a suite has refuse one.
+ * suite names when it is about a machine that has none, `links` the system a link is made by,
+ * which a suite has refuse one, and `notices` the window, which a suite listens as.
  */
 export function workspaceEngine(
   folder: string,
   gitProgram?: string,
   links: Layer.Layer<Links> = hostLinks,
+  notices: Layer.Layer<AgentNotices> = NoNotices,
 ) {
   const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
   const processes = processSupervisorLayer.pipe(
@@ -85,7 +87,7 @@ export function workspaceEngine(
     Layer.provide(processes),
     Layer.provide(sink),
     Layer.provide(heldWordsLayer),
-    Layer.provide(NoNotices),
+    Layer.provide(notices),
   )
   return <A, E>(program: Effect.Effect<A, E, WorkspaceEngine | Scope.Scope>): Promise<A> =>
     Effect.runPromise(
@@ -94,6 +96,8 @@ export function workspaceEngine(
         Effect.scoped(
           Effect.gen(function* () {
             yield* openProfile(folder, SHIPPED, VERSION)
+            // What the engine does at its start (D8-05).
+            yield* recovered
             return yield* program
           }),
         ),

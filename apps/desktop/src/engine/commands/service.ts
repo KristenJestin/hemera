@@ -399,6 +399,12 @@ export interface CommandsService {
   ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
   /** Stops everything of a Session, or everything at all when no Session is named. */
   readonly stopped: (sessionId?: string | undefined) => Effect.Effect<void, DatabaseError>
+  /**
+   * Writes every run an engine that stopped left `running` as `stopped`, with its end, through
+   * the same write as any end — its row, its thread entry, its Journal line (D6-12). Called once
+   * at the start of the engine: a run whose process is not this engine's is not running.
+   */
+  readonly recover: () => Effect.Effect<void, DatabaseError>
 }
 
 export class Commands extends Context.Service<Commands, CommandsService>()('Commands') {}
@@ -1354,6 +1360,43 @@ export const commandsLayer = Layer.effect(
             if (sessionId !== undefined && record.sessionId !== sessionId) continue
             yield* stopRun(record)
             live.delete(id)
+          }
+        }),
+
+      recover: () =>
+        Effect.gen(function* () {
+          const left = yield* runRows()
+            .where(eq(commandRuns.state, 'running'))
+            .pipe(Effect.mapError(failed('reading the runs')))
+          const endedAt = new Date().toISOString()
+          for (const found of left) {
+            if (live.has(found.run.id)) continue
+            const {
+              id,
+              output,
+              joined: _joined,
+              heldAgainst: _held,
+              readiness: _r,
+              ...kept
+            } = rowOf(found)
+            yield* writeRow(
+              id,
+              {
+                ...kept,
+                portless: false,
+                startedBy: found.run.startedBy === 'agent' ? 'agent' : 'user',
+                state: 'stopped',
+                endedAt,
+                kept: output,
+                stop: Effect.void,
+                stopping: false,
+                ended: Deferred.makeUnsafe<void>(),
+                pushing: false,
+                unanswered: false,
+                published: Deferred.makeUnsafe<string | null>(),
+              },
+              'command.run_ended',
+            )
           }
         }),
 

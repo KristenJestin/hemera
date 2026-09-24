@@ -25,15 +25,21 @@ import { Effect, Fiber, Layer, Result } from 'effect'
 
 import { runsOf } from '#engine/commands/panel.ts'
 import { Sessions } from '#engine/sessions.ts'
+import { AgentNotices } from '#engine/agents/notices.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import {
   LinkRefusedError,
   Links,
   Preparation,
   PreparationRunningError,
+  hostLinks,
 } from '#engine/workspaces/preparation.ts'
 import { Recipe, type RecipeEdit } from '#engine/workspaces/recipe.ts'
-import { CleanupRefusedError, Workspaces } from '#engine/workspaces/workspaces.ts'
+import {
+  CleanupRefusedError,
+  Workspaces,
+  type WorkspacesService,
+} from '#engine/workspaces/workspaces.ts'
 
 import { until } from './application.ts'
 import { git } from './repositories.ts'
@@ -123,7 +129,8 @@ const runRows = Effect.gen(function* () {
     state: string
     exit_code: number | null
     output: string
-  }>`SELECT id, session_id, workspace_id, state, exit_code, output FROM command_runs`
+    ended_at: string | null
+  }>`SELECT id, session_id, workspace_id, state, exit_code, output, ended_at FROM command_runs`
 })
 
 /** What a step reads as: its kind, its target, its state and its message. */
@@ -596,5 +603,141 @@ describe('A step’s output stays off its Journal line', () => {
     // What it printed is its run's, where it is read (Decided 11).
     expect(seen.steps[2]?.message).toBe('exit 1')
     expect(seen.runs[0]?.output.trim()).toBe('TOKEN=secret-value')
+  })
+})
+
+describe('A preparation interrupted by a quit can be resumed', () => {
+  const release = () => join(folder, 'release')
+
+  /**
+   * A Workspace whose preparation was begun in the background and whose engine quit while its
+   * `run` step held: the program ends, and the engine's scope closes under the step.
+   */
+  const interrupted = () =>
+    workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspace = yield* createdWith([{ run: heldUntil(release()) }])
+        yield* preparation.begin(workspace.id, false)
+        yield* until(stepsOf(workspace.id), (steps) => steps[2]?.runId !== null)
+        return workspace
+      }),
+    )
+
+  it('finds the step pending and the Workspace not live at the next start, and resumes to ready', async () => {
+    const workspace = await interrupted()
+    // The command may end, once it is run again.
+    writeFileSync(release(), '')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspaces = yield* Workspaces
+        const swept = yield* stepsOf(workspace.id)
+        const before = yield* workspaces.one(workspace.id)
+        const runs = yield* runRows
+        const resumed = yield* preparation.resume(workspace.id)
+        return { swept, before, runs, resumed, after: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    expect(shown(seen.swept)).toEqual([
+      ['worktree', API, 'done'],
+      ['worktree', FRONT, 'done'],
+      ['run', 'install', 'pending'],
+    ])
+    expect(seen.before).toMatchObject({ state: 'preparing', live: false })
+    // The run the quit took down is over, with its end.
+    expect(seen.runs).toHaveLength(1)
+    expect(seen.runs[0]?.state).toBe('stopped')
+    expect(seen.runs[0]?.ended_at).not.toBeNull()
+    expect(seen.resumed).toMatchObject({ state: 'ready', live: false })
+    expect(seen.after[2]).toMatchObject({ state: 'done', message: 'exit 0' })
+  })
+
+  it('lets that Workspace be cleaned up, since nothing prepares it any more', async () => {
+    const workspace = await interrupted()
+    const cleaned = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        return yield* workspaces.cleanup(workspace.id)
+      }),
+    )
+
+    expect(cleaned).toMatchObject({ state: 'cleaned', live: false })
+    expect(existsSync(cleaned.path)).toBe(false)
+  })
+})
+
+describe('A run a dead engine left running is ended at the next start', () => {
+  it('writes it stopped, with its end and one Journal line', async () => {
+    // What an engine killed in the middle of a run leaves: a row still `running`.
+    await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const project = yield* atlas(main, [])
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, started_by, started_at)
+          VALUES ('left', NULL, 'dev', 'pnpm dev', 'serve', ${main}, 'running', 'user', '2026-09-24T08:00:00.000Z')`
+        return project
+      }),
+    )
+    const ended = Effect.gen(function* () {
+      const sql = yield* SqliteClient
+      const lines = yield* sql<{ count: number }>`
+        SELECT count(*) AS count FROM domain_events WHERE type = 'command.run_ended'`
+      return { runs: yield* runRows, lines: lines[0]?.count }
+    })
+    const first = await workspaceEngine(folder)(ended)
+    const second = await workspaceEngine(folder)(ended)
+
+    expect(first.runs[0]).toMatchObject({ id: 'left', state: 'stopped' })
+    expect(first.runs[0]?.ended_at).not.toBeNull()
+    expect(first.lines).toBe(1)
+    // Written once: the next start finds nothing left running.
+    expect(second.lines).toBe(1)
+  })
+})
+
+describe('A preparation that fails in the background is told as no longer live', () => {
+  it('tells the window after letting the Workspace go, and the Workspace reads failed', async () => {
+    // At each notice, whether the Workspace was still held: what a page reading it then sees.
+    const heldAtNotice: boolean[] = []
+    let workspaces: WorkspacesService | null = null
+    // Where the preparation's own notices begin: the creation was told before it.
+    let from = 0
+    const listening = Layer.succeed(AgentNotices, {
+      wrote: () => undefined,
+      changed: () => undefined,
+      ran: () => undefined,
+      workspace: (_projectId, workspaceId) => {
+        if (workspaces === null) return
+        const free = Effect.runSync(workspaces.hold(workspaceId))
+        if (free) Effect.runSync(workspaces.release(workspaceId))
+        heldAtNotice.push(!free)
+      },
+    })
+
+    const seen = await workspaceEngine(
+      folder,
+      undefined,
+      hostLinks,
+      listening,
+    )(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        workspaces = yield* Workspaces
+        const workspace = yield* createdWith([{ run: node('process.exit(1)') }])
+        from = heldAtNotice.length
+        yield* preparation.begin(workspace.id, false)
+        yield* until(
+          Effect.sync(() => heldAtNotice),
+          (heard) => heard.length > 1 && heard.at(-1) === false,
+        )
+        return yield* workspaces.one(workspace.id)
+      }),
+    )
+
+    expect(heldAtNotice.slice(from, -1).every((held) => held)).toBe(true)
+    expect(heldAtNotice.at(-1)).toBe(false)
+    expect(seen).toMatchObject({ state: 'failed', live: false })
   })
 })

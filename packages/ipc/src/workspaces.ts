@@ -29,7 +29,9 @@ export type Worktree = z.infer<typeof worktreeSchema>
  *
  * `specId` is the Spec it was made for, null for `main` and for one made on a folder. `dedicated`
  * is true for one Hemera assembled — it has worktrees or steps — and false for `main` and a
- * folder the user picked, which Hemera never cleans up (D8-14). The dates are ISO strings.
+ * folder the user picked, which Hemera never cleans up (D8-14). `live` is true while a
+ * preparation of it runs in the engine: a `preparing` Workspace that is not live was
+ * interrupted, and waits for a resume (D8-05). The dates are ISO strings.
  */
 export const workspaceSchema = z.object({
   id: z.string(),
@@ -40,6 +42,7 @@ export const workspaceSchema = z.object({
   state: workspaceStateSchema,
   main: z.boolean(),
   dedicated: z.boolean(),
+  live: z.boolean(),
   createdAt: z.string(),
   cleanedAt: z.string().nullable(),
   repositories: z.readonly(z.array(worktreeSchema)),

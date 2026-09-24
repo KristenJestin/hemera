@@ -96,6 +96,12 @@ export interface WorkspaceView {
    * user picked, which Hemera never cleans up (D8-14).
    */
   readonly dedicated: boolean
+  /**
+   * Whether a preparation of it runs in this engine now (D8-05). A `preparing` Workspace that is
+   * not live is one whose preparation was interrupted — a quit, a failure in the background —
+   * and waits for a resume.
+   */
+  readonly live: boolean
   readonly createdAt: string
   readonly cleanedAt: string | null
   readonly repositories: readonly WorktreeRecord[]
@@ -160,6 +166,13 @@ export interface WorkspacesService {
   readonly status: (
     id: string,
   ) => Effect.Effect<RepositoryState[], DatabaseError | UnknownWorkspaceError>
+  /**
+   * Marks a Workspace as being prepared in this engine, and answers false when it already is:
+   * the one-at-a-time rule of its preparation, which a cleanup takes too (D8-05, D8-14).
+   */
+  readonly hold: (id: string) => Effect.Effect<boolean>
+  /** Lets go of what `hold` took. */
+  readonly release: (id: string) => Effect.Effect<void>
   /** Removes the worktrees and the folder, keeps the row `cleaned` and every branch (D8-14). */
   readonly cleanup: (
     id: string,
@@ -227,6 +240,22 @@ export const workspacesLayer = Layer.effect(
     const notices = yield* AgentNotices
     const told = (view: WorkspaceView) =>
       Effect.sync(() => notices.workspace(view.projectId, view.id))
+    /**
+     * The Workspaces held in this engine: one being prepared, or one being cleaned up. In memory,
+     * which is enough: one engine holds a data folder, so what a dead engine was doing is never
+     * held here, whatever its rows still say.
+     */
+    const held = new Set<string>()
+    const hold = (id: string) =>
+      Effect.sync(() => {
+        if (held.has(id)) return false
+        held.add(id)
+        return true
+      })
+    const release = (id: string) =>
+      Effect.sync(() => {
+        held.delete(id)
+      })
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -327,6 +356,7 @@ export const workspacesLayer = Layer.effect(
           dedicated:
             records.some((record) => record.workspaceId === row.id) ||
             prepared.some((step) => step.workspaceId === row.id),
+          live: held.has(row.id),
           createdAt: row.createdAt,
           cleanedAt: row.cleanedAt,
           repositories: records
@@ -406,6 +436,108 @@ export const workspacesLayer = Layer.effect(
           }),
         ),
       ).pipe(Effect.andThen(Effect.fail(new CleanupRefusedError({ reason }))))
+
+    /**
+     * What a cleanup does once nothing it checks refuses it: no service running, every worktree
+     * removed by Git, then the folder; the row kept `cleaned` and every branch kept (D8-14).
+     */
+    const cleaned = (row: typeof workspaces.$inferSelect) =>
+      Effect.gen(function* () {
+        const running = yield* database
+          .select({ name: commandRuns.name })
+          .from(commandRuns)
+          .where(and(eq(commandRuns.workspaceId, row.id), eq(commandRuns.state, 'running')))
+          .limit(1)
+          .pipe(Effect.mapError(failed('reading the runs')))
+        if (running[0] !== undefined) {
+          return yield* refuseCleanup(
+            row,
+            `the service ${running[0].name} of ${row.name} is running`,
+          )
+        }
+        // D8-14, D8-13: a Workspace whose build Session is not archived is refused too. No
+        // Session has a mission yet — the build Session is the lot that launches builds — so
+        // there is nothing to look for until then.
+
+        const main = yield* mainPathOf(row.projectId)
+        const records = yield* database
+          .select()
+          .from(workspaceRepositories)
+          .where(eq(workspaceRepositories.workspaceId, row.id))
+          .pipe(Effect.mapError(failed('reading the worktrees')))
+        // Every worktree is checked before any is removed (D8-14): one that Git would refuse to
+        // remove — changed or untracked files — refuses the whole cleanup, with nothing removed.
+        // Git's words are asked of that worktree alone: `worktree remove` refuses a changed one
+        // before it deletes anything, which is the very rule the check applies.
+        for (const record of records) {
+          const repository = join(main, record.relativePath)
+          const worktree = join(row.path, record.relativePath)
+          if (!existsSync(worktree)) continue
+          const checked = yield* git.status(worktree).pipe(
+            Effect.map((status) => ({
+              dirty: status.staged + status.unstaged + status.untracked > 0,
+              refused: null,
+            })),
+            Effect.catch((said) => Effect.succeed({ dirty: true, refused: said.message })),
+          )
+          if (!checked.dirty) continue
+          const refused =
+            checked.refused ??
+            (yield* git.worktreeRemove(repository, worktree).pipe(
+              Effect.as(null),
+              Effect.catch((said) => Effect.succeed(said.message)),
+            ))
+          if (refused !== null) return yield* refuseCleanup(row, refused)
+        }
+        // Then one at a time, in order. Git may still refuse one for a reason of its own — a
+        // locked worktree — and what it already removed stays removed, which the reason says.
+        const removed: string[] = []
+        for (const record of records) {
+          const repository = join(main, record.relativePath)
+          const worktree = join(row.path, record.relativePath)
+          // A worktree never made, or removed by hand, is one Git still holds as registered:
+          // forgetting it is all there is to do, and never `--force` (D8-14; the prune is D8-03
+          // as amended by Decided 15).
+          const removal = existsSync(worktree)
+            ? git.worktreeRemove(repository, worktree)
+            : git.worktreePrune(repository)
+          const refused = yield* removal.pipe(
+            Effect.as(null),
+            Effect.catch((said) => Effect.succeed(said.message)),
+          )
+          if (refused !== null) {
+            const kept =
+              removed.length === 0 ? '' : ` (already removed: ${removed.map(labelOf).join(', ')})`
+            return yield* refuseCleanup(row, `${refused}${kept}`)
+          }
+          removed.push(record.relativePath)
+        }
+        const deleted = yield* Effect.try({
+          try: () => rmSync(row.path, { recursive: true, force: true }),
+          catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
+        }).pipe(
+          Effect.as(null),
+          Effect.catch((reason) => Effect.succeed(reason)),
+        )
+        if (deleted !== null) return yield* refuseCleanup(row, deleted)
+
+        const cleanedAt = new Date().toISOString()
+        yield* withDatabase(
+          mutate('cleaning up a Workspace', (transaction) =>
+            transaction
+              .update(workspaces)
+              .set({ state: 'cleaned', cleanedAt })
+              .where(eq(workspaces.id, row.id))
+              .pipe(
+                Effect.mapError(failed('writing the Workspace')),
+                Effect.as({
+                  result: undefined,
+                  events: [workspaceEvent(row, 'workspace.cleaned', { path: row.path }, 'human')],
+                }),
+              ),
+          ),
+        )
+      })
 
     return {
       list: (projectId) =>
@@ -621,6 +753,7 @@ export const workspacesLayer = Layer.effect(
                     state: 'preparing',
                     main: false,
                     dedicated: true,
+                    live: false,
                     createdAt: row.createdAt,
                     cleanedAt: null,
                     repositories: worktrees,
@@ -662,6 +795,7 @@ export const workspacesLayer = Layer.effect(
                     state: 'ready',
                     main: false,
                     dedicated: false,
+                    live: false,
                     repositories: [],
                   } satisfies WorkspaceView,
                   events: [workspaceEvent(row, 'workspace.created', { name, path }, 'human')],
@@ -723,106 +857,18 @@ export const workspacesLayer = Layer.effect(
           }
           // A preparation under way is writing into the folder a cleanup would delete: the two
           // never overlap, and the preparation is let to end first (D8-05, D8-14 as amended by
-          // Decided 14).
-          if (row.state === 'preparing' || steps.some((step) => step.state === 'running')) {
+          // Decided 14). Under way means running in this engine: a `preparing` Workspace whose
+          // preparation a quit or a failure interrupted is not, and may be cleaned up. The
+          // cleanup holds it in turn, so no preparation starts while it removes.
+          if (!(yield* hold(id))) {
             return yield* refuseCleanup(row, `the Workspace ${row.name} is being prepared`)
           }
-          const running = yield* database
-            .select({ name: commandRuns.name })
-            .from(commandRuns)
-            .where(and(eq(commandRuns.workspaceId, id), eq(commandRuns.state, 'running')))
-            .limit(1)
-            .pipe(Effect.mapError(failed('reading the runs')))
-          if (running[0] !== undefined) {
-            return yield* refuseCleanup(
-              row,
-              `the service ${running[0].name} of ${row.name} is running`,
-            )
-          }
-          // D8-14, D8-13: a Workspace whose build Session is not archived is refused too. No
-          // Session has a mission yet — the build Session is the lot that launches builds — so
-          // there is nothing to look for until then.
-
-          const main = yield* mainPathOf(row.projectId)
-          const records = yield* database
-            .select()
-            .from(workspaceRepositories)
-            .where(eq(workspaceRepositories.workspaceId, id))
-            .pipe(Effect.mapError(failed('reading the worktrees')))
-          // Every worktree is checked before any is removed (D8-14): one that Git would refuse to
-          // remove — changed or untracked files — refuses the whole cleanup, with nothing removed.
-          // Git's words are asked of that worktree alone: `worktree remove` refuses a changed one
-          // before it deletes anything, which is the very rule the check applies.
-          for (const record of records) {
-            const repository = join(main, record.relativePath)
-            const worktree = join(row.path, record.relativePath)
-            if (!existsSync(worktree)) continue
-            const checked = yield* git.status(worktree).pipe(
-              Effect.map((status) => ({
-                dirty: status.staged + status.unstaged + status.untracked > 0,
-                refused: null,
-              })),
-              Effect.catch((said) => Effect.succeed({ dirty: true, refused: said.message })),
-            )
-            if (!checked.dirty) continue
-            const refused =
-              checked.refused ??
-              (yield* git.worktreeRemove(repository, worktree).pipe(
-                Effect.as(null),
-                Effect.catch((said) => Effect.succeed(said.message)),
-              ))
-            if (refused !== null) return yield* refuseCleanup(row, refused)
-          }
-          // Then one at a time, in order. Git may still refuse one for a reason of its own — a
-          // locked worktree — and what it already removed stays removed, which the reason says.
-          const removed: string[] = []
-          for (const record of records) {
-            const repository = join(main, record.relativePath)
-            const worktree = join(row.path, record.relativePath)
-            // A worktree never made, or removed by hand, is one Git still holds as registered:
-            // forgetting it is all there is to do, and never `--force` (D8-14; the prune is D8-03
-            // as amended by Decided 15).
-            const removal = existsSync(worktree)
-              ? git.worktreeRemove(repository, worktree)
-              : git.worktreePrune(repository)
-            const refused = yield* removal.pipe(
-              Effect.as(null),
-              Effect.catch((said) => Effect.succeed(said.message)),
-            )
-            if (refused !== null) {
-              const kept =
-                removed.length === 0 ? '' : ` (already removed: ${removed.map(labelOf).join(', ')})`
-              return yield* refuseCleanup(row, `${refused}${kept}`)
-            }
-            removed.push(record.relativePath)
-          }
-          const deleted = yield* Effect.try({
-            try: () => rmSync(row.path, { recursive: true, force: true }),
-            catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
-          }).pipe(
-            Effect.as(null),
-            Effect.catch((reason) => Effect.succeed(reason)),
-          )
-          if (deleted !== null) return yield* refuseCleanup(row, deleted)
-
-          const cleanedAt = new Date().toISOString()
-          yield* withDatabase(
-            mutate('cleaning up a Workspace', (transaction) =>
-              transaction
-                .update(workspaces)
-                .set({ state: 'cleaned', cleanedAt })
-                .where(eq(workspaces.id, id))
-                .pipe(
-                  Effect.mapError(failed('writing the Workspace')),
-                  Effect.as({
-                    result: undefined,
-                    events: [workspaceEvent(row, 'workspace.cleaned', { path: row.path }, 'human')],
-                  }),
-                ),
-            ),
-          )
+          yield* cleaned(row).pipe(Effect.ensuring(release(id)))
           return yield* viewOf(id).pipe(Effect.tap(told))
         }),
+
+      hold,
+      release,
     } satisfies WorkspacesService
   }),
 )

@@ -16,6 +16,7 @@ export function workspace(id: string, change: Partial<Workspace> = {}): Workspac
     state: 'ready',
     main: false,
     dedicated: true,
+    live: false,
     createdAt: '2026-09-24T08:00:00.000Z',
     cleanedAt: null,
     repositories: [

@@ -133,6 +133,12 @@ export interface PreparationService {
     WorkspaceStep[],
     DatabaseError | UnknownWorkspaceError | PreparationRunningError
   >
+  /**
+   * Turns every step an engine that stopped left `running` back to `pending` (D8-05): called
+   * once at the start of the engine, before anything is prepared, so none of them is this
+   * engine's. A resume runs them again.
+   */
+  readonly recover: () => Effect.Effect<void, DatabaseError>
   /** The steps of a Workspace, in their order. */
   readonly steps: (
     workspaceId: string,
@@ -253,6 +259,16 @@ function replaced(steps: readonly WorkspaceStep[], changed: WorkspaceStep): Work
   return steps.map((step) => (step.id === changed.id ? changed : step))
 }
 
+/**
+ * What the engine does once at its start, the database open and nothing yet running: the runs an
+ * engine that stopped left `running` are ended, then its steps left `running` wait for a resume
+ * (D8-05, D6-12).
+ */
+export const recovered = Effect.gen(function* () {
+  yield* (yield* Commands).recover()
+  yield* (yield* Preparation).recover()
+})
+
 export const preparationLayer = Layer.effect(
   Preparation,
   Effect.gen(function* () {
@@ -273,25 +289,28 @@ export const preparationLayer = Layer.effect(
 
     const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
 
-    /** The Workspaces a preparation or a resume is running on, in this engine. */
-    const running = new Set<string>()
-
     /**
      * One preparation of a Workspace at a time: a second `prepare` or `resume` while one runs is
-     * refused by name. Taken before anything is read, and in memory, which is enough: one engine
-     * holds a data folder. So a step a resume finds `running` is always one an engine that
-     * stopped left behind, never one being run now — which is what lets `resumedSteps` start it
-     * again (D8-05).
+     * refused by name. Held by the Workspaces, before anything is read and in memory, which is
+     * enough: one engine holds a data folder. So a step a resume finds `running` is always one an
+     * engine that stopped left behind, never one being run now — which is what lets
+     * `resumedSteps` start it again (D8-05) — and a Workspace held is what its view calls `live`.
      */
     const taken = (id: string) =>
-      Effect.suspend(() => {
-        if (running.has(id)) return Effect.fail(new PreparationRunningError({ workspaceId: id }))
-        running.add(id)
-        return Effect.void
-      })
-    const released = (id: string) => Effect.sync(() => running.delete(id))
-    const alone = <A, E>(id: string, effect: Effect.Effect<A, E>) =>
-      taken(id).pipe(Effect.andThen(effect.pipe(Effect.ensuring(released(id)))))
+      workspacesService
+        .hold(id)
+        .pipe(
+          Effect.flatMap((free) =>
+            free ? Effect.void : Effect.fail(new PreparationRunningError({ workspaceId: id })),
+          ),
+        )
+    /**
+     * Lets go of a Workspace, and tells the window once it is no longer live: however the
+     * preparation ended — done, failed, interrupted — the page reads a Workspace it can resume
+     * (D8-05).
+     */
+    const released = (row: typeof workspaces.$inferSelect) =>
+      workspacesService.release(row.id).pipe(Effect.andThen(told(row)))
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -603,8 +622,6 @@ export const preparationLayer = Layer.effect(
         // A Workspace whose steps were all skipped from its creation is ready without running
         // any: its state is what its steps say.
         if (stored !== 'cleaned' && workspaceStateOf(steps) !== stored) yield* advance(steps, [])
-        yield* told(place.workspace)
-        return yield* workspacesService.one(id)
       })
 
     /** Whether what a `done` step made is still on the disk (D8-05). */
@@ -649,14 +666,25 @@ export const preparationLayer = Layer.effect(
 
     const steps = (id: string) => workspaceRow(id).pipe(Effect.andThen(stepsOf(id)))
 
-    return {
-      prepare: (id) => alone(id, drive(id, new Set())),
+    /** A preparation of a Workspace run here, alone, and the Workspace let go of once it ends. */
+    const alone = <A, E>(id: string, effect: Effect.Effect<A, E>) =>
+      workspaceRow(id).pipe(
+        Effect.flatMap((row) =>
+          taken(id).pipe(Effect.andThen(effect.pipe(Effect.ensuring(released(row))))),
+        ),
+      )
 
-      resume: (id) => alone(id, resuming(id)),
+    return {
+      // The Workspace is read once let go of, so what answers says it is no longer live.
+      prepare: (id) =>
+        alone(id, drive(id, new Set())).pipe(Effect.andThen(workspacesService.one(id))),
+
+      resume: (id) => alone(id, resuming(id)).pipe(Effect.andThen(workspacesService.one(id))),
 
       begin: (id, resume) =>
         Effect.gen(function* () {
-          const before = yield* steps(id)
+          const row = yield* workspaceRow(id)
+          const before = yield* stepsOf(id)
           yield* taken(id)
           yield* Effect.forkIn(scope)(
             (resume ? resuming(id) : drive(id, new Set())).pipe(
@@ -665,11 +693,25 @@ export const preparationLayer = Layer.effect(
               Effect.catch((refused) =>
                 diagnostic.write(`preparing the Workspace ${id} failed: ${refused.message}`),
               ),
-              Effect.ensuring(released(id)),
+              Effect.ensuring(released(row)),
             ),
           )
           return before
         }),
+
+      recover: () =>
+        withDatabase(
+          mutate('recovering the preparations', (transaction) =>
+            transaction
+              .update(workspaceSteps)
+              .set({ state: 'pending' })
+              .where(eq(workspaceSteps.state, 'running'))
+              .pipe(
+                Effect.mapError(failed('writing the steps')),
+                Effect.as({ result: undefined, events: [] }),
+              ),
+          ),
+        ),
 
       steps,
     } satisfies PreparationService
