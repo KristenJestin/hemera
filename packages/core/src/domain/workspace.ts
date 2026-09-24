@@ -20,6 +20,14 @@ export const WORKSPACE_STATES = ['preparing', 'ready', 'failed', 'cleaned'] as c
 
 export type WorkspaceState = (typeof WORKSPACE_STATES)[number]
 
+/**
+ * Where a launch of a Spec stands (D8-13): waiting for its environment to be ready, being
+ * started, started, refused with the cause it gave, or cancelled by a Rework.
+ */
+export const LAUNCH_STATES = ['waiting', 'starting', 'started', 'failed', 'cancelled'] as const
+
+export type LaunchState = (typeof LAUNCH_STATES)[number]
+
 /** What a step of a preparation does: a worktree, or one of the three kinds of a recipe. */
 export const STEP_KINDS = ['worktree', 'copy', 'link', 'run'] as const
 

@@ -117,6 +117,7 @@ export type { BaseReach, ContextReach, ContextSource } from './domain/context.ts
 export {
   InvalidVariableKeyError,
   InvalidWorkspaceNameError,
+  LAUNCH_STATES,
   RECIPE_KINDS,
   STEP_KINDS,
   STEP_STATES,
@@ -133,6 +134,7 @@ export {
   workspaceStateOf,
 } from './domain/workspace.ts'
 export type {
+  LaunchState,
   RecipeKind,
   RecipeStep,
   StepKind,
