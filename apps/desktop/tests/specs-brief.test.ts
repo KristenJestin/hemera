@@ -18,6 +18,7 @@ import { AgentRuntime, NoNotices } from '#engine/agents/runtime.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { briefFor } from '#engine/specs/brief.ts'
 import { Specs } from '#engine/specs/specs.ts'
+import { Database } from '#engine/storage/database.ts'
 import {
   application,
   aSession,
@@ -276,6 +277,34 @@ describe('An answer resolves the question and reaches the agent with the next tu
 
         yield* runtime.prompt(sessionId, 'Third turn.')
         expect(agent.answers.prompts[2]).not.toContain(ANSWERS)
+      }),
+    )
+  })
+})
+
+describe('A free turn opens no Spec transaction', () => {
+  test('the brief of a free Session is null before any transaction; a define one opens one', async () => {
+    const agent = fakeAgent()
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const free = yield* aSession(workingDirectory)
+        const { sessionId } = yield* defining
+        const database = yield* Database
+        let opened = 0
+        // The database as the brief sees it, counting the transactions it is asked for.
+        const counted = new Proxy(database, {
+          get: (target, key) => {
+            if (key === 'transaction') opened += 1
+            return Reflect.get(target, key, target)
+          },
+        })
+        const brief = (id: string) => briefFor(id).pipe(Effect.provideService(Database, counted))
+
+        expect(yield* brief(free.id)).toBe(null)
+        expect(opened).toBe(0)
+        expect(yield* brief(sessionId)).not.toBe(null)
+        expect(opened).toBe(1)
       }),
     )
   })

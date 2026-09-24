@@ -15,6 +15,7 @@ import { type PhaseId, composeBrief, focusOf } from '@hemera/core'
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
+import { Database } from '../storage/database.ts'
 import { sessions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { failed, now, readSnapshot, reading } from './snapshot.ts'
@@ -31,6 +32,21 @@ export interface Brief {
 
 /** The brief of this Session's next turn, or null when it defines no Spec. */
 export function briefFor(sessionId: string) {
+  return Effect.gen(function* () {
+    // A `free` turn has no brief, and opens no Spec transaction to find that out (Decided 17).
+    // The mission is read alone: it only ever goes from `free` to `define`, never back.
+    const missions = yield* (yield* Database)
+      .select({ mission: sessions.mission })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .pipe(Effect.mapError(failed('reading the Session')))
+    if (missions[0]?.mission !== 'define') return null
+    return yield* composed(sessionId)
+  })
+}
+
+/** The brief of a `define` Session, read from the Spec at one moment. */
+function composed(sessionId: string) {
   return reading('composing the mission brief', (transaction) =>
     Effect.gen(function* () {
       const composedAt = now()
