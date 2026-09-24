@@ -90,6 +90,9 @@ const CATALOGUE: Catalogued[] = [
   // HEM-17: where a piece of work stands, said as a dot. A thing to read and not a thing to
   // operate, so there is no keyboard story to ask of it.
   { name: 'StatusDot', folder: 'status-dot', keyboard: false },
+  // Lot 20, recette of 24 September 2026: a box to tick, drawn in the theme, which every box of
+  // the application is instead of the platform's own.
+  { name: 'Checkbox', folder: 'checkbox', keyboard: true },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */
