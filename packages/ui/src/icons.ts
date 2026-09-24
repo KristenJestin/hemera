@@ -36,6 +36,7 @@ import {
   IconBookFilled as TablerBookFilled,
   IconBookmarkPlus as TablerBookmarkPlus,
   IconBorderOuter as TablerBorderOuter,
+  IconBrowser as TablerBrowser,
   IconBrain as TablerBrain,
   IconBrandOpenai as TablerBrandOpenai,
   IconBug as TablerBug,
@@ -64,6 +65,8 @@ import {
   IconDatabaseFilled as TablerDatabaseFilled,
   IconDeviceDesktop as TablerDeviceDesktop,
   IconDeviceDesktopFilled as TablerDeviceDesktopFilled,
+  IconDeviceMobile as TablerDeviceMobile,
+  IconDeviceMobileFilled as TablerDeviceMobileFilled,
   IconDots as TablerDots,
   IconDotsFilled as TablerDotsFilled,
   IconEye as TablerEye,
@@ -111,6 +114,7 @@ import {
   IconMessagesFilled as TablerMessagesFilled,
   IconMoon as TablerMoon,
   IconMoonFilled as TablerMoonFilled,
+  IconPackage as TablerPackage,
   IconPaperclip as TablerPaperclip,
   IconPencil as TablerPencil,
   IconPencilFilled as TablerPencilFilled,
@@ -387,6 +391,20 @@ export const IconScript = catalogued(TablerScript, TablerScript, 'IconScript')
 export const IconServer = catalogued(TablerServer, TablerServer, 'IconServer')
 export const IconVariable = catalogued(TablerVariable, TablerVariable, 'IconVariable')
 export const IconWorld = catalogued(TablerWorldFilled, TablerWorld, 'IconWorld')
+
+/**
+ * What a repository of a Project may be drawn with on its row, chosen in its dialog (recette 1
+ * of lot 20): a browser, a phone and a package, beside the folder, the server, the book, the
+ * database and the terminal the catalogue already had. Tabler draws no solid browser and no solid
+ * package: the outline stands for both weights.
+ */
+export const IconBrowser = catalogued(TablerBrowser, TablerBrowser, 'IconBrowser')
+export const IconDeviceMobile = catalogued(
+  TablerDeviceMobileFilled,
+  TablerDeviceMobile,
+  'IconDeviceMobile',
+)
+export const IconPackage = catalogued(TablerPackage, TablerPackage, 'IconPackage')
 
 /**
  * A mark Tabler does not draw, vendored as the one path it is (design D17-11).
