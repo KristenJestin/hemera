@@ -80,6 +80,15 @@ export function workspaceCardOf(
   }
 }
 
+/**
+ * Whether a Workspace's preparation was interrupted (D8-05): it says it is being prepared, and no
+ * preparation of it runs in the engine — Hemera was closed while it ran. It is resumed as a
+ * failed one is.
+ */
+export function interruptedOf(workspace: Workspace): boolean {
+  return workspace.state === 'preparing' && !workspace.live
+}
+
 /** The branches a cleanup keeps, one per branch however many worktrees are on it (D8-14). */
 export function branchesKeptOf(workspace: Workspace): string[] {
   return [...new Set(workspace.repositories.map((one) => one.branch))]

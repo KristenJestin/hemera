@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import type { Variable } from '@hemera/ipc'
 import {
   branchesKeptOf,
+  interruptedOf,
   recipeAddOf,
   recipeLinesOf,
   runDetailsOf,
@@ -184,5 +185,12 @@ describe('The cards say the engine views in their own words', () => {
         ],
       ),
     ).toEqual([{ id: 'r1', kind: 'run', path: undefined, scope: 'root', commandName: 'dev' }])
+  })
+
+  // Scenario: "A preparation interrupted by a quit can be resumed".
+  test('a Workspace preparing with no preparation running is an interrupted one', () => {
+    expect(interruptedOf(workspace('login-form', { state: 'preparing', live: false }))).toBe(true)
+    expect(interruptedOf(workspace('login-form', { state: 'preparing', live: true }))).toBe(false)
+    expect(interruptedOf(workspace('login-form', { state: 'failed', live: false }))).toBe(false)
   })
 })

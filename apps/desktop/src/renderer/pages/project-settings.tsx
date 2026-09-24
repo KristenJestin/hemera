@@ -19,6 +19,7 @@ import {
 
 import {
   branchesKeptOf,
+  interruptedOf,
   projectVariablesOf,
   recipeAddOf,
   recipeCommandsOf,
@@ -113,6 +114,7 @@ function ShownWorkspaceCards({
         <PreparationSteps
           steps={stepLinesOf(shown.steps)}
           onResume={() => actions.onResume(workspace.id)}
+          interrupted={interruptedOf(workspace)}
         />
       )}
       <VariablesEditor
