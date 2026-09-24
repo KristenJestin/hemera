@@ -33,8 +33,27 @@ import { LOGIN_FORM, MAIN, STATUS, run, step, workspace } from './workspace-view
 /** What was asked of the bridge, in the order it was asked. */
 let asked: { name: string; argument: unknown }[] = []
 
-/** What the bridge answers, per channel: a value, a promise of one, or an error. */
+/** Answers given one per call, in order: what a channel asked twice answers each time. */
+class InTurn {
+  constructor(readonly answers: unknown[]) {}
+}
+
+/** What the bridge answers, per channel: a value, a promise of one, an error, or one per call. */
 let answers: Map<string, unknown>
+
+/** An answer still on its way, and the hand that lets it arrive. */
+interface Later<T> {
+  readonly answer: Promise<T>
+  readonly arrive: (value: T) => void
+}
+
+function later<T>(): Later<T> {
+  let arrive: (value: T) => void = () => undefined
+  const answer = new Promise<T>((resolve) => {
+    arrive = resolve
+  })
+  return { answer, arrive }
+}
 
 /** What the engine would push, once the store is listening. */
 let push: (event: EngineEvent) => void = () => undefined
@@ -60,7 +79,8 @@ beforeEach(() => {
         // oxlint-disable-next-line anti-slop/no-unknown-parameters -- stands in for the preload's bridge, whose job is to carry an argument it never reads
         invoke: async (name: string, argument: unknown) => {
           asked.push({ name, argument })
-          const answer = answers.get(name)
+          const held = answers.get(name)
+          const answer = held instanceof InTurn ? held.answers.shift() : held
           if (answer instanceof Error) throw answer
           // A promise is an answer still on its way, which the test lets arrive when it wants.
           return await Promise.resolve(answer)
@@ -368,5 +388,98 @@ describe("A refusal is the engine's sentence, said until the next act", () => {
     await moveRecipeStep('atlas', 'r2', 'down')
 
     expect(workspacesSnapshot().refusal).toBeNull()
+  })
+})
+
+describe('An older answer never lands over a newer one', () => {
+  test('a slow Git answer to an earlier event is dropped once a later one was written', async () => {
+    answersForShowing()
+    await showWorkspace(LOGIN_FORM)
+    const slow = later<typeof STATUS>()
+    const clean = STATUS.map((one) => ({
+      relativePath: one.relativePath,
+      git: {
+        ok: true as const,
+        branch: 'atlas/HEM-7-login-form',
+        commit: 'd'.repeat(40),
+        staged: 0,
+        unstaged: 0,
+        untracked: 0,
+      },
+    }))
+    answers.set('workspaces.status', new InTurn([slow.answer, clean]))
+
+    push({ event: 'workspace', projectId: 'atlas', workspaceId: 'login-form' })
+    push({ event: 'workspace', projectId: 'atlas', workspaceId: 'login-form' })
+    await settled()
+    slow.arrive(STATUS)
+    await settled()
+
+    expect(workspacesSnapshot().shown?.status).toEqual(clean)
+  })
+
+  test('a slow step reading is dropped once a later one was written', async () => {
+    answersForShowing()
+    await showWorkspace(LOGIN_FORM)
+    const slow = later<ReturnType<typeof step>[]>()
+    answers.set('preparation.steps', new InTurn([slow.answer, [step(1, { state: 'done' })]]))
+
+    push({ event: 'workspace', projectId: 'atlas', workspaceId: 'login-form' })
+    push({ event: 'workspace', projectId: 'atlas', workspaceId: 'login-form' })
+    await settled()
+    slow.arrive([step(1, { state: 'running' })])
+    await settled()
+
+    expect(workspacesSnapshot().shown?.steps.map((one) => one.state)).toEqual(['done'])
+  })
+
+  test('the steps a resume answered do not replace newer ones the events brought', async () => {
+    answersForShowing()
+    await showWorkspace(LOGIN_FORM)
+    const resumed = later<ReturnType<typeof step>[]>()
+    answers.set('preparation.resume', resumed.answer)
+    const resuming = resumePreparation('login-form')
+    await settled()
+
+    // The resumed preparation moves on, and its event is read before the resume's answer lands.
+    answers.set('preparation.steps', [step(1, { state: 'done' }), step(2, { state: 'running' })])
+    push({ event: 'workspace', projectId: 'atlas', workspaceId: 'login-form' })
+    await settled()
+    resumed.arrive([step(1, { state: 'pending' }), step(2, { state: 'failed' })])
+    await resuming
+
+    expect(workspacesSnapshot().shown?.steps.map((one) => one.state)).toEqual(['done', 'running'])
+  })
+
+  test('the services read again keep what a push brought of a run since they were asked', async () => {
+    answersForShowing()
+    await showWorkspace(LOGIN_FORM)
+    const read = later<ReturnType<typeof run>[]>()
+    answers.set('commands.services', read.answer)
+
+    // A new service here: the list is asked again, and its answer is slow.
+    push({ event: 'run', sessionId: 'session-1', run: run('run-auth', { name: 'auth' }) })
+    await settled()
+    // Meanwhile `dev` prints on and publishes that it answered.
+    const pushed = run('run-dev', {
+      output: 'ready on http://localhost:3000\nGET / 200\n',
+      readyAt: '2026-09-24T08:00:02.000Z',
+      readiness: 'ready',
+    })
+    push({ event: 'run', sessionId: 'session-1', run: pushed })
+    await settled()
+    const claim = {
+      port: 3000,
+      runId: 'run-x',
+      workspaceId: null,
+      workspaceName: 'main',
+      name: 'dev',
+    }
+    read.arrive([run('run-dev', { heldAgainst: [claim] }), run('run-auth', { name: 'auth' })])
+    await settled()
+
+    const [dev, auth] = workspacesSnapshot().shown?.services ?? []
+    expect(dev).toMatchObject({ output: pushed.output, readiness: 'ready', heldAgainst: [claim] })
+    expect(auth?.name).toBe('auth')
   })
 })

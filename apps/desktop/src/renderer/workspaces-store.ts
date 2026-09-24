@@ -105,6 +105,49 @@ function withKey<V>(map: ReadonlyMap<string, V>, key: string, value: V): Readonl
   return next
 }
 
+/** How many questions were asked of the engine about a Workspace shown, all kinds together. */
+let questions = 0
+
+/** Per question — its Git state, its steps, its services — the newest answer written. */
+const answered = new Map<string, number>()
+
+/** Numbers a question as it is asked: a later question is a larger number. */
+function asking(): number {
+  questions += 1
+  return questions
+}
+
+/**
+ * Whether the answer to question number `asked` about `what` is newer than the one on screen.
+ *
+ * Every `workspace` event asks again, and answers do not come back in the order they were asked:
+ * a slow answer to an older question, landing last, would draw what was true before. So an
+ * answer is written only when it answers a later question than the one already written.
+ */
+function newest(what: string, asked: number): boolean {
+  if (asked <= (answered.get(what) ?? 0)) return false
+  answered.set(what, asked)
+  return true
+}
+
+/** How much a run has printed altogether, which only grows while it runs. */
+function printed(run: CommandRun): number {
+  return run.dropped + run.output.length
+}
+
+/**
+ * A service as the list reads it again, against the one a push already put there (D8-08).
+ *
+ * The list was asked before the push arrived, so what it answers of a run can be older than what
+ * was pushed of it since: the push is kept when it has printed more, or answered where the list
+ * says it has not yet. The holder's side is the list's, which a push never carries (Decided 12).
+ */
+function fresherOf(read: CommandRun, held: CommandRun | undefined): CommandRun {
+  if (held === undefined) return read
+  const newer = printed(held) > printed(read) || (held.readyAt !== null && read.readyAt === null)
+  return newer ? { ...held, heldAgainst: read.heldAgainst } : read
+}
+
 /**
  * Changes the Workspace shown, when it is still `workspaceId`: an answer about one the reader has
  * moved off since is dropped rather than drawn over the one on screen.
@@ -229,8 +272,10 @@ export async function showWorkspace(workspace: Workspace | null): Promise<void> 
 
 /** Asks Git about each repository of the Workspace shown, now (D8-15). */
 export async function readStatus(workspaceId: string): Promise<void> {
+  const asked = asking()
   try {
     const status = await window.hemera.invoke('workspaces.status', { id: workspaceId })
+    if (!newest(`status:${workspaceId}`, asked)) return
     onShown(workspaceId, (shown) => ({ ...shown, status }))
   } catch (cause) {
     refused(cause)
@@ -238,8 +283,10 @@ export async function readStatus(workspaceId: string): Promise<void> {
 }
 
 async function readSteps(workspaceId: string): Promise<void> {
+  const asked = asking()
   try {
     const steps = await window.hemera.invoke('preparation.steps', { workspaceId })
+    if (!newest(`steps:${workspaceId}`, asked)) return
     onShown(workspaceId, (shown) => ({ ...shown, steps }))
   } catch (cause) {
     refused(cause)
@@ -260,13 +307,23 @@ async function readWorkspaceVariables(workspaceId: string): Promise<void> {
 async function readServices(workspaceId: string): Promise<void> {
   const shown = state.shown
   if (shown === null) return
+  const asked = asking()
   try {
     const services = await window.hemera.invoke('commands.services', {
       projectId: shown.projectId,
       // `main`'s services are asked for as `main`'s, whichever row its runs were written with.
       workspaceId: shown.main ? null : workspaceId,
     })
-    onShown(workspaceId, (now) => ({ ...now, services }))
+    if (!newest(`services:${workspaceId}`, asked)) return
+    onShown(workspaceId, (now) => ({
+      ...now,
+      services: services.map((one) =>
+        fresherOf(
+          one,
+          now.services.find((held) => held.id === one.id),
+        ),
+      ),
+    }))
   } catch (cause) {
     refused(cause)
   }
@@ -274,12 +331,16 @@ async function readServices(workspaceId: string): Promise<void> {
 
 /**
  * Resumes the preparation of a Workspace (D8-05): the engine answers the steps as they stand at
- * once, and the rest arrives as the `workspace` event says it moved.
+ * once, and the rest arrives as the `workspace` event says it moved. The answer is one more
+ * reading of the steps, and is written only when no later reading was asked for meanwhile: the
+ * events of the resumed preparation can have brought newer steps before it arrives.
  */
 export async function resumePreparation(workspaceId: string): Promise<void> {
   forgetWorkspacesRefusal()
+  const asked = asking()
   try {
     const steps = await window.hemera.invoke('preparation.resume', { workspaceId })
+    if (!newest(`steps:${workspaceId}`, asked)) return
     onShown(workspaceId, (shown) => ({ ...shown, steps }))
   } catch (cause) {
     refused(cause)
