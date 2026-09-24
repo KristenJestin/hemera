@@ -228,4 +228,27 @@ describe('The view lists the sources with their provenance', () => {
     )
     expect(view.commands).toEqual([{ name: 'check', line: 'pnpm check' }])
   })
+
+  test('a define Session lists the define set: the Spec tools and no write tool', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const { bridge } = opened
+    const project = await aProject(opened)
+    const session = await bridge.invoke('sessions.create', {
+      projectId: project.id,
+      provider: 'claude',
+    })
+    await bridge.invoke('specs.create', {
+      sessionId: session.id,
+      type: 'feature',
+      title: 'Export the Journal',
+    })
+
+    const view = await bridge.invoke('context.read', { sessionId: session.id })
+
+    const listed = view.tools.map((one) => one.name)
+    expect(listed).toEqual([...offeredTools('define')])
+    expect(listed).toContain('spec_write')
+    expect(listed).not.toContain('fs_write')
+    expect(listed).not.toContain('commands_run')
+  })
 })
