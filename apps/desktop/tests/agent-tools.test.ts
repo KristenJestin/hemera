@@ -72,8 +72,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dataFolder, { recursive: true, force: true })
-  rmSync(workspace, { recursive: true, force: true })
+  // A run stopped by tree may still be closing when the test ends: Windows keeps its folder until then.
+  rmSync(dataFolder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  rmSync(workspace, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 })
 
 /** What the runtime keeps of a tool call the agent streamed: its input and its output, as text. */
