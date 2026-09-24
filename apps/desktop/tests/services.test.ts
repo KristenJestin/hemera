@@ -457,6 +457,33 @@ describe('Portless is refused when it is not installed', () => {
 })
 
 describe('A Portless command runs through portless under its Workspace name', () => {
+  /** What the stand-in is given to run after the name: a line that prints its words and stays up. */
+  const line = `"${process.execPath}" -e "console.log(process.argv.slice(1).join('|'));setInterval(()=>{},1000)" two words`
+
+  /** `Dev`, a Portless `serve` of login-form, run on a machine whose `PATH` is `bin` alone. */
+  const runThrough = (bin: string) =>
+    engine(onlyIn(bin))(
+      Effect.gen(function* () {
+        const { workspace, inLoginForm } = yield* twoWorkspaces
+        const commands = yield* Commands
+        const started = yield* commands.run(
+          request(inLoginForm, {
+            name: 'Dev',
+            line,
+            type: 'serve',
+            portless: true,
+            cwd: workspace.path,
+            workspaceId: workspace.id,
+            workspaceName: workspace.name,
+          }),
+        )
+        return yield* until(
+          commands.output(inLoginForm.sessionId, started.id),
+          (view) => view.url !== null && view.output.includes('two|words'),
+        )
+      }),
+    )
+
   it.runIf(process.platform !== 'win32')(
     'runs portless <workspace>-<name> <line>, reads its address, and names no conflict',
     async () => {
@@ -468,28 +495,28 @@ describe('A Portless command runs through portless under its Workspace name', ()
         '#!/bin/sh\necho "https://$1.localhost"\nshift\nexec "$@"\n',
       )
       chmodSync(join(bin, 'portless'), 0o755)
-      const line = `"${process.execPath}" -e "console.log(process.argv.slice(1).join('|'));setInterval(()=>{},1000)" two words`
-      const seen = await engine(onlyIn(bin))(
-        Effect.gen(function* () {
-          const { workspace, inLoginForm } = yield* twoWorkspaces
-          const commands = yield* Commands
-          const started = yield* commands.run(
-            request(inLoginForm, {
-              name: 'Dev',
-              line,
-              type: 'serve',
-              portless: true,
-              cwd: workspace.path,
-              workspaceId: workspace.id,
-              workspaceName: workspace.name,
-            }),
-          )
-          return yield* until(
-            commands.output(inLoginForm.sessionId, started.id),
-            (view) => view.url !== null && view.output.includes('two|words'),
-          )
-        }),
+      const seen = await runThrough(bin)
+
+      expect(seen.line).toBe(`portless login-form-dev ${line}`)
+      expect(seen.state).toBe('running')
+      expect(seen.url).toBe('https://login-form-dev.localhost')
+      expect(seen.output).toContain('two|words')
+      expect(seen.portConflict).toBeNull()
+    },
+  )
+
+  it.runIf(process.platform === 'win32')(
+    'runs portless.cmd <workspace>-<name> <line> on Windows, reads its address, and names no conflict',
+    async () => {
+      // The same stand-in as a `.cmd`, found through `PATHEXT` and run by `cmd.exe`, as an npm
+      // shim of the real one would be (Decided 13): the address, then the line's own words.
+      const bin = join(scratch.folder, 'bin')
+      mkdirSync(bin)
+      writeFileSync(
+        join(bin, 'portless.cmd'),
+        '@echo off\r\necho https://%~1.localhost\r\n%2 %3 %4 %5 %6 %7 %8 %9\r\n',
       )
+      const seen = await runThrough(bin)
 
       expect(seen.line).toBe(`portless login-form-dev ${line}`)
       expect(seen.state).toBe('running')
