@@ -174,9 +174,17 @@ export function workspacesOf(projectId: string | null): readonly Workspace[] {
   return state.workspaces.get(projectId) ?? []
 }
 
+/**
+ * Reads the Workspaces of a Project. Every step of a preparation is a `workspace` event and every
+ * event reads the list again, so an answer lands only over an older one: an answer from before the
+ * last step, arriving last, would leave a Workspace `failed` or `preparing` once it is `ready`,
+ * with no event left to correct it.
+ */
 export async function readWorkspaces(projectId: string): Promise<void> {
+  const asked = asking()
   try {
     const listed = await window.hemera.invoke('workspaces.list', { projectId })
+    if (!newest(`list:${projectId}`, asked)) return
     replace({ ...state, workspaces: withKey(state.workspaces, projectId, listed) })
   } catch (cause) {
     refused(cause)

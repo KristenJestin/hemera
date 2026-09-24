@@ -426,6 +426,23 @@ describe('An older answer never lands over a newer one', () => {
     expect(workspacesSnapshot().shown?.status).toEqual(clean)
   })
 
+  test('a slow list answer to an earlier event is dropped once a later one was written', async () => {
+    const slow = later<(typeof LOGIN_FORM)[]>()
+    const failed = { ...LOGIN_FORM, state: 'failed' as const }
+    answers.set('workspaces.list', [MAIN])
+    await readWorkspaces('atlas')
+    answers.set('workspaces.list', new InTurn([slow.answer, [MAIN, LOGIN_FORM]]))
+
+    // Two steps of a resumed preparation, the Workspace `ready` after the second.
+    push({ event: 'workspace', projectId: 'atlas', workspaceId: 'login-form' })
+    push({ event: 'workspace', projectId: 'atlas', workspaceId: 'login-form' })
+    await settled()
+    slow.arrive([MAIN, failed])
+    await settled()
+
+    expect(workspacesOf('atlas').find((one) => one.id === 'login-form')?.state).toBe('ready')
+  })
+
   test('a slow variables reading of the showing is dropped once an edit read them again', async () => {
     answersForShowing()
     const slow = later<{ key: string; value: string; workspaceId: string }[]>()
