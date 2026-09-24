@@ -275,7 +275,7 @@ export const AFailedRunFolds: Story = {
   args: {
     name: 'bun',
     command: 'bun run check',
-    kind: 'utility',
+    type: 'script',
     state: 'failed',
     folder: '.',
     output: 'error: script "check" exited with code 1',
@@ -321,7 +321,7 @@ function EndingRun({ exitCode }: { exitCode: number }): ReactNode {
       <CommandRun
         name="check"
         command="pnpm check"
-        kind="check"
+        type="test"
         state={over ? (failed ? 'failed' : 'finished') : 'running'}
         folder="."
         output={over ? (failed ? 'Tests  3 failed (3)' : 'Tests  3 passed (3)') : 'Running...'}
