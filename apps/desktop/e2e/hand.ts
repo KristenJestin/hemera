@@ -7,7 +7,7 @@
  * a suite about the shell has to make one before it can look at a tab, exactly as a hand would.
  */
 
-import { browser, expect } from '@wdio/globals'
+import { $, $$, browser, expect } from '@wdio/globals'
 
 /** Presses whatever the page shows under this name, and says so when there is nothing there. */
 export async function press(name: string): Promise<void> {
@@ -60,6 +60,52 @@ export async function fill(label: string, value: string): Promise<void> {
   )
   expect(filled).toBe(true)
   await browser.pause(120)
+}
+
+/**
+ * Chooses an option of the select with this label, with the pointer, as a hand does.
+ *
+ * Not through `press`: a select of the design system opens on the pointer going down, which a
+ * `click()` dispatched from the page never is, and its options live in a popup the select puts
+ * at the end of the document. So the trigger is clicked by the driver, then the option that says
+ * exactly this.
+ */
+export async function choose(label: string, option: string): Promise<void> {
+  await $(`button[aria-label="${label}"]`).click()
+  await browser.pause(300)
+  const options = await $$('[role="option"]')
+  let chosen = false
+  for (const one of options) {
+    // oxlint-disable-next-line no-await-in-loop -- the options are read one after the other, in order
+    if ((await one.getText()).trim() === option) {
+      // oxlint-disable-next-line no-await-in-loop -- the one found is chosen, then the loop ends
+      await one.click()
+      chosen = true
+      break
+    }
+  }
+  expect(chosen).toBe(true)
+  await browser.pause(300)
+}
+
+/**
+ * Presses the tab that says this, with the pointer: a tab of the design system is chosen on the
+ * pointer, not on a click event.
+ */
+export async function pressTab(name: string): Promise<void> {
+  const found = await $$('[role="tab"]')
+  let pressed = false
+  for (const tab of found) {
+    // oxlint-disable-next-line no-await-in-loop -- the tabs are read one after the other, in order
+    if ((await tab.getText()).includes(name)) {
+      // oxlint-disable-next-line no-await-in-loop -- the one found is pressed, then the loop ends
+      await tab.click()
+      pressed = true
+      break
+    }
+  }
+  expect(pressed).toBe(true)
+  await browser.pause(400)
 }
 
 /**
