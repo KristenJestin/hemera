@@ -31,6 +31,7 @@ import {
   commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
+  elsewhereOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
   hemeraToolLabelOf,
@@ -305,6 +306,8 @@ export interface AgentContext {
   onDecide: (toolCallId: string, option: PermissionOption) => void
   /** The runs of the Session as they were last pushed: what a run's block is drawn from (D6-12). */
   runs: readonly Run[]
+  /** The name of the Session's Workspace, which a run elsewhere is told apart from (D8-08). */
+  workspace: string | undefined
   /** Opens the address a run published, in the browser: this window is not one. */
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
@@ -526,6 +529,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         {...shown}
         onOpenUrl={context.onOpenUrl}
         onStop={runId === null ? undefined : () => context.onStopRun(runId)}
+        workspace={heard === undefined ? undefined : elsewhereOf(heard, context.workspace)}
         onAddToCatalogue={heard === undefined ? undefined : () => context.onAddToCatalogue(heard)}
       />
     )

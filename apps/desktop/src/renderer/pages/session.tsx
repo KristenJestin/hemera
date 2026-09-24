@@ -33,7 +33,7 @@ import {
 import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
 import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
-import { foldedCallsOf } from '../agent-tool-payloads.ts'
+import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
@@ -250,6 +250,11 @@ export function SessionPage({
   const thread = together(entries, agent.entries)
   const waiting = waitingOf(thread)
 
+  // The Workspace the Session works in, on the pill: it can be changed until the agent has
+  // started, and is fixed from then on, which the pill says in words (D8-08). A run in another
+  // one — a Project-scoped service, in `main` — names it on its block.
+  const workspace = workspaces.find((one) => one.id === session.workspaceId)
+
   /**
    * The user's messages cut into the days they were written on.
    *
@@ -302,6 +307,7 @@ export function SessionPage({
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
       runs: commandRuns,
+      workspace: workspace?.name,
       onOpenUrl,
       onStopRun,
       reportedCall: (toolCallId) => reported.get(toolCallId),
@@ -406,10 +412,6 @@ export function SessionPage({
   const usage = usageOf(thread)
   // Which tabs have something to show, which is what the details open on.
   const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
-
-  // The Workspace the Session works in, on the pill: it can be changed until the agent has
-  // started, and is fixed from then on, which the pill says in words (D8-08).
-  const workspace = workspaces.find((one) => one.id === session.workspaceId)
 
   return (
     /*
@@ -582,11 +584,13 @@ export function SessionPage({
         commands={
           session.provider === null ? undefined : (
             <CommandsPanel
-              // A one-off offers "Add to catalogue" here as it does in the thread (D8-11).
+              // A one-off offers "Add to catalogue" here as it does in the thread (D8-11), and a
+              // run in another Workspace names it (D8-08).
               runs={panelRunsOf(commandRuns, root).map((shown) => {
                 const run = commandRuns.find((one) => one.id === shown.id)
                 if (run !== undefined) {
                   shown.onAddToCatalogue = () => deciding(onAddToCatalogue(run))
+                  shown.workspace = elsewhereOf(run, workspace?.name)
                 }
                 return shown
               })}

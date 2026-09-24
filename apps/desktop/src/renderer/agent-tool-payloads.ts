@@ -360,6 +360,15 @@ export function commandProposalOf(entry: SessionEntry): CommandProposalDrawn | n
   return { ...read, folder: read.folder ?? '.' }
 }
 
+/**
+ * The Workspace a run's block names, or undefined when it is the Session's own (D8-08): a
+ * Project-scoped service asked for from a Session elsewhere runs in `main` (D8-07). Undefined too
+ * while the Session's own is not known, rather than naming every run.
+ */
+export function elsewhereOf(run: CommandRun, own: string | undefined): string | undefined {
+  return own === undefined || run.workspaceName === own ? undefined : run.workspaceName
+}
+
 /** What the thread shows of a `context_delivery` entry: one line, like a `note`. */
 export interface ContextDeliveryDrawn {
   readonly id: string

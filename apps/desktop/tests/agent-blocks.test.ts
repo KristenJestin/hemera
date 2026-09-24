@@ -18,6 +18,7 @@ import {
   commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
+  elsewhereOf,
   foldedCallsOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
@@ -239,6 +240,13 @@ describe('The agent starts the app and the user opens it', () => {
     })
     // And a run of another entry is not this one's.
     expect(commandRunOf(entry, [{ ...pushed, id: 'run-2' }])?.url).toBeUndefined()
+
+    // A Project-scoped service runs in `main` whichever Session asked for it (D8-07): the block
+    // of a Session in another Workspace names `main`, and a Session in `main` names nothing.
+    expect(elsewhereOf(pushed, 'login-form')).toBe('main')
+    expect(elsewhereOf(pushed, 'main')).toBeUndefined()
+    // Nor while the Session's own Workspace is not known yet.
+    expect(elsewhereOf(pushed, undefined)).toBeUndefined()
   })
 })
 
