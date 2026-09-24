@@ -25,7 +25,7 @@ import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
 import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
-import { type Commands, commandsLayer } from '#engine/commands/service.ts'
+import { type Commands, UnknownRunError, commandsLayer } from '#engine/commands/service.ts'
 import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
@@ -595,6 +595,46 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.services).toEqual([])
     expect(seen.accepted).toMatchObject({ name: 'seed', line: 'node seed.js' })
     expect(seen.catalogue.map((command) => command.name)).toEqual(['seed'])
+  })
+
+  test('a step’s run is read by its Project, and by no other', async () => {
+    const seen = await running(
+      Effect.gen(function* () {
+        const project = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: main,
+        })
+        const other = yield* asked('projects.create', {
+          name: 'Borealis',
+          tone: 'primary',
+          mainPath: join(dataFolder, 'spike'),
+        })
+        const workspace = yield* asked('workspaces.createOnFolder', {
+          projectId: project.id,
+          path: join(dataFolder, 'spike'),
+        })
+        // A run as a preparation step leaves it: no Session, its Workspace, its output and code.
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO command_runs (id, session_id, workspace_id, name, line, type, cwd, state, exit_code, output, started_by, started_at, ended_at)
+          VALUES ('step-run', NULL, ${workspace.id}, 'install', 'pnpm install', 'script', ${workspace.path}, 'failed', 2, 'installed', 'user', '2026-09-24T08:00:00.000Z', '2026-09-24T08:00:01.000Z')`
+        const read = yield* asked('commands.runOf', { projectId: project.id, runId: 'step-run' })
+        const refused = yield* Effect.flip(
+          asked('commands.runOf', { projectId: other.id, runId: 'step-run' }),
+        )
+        return { read, refused }
+      }),
+    )
+
+    expect(seen.read).toMatchObject({
+      id: 'step-run',
+      sessionId: null,
+      workspaceName: 'spike',
+      state: 'failed',
+      exitCode: 2,
+      output: 'installed',
+    })
+    expect(seen.refused).toBeInstanceOf(UnknownRunError)
   })
 
   test('the window is told when a Workspace is created, prepared and cleaned up', async () => {

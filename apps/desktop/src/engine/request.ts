@@ -367,6 +367,10 @@ export function answer(
       const { sessionId, runId } = decision.argument
       return yield* commands.output(sessionId, runId)
     }
+    if (decision.name === 'commands.runOf') {
+      const { projectId, runId } = decision.argument
+      return yield* commands.runOf(projectId, runId)
+    }
     if (decision.name === 'commands.services') {
       const { projectId, workspaceId } = decision.argument
       // D8-08, D8-09: a Workspace's services are its running `serve` runs, whoever started

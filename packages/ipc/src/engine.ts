@@ -636,6 +636,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,
   },
+  // Any run of a Project by its id, whoever started it: how a preparation step's run, which no
+  // Session asked for, is read with its output and its exit code (Decided 11).
+  'commands.runOf': {
+    arguments: z.object({ projectId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
   // The services of a Workspace: every `serve` run of it that is running, whoever started it,
   // oldest first; `workspaceId` null is `main` (D8-08, D8-09).
   'commands.services': {

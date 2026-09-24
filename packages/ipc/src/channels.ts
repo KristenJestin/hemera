@@ -113,6 +113,7 @@ export const CHANNELS = {
   'commands.run': ENGINE_REQUESTS['commands.run'],
   'commands.stop': ENGINE_REQUESTS['commands.stop'],
   'commands.output': ENGINE_REQUESTS['commands.output'],
+  'commands.runOf': ENGINE_REQUESTS['commands.runOf'],
   'commands.services': ENGINE_REQUESTS['commands.services'],
   'commands.stopService': ENGINE_REQUESTS['commands.stopService'],
   'commands.proposeAccept': ENGINE_REQUESTS['commands.proposeAccept'],

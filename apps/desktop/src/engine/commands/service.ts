@@ -355,6 +355,14 @@ export interface CommandsService {
     sessionId: string | null,
     runId: string,
   ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
+  /**
+   * A run of the Project by its identifier, whoever started it — a Session, or a preparation's
+   * step with none (Decided 11): what a step's run is read by. One of another Project is unknown.
+   */
+  readonly runOf: (
+    projectId: string,
+    runId: string,
+  ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
   /** Stops a run and everything it started. */
   readonly stop: (
     sessionId: string,
@@ -831,6 +839,29 @@ export const commandsLayer = Layer.effect(
         yield* Deferred.await(record.ended)
       })
 
+    /**
+     * A run by its identifier, among the Project's when one is named and among all otherwise:
+     * from memory while it runs, from its row once its process is gone — a `test` that exited an
+     * hour ago is read exactly as a run of this process is.
+     */
+    const readRun = (among: { readonly projectId: string } | null, runId: string) =>
+      Effect.gen(function* () {
+        const record = live.get(runId)
+        if (record !== undefined && (among === null || record.projectId === among.projectId)) {
+          return viewOf(runId, record)
+        }
+        const rows = yield* runRows()
+          .where(
+            among === null
+              ? eq(commandRuns.id, runId)
+              : and(eq(commandRuns.id, runId), eq(runProject, among.projectId)),
+          )
+          .pipe(Effect.mapError(failed('reading a run')))
+        const row = rows[0]
+        if (row === undefined) return yield* Effect.fail(new UnknownRunError(runId))
+        return rowOf(row)
+      })
+
     /** Stops a running run of the Project; one of another Project, or none, is unknown to it. */
     const stopIn = (projectId: string | null, runId: string) =>
       Effect.gen(function* () {
@@ -1285,25 +1316,13 @@ export const commandsLayer = Layer.effect(
         }),
 
       output: (sessionId, runId) =>
-        Effect.gen(function* () {
-          const projectId = sessionId === null ? null : yield* projectOf(sessionId)
-          const record = live.get(runId)
-          if (record !== undefined && (sessionId === null || record.projectId === projectId)) {
-            return viewOf(runId, record)
-          }
-          // The process is gone: the row is what is left of the run, and a `test` that exited
-          // an hour ago is read from it exactly as a run of this process is read from memory.
-          const rows = yield* runRows()
-            .where(
-              sessionId === null
-                ? eq(commandRuns.id, runId)
-                : and(eq(commandRuns.id, runId), eq(runProject, projectId ?? '')),
-            )
-            .pipe(Effect.mapError(failed('reading a run')))
-          const row = rows[0]
-          if (row === undefined) return yield* Effect.fail(new UnknownRunError(runId))
-          return rowOf(row)
-        }),
+        sessionId === null
+          ? readRun(null, runId)
+          : projectOf(sessionId).pipe(
+              Effect.flatMap((projectId) => readRun({ projectId: projectId ?? '' }, runId)),
+            ),
+
+      runOf: (projectId, runId) => readRun({ projectId }, runId),
 
       stop: (sessionId, runId) =>
         projectOf(sessionId).pipe(Effect.flatMap((projectId) => stopIn(projectId, runId))),
