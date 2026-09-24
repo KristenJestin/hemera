@@ -31,7 +31,7 @@ import { Sessions } from '#engine/sessions.ts'
 import { briefFor } from '#engine/specs/brief.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { Database } from '#engine/storage/database.ts'
-import { application, aSession, gated, heldInThread, threadOf } from './application.ts'
+import { application, aSession, gated, held, heldInThread, pause, threadOf } from './application.ts'
 import { frozen, humanOf, shaped, write } from './specs-harness.ts'
 
 let dataFolder: string
@@ -299,6 +299,53 @@ describe('A human edit is recorded and reaches the agent', () => {
 
         yield* runtime.prompt(sessionId, 'Third turn.')
         expect(agent.answers.prompts.slice(4)).toEqual(['Third turn.'])
+      }),
+    )
+  })
+})
+
+describe('An edit made during a delivery turn is handed over once that turn ends', () => {
+  test('a section saved while Hemera’s own delivery turn runs goes as an edit delivery after it', async () => {
+    const gate = held()
+    let deliveries = 0
+    const agent = fakeAgent({
+      // The brief of the first turn is taken at once; the delivery after it is held open.
+      holdsDelivery: () => {
+        deliveries += 1
+        return deliveries === 2 ? gate.promise : Promise.resolve()
+      },
+    })
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        const runtime = yield* AgentRuntime
+        yield* runtime.prompt(sessionId, 'First turn.')
+        // The safe point the end of that turn asked for has come and found nothing to hand over.
+        yield* pause(50)
+
+        // No turn runs: the edit of scope opens a delivery turn of its own, held open.
+        yield* write(humanOf(sessionId), specId, 'scope', 'CSV only.')
+        yield* runtime.specChanged(specId)
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.body.endsWith('the human edits of scope.')),
+        )
+        // While it runs, the human saves problem.
+        yield* write(humanOf(sessionId), specId, 'problem', 'The Journal cannot leave Hemera.')
+        gate.carryOn()
+        const entries = yield* heldInThread(sessionId, (thread) =>
+          thread.some((entry) => entry.body.endsWith('the human edits of problem.')),
+        )
+        expect(agent.answers.prompts).toEqual([
+          DELIVERY_MARKER,
+          'First turn.',
+          DELIVERY_MARKER,
+          DELIVERY_MARKER,
+        ])
+        expect(deliveriesTo(agent)[2]?.get(contextUri('edit'))).toContain(
+          'The Journal cannot leave Hemera.',
+        )
+        expect(usersOf(entries)).toEqual(['First turn.'])
       }),
     )
   })

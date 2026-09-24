@@ -2253,6 +2253,12 @@ export const runtimeLayer = Layer.effect(
               yield* note(sessionId, turn, sent.failure.cause, 'delivery_failed')
             }
             yield* closeTurn(sessionId, turn, stopReason, 'delivery')
+            // Its end is a safe point like the end of a turn the user started: what was made
+            // while it ran — an edit, a phase the agent finished in answer to it — goes once it is
+            // over. A delivery that was stopped or not taken is left for the next prompt.
+            if (turn.closed === null && Result.isSuccess(sent) && stopReason !== 'cancelled') {
+              deliverSoon(sessionId, false)
+            }
           }).pipe(
             Effect.ignore,
             Effect.ensuring(
