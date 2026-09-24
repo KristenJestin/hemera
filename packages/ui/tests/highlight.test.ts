@@ -12,6 +12,7 @@ import { describe, expect, test, vi } from 'vite-plus/test'
 import {
   highlighted,
   languageOf,
+  loaded,
   subscribeToHighlight,
   warm,
   type HighlightedLine,
@@ -110,8 +111,10 @@ describe('the language of a diff', () => {
     // rules — the draw #51 lost on a busy machine, and kept, uncoloured, for good.
     const code = 'def answer():\n    return 42  # the end\n'
     const loading = warm('python')
+    expect(loaded('python')).toBe(false)
     expect(highlighted(code, 'python')).toBeNull()
     await loading
+    expect(loaded('python')).toBe(true)
     const lines = tokensByLine(stalledOnce(() => highlighted(code, 'python')))
     expect(lines[0], 'the line that compiled the grammar came back plain').toContain(
       'tok-keyword:def',
