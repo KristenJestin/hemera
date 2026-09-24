@@ -11,8 +11,9 @@
  * is a script of the suite standing in for it.
  */
 
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer as createHttpServer } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
 import { type AddressInfo, createServer } from 'node:net'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
@@ -286,6 +287,28 @@ describe('An address is probed as printed', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
+  })
+})
+
+describe('An https address answers on a certificate of its own', () => {
+  /** A self-signed pair for `localhost`, made once for this suite and trusted by nothing. */
+  const fixture = (name: string) => readFileSync(join(import.meta.dirname, 'fixtures', name))
+
+  it('answers true for a local https server on an untrusted certificate, and false once closed', async () => {
+    const server = createHttpsServer(
+      { key: fixture('localhost-key.pem'), cert: fixture('localhost.pem') },
+      (_request, response) => response.end('ok'),
+    )
+    await new Promise<void>((resolve) => server.listen(0, resolve))
+    // SAFETY: a server listening on a TCP port answers its address as an object, never a pipe name.
+    const { port } = server.address() as AddressInfo
+    // As Portless prints it: `https`, a `localhost` name, a certificate of its own (Decided 13).
+    const address = `https://localhost:${String(port)}`
+    const answering = await Effect.runPromise(addressAnswers(address))
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    const closed = await Effect.runPromise(addressAnswers(address))
+
+    expect({ answering, closed }).toEqual({ answering: true, closed: false })
   })
 })
 
