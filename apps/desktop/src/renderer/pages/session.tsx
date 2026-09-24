@@ -601,8 +601,12 @@ export function SessionPage({
           )
         }
         // What the agent works from, its Workspace, instructions and tools (D6-10), once the engine
-        // has said it.
-        context={context === null ? undefined : <ContextView {...contextListsOf(context, root)} />}
+        // has said it and the Session's Workspace is known: no root is guessed before (D8-08).
+        context={
+          context === null || root === null ? undefined : (
+            <ContextView {...contextListsOf(context, root, workspace?.name)} />
+          )
+        }
         // The tab it opens on follows what is happening: a command running opens on Commands,
         // then the tab that has something, and the Context when no tab has anything (D6-12). It
         // is read when the dialog opens, so an open dialog never changes tab under the reader.

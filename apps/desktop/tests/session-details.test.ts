@@ -335,6 +335,13 @@ describe('The Context tab says how the instructions reached the agent', () => {
     expect(contextListsOf(aViewOf([]), ROOT).workspace).toEqual({ name: 'main', path: ROOT })
   })
 
+  test("the Workspace is the Session's own when the composer chose another", () => {
+    expect(contextListsOf(aViewOf([]), ROOT, 'login-form').workspace).toEqual({
+      name: 'login-form',
+      path: ROOT,
+    })
+  })
+
   test('the tools were lent when the base went in, and have no time before it', () => {
     expect(contextListsOf(aViewOf([]), ROOT).lentAt).toBeUndefined()
     const view = aViewOf([aSource('base', 'embedded_resource', '2026-09-23T09:30:00.000Z')])

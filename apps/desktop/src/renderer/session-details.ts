@@ -174,15 +174,19 @@ function fileLineOf(file: Provided | undefined, change: Provided | undefined): C
 /**
  * The Context view of a Session, in the words the view draws it with (D6-10).
  *
- * The Workspace is the Project's `main` one, the only one a Session runs in until lot 7, at the
+ * The Workspace is the Session's own, `main` unless the composer chose another (D8-08), at the
  * root the page already reads its runs from. The tools were lent when the agent's session was
  * opened, which is the moment the base was recorded: the engine provides a session the instant it
  * opens it, with the tools already in its hands. Before that there is no time to give.
  */
-export function contextListsOf(view: ContextView, root: string): ContextLists {
+export function contextListsOf(
+  view: ContextView,
+  root: string,
+  workspace = MAIN_WORKSPACE,
+): ContextLists {
   const base = view.provided.find((one) => one.kind === 'base')
   return {
-    workspace: { name: MAIN_WORKSPACE, path: root },
+    workspace: { name: workspace, path: root },
     instructions: instructionsOf(view.provided),
     tools: view.tools.map((tool) => ({ name: tool.name, bound: tool.bound })),
     lentAt: base === undefined ? undefined : atOf(base.deliveredAt),
