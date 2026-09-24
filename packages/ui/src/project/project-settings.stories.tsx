@@ -32,9 +32,9 @@ const ATLAS: ProjectSettingsDraft = {
 }
 
 const REPOSITORIES: RepositoryLine[] = [
-  { path: './sources/api', branch: 'main', exists: true, includedByDefault: true },
-  { path: './sources/front', branch: 'develop', exists: true, includedByDefault: true },
-  { path: './docs', branch: null, exists: true, includedByDefault: false },
+  { path: './sources/api', branch: 'main', exists: true, includedByDefault: true, icon: null },
+  { path: './sources/front', branch: 'develop', exists: true, includedByDefault: true, icon: null },
+  { path: './docs', branch: null, exists: true, includedByDefault: false, icon: null },
 ]
 
 /** What a command of the catalogue is unless a fixture says otherwise. */
@@ -123,7 +123,7 @@ const COMMANDS: CommandLine[] = [
  */
 const FOLDERS: RepositoryLine[] = [
   ...REPOSITORIES,
-  { path: './scripts', branch: null, exists: true, includedByDefault: false },
+  { path: './scripts', branch: null, exists: true, includedByDefault: false, icon: null },
 ]
 
 interface Extra {
@@ -174,7 +174,10 @@ function Controlled({
         onAddRepository={async (path) => {
           await onAddRepository(path)
           if (addRefusal !== null) return addRefusal
-          setLines([...lines, { path, branch: null, exists: false, includedByDefault: true }])
+          setLines([
+            ...lines,
+            { path, branch: null, exists: false, includedByDefault: true, icon: null },
+          ])
           return null
         }}
         onRemoveRepository={(path) => {
@@ -186,7 +189,13 @@ function Controlled({
           setLines(
             lines.map((one) =>
               one.path === path
-                ? { path, branch: one.branch, exists: one.exists, includedByDefault: included }
+                ? {
+                    path,
+                    branch: one.branch,
+                    exists: one.exists,
+                    includedByDefault: included,
+                    icon: one.icon,
+                  }
                 : one,
             ),
           )

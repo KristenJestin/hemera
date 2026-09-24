@@ -694,6 +694,8 @@ export function Application() {
             exists: one.exists,
             // What the Project says of it, which is what a dedicated Workspace takes (D8-04).
             includedByDefault: current.included.includes(one.path),
+            // The icon is not stored yet: the row draws its folder or its branch.
+            icon: null,
           })),
         )
       })
@@ -710,6 +712,7 @@ export function Application() {
             branch: one.git,
             exists: one.exists,
             includedByDefault: true,
+            icon: null,
           })),
         )
       })

@@ -1,3 +1,4 @@
+import type { CommandScope, CommandType } from '../activity/command-type.ts'
 import type { ProjectTone } from '../shell/model.ts'
 
 /**
@@ -51,4 +52,69 @@ export interface RepositoryLine {
    * creation dialog still lets the user leave it out, or take one that is not.
    */
   includedByDefault: boolean
+  /**
+   * What the row is drawn with, chosen in its dialog among a short fixed set; null draws the
+   * folder, or the branch when the folder holds a repository.
+   */
+  icon: RepositoryIcon | null
+}
+
+/**
+ * The icons a repository may be given, in the order its dialog offers them (recette 1 of lot 20).
+ *
+ * A key and not an icon: the application stores the word, and the design system alone knows
+ * which glyph of the catalogue it is.
+ */
+export const REPOSITORY_ICONS = [
+  'folder',
+  'server',
+  'browser',
+  'database',
+  'package',
+  'book',
+  'mobile',
+  'terminal',
+] as const
+
+export type RepositoryIcon = (typeof REPOSITORY_ICONS)[number]
+
+/** What a repository's dialog hands back: where it is, how it is drawn, whether it is taken. */
+export interface RepositoryDraft {
+  path: string
+  icon: RepositoryIcon | null
+  includedByDefault: boolean
+}
+
+/**
+ * One command of a Project's catalogue, which is what its Sessions may run (design D6-12, D8-07).
+ *
+ * A command is named once and run by name: the agent asks for `check`, and what runs is the line
+ * the reader wrote, in the folder they wrote it for.
+ */
+export interface CommandLine {
+  /** What the command is called, which is what the agent asks for. */
+  id: string
+  /** The name the reader gave it, shown everywhere the catalogue is read. */
+  name: string
+  /** The default line, run in the folder below on a system with no line of its own. */
+  command: string
+  /** What Windows runs instead of the default line, or null. */
+  lineWindows: string | null
+  /** What Linux runs instead of the default line, or null. */
+  lineLinux: string | null
+  /** What the command is for, which is how it is drawn everywhere (D8-07). */
+  type: CommandType
+  /** Where a `serve` runs: once per Workspace, or once for the Project in `main`. */
+  scope: CommandScope
+  /** Whether a `serve` goes through Portless at launch (D8-10). */
+  portless: boolean
+  /** The name Portless serves it under, when it goes through Portless; null otherwise. */
+  portlessName: string | null
+  /**
+   * What the folder is relative to: the path of one of the Project's repositories, as declared,
+   * or null for the Workspace root. It follows the Workspace the run is in.
+   */
+  folderBase: string | null
+  /** The folder it runs in, relative to its base; empty for the base itself. */
+  folder: string
 }

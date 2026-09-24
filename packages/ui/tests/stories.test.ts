@@ -103,7 +103,14 @@ const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter', 'command-palette']
  * shows as a screen or a composed piece, with the same discipline whatever root they sit under.
  */
 const SURFACES = {
-  project: ['project-dialog', 'project-settings', 'preparation-editor'],
+  // Recette 1 of lot 20: the dialogs a repository and a command are added and edited in.
+  project: [
+    'project-dialog',
+    'project-settings',
+    'preparation-editor',
+    'repository-dialog',
+    'command-dialog',
+  ],
   journal: ['journal'],
   composer: ['composer', 'prompt-input'],
   // The thread of a Session (HEM-57): the messages, the viewport they are read in, and the
@@ -194,6 +201,20 @@ const NAMED_STATES = new Map([
   ],
   // Lot 20: the recipe of a Project, with nothing in it, in order, being added to, and walked.
   ['project/preparation-editor', ['Empty', 'Filled', 'Adding', 'Keyboard']],
+  ['project/repository-dialog', ['Add', 'Edit', 'Invalid', 'Refused', 'Keyboard']],
+  [
+    'project/command-dialog',
+    [
+      'Add',
+      'Edit',
+      'Portless',
+      'PortlessNameInvalid',
+      'PortlessMissing',
+      'PortlessInLine',
+      'Refused',
+      'Keyboard',
+    ],
+  ],
 ])
 
 function storiesIn(path: string): string[] {
