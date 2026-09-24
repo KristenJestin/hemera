@@ -22,6 +22,10 @@
  * reads what was run and how it ended — and the Session's thread gets that same run as one
  * entry that changes state, because a run shows in the panel and in the thread (D6-12).
  *
+ * A run no Session asked for — a preparation's `run` step (Decided 11) — is a run like any other,
+ * with its row, its output and its Journal lines, and no thread entry, because there is no thread:
+ * it is read by its identifier, and no Session's panel lists it.
+ *
  * A run belongs to a Workspace (D8-08) and runs the machine's own line of its command (D8-07): a
  * `serve` joins the one running in its Workspace, or the Project's one when its scope says so; the
  * address it publishes is requested until it answers, and its port is compared with the Project's
@@ -45,7 +49,7 @@ import {
   portOf,
   slugOf,
 } from '@hemera/core'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
 import { request as httpsRequest } from 'node:https'
 import { z } from 'zod'
@@ -205,7 +209,8 @@ export interface PortConflict {
 export interface Run {
   readonly id: string
   readonly projectId: string
-  readonly sessionId: string
+  /** The Session that asked for it, and null for a preparation's step (Decided 11). */
+  readonly sessionId: string | null
   /** The catalogue entry it is, and null for a one-off command line. */
   readonly commandId: string | null
   readonly name: string
@@ -272,7 +277,8 @@ export interface RunView extends Run {
  * service checks nothing about that path; it runs there.
  */
 export interface RunRequest {
-  readonly sessionId: string
+  /** The Session asking, and null for a preparation's step, which has none (Decided 11). */
+  readonly sessionId: string | null
   readonly projectId: string
   readonly commandId: string | null
   readonly name: string
@@ -330,10 +336,12 @@ export interface CommandsService {
    * What a run has printed, bounded, and the address it published.
    *
    * A run that is over is read from its row, where a `test` that exited kept its output and its
-   * exit code: the question is about the run, not about the process.
+   * exit code: the question is about the run, not about the process. A Session reads any run of
+   * its Project; null is Hemera's own preparation asking, by the run's identifier alone
+   * (Decided 11).
    */
   readonly output: (
-    sessionId: string,
+    sessionId: string | null,
     runId: string,
   ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
   /** Stops a run and everything it started. */
@@ -363,7 +371,7 @@ export interface CommandsService {
    * its exit code and all it printed, or still running.
    */
   readonly awaited: (
-    sessionId: string,
+    sessionId: string | null,
     runId: string,
     milliseconds: number,
   ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
@@ -412,7 +420,7 @@ const sameWorkspace = (
 
 /** One live run: what it is, what it has printed, and how to end it. */
 interface Live {
-  readonly sessionId: string
+  readonly sessionId: string | null
   readonly projectId: string
   readonly commandId: string | null
   readonly name: string
@@ -542,18 +550,25 @@ export const commandsLayer = Layer.effect(
     })
 
     /**
-     * The rows of runs, with what a row does not hold itself: the Project, from the Session; and
-     * the Workspace's name, `main` for a row without one (D8-08).
+     * The Project of a run's row, which the row does not hold itself: its Session's, or for a run
+     * with none — a preparation's step, always in a dedicated Workspace — its Workspace's
+     * (Decided 11). Neither a Project, a Session nor a Workspace row is ever deleted under a run.
+     */
+    const runProject = sql<string>`coalesce(${sessions.projectId}, ${workspaces.projectId})`
+
+    /**
+     * The rows of runs, with what a row does not hold itself: the Project; and the Workspace's
+     * name, `main` for a row without one (D8-08).
      */
     const runRows = () =>
       database
         .select({
           run: commandRuns,
-          projectId: sessions.projectId,
+          projectId: runProject,
           workspaceName: workspaces.name,
         })
         .from(commandRuns)
-        .innerJoin(sessions, eq(sessions.id, commandRuns.sessionId))
+        .leftJoin(sessions, eq(sessions.id, commandRuns.sessionId))
         .leftJoin(workspaces, eq(workspaces.id, commandRuns.workspaceId))
 
     /**
@@ -620,13 +635,15 @@ export const commandsLayer = Layer.effect(
      *
      * What the agent said before the run started is written first: the runtime holds a message's
      * words until its timer writes them (Decided 10 of #17), and a run is below them in the thread.
+     *
+     * A run with no Session has no thread, and writes nothing here (Decided 11).
      */
-    const writeEntry = (id: string, one: Live) =>
+    const writeEntry = (id: string, one: Live, sessionId: string) =>
       held
-        .flushed(one.sessionId)
+        .flushed(sessionId)
         .pipe(
           Effect.andThen(() =>
-            thread.write(one.sessionId, {
+            thread.write(sessionId, {
               role: 'hemera',
               kind: 'command_run',
               body: one.name,
@@ -657,7 +674,7 @@ export const commandsLayer = Layer.effect(
               state: one.state,
             }),
           ),
-          Effect.tap((written) => Effect.sync(() => notices.wrote(one.sessionId, written.entry))),
+          Effect.tap((written) => Effect.sync(() => notices.wrote(sessionId, written.entry))),
         )
         .pipe(Effect.catch(() => Effect.void))
 
@@ -741,7 +758,9 @@ export const commandsLayer = Layer.effect(
           }),
         ),
       ).pipe(
-        Effect.tap(() => writeEntry(id, one)),
+        Effect.tap(() =>
+          one.sessionId === null ? Effect.void : writeEntry(id, one, one.sessionId),
+        ),
         Effect.tap(() => Effect.sync(() => notices.ran(one.sessionId, viewOf(id, one)))),
       )
 
@@ -1215,13 +1234,19 @@ export const commandsLayer = Layer.effect(
 
       output: (sessionId, runId) =>
         Effect.gen(function* () {
-          const projectId = yield* projectOf(sessionId)
+          const projectId = sessionId === null ? null : yield* projectOf(sessionId)
           const record = live.get(runId)
-          if (record !== undefined && record.projectId === projectId) return viewOf(runId, record)
+          if (record !== undefined && (sessionId === null || record.projectId === projectId)) {
+            return viewOf(runId, record)
+          }
           // The process is gone: the row is what is left of the run, and a `test` that exited
           // an hour ago is read from it exactly as a run of this process is read from memory.
           const rows = yield* runRows()
-            .where(and(eq(commandRuns.id, runId), eq(sessions.projectId, projectId ?? '')))
+            .where(
+              sessionId === null
+                ? eq(commandRuns.id, runId)
+                : and(eq(commandRuns.id, runId), eq(runProject, projectId ?? '')),
+            )
             .pipe(Effect.mapError(failed('reading a run')))
           const row = rows[0]
           if (row === undefined) return yield* Effect.fail(new UnknownRunError(runId))

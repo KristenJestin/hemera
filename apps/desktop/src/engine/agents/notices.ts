@@ -33,9 +33,10 @@ export interface AgentNoticesService {
    * A run changed — it started, named its address, printed, or ended (D6-12).
    *
    * The run as it stands and not a line of it: the panel draws the whole of what is kept, and a
-   * window that missed one push reads the next one whole.
+   * window that missed one push reads the next one whole. `sessionId` is null for a run no
+   * Session asked for: a preparation's step (Decided 11).
    */
-  readonly ran: (sessionId: string, run: CommandRun) => void
+  readonly ran: (sessionId: string | null, run: CommandRun) => void
   /**
    * A Workspace or its steps changed (D8-05): created, made on a folder, cleaned up, a step of
    * its preparation written, or the preparation over. About a Project rather than a Session: the

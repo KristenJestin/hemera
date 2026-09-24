@@ -452,6 +452,14 @@ describe('The agent starts the app and the user opens it', () => {
     expect(ENGINE_EVENTS.run.safeParse({ event: 'run', sessionId: 'session-1', run }).success).toBe(
       true,
     )
+    // A run no Session asked for — a preparation's step — is pushed with none (Decided 11).
+    expect(
+      ENGINE_EVENTS.run.safeParse({
+        event: 'run',
+        sessionId: null,
+        run: { ...run, sessionId: null },
+      }).success,
+    ).toBe(true)
     expect(
       ENGINE_EVENTS.run.safeParse({
         event: 'run',

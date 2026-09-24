@@ -74,7 +74,7 @@ ALTER TABLE `workspaces` ADD `cleaned_at` text;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_command_runs` (
 	`id` text PRIMARY KEY,
-	`session_id` text NOT NULL,
+	`session_id` text,
 	`command_id` text,
 	`name` text NOT NULL,
 	`line` text NOT NULL,

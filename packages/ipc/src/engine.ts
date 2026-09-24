@@ -818,9 +818,14 @@ export const ENGINE_EVENTS = {
    * A run changed: it started, published its address, printed something, or ended (D6-12).
    *
    * The run itself crosses rather than an entry: the Commands panel draws its output as it grows,
-   * and a thread entry per line printed is what the panel exists to avoid.
+   * and a thread entry per line printed is what the panel exists to avoid. `sessionId` is null
+   * for a run no Session asked for: a preparation's step (Decided 11).
    */
-  run: z.object({ event: z.literal('run'), sessionId: z.string(), run: commandRunSchema }),
+  run: z.object({
+    event: z.literal('run'),
+    sessionId: z.string().nullable(),
+    run: commandRunSchema,
+  }),
   /**
    * A Workspace or its steps changed (D8-01, D8-05): it was created, made on a folder, cleaned
    * up, a step of its preparation changed state, or the preparation ended. Only the names cross:

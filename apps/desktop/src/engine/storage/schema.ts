@@ -434,7 +434,9 @@ export const projectCommands = sqliteTable(
  * One run of a command, what it printed, and what it published (D6-12).
  *
  * A run belongs to the Session that asked for it and not to the process that held it: the row
- * outlives the process, and the Commands panel of a Session reads what it did. `command_id` is
+ * outlives the process, and the Commands panel of a Session reads what it did. `session_id` is
+ * null for a run no Session asked for — a preparation's `run` step, which has none (Decided 11) —
+ * and a Session's panel never lists such a run. `command_id` is
  * null for a one-off command line, which is the one thing that tells the two apart — a one-off
  * is never promoted to the catalogue by itself.
  *
@@ -460,9 +462,7 @@ export const commandRuns = sqliteTable(
   'command_runs',
   {
     id: text('id').primaryKey(),
-    sessionId: text('session_id')
-      .notNull()
-      .references(() => sessions.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').references(() => sessions.id, { onDelete: 'cascade' }),
     /** The catalogue entry this ran, and null for a one-off command line. */
     commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
     name: text('name').notNull(),

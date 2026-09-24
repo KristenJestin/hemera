@@ -60,7 +60,8 @@ export type RunState = z.infer<typeof runStateSchema>
  *
  * `commandId` is null for a one-off line. `output` is the end of what it printed, bounded, and
  * `dropped` how many characters of the beginning were let go of. `joined` says the run asked for
- * was a server already running, handed back rather than started a second time. `workspaceId` is
+ * was a server already running, handed back rather than started a second time. `sessionId` is
+ * null for a run no Session asked for, a preparation's step (Decided 11). `workspaceId` is
  * the Workspace it runs in, null for `main` (D8-08); `environment` the variables it was given
  * (D8-06); `readyAt` when its address first answered and `portConflict` the run holding the port
  * it published (D8-09).
@@ -68,7 +69,7 @@ export type RunState = z.infer<typeof runStateSchema>
 export const commandRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
-  sessionId: z.string(),
+  sessionId: z.string().nullable(),
   commandId: z.string().nullable(),
   name: z.string(),
   line: z.string(),

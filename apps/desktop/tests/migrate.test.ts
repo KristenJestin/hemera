@@ -74,7 +74,7 @@ const TOOLS_MIGRATION = '20260922075631_tools_commands_and_context'
  * The migration lot 20 adds: the one a profile of lot 18 has never heard of — the Workspaces,
  * their steps and variables, and the commands typed by seven types (D8-01, D8-05, D8-06, D8-07).
  */
-const WORKSPACES_MIGRATION = '20260923204250_workspaces'
+const WORKSPACES_MIGRATION = '20260924074136_workspaces'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -806,7 +806,13 @@ describe('A profile of lot 18 is migrated to lot 20', () => {
         }>`SELECT name FROM pragma_table_info('project_commands')`
         const events = yield* sql<{ type: string; payload: string }>`
           SELECT type, payload FROM domain_events ORDER BY sequence`
-        return { commands, runs, entries, main, repositories, columns, events }
+        // A run no Session asked for — a preparation's `run` step — is written with none
+        // (Decided 11).
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, started_by, started_at, workspace_id)
+          VALUES ('run-2', NULL, 'install', 'pnpm install', 'script', '/work/atlas', 'exited', 'user', '2026-09-24T10:00:00.000Z', 'main-1')`
+        const unowned = yield* sql<{ session_id: string | null; workspace_id: string | null }>`
+          SELECT session_id, workspace_id FROM command_runs WHERE id = 'run-2'`
+        return { commands, runs, entries, main, repositories, columns, events, unowned }
       }),
     )
 
@@ -822,6 +828,7 @@ describe('A profile of lot 18 is migrated to lot 20', () => {
     expect(kept.runs).toEqual([
       { type: 'serve', workspace_id: null, environment: '{}', folder: null, scope: 'workspace' },
     ])
+    expect(kept.unowned).toEqual([{ session_id: null, workspace_id: 'main-1' }])
     // Its block in the thread names the type in place of the kind, so the thread still draws it.
     const payload: unknown = JSON.parse(kept.entries[0]!.payload)
     expect(payload).toMatchObject({ runId: 'run-1', type: 'serve', state: 'exited', exitCode: 0 })

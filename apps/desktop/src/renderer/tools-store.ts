@@ -100,7 +100,10 @@ export function listenToTools(): () => void {
   listening = true
   const stop = window.hemera.on((event: EngineEvent) => {
     if (event.event === 'run') {
-      holding(event.sessionId, withRun(runsOf(event.sessionId), event.run))
+      // A run no Session asked for — a preparation's step — is in no Session's panel (Decided 11).
+      if (event.sessionId !== null) {
+        holding(event.sessionId, withRun(runsOf(event.sessionId), event.run))
+      }
       return
     }
     // What a Session was provided may have changed: a turn carried the base with its first
