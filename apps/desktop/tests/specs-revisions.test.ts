@@ -203,6 +203,65 @@ describe('Rework creates a complete new draft', () => {
   })
 })
 
+describe('Rework keeps every question, answered ones still answered', () => {
+  test('revision 2 holds the answered question with its answer and the open one still open', async () => {
+    const outcome = await opened()(
+      Effect.gen(function* () {
+        const { specId, session } = yield* draft()
+        const specs = yield* Specs
+        const raised = yield* specs.raiseQuestion(agentOf(session.id), {
+          specId,
+          body: 'Which separator?',
+          blocking: true,
+          phase: 'shape',
+          options: [
+            { id: 'comma', label: 'Comma' },
+            { id: 'tab', label: 'Tab' },
+          ],
+        })
+        const asked = raised.questions[0]
+        if (asked === undefined) return yield* Effect.die('the question was not raised')
+        yield* specs.answerQuestion({ specId, questionId: asked.id, optionId: 'tab' })
+        yield* specs.raiseQuestion(agentOf(session.id), {
+          specId,
+          body: 'Which encoding?',
+          blocking: false,
+          phase: 'plan',
+          options: [],
+        })
+        const snapshot = yield* frozen(specId, session.id)
+        const reworked = yield* specs.reopen({
+          specId,
+          expectedRevisionId: snapshot.revision.id,
+          sessionId: session.id,
+        })
+        const thread = yield* (yield* Sessions).read(session.id)
+        return { snapshot, reworked, thread }
+      }),
+    )
+    const { snapshot, reworked } = outcome
+    const questions = (from: SpecSnapshot) =>
+      from.questions.map(({ body, blocking, answer, resolvedAt }) => ({
+        body,
+        blocking,
+        answer,
+        resolvedAt,
+      }))
+    expect(questions(reworked)).toEqual(questions(snapshot))
+    expect(reworked.questions.map((question) => question.answer)).toEqual([
+      { optionId: 'tab', text: null },
+      null,
+    ])
+    // Only the open question is asked again: the answered one keeps the answer it was given.
+    const again = outcome.thread.entries.filter(
+      (entry) =>
+        entry.kind === 'spec_question' &&
+        reworked.questions.some((question) => question.id === entry.correlationId),
+    )
+    expect(again.map((entry) => entry.body)).toEqual(['Which encoding?'])
+  })
+})
+
 describe('Rework asks the open questions again in the thread', () => {
   test('the copied question is asked under its new id, and answered there', async () => {
     const outcome = await opened()(

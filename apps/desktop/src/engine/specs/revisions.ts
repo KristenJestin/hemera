@@ -3,16 +3,17 @@
  *
  * Revision n+1 is a copy of revision n under new identifiers and the same order: its sections
  * (with their versions, so the phase summaries keep meaning), stories, criteria, the contract task
- * set and its tasks, dependencies and story links, and the questions still open. Its phases start
- * `stale` with the summaries they had (Decided 4). Revision n is never written again.
+ * set and its tasks, dependencies and story links, and every question, the answered ones still
+ * answered (Decided 13). Its phases start `stale` with the summaries they had (Decided 4).
+ * Revision n is never written again.
  *
- * A copied question is a new question: the one asked in the chat named the old revision's, so
- * each is asked again in the writer Session's thread, under its new identifier, and it is that
- * block the answer is given in (D7-01).
+ * A copied open question is a new question: the one asked in the chat named the old revision's,
+ * so each is asked again in the writer Session's thread, under its new identifier, and it is that
+ * block the answer is given in (D7-01). An answered one is not asked again.
  */
 
 import type { SpecPhase, SpecSnapshot } from '@hemera/core'
-import { and, eq, isNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { Data, Effect } from 'effect'
 
 import type { NewEvent } from '../journal.ts'
@@ -153,22 +154,22 @@ function copyTasks(
 }
 
 /**
- * Copies the questions still open, with the date they were raised, so they keep their order.
- * Answers each old identifier with the new one.
+ * Copies every question with its answer and the date it was raised, so they keep their order
+ * (Decided 13). Answers each old identifier with the new one.
  */
-function copyOpenQuestions(transaction: EngineTransaction, from: string, revisionId: string) {
+function copyQuestions(transaction: EngineTransaction, from: string, revisionId: string) {
   return Effect.gen(function* () {
-    const open = yield* transaction
+    const questions = yield* transaction
       .select()
       .from(specQuestions)
-      .where(and(eq(specQuestions.revisionId, from), isNull(specQuestions.resolvedAt)))
+      .where(eq(specQuestions.revisionId, from))
       .pipe(Effect.mapError(failed('reading the questions')))
-    const ids = renamed(open)
-    if (open.length === 0) return ids
+    const ids = renamed(questions)
+    if (questions.length === 0) return ids
     yield* transaction
       .insert(specQuestions)
       .values(
-        open.map((question) => ({
+        questions.map((question) => ({
           id: ids.get(question.id)!,
           revisionId,
           body: question.body,
@@ -188,8 +189,8 @@ function copyOpenQuestions(transaction: EngineTransaction, from: string, revisio
 }
 
 /**
- * Asks again, in the writer Session's thread, every copied question that had been asked in a
- * chat: the same question under its new identifier, which is the one an answer names.
+ * Asks again, in the writer Session's thread, every copied open question that had been asked in
+ * a chat: the same question under its new identifier, which is the one an answer names.
  */
 function askAgain(
   transaction: EngineTransaction,
@@ -203,7 +204,8 @@ function askAgain(
     if (writer === null) return { events, wrote }
     for (const question of from.questions) {
       const id = questionIds.get(question.id)
-      if (id === undefined || (yield* askedIn(transaction, question.id)) === null) continue
+      if (id === undefined || question.resolvedAt !== null) continue
+      if ((yield* askedIn(transaction, question.id)) === null) continue
       const asked = yield* appendEntry(transaction, writer, {
         role: 'hemera',
         kind: 'spec_question',
@@ -267,7 +269,7 @@ export function reopen(
       .pipe(Effect.mapError(failed('opening the revision')))
     const storyIds = yield* copyContent(transaction, snapshot, revisionId)
     yield* copyTasks(transaction, snapshot, revisionId, storyIds)
-    const questionIds = yield* copyOpenQuestions(transaction, revision.id, revisionId)
+    const questionIds = yield* copyQuestions(transaction, revision.id, revisionId)
     yield* insertPhases(transaction, stalePhases(snapshot, revisionId))
     yield* transaction
       .update(specs)
