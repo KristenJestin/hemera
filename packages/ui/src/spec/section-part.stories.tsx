@@ -91,7 +91,7 @@ function Held({
 const meta = {
   title: 'Blocks/Spec/SectionPart',
   component: Held,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     section: sectionOf(GATE_FULL.sections, 'expected_outcome'),

@@ -10,7 +10,7 @@ import { CreateSpecProposal } from './create-spec-proposal.tsx'
 const meta = {
   title: 'Blocks/Spec/CreateSpecProposal',
   component: CreateSpecProposal,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { title: 'CSV invoice export', type: 'feature', onCreate: fn(), onDecline: fn() },
   argTypes: {

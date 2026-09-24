@@ -174,7 +174,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Journal',
   component: Journal,
   render: (args) => <Controlled {...args} />,

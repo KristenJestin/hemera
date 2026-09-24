@@ -19,7 +19,7 @@ import { Timeline, TimelineSection, TimelineStop } from './timeline.tsx'
  * a Session will draw a third.
  */
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/Timeline',
   component: TimelineStop,
   parameters: { layout: 'padded' },

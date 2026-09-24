@@ -428,7 +428,7 @@ function Screens({
 const meta = {
   title: 'Surfaces/Session/Define',
   component: Screens,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   args: { screen: 'midPlan' },
   argTypes: {
