@@ -201,7 +201,9 @@ export const push: Transition = morph
  * For a box whose frame does not move while what it holds is replaced — the tabs of the details
  * of a Session, where the dialog keeps its height and only the panel inside it changes. A slide
  * there would say the new panel came from somewhere; it did not, it was behind its tab all
- * along, and what has to be read is the same room showing something else.
+ * along, and what has to be read is the same room showing something else. The stage of the Spec
+ * panel is that room too: it shows one part of a Spec at a time, and a reader walking the
+ * outline with the arrows is never kept waiting on the change.
  *
  * The panel that is left goes at once and the one that is chosen comes up from transparent on
  * the theme's `fast` beat: short enough that the two read as one crossing, where a panel that
@@ -218,6 +220,19 @@ export const CROSSFADE = {
   from: { filter: 'opacity(0)' },
   to: { filter: 'opacity(1)' },
 } as const
+
+/**
+ * The `fill` kind: a measure filling up to where it stands.
+ *
+ * The readiness bar of a Spec is seven segments, and one that passes fills from its left edge
+ * rather than switching colour: the eye catches a change it saw happen. The theme's `slow`, on
+ * the calm curve, and each segment a `FILL_STEP` behind the one before it, so a bar that fills
+ * at once reads as a sweep from left to right and not as seven lamps going on together.
+ */
+export const fill: Transition = { duration: durations.slow, ease: easing }
+
+/** How far behind the segment before it a segment of a measure starts filling, in seconds. */
+export const FILL_STEP = 0.04
 
 /**
  * The `ping` kind: a ring leaving what is running, over and over.
