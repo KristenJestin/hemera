@@ -72,7 +72,7 @@ updated 1 package and audited 2 packages in 3.812s`
 const meta = {
   title: 'Surfaces/Settings/Agents',
   component: AgentsSection,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     agents: [CLAUDE, CODEX, OPENCODE],

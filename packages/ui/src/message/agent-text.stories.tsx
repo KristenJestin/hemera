@@ -20,7 +20,7 @@ import { MessageBubble } from './message.tsx'
  * otherwise. `TruncatedFence` is the story this file exists for.
  */
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Message/AgentText',
   component: AgentText,
   parameters: { layout: 'padded' },

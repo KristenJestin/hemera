@@ -32,7 +32,7 @@ const QUALIFIED: BareModeEntry[] = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Session/BareModeState',
   component: BareModeState,
   parameters: { layout: 'padded' },

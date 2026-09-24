@@ -27,7 +27,7 @@ const PLACES = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/Tabs',
   component: Tabs,
   // Anchored rather than centred. Each panel is a different height, and a centred story puts

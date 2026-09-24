@@ -494,7 +494,7 @@ function Page({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
@@ -530,8 +530,10 @@ export const Complete: Story = {
     // The plan is the details', and the thread does not repeat it.
     expect(canvas.queryByText('2 of 4')).toBeNull()
     // The change is read in the language of its file, which is what the extension bought. The
-    // grammar of that language is a module loaded on demand, so the first diff of a session waits
-    // for it: on a cold machine that load is slower than the default patience of a wait.
+    // grammar of that language is a module loaded on demand, so the first diff of a session is
+    // drawn plain and coloured once the grammar has arrived. On a machine busy with the rest of
+    // the run that import outlasts the default patience of a wait, so it is given ten seconds;
+    // a draw kept plain would never be coloured, and would fail the wait however long it is.
     await waitFor(
       () => {
         expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
@@ -607,7 +609,8 @@ export const Complete: Story = {
     // And the rail marks the reader's own message and nothing else: one question asked, one
     // mark to come back to. The rail is drawn once the thread has been measured, in an effect:
     // counted where it is still on its way, the count is zero. So the mark is found first, with
-    // the patience the grammar above is given for the same reason.
+    // ten seconds of patience: a thread this long, measured on a machine busy with the rest of
+    // the run, takes longer than the default patience of a wait.
     const patience = { timeout: 10_000 }
     const marked = await canvas.findAllByRole('button', { name: /forty thousand rows/ }, patience)
     await expect(marked).toHaveLength(1)
