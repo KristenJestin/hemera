@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
+import { commandRunSchema } from '@hemera/ipc'
 import { hostLookup } from '#engine/commands/line.ts'
 import {
   Commands,
@@ -362,6 +363,45 @@ describe('A port conflict names its holder', () => {
         ],
       ],
     ])
+  })
+})
+
+describe('A run reaches the window with its Workspace, scope, folder and readiness', () => {
+  it('keeps what the engine says of a starting service in login-form through the wire schema', async () => {
+    const port = await freePort()
+    const seen = await engine()(
+      Effect.gen(function* () {
+        const { workspace, inLoginForm } = yield* twoWorkspaces
+        const commands = yield* Commands
+        const started = yield* commands.run(
+          request(inLoginForm, {
+            name: 'dev',
+            line: printsOnly(port),
+            type: 'serve',
+            folder: './sources/api',
+            cwd: workspace.path,
+            workspaceId: workspace.id,
+            workspaceName: workspace.name,
+          }),
+        )
+        const view = yield* until(
+          commands.output(inLoginForm.sessionId, started.id),
+          (one) => one.url !== null,
+        )
+        return { view, services: yield* commands.services(inLoginForm.projectId, workspace.id) }
+      }),
+    )
+
+    // What a schema does not name, it drops: every field the window draws is named (D8-07, D8-09).
+    const sent = commandRunSchema.parse(seen.view)
+    expect(sent).toMatchObject({
+      workspaceName: 'login-form',
+      scope: 'workspace',
+      folder: './sources/api',
+      readiness: 'starting',
+      heldAgainst: [],
+    })
+    expect(commandRunSchema.parse(seen.services[0]).id).toBe(seen.view.id)
   })
 })
 

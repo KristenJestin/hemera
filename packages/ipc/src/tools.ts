@@ -71,16 +71,26 @@ export const portConflictSchema = z.object({
 export type PortConflict = z.infer<typeof portConflictSchema>
 
 /**
+ * Where the address of a `serve` run stands (D8-09): `starting` until it answers, `ready` once it
+ * has, `unanswered` after a minute without an answer or when the run ended without one; null for a
+ * run with no address and for any run that is not a `serve`.
+ */
+export const readinessSchema = z.enum(['starting', 'ready', 'unanswered']).nullable()
+
+/**
  * One run of a command, as the panel and the agent both read it (design D6-12).
  *
  * `commandId` is null for a one-off line. `output` is the end of what it printed, bounded, and
  * `dropped` how many characters of the beginning were let go of. `joined` says the run asked for
  * was a server already running, handed back rather than started a second time. `sessionId` is
  * null for a run no Session asked for, a preparation's step (Decided 11). `workspaceId` is
- * the Workspace it runs in, null for `main` (D8-08); `environment` the variables it was given
- * (D8-06); `readyAt` when its address first answered and `portConflict` the run holding the port
- * it published (D8-09); `heldAgainst` the runs that published the port this one holds, filled
- * when a Workspace's services are read and empty elsewhere (Decided 12).
+ * the Workspace it runs in, null for `main` (D8-08), and `workspaceName` what it is called;
+ * `scope` and `folder` are the command's as the run was started, `folder` relative to the
+ * Workspace root and null for the root (D8-07); `environment` the variables it was given
+ * (D8-06); `readyAt` when its address first answered, `readiness` where that address stands, and
+ * `portConflict` the run holding the port it published (D8-09); `heldAgainst` the runs that
+ * published the port this one holds, filled when a Workspace's services are read and empty
+ * elsewhere (Decided 12).
  */
 export const commandRunSchema = z.object({
   id: z.string(),
@@ -90,13 +100,17 @@ export const commandRunSchema = z.object({
   name: z.string(),
   line: z.string(),
   type: commandTypeSchema,
+  scope: commandScopeSchema,
   cwd: z.string(),
+  folder: z.string().nullable(),
   workspaceId: z.string().nullable(),
+  workspaceName: z.string(),
   environment: z.record(z.string(), z.string()),
   state: runStateSchema,
   pid: z.number().nullable(),
   url: z.string().nullable(),
   readyAt: z.string().nullable(),
+  readiness: readinessSchema,
   portConflict: portConflictSchema.nullable(),
   heldAgainst: z.array(portConflictSchema),
   exitCode: z.number().nullable(),
