@@ -83,6 +83,8 @@ describe('The agent starts the app and the user opens it', () => {
     ])
     // A Windows root reads the same way.
     expect(panelRunsOf(runs.slice(2), 'C:\\Users\\ana\\atlas')[0]?.folder).toBe('web')
+    // A root not known yet shows the folder as the run was started in it.
+    expect(panelRunsOf(runs.slice(1, 2), null)[0]?.folder).toBe('/home/ana/atlas/api')
   })
 
   test('the details of a Session with a command running open on its commands', () => {

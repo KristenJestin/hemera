@@ -123,6 +123,7 @@ import {
   closeSessions,
   listenToWorkspaces as listenToOfferedWorkspaces,
   offeredWorkspacesOf,
+  workspaceRootOf,
   openSession,
   openSessions,
   readSessions,
@@ -913,6 +914,22 @@ export function Application() {
     </Shell>
   )
 
+  /**
+   * The files of a Workspace of the Project in front, searched and picked where a composer is
+   * writing about it (D8-08): nothing while its folder is not known yet.
+   */
+  async function searchIn(workspaceId: string | null, query: string): Promise<string[]> {
+    const root =
+      current === null ? null : workspaceRootOf(workspaceId, sessions.workspaces, current.mainPath)
+    return root === null ? [] : await window.hemera.invoke('workspace.files', { root, query })
+  }
+
+  async function pickIn(workspaceId: string | null): Promise<string[]> {
+    const root =
+      current === null ? null : workspaceRootOf(workspaceId, sessions.workspaces, current.mainPath)
+    return root === null ? [] : await window.hemera.invoke('dialog.pickFiles', { root })
+  }
+
   /** Which page the content area holds, which is where the window is looking. */
   function page() {
     if (place === 'settings') {
@@ -1111,12 +1128,12 @@ export function Application() {
       )
     }
     if (open !== null) {
-      // The folder the Session works in, which its files are searched and its runs are said
-      // relative to: its Workspace's, and `main`'s when it has none (D8-08).
+      // The folder the Session works in, which its runs are said relative to: its Workspace's,
+      // `main`'s when it has none, and none until the list has named it (D8-08).
       const root =
-        sessions.workspaces.find((one) => one.id === open.workspaceId)?.path ??
-        current?.mainPath ??
-        ''
+        current === null
+          ? null
+          : workspaceRootOf(open.workspaceId, sessions.workspaces, current.mainPath)
       return (
         <SessionPage
           // Keyed on the Session: a draft of a title belongs to the Session it is about, and
@@ -1145,12 +1162,8 @@ export function Application() {
           onStartEditing={() => setNaming(open.id)}
           onCancelEditing={() => setNaming(null)}
           onArchive={() => void archive(open)}
-          onSearchFiles={async (query: string) =>
-            root === '' ? [] : await window.hemera.invoke('workspace.files', { root, query })
-          }
-          onPickFiles={async () =>
-            root === '' ? [] : await window.hemera.invoke('dialog.pickFiles', { root })
-          }
+          onSearchFiles={async (query: string) => await searchIn(open.workspaceId, query)}
+          onPickFiles={async () => await pickIn(open.workspaceId)}
           commandRuns={tools.runs.get(open.id) ?? []}
           // An address a run published is opened by the browser: the window hands every web
           // address to the platform and never navigates away itself.
@@ -1201,19 +1214,9 @@ export function Application() {
         onOpenSession={goTo}
         onOpenAllSessions={() => setPlace('archived')}
         onOpenJournal={() => goTo(JOURNAL_ENTRY)}
-        onSearchFiles={async (query: string) =>
-          current === null
-            ? []
-            : await window.hemera.invoke('workspace.files', {
-                root: current.mainPath,
-                query,
-              })
-        }
-        onPickFiles={async () =>
-          current === null
-            ? []
-            : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
-        }
+        // The files of the Workspace the pill chose, which is `main` until another is (D8-08).
+        onSearchFiles={searchIn}
+        onPickFiles={pickIn}
         // What the greeting promises: the first message makes the Session, and the Session is
         // made with the agent chosen at the end of the box. What was chosen with it is not handed
         // over again — the engine kept those choices against this Project and this agent, and the

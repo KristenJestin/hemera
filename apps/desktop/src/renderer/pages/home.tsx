@@ -96,8 +96,9 @@ export function HomePage({
   onOpenSession: (id: string) => void
   onOpenAllSessions: () => void
   onOpenJournal: () => void
-  onSearchFiles: (query: string) => Promise<string[]>
-  onPickFiles: () => Promise<string[]>
+  /** Searches the files of a Workspace, null for `main`: the one the pill chose (D8-08). */
+  onSearchFiles: (workspaceId: string | null, query: string) => Promise<string[]>
+  onPickFiles: (workspaceId: string | null) => Promise<string[]>
   /** The Project's Workspaces a Session may be made in: `ready`, `main` first (D8-08). */
   workspaces: readonly OfferedWorkspace[]
   /**
@@ -164,8 +165,8 @@ export function HomePage({
         onValueChange={setValue}
         files={files}
         onFilesChange={setFiles}
-        onSearchFiles={onSearchFiles}
-        onPickFiles={onPickFiles}
+        onSearchFiles={async (query) => await onSearchFiles(workspace?.id ?? null, query)}
+        onPickFiles={async () => await onPickFiles(workspace?.id ?? null)}
         sendDisabledReason={reason}
         // Until the list is read the composer offers its own `main`, which is what null sends.
         workspaces={workspaces.length === 0 ? undefined : [...workspaces]}

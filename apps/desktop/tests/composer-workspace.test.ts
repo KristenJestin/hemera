@@ -24,6 +24,7 @@ import {
   sessionsSnapshot,
   startSession,
   workspaceFixedOf,
+  workspaceRootOf,
 } from '#renderer/sessions-store.ts'
 
 import { type OpenWindow, install, openWindow } from './window.ts'
@@ -104,6 +105,20 @@ describe("The pill lists the Project's ready Workspaces, main first", () => {
       'gone',
     )
     expect(listed.map((one) => one.name)).toEqual(['main', 'gone'])
+  })
+})
+
+describe('The composer works in the folder of the Workspace it writes about', () => {
+  const listed = [workspace('main-id', 'ready', true), workspace('login-form', 'ready')]
+
+  test("main is the Project's own folder, known before any list", () => {
+    expect(workspaceRootOf(null, [], '/home/ana/atlas')).toBe('/home/ana/atlas')
+  })
+
+  test('another Workspace is its folder once the list names it, and unknown until then', () => {
+    expect(workspaceRootOf('login-form', listed, '/home/ana/atlas')).toBe('/home/ana/login-form')
+    // Not `main`'s folder in the meantime: the files of another folder are not this one's.
+    expect(workspaceRootOf('login-form', [], '/home/ana/atlas')).toBeNull()
   })
 })
 

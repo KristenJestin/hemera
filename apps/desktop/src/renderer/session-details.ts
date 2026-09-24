@@ -23,8 +23,9 @@ import { runFactsOf } from './agent-tool-payloads.ts'
  * without a theme or a DOM.
  */
 
-/** Where a run ran, relative to the Workspace root when it is inside it. */
-function folderOf(cwd: string, root: string): string {
+/** Where a run ran, relative to the Workspace root when it is inside it and the root is known. */
+function folderOf(cwd: string, root: string | null): string {
+  if (root === null) return cwd
   const inside = cwd.replaceAll('\\', '/')
   const base = root.replaceAll('\\', '/').replace(/\/$/, '')
   if (inside === base) return '.'
@@ -33,7 +34,7 @@ function folderOf(cwd: string, root: string): string {
 }
 
 /** The runs of a Session as the Commands panel lists them, oldest first. */
-export function panelRunsOf(runs: readonly CommandRun[], root: string): CommandPanelRun[] {
+export function panelRunsOf(runs: readonly CommandRun[], root: string | null): CommandPanelRun[] {
   return runs.map((run) => ({
     id: run.id,
     name: run.name,

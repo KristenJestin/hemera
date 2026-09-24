@@ -322,6 +322,20 @@ export function offeredWorkspacesOf(
 }
 
 /**
+ * The folder a Workspace of the Project is, which a composer searches and picks files in and a
+ * Session's runs are said relative to (D8-08): `main`'s own for null, and another's once the list
+ * has named it. Null while it has not: a root that is not known is not offered as `main`'s.
+ */
+export function workspaceRootOf(
+  workspaceId: string | null,
+  workspaces: readonly Workspace[],
+  mainPath: string,
+): string | null {
+  if (workspaceId === null) return mainPath
+  return workspaces.find((one) => one.id === workspaceId)?.path ?? null
+}
+
+/**
  * Whether a Session's Workspace can no longer change (D8-08): once its agent has started — the
  * agent's own session was opened in that folder, which the engine records as a native state —
  * or once a turn has run in it, which the thread says before the list is read again.

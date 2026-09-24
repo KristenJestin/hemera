@@ -161,8 +161,8 @@ export interface SessionPageProps {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
-  /** The Workspace root, which is what a run's folder is said relative to. */
-  root: string
+  /** The Workspace root, which is what a run's folder is said relative to; null until known. */
+  root: string | null
   /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
   onRunCommand: (line: string) => void
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
