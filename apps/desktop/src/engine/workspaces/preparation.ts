@@ -485,6 +485,8 @@ export const preparationLayer = Layer.effect(
           workspaceId,
           workspaceName: place.workspace.name,
           environment: yield* variables.givenFor(projectId, workspaceId),
+          // The row's word, which knows only the agent and the user; a run with no Session is
+          // journalled as Hemera's own, as the step itself is (D8-16).
           startedBy: 'user',
         })
         yield* withDatabase(

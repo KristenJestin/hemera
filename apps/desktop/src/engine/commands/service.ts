@@ -462,6 +462,14 @@ const sameWorkspace = (
   right: { workspaceId: string | null; workspaceName: string },
 ) => (inMain(left) && inMain(right)) || left.workspaceId === right.workspaceId
 
+/** Who the Journal names for a run's lines: the user, the agent's tool, or Hemera itself. */
+function attributionOf(one: { sessionId: string | null; startedBy: 'agent' | 'user' }) {
+  if (one.sessionId === null) return { source: 'system' as const, author: 'hemera' as const }
+  return one.startedBy === 'user'
+    ? { source: 'ui' as const, author: 'human' as const }
+    : { source: 'system' as const, author: 'mcp' as const }
+}
+
 /** One live run: what it is, what it has printed, and how to end it. */
 interface Live {
   readonly sessionId: string | null
@@ -475,6 +483,8 @@ interface Live {
   readonly folder: string | null
   readonly workspaceId: string | null
   readonly workspaceName: string
+  /** The Spec its Workspace was made for, which its Journal lines name (D8-16). */
+  readonly specId: string | null
   readonly environment: Record<string, string>
   /** Whether it runs through Portless, whose address holds no port of its own (D8-10). */
   readonly portless: boolean
@@ -612,6 +622,7 @@ export const commandsLayer = Layer.effect(
           run: commandRuns,
           projectId: runProject,
           workspaceName: workspaces.name,
+          specId: workspaces.specId,
         })
         .from(commandRuns)
         .leftJoin(sessions, eq(sessions.id, commandRuns.sessionId))
@@ -789,11 +800,13 @@ export const commandsLayer = Layer.effect(
                         entityKind: 'command' as const,
                         entityId: id,
                         // Who asked is who the Journal names: a run the user started from the
-                        // panel is the user's, and one the agent asked for is the tool's.
-                        source: one.startedBy === 'user' ? ('ui' as const) : ('system' as const),
-                        author: one.startedBy === 'user' ? ('human' as const) : ('mcp' as const),
+                        // panel is the user's, one the agent asked for is the tool's, and one no
+                        // Session asked for — a preparation's step — is Hemera's own, as the
+                        // step's lines are (D8-16, Decided 11).
+                        ...attributionOf(one),
                         projectId: one.projectId,
                         sessionId: one.sessionId,
+                        specId: one.specId,
                         payload: {
                           name: one.name,
                           state: one.state,
@@ -812,6 +825,19 @@ export const commandsLayer = Layer.effect(
         ),
         Effect.tap(() => Effect.sync(() => notices.ran(one.sessionId, viewOf(id, one)))),
       )
+
+    /** The Spec a Workspace was made for: null for `main`, for a folder, and for none named. */
+    const specOf = (workspaceId: string | null) =>
+      workspaceId === null
+        ? Effect.succeed(null)
+        : database
+            .select({ specId: workspaces.specId })
+            .from(workspaces)
+            .where(eq(workspaces.id, workspaceId))
+            .pipe(
+              Effect.mapError(failed('reading the Workspace of a run')),
+              Effect.map((rows) => rows[0]?.specId ?? null),
+            )
 
     /** The Project a Session belongs to, and null for a Session this database does not hold. */
     const projectOf = (sessionId: string) =>
@@ -1121,6 +1147,7 @@ export const commandsLayer = Layer.effect(
             folder: asked.folder,
             workspaceId: asked.workspaceId,
             workspaceName: asked.workspaceName,
+            specId: yield* specOf(asked.workspaceId),
             environment: asked.environment,
             portless: asked.portless,
             startedBy: asked.startedBy,
@@ -1402,6 +1429,7 @@ export const commandsLayer = Layer.effect(
               id,
               {
                 ...kept,
+                specId: found.specId,
                 portless: false,
                 startedBy: found.run.startedBy === 'agent' ? 'agent' : 'user',
                 state: 'stopped',

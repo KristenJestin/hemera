@@ -741,3 +741,33 @@ describe('A preparation that fails in the background is told as no longer live',
     expect(seen).toMatchObject({ state: 'failed', live: false })
   })
 })
+
+describe('A preparation run is journalled as Hemera’s own, with its Spec', () => {
+  it('names Hemera as the author of its run lines, as of its step lines, and the Spec', async () => {
+    const lines = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const workspace = yield* createdWith([{ run: node('process.exit(0)') }])
+        yield* preparation.prepare(workspace.id)
+        const sql = yield* SqliteClient
+        return yield* sql<{
+          type: string
+          source: string
+          author: string
+          spec_id: string | null
+          session_id: string | null
+        }>`SELECT type, source, author, spec_id, session_id FROM domain_events
+          WHERE type LIKE 'command.run_%' OR type = 'workspace.step_done' ORDER BY sequence`
+      }),
+    )
+
+    const hemera = { source: 'system', author: 'hemera', spec_id: 'HEM-7', session_id: null }
+    expect(lines).toEqual([
+      { type: 'workspace.step_done', ...hemera },
+      { type: 'workspace.step_done', ...hemera },
+      { type: 'command.run_started', ...hemera },
+      { type: 'command.run_ended', ...hemera },
+      { type: 'workspace.step_done', ...hemera },
+    ])
+  })
+})
