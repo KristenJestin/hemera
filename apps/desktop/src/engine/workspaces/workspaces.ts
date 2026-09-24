@@ -15,7 +15,8 @@
  * Workspace, and it never deletes a branch (D8-14).
  */
 
-import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 import {
@@ -512,8 +513,10 @@ export const workspacesLayer = Layer.effect(
           }
           removed.push(record.relativePath)
         }
-        const deleted = yield* Effect.try({
-          try: () => rmSync(row.path, { recursive: true, force: true }),
+        // Asynchronously, outside any transaction: a folder of installed dependencies is
+        // thousands of files, and the engine answers everything else meanwhile.
+        const deleted = yield* Effect.tryPromise({
+          try: () => rm(row.path, { recursive: true, force: true }),
           catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
         }).pipe(
           Effect.as(null),
