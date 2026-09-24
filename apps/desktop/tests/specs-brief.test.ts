@@ -192,7 +192,7 @@ describe('The brief goes once per phase change', () => {
   })
 })
 
-describe('A human edit is recorded and reaches the agent', () => {
+describe('A human edit made during a turn waits for the next brief', () => {
   test('a section saved while the agent is answering reaches nothing during the turn, and goes as an edit delivery at the next safe point', async () => {
     const gate = gated(1)
     const agent = fakeAgent({ steps: SHAPING, between: gate.between })
@@ -244,7 +244,9 @@ describe('A human edit is recorded and reaches the agent', () => {
       }),
     )
   })
+})
 
+describe('A human edit is recorded and reaches the agent', () => {
   test('several edits made during a turn go as one edit delivery, each section once as it now reads', async () => {
     const gate = gated(1)
     const agent = fakeAgent({ steps: SHAPING, between: gate.between })
