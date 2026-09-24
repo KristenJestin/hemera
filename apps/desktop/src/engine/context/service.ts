@@ -130,6 +130,11 @@ export class UnreadableInstructionsError extends Error {
 
 export class Context extends EffectContext.Service<Context, ContextService>()('Context') {}
 
+/** What makes the same text recognisable, and never given twice. */
+export function fingerprintOf(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
 /** The instructions of a Workspace, as they stand, and their fingerprint. */
 interface Instructions {
   readonly text: string
@@ -147,10 +152,6 @@ export const contextLayer = Layer.effect(
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
-
-    /** What makes the same text recognisable, and never given twice. */
-    const fingerprintOf = (text: string): string =>
-      createHash('sha256').update(text, 'utf8').digest('hex')
 
     /** Whether a read failed because the file is simply not there, which is not a failure. */
     const missing = (cause: unknown): boolean =>

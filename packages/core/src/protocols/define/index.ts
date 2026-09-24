@@ -1,6 +1,7 @@
 /**
- * The `define` protocol's text side (D7-09): the Spec rendered for the agent, and the block
- * Hemera puts before each turn of a `define` Session.
+ * The `define` protocol's text side (D7-09): the Spec rendered for the agent, the mission brief
+ * Hemera hands a `define` Session's agent, and the human edits and answers it hands over between
+ * two briefs.
  */
 
 import { compareRanks } from '../../domain/rank.ts'
@@ -104,11 +105,27 @@ export function readerLine(key: string, writer: string): string {
   return `You read ${key}: the Session "${writer}" writes it, and your writes to it are refused.`
 }
 
+/** The human edits the agent was not told of yet, each with its section, version and body. */
+export function editsText(humanEdits: readonly SpecSection[]): string {
+  const edits = humanEdits.map(
+    (section) => `## ${section.name} · version ${section.version}\n\n${section.body}`,
+  )
+  return `# Human edits since your last turn\n\n${edits.join('\n\n')}`
+}
+
+/** The answers the user gave in the chat that the agent was not told of yet. */
+export function answersText(answers: readonly SpecQuestion[]): string {
+  const given = answers.map(
+    (question) => `- ${question.body}\n  The user answered: ${answerWords(question) ?? ''}`,
+  )
+  return `# Answers since your last turn\n\n${given.join('\n')}`
+}
+
 /**
- * The block that precedes the text of a `define` turn (D7-09): the mission's instructions, the
- * focused phase's brief, the Spec with its section versions, then the human edits since the
- * last turn, each with its section, version and body, and the answers given in the chat since.
- * A reader's brief opens with one line saying it reads and naming the writer.
+ * The mission brief of a `define` Session (D7-09), handed to its agent as a delivery: the
+ * mission's instructions, the focused phase's brief, the Spec with its section versions, then the
+ * human edits and the answers given in the chat that the agent was not told of yet. A reader's
+ * brief opens with one line saying it reads and naming the writer.
  */
 export function composeBrief({
   snapshot,
@@ -125,17 +142,7 @@ export function composeBrief({
     `# The Spec\n\n${renderSpecMarkdown(snapshot)}`,
   ]
   if (readsFrom !== undefined) parts.unshift(readerLine(snapshot.spec.key, readsFrom))
-  if (humanEdits.length > 0) {
-    const edits = humanEdits.map(
-      (section) => `## ${section.name} · version ${section.version}\n\n${section.body}`,
-    )
-    parts.push(`# Human edits since your last turn\n\n${edits.join('\n\n')}`)
-  }
-  if (answers.length > 0) {
-    const given = answers.map(
-      (question) => `- ${question.body}\n  The user answered: ${answerWords(question) ?? ''}`,
-    )
-    parts.push(`# Answers since your last turn\n\n${given.join('\n')}`)
-  }
+  if (humanEdits.length > 0) parts.push(editsText(humanEdits))
+  if (answers.length > 0) parts.push(answersText(answers))
   return parts.join('\n\n')
 }

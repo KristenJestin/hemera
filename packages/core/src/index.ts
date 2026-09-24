@@ -168,7 +168,9 @@ export type {
 export {
   DEFINE_MISSION_BRIEF,
   PHASE_BRIEFS,
+  answersText,
   composeBrief,
+  editsText,
   readerLine,
   renderSpecMarkdown,
 } from './protocols/define/index.ts'
