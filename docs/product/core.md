@@ -627,6 +627,14 @@ UI prototype, in particular to determine where to create them and find them agai
 The mission determines the instructions and the MCP tools made available. The provider
 indicates which engine executes the Session, for example Claude, Codex or OpenCode.
 
+A `free` Session is offered Hemera's code tools and, of the Spec tools, `spec_propose` alone,
+to propose a Spec. A `define` Session produces a Spec and not code: it reads the Workspace
+(`fs_read`, `fs_list`, `search`, `project_get`, `session_get`, `commands_list`,
+`commands_output`) and writes only its Spec, through `spec_read`, `spec_write` and
+`spec_propose`; it is offered neither `fs_write`, `fs_edit`, `commands_run` nor `commands_stop`.
+The Session, its Spec and its write right are deduced from the caller, never from the arguments
+of a call. The Context view lists the set of the Session's mission.
+
 ## Session view
 
 The chat belongs to all Sessions, but it is not necessarily their main surface
@@ -721,9 +729,16 @@ briefs can be resources versioned with the application.
 The mission carries the permanent instructions that remain true from start to finish: its
 responsibility, its limits of authority, its relationship with the user and the Spec, its
 common rules and its general definition of success. Each phase adds a temporary objective,
-expected results, suitable tools and exit criteria. At each turn, Hemera
-composes the global rules, the mission's instructions, the active phase's instructions
-and the live context of the Session and the Spec.
+expected results, suitable tools and exit criteria. Hemera composes the mission's
+instructions, the brief of the phase in focus and the Spec as it stands, each section with its
+version, into the mission brief, and hands it to the agent as a delivery at a safe point, the
+way a change of the Workspace's instructions is handed over: before the Session's first turn,
+again each time the phase in focus changes, and to an agent whose own session was opened afresh.
+The brief is a prompt of its own, a Hemera marker and the brief as a resource, never a part of
+the user's message; the thread shows it as a folded Hemera line, and it counts as given only
+once the agent took it. Between two briefs, the human's section edits and answers reach the
+agent the same way, each a delivery of its own and a Hemera line of the thread: at once when no
+turn runs, once the running turn ends otherwise.
 
 The `define` mission defines three main phases and one conditional phase. The
 `prototype` phase remains unavailable and cannot be triggered in the first delivery; its declaration
@@ -779,11 +794,12 @@ the mechanical invariants: it checks that the expected phase is indeed active, t
 required data exists and that no declared blocker makes the transition impossible. The agent
 can therefore neither bypass the protocol's order nor force a failing check.
 
-This declaration goes through a structured Hemera MCP tool, and not through a mere sentence in the
-chat. The backend itself deduces the Session, the agent and the mission; the targeted phase must be
-an open phase assigned to that caller. If the agent's summary and Hemera's checks are
-both met, the phase is recorded as finished, its dependants become eligible and the
-main agent's focus can advance.
+This declaration goes through a structured Hemera MCP tool, `spec_propose` with the kind
+`phase_done`, and not through a mere sentence in the chat. The backend itself deduces the
+Session, the agent and the mission; the targeted phase must be an open phase assigned to that
+caller. If the agent's summary and Hemera's checks are both met, the phase is recorded as
+finished, its dependants become eligible and the main agent's focus can advance; otherwise the
+call answers the failing checks and changes nothing.
 
 Finishing a phase is a work checkpoint, not a contractual validation. A phase
 can be reopened by the user or become stale if its inputs change. Only
@@ -795,8 +811,9 @@ is a protocol gate, not an additional phase: it blocks the proposal as long as a
 contradiction or an activated but unresolved element remains. `shape`, `plan` and `decompose`
 must be finished, as well as `prototype` when it was activated. No
 blocking question may remain; every requirement or `UserStory` must be covered by criteria
-and tasks, whose dependencies and references are valid. The agent then attests that
-the contract is complete and executable without any major decision left to invent. Hemera can propose it,
+and tasks, whose dependencies and references are valid. The agent then attests, through
+`spec_propose` with the kind `ready`, that the contract is complete and executable without any
+major decision left to invent; the attestation holds for the content it was made on. Hemera can propose it,
 but only an explicit action of the user freezes the revision by moving the Spec to `ready`.
 
 The `shape` phase can end when Hemera observes that the title, the type, the problem, the
@@ -1015,7 +1032,8 @@ review loop without creating a separate `review` mission.
 A sub-agent execution is attached to the parent Session and to its phase of origin.
 When it ends, Hemera persists the result then places a signal in a durable
 inbox of the main Session. This signal is never injected in the middle of a generation and
-never passes itself off as a human message: it is delivered at the next safe point. If
+never passes itself off as a human message: it is delivered at the next safe point, as a
+delivery said to be internal. If
 the main agent is idle, Hemera can launch an internal continuation to integrate the
 result without waiting for a new user message. This inbox guarantees
 delivery; `domain_events` separately keeps its history.
@@ -1031,11 +1049,12 @@ creates the Spec, makes the Session its writer and switches it to `define` in on
 keeping the thread. A `define` Session opened from a Spec, in the list of a Project's Specs, is
 attached to it from its creation: it writes the draft when nobody does, and reads it otherwise.
 
-Until the agent has Hemera's Spec tools, it proposes with one line of its answer,
-`<!-- hemera:propose-spec title="…" type="feature|bug|maintenance" -->`. An HTML comment is what
-a Markdown reader shows nothing of, and a line of its own is what an agent writes reliably;
-Hemera takes the line out of the message and shows the proposal in its place. The
-`spec_propose` tool replaces this line once the agent is offered it.
+The agent proposes through Hemera's `spec_propose` tool, with the kind `spec`, a title and a
+type: of the Spec tools, it is the only one a `free` Session is offered. Hemera writes the
+proposal in the thread, below what the agent said before it, and nothing else; a `define`
+Session is refused a proposal. The tools an agent holds are fixed when it is started, so once
+the proposal is accepted Hemera lets the Session's agent go, and its next turn starts it again,
+its conversation resumed, with the tools of a `define` Session.
 
 Moving from `free` to `build` is only possible if the Session is first attached to an
 existing Spec. Without a Spec, the user must remain in free discussion, accept the agent's
