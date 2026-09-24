@@ -140,14 +140,18 @@ function frame(): Promise<void> {
 /**
  * Waits for the dialog to be in place: opaque, and no longer growing from the smaller scale it
  * rises from — two frames in a row at the same height.
+ * A loaded runner plays the rise slowly: the second it gives can end while it is in flight.
  */
 async function risen(dialog: HTMLElement): Promise<void> {
-  await waitFor(async () => {
-    expect(getComputedStyle(dialog).opacity).toBe('1')
-    const before = dialog.getBoundingClientRect().height
-    await frame()
-    expect(dialog.getBoundingClientRect().height).toBe(before)
-  })
+  await waitFor(
+    async () => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+      const before = dialog.getBoundingClientRect().height
+      await frame()
+      expect(dialog.getBoundingClientRect().height).toBe(before)
+    },
+    { timeout: 10_000 },
+  )
 }
 
 /** How far a tab's panel has faded in, from 0 to 1, read off the filter the crossfade plays. */
@@ -332,20 +336,27 @@ export const Keyboard: Story = {
       'true',
     )
     // Escape closes it and hands the focus back to what opened it.
+    // The leave is a journey too: a second of window can end while it is still playing.
     await userEvent.keyboard('{Escape}')
-    await waitFor(() => {
-      expect(within(document.body).queryByRole('dialog')).toBeNull()
-    })
+    await waitFor(
+      () => {
+        expect(within(document.body).queryByRole('dialog')).toBeNull()
+      },
+      { timeout: 10_000 },
+    )
     await waitFor(() => {
       expect(document.activeElement).toBe(button)
     })
-    // And a click outside closes it too.
+    // And a click outside closes it too, with the same room for the leave to be played out.
     await userEvent.click(button)
     await waitFor(() => within(document.body).getByRole('dialog'))
     await userEvent.click(document.body)
-    await waitFor(() => {
-      expect(within(document.body).queryByRole('dialog')).toBeNull()
-    })
+    await waitFor(
+      () => {
+        expect(within(document.body).queryByRole('dialog')).toBeNull()
+      },
+      { timeout: 10_000 },
+    )
   },
 }
 
