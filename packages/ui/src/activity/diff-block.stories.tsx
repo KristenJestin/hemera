@@ -110,12 +110,13 @@ export const ColouredInItsOwnLanguage: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('+2')).toBeVisible()
     // The grammar is a module of its own, imported when the first block of that language is
-    // drawn, and the change is drawn plain while it comes. No patience beyond the default: a draw
-    // that came back plain because the grammar had not read yet is no longer kept, so the block
-    // colours itself as soon as the grammar reads — a wait long enough to outlast a frozen draw is
-    // a wait that was hiding it.
-    await waitFor(() =>
-      expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0),
+    // drawn, and the change is drawn plain while it comes. On a machine busy with the rest of the
+    // run that import alone outlasts the default patience of a wait (1.6 s was measured for it),
+    // so the wait is given ten seconds. The patience cannot hide a draw kept plain: such a draw
+    // is never coloured again, and the wait fails however long it is.
+    await waitFor(
+      () => expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0),
+      { timeout: 10_000 },
     )
     await expect(canvasElement.querySelectorAll('.tok-comment').length).toBeGreaterThan(0)
   },
@@ -131,9 +132,10 @@ export const ColouredAsAStylesheet: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('+1')).toBeVisible()
-    // A stylesheet grammar is another module, fetched the same way and waited for the same way.
-    await waitFor(() =>
-      expect(canvasElement.querySelectorAll('.tok-constant').length).toBeGreaterThan(0),
+    // A stylesheet grammar is another module, fetched the same way and given the same patience.
+    await waitFor(
+      () => expect(canvasElement.querySelectorAll('.tok-constant').length).toBeGreaterThan(0),
+      { timeout: 10_000 },
     )
   },
 }
@@ -180,7 +182,8 @@ export const MoreChangesThanAreHeld: Story = {
     await expect(blocks).toHaveLength(65)
     const uncoloured = (): HTMLElement[] =>
       blocks.filter((block) => block.querySelector('.tok-keyword') === null)
-    await waitFor(() => expect(uncoloured()).toHaveLength(0))
+    // The grammar's import is given the patience the stories above give it.
+    await waitFor(() => expect(uncoloured()).toHaveLength(0), { timeout: 10_000 })
     // A frame later, the same: a block whose tokens had been let go of would draw them again
     // and push another block's out, and the thread would never stop rendering.
     await new Promise((resolve) => requestAnimationFrame(resolve))

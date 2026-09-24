@@ -531,11 +531,15 @@ export const Complete: Story = {
     expect(canvas.queryByText('2 of 4')).toBeNull()
     // The change is read in the language of its file, which is what the extension bought. The
     // grammar of that language is a module loaded on demand, so the first diff of a session is
-    // drawn plain and coloured once the grammar has arrived — no patience beyond the default,
-    // since a draw that came back plain because the grammar had not read yet is no longer kept.
-    await waitFor(() => {
-      expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
-    })
+    // drawn plain and coloured once the grammar has arrived. On a machine busy with the rest of
+    // the run that import outlasts the default patience of a wait, so it is given ten seconds;
+    // a draw kept plain would never be coloured, and would fail the wait however long it is.
+    await waitFor(
+      () => {
+        expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
+      },
+      { timeout: 10_000 },
+    )
     // A call to one of Hemera's own tools wears the mark of its kind, as a native call does, and
     // is announced as Hemera's, so it is not read as a native call.
     await expect(canvas.getByRole('button', { name: /^Hemera Read file/ })).toBeVisible()
