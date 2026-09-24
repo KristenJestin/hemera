@@ -174,6 +174,11 @@ export async function warm(language: string | null): Promise<void> {
   for (const listener of LISTENERS) listener()
 }
 
+/** Whether the grammar of a language is in hand, so that its code can be drawn. */
+export function loaded(language: string | null): boolean {
+  return language !== null && LOADED.has(language) && ready !== null
+}
+
 /** Watches for a grammar arriving; returns what undoes the watching. */
 export function subscribeToHighlight(listener: () => void): () => void {
   LISTENERS.add(listener)

@@ -155,3 +155,35 @@ export const PlainWhereNoGrammarIs: Story = {
     await expect(canvasElement.querySelector('[class*="tok-"]')).toBeNull()
   },
 }
+
+/**
+ * More changes on one screen than the drawn changes the module holds (sixty-four): a long turn
+ * reaches that. Every block is coloured and stays so, and none of them keeps asking for its
+ * tokens again — the thread renders once and settles.
+ */
+export const MoreChangesThanAreHeld: Story = {
+  render: () => (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 65 }, (_, index) => (
+        <DiffBlock
+          key={index}
+          path={`packages/ui/src/change-${index}.ts`}
+          oldText={null}
+          newText={`const answer${index} = ${index}\n`}
+          defaultOpen
+        />
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const blocks = within(canvasElement).getAllByRole('group')
+    await expect(blocks).toHaveLength(65)
+    const uncoloured = (): HTMLElement[] =>
+      blocks.filter((block) => block.querySelector('.tok-keyword') === null)
+    await waitFor(() => expect(uncoloured()).toHaveLength(0))
+    // A frame later, the same: a block whose tokens had been let go of would draw them again
+    // and push another block's out, and the thread would never stop rendering.
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    await expect(uncoloured()).toHaveLength(0)
+  },
+}
