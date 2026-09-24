@@ -36,6 +36,7 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
+import { type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -166,6 +167,10 @@ export interface SessionPageProps {
   onRunCommand: (line: string) => void
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
   context: Provided | null
+  /** The Workspaces the pill lists: `ready`, `main` first, and the Session's own (D8-08). */
+  workspaces: readonly OfferedWorkspace[]
+  /** Moves the Session to another Workspace, null for `main`, before its agent has started. */
+  onChooseWorkspace: (workspaceId: string | null) => void
 }
 
 export function SessionPage({
@@ -197,6 +202,8 @@ export function SessionPage({
   root,
   onRunCommand,
   context,
+  workspaces,
+  onChooseWorkspace,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -379,6 +386,10 @@ export function SessionPage({
   // Which tabs have something to show, which is what the details open on.
   const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
 
+  // The Workspace the Session works in, on the pill: it can be changed until the agent has
+  // started, and is fixed from then on, which the pill says in words (D8-08).
+  const workspace = workspaces.find((one) => one.id === session.workspaceId)
+
   return (
     /*
       One column (review of #40, defect 2): the header, the thread and the composer share one
@@ -454,10 +465,11 @@ export function SessionPage({
           )}
           {/*
             What the page's last act was refused with — a rename, an archive, a thread that could
-            not be read — said here and not on the send: those are refusals of the header and of
-            the opening, and a Session whose archive was refused is one that can still be written
-            in. It stands in the same stack as the meter rather than over the thread, so what it
-            moves is itself and nothing above it (D4b-02).
+            not be read, a Workspace changed once the agent had started (D8-08) — said here and
+            not on the send: those are refusals of the header and of the opening, and a Session
+            whose archive was refused is one that can still be written in. It stands in the same
+            stack as the meter rather than over the thread, so what it moves is itself and nothing
+            above it (D4b-02).
           */}
           {refusal !== null && (
             <p role="alert" className="text-sm text-muted-foreground">
@@ -479,6 +491,15 @@ export function SessionPage({
                 : `Say something to ${session.provider}…`
             }
             onSend={write}
+            workspaces={[...workspaces]}
+            workspace={workspace?.name}
+            workspaceFixed={workspaceFixedOf(session, thread, agent.running)}
+            onWorkspaceChange={(name) => {
+              const chosen = workspaces.find((one) => one.name === name)
+              if (chosen !== undefined && chosen.id !== session.workspaceId) {
+                onChooseWorkspace(chosen.id)
+              }
+            }}
             // Nothing is handed over here: a refusal of this page is not a reason not to write,
             // and a write that is refused answers `write` itself — which is what the composer
             // shows under the box, on the sentence that was not written (D4b-02).

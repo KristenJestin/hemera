@@ -22,6 +22,7 @@ import {
   openingAgentOf,
 } from '../agent-options.ts'
 import type { AgentOffering } from '../agent-store.ts'
+import type { OfferedWorkspace } from '../sessions-store.ts'
 
 /**
  * The Home of the active Project (design D4-07, D4b-02, D5-17, D17-11).
@@ -41,6 +42,9 @@ import type { AgentOffering } from '../agent-store.ts'
  * the agent and answers with what it announces then — which is the only way the effort of a
  * reasoning model ever appears (D5-13). Nothing about those choices is remembered here and
  * nothing is handed over again when the Session starts: the engine keeps them for it.
+ *
+ * The Workspace the Session will work in is chosen here too, on the pill at the foot of the box
+ * (D8-08): `main` unless another is picked, and handed to the Session when it is made.
  */
 const PAGE = 'mx-auto flex max-w-3xl flex-col gap-6 px-6 py-10'
 
@@ -64,6 +68,7 @@ export function HomePage({
   onOpenJournal,
   onSearchFiles,
   onPickFiles,
+  workspaces,
   onSend,
 }: {
   projectName: string
@@ -93,12 +98,21 @@ export function HomePage({
   onOpenJournal: () => void
   onSearchFiles: (query: string) => Promise<string[]>
   onPickFiles: () => Promise<string[]>
-  /** Starts the Session with the chosen agent, and says what to write in it. */
-  onSend: (text: string, agent: string) => Promise<string | null>
+  /** The Project's Workspaces a Session may be made in: `ready`, `main` first (D8-08). */
+  workspaces: readonly OfferedWorkspace[]
+  /**
+   * Starts the Session with the chosen agent in the chosen Workspace (null for `main`), and says
+   * what to write in it.
+   */
+  onSend: (text: string, agent: string, workspaceId: string | null) => Promise<string | null>
 }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [agent, setAgent] = useState<string | null>(null)
+  const [named, setNamed] = useState<string | null>(null)
+  // The Workspace picked, by the name the pill shows; `main` until another is, and again if the
+  // one picked stops being offered — cleaned up meanwhile.
+  const workspace = workspaces.find((one) => one.name === named) ?? workspaces[0]
   const offering = agent === null ? null : offeringOf(agent)
   const options = offering?.options ?? []
   const model = modelStage(options)
@@ -153,6 +167,10 @@ export function HomePage({
         onSearchFiles={onSearchFiles}
         onPickFiles={onPickFiles}
         sendDisabledReason={reason}
+        // Until the list is read the composer offers its own `main`, which is what null sends.
+        workspaces={workspaces.length === 0 ? undefined : [...workspaces]}
+        workspace={workspace?.name}
+        onWorkspaceChange={setNamed}
         agentMenu={
           <AgentModelMenu
             agents={agents}
@@ -184,7 +202,9 @@ export function HomePage({
         // The Home is where a Spec is made from the question that starts a Session; a Session is
         // a conversation already under way and offers nothing of the sort (D4b-02).
         spec
-        onSend={async (text) => (agent === null ? NO_AGENT : await onSend(text, agent))}
+        onSend={async (text) =>
+          agent === null ? NO_AGENT : await onSend(text, agent, workspace?.id ?? null)
+        }
       />
       {sessions.length === 0 ? (
         <EmptyProject projectName={projectName} onOpenJournal={onOpenJournal} />

@@ -1,4 +1,4 @@
-import type { AgentProvider, Session, SessionEntry } from '@hemera/ipc'
+import type { AgentProvider, EngineEvent, Session, SessionEntry, Workspace } from '@hemera/ipc'
 
 /**
  * The Sessions of the Project in front, and the thread of the one that is open (design D4b-02).
@@ -27,6 +27,11 @@ export interface SessionsState {
   loaded: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
+  /**
+   * The Workspaces of the active Project, as `workspaces.list` answered: what the composer's
+   * pill offers a Session to work in (D8-08).
+   */
+  workspaces: readonly Workspace[]
 }
 
 const EMPTY: SessionsState = {
@@ -35,6 +40,7 @@ const EMPTY: SessionsState = {
   open: null,
   loaded: false,
   refusal: null,
+  workspaces: [],
 }
 
 /**
@@ -102,7 +108,8 @@ async function threadOf(sessionId: string): Promise<SessionEntry[]> {
  */
 export async function openSessions(projectId: string): Promise<void> {
   shown = projectId
-  replace({ ...state, thread: [], open: null, loaded: false, refusal: null })
+  replace({ ...state, thread: [], open: null, loaded: false, refusal: null, workspaces: [] })
+  void readWorkspaces(projectId)
   try {
     const sessions = await listed(projectId)
     if (shown !== projectId) return
@@ -154,15 +161,21 @@ export async function openSession(sessionId: string): Promise<void> {
  * A Session exists from the moment it is made, before anything is written in it, and what is
  * chosen when it is made is the agent: a Session keeps the one it was made with, so the composer
  * that starts it is where that is decided, and `null` is not a choice — it is the Sessions
- * written before the agents existed (D5-06, D5-17). Nothing else is created with it — no Spec,
- * no Workspace (design D4b-01) — and the engine is where that is true rather than here.
+ * written before the agents existed (D5-06, D5-17). The Workspace it works in is chosen there too,
+ * null for `main` (D8-08). Nothing else is created with it — no Spec (design D4b-01) — and the
+ * engine is where that is true rather than here.
  */
 export async function startSession(
   projectId: string,
   provider: AgentProvider | null,
+  workspaceId: string | null,
 ): Promise<Session | null> {
   try {
-    const session = await window.hemera.invoke('sessions.create', { projectId, provider })
+    const session = await window.hemera.invoke('sessions.create', {
+      projectId,
+      provider,
+      workspaceId,
+    })
     const sessions = await listed(projectId)
     if (shown !== projectId) return session
     replace({ ...state, sessions, refusal: null })
@@ -227,6 +240,26 @@ export async function restoreSession(session: Session): Promise<boolean> {
   })
 }
 
+/**
+ * Moves a Session to another of the Project's Workspaces, null for `main` (D8-08).
+ *
+ * Only before its agent has started: the engine refuses it afterwards, and the refusal is kept
+ * like any other, for the page to show where it shows refusals.
+ */
+export async function chooseWorkspace(
+  session: Session,
+  workspaceId: string | null,
+): Promise<boolean> {
+  return await acting(session.projectId, async () => {
+    await window.hemera.invoke('sessions.chooseWorkspace', {
+      id: session.id,
+      version: session.version,
+      workspaceId,
+    })
+    return await listed(session.projectId)
+  })
+}
+
 /** Runs an act that changes a Session, and puts the list the engine answered back on screen. */
 async function acting(projectId: string, act: () => Promise<Session[]>): Promise<boolean> {
   try {
@@ -238,6 +271,67 @@ async function acting(projectId: string, act: () => Promise<Session[]>): Promise
     replace({ ...state, refusal: message(cause) })
     return false
   }
+}
+
+/** Reads the Workspaces of the Project on screen, which the composer's pill offers (D8-08). */
+export async function readWorkspaces(projectId: string): Promise<void> {
+  try {
+    const workspaces = await window.hemera.invoke('workspaces.list', { projectId })
+    if (shown !== projectId) return
+    replace({ ...state, workspaces })
+  } catch (cause) {
+    if (shown !== projectId) return
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/**
+ * Reads them again whenever the engine says one of them changed: a Workspace being prepared
+ * becomes one the pill offers the moment it is `ready`, and one cleaned up leaves it (D8-01).
+ */
+export function listenToWorkspaces(): () => void {
+  return window.hemera.on((event: EngineEvent) => {
+    if (event.event === 'workspace' && event.projectId === shown) {
+      void readWorkspaces(event.projectId)
+    }
+  })
+}
+
+/** A Workspace the pill offers: its name, where it is, and what the engine is given for it. */
+export interface OfferedWorkspace {
+  /** What `sessions.create` and `sessions.chooseWorkspace` are given: null for `main`. */
+  readonly id: string | null
+  readonly name: string
+  readonly path: string
+}
+
+/**
+ * What the pill lists (D8-08): the Project's Workspaces in state `ready`, `main` first.
+ *
+ * `kept` is the Workspace a Session already works in, listed whatever its state: a Session keeps
+ * its Workspace, and a pill that could not name it would say the Session works nowhere.
+ */
+export function offeredWorkspacesOf(
+  workspaces: readonly Workspace[],
+  kept: string | null = null,
+): OfferedWorkspace[] {
+  return workspaces
+    .filter((one) => one.state === 'ready' || one.id === kept)
+    .toSorted((a, b) => Number(b.main) - Number(a.main))
+    .map((one) => ({ id: one.main ? null : one.id, name: one.name, path: one.path }))
+}
+
+/**
+ * Whether a Session's Workspace can no longer change (D8-08): once its agent has started — the
+ * agent's own session was opened in that folder, which the engine records as a native state —
+ * or once a turn has run in it, which the thread says before the list is read again.
+ */
+export function workspaceFixedOf(
+  session: Session,
+  thread: readonly SessionEntry[],
+  running: boolean,
+): boolean {
+  return session.nativeState !== 'none' || running || thread.some((one) => one.kind === 'turn')
 }
 
 /** What was archived, which only the archived page asks for. */

@@ -97,7 +97,10 @@ import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
   archivedSessions,
   archiveSession,
+  chooseWorkspace,
   closeSessions,
+  listenToWorkspaces,
+  offeredWorkspacesOf,
   openSession,
   openSessions,
   readSessions,
@@ -479,6 +482,9 @@ export function Application() {
   // And the runs, heard on the same channel: a command a Session started while another was on
   // screen has moved on by the time the reader comes back to it (D6-12).
   useEffect(() => listenToTools(), [])
+  // And the Workspaces of the Project in front, which the composer's pill offers: one becomes
+  // `ready`, or is cleaned up, while a Home or a Session is on screen (D8-08).
+  useEffect(() => listenToWorkspaces(), [])
 
   // The list the sidebar draws is read again when a Session gets its first entry: the engine
   // writes the user's own message as part of the prompt (design D5-11), and that message is what
@@ -1021,6 +1027,12 @@ export function Application() {
       )
     }
     if (open !== null) {
+      // The folder the Session works in, which its files are searched and its runs are said
+      // relative to: its Workspace's, and `main`'s when it has none (D8-08).
+      const root =
+        sessions.workspaces.find((one) => one.id === open.workspaceId)?.path ??
+        current?.mainPath ??
+        ''
       return (
         <SessionPage
           // Keyed on the Session: a draft of a title belongs to the Session it is about, and
@@ -1050,17 +1062,10 @@ export function Application() {
           onCancelEditing={() => setNaming(null)}
           onArchive={() => void archive(open)}
           onSearchFiles={async (query: string) =>
-            current === null
-              ? []
-              : await window.hemera.invoke('workspace.files', {
-                  root: current.mainPath,
-                  query,
-                })
+            root === '' ? [] : await window.hemera.invoke('workspace.files', { root, query })
           }
           onPickFiles={async () =>
-            current === null
-              ? []
-              : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
+            root === '' ? [] : await window.hemera.invoke('dialog.pickFiles', { root })
           }
           commandRuns={tools.runs.get(open.id) ?? []}
           // An address a run published is opened by the browser: the window hands every web
@@ -1069,7 +1074,7 @@ export function Application() {
             window.open(url, '_blank', 'noopener')
           }}
           onStopRun={(runId) => void stopRun(open.id, runId)}
-          root={current?.mainPath ?? ''}
+          root={root}
           context={tools.contexts.get(open.id) ?? null}
           // A line that names a command of the catalogue runs that command, in its folder; any
           // other line is a one-off, run in the Workspace root and not added to the catalogue.
@@ -1077,6 +1082,8 @@ export function Application() {
             const known = tools.contexts.get(open.id)?.commands.some((one) => one.name === line)
             void runCommand(open.id, known === true ? { name: line } : { line })
           }}
+          workspaces={offeredWorkspacesOf(sessions.workspaces, open.workspaceId)}
+          onChooseWorkspace={(workspaceId) => void chooseWorkspace(open, workspaceId)}
         />
       )
     }
@@ -1125,9 +1132,10 @@ export function Application() {
         // over again — the engine kept those choices against this Project and this agent, and the
         // Session it opens is opened on them (D5-17). An agent the engine does not know is
         // refused by the engine rather than by a sentence written here.
-        onSend={async (text, chosen) => {
+        workspaces={offeredWorkspacesOf(sessions.workspaces)}
+        onSend={async (text, chosen, workspaceId) => {
           const asked = providerOf(chosen)
-          const made = await startSession(active.id, asked)
+          const made = await startSession(active.id, asked, workspaceId)
           if (made === null) return sessionsSnapshot().refusal
           goTo(made.id)
           // The thread is read before the agent is spoken to: the message the engine writes as

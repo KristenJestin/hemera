@@ -482,7 +482,12 @@ describe('Le titre proposé paraît sans rechargement', () => {
     })
     await readSessions('atlas')
 
-    expect(asked.map((one) => one.name)).toEqual(['sessions.list', 'sessions.list'])
+    // Opening the Project reads its Workspaces too, which the composer's pill offers (D8-08).
+    expect(asked.map((one) => one.name)).toEqual([
+      'workspaces.list',
+      'sessions.list',
+      'sessions.list',
+    ])
     expect(sessionsSnapshot().sessions.map((one) => one.id)).toEqual(['session-2', 'session-1'])
     // The list alone: a read that dropped the thread would close a page nobody asked to close.
     expect(sessionsSnapshot().thread).toEqual([])
