@@ -107,6 +107,10 @@ export interface AgentAdapter {
    *
    * The platform is asked rather than read: the answer is declared per platform (D6-02), and a
    * machine cannot try the other one's answer.
+   *
+   * It is read through `bareModeOf` and nowhere else, which is the one place a declaration can be
+   * overruled: by `HEMERA_E2E_QUALIFIED`, the end-to-end suite's variable naming the agent it
+   * fakes, which the application never sets (D5-16).
    */
   readonly bareMode: (platform: NodeJS.Platform) => BareMode
   /**
