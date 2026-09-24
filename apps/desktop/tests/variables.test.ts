@@ -208,3 +208,40 @@ describe('A change of a variable is a line of the Journal, without its value', (
     expect(seen.left).toEqual([{ key: 'TOKEN', value: 'secret-one', workspaceId: null }])
   })
 })
+
+describe('Setting an existing key rewrites its value', () => {
+  it('rewrites the Project’s value and the Workspace’s, each in its own scope', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const variables = yield* Variables
+        const workspaces = yield* Workspaces
+        const { project, workspace } = yield* inAWorkspace
+        const own = (yield* workspaces.list(project.id)).find((one) => one.main)
+        yield* variables.set(project.id, null, 'PORT', '3000')
+        yield* variables.set(project.id, workspace.id, 'PORT', '3001')
+        yield* variables.set(project.id, own?.id ?? null, 'PORT', '3002')
+        // The same keys again, each in its scope: an edit, not a second variable.
+        const project2 = yield* variables.set(project.id, null, 'PORT', '4000')
+        const workspace2 = yield* variables.set(project.id, workspace.id, 'PORT', '4001')
+        const main2 = yield* variables.set(project.id, own?.id ?? null, 'PORT', '4002')
+        return {
+          project2,
+          workspace2,
+          main2,
+          ofProject: yield* variables.list(project.id, null),
+          ofWorkspace: yield* variables.list(project.id, workspace.id),
+          ofMain: yield* variables.list(project.id, own?.id ?? null),
+          given: yield* variables.givenFor(project.id, workspace.id),
+        }
+      }),
+    )
+
+    expect(seen.project2).toMatchObject({ key: 'PORT', value: '4000', workspaceId: null })
+    expect(seen.workspace2.value).toBe('4001')
+    expect(seen.main2.value).toBe('4002')
+    expect(seen.ofProject.map((one) => [one.key, one.value])).toEqual([['PORT', '4000']])
+    expect(seen.ofWorkspace.map((one) => [one.key, one.value])).toEqual([['PORT', '4001']])
+    expect(seen.ofMain.map((one) => [one.key, one.value])).toEqual([['PORT', '4002']])
+    expect(seen.given).toEqual({ PORT: '4001' })
+  })
+})

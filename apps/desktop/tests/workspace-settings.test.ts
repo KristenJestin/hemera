@@ -284,6 +284,47 @@ describe('A Workspace is shown under the list with its Git state, steps and vari
   })
 })
 
+describe('Setting an existing key rewrites its value', () => {
+  test("the editors rewrite the Project's PORT, a Workspace's and main's, and show the new one", async () => {
+    const project = await atlas()
+    const workspace = await loginForm(opened!, project.id)
+    await readWorkspaces(project.id)
+    const own = workspacesOf(project.id).find((one) => one.main)!
+    const valuesOf = (variables: readonly { key: string; value: string }[]) =>
+      variables.map((one) => [one.key, one.value])
+    /** A Workspace shown, its PORT set then set again: what the editor and the engine hold. */
+    const editedIn = async (shown: typeof workspace) => {
+      await showWorkspace(shown)
+      expect(await setVariable(project.id, shown.id, 'PORT', '3001')).toBeNull()
+      expect(await setVariable(project.id, shown.id, 'PORT', '4001')).toBeNull()
+      return {
+        editor: valuesOf(workspacesSnapshot().shown!.variables),
+        engine: valuesOf(
+          await opened!.bridge.invoke('variables.list', {
+            projectId: project.id,
+            workspaceId: shown.id,
+          }),
+        ),
+      }
+    }
+
+    expect(await setVariable(project.id, null, 'PORT', '3000')).toBeNull()
+    expect(await setVariable(project.id, null, 'PORT', '4000')).toBeNull()
+    expect(valuesOf(workspacesSnapshot().variables.get(project.id) ?? [])).toEqual([
+      ['PORT', '4000'],
+    ])
+
+    // One key, its last value, in the editor as in the engine: a dedicated Workspace, then main.
+    const one = { editor: [['PORT', '4001']], engine: [['PORT', '4001']] }
+    expect(await editedIn(workspace)).toEqual(one)
+    expect(await editedIn(own)).toEqual(one)
+    // The Project's own value is untouched by the Workspaces' edits.
+    expect(valuesOf(workspacesSnapshot().variables.get(project.id) ?? [])).toEqual([
+      ['PORT', '4000'],
+    ])
+  })
+})
+
 /** A line that prints an address on `port` and stays up, never listening on it. */
 const printsOnly = (port: number) =>
   `"${process.execPath}" -e "console.log('http://localhost:${String(port)}');setInterval(()=>{},1000)"`
