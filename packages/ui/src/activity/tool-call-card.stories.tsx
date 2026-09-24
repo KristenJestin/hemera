@@ -30,7 +30,7 @@ const OUTPUT = `export function SessionPage() {
 `
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/ToolCallCard',
   component: ToolCallCard,
   parameters: { layout: 'padded' },

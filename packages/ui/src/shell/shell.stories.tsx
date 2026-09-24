@@ -131,7 +131,7 @@ function Harness({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Shell/Shell',
   component: Harness,
   parameters: { layout: 'fullscreen' },

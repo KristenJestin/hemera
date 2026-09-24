@@ -49,7 +49,7 @@ const COMMANDS = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Session/ContextView',
   component: ContextView,
   parameters: { layout: 'padded' },
