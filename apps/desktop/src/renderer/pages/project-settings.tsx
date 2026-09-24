@@ -34,7 +34,10 @@ import {
 } from '../workspace-details.ts'
 import type { ShownWorkspace } from '../workspaces-store.ts'
 
-/** A command of the catalogue, as its row draws it: the Workspace root is `.` on screen. */
+/**
+ * A command of the catalogue, as its row draws it. The engine knows a folder relative to the
+ * Workspace root and no base or Portless name yet: every command reads as running from the root.
+ */
 function lineOf(command: Command): CommandLine {
   return {
     id: command.name,
@@ -45,7 +48,9 @@ function lineOf(command: Command): CommandLine {
     type: command.type,
     scope: command.scope,
     portless: command.portless,
-    folder: command.folder ?? '.',
+    portlessName: null,
+    folderBase: null,
+    folder: command.folder === null || command.folder === '.' ? '' : command.folder,
   }
 }
 
@@ -63,11 +68,19 @@ function writeOf(line: CommandLine): CommandWrite {
     lineWindows: line.lineWindows,
     lineLinux: line.lineLinux,
     type: line.type,
-    // The row's `.` is the Workspace root, which the engine is told as no folder at all.
-    folder: line.folder === '.' ? null : line.folder,
+    folder: folderOf(line),
     scope: line.scope,
     portless: line.portless,
   }
+}
+
+/**
+ * The folder of a command relative to the Workspace root, as the engine knows it: its base
+ * joined in front of its path, and no folder at all for the root itself.
+ */
+function folderOf(line: CommandLine): string | null {
+  const parts = [line.folderBase ?? '', line.folder].filter((part) => part !== '')
+  return parts.length === 0 ? null : parts.join('/')
 }
 
 /** What a Workspace shown under the list is asked through (D8-05, D8-06, D8-08). */
@@ -320,43 +333,56 @@ export function ProjectSettingsPage({
         onMainPathChange={onMainPathChange}
         onAddRepository={onAddRepository}
         onRemoveRepository={onRemoveRepository}
-        onToggleIncluded={onToggleIncluded}
+        onUpdateRepository={async (path, next) => {
+          // Only the inclusion is written for now: a new path or an icon waits for the engine.
+          const current = repositories.find((one) => one.path === path)
+          if (next.path !== path || next.icon !== (current?.icon ?? null)) {
+            return 'Changing the path or the icon of a repository is not available yet.'
+          }
+          if (current?.includedByDefault !== next.includedByDefault) {
+            onToggleIncluded(path, next.includedByDefault)
+          }
+          return null
+        }}
         commands={commands.map(lineOf)}
         onAddCommand={async (line) => await onSaveCommand(writeOf(line), false)}
         onUpdateCommand={async (line) => await onSaveCommand(writeOf(line), true)}
         onRemoveCommand={onRemoveCommand}
+        // Whether portless is on this machine is not asked of the engine yet.
+        portlessInstalled={false}
         onArchive={onArchive}
-      >
-        {workspacesRefusal !== null && (
-          <p role="alert" className="text-sm text-destructive-muted-foreground">
-            {workspacesRefusal}
-          </p>
-        )}
-        <WorkspacesCards
-          workspaces={workspaces}
-          shown={shown}
-          projectVariables={projectVariables}
-          catalogue={commands}
-          actions={workspaceActions}
-          onBrowse={onBrowse}
-          onCreate={onCreateWorkspace}
-          onCleanup={onCleanupWorkspace}
-        />
-        <PreparationEditor
-          steps={recipeLinesOf(recipe, commands)}
-          commands={recipeCommandsOf(commands)}
-          onAdd={async (step) => await onAddRecipeStep(recipeAddOf(step))}
-          onRemove={onRemoveRecipeStep}
-          onMove={onMoveRecipeStep}
-        />
-        <VariablesEditor
-          scope="project"
-          name={project.name}
-          variables={projectVariablesOf(projectVariables)}
-          onSet={onSetProjectVariable}
-          onRemove={onRemoveProjectVariable}
-        />
-      </ProjectSettings>
+        slotRefusal={workspacesRefusal}
+        workspaces={
+          <WorkspacesCards
+            workspaces={workspaces}
+            shown={shown}
+            projectVariables={projectVariables}
+            catalogue={commands}
+            actions={workspaceActions}
+            onBrowse={onBrowse}
+            onCreate={onCreateWorkspace}
+            onCleanup={onCleanupWorkspace}
+          />
+        }
+        preparation={
+          <PreparationEditor
+            steps={recipeLinesOf(recipe, commands)}
+            commands={recipeCommandsOf(commands)}
+            onAdd={async (step) => await onAddRecipeStep(recipeAddOf(step))}
+            onRemove={onRemoveRecipeStep}
+            onMove={onMoveRecipeStep}
+          />
+        }
+        variables={
+          <VariablesEditor
+            scope="project"
+            name={project.name}
+            variables={projectVariablesOf(projectVariables)}
+            onSet={onSetProjectVariable}
+            onRemove={onRemoveProjectVariable}
+          />
+        }
+      />
     </div>
   )
 }

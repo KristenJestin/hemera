@@ -2,25 +2,22 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
-import { COMMAND_TYPE_LABELS } from '../activity/command-type.ts'
+import { VariablesEditor } from '../workspace/variables-editor.tsx'
 import { WorkspaceList } from '../workspace/workspace-list.tsx'
-import type { ProjectSettingsDraft, RepositoryLine } from './model.ts'
-import {
-  ProjectSettings,
-  type CommandLine,
-  type ProjectSettingsProps,
-} from './project-settings.tsx'
+import type { CommandLine, ProjectSettingsDraft, RepositoryLine } from './model.ts'
+import { PreparationEditor } from './preparation-editor.tsx'
+import { ProjectSettings, type ProjectSettingsProps } from './project-settings.tsx'
 
 /**
- * The settings of one Project, on fixtures (design D4-07).
+ * The settings of one Project, on fixtures (design D4-07, recette 1 of lot 20).
  *
- * What a name and a path are allowed to be is the domain's rule, and the panel stands in for
- * it: `saveRefusal` and `addRefusal` are what the engine would have answered. What is under
- * test here is the page — what it shows, what it saves, and what it does with a refusal.
+ * A navigation on the left and one section at a time; one story per section, opened on it, and
+ * the states the page has beyond them. What a name and a path are allowed to be is the domain's
+ * rule, and the panel stands in for it: `saveRefusal`, `repositoryRefusal` and `commandRefusal`
+ * are what the engine would have answered.
  *
- * Lot 20 gives the catalogue its seven types, a line per system, a scope and Portless (D8-07,
- * D8-10), each repository its place in a dedicated Workspace, and the page the folder and the
- * branch prefix of dedicated Workspaces (D8-02, D8-04).
+ * The Workspaces, the preparation and the variables are composed by the caller: the stories hand
+ * in the blocks the application hands in, with their own fixtures.
  */
 const ATLAS: ProjectSettingsDraft = {
   name: 'Atlas',
@@ -32,9 +29,16 @@ const ATLAS: ProjectSettingsDraft = {
 }
 
 const REPOSITORIES: RepositoryLine[] = [
-  { path: './sources/api', branch: 'main', exists: true, includedByDefault: true, icon: null },
-  { path: './sources/front', branch: 'develop', exists: true, includedByDefault: true, icon: null },
+  { path: './sources/api', branch: 'main', exists: true, includedByDefault: true, icon: 'server' },
+  {
+    path: './sources/front',
+    branch: 'develop',
+    exists: true,
+    includedByDefault: true,
+    icon: 'browser',
+  },
   { path: './docs', branch: null, exists: true, includedByDefault: false, icon: null },
+  { path: './sources/mobile', branch: null, exists: false, includedByDefault: false, icon: null },
 ]
 
 /** What a command of the catalogue is unless a fixture says otherwise. */
@@ -43,24 +47,24 @@ const PLAIN = {
   lineLinux: null,
   scope: 'workspace',
   portless: false,
+  portlessName: null,
+  folder: '',
 } as const
 
 /**
- * The catalogue of a Project that has one command of each of the seven types (D8-07).
- *
- * Named the way a reader names them, and each with the folder it runs in: `dev` in the front,
- * `check` at the root, an `auth` server shared by the Project and run through Portless, and a
- * `seed` whose Windows line is its own (scenario "The machine runs its own variant").
+ * The catalogue of a Project that has one command of each of the seven types (D8-07): `dev` in
+ * the front, `check` at the root, an `auth` server shared by the Project and run through
+ * Portless, and a `seed` whose Windows line is its own.
  */
 const COMMANDS: CommandLine[] = [
-  { ...PLAIN, id: 'check', name: 'check', command: 'pnpm check', type: 'test', folder: '.' },
+  { ...PLAIN, id: 'check', name: 'check', command: 'pnpm check', type: 'test', folderBase: null },
   {
     ...PLAIN,
     id: 'dev',
     name: 'dev',
     command: 'pnpm dev',
     type: 'serve',
-    folder: './sources/front',
+    folderBase: './sources/front',
   },
   {
     ...PLAIN,
@@ -70,23 +74,17 @@ const COMMANDS: CommandLine[] = [
     type: 'serve',
     scope: 'project',
     portless: true,
-    folder: './sources/api',
+    portlessName: 'atlas',
+    folderBase: './sources/api',
   },
-  {
-    ...PLAIN,
-    id: 'lint',
-    name: 'lint',
-    command: 'pnpm lint',
-    type: 'lint',
-    folder: './sources/api',
-  },
+  { ...PLAIN, id: 'lint', name: 'lint', command: 'pnpm lint', type: 'lint', folderBase: null },
   {
     ...PLAIN,
     id: 'build',
     name: 'build',
     command: 'pnpm build',
     type: 'build',
-    folder: './sources/api',
+    folderBase: './sources/api',
   },
   {
     ...PLAIN,
@@ -94,7 +92,7 @@ const COMMANDS: CommandLine[] = [
     name: 'env',
     command: 'pnpm env:configure',
     type: 'configure',
-    folder: './sources/api',
+    folderBase: './sources/api',
   },
   {
     ...PLAIN,
@@ -102,7 +100,8 @@ const COMMANDS: CommandLine[] = [
     name: 'inspect',
     command: 'node --inspect dist/main.js',
     type: 'debug',
-    folder: './sources/api',
+    folderBase: './sources/api',
+    folder: 'dist',
   },
   {
     ...PLAIN,
@@ -111,46 +110,100 @@ const COMMANDS: CommandLine[] = [
     command: './scripts/seed.sh',
     lineWindows: 'scripts\\seed.cmd',
     type: 'script',
-    folder: './sources/api',
+    folderBase: './sources/api',
   },
 ]
 
-/**
- * What the disk holds under the root: the declared paths, and folders that are not repositories.
- *
- * The page offers these when a repository is declared. A command's folder is offered among the
- * declared repositories only: it runs in the Workspace root or in one of them (D6-12).
- */
+/** What the disk holds under the root: the declared paths, and folders not declared yet. */
 const FOLDERS: RepositoryLine[] = [
   ...REPOSITORIES,
-  { path: './scripts', branch: null, exists: true, includedByDefault: false, icon: null },
+  { path: './sources/worker', branch: 'main', exists: true, includedByDefault: true, icon: null },
+  { path: './scripts', branch: null, exists: true, includedByDefault: true, icon: null },
 ]
+
+/** The Workspaces section as the application composes it: the list of the Project's. */
+const WORKSPACES = (
+  <WorkspaceList
+    workspaces={[
+      {
+        id: 'main',
+        name: 'main',
+        path: ATLAS.mainPath,
+        state: 'ready',
+        main: true,
+        dedicated: false,
+      },
+      {
+        id: 'login-form',
+        name: 'login-form',
+        path: '/home/someone/.local/share/hemera/workspaces/atlas/login-form',
+        state: 'ready',
+        main: false,
+        dedicated: true,
+      },
+    ]}
+    onBrowse={fn(async () => await Promise.resolve(null))}
+    onCreate={fn(async () => await Promise.resolve(null))}
+    onCleanup={fn()}
+  />
+)
+
+/** The Preparation section: the recipe every dedicated Workspace replays (D8-05). */
+const PREPARATION = (
+  <PreparationEditor
+    steps={[
+      { id: 'copy-env', kind: 'copy', path: '.env', scope: 'repositories' },
+      { id: 'link-claude', kind: 'link', path: 'CLAUDE.md', scope: 'root' },
+      { id: 'run-env', kind: 'run', commandName: 'env' },
+    ]}
+    commands={[
+      { id: 'env', name: 'env', type: 'configure' },
+      { id: 'check', name: 'check', type: 'test' },
+    ]}
+    onAdd={fn(async () => await Promise.resolve(null))}
+    onRemove={fn()}
+    onMove={fn()}
+  />
+)
+
+/** The Variables section: the Project's own (D8-06). */
+const VARIABLES = (
+  <VariablesEditor
+    scope="project"
+    name="Atlas"
+    variables={[
+      { key: 'DATABASE_URL', value: 'postgres://localhost:5432/atlas' },
+      { key: 'PORT', value: '3000' },
+    ]}
+    onSet={fn(async () => await Promise.resolve(null))}
+    onRemove={fn()}
+  />
+)
 
 interface Extra {
   /** What saving answers: nothing, or the refusal the engine sent back. */
   saveRefusal?: string | null
-  /** What adding a path answers: nothing, or the refusal the domain sent back. */
-  addRefusal?: string | null
-  /** What adding a command answers: nothing, or the refusal the engine sent back. */
+  /** What adding or editing a repository answers: nothing, or the domain's refusal. */
+  repositoryRefusal?: string | null
+  /** What adding or editing a command answers: nothing, or the engine's refusal. */
   commandRefusal?: string | null
 }
 
 /**
- * The page holds the Project and its repositories; the panel decides what the engine answers.
- *
- * Written out rather than hidden in a harness, because it is exactly what the application does
- * with the same component: keep what came back, hand it in again.
+ * The page holds the Project, its repositories and its catalogue; the panel decides what the
+ * engine answers. Written out rather than hidden in a harness, because it is exactly what the
+ * application does with the same component: keep what came back, hand it in again.
  */
 function Controlled({
   project,
   repositories,
   saveRefusal = null,
-  addRefusal = null,
+  repositoryRefusal = null,
   commandRefusal = null,
   onSave,
   onAddRepository,
+  onUpdateRepository,
   onRemoveRepository,
-  onToggleIncluded,
   onAddCommand,
   onUpdateCommand,
   onRemoveCommand,
@@ -160,7 +213,7 @@ function Controlled({
   const [lines, setLines] = useState(repositories)
   const [catalogue, setCatalogue] = useState(rest.commands ?? [])
   return (
-    <div className="mx-auto flex max-w-3xl flex-col p-6">
+    <div className="mx-auto flex max-w-5xl flex-col p-6">
       <ProjectSettings
         {...rest}
         project={kept}
@@ -173,49 +226,51 @@ function Controlled({
         }}
         onAddRepository={async (path) => {
           await onAddRepository(path)
-          if (addRefusal !== null) return addRefusal
-          setLines([
-            ...lines,
+          if (repositoryRefusal !== null) return repositoryRefusal
+          setLines((now) => [
+            ...now,
             { path, branch: null, exists: false, includedByDefault: true, icon: null },
           ])
           return null
         }}
-        onRemoveRepository={(path) => {
-          onRemoveRepository(path)
-          setLines(lines.filter((one) => one.path !== path))
-        }}
-        onToggleIncluded={(path, included) => {
-          onToggleIncluded?.(path, included)
-          setLines(
-            lines.map((one) =>
+        onUpdateRepository={async (path, next) => {
+          await onUpdateRepository(path, next)
+          if (repositoryRefusal !== null) return repositoryRefusal
+          setLines((now) =>
+            now.map((one) =>
               one.path === path
                 ? {
-                    path,
+                    path: next.path,
                     branch: one.branch,
                     exists: one.exists,
-                    includedByDefault: included,
-                    icon: one.icon,
+                    includedByDefault: next.includedByDefault,
+                    icon: next.icon,
                   }
                 : one,
             ),
           )
+          return null
+        }}
+        onRemoveRepository={(path) => {
+          onRemoveRepository(path)
+          setLines((now) => now.filter((one) => one.path !== path))
         }}
         commands={catalogue}
         onAddCommand={async (command) => {
           await onAddCommand?.(command)
           if (commandRefusal !== null) return commandRefusal
-          setCatalogue([...catalogue, command])
+          setCatalogue((now) => [...now, command])
           return null
         }}
         onUpdateCommand={async (command) => {
           await onUpdateCommand?.(command)
           if (commandRefusal !== null) return commandRefusal
-          setCatalogue(catalogue.map((one) => (one.name === command.name ? command : one)))
+          setCatalogue((now) => now.map((one) => (one.name === command.name ? command : one)))
           return null
         }}
         onRemoveCommand={(id) => {
           onRemoveCommand?.(id)
-          setCatalogue(catalogue.filter((one) => one.id !== id))
+          setCatalogue((now) => now.filter((one) => one.id !== id))
         }}
       />
     </div>
@@ -234,18 +289,24 @@ const meta = {
     repositories: REPOSITORIES,
     folders: FOLDERS,
     saveRefusal: null,
-    addRefusal: null,
+    repositoryRefusal: null,
     commandRefusal: null,
     commands: COMMANDS,
+    portlessInstalled: true,
+    workspaces: WORKSPACES,
+    preparation: PREPARATION,
+    variables: VARIABLES,
+    slotRefusal: null,
     onSave: fn(async () => await Promise.resolve(null)),
     onAddCommand: fn(async () => await Promise.resolve(null)),
     onUpdateCommand: fn(async () => await Promise.resolve(null)),
     onRemoveCommand: fn(),
     onBrowse: fn(async () => await Promise.resolve('/home/someone/Projects/atlas-2')),
     onAddRepository: fn(async () => await Promise.resolve(null)),
+    onUpdateRepository: fn(async () => await Promise.resolve(null)),
     onRemoveRepository: fn(),
-    onToggleIncluded: fn(),
     onArchive: fn(),
+    onSectionChange: fn(),
   },
   argTypes: {
     project: { control: 'object', description: 'What the Project is right now.' },
@@ -255,30 +316,45 @@ const meta = {
       control: 'object',
       description: 'The folders of the Workspace, offered to fill in.',
     },
-    saveRefusal: {
+    saveRefusal: { control: 'text', description: 'What saving answers; null accepts the change.' },
+    repositoryRefusal: {
       control: 'text',
-      description: 'What saving answers; null accepts the change.',
-    },
-    addRefusal: {
-      control: 'text',
-      description: 'What adding a path answers; null accepts it.',
+      description: 'What adding or editing a repository answers; null accepts it.',
     },
     commands: { control: 'object', description: 'The commands this Project may run.' },
     commandRefusal: {
       control: 'text',
-      description: 'What adding a command answers; null accepts it.',
+      description: 'What adding or editing a command answers; null accepts it.',
     },
+    portlessInstalled: {
+      control: 'boolean',
+      description: 'Whether portless is on this machine, which offers it on a server.',
+    },
+    workspaces: { control: false, description: 'The Workspaces section, composed by the caller.' },
+    preparation: {
+      control: false,
+      description: 'The Preparation section, composed by the caller.',
+    },
+    variables: { control: false, description: 'The Variables section, composed by the caller.' },
+    slotRefusal: {
+      control: 'text',
+      description: 'What the engine last refused about the three composed sections.',
+    },
+    defaultSection: {
+      control: 'select',
+      options: ['general', 'repositories', 'workspaces', 'commands', 'preparation', 'variables'],
+      description: 'The section shown first.',
+    },
+    section: { control: false, description: 'The section shown, for a caller that keeps it.' },
+    onSectionChange: { action: 'section chosen' },
     onSave: { action: 'saved' },
     onAddCommand: { action: 'command added' },
     onUpdateCommand: { action: 'command updated' },
     onRemoveCommand: { action: 'command removed' },
     onBrowse: { action: 'folder picked' },
     onAddRepository: { action: 'repository added' },
+    onUpdateRepository: { action: 'repository updated' },
     onRemoveRepository: { action: 'repository removed' },
-    onToggleIncluded: {
-      action: 'repository included by default',
-      description: 'Says whether a repository is in every dedicated Workspace by default.',
-    },
     onArchive: { action: 'archived' },
   },
 } satisfies Meta<typeof Controlled>
@@ -286,77 +362,96 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-type StoryContext = Parameters<NonNullable<Story['play']>>[0]
-
-/** Opens a select of the page by its name and chooses one of its items, then waits it out. */
-async function choose(canvasElement: HTMLElement, label: string, option: RegExp): Promise<void> {
-  await userEvent.click(within(canvasElement).getByLabelText(label))
-  const list = await waitFor(() => within(document.body).getByRole('listbox'))
-  await userEvent.click(within(list).getByRole('option', { name: option }))
-  // The list is waited out: the accessibility pass runs on whatever is on the page at the end,
-  // and a popup still leaving carries focus guards that read as an error.
-  await waitFor(() => {
-    expect(within(document.body).queryByRole('listbox')).toBeNull()
-  })
+/** The section shown: the one panel of the page. */
+function panelOf(canvasElement: HTMLElement) {
+  return within(within(canvasElement).getByRole('tabpanel'))
 }
 
-export const Playground: Story = {}
+function dialog() {
+  return within(within(document.body).getByRole('dialog'))
+}
+
+/** The row of a list that holds the text given, found by the list item it sits in. */
+function rowOf(canvasElement: HTMLElement, text: string) {
+  return within(within(canvasElement).getByText(text).closest('li')!)
+}
 
 /**
- * Saved: nothing has been touched, so there is nothing to save and the button says so.
- *
- * Scenario « Branche lue à l'affichage » of `specs/project-workspaces/spec.md`: each declared
- * path says what the disk holds right now, and a folder with no repository says that.
+ * Everything in place, on General: the navigation of six sections, the form, its button, the
+ * archive at the bottom.
  */
-export const Variants: Story = {
+export const Complete: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('button', { name: 'Saved' })).toBeDisabled()
-    expect(canvas.getByText('git · main')).toBeInTheDocument()
-    expect(canvas.getByText('git · develop')).toBeInTheDocument()
-    expect(canvas.getByText('no repository')).toBeInTheDocument()
+    const nav = canvas.getByRole('tablist', { name: 'Project settings' })
+    await expect(
+      within(nav)
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent),
+    ).toEqual(['General', 'Repositories', 'Workspaces', 'Commands', 'Preparation', 'Variables'])
+    await expect(canvas.getByRole('tab', { name: 'General' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    // One section on screen at a time.
+    await expect(canvas.getAllByRole('tabpanel')).toHaveLength(1)
+    await expect(canvas.getByRole('button', { name: 'Saved' })).toBeDisabled()
   },
 }
 
-/** Scenario « Édition durable » of `specs/project-workspaces/spec.md`, as far as a page goes. */
-export const States: Story = {
+/**
+ * General: the identity and the prefix of the Spec keys, the folder of main, where dedicated
+ * Workspaces go and their branch prefix, saved by the one button under them, and the archive at
+ * the bottom (scenario « Édition durable » of `specs/project-workspaces/spec.md`, as far as a
+ * page goes).
+ */
+export const General: Story = {
+  args: { defaultSection: 'general' },
   play: async ({ canvasElement, args }) => {
     args.onSave.mockClear()
-    const canvas = within(canvasElement)
-    const name = canvas.getByRole('textbox', { name: 'Name' })
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByRole('textbox', { name: 'Spec prefix' })).toHaveValue('ATL')
+    await expect(panel.getByRole('textbox', { name: 'Workspaces folder' })).toHaveValue('')
+    const prefix = panel.getByRole('textbox', { name: 'Branch prefix' })
+    await expect(prefix).toHaveAttribute('placeholder', 'atlas')
+    await expect(panel.getByText('Dedicated branches are atlas/<KEY>-<slug>.')).toBeVisible()
 
+    const name = panel.getByRole('textbox', { name: 'Name' })
     await userEvent.clear(name)
     await userEvent.type(name, 'Atlas II')
+    await userEvent.type(prefix, 'kris')
     await waitFor(() => {
-      expect(canvas.getByRole('button', { name: 'Save' })).toBeEnabled()
+      expect(panel.getByRole('button', { name: 'Save' })).toBeEnabled()
     })
-
-    await userEvent.click(canvas.getByRole('button', { name: 'Save' }))
+    await userEvent.click(panel.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
-      expect(args.onSave).toHaveBeenCalledWith({ ...ATLAS, name: 'Atlas II' })
+      expect(args.onSave).toHaveBeenCalledWith({ ...ATLAS, name: 'Atlas II', branchPrefix: 'kris' })
     })
     // Once it is saved, the page is on what it saved, and there is nothing left to do.
     await waitFor(() => {
-      expect(canvas.getByRole('button', { name: 'Saved' })).toBeDisabled()
+      expect(panel.getByRole('button', { name: 'Saved' })).toBeDisabled()
     })
+    // The archive is the last thing of the section.
+    await expect(panel.getByRole('button', { name: 'Archive Atlas II' })).toBeVisible()
   },
 }
 
 /**
- * The prefix of the Spec keys (lot 19, Decided 2): refused while it is not 2 to 4 capital
- * letters, and saved with the rest of the identity once it is.
+ * The prefix of the Spec keys (lot 19, Decided 2), in General with the identity: refused while it
+ * is not 2 to 4 capital letters, and saved with the rest of the section once it is.
  */
 export const SpecPrefix: Story = {
+  args: { defaultSection: 'general' },
   play: async ({ canvasElement, args }) => {
     args.onSave.mockClear()
-    const canvas = within(canvasElement)
-    const prefix = canvas.getByRole('textbox', { name: 'Spec prefix' })
+    const panel = panelOf(canvasElement)
+    const prefix = panel.getByRole('textbox', { name: 'Spec prefix' })
     await expect(prefix).toHaveValue('ATL')
 
     await userEvent.clear(prefix)
     await userEvent.type(prefix, 'at1')
     await waitFor(() => {
-      expect(canvas.getByText('A prefix is 2 to 4 capital letters, A to Z.')).toBeVisible()
+      expect(panel.getByText('A prefix is 2 to 4 capital letters, A to Z.')).toBeVisible()
     })
 
     await userEvent.clear(prefix)
@@ -364,9 +459,9 @@ export const SpecPrefix: Story = {
     // Gone before anything else is read: the check of the page's contrast would otherwise read
     // the message halfway through fading out.
     await waitFor(() => {
-      expect(canvas.queryByText('A prefix is 2 to 4 capital letters, A to Z.')).toBeNull()
+      expect(panel.queryByText('A prefix is 2 to 4 capital letters, A to Z.')).toBeNull()
     })
-    await userEvent.click(canvas.getByRole('button', { name: 'Save' }))
+    await userEvent.click(panel.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
       expect(args.onSave).toHaveBeenCalledWith({ ...ATLAS, specPrefix: 'ATX' })
     })
@@ -377,83 +472,19 @@ export const SpecPrefix: Story = {
 export const StaleVersion: Story = {
   args: { saveRefusal: 'the Project changed somewhere else; reopen it and try again' },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const name = canvas.getByRole('textbox', { name: 'Name' })
-
+    const panel = panelOf(canvasElement)
+    const name = panel.getByRole('textbox', { name: 'Name' })
     await userEvent.clear(name)
     await userEvent.type(name, 'Atlas II')
-    await userEvent.click(canvas.getByRole('button', { name: 'Save' }))
-
+    await userEvent.click(panel.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
-      expect(canvas.getByRole('alert')).toHaveTextContent('changed somewhere else')
+      expect(panel.getByRole('alert')).toHaveTextContent('changed somewhere else')
     })
     // What was typed stays: a refusal is not a reason to throw the edit away.
-    expect(name).toHaveValue('Atlas II')
+    await expect(name).toHaveValue('Atlas II')
     await waitFor(() => {
-      expect(canvas.getByRole('button', { name: 'Save' })).toHaveStyle({ opacity: '1' })
+      expect(panel.getByRole('button', { name: 'Save' })).toHaveStyle({ opacity: '1' })
     })
-  },
-}
-
-/** Scenario « Liste vide » of `specs/project-workspaces/spec.md`. */
-export const NoRepositoryDeclared: Story = {
-  args: { repositories: [] },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    expect(canvas.getByText(/the root is used as it is/)).toBeInTheDocument()
-    // Nothing is offered that would create anything.
-    expect(canvas.queryByRole('button', { name: /Initialise/ })).toBeNull()
-  },
-}
-
-/**
- * Scenario « Chemin hors racine refusé » of `specs/project-workspaces/spec.md`, as the eye sees
- * it — the rule itself is checked in `packages/core/tests/project.test.ts`.
- */
-export const PathOutsideTheRoot: Story = {
-  // Refused by the field itself, before anything is asked of anybody: the three rules a path is
-  // refused by are rules a form can check, and a refusal that took a round trip to say "that is
-  // absolute" is a refusal that arrives after the next character has been typed. What the domain
-  // says is still shown when it is the domain that says no — a path already declared, say.
-  args: { addRefusal: 'the repository location "/tmp/x" is refused: it is absolute' },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Add a path' }), '/tmp/x')
-    await userEvent.click(canvas.getByRole('button', { name: 'Add a path' }))
-
-    // The message arrives from under the field, and the story waits for it to land: a colour
-    // read halfway through a fade is a contrast the accessibility pass is right to refuse.
-    await waitFor(() => {
-      expect(canvas.getByText(/is absolute/)).toHaveStyle({ opacity: '1' })
-    })
-    // The page holds two lists now, and the same path can be read in both: what is counted here
-    // is the rows of declared paths, which the Repositories card draws before the Commands card.
-    // SAFETY: the first reading of the path is that card's row, so the `<ul>` above it is the
-    // list; the count below fails loudly if it ever is not.
-    const paths = canvas.getAllByText('./sources/api')[0]?.closest('ul') as HTMLElement
-    expect(within(paths).getAllByRole('listitem')).toHaveLength(REPOSITORIES.length)
-    expect(canvas.getByRole('textbox', { name: 'Add a path' })).toHaveValue('/tmp/x')
-  },
-}
-
-/** Adding and removing a path, which is the whole of what the list does. */
-export const RepositoriesComeAndGo: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onRemoveRepository.mockClear()
-    const canvas = within(canvasElement)
-
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Add a path' }), './sources/worker')
-    await userEvent.click(canvas.getByRole('button', { name: 'Add a path' }))
-    await waitFor(() => {
-      expect(canvas.getByText('./sources/worker')).toBeInTheDocument()
-    })
-
-    await userEvent.click(canvas.getByRole('button', { name: 'Remove ./docs' }))
-    await waitFor(() => {
-      expect(canvas.queryByText('./docs')).toBeNull()
-    })
-    expect(args.onRemoveRepository).toHaveBeenCalledWith('./docs')
   },
 }
 
@@ -461,42 +492,153 @@ export const RepositoriesComeAndGo: Story = {
 export const Archiving: Story = {
   play: async ({ canvasElement, args }) => {
     args.onArchive.mockClear()
-    const canvas = within(canvasElement)
-
-    expect(canvas.queryByRole('button', { name: /Delete/ })).toBeNull()
-
-    // It asks first. Archiving takes a Project out of the bar, and a press that did it on the
-    // way past is a press nobody meant: the button opens the question, and the question is what
-    // archives it.
-    await userEvent.click(canvas.getByRole('button', { name: `Archive ${ATLAS.name}` }))
+    const panel = panelOf(canvasElement)
+    await expect(panel.queryByRole('button', { name: /Delete/ })).toBeNull()
+    // It asks first: the button opens the question, and the question is what archives it.
+    await userEvent.click(panel.getByRole('button', { name: `Archive ${ATLAS.name}` }))
     const asking = within(document.body).getByRole('dialog')
-    expect(args.onArchive).not.toHaveBeenCalled()
-
+    await expect(args.onArchive).not.toHaveBeenCalled()
     await userEvent.click(within(asking).getByRole('button', { name: 'Archive it' }))
-    expect(args.onArchive).toHaveBeenCalled()
+    await expect(args.onArchive).toHaveBeenCalled()
   },
 }
 
-/** Scenario « Catalogue du projet » of `specs/agent-tools/spec.md`: what a Session may run. */
-export const CommandCatalogue: Story = {
+/**
+ * Repositories: each row its icon, its path, its branch or a quiet word, and one mark when a new
+ * Workspace takes it (scenario « Branche lue à l'affichage » of
+ * `specs/project-workspaces/spec.md`); its pencil opens its dialog.
+ */
+export const Repositories: Story = {
+  args: { defaultSection: 'repositories' },
   play: async ({ canvasElement, args }) => {
-    args.onRemoveCommand?.mockClear()
-    const canvas = within(canvasElement)
+    args.onUpdateRepository.mockClear()
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByText('git · main')).toBeVisible()
+    await expect(panel.getByText('git · develop')).toBeVisible()
+    await expect(panel.getByText('not a Git repository')).toBeVisible()
+    await expect(panel.getByText('not there yet')).toBeVisible()
+    // One quiet mark says a new Workspace takes it, and no box is ticked on a row.
+    await expect(panel.queryByRole('checkbox')).toBeNull()
+    await expect(
+      panel.getByRole('img', { name: './sources/api is in every new Workspace' }),
+    ).toBeVisible()
+    await expect(panel.queryByRole('img', { name: './docs is in every new Workspace' })).toBeNull()
 
-    expect(canvas.getByText('Commands')).toBeInTheDocument()
-    // The name is what the agent asks for; the line is what runs, and it is shown as written.
-    expect(canvas.getByText('pnpm check')).toBeInTheDocument()
-    // The folder is read on the command's own row, and the same path is a declared repository:
-    // both are true, and both are shown.
-    expect(canvas.getAllByText('./sources/front')).toHaveLength(2)
-    // A command in the root says so in words: a dot is not a folder a reader recognises.
-    expect(canvas.getByText('Workspace root')).toBeInTheDocument()
-
-    await userEvent.click(canvas.getByRole('button', { name: 'Remove seed' }))
+    await userEvent.click(panel.getByRole('button', { name: 'Edit ./docs' }))
+    const inside = dialog()
+    await userEvent.click(inside.getByRole('radio', { name: 'Book' }))
+    await userEvent.click(inside.getByRole('checkbox', { name: /Include in every new Workspace/ }))
+    await userEvent.click(inside.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
-      expect(canvas.queryByText('./scripts/seed.sh')).toBeNull()
+      expect(args.onUpdateRepository).toHaveBeenCalledWith('./docs', {
+        path: './docs',
+        icon: 'book',
+        includedByDefault: true,
+      })
     })
-    expect(args.onRemoveCommand).toHaveBeenCalledWith('seed')
+    await waitFor(() => {
+      expect(panel.getByRole('img', { name: './docs is in every new Workspace' })).toBeVisible()
+    })
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+  },
+}
+
+/** Adding one in its dialog and removing one from its row, which is what the list does. */
+export const RepositoriesComeAndGo: Story = {
+  args: { defaultSection: 'repositories' },
+  play: async ({ canvasElement, args }) => {
+    args.onAddRepository.mockClear()
+    args.onRemoveRepository.mockClear()
+    const panel = panelOf(canvasElement)
+
+    await userEvent.click(panel.getByRole('button', { name: 'Add repository' }))
+    const inside = dialog()
+    await userEvent.type(inside.getByRole('textbox', { name: 'Path' }), './sources/worker')
+    await userEvent.click(inside.getByRole('button', { name: 'Add repository' }))
+    await waitFor(() => {
+      expect(panel.getByText('./sources/worker')).toBeVisible()
+    })
+    await expect(args.onAddRepository).toHaveBeenCalledWith('./sources/worker')
+
+    await userEvent.click(panel.getByRole('button', { name: 'Remove ./docs' }))
+    await waitFor(() => {
+      expect(panel.queryByText('./docs')).toBeNull()
+    })
+    await expect(args.onRemoveRepository).toHaveBeenCalledWith('./docs')
+  },
+}
+
+/** Scenario « Liste vide » of `specs/project-workspaces/spec.md`. */
+export const NoRepositoryDeclared: Story = {
+  args: { defaultSection: 'repositories', repositories: [] },
+  play: async ({ canvasElement }) => {
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByText(/the root is used as it is/)).toBeVisible()
+    // Nothing is offered that would create anything.
+    await expect(panel.queryByRole('button', { name: /Initialise/ })).toBeNull()
+  },
+}
+
+/**
+ * Commands: each row its name, its line, and its badges together at its end (scenario
+ * « Catalogue du projet » of `specs/agent-tools/spec.md`); the pencil opens its dialog.
+ */
+export const Commands: Story = {
+  args: { defaultSection: 'commands' },
+  play: async ({ canvasElement, args }) => {
+    args.onUpdateCommand?.mockClear()
+    const panel = panelOf(canvasElement)
+    const auth = rowOf(canvasElement, 'pnpm auth:serve')
+    await expect(auth.getByText('Serve')).toBeVisible()
+    await expect(auth.getByText('Project, in main')).toBeVisible()
+    await expect(auth.getByText('Portless')).toBeVisible()
+    await expect(auth.getByText('api')).toBeVisible()
+    await expect(rowOf(canvasElement, 'pnpm check').getByText('Workspace root')).toBeVisible()
+    // The line of another system is the dialog's, not the row's.
+    await expect(panel.queryByText('scripts\\seed.cmd')).toBeNull()
+
+    await userEvent.click(panel.getByRole('button', { name: 'Edit dev' }))
+    const inside = dialog()
+    const line = inside.getByRole('textbox', { name: 'Default line' })
+    await userEvent.clear(line)
+    await userEvent.type(line, 'pnpm dev --host')
+    await userEvent.click(inside.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(args.onUpdateCommand).toHaveBeenCalledWith({
+        ...COMMANDS[1],
+        command: 'pnpm dev --host',
+      })
+    })
+    await waitFor(() => {
+      expect(panel.getByText('pnpm dev --host')).toBeVisible()
+    })
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+  },
+}
+
+/** Adding one, and the refusal the dialog keeps open on when the engine will not have it. */
+export const ACommandIsAdded: Story = {
+  args: {
+    defaultSection: 'commands',
+    commandRefusal: 'a command named "check" is already declared',
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(panelOf(canvasElement).getByRole('button', { name: 'Add command' }))
+    const inside = dialog()
+    await userEvent.type(inside.getByRole('textbox', { name: 'Name' }), 'check')
+    await userEvent.type(inside.getByRole('textbox', { name: 'Default line' }), 'pnpm check')
+    await userEvent.click(inside.getByRole('button', { name: 'Add command' }))
+    await waitFor(() => {
+      expect(inside.getByRole('alert')).toHaveTextContent('already declared')
+    })
+    await expect(inside.getByRole('textbox', { name: 'Default line' })).toHaveValue('pnpm check')
+    await waitFor(() => {
+      expect(inside.getByRole('button', { name: 'Add command' })).toHaveStyle({ opacity: '1' })
+    })
   },
 }
 
@@ -505,240 +647,94 @@ export const CommandCatalogue: Story = {
  * the agent's `commands_run` would be refused.
  */
 export const NoCommandDeclared: Story = {
-  args: { commands: [] },
+  args: { defaultSection: 'commands', commands: [] },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    expect(canvas.getByText(/No command is declared/)).toBeInTheDocument()
-    expect(canvas.queryByText('pnpm check')).toBeNull()
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByText(/No command is declared/)).toBeVisible()
+    await expect(panel.queryByText('pnpm check')).toBeNull()
   },
 }
 
-/** Adding one, and the refusal when the engine will not have it. */
-export const ACommandIsAdded: Story = {
-  args: { commandRefusal: 'a command named "check" is already declared' },
+/** Workspaces: the list the caller composes, drawn as it is handed. */
+export const Workspaces: Story = {
+  args: { defaultSection: 'workspaces' },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Command name' }), 'check')
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Default line' }), 'pnpm check')
-    await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
-
-    // The refusal lands under the folder field, and what was typed stays: a refusal is not a
-    // reason to throw the line away.
-    await waitFor(() => {
-      expect(canvas.getByText(/already declared/)).toHaveStyle({ opacity: '1' })
-    })
-    expect(canvas.getByRole('textbox', { name: 'Default line' })).toHaveValue('pnpm check')
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByRole('list', { name: 'Workspaces' })).toBeVisible()
+    await expect(panel.getByText('login-form')).toBeVisible()
   },
 }
 
-/**
- * Scenario « Dossier du projet » of `specs/agent-tools/spec.md`: a command runs in a folder of
- * the Project, and the folders it already holds are offered rather than asked for.
- */
-export const CommandFolderIsARepository: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onAddCommand?.mockClear()
-    const canvas = within(canvasElement)
-
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Command name' }), 'test')
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Default line' }), 'pnpm test')
-    const folder = canvas.getByRole('textbox', { name: 'Command folder' })
-    await userEvent.type(folder, 'sou')
-
-    // The folders the Project already holds are offered rather than asked for, and the popover is
-    // drawn outside the story's canvas: it is read where it lands.
-    await waitFor(() => {
-      expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0)
-    })
-    const offered = document.querySelectorAll('[role="option"]')[0]
-    expect(offered?.textContent).toBe('./sources/api')
-    await userEvent.keyboard('{Enter}')
-    expect(folder).toHaveValue('./sources/api')
-
-    await userEvent.click(canvas.getByRole('button', { name: 'Add a command' }))
-    await waitFor(() => {
-      expect(args.onAddCommand).toHaveBeenCalledWith({
-        id: 'test',
-        name: 'test',
-        command: 'pnpm test',
-        ...PLAIN,
-        type: 'script',
-        folder: './sources/api',
-      })
-    })
-  },
-}
-
-/**
- * Scenario « The catalogue is edited and read »: a command of the catalogue is edited in place.
- * Its name is what it is found by, so the name stays and the lines, the type and the folder are
- * rewritten.
- */
-export const ACommandIsEdited: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onUpdateCommand?.mockClear()
-    const canvas = within(canvasElement)
-
-    await userEvent.click(canvas.getByRole('button', { name: 'Edit dev' }))
-    const name = canvas.getByRole('textbox', { name: 'Command name' })
-    expect(name).toHaveValue('dev')
-    expect(name).toBeDisabled()
-    const line = canvas.getByRole('textbox', { name: 'Default line' })
-    expect(line).toHaveValue('pnpm dev')
-    await userEvent.clear(line)
-    await userEvent.type(line, 'pnpm dev --host')
-    await userEvent.click(canvas.getByRole('button', { name: 'Save dev' }))
-
-    await waitFor(() => {
-      expect(args.onUpdateCommand).toHaveBeenCalledWith({
-        id: 'dev',
-        name: 'dev',
-        command: 'pnpm dev --host',
-        ...PLAIN,
-        type: 'serve',
-        folder: './sources/front',
-      })
-    })
-    expect(canvas.getByText('pnpm dev --host')).toBeInTheDocument()
-    // The form is back to adding one.
-    expect(canvas.getByRole('button', { name: 'Add a command' })).toBeInTheDocument()
-  },
-}
-
-/**
- * The seven types, each with its fixed icon and word, and a command whose Windows line is its
- * own (D8-07).
- */
-async function theMachineRunsItsOwnVariant({ canvasElement }: StoryContext): Promise<void> {
-  // "The machine runs its own variant"
-  const canvas = within(canvasElement)
-  // SAFETY: the default line of `seed` is drawn on its own row of the catalogue, which is a list
-  // item; the lookups below fail loudly if it ever is not.
-  const row = canvas.getByText('./scripts/seed.sh').closest('li') as HTMLElement
-  const seed = within(row)
-  // The badge names the system and carries the line it runs there, beside the default one.
-  const windows = seed.getByText('Windows')
-  await expect(windows.closest('[title]')).toHaveAttribute('title', 'scripts\\seed.cmd')
-  await expect(seed.getByText(': scripts\\seed.cmd')).toBeInTheDocument()
-  await expect(seed.getByText('./scripts/seed.sh')).toBeVisible()
-  // No Linux line is set, so Linux runs the default and no badge says otherwise.
-  await expect(seed.queryByText('Linux')).toBeNull()
-  // Every type of the catalogue is drawn with its word.
-  const drawn = Object.values(COMMAND_TYPE_LABELS).filter(
-    (word) => canvas.queryAllByText(word, { exact: true }).length > 0,
-  )
-  await expect(drawn).toEqual(Object.values(COMMAND_TYPE_LABELS))
-  // The shared server says it is the Project's and goes through Portless.
-  await expect(canvas.getByText('Project, in main')).toBeVisible()
-  await expect(canvas.getByText('Portless')).toBeVisible()
-}
-
-export const CommandTypes: Story = {
-  play: theMachineRunsItsOwnVariant,
-}
-
-/** A scope and Portless are a `serve`'s alone: the form offers them for that type only. */
-export const ServeScope: Story = {
+/** Preparation: the recipe the caller composes, drawn as it is handed. */
+export const Preparation: Story = {
+  args: { defaultSection: 'preparation' },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.queryByLabelText('Scope')).toBeNull()
-    await expect(canvas.queryByRole('checkbox', { name: 'Serve through Portless' })).toBeNull()
-
-    await choose(canvasElement, 'Type', /^Serve/)
-    await waitFor(() => {
-      expect(canvas.getByLabelText('Scope')).toBeInTheDocument()
-    })
-    await expect(canvas.getByRole('checkbox', { name: 'Serve through Portless' })).not.toBeChecked()
-
-    await choose(canvasElement, 'Type', /^Test/)
-    await waitFor(() => {
-      expect(canvas.queryByLabelText('Scope')).toBeNull()
-    })
-    await expect(canvas.queryByRole('checkbox', { name: 'Serve through Portless' })).toBeNull()
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByText('copy .env in each repository')).toBeVisible()
   },
 }
 
-/** Each repository says whether a dedicated Workspace takes it by default (D8-04). */
-export const RepositoriesDefault: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onToggleIncluded?.mockClear()
-    const canvas = within(canvasElement)
-    const api = canvas.getByRole('checkbox', {
-      name: 'In every Workspace by default for ./sources/api',
-    })
-    await expect(api).toBeChecked()
-    await expect(
-      canvas.getByRole('checkbox', { name: 'In every Workspace by default for ./docs' }),
-    ).not.toBeChecked()
-
-    await userEvent.click(api)
-    await expect(args.onToggleIncluded).toHaveBeenCalledWith('./sources/api', false)
-    await waitFor(() => {
-      expect(api).not.toBeChecked()
-    })
+/** Variables: the Project's own, composed by the caller. */
+export const Variables: Story = {
+  args: { defaultSection: 'variables' },
+  play: async ({ canvasElement }) => {
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByText('DATABASE_URL')).toBeVisible()
   },
 }
 
-/** Where dedicated Workspaces go and what their branches are called, saved with the page. */
-export const DedicatedWorkspaces: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onSave.mockClear()
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('textbox', { name: 'Workspaces folder' })).toHaveValue('')
-    const prefix = canvas.getByRole('textbox', { name: 'Branch prefix' })
-    // Empty, the prefix is the Project's slug, and the description says what a branch becomes.
-    await expect(prefix).toHaveAttribute('placeholder', 'atlas')
-    await expect(canvas.getByText('Dedicated branches are atlas/<KEY>-<slug>.')).toBeVisible()
-
-    await userEvent.type(prefix, 'kris')
-    await expect(canvas.getByText('Dedicated branches are kris/<KEY>-<slug>.')).toBeVisible()
-    await waitFor(() => {
-      expect(canvas.getByRole('button', { name: 'Save' })).toBeEnabled()
-    })
-    await userEvent.click(canvas.getByRole('button', { name: 'Save' }))
-    await waitFor(() => {
-      expect(args.onSave).toHaveBeenCalledWith({ ...ATLAS, branchPrefix: 'kris' })
-    })
-  },
-}
-
-/**
- * The cards of what the Project holds beyond itself, handed in by the caller: here its
- * Workspaces, drawn after the commands and before the archive.
- */
-export const WorkspaceCards: Story = {
+/** What the engine refused about a composed section, said at its top, as it said it. */
+export const Refused: Story = {
   args: {
-    children: (
-      <WorkspaceList
-        workspaces={[
-          {
-            id: 'main',
-            name: 'main',
-            path: ATLAS.mainPath,
-            state: 'ready',
-            main: true,
-            dedicated: false,
-          },
-        ]}
-        onBrowse={fn(async () => await Promise.resolve(null))}
-        onCreate={fn(async () => await Promise.resolve(null))}
-        onCleanup={fn()}
-      />
-    ),
+    defaultSection: 'workspaces',
+    slotRefusal: 'the Workspaces of Atlas could not be read: the engine is not answering',
   },
   play: async ({ canvasElement }) => {
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByRole('alert')).toHaveTextContent('the engine is not answering')
+    await expect(panel.getByRole('list', { name: 'Workspaces' })).toBeVisible()
+  },
+}
+
+/**
+ * The navigation with the keyboard: one stop, the arrows walk it and show each section, Tab
+ * goes on into the section; a dialog opened from a row gives the focus back to its pencil.
+ */
+export const Keyboard: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onSectionChange?.mockClear()
     const canvas = within(canvasElement)
-    const workspaces = canvas.getByRole('list', { name: 'Workspaces' })
-    const commands = canvas.getByText('Commands')
-    const archive = canvas.getByText('Archive this Project')
-    await expect(workspaces).toBeVisible()
-    // After the commands and before the archive, which stays the last thing on the page.
-    await expect(
-      commands.compareDocumentPosition(workspaces) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
-    await expect(
-      workspaces.compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
+    const general = canvas.getByRole('tab', { name: 'General' })
+    general.focus()
+    await userEvent.keyboard('{ArrowDown}')
+    const repositories = canvas.getByRole('tab', { name: 'Repositories' })
+    await expect(repositories).toHaveFocus()
+    await expect(repositories).toHaveAttribute('aria-selected', 'true')
+    await expect(args.onSectionChange).toHaveBeenCalledWith('repositories')
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}')
+    await expect(canvas.getByRole('tab', { name: 'Commands' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    // Tab leaves the navigation for the first control of the section.
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Add command' })).toHaveFocus()
+
+    const pencil = canvas.getByRole('button', { name: 'Edit check' })
+    pencil.focus()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => {
+      expect(within(document.body).getByRole('dialog')).toBeVisible()
+    })
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    await expect(pencil).toHaveFocus()
+    // The section chosen stays chosen.
+    await expect(canvas.getByRole('tab', { name: 'Commands' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
   },
 }

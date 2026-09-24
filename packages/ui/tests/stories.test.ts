@@ -201,6 +201,21 @@ const NAMED_STATES = new Map([
   ],
   // Lot 20: the recipe of a Project, with nothing in it, in order, being added to, and walked.
   ['project/preparation-editor', ['Empty', 'Filled', 'Adding', 'Keyboard']],
+  // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
+  [
+    'project/project-settings',
+    [
+      'Complete',
+      'General',
+      'Repositories',
+      'Workspaces',
+      'Commands',
+      'Preparation',
+      'Variables',
+      'Refused',
+      'Keyboard',
+    ],
+  ],
   ['project/repository-dialog', ['Add', 'Edit', 'Invalid', 'Refused', 'Keyboard']],
   [
     'project/command-dialog',
@@ -479,6 +494,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // and the rail it is fed with.
       'MissionPanel',
       'MissionRail',
+      // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
+      'CommandDialog',
+      'RepositoryDialog',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
@@ -516,6 +534,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'NESTED_RADIUS',
       'PROJECT_SETTINGS_ENTRY',
       'PROJECT_TONES',
+      // Recette 1 of lot 20: the icons a repository may be drawn with.
+      'REPOSITORY_ICONS',
       'SIDEBAR_DEFAULT',
       'SIDEBAR_MAX',
       'SIDEBAR_MIN',

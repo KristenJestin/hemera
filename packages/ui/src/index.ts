@@ -85,11 +85,22 @@ export {
   DangerZone,
   ProjectSettings,
   RepositoryList,
-  type CommandLine,
   type ProjectSettingsProps,
+  type ProjectSettingsSection,
 } from './project/project-settings.tsx'
+/** The dialogs a repository and a command of the Project are added and edited in. */
+export { CommandDialog, type CommandDialogProps } from './project/command-dialog.tsx'
+export { RepositoryDialog, type RepositoryDialogProps } from './project/repository-dialog.tsx'
 
-export type { ProjectDraft, ProjectSettingsDraft, RepositoryLine } from './project/model.ts'
+export {
+  REPOSITORY_ICONS,
+  type CommandLine,
+  type ProjectDraft,
+  type ProjectSettingsDraft,
+  type RepositoryDraft,
+  type RepositoryIcon,
+  type RepositoryLine,
+} from './project/model.ts'
 /** The preparation of a Project: the ordered recipe each dedicated Workspace replays (D8-05). */
 export {
   PreparationEditor,
