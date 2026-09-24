@@ -363,5 +363,11 @@ describe('The steps follow the recipe in order', () => {
 
     await removeRecipeStep(project.id, first!.id)
     expect(recipeOf(project.id).map((one) => one.kind)).toEqual(['copy'])
+    expect(workspacesSnapshot().refusal).toBeNull()
+
+    // A step that is not there any more is the engine's refusal, kept for the page to say.
+    await removeRecipeStep(project.id, first!.id)
+    expect(workspacesSnapshot().refusal).not.toBeNull()
+    expect(recipeOf(project.id).map((one) => one.kind)).toEqual(['copy'])
   })
 })

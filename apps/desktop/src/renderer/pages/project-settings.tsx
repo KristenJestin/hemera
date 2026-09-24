@@ -244,6 +244,7 @@ export function ProjectSettingsPage({
   onMoveRecipeStep,
   onSetProjectVariable,
   onRemoveProjectVariable,
+  workspacesRefusal,
 }: {
   project: ProjectDraft
   subtitle?: string
@@ -286,6 +287,12 @@ export function ProjectSettingsPage({
   /** Sets one of the Project's own variables; answers the engine's refusal, or null (D8-06). */
   onSetProjectVariable: (key: string, value: string) => Promise<string | null>
   onRemoveProjectVariable: (key: string) => void
+  /**
+   * What the engine last refused about the Workspaces, the recipe or the variables, in its words:
+   * a read that failed, or an act whose card has no place of its own to say it. Null once the
+   * next act began.
+   */
+  workspacesRefusal: string | null
 }): ReactNode {
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
@@ -307,6 +314,11 @@ export function ProjectSettingsPage({
         onRemoveCommand={onRemoveCommand}
         onArchive={onArchive}
       >
+        {workspacesRefusal !== null && (
+          <p role="alert" className="text-sm text-destructive-muted-foreground">
+            {workspacesRefusal}
+          </p>
+        )}
         <WorkspacesCards
           workspaces={workspaces}
           shown={shown}

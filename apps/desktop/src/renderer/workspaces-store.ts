@@ -88,6 +88,10 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
+/**
+ * Keeps what the engine refused, for the page to say (`role="alert"`) until the next act: a read
+ * that failed, or an act whose card has no place of its own for a refusal.
+ */
 function refused(cause: unknown): string {
   const said = message(cause)
   replace({ ...state, refusal: said })
@@ -166,6 +170,7 @@ export async function createOnFolder(
   path: string,
   name: string,
 ): Promise<string | null> {
+  forgetWorkspacesRefusal()
   try {
     await window.hemera.invoke('workspaces.createOnFolder', { projectId, path, name })
     await readWorkspaces(projectId)
@@ -180,6 +185,7 @@ export async function createOnFolder(
  * still running, Git refusing — and null once the list was read again.
  */
 export async function cleanUp(projectId: string, workspaceId: string): Promise<string | null> {
+  forgetWorkspacesRefusal()
   try {
     await window.hemera.invoke('workspaces.cleanup', { id: workspaceId })
     await readWorkspaces(projectId)
@@ -194,6 +200,7 @@ export async function cleanUp(projectId: string, workspaceId: string): Promise<s
  * this one is — Git, steps, variables, services — is read now.
  */
 export async function showWorkspace(workspace: Workspace | null): Promise<void> {
+  forgetWorkspacesRefusal()
   if (workspace === null) {
     replace({ ...state, shown: null })
     return
@@ -270,6 +277,7 @@ async function readServices(workspaceId: string): Promise<void> {
  * once, and the rest arrives as the `workspace` event says it moved.
  */
 export async function resumePreparation(workspaceId: string): Promise<void> {
+  forgetWorkspacesRefusal()
   try {
     const steps = await window.hemera.invoke('preparation.resume', { workspaceId })
     onShown(workspaceId, (shown) => ({ ...shown, steps }))
@@ -280,6 +288,7 @@ export async function resumePreparation(workspaceId: string): Promise<void> {
 
 /** Shows the details of one service of the Workspace shown, or none. */
 export function selectRun(runId: string | null): void {
+  forgetWorkspacesRefusal()
   const shown = state.shown
   if (shown === null) return
   replace({
@@ -290,6 +299,7 @@ export function selectRun(runId: string | null): void {
 
 /** Stops one service of the Workspace shown, that instance and no other (D8-08). */
 export async function stopService(runId: string): Promise<void> {
+  forgetWorkspacesRefusal()
   const shown = state.shown
   if (shown === null) return
   try {
@@ -312,6 +322,7 @@ export async function addRecipeStep(
   projectId: string,
   step: Omit<ChannelArguments<'recipe.add'>, 'projectId'>,
 ): Promise<string | null> {
+  forgetWorkspacesRefusal()
   try {
     const recipe = await window.hemera.invoke('recipe.add', { projectId, ...step })
     replace({ ...state, recipes: withKey(state.recipes, projectId, recipe) })
@@ -322,6 +333,7 @@ export async function addRecipeStep(
 }
 
 export async function removeRecipeStep(projectId: string, id: string): Promise<void> {
+  forgetWorkspacesRefusal()
   try {
     const recipe = await window.hemera.invoke('recipe.remove', { projectId, id })
     replace({ ...state, recipes: withKey(state.recipes, projectId, recipe) })
@@ -335,6 +347,7 @@ export async function moveRecipeStep(
   id: string,
   direction: 'up' | 'down',
 ): Promise<void> {
+  forgetWorkspacesRefusal()
   try {
     const recipe = await window.hemera.invoke('recipe.move', { projectId, id, direction })
     replace({ ...state, recipes: withKey(state.recipes, projectId, recipe) })
@@ -359,6 +372,7 @@ export async function setVariable(
   key: string,
   value: string,
 ): Promise<string | null> {
+  forgetWorkspacesRefusal()
   try {
     await window.hemera.invoke('variables.set', { projectId, workspaceId, key, value })
     await readScope(projectId, workspaceId)
@@ -373,6 +387,7 @@ export async function removeVariable(
   workspaceId: string | null,
   key: string,
 ): Promise<void> {
+  forgetWorkspacesRefusal()
   try {
     await window.hemera.invoke('variables.remove', { projectId, workspaceId, key })
     await readScope(projectId, workspaceId)
@@ -461,7 +476,10 @@ export function listenToWorkspaces(): () => void {
   }
 }
 
-/** Clears the last refusal, once whoever showed it has shown it. */
+/**
+ * Clears the last refusal: every act begins with it, since what the act before was refused with
+ * has been said by then.
+ */
 export function forgetWorkspacesRefusal(): void {
   if (state.refusal === null) return
   replace({ ...state, refusal: null })

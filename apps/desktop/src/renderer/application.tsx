@@ -1106,6 +1106,7 @@ export function Application() {
             await setVariable(current.id, null, key, value)
           }
           onRemoveProjectVariable={(key) => void removeVariable(current.id, null, key)}
+          workspacesRefusal={places.refusal}
         />
       )
     }

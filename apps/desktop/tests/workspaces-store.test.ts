@@ -14,7 +14,10 @@ import {
   cleanUp,
   forgetWorkspacesRefusal,
   listenToWorkspaces,
+  moveRecipeStep,
   readWorkspaces,
+  removeRecipeStep,
+  removeVariable,
   resumePreparation,
   selectRun,
   serviceChange,
@@ -321,5 +324,49 @@ describe('What a pushed run does to the services shown', () => {
     expect(
       serviceChange([], run('run-dev', { workspaceId: null, workspaceName: 'main' }), onMain),
     ).toBe('read')
+  })
+})
+
+describe("A refusal is the engine's sentence, said until the next act", () => {
+  const cases: [string, string, () => Promise<void>][] = [
+    [
+      'a resume while the preparation runs',
+      'preparation.resume',
+      async () => await resumePreparation('login-form'),
+    ],
+    ['a recipe step moved', 'recipe.move', async () => await moveRecipeStep('atlas', 'r1', 'up')],
+    ['a recipe step removed', 'recipe.remove', async () => await removeRecipeStep('atlas', 'r1')],
+    ['a service stopped', 'commands.stopService', async () => await stopService('run-dev')],
+    [
+      'a variable removed',
+      'variables.remove',
+      async () => await removeVariable('atlas', 'login-form', 'PORT'),
+    ],
+    ['a list read', 'workspaces.list', async () => await readWorkspaces('atlas')],
+  ]
+
+  for (const [what, channel, act] of cases) {
+    test(`${what} that the engine refuses is kept in its words`, async () => {
+      answersForShowing()
+      await showWorkspace(LOGIN_FORM)
+      answers.set(channel, new Error('this Workspace is already being prepared'))
+
+      await act()
+
+      expect(workspacesSnapshot().refusal).toBe('this Workspace is already being prepared')
+    })
+  }
+
+  test('the next act clears what the one before was refused with', async () => {
+    answersForShowing()
+    await showWorkspace(LOGIN_FORM)
+    answers.set('recipe.remove', new Error('no step r1 in this recipe'))
+    await removeRecipeStep('atlas', 'r1')
+    expect(workspacesSnapshot().refusal).toBe('no step r1 in this recipe')
+
+    answers.set('recipe.move', [])
+    await moveRecipeStep('atlas', 'r2', 'down')
+
+    expect(workspacesSnapshot().refusal).toBeNull()
   })
 })
