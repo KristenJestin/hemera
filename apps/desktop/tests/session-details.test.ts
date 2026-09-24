@@ -47,6 +47,7 @@ function aRun(id: string, cwd: string, state: CommandRun['state'], commandId: st
     url: state === 'running' ? 'http://localhost:5173' : null,
     readyAt: null,
     portConflict: null,
+    heldAgainst: [],
     exitCode: state === 'running' ? null : 0,
     output: 'ready\n',
     dropped: 0,

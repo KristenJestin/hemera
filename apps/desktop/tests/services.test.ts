@@ -318,6 +318,8 @@ describe('A port conflict names its holder', () => {
           commands.output(inLoginForm.sessionId, second.id),
           (view) => view.portConflict !== null,
         )
+        // main's services, read while both run: the holder's side, derived (Decided 12).
+        const mainServices = yield* commands.services(main.projectId, null)
         // And another tries to listen on it, and dies of it.
         const third = yield* commands.run(
           request(inLoginForm, {
@@ -329,7 +331,7 @@ describe('A port conflict names its holder', () => {
         )
         // Read once its end is written: what it printed last is what names the port.
         const died = yield* commands.awaited(inLoginForm.sessionId, third.id, 5_000)
-        return { holder, named, died }
+        return { holder, second, workspace, named, died, mainServices }
       }),
     )
 
@@ -345,6 +347,21 @@ describe('A port conflict names its holder', () => {
     expect(seen.died.output).toContain('EADDRINUSE')
     expect(seen.died.state).toBe('failed')
     expect(seen.died.portConflict).toEqual(conflict)
+    // The holder, read among main's services, names the login-form run that published its port.
+    expect(seen.mainServices.map((service) => [service.id, service.heldAgainst])).toEqual([
+      [
+        seen.holder.id,
+        [
+          {
+            port,
+            runId: seen.second.id,
+            workspaceId: seen.workspace.id,
+            workspaceName: 'login-form',
+            name: 'dev',
+          },
+        ],
+      ],
+    ])
   })
 })
 

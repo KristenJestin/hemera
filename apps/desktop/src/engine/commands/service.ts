@@ -238,6 +238,12 @@ export interface Run {
   readonly readiness: Readiness
   /** The run holding the port it published, and null when none does (D8-09). */
   readonly portConflict: PortConflict | null
+  /**
+   * The runs that published the port this one holds, each named as a conflict is: the holder's
+   * side, derived when the Workspace's services are read and stored nowhere (D8-09, Decided 12);
+   * empty on any other read.
+   */
+  readonly heldAgainst: PortConflict[]
   readonly exitCode: number | null
   /** The end of what it printed, bounded: what fits in `OUTPUT_KEPT_BYTES`. */
   readonly output: string
@@ -359,6 +365,12 @@ export interface CommandsService {
   /** What the Project has running, in every Workspace, oldest first. */
   readonly runningOf: (projectId: string) => Effect.Effect<RunView[]>
   /**
+   * The services of a Workspace, oldest first: its running `serve` runs, whoever started them
+   * (D8-08), each with the runs of the Project whose conflict names it as the holder
+   * (D8-09, Decided 12). Null is `main`, matched as `runningIn` matches it.
+   */
+  readonly services: (projectId: string, workspaceId: string | null) => Effect.Effect<RunView[]>
+  /**
    * The last runs of a Session, newest first, ended ones included.
    *
    * The panel draws them, and `commands_output` answers from them when the agent reads the run
@@ -411,6 +423,14 @@ function conflictOf(text: string): PortConflict | null {
  */
 const inMain = (one: { workspaceId: string | null; workspaceName: string }) =>
   one.workspaceId === null || one.workspaceName === MAIN_WORKSPACE
+
+/**
+ * Whether a run is in the Workspace named: `main` by null, whose runs are read as `inMain`
+ * reads them, and any other by its row.
+ */
+const inWorkspace =
+  (workspaceId: string | null) => (one: { workspaceId: string | null; workspaceName: string }) =>
+    workspaceId === null ? inMain(one) : one.workspaceId === workspaceId
 
 /** Whether two runs are in the same Workspace. */
 const sameWorkspace = (
@@ -541,6 +561,7 @@ export const commandsLayer = Layer.effect(
       readyAt: one.readyAt,
       readiness: readinessOf(one, one.unanswered),
       portConflict: one.portConflict,
+      heldAgainst: [],
       exitCode: one.exitCode,
       output: one.kept,
       dropped: one.dropped,
@@ -615,6 +636,7 @@ export const commandsLayer = Layer.effect(
         false,
       ),
       portConflict: row.portConflict === null ? null : conflictOf(row.portConflict),
+      heldAgainst: [],
       exitCode: row.exitCode,
       output: row.output,
       dropped: row.truncated === 1 ? row.outputBytes - row.output.length : 0,
@@ -1267,13 +1289,36 @@ export const commandsLayer = Layer.effect(
       running: (sessionId) => runningWhere((one) => one.sessionId === sessionId),
 
       runningIn: (workspaceId, projectId) =>
-        runningWhere(
-          (one) =>
-            one.projectId === projectId &&
-            (workspaceId === null ? inMain(one) : one.workspaceId === workspaceId),
-        ),
+        runningWhere((one) => one.projectId === projectId && inWorkspace(workspaceId)(one)),
 
       runningOf: (projectId) => runningWhere((one) => one.projectId === projectId),
+
+      services: (projectId, workspaceId) =>
+        runningWhere((one) => one.projectId === projectId).pipe(
+          Effect.map((running) =>
+            running
+              .filter((run) => run.type === 'serve' && inWorkspace(workspaceId)(run))
+              // The conflict is written on the run that published second; the holder's side is
+              // read off those runs, never stored (Decided 12). Each view was made for this read.
+              .map((run) =>
+                Object.assign(run, {
+                  heldAgainst: running.flatMap((other) =>
+                    other.portConflict?.runId === run.id
+                      ? [
+                          {
+                            port: other.portConflict.port,
+                            runId: other.id,
+                            workspaceId: other.workspaceId,
+                            workspaceName: other.workspaceName,
+                            name: other.name,
+                          },
+                        ]
+                      : [],
+                  ),
+                }),
+              ),
+          ),
+        ),
 
       recent: (sessionId) =>
         runRows()

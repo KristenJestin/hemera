@@ -56,6 +56,21 @@ export const runStateSchema = z.enum(['running', 'exited', 'failed', 'stopped'])
 export type RunState = z.infer<typeof runStateSchema>
 
 /**
+ * A port two runs published (D8-09): the other run, in which Workspace, under which name. On the
+ * run that published second it names the holder; on the holder, read among its Workspace's
+ * services, it names each run that published the port after it (Decided 12).
+ */
+export const portConflictSchema = z.object({
+  port: z.number(),
+  runId: z.string(),
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string(),
+  name: z.string(),
+})
+
+export type PortConflict = z.infer<typeof portConflictSchema>
+
+/**
  * One run of a command, as the panel and the agent both read it (design D6-12).
  *
  * `commandId` is null for a one-off line. `output` is the end of what it printed, bounded, and
@@ -64,7 +79,8 @@ export type RunState = z.infer<typeof runStateSchema>
  * null for a run no Session asked for, a preparation's step (Decided 11). `workspaceId` is
  * the Workspace it runs in, null for `main` (D8-08); `environment` the variables it was given
  * (D8-06); `readyAt` when its address first answered and `portConflict` the run holding the port
- * it published (D8-09).
+ * it published (D8-09); `heldAgainst` the runs that published the port this one holds, filled
+ * when a Workspace's services are read and empty elsewhere (Decided 12).
  */
 export const commandRunSchema = z.object({
   id: z.string(),
@@ -81,15 +97,8 @@ export const commandRunSchema = z.object({
   pid: z.number().nullable(),
   url: z.string().nullable(),
   readyAt: z.string().nullable(),
-  portConflict: z
-    .object({
-      port: z.number(),
-      runId: z.string(),
-      workspaceId: z.string().nullable(),
-      workspaceName: z.string(),
-      name: z.string(),
-    })
-    .nullable(),
+  portConflict: portConflictSchema.nullable(),
+  heldAgainst: z.array(portConflictSchema),
   exitCode: z.number().nullable(),
   output: z.string(),
   dropped: z.number(),

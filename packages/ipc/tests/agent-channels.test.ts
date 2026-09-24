@@ -442,6 +442,7 @@ describe('The agent starts the app and the user opens it', () => {
       url: 'http://localhost:5173',
       readyAt: null,
       portConflict: null,
+      heldAgainst: [],
       exitCode: null,
       output: 'ready in 300 ms',
       dropped: 0,
