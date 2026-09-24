@@ -1,7 +1,8 @@
 /**
  * What the window is opened with, kept apart from `window.ts` so it can be read without Electron.
  *
- * The end-to-end suite has one seam here and nowhere else: `HEMERA_E2E_HEADLESS=1` opens the
+ * The end-to-end suite has one of its two seams here and nowhere else (D5-16; the other is
+ * `HEMERA_E2E_QUALIFIED`, in `src/engine/agents/bare.ts`): `HEMERA_E2E_HEADLESS=1` opens the
  * window where no display is, out of the taskbar and unable to take the focus, so a suite run on
  * a machine in use neither puts a window on its screen nor takes its keyboard. Without the
  * variable the options are exactly the ones the application always opens with.

@@ -83,6 +83,24 @@ export const CHANNELS = {
   'sessions.append': ENGINE_REQUESTS['sessions.append'],
   'sessions.read': ENGINE_REQUESTS['sessions.read'],
 
+  // The Specs, relayed the same way: the panel reads and writes them as the human (D7-04).
+  'specs.list': ENGINE_REQUESTS['specs.list'],
+  'specs.read': ENGINE_REQUESTS['specs.read'],
+  'specs.revisions': ENGINE_REQUESTS['specs.revisions'],
+  'specs.create': ENGINE_REQUESTS['specs.create'],
+  'specs.openSession': ENGINE_REQUESTS['specs.openSession'],
+  'specs.writeSection': ENGINE_REQUESTS['specs.writeSection'],
+  'specs.writeStories': ENGINE_REQUESTS['specs.writeStories'],
+  'specs.writeTasks': ENGINE_REQUESTS['specs.writeTasks'],
+  'specs.raiseQuestion': ENGINE_REQUESTS['specs.raiseQuestion'],
+  'specs.answerQuestion': ENGINE_REQUESTS['specs.answerQuestion'],
+  'specs.markReady': ENGINE_REQUESTS['specs.markReady'],
+  'specs.reopen': ENGINE_REQUESTS['specs.reopen'],
+  'specs.transferWrite': ENGINE_REQUESTS['specs.transferWrite'],
+  'specs.buffers.read': ENGINE_REQUESTS['specs.buffers.read'],
+  'specs.buffers.save': ENGINE_REQUESTS['specs.buffers.save'],
+  'specs.buffers.discard': ENGINE_REQUESTS['specs.buffers.discard'],
+
   // The agents, relayed the same way: what this machine has, what a Session's agent offers, and
   // what the window asks of a Session that is running — a turn, a stop, a decision, a resume.
   'agents.list': ENGINE_REQUESTS['agents.list'],

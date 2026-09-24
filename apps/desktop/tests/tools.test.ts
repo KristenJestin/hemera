@@ -43,6 +43,8 @@ import { Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { NoSpecNotices } from '#engine/specs/notices.ts'
+import { specsLayer } from '#engine/specs/specs.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { ToolCatalogue, toolCatalogueLayer } from '#engine/tools/catalogue.ts'
@@ -139,9 +141,11 @@ function engine(human: Human) {
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(
-      Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
-        Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite'))),
-      ),
+      Layer.mergeAll(
+        projectsLayer,
+        sessionsLayer,
+        specsLayer.pipe(Layer.provide(NoSpecNotices)),
+      ).pipe(Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite')))),
     ),
     Layer.provide(processes),
     Layer.provide(heldWordsLayer),

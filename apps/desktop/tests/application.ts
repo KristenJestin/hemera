@@ -45,6 +45,8 @@ import { preferencesLayer } from '#engine/preferences.ts'
 import type { Preferences } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer, type ThreadWrite } from '#engine/sessions.ts'
+import { NoSpecNotices, type SpecNotices } from '#engine/specs/notices.ts'
+import { type Specs, specsLayer } from '#engine/specs/specs.ts'
 import { DatabaseError, databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
@@ -184,6 +186,7 @@ export function application(
     const services: Layer.Layer<
       | Projects
       | Sessions
+      | Specs
       | Preferences
       | AgentRuntime
       | ToolAccess
@@ -197,9 +200,12 @@ export function application(
       Layer.provideMerge(contextLayer),
       Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer)),
       Layer.provideMerge(
-        Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
-          Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
-        ),
+        Layer.mergeAll(
+          projectsLayer,
+          storage.sessions,
+          preferencesLayer,
+          specsLayer.pipe(Layer.provide(NoSpecNotices)),
+        ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(supervisor ?? fakeSupervisor(agent)),
@@ -218,6 +224,7 @@ export function application(
         E,
         | Projects
         | Sessions
+        | Specs
         | Preferences
         | AgentRuntime
         | ToolAccess
@@ -364,6 +371,7 @@ export const joined = <A, E>(fiber: Fiber.Fiber<A, E>) => Fiber.join(fiber)
 export type ToolEngine =
   | Projects
   | Sessions
+  | Specs
   | Preferences
   | AgentRuntime
   | ToolAccess
@@ -427,6 +435,8 @@ export function toolApplication(
   // A storage that never fails, unless the suite is about one that does; its diagnostic is not
   // the one read here, which is `written`.
   storage: ReturnType<typeof failing> = failing(),
+  // Nobody hears of a Spec changing, unless the suite is about the window that does.
+  specNotices: Layer.Layer<SpecNotices> = NoSpecNotices,
 ) {
   return (agent: FakeAgent, ...others: readonly FakeAgent[]) => {
     const lines = Layer.succeed(StderrSink, {
@@ -446,9 +456,12 @@ export function toolApplication(
       Layer.provideMerge(contextLayer),
       Layer.provideMerge(journalLayer),
       Layer.provideMerge(
-        Layer.mergeAll(projectsLayer, storage.sessions, preferencesLayer).pipe(
-          Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
-        ),
+        Layer.mergeAll(
+          projectsLayer,
+          storage.sessions,
+          preferencesLayer,
+          specsLayer.pipe(Layer.provide(specNotices)),
+        ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(

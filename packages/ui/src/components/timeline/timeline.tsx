@@ -62,6 +62,8 @@ const TONES = {
   success: 'bg-success',
   warning: 'bg-warning',
   neutral: 'bg-mission-free',
+  /** A Spec being defined, in the colour of the define mission. */
+  define: 'bg-mission-define',
 } satisfies Record<string, string>
 
 export type TimelineTone = keyof typeof TONES

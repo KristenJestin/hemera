@@ -3,11 +3,14 @@ import {
   type Project as DomainProject,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
+  InvalidSpecPrefixError,
   MAIN_WORKSPACE,
   type ProjectTone,
   projectName,
   rankBetween,
   repositoryPath,
+  specPrefix,
+  specPrefixFrom,
 } from '@hemera/core'
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
@@ -32,6 +35,8 @@ export interface Project extends DomainProject {
   mainPath: string
   /** What it reads from, relative to that root, in the order the user put them in. */
   repositories: string[]
+  /** What its Spec keys start with, `PREFIX-n` (D7-02). */
+  specPrefix: string
 }
 
 /** A Project was asked for by an identifier nothing answers to. */
@@ -48,6 +53,8 @@ export interface NewProject {
   tone: ProjectTone
   /** The folder `main` will point at. Checked by the main process before it gets here. */
   mainPath: string
+  /** The Spec key prefix; derived from the name when not given (Decided 2). */
+  specPrefix?: string | undefined
 }
 
 /** What can be changed about a Project without touching its Workspaces. */
@@ -56,6 +63,8 @@ export interface ProjectEdit {
   version: number
   name?: string | undefined
   tone?: ProjectTone | undefined
+  /** A new Spec key prefix; the keys already minted keep theirs (D7-02). */
+  specPrefix?: string | undefined
 }
 
 /**
@@ -75,8 +84,10 @@ export interface ProjectsService {
   readonly list: (includeArchived?: boolean | undefined) => Effect.Effect<Project[], DatabaseError>
   readonly create: (
     asked: NewProject,
-  ) => Effect.Effect<Project, DatabaseError | InvalidProjectNameError>
-  readonly update: (edit: ProjectEdit) => Effect.Effect<Project, Refusal | InvalidProjectNameError>
+  ) => Effect.Effect<Project, DatabaseError | InvalidProjectNameError | InvalidSpecPrefixError>
+  readonly update: (
+    edit: ProjectEdit,
+  ) => Effect.Effect<Project, Refusal | InvalidProjectNameError | InvalidSpecPrefixError>
   readonly moveMain: (id: string, version: number, path: string) => Effect.Effect<Project, Refusal>
   readonly archive: (id: string, version: number) => Effect.Effect<Project, Refusal>
   readonly restore: (id: string, version: number) => Effect.Effect<Project, Refusal>
@@ -132,6 +143,14 @@ function named(candidate: string) {
     try: () => projectName(candidate),
     catch: (cause) =>
       cause instanceof InvalidProjectNameError ? cause : new InvalidProjectNameError(String(cause)),
+  })
+}
+
+function prefixed(candidate: string) {
+  return Effect.try({
+    try: () => specPrefix(candidate),
+    catch: (cause) =>
+      cause instanceof InvalidSpecPrefixError ? cause : new InvalidSpecPrefixError(candidate),
   })
 }
 
@@ -218,6 +237,7 @@ export const projectsLayer = Layer.effect(
           repositories: locations
             .filter((one) => one.projectId === row.id)
             .map((one) => one.relativePath),
+          specPrefix: row.specPrefix,
         }))
       })
 
@@ -241,7 +261,12 @@ export const projectsLayer = Layer.effect(
       transaction: Parameters<Parameters<typeof mutate>[1]>[0],
       id: string,
       version: number,
-      change: Partial<{ name: string; tone: string; archivedAt: string | null }>,
+      change: Partial<{
+        name: string
+        tone: string
+        specPrefix: string
+        archivedAt: string | null
+      }>,
     ) =>
       Effect.gen(function* () {
         const written = yield* transaction
@@ -287,9 +312,20 @@ export const projectsLayer = Layer.effect(
               const written = now()
               const name = yield* named(asked.name)
               const mainPath = canonical(asked.mainPath)
+              const prefix =
+                asked.specPrefix === undefined
+                  ? specPrefixFrom(name)
+                  : yield* prefixed(asked.specPrefix)
               yield* transaction
                 .insert(projects)
-                .values({ id, name, tone: asked.tone, createdAt: written, updatedAt: written })
+                .values({
+                  id,
+                  name,
+                  tone: asked.tone,
+                  specPrefix: prefix,
+                  createdAt: written,
+                  updatedAt: written,
+                })
                 .pipe(Effect.mapError(failed('writing the Project')))
               // The Workspace is created with the Project and never removed: the path belongs to
               // it, so a Project without one is a Project with nowhere to be.
@@ -317,6 +353,7 @@ export const projectsLayer = Layer.effect(
                 version: 1,
                 mainPath,
                 repositories: [],
+                specPrefix: prefix,
               }
               return {
                 result: project,
@@ -328,7 +365,12 @@ export const projectsLayer = Layer.effect(
                     source: 'ui',
                     author: 'human',
                     projectId: id,
-                    payload: { name, tone: asked.tone, mainPath },
+                    payload: {
+                      name,
+                      tone: asked.tone,
+                      mainPath,
+                      specPrefix: prefix,
+                    },
                   },
                 ],
               } satisfies Mutation<Project>
@@ -346,6 +388,10 @@ export const projectsLayer = Layer.effect(
               // be told about — which is the whole reason the use case declares it.
               if (edit.name !== undefined) change['name'] = yield* named(edit.name)
               if (edit.tone !== undefined) change['tone'] = edit.tone
+              // Only the next keys take it: the keys already minted are never renamed (D7-02).
+              if (edit.specPrefix !== undefined) {
+                change['specPrefix'] = yield* prefixed(edit.specPrefix)
+              }
               yield* bump(transaction, edit.id, edit.version, change)
               const project = yield* readOne(edit.id)
               return {
@@ -358,7 +404,11 @@ export const projectsLayer = Layer.effect(
                     source: 'ui',
                     author: 'human',
                     projectId: edit.id,
-                    payload: { name: project.name, tone: project.tone },
+                    payload: {
+                      name: project.name,
+                      tone: project.tone,
+                      specPrefix: project.specPrefix,
+                    },
                   },
                 ],
               } satisfies Mutation<Project>

@@ -186,16 +186,17 @@ function endOf(stopReason: string | null): ActivityState {
 }
 
 /**
- * Where the last turn began: the last message the user wrote, or a change of the instructions
- * Hemera handed over while no turn ran, which is a turn of its own (D6-08) — or -1 in a thread
- * where neither happened. A delivery made inside a turn the user started belongs to that turn,
- * and carries no turn of its own.
+ * Where the last turn began: the last message the user wrote, or what Hemera handed over while no
+ * turn ran — a change of the instructions, a mission brief, a human edit or answer — which is a
+ * turn of its own (D6-08, D7-09) — or -1 in a thread where neither happened. A delivery made
+ * inside a turn the user started belongs to that turn, and carries no turn of its own.
  */
 function lastSaid(entries: readonly SessionEntry[]): number {
   for (let at = entries.length - 1; at >= 0; at -= 1) {
     const entry = entries[at]
     if (entry?.role === 'user' && entry.kind === 'message') return at
-    if (entry?.kind === 'context_delivery' && entry.turnId !== null) return at
+    const handed = entry?.kind === 'context_delivery' || entry?.kind === 'mission_brief'
+    if (handed && entry.turnId !== null) return at
   }
   return -1
 }

@@ -40,7 +40,7 @@ import {
   type JournalFilter,
   type OfferedAgent,
   type ProfileFacts,
-  type ProjectDraft,
+  type ProjectSettingsDraft,
   type RepositoryLine,
   type ShellProject,
 } from '@hemera/ui'
@@ -108,6 +108,7 @@ import {
   subscribeToSessions,
   writeMessage,
 } from './sessions-store.ts'
+import { closeSpec, forgetSpecRefusal, listenToSpecs, openSpec } from './spec-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -381,6 +382,7 @@ export function Application() {
   /** The two halves of `open` that effects may depend on, which are not the same every render. */
   const openId = open?.id ?? null
   const provider = open?.provider ?? null
+  const openSpecId = open?.specId ?? null
 
   // Everything the window shows about the data folder, asked for once it is open.
   useEffect(() => {
@@ -479,6 +481,32 @@ export function Application() {
   // And the runs, heard on the same channel: a command a Session started while another was on
   // screen has moved on by the time the reader comes back to it (D6-12).
   useEffect(() => listenToTools(), [])
+
+  // A Spec is written by whoever holds its right and read live by every Session on it (D7-11).
+  // A Spec step can change a Session too — accepting a proposal makes it `define`, a Session is
+  // opened on a Spec — so the Sessions of the Project in front are read again with it.
+  useEffect(
+    () =>
+      listenToSpecs((projectId) => {
+        if (projectId === shellState().activeProjectId) void readSessions(projectId)
+      }),
+    [],
+  )
+
+  // What a Spec act was refused with belongs to the Session it was made in: accepting a proposal
+  // refused in one Session is not a sentence to show under the composer of the next.
+  useEffect(() => {
+    forgetSpecRefusal()
+  }, [openId])
+
+  // The Spec of the Session on screen, opened when that Session defines one (D7-07).
+  useEffect(() => {
+    if (openSpecId === null) {
+      closeSpec()
+      return
+    }
+    void openSpec(openSpecId)
+  }, [openSpecId])
 
   // The list the sidebar draws is read again when a Session gets its first entry: the engine
   // writes the user's own message as part of the prompt (design D5-11), and that message is what
@@ -949,7 +977,7 @@ export function Application() {
         <JournalPage
           projectName={active.name}
           entries={linesOf(journal.entries)}
-          filter={journal.kind === 'all' ? 'all' : journal.kind}
+          filter={journal.kind}
           byYou={journal.byYou}
           onFilterChange={(filter: JournalFilter) => {
             void filterJournal(active.id, { kind: filter })
@@ -966,10 +994,20 @@ export function Application() {
     if (shell.activeEntryId === PROJECT_SETTINGS_ENTRY && current !== null) {
       return (
         <ProjectSettingsPage
-          project={{ name: current.name, tone: current.tone, mainPath: current.mainPath }}
+          project={{
+            name: current.name,
+            tone: current.tone,
+            mainPath: current.mainPath,
+            specPrefix: current.specPrefix,
+          }}
           repositories={repositories}
-          onSave={async (draft: ProjectDraft) => {
-            const renamed = await renameProject(current, { name: draft.name, tone: draft.tone })
+          onSave={async (draft: ProjectSettingsDraft) => {
+            // The prefix goes with the identity: only the keys minted from now on take it (D7-02).
+            const renamed = await renameProject(current, {
+              name: draft.name,
+              tone: draft.tone,
+              specPrefix: draft.specPrefix,
+            })
             if (!renamed) return projectsSnapshot().refusal
             if (draft.mainPath === current.mainPath) return null
             const moved = await moveMainWorkspace(
@@ -1018,6 +1056,8 @@ export function Application() {
           // not wait for a turn, and a refusal nobody draws is a message that just goes unanswered.
           refusal={sessions.refusal ?? agents.refusal}
           agent={agentOf(open.id)}
+          sessions={sessions.sessions}
+          running={(sessionId) => agentOf(sessionId).running}
           agents={runsOn(open, agents.agents)}
           options={optionsOf(open.id)}
           onWrite={async (body) => await writeInto(open.id, body)}

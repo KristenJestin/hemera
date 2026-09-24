@@ -7,6 +7,14 @@
  * product's — so the suite answers those three questions with a directory of its own instead of
  * a flag in production code. Nothing under `src/` knows this file exists.
  *
+ * Two test seams exist in `src/` all the same, both environment variables read in one place
+ * each and never set by the application itself: `HEMERA_E2E_HEADLESS`, which opens the window
+ * off screen (`src/main/window-options.ts`), and `HEMERA_E2E_QUALIFIED`, which names the agent
+ * this file fakes so that it is qualified to run bare on a platform where the real one is not
+ * yet (`bareModeOf` in `src/engine/agents/bare.ts`, which the engine's diagnostic log reports
+ * once at start). `wdio.conf.ts` sets the second to `opencode`: without it, every Session the
+ * suite opens on Linux would be refused with OpenCode's own reason.
+ *
  * OpenCode is the agent it answers for, because it is the one of the three that speaks ACP
  * itself: its command *is* what Hemera starts (`opencode acp`), where the other two are started
  * through an adapter resolved out of Hemera's own `node_modules` and could not be replaced

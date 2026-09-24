@@ -88,7 +88,7 @@ export {
   type ProjectSettingsProps,
 } from './project/project-settings.tsx'
 
-export type { ProjectDraft, RepositoryLine } from './project/model.ts'
+export type { ProjectDraft, ProjectSettingsDraft, RepositoryLine } from './project/model.ts'
 
 /** The settings of the application, and the bell of the chrome bar. */
 export {
@@ -357,3 +357,84 @@ export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
 } from './session/resume-fallback-banner.tsx'
+/**
+ * The panel a Session's mission opens beside the chat, and the rail it is fed with: the fold, the
+ * width that pushes the chat, the band; groups of items that say what needs attention. The Spec
+ * panel stands in it; a `build` panel is the next.
+ */
+export { MissionPanel, type MissionPanelProps } from './session/mission-panel.tsx'
+export {
+  MissionRail,
+  type MissionRailGroup,
+  type MissionRailItem,
+  type MissionRailProps,
+  type RailAttention,
+  type RailChoice,
+  type RailIcon,
+} from './session/mission-rail.tsx'
+
+/**
+ * The Spec panel of a `define` Session (lot 19, brief revision 4): folded to a band beside the
+ * chat, and unfolded a head over the rail — the readiness at its foot — and the stage that shows
+ * one part, or one phase; the pieces a Session reading or reworking a Spec adds to it; and the
+ * three blocks of the thread — the thin Hemera line of what the agent was handed, a question of
+ * the Spec asked in the chat, and the agent proposing a Spec in a `free` Session. View types
+ * only: the domain arrives with phase 1.
+ */
+export {
+  SpecPanel,
+  SpecPart,
+  SpecStage,
+  type SpecPanelProps,
+  type SpecPartHandlers,
+  type SpecPartProps,
+  type SpecStageProps,
+} from './spec/spec-panel.tsx'
+export {
+  SpecRail,
+  type RailGroup,
+  type RailRow,
+  type SpecRailProps,
+  type StageChoice,
+} from './spec/spec-rail.tsx'
+export { SpecHead, type SpecHeadProps } from './spec/spec-head.tsx'
+export { SectionPart, type SectionPartProps } from './spec/section-part.tsx'
+export { StoriesPart, type StoriesPartProps } from './spec/stories-part.tsx'
+export { TasksPart, type TasksPartProps } from './spec/tasks-part.tsx'
+export { QuestionsPart, type QuestionsPartProps } from './spec/questions-part.tsx'
+export { ConflictBanner, type ConflictBannerProps } from './spec/conflict-banner.tsx'
+export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
+export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
+export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
+export { SpecQuestion, type SpecQuestionProps } from './spec/spec-question.tsx'
+export {
+  CreateSpecProposal,
+  type CreateSpecProposalProps,
+  type ProposalState,
+} from './spec/create-spec-proposal.tsx'
+export type {
+  Author,
+  ConflictView,
+  Executor,
+  GateCheck,
+  GateCheckView,
+  Mark,
+  PhaseName,
+  PhaseState,
+  PhaseView,
+  ReaderView,
+  ReadinessItem,
+  ReadinessView,
+  RevisionView,
+  SectionName,
+  SectionView,
+  SpecAnswer,
+  SpecQuestionOption,
+  SpecQuestionView,
+  SpecStatus,
+  SpecTarget,
+  SpecType,
+  SpecView,
+  StoryView,
+  TaskView,
+} from './spec/model.ts'

@@ -1,14 +1,17 @@
 import { hemeraToolNamed } from '@hemera/core'
-import type { CommandRun as Run, SessionEntry } from '@hemera/ipc'
+import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
   AgentText,
   CommandRun,
+  CreateSpecProposal,
   DecisionSummary,
   DiffBlock,
   HemeraToolCall,
   type HemeraToolStatus,
   MessageGroup,
+  MissionBrief,
   PermissionRequest,
+  SpecQuestion,
   StoppedTurn,
   ThoughtBlock,
   ToolCallCard,
@@ -18,6 +21,7 @@ import {
   type PlanEntry,
   type PlanPriority,
   type PlanStatus,
+  type SpecAnswer,
   type ToolKind,
   type ToolStatus,
   type TouchedFile,
@@ -36,6 +40,13 @@ import {
   questionOpen,
   subjectOf,
 } from './agent-tool-payloads.ts'
+import {
+  type DefinedSpec,
+  briefOf,
+  proposalOf,
+  questionAnchor,
+  questionEntryOf,
+} from './spec-entries.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -313,6 +324,25 @@ export interface AgentContext {
    * 2026).
    */
   reportedCall: (toolCallId: string) => SessionEntry | undefined
+  /** What the Spec entries of the thread are drawn with. */
+  spec: SpecContext
+}
+
+/** What the Spec entries of a thread need beyond themselves (D7-01, D7-07). */
+export interface SpecContext {
+  /** The whole thread, where the answer written beside a question is found. */
+  thread: readonly SessionEntry[]
+  /** The Spec the Session defines, or null while it is `free`. */
+  specId: string | null
+  /** That Spec as its first revision named it, once it is read: what a created proposal names. */
+  defined: DefinedSpec | null
+  /** The ids of the current revision's questions, null until the Spec is read. */
+  asked: ReadonlySet<string> | null
+  /** The proposals `Not now` was pressed on, in this window only: nothing keeps it. */
+  declined: ReadonlySet<string>
+  onAnswer: (questionId: string, answer: SpecAnswer) => void
+  onCreate: (title: string, type: SpecType) => void
+  onDecline: (entryId: string) => void
 }
 
 /**
@@ -488,6 +518,48 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           minute: '2-digit',
         })}
         byTheReader={read.stopReason === 'cancelled'}
+      />
+    )
+  }
+
+  // The brief a `define` turn rode on: Hemera's line, folded, never a message of yours (D7-09).
+  if (entry.kind === 'mission_brief') {
+    const { title, detail, brief } = briefOf(entry)
+    return <MissionBrief title={title} detail={detail} brief={brief} />
+  }
+
+  // A question of the Spec, asked here and answered here (D7-01). The answer written beside it is
+  // drawn by the question itself, folded to what was chosen, and has no block of its own.
+  if (entry.kind === 'spec_question') {
+    const block = questionEntryOf(entry, context.spec.thread, context.spec.asked)
+    if (block === null) return null
+    const { question, cancelled } = block
+    return (
+      <div id={questionAnchor(question.id)}>
+        <SpecQuestion
+          question={question}
+          cancelled={cancelled}
+          onAnswer={(answer) => context.spec.onAnswer(question.id, answer)}
+        />
+      </div>
+    )
+  }
+
+  if (entry.kind === 'spec_answer') return null
+
+  // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07).
+  if (entry.kind === 'spec_proposal') {
+    const { thread, specId, defined, declined } = context.spec
+    const proposal = proposalOf(entry, thread, specId, defined, declined.has(entry.id))
+    if (proposal === null) return null
+    return (
+      <CreateSpecProposal
+        title={proposal.title}
+        type={proposal.type}
+        state={proposal.state}
+        createdKey={defined?.key}
+        onCreate={context.spec.onCreate}
+        onDecline={() => context.spec.onDecline(entry.id)}
       />
     )
   }

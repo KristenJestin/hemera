@@ -19,7 +19,7 @@ import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
  */
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/HemeraToolCall',
   component: HemeraToolCall,
   parameters: { layout: 'padded' },
@@ -482,11 +482,14 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
   ['commands_output', 'Command output', 'command-output', 'check', 'Reading the output of check'],
   ['project_get', 'Project', 'project', null, 'Reading the Project'],
   ['session_get', 'Session', 'session', null, 'Reading this Session'],
+  ['spec_read', 'Read Spec', 'read-spec', 'HEM-7', 'Reading HEM-7'],
+  ['spec_write', 'Write Spec', 'write-spec', 'scope', 'Writing the scope'],
+  ['spec_propose', 'Propose', 'propose-spec', 'shape', 'Declaring shape finished'],
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): eleven tools, eleven
- * marks and eleven labels, and what each call is about where it is about something. A mark per
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): fourteen tools, fourteen
+ * marks and fourteen labels, and what each call is about where it is about something. A mark per
  * kind of tool drew `fs_list` as `fs_read` and the four commands as one.
  */
 export const EveryTool: Story = {
@@ -509,11 +512,13 @@ export const EveryTool: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const marks = [...canvasElement.querySelectorAll('[data-mark]')]
-    await expect(marks).toHaveLength(11)
-    await expect(new Set(marks.map((mark) => mark.getAttribute('data-mark'))).size).toBe(11)
-    // Eleven pictures, and not one drawn twice.
+    await expect(marks).toHaveLength(CATALOGUE.length)
+    await expect(new Set(marks.map((mark) => mark.getAttribute('data-mark'))).size).toBe(
+      CATALOGUE.length,
+    )
+    // One picture per tool, and not one drawn twice.
     const pictures = marks.map((mark) => mark.querySelector('svg')?.getAttribute('class') ?? '')
-    await expect(new Set(pictures).size).toBe(11)
+    await expect(new Set(pictures).size).toBe(CATALOGUE.length)
     for (const [tool, label, mark, subject] of CATALOGUE) {
       const name = ['Hemera', label, subject, 'Done'].filter((word) => word !== null).join(' ')
       const row = canvas.getByRole('button', { name })

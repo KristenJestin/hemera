@@ -28,6 +28,8 @@ import { commandsLayer, type Commands } from '#engine/commands/service.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { NoSpecNotices } from '#engine/specs/notices.ts'
+import { specsLayer } from '#engine/specs/specs.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { type GrantedAccess, ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
@@ -142,9 +144,11 @@ function engine(
     Layer.provideMerge(Layer.succeed(ToolPermissions, permissions)),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(
-      Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
-        Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite'))),
-      ),
+      Layer.mergeAll(
+        projectsLayer,
+        sessionsLayer,
+        specsLayer.pipe(Layer.provide(NoSpecNotices)),
+      ).pipe(Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite')))),
     ),
     Layer.provide(Layer.mergeAll(processes, sink)),
     Layer.provide(heldWordsLayer),

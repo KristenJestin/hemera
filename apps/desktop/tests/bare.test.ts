@@ -17,7 +17,13 @@ import { z } from 'zod'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { AGENT_PROVIDERS, type AgentAdapter } from '#engine/agents/adapter.ts'
-import { type BareOptions, bareModeOf, bareOptionsOf } from '#engine/agents/bare.ts'
+import {
+  type BareOptions,
+  QUALIFIED_VARIABLE,
+  bareModeOf,
+  bareOptionsOf,
+  qualifiedBySuite,
+} from '#engine/agents/bare.ts'
 import { claude } from '#engine/agents/adapters/claude.ts'
 import { codex } from '#engine/agents/adapters/codex.ts'
 import { NOT_RUN_ON_LINUX, opencode } from '#engine/agents/adapters/opencode.ts'
@@ -520,6 +526,48 @@ describe('A bare OpenCode session starts on the model the user uses', () => {
     } finally {
       rmSync(places.data, { recursive: true, force: true })
       rmSync(places.workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+/** What an adapter declares, with its options compared by what they are rather than by identity. */
+const declaredBy = (adapter: AgentAdapter, platform: NodeJS.Platform) => ({
+  ...adapter.bareMode(platform),
+  options: expect.any(Function),
+})
+
+describe("The end-to-end suite's fake agent is qualified by its variable alone", () => {
+  test('without the variable, every declaration is read as written', () => {
+    for (const adapter of ADAPTERS) {
+      for (const platform of PLATFORMS) {
+        expect(bareModeOf(adapter, platform, {})).toEqual(declaredBy(adapter, platform))
+      }
+    }
+    expect(qualifiedBySuite({})).toBeUndefined()
+  })
+
+  test('naming OpenCode qualifies it on Linux with the means it declared, and only it', () => {
+    const suite = { [QUALIFIED_VARIABLE]: 'opencode' }
+    const declared = opencode.bareMode('linux')
+    const overruled = bareModeOf(opencode, 'linux', suite)
+    expect(overruled.qualified).toBe(true)
+    expect(overruled.means).toBe(declared.means)
+    expect(overruled.options(input)).toEqual(declared.options(input))
+    expect(qualifiedBySuite(suite)).toBe('opencode')
+    // The other agents, and OpenCode where it is qualified already, are what they declare.
+    for (const platform of PLATFORMS) {
+      for (const adapter of [claude, codex]) {
+        expect(bareModeOf(adapter, platform, suite)).toEqual(declaredBy(adapter, platform))
+      }
+    }
+    expect(bareModeOf(opencode, 'win32', suite)).toEqual(declaredBy(opencode, 'win32'))
+  })
+
+  test('a value that names no agent changes nothing', () => {
+    for (const value of ['gemini', 'OpenCode', '']) {
+      const suite = { [QUALIFIED_VARIABLE]: value }
+      expect(qualifiedBySuite(suite)).toBeUndefined()
+      expect(bareModeOf(opencode, 'linux', suite)).toEqual(declaredBy(opencode, 'linux'))
     }
   })
 })

@@ -69,6 +69,8 @@ const AGENTS_MIGRATION = '20260921133441_sessions_with_agents'
  * what it brings is three tables and a wider set of entry kinds rather than a page.
  */
 const TOOLS_MIGRATION = '20260922075631_tools_commands_and_context'
+/** The migration lot 19 adds, the Specs (design D7-01): one a profile of lot 5 has never run. */
+const SPECS_MIGRATION = '20260924122302_specs'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -371,9 +373,10 @@ describe('Un profil du lot 4b est migré vers le lot 5', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
 
-    // Two migrations behind now — the agents' and this lot's — and the copy taken before them
-    // is named after the first of the two, which is the one that was applied first.
-    expect(standing.behind).toEqual([AGENTS_MIGRATION, TOOLS_MIGRATION])
+    // Behind by this migration and those after it, and the copy is named after the first.
+    const carried = carriedMigrations(SHIPPED)
+    const from = carried.findIndex((one) => one.name === LOT_FOUR_B)
+    expect(standing.behind).toEqual(carried.slice(from + 1).map((one) => one.name))
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${AGENTS_MIGRATION}.sqlite`])
 
     // The agent columns arrived...
@@ -464,6 +467,231 @@ describe('Un profil du lot 4b est migré vers le lot 5', () => {
 
     expect(refusals.refused).toEqual([true, true, true])
     expect(refusals.written).toBe(0)
+  })
+})
+
+describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
+  test('the migration keeps Sessions, their threads and the Journal, with the new defaults', async () => {
+    const dataFolder = join(workspace, 'from-lot-six')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(TOOLS_MIGRATION), '0.5.0'))
+
+    // A Project, a Session with an agent and two entries, and a line of the Journal: the three
+    // tables this migration rebuilds, and the one it only widens.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-22T10:00:00.000Z', '2026-09-22T10:00:00.000Z', 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, model, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Fix the parser', 'derived', 'claude', 'opus', 'native-1', 'attached', '/work/atlas', '2026-09-22T10:00:00.000Z', '2026-09-22T10:02:00.000Z', 2)`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, created_at)
+          VALUES ('entry-1', 'session-1', 1, 'user', 'message', 'the parser drops the last line', '{}', '2026-09-22T10:01:00.000Z')`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, correlation_id, created_at)
+          VALUES ('entry-2', 'session-1', 2, 'agent', 'tool_call', 'Read parser.ts', '{"tool":"read"}', 'call-1', '2026-09-22T10:02:00.000Z')`
+        yield* sql`INSERT INTO domain_events (type, entity_kind, entity_id, source, author, occurred_at, project_id, session_id, payload)
+          VALUES ('session.created', 'session', 'session-1', 'ui', 'human', '2026-09-22T10:00:00.000Z', 'atlas', 'session-1', '{}')`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+
+    // One migration behind, and the copy taken before it is named after it.
+    expect(standing.behind).toEqual([SPECS_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
+
+    // The Specs arrived, and the columns that tie a Project and a Session to them...
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const table of [
+      'specs',
+      'spec_revisions',
+      'spec_sections',
+      'user_stories',
+      'acceptance_criteria',
+      'task_sets',
+      'spec_tasks',
+      'task_dependencies',
+      'task_stories',
+      'spec_questions',
+      'spec_phases',
+      'spec_edit_buffers',
+    ]) {
+      expect(schema).toContain(`${table}: CREATE TABLE`)
+    }
+    for (const column of [
+      'spec_prefix',
+      'next_spec_number',
+      'mission',
+      'briefed_at',
+      'spec_key_in_project',
+      "'mission_brief'",
+      "'spec_question'",
+      "'spec_answer'",
+      "'spec_proposal'",
+      'answer_option_id',
+      'answer_text',
+      "`options` text DEFAULT '[]' NOT NULL",
+      "'spec'",
+    ]) {
+      expect(schema).toContain(column)
+    }
+
+    // ...and what the user had is still there, with the defaults a profile of lot 5 is given.
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const projects = yield* sql<{
+          name: string
+          spec_prefix: string
+          next_spec_number: number
+        }>`SELECT name, spec_prefix, next_spec_number FROM projects WHERE id = 'atlas'`
+        const sessions = yield* sql<{
+          title: string
+          provider: string | null
+          native_session_id: string | null
+          native_state: string
+          version: number
+          mission: string
+          spec_id: string | null
+          briefed_at: string | null
+        }>`SELECT title, provider, native_session_id, native_state, version, mission, spec_id, briefed_at
+          FROM sessions WHERE id = 'session-1'`
+        const entries = yield* sql<{
+          seq: number
+          kind: string
+          payload: string
+          correlation_id: string | null
+        }>`SELECT seq, kind, payload, correlation_id FROM session_entries
+          WHERE session_id = 'session-1' ORDER BY seq`
+        const events = yield* sql<{ type: string; entity_id: string }>`
+          SELECT type, entity_id FROM domain_events WHERE entity_kind = 'session'`
+        return { project: projects[0], session: sessions[0], entries, events }
+      }),
+    )
+    expect(kept.project).toEqual({ name: 'Atlas', spec_prefix: 'SPEC', next_spec_number: 1 })
+    expect(kept.session).toEqual({
+      title: 'Fix the parser',
+      provider: 'claude',
+      native_session_id: 'native-1',
+      native_state: 'attached',
+      version: 2,
+      mission: 'free',
+      spec_id: null,
+      briefed_at: null,
+    })
+    expect(kept.entries).toEqual([
+      { seq: 1, kind: 'message', payload: '{}', correlation_id: null },
+      { seq: 2, kind: 'tool_call', payload: '{"tool":"read"}', correlation_id: 'call-1' },
+    ])
+    expect(kept.events).toEqual([{ type: 'session.created', entity_id: 'session-1' }])
+  })
+
+  test('a Spec event is accepted, an unknown status, mission or entity kind still refused', async () => {
+    const dataFolder = join(workspace, 'spec-checks')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+
+    const outcomes = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-23T10:00:00.000Z', '2026-09-23T10:00:00.000Z', 1)`
+        const tried = (insert: Effect.Effect<unknown, unknown>) =>
+          Effect.map(Effect.exit(insert), (exit) => Exit.isSuccess(exit))
+        return {
+          draft:
+            yield* tried(sql`INSERT INTO specs (id, project_id, key, slug, status, current_revision_id, created_at, updated_at)
+            VALUES ('spec-1', 'atlas', 'SPEC-1', 'csv-export', 'draft', 'revision-1', '2026-09-23T10:00:00.000Z', '2026-09-23T10:00:00.000Z')`),
+          unknownStatus:
+            yield* tried(sql`INSERT INTO specs (id, project_id, key, slug, status, current_revision_id, created_at, updated_at)
+            VALUES ('spec-2', 'atlas', 'SPEC-2', 'other', 'shipped', 'revision-2', '2026-09-23T10:00:00.000Z', '2026-09-23T10:00:00.000Z')`),
+          unknownMission:
+            yield* tried(sql`INSERT INTO sessions (id, project_id, title, title_source, mission, created_at, last_written_at, version)
+            VALUES ('s1', 'atlas', 'T', 'derived', 'explore', '2026-09-23T10:00:00.000Z', '2026-09-23T10:00:00.000Z', 1)`),
+          specEvent:
+            yield* tried(sql`INSERT INTO domain_events (type, entity_kind, entity_id, source, author, occurred_at, project_id, spec_id, payload)
+            VALUES ('spec.spec_created', 'spec', 'spec-1', 'ui', 'human', '2026-09-23T10:00:00.000Z', 'atlas', 'spec-1', '{}')`),
+          unknownKind:
+            yield* tried(sql`INSERT INTO domain_events (type, entity_kind, entity_id, source, author, occurred_at, payload)
+            VALUES ('story.written', 'story', 'story-1', 'ui', 'human', '2026-09-23T10:00:00.000Z', '{}')`),
+        }
+      }),
+    )
+
+    expect(outcomes).toEqual({
+      draft: true,
+      unknownStatus: false,
+      unknownMission: false,
+      specEvent: true,
+      unknownKind: false,
+    })
+  })
+
+  test('a brief, an answer, an edit and an internal result are deliveries, each written again', async () => {
+    const dataFolder = join(workspace, 'spec-deliveries')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(TOOLS_MIGRATION), '0.5.0'))
+    // A delivery a profile of lot 6 made: the table is rebuilt for its wider check, and keeps it.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-24T10:00:00.000Z', '2026-09-24T10:00:00.000Z', 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'T', 'derived', '2026-09-24T10:00:00.000Z', '2026-09-24T10:00:00.000Z', 1)`
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('d0', 'session-1', 'instructions', 'AGENTS.md', 'abc', '2026-09-24T10:00:00.000Z')`
+      }),
+    )
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+
+    const seen = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const tried = (id: string, kind: string, path: string) =>
+          Effect.map(
+            Effect.exit(sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+              VALUES (${id}, 'session-1', ${kind}, ${path}, 'same', '2026-09-24T10:01:00.000Z')`),
+            (exit) => Exit.isSuccess(exit),
+          )
+        // The same text handed over twice is two deliveries, of each of the four kinds (D7-09).
+        const accepted: boolean[] = []
+        for (const kind of ['brief', 'answer', 'edit', 'internal']) {
+          const path = kind === 'brief' ? 'shape' : ''
+          accepted.push(
+            yield* tried(`${kind}-1`, kind, path),
+            yield* tried(`${kind}-2`, kind, path),
+          )
+        }
+        const unknown = yield* tried('rumour-1', 'rumour', '')
+        const kept = yield* sql<{
+          kind: string
+        }>`SELECT kind FROM context_deliveries WHERE id = 'd0'`
+        return { accepted, unknown, kept }
+      }),
+    )
+
+    expect(seen.accepted).toEqual(Array.from({ length: 8 }, () => true))
+    expect(seen.unknown).toBe(false)
+    expect(seen.kept).toEqual([{ kind: 'instructions' }])
+  })
+
+  test('a Spec’s Journal lines are read through an index on spec_id', async () => {
+    const dataFolder = join(workspace, 'spec-index')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+
+    const plan = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        return yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+          SELECT sequence FROM domain_events WHERE spec_id = 'spec-1' ORDER BY sequence DESC`
+      }),
+    )
+
+    expect(plan.map((row) => row.detail).join('\n')).toContain('INDEX event_by_spec (spec_id=?)')
   })
 })
 
@@ -633,8 +861,9 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
-    // One migration behind, and the copy taken before it is named after it.
-    expect(standing.behind).toEqual([TOOLS_MIGRATION])
+    // Two migrations behind now, this one and the Specs after it, and the copy taken before them
+    // is named after the first of the two, which is the one that was applied first.
+    expect(standing.behind).toEqual([TOOLS_MIGRATION, SPECS_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
     // The three tables of this lot arrived...

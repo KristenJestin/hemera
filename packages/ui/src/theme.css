@@ -436,6 +436,21 @@
      is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
   --spacing-dialog-wide: 70vh;
 
+  /* How wide the rail of a mission panel stands beside its stage (lot 19, revisions 3, 4 and 4b):
+     wide enough for the Spec's `Expected outcome` after its glyph, for `Decompose` and
+     `Show all` after its glyph, and for `3/7 · 4 things before ready` on one line at its foot. */
+  --spacing-rail: 13rem;
+
+  /* A mission panel folded (lot 19, revision 4): the band of the rail's glyphs beside the chat,
+     a group's square, the set-in squares of its items and the margin around them. */
+  --spacing-mission-band: 3rem;
+
+  /* A mission panel unfolded: a share of the Session's row, the container it is asked of. A length
+     of the row rather than a fraction of the panel's own box, because the panel's box is what
+     changes while it unfolds: what the panel holds is laid at this width from the first frame,
+     so nothing inside it reflows on the way. */
+  --spacing-mission-panel: 45cqw;
+
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -548,6 +563,19 @@
 @utility chrome-columns {
   display: grid;
   grid-template-columns: var(--sidebar-current-width, var(--spacing-sidebar)) 1fr;
+}
+
+/* The slot a mission panel takes in a Session's row (lot 19, revision 4b): the band, the unfolded
+   width, or a width between the two, which the panel writes as `--mission-panel-open` on every
+   frame of a fold — 0 folded, 1 unfolded — so the chat beside it is pushed as it moves. A share
+   and not a length, because the two ends are lengths of different kinds, rems and a share of the row, and
+   only the browser can put them on one line; at rest it is one of the two tokens exactly, and
+   stays so while the window is resized. The fallback is the band, which the panel opens at. */
+@utility mission-panel-slot {
+  width: calc(
+    var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
+      var(--mission-panel-open, 0)
+  );
 }
 
 /* Where the active tab meets the sheet it opens (design D2-02).
@@ -854,6 +882,18 @@
 
 @utility thumb-dome {
   box-shadow: var(--knob);
+}
+
+/* How the part of a Spec that has the focus takes its soft highlight and gives it back (lot 19):
+   the background fades on the theme's `fast` step — the stage's cross-fade of the first brief,
+   now that the Spec is one document and the focus moves inside it rather than replacing it. */
+@utility highlight-motion {
+  transition-property: background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
 }
 
 /* What a chevron does while the list it opens is open: it turns over, so the control says

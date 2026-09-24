@@ -285,7 +285,7 @@ const ASKED: ScrollerEntry[] = THREAD.map((entry) =>
 )
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Message/Scroller',
   component: MessageScroller,
   decorators: [withTooltips],

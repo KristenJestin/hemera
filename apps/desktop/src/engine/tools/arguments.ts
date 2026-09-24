@@ -10,7 +10,17 @@
  * MCP is what carries them and a nested document is a document nobody validates twice.
  */
 
-import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, SEARCH_SCAN_BYTES, type ToolName } from '@hemera/core'
+import {
+  PHASE_IDS,
+  READ_PAGE_BYTES,
+  SEARCH_MATCH_LIMIT,
+  SEARCH_SCAN_BYTES,
+  SECTION_NAMES,
+  SPEC_PAGE_CHARACTERS,
+  SPEC_TYPES,
+  TASK_EXECUTORS,
+  type ToolName,
+} from '@hemera/core'
 import { z } from 'zod'
 
 import { OUTPUT_KEPT_BYTES } from '../commands/service.ts'
@@ -49,6 +59,18 @@ export type ParsedCall =
       readonly tool: 'session_get'
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['session_get']>
     }
+  | {
+      readonly tool: 'spec_read'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['spec_read']>
+    }
+  | {
+      readonly tool: 'spec_write'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['spec_write']>
+    }
+  | {
+      readonly tool: 'spec_propose'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['spec_propose']>
+    }
 
 /**
  * The key an idempotency key may be, so that a key is a name and not a document.
@@ -66,6 +88,64 @@ export const RUN_WAIT_LONGEST_MS = 600_000
 
 /** How many entries of the thread `session_get` hands back. */
 export const THREAD_TAIL = 20
+
+/**
+ * A list sent as JSON text inside one argument, read against its schema.
+ *
+ * The arguments stay flat (see the head of this file), and the stories, the tasks, the options of
+ * a question and the assumptions of a phase are lists: each is one string argument holding a JSON
+ * array, read here, where a list that does not read is refused with the reason, like any argument.
+ */
+export function jsonList<T>(item: z.ZodType<T>) {
+  return z
+    .string()
+    .transform((text, context) => {
+      try {
+        return JSON.parse(text)
+      } catch {
+        context.addIssue({ code: 'custom', message: 'is not JSON' })
+        return z.NEVER
+      }
+    })
+    .pipe(z.array(item))
+}
+
+/** One story of `spec_write`, as its JSON text reads. */
+export const STORY_SENT = z.object({
+  id: z.string().min(1).optional(),
+  title: z.string().min(1),
+  narrative: z.string(),
+  priority: z.string().nullable().optional(),
+  criteria: z.array(z.string().min(1)),
+})
+
+/** One task of `spec_write`, as its JSON text reads. */
+export const TASK_SENT = z.object({
+  id: z.string().min(1).optional(),
+  title: z.string().min(1),
+  result: z.string(),
+  type: z.string(),
+  executor: z.enum(TASK_EXECUTORS),
+  criteria: z.string(),
+  dependsOn: z.array(z.string().min(1)).default([]),
+  stories: z.array(z.string().min(1)).default([]),
+})
+
+/** One answer a question of `spec_write` offers, as its JSON text reads. */
+export const OPTION_SENT = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  recommended: z.boolean().optional(),
+})
+
+/** How long a list of the Spec tools may be, as the JSON text it is sent as. */
+const LIST_CHARACTERS = SPEC_PAGE_CHARACTERS
+
+/** What `spec_write` writes: exactly one of the four. */
+const SPEC_WRITES = ['section', 'stories', 'tasks', 'question'] as const
+
+/** What `spec_propose` hands over. */
+export const PROPOSALS = ['phase_done', 'ready', 'spec'] as const
 
 /**
  * The arguments of every tool, as the agent is told them and as they are read back.
@@ -142,6 +222,165 @@ export const TOOL_ARGUMENTS = {
   }),
   project_get: z.object({}),
   session_get: z.object({}),
+  spec_read: z.object({
+    revision: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('a revision of the Spec, by number, to read as it was; the current one without it'),
+    offset: z.number().int().min(0).optional().describe('the character to start at; 0 without it'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(SPEC_PAGE_CHARACTERS)
+      .optional()
+      .describe(`how many characters at most; ${SPEC_PAGE_CHARACTERS} without it`),
+  }),
+  spec_write: z
+    .object({
+      section: z
+        .enum(SECTION_NAMES)
+        .optional()
+        .describe('the section to write; send body and baseVersion with it'),
+      body: z
+        .string()
+        .max(SPEC_PAGE_CHARACTERS)
+        .optional()
+        .describe('with section: the whole Markdown text the section becomes'),
+      baseVersion: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe(
+          'with section: the version you read the section at, as spec_read shows it; 0 for a section the Spec does not hold yet',
+        ),
+      stories: z
+        .string()
+        .max(LIST_CHARACTERS)
+        .optional()
+        .describe(
+          'every story of the Spec, in order, as a JSON array of {"id"?, "title", "narrative", "priority"?, "criteria": ["…"]}: it replaces them all; keep the id of a story you keep',
+        ),
+      tasks: z
+        .string()
+        .max(LIST_CHARACTERS)
+        .optional()
+        .describe(
+          'every task of the contract, in order, as a JSON array of {"id"?, "title", "result", "type", "executor": "agent"|"human", "criteria", "dependsOn"?: ["task id or title"], "stories"?: ["story id or title"]}: it replaces them all',
+        ),
+      question: z
+        .string()
+        .min(1)
+        .max(SPEC_PAGE_CHARACTERS)
+        .optional()
+        .describe('a question for the user, asked in the chat; send blocking with it'),
+      blocking: z
+        .boolean()
+        .optional()
+        .describe('with question: true when the Spec cannot be ready until it is answered'),
+      phase: z.enum(PHASE_IDS).optional().describe('with question: the phase it belongs to'),
+      options: z
+        .string()
+        .max(LIST_CHARACTERS)
+        .optional()
+        .describe(
+          'with question: the answers offered, as a JSON array of {"id", "label", "recommended"?}; none for an answer in the user\'s own words',
+        ),
+      revision: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe('the revision you read; a write naming one that is not the current is refused'),
+      key: KEY.describe('an idempotency key, so a retry does not write twice'),
+    })
+    .superRefine((sent, context) => {
+      const writes = SPEC_WRITES.filter((write) => sent[write] !== undefined)
+      if (writes.length !== 1) {
+        context.addIssue({
+          code: 'custom',
+          message: `send exactly one of section, stories, tasks or question, not ${writes.length === 0 ? 'none' : writes.join(' and ')}`,
+        })
+      }
+      if (
+        sent.section !== undefined &&
+        (sent.body === undefined || sent.baseVersion === undefined)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a section is sent with its body and baseVersion',
+        })
+      }
+      if (sent.question !== undefined && sent.blocking === undefined) {
+        context.addIssue({ code: 'custom', message: 'a question is sent with blocking' })
+      }
+      const lists = [
+        ['stories', STORY_SENT],
+        ['tasks', TASK_SENT],
+        ['options', OPTION_SENT],
+      ] as const
+      for (const [field, item] of lists) {
+        const text = sent[field]
+        if (text === undefined) continue
+        const listed = jsonList<z.infer<typeof item>>(item).safeParse(text)
+        for (const issue of listed.success ? [] : listed.error.issues) {
+          context.addIssue({ code: 'custom', path: [field, ...issue.path], message: issue.message })
+        }
+      }
+    }),
+  spec_propose: z
+    .object({
+      kind: z
+        .enum(PROPOSALS)
+        .describe(
+          'phase_done: declare a phase finished, with a summary; ready: attest the contract is complete, for the user to mark it ready; spec: from a free Session, propose the user a Spec to create, with a title and a type',
+        ),
+      phase: z.enum(PHASE_IDS).optional().describe('with phase_done: the phase declared finished'),
+      summary: z
+        .string()
+        .min(1)
+        .max(SPEC_PAGE_CHARACTERS)
+        .optional()
+        .describe('with phase_done: what the phase settled, kept with the phase'),
+      supporting: z
+        .string()
+        .max(SPEC_PAGE_CHARACTERS)
+        .optional()
+        .describe('with phase_done: the elements of the Spec that support it'),
+      assumptions: z
+        .string()
+        .max(LIST_CHARACTERS)
+        .optional()
+        .describe(
+          'with phase_done: the assumptions and questions still open, as a JSON array of strings',
+        ),
+      title: z.string().trim().min(1).max(200).optional().describe('with spec: its title'),
+      type: z.enum(SPEC_TYPES).optional().describe('with spec: feature, bug or maintenance'),
+      key: KEY.describe('an idempotency key, so a retry is answered once and not declared twice'),
+    })
+    .superRefine((sent, context) => {
+      if (sent.kind === 'phase_done' && (sent.phase === undefined || sent.summary === undefined)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'phase_done is sent with a phase and a summary',
+        })
+      }
+      if (sent.kind === 'spec' && (sent.title === undefined || sent.type === undefined)) {
+        context.addIssue({ code: 'custom', message: 'spec is sent with a title and a type' })
+      }
+      if (sent.assumptions === undefined) return
+      const listed = jsonList(z.string()).safeParse(sent.assumptions)
+      for (const issue of listed.success ? [] : listed.error.issues) {
+        context.addIssue({
+          code: 'custom',
+          path: ['assumptions', ...issue.path],
+          message: issue.message,
+        })
+      }
+    }),
 } as const
 
 /** What each tool is, in the words the agent reads before it asks. */
@@ -162,6 +401,10 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     'The Project this Session belongs to: its name, where its Workspace root is, and what it reads from.',
   session_get:
     'This Session: its title, its Project, its agent, and the last entries of its thread.',
+  spec_read: `Read the Spec this Session defines, rendered as Markdown: its key, type, status and revision, each section with its version as <!-- version: n -->, the stories with their criteria, the tasks, the phases and the open questions. The current revision, or an older one by number, which is read-only. One call returns at most ${SPEC_PAGE_CHARACTERS} characters and ends with the range read as JSON: offset, end, size, truncated and next.`,
+  spec_write: `Write the current draft of the Spec this Session defines, and only while this Session holds its write right. Exactly one of: a section, with its whole body and the version you read it at; every story; every task; or a question for the user, asked in the chat. A section that changed since the version you send, a Spec that is not a draft, an older revision, and a Session that does not hold the write right are refused, and nothing is written. Send a key so that a retry after a lost answer does not write twice.`,
+  spec_propose:
+    "Hand the Spec this Session defines over to Hemera's checks. phase_done declares a phase finished with a summary, the elements of the Spec that support it and the assumptions still open: Hemera runs the phase's exit checks, and either finishes it and opens the phases that wait on it, or answers what fails and changes nothing. ready attests the contract is complete and executable: the user's Mark ready is what freezes it, never this call. Both only while this Session holds the write right. spec is for a free Session, which defines no Spec yet: it proposes one, a title and a type, and the user creates it or not. Send a key so that a retry after a lost answer is answered once.",
 }
 
 /**
@@ -182,6 +425,10 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   commands_stop: 'a run of this Project, and all it started',
   project_get: 'this Project',
   session_get: `this Session and its last ${THREAD_TAIL} entries`,
+  spec_read: `this Session's Spec, ${SPEC_PAGE_CHARACTERS / 1024} K characters a page`,
+  spec_write: "one write of this Session's draft, on its current version",
+  spec_propose:
+    'a phase declared finished, the contract attested, or a Spec proposed; never marked ready',
 }
 
 /** What one reading of the arguments answered. */
@@ -248,6 +495,12 @@ export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision
       return decide(tool, read(TOOL_ARGUMENTS['project_get'], raw))
     case 'session_get':
       return decide(tool, read(TOOL_ARGUMENTS['session_get'], raw))
+    case 'spec_read':
+      return decide(tool, read(TOOL_ARGUMENTS['spec_read'], raw))
+    case 'spec_write':
+      return decide(tool, read(TOOL_ARGUMENTS['spec_write'], raw))
+    case 'spec_propose':
+      return decide(tool, read(TOOL_ARGUMENTS['spec_propose'], raw))
   }
 }
 

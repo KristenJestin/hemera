@@ -18,7 +18,7 @@ import type { MessagePortMain } from 'electron'
 
 import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
-import { agentDirectoriesLayer } from './agents/bare.ts'
+import { QUALIFIED_VARIABLE, agentDirectoriesLayer, qualifiedBySuite } from './agents/bare.ts'
 import { heldWordsLayer } from './agents/held.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
@@ -45,6 +45,9 @@ import type { Projects } from './projects.ts'
 import { type EngineAnswer, type EngineRequest, answer, decideRequest } from './request.ts'
 import { sessionsLayer } from './sessions.ts'
 import type { Sessions } from './sessions.ts'
+import { SpecNotices } from './specs/notices.ts'
+import { specsLayer } from './specs/specs.ts'
+import type { Specs } from './specs/specs.ts'
 import { engineStatusLayer } from './status.ts'
 import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
@@ -62,7 +65,7 @@ export interface EngineStart {
 }
 
 /** The name each change of a Session travels under, on the one channel the page listens on. */
-export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run'>> = {
+export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run' | 'spec_changed'>> = {
   permission_requested: 'permission',
   turn_started: 'turn_start',
   turn_ended: 'turn',
@@ -109,6 +112,33 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
 }
 
 /**
+ * The window, as the Specs' notices: a Spec changed, whoever wrote it, and every panel open on it
+ * reads it again (D7-11). Its own shape, never a top-level `id`, which is what tells an answer
+ * from an event. A question asked or answered in a thread is pushed as any entry is.
+ */
+function specNoticesTo(
+  port: MessagePortMain,
+  log: (line: string) => void,
+): Layer.Layer<SpecNotices> {
+  return Layer.succeed(SpecNotices, {
+    changed: (specId, projectId) => {
+      try {
+        port.postMessage({ event: 'spec.changed', specId, projectId })
+      } catch (died) {
+        log(`pushing spec.changed failed: ${named(died)}`)
+      }
+    },
+    wrote: (sessionId, entry) => {
+      try {
+        port.postMessage({ event: 'entry', sessionId, entry })
+      } catch (died) {
+        log(`pushing an entry failed: ${named(died)}`)
+      }
+    },
+  })
+}
+
+/**
  * Everything this process is, built once.
  *
  * The database layer is underneath the two services, so both stand on the same open file, and
@@ -123,6 +153,7 @@ type EngineServices =
   | Projects
   | Journal
   | Sessions
+  | Specs
   | AgentRuntime
   | Discovery
   | Agents
@@ -164,6 +195,9 @@ function servicesOf(
   // The processes a command becomes and the processes an agent is are started by the same
   // supervisor, built once: a quit closes one scope and every tree of both goes with it (D5-04).
   const processes = processSupervisorLayer.pipe(Layer.provide(agents))
+  // The Specs, and the window that hears of them: one service, which the Spec tools write through
+  // as the window's own requests do.
+  const specs = specsLayer.pipe(Layer.provide(specNoticesTo(port, log)))
   // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
   // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
   // rather than minting a second one, and a token of one book means nothing to the other.
@@ -173,6 +207,7 @@ function servicesOf(
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
     Layer.provide(rows),
+    Layer.provide(specs),
     Layer.provide(processes),
     Layer.provide(agents),
     // What an agent holds in memory, written before a call or a run is: the runtime hands its
@@ -189,6 +224,7 @@ function servicesOf(
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),
     journalLayer,
     rows,
+    specs,
     listed,
     runtimeLayer.pipe(
       // Discovery is handed up rather than hidden: the settings page asks this process what the
@@ -246,6 +282,14 @@ if (process.parentPort !== undefined) {
     if (port === undefined) return
 
     const log = openDiagnosticLog(start.directory, 'engine')
+    // Said once, at start, so a log read later tells a run whose declaration the end-to-end
+    // suite overruled from one on a real machine (D5-16).
+    const suite = qualifiedBySuite(process.env)
+    if (suite !== undefined) {
+      log(
+        `${QUALIFIED_VARIABLE}=${suite}: ${suite} is qualified to run bare here, whatever it declares`,
+      )
+    }
 
     void Effect.runPromise(
       Effect.scoped(

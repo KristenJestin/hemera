@@ -19,6 +19,12 @@ import { UnknownHeldAgentError } from '#engine/agents/pool.ts'
 import { named } from '#engine/index.ts'
 import { MigrationError, ProfileAheadError } from '#engine/migrate.ts'
 import { UnknownSessionError } from '#engine/sessions.ts'
+import { ReadyRefusedError } from '#engine/specs/gate.ts'
+import { PhaseRefusedError } from '#engine/specs/protocol.ts'
+import { ReopenRefusedError } from '#engine/specs/revisions.ts'
+import { UnknownRevisionError, UnknownSpecError } from '#engine/specs/snapshot.ts'
+import { UnknownSpecItemError } from '#engine/specs/specs.ts'
+import { SpecAnchorRefusedError } from '#engine/specs/write-right.ts'
 import { DatabaseError } from '#engine/storage/database.ts'
 import { StaleVersionError } from '#engine/transaction.ts'
 
@@ -33,6 +39,14 @@ const REFUSALS: readonly Error[] = [
   new AgentUpdateRefusedError({ reason: 'Codex is not on this machine.' }),
   new UnknownHeldAgentError({ sessionId: 'session-1' }),
   new UnknownSessionError('session-1'),
+  // The Specs' own (D7-03): each carries the sentence the panel shows.
+  new UnknownSpecError({ id: 'spec-1' }),
+  new UnknownRevisionError({ key: 'HEM-7', number: 3 }),
+  new UnknownSpecItemError({ kind: 'task', name: 'Write the exporter' }),
+  new SpecAnchorRefusedError({ reason: 'The Session "Draft" already defines a Spec.' }),
+  new PhaseRefusedError({ reason: 'The plan phase cannot finish: the plan section is missing.' }),
+  new ReadyRefusedError({ reason: 'HEM-7 changed since its gate was shown.' }),
+  new ReopenRefusedError({ reason: 'A stale reopening is refused.' }),
   // The two of the start. They are read in the diagnostic log of a package started from a
   // desktop icon rather than in a window, and `MigrationError` on its own is a start that
   // failed for a reason nobody kept.

@@ -1,0 +1,633 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE, lot 19 phase 0: the Spec panel of a `define` Session, open beside the chat,
+  drawn in its eight states (feature mid-plan, bug, empty define, gate full, ready and frozen,
+  reader Session, edit conflict, stale after a rework) on the keys `1`-`8`, with `t` for the theme.
+  It is a reference for the tokens of packages/ui/src/theme.css, the layout, the density and the
+  motion only: its markup, its classes and its inline styles are never copied into a component
+  (docs/design/README.md). The texts are static, nothing is saved, and the only script switches
+  the screens and the theme.
+-->
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE · Hemera Spec panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Role variables copied from packages/ui/src/theme.css, light then dark. */
+  :root {
+    color-scheme: light;
+    --background: #ededf0; --foreground: #111118; --card: #ffffff;
+    --surface-page: #ededf0; --surface-content: #ffffff; --surface-rim: #f2f2f5; --surface-body: #ffffff;
+    --card-foreground: #111118; --muted: #f6f6f8; --muted-foreground: #63636f; --accent: #e9e9ee; --accent-foreground: #111118;
+    --sidebar: #ededf0; --sidebar-foreground: #111118; --sidebar-border: #e2e2e8; --sidebar-accent: #dcdce4; --sidebar-accent-foreground: #111118;
+    --primary: #c026d3; --primary-foreground: #ffffff; --primary-strong: #a21caf; --primary-muted: #fdf4ff; --primary-muted-foreground: #a21caf;
+    --success: #16a34a; --success-muted: #ecfdf3; --success-muted-foreground: #15803d;
+    --warning: #d97706; --warning-muted: #fffbeb; --warning-muted-foreground: #b45309;
+    --destructive: #dc2626; --destructive-foreground: #ffffff; --destructive-muted: #fef2f2; --destructive-muted-foreground: #b91c1c;
+    --info: #2563eb; --info-muted: #eff6ff; --info-muted-foreground: #1d4ed8;
+    --mission-define: #7c3aed; --mission-define-muted: #f3efff; --mission-define-muted-foreground: #6d28d9;
+    --mission-build: #0891b2; --mission-build-muted: #ecfeff; --mission-build-muted-foreground: #0e7490;
+    --mission-free: #6b6b7b; --mission-free-muted: #f1f1f4; --mission-free-muted-foreground: #4b4b57;
+    --border: #e2e2e8; --input: #d3d3db; --ring: rgba(217, 70, 239, 0.25); --overlay: rgba(16, 16, 24, 0.2);
+    --selection: #f0abfc; --selection-foreground: #111118;
+    --shadow: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.04); --shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12);
+    --halo: 0 0 0 3px rgba(192, 38, 211, 0.16); --halo-strong: 0 0 0 5px rgba(192, 38, 211, 0.26);
+    --well: inset 0 1px 3px rgba(16, 16, 24, 0.1), inset 0 0 0 1px rgba(16, 16, 24, 0.05);
+    /* theme.css @theme: fonts, radii, motion */
+    --font-sans: 'Inter', system-ui, sans-serif; --font-mono: 'Fira Code', ui-monospace, monospace;
+    --radius-sm: 0.375rem; --radius-md: 0.5rem; --radius-lg: 0.75rem; --radius-xl: 1rem;
+    --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1); --duration-fast: 160ms; --duration-base: 260ms; --duration-slow: 400ms; --duration-turn: 1200ms;
+  }
+  .dark {
+    color-scheme: dark;
+    --background: #040406; --foreground: #ececf1; --card: #18181e;
+    --surface-page: #040406; --surface-content: #0e0e12; --surface-rim: #121217; --surface-body: #18181e;
+    --card-foreground: #ececf1; --muted: #0e0e12; --muted-foreground: #9a9aab; --accent: #121217; --accent-foreground: #ececf1;
+    --sidebar: #040406; --sidebar-foreground: #ececf1; --sidebar-border: #27272f; --sidebar-accent: #1c1c23; --sidebar-accent-foreground: #ececf1;
+    --primary: #e879f9; --primary-foreground: #040406; --primary-strong: #d946ef; --primary-muted: rgba(232, 121, 249, 0.1); --primary-muted-foreground: #f0abfc;
+    --success: #4ade80; --success-muted: rgba(74, 222, 128, 0.1); --success-muted-foreground: #4ade80;
+    --warning: #fbbf24; --warning-muted: rgba(251, 191, 36, 0.1); --warning-muted-foreground: #fbbf24;
+    --destructive: #f87171; --destructive-foreground: #040406; --destructive-muted: rgba(248, 113, 113, 0.1); --destructive-muted-foreground: #f87171;
+    --info: #60a5fa; --info-muted: rgba(96, 165, 250, 0.1); --info-muted-foreground: #60a5fa;
+    --mission-define: #a78bfa; --mission-define-muted: rgba(167, 139, 250, 0.12); --mission-define-muted-foreground: #a78bfa;
+    --mission-build: #22d3ee; --mission-build-muted: rgba(34, 211, 238, 0.1); --mission-build-muted-foreground: #22d3ee;
+    --mission-free: #9a9aab; --mission-free-muted: rgba(154, 154, 171, 0.12); --mission-free-muted-foreground: #9a9aab;
+    --border: #27272f; --input: #363640; --ring: rgba(232, 121, 249, 0.3); --overlay: rgba(0, 0, 0, 0.5);
+    --selection: #6b1f7a; --selection-foreground: #ececf1;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5); --shadow-raised: 0 14px 40px rgba(0, 0, 0, 0.6);
+    --halo: 0 0 0 3px rgba(232, 121, 249, 0.2); --halo-strong: 0 0 0 5px rgba(232, 121, 249, 0.32);
+    --well: inset 0 1px 3px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+
+  * { box-sizing: border-box }
+  html, body { margin: 0; height: 100%; background: var(--surface-page); color: var(--foreground); font: 400 13px/1.55 var(--font-sans); -webkit-font-smoothing: antialiased }
+  ::selection { background: var(--selection); color: var(--selection-foreground) }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer }
+  textarea, input { font: inherit; color: inherit }
+  svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+  svg.i.lg { width: 16px; height: 16px }
+  .mono { font-family: var(--font-mono); font-size: 12px }
+  .mut { color: var(--muted-foreground) }
+  .grow { flex: 1; min-width: 0 }
+  code { font-family: var(--font-mono); font-size: 12px; background: var(--accent); padding: 1px 5px; border-radius: 5px }
+  [hidden] { display: none !important }
+  :focus-visible { outline: 0; box-shadow: var(--halo) }
+
+  /* shell: title bar, folded sidebar, content */
+  #app { position: fixed; inset: 0 0 34px 0; display: grid; grid-template-columns: 52px 1fr; grid-template-rows: 40px 1fr }
+  .chrome { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 16px }
+  .mark { width: 16px; height: 16px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, var(--primary-muted-foreground), var(--primary) 60%, var(--mission-define)); flex: none }
+  .chrome .mark { margin-right: 26px }
+  .ptab { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: var(--radius-md); font-weight: 500; color: var(--muted-foreground) }
+  .ptab.on { background: var(--surface-content); color: var(--foreground); box-shadow: var(--shadow) }
+  .ptab .dot { width: 7px; height: 7px; border-radius: 50% }
+  .side { display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 6px }
+  .side button { width: 36px; height: 36px; border-radius: var(--radius-md); display: grid; place-items: center; color: var(--muted-foreground) }
+  .side button.on { background: var(--sidebar-accent); color: var(--foreground) }
+  .work { display: grid; grid-template-columns: 55fr 45fr; min-height: 0; background: var(--surface-content); border: 1px solid var(--border); border-right: 0; border-bottom: 0; border-top-left-radius: var(--radius-lg); overflow: hidden }
+
+  /* chat: the lot-4 thread and composer, trimmed */
+  .chat { display: flex; flex-direction: column; min-width: 0; min-height: 0 }
+  .chead { display: flex; align-items: center; gap: 10px; padding: 12px 28px; border-bottom: 1px solid var(--border) }
+  .chead h1 { font: 600 15px/1.3 var(--font-sans); margin: 0 }
+  .chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11px; font-weight: 600 }
+  .chip.define { background: var(--mission-define-muted); color: var(--mission-define-muted-foreground) }
+  .chip.free { background: var(--mission-free-muted); color: var(--mission-free-muted-foreground) }
+  .agentpill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: var(--radius-md); background: var(--muted); border: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground) }
+  .agentpill b { color: var(--foreground); font-weight: 500 }
+  .thread { flex: 1; min-height: 0; overflow: auto; padding: 20px 28px 12px; display: flex; flex-direction: column; gap: 16px }
+  .thread > * { max-width: 680px; width: 100% }
+  .msg { display: flex; flex-direction: column; gap: 4px }
+  .msg .who { font-size: 11px; color: var(--muted-foreground); display: flex; gap: 6px; align-items: center }
+  .msg .who b { color: var(--foreground); font-weight: 600 }
+  .msg.user { align-items: flex-end; align-self: flex-end; max-width: 560px }
+  .msg.user .bd { background: var(--card); border: 1px solid var(--border); border-radius: 14px; border-bottom-right-radius: 5px; padding: 9px 13px }
+  .msg .bd p { margin: 0 0 8px } .msg .bd p:last-child { margin: 0 }
+  .msg.agent .bd { font-size: 13.5px; line-height: 1.6 }
+  .cursor { display: inline-block; width: 2px; height: 14px; background: var(--primary); vertical-align: -2px; margin-left: 2px; animation: breathe var(--duration-turn) var(--ease-calm) infinite }
+  /* a Hemera line: thin, a system note, never a card */
+  .sys { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); text-align: left }
+  .sys::after { content: ""; flex: 1; height: 1px; background: var(--border) }
+  .sys .mark { width: 11px; height: 11px }
+  .sys b { font-weight: 500; color: var(--foreground) }
+  .tool { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); margin-bottom: 6px }
+  .tool .loc { font-family: var(--font-mono); font-size: 11.5px; color: var(--primary-muted-foreground) }
+  .compose { padding: 10px 28px 16px }
+  .cframe { max-width: 680px; background: var(--accent); border: 1px solid var(--border); border-radius: 16px; padding: 5px; box-shadow: var(--shadow) }
+  .cbox { background: var(--surface-body); border: 1px solid var(--input); border-radius: 12px; padding: 10px 14px 6px }
+  .cbox textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; font-size: 13.5px; min-height: 40px }
+  .cbox textarea::placeholder { color: var(--muted-foreground) }
+  .cfoot { display: flex; align-items: center; gap: 6px; padding: 7px 6px 2px }
+  .sel { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--radius-md); font-size: 12px; color: var(--muted-foreground) }
+  .sel b { font-family: var(--font-mono); font-weight: 500; font-size: 11.5px; color: var(--foreground) }
+  .send { width: 30px; height: 30px; border-radius: 50%; background: var(--primary); color: var(--primary-foreground); display: grid; place-items: center }
+
+  /* buttons */
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: var(--radius-md); border: 1px solid var(--input); background: var(--surface-body); font-size: 12.5px; font-weight: 500; white-space: nowrap; box-shadow: var(--shadow); transition: border-color var(--duration-fast) var(--ease-calm), background var(--duration-fast) var(--ease-calm) }
+  .btn:hover { border-color: var(--primary) }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); font-weight: 600 }
+  .btn.primary:hover { background: var(--primary-strong) }
+  .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--muted-foreground) }
+  .btn.ghost:hover { background: var(--accent); color: var(--foreground) }
+  .btn.sm { height: 26px; padding: 0 9px; font-size: 12px }
+
+  /* the Spec panel */
+  .panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface-rim); border-left: 1px solid var(--border) }
+  .spec { display: flex; flex-direction: column; min-height: 0; flex: 1 }
+  .reader { display: flex; align-items: center; gap: 8px; padding: 7px 20px; font-size: 12px; color: var(--muted-foreground); background: var(--accent); border-bottom: 1px solid var(--border) }
+  .reader b { font-weight: 500; color: var(--foreground) }
+  .reader .btn { margin-left: auto }
+
+  /* 1 · head */
+  .head { padding: 14px 20px 12px; border-bottom: 1px solid var(--border) }
+  .hl { display: flex; align-items: center; gap: 10px; min-height: 26px }
+  .hl .key { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground) }
+  .hl h2 { font: 600 15px/1.3 var(--font-sans); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+  .type { font-size: 11px; font-weight: 500; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; line-height: 18px }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground) }
+  .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--muted-foreground) }
+  .status.ready { color: var(--success-muted-foreground) }
+  .status.ready::before { background: var(--success); border-color: var(--success) }
+  .rev { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground) }
+  .hl .end { margin-left: auto; display: flex; align-items: center; gap: 6px }
+  details.revs { position: relative }
+  details.revs summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: var(--radius-md); border: 1px solid var(--border); font-family: var(--font-mono); font-size: 11.5px; cursor: pointer }
+  details.revs summary::-webkit-details-marker { display: none }
+  details.revs .menu { position: absolute; right: 0; top: 30px; z-index: 5; width: 210px; padding: 4px; background: var(--surface-body); border: 1px solid var(--input); border-radius: var(--radius-lg); box-shadow: var(--shadow-raised) }
+  .menu div { display: flex; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); font-size: 12px }
+  .menu div:first-child { background: var(--accent) }
+
+  /* 2 · phase rail */
+  .phases { display: flex; align-items: center; gap: 0; margin-top: 12px }
+  .ph { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted-foreground); white-space: nowrap }
+  .ph + .ph::before { content: ""; width: 22px; height: 1px; background: var(--border); margin: 0 10px 0 3px }
+  .ph i { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--input); flex: none }
+  .ph.done { color: var(--muted-foreground) } .ph.done i { background: var(--muted-foreground); border-color: var(--muted-foreground) }
+  .ph.open { color: var(--foreground); font-weight: 600 } .ph.open i { border: 2px solid var(--primary); box-shadow: var(--halo) }
+  .ph.stale { color: var(--warning-muted-foreground) } .ph.stale i { border: 2px solid var(--warning) }
+  .ph.stale small { font-size: 10px; font-weight: 500; letter-spacing: .02em; opacity: .8 }
+  .ph.off span { text-decoration: line-through; opacity: .6 } .ph.off i { border-style: dashed; opacity: .6 }
+  .now { margin: 8px 0 0; font-size: 12.5px; color: var(--muted-foreground) }
+
+  /* 3 · body: outline + stage */
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px 1fr }
+  .outline { border-right: 1px solid var(--border); padding: 12px 8px; overflow: auto; display: flex; flex-direction: column; gap: 1px }
+  .outline hr { border: 0; height: 1px; background: var(--border); margin: 8px 8px }
+  .o { display: flex; align-items: center; gap: 9px; width: 100%; height: 28px; padding: 0 8px; border-radius: var(--radius-sm); text-align: left; font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); transition: background var(--duration-fast) var(--ease-calm) }
+  .o:hover { background: var(--accent); color: var(--foreground) }
+  .o.on { background: var(--primary-muted); color: var(--primary-muted-foreground); box-shadow: inset 2px 0 0 var(--primary) }
+  .o .n { margin-left: auto; font-family: var(--font-mono); letter-spacing: 0; font-size: 11px }
+  /* the state mark: empty ring = not written, filled = the agent, blue edge = you, amber = stale, red = conflict, pulse = being written */
+  .o > i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--input); flex: none }
+  .o.agent > i { background: var(--muted-foreground); border-color: var(--muted-foreground) }
+  .o.you > i { background: var(--muted-foreground); border-color: var(--muted-foreground); outline: 1.5px solid var(--info); outline-offset: 1.5px }
+  .o.stale > i { background: var(--warning-muted); border: 2px solid var(--warning) } .o.stale { color: var(--warning-muted-foreground) }
+  .o.clash > i { background: var(--destructive); border-color: var(--destructive) } .o.clash { color: var(--destructive-muted-foreground) }
+  .o.writing > i { width: 3px; height: 12px; border: 0; border-radius: 2px; margin: 0 2.5px; background: var(--primary); animation: breathe var(--duration-turn) var(--ease-calm) infinite }
+  .stage { overflow: auto; padding: 18px 24px 24px; min-width: 0 }
+  .item { animation: fade var(--duration-fast) var(--ease-calm) both }
+  .stage h3 { font: 600 15px/1.3 var(--font-sans); margin: 0 }
+  .meta { display: flex; align-items: center; gap: 6px; margin: 4px 0 12px; font-size: 11px; font-weight: 500; color: var(--muted-foreground) }
+  .meta .sep::before { content: "·" }
+  .meta .saved { color: var(--success-muted-foreground); animation: saved 1.6s var(--ease-calm) 0.4s both }
+  .meta .warn { color: var(--warning-muted-foreground) }
+  .meta .tog { margin-left: auto; width: 24px; height: 22px; border-radius: var(--radius-sm); display: grid; place-items: center; color: var(--muted-foreground) }
+  .meta .tog:hover { background: var(--accent); color: var(--foreground) }
+  /* text edited in place: reads as the rendered text until it has the focus */
+  .inplace { display: block; field-sizing: content; min-height: 0; margin: 0 -8px; width: calc(100% + 16px); padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; resize: none; outline: 0; font-size: 13px; line-height: 1.6; color: var(--foreground); transition: background var(--duration-fast) var(--ease-calm), border-color var(--duration-fast) var(--ease-calm) }
+  .inplace:hover { background: var(--accent) }
+  .inplace:focus { background: var(--surface-body); border-color: var(--input); box-shadow: var(--halo) }
+  .prose { font-size: 13px; line-height: 1.6; margin: 0 }
+  .quiet { font-size: 12px; color: var(--muted-foreground); margin: 10px 0 0 }
+  .tag { display: inline-flex; align-items: center; height: 19px; padding: 0 6px; border-radius: 5px; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-foreground); border: 1px solid var(--border); white-space: nowrap }
+  .tag.who { font-family: var(--font-sans); font-weight: 500 }
+  .tag.block { border-color: transparent; background: var(--primary-muted); color: var(--primary-muted-foreground); font-family: var(--font-sans); font-weight: 600 }
+  .list { display: flex; flex-direction: column }
+  .li { padding: 12px 0; border-top: 1px solid var(--border) } .li:first-child { border-top: 0; padding-top: 2px }
+  .li .t { display: flex; align-items: baseline; gap: 8px; font-weight: 600 }
+  .li .t .k { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; color: var(--muted-foreground) }
+  .li .tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px }
+  .li .r { color: var(--muted-foreground); margin: 3px 0 0 }
+  .li.done { opacity: .62 } .li.done .t { font-weight: 500 }
+  ol.crit { margin: 6px 0 0; padding-left: 20px; color: var(--foreground) }
+  ol.crit li { padding-left: 2px } ol.crit li::marker { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground) }
+  ol.crit .inplace { margin-left: -8px; padding: 2px 8px }
+  details.answer summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--primary-muted-foreground); cursor: pointer }
+  details.answer summary::-webkit-details-marker { display: none }
+  details.answer textarea { margin-top: 6px; background: var(--surface-body); border-color: var(--input) }
+  .conflict { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--destructive-muted); border: 1px solid var(--destructive); color: var(--destructive-muted-foreground); font-size: 12.5px; font-weight: 500 }
+  .conflict .acts { display: flex; gap: 6px }
+
+  /* empty define */
+  .empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px }
+  .empty .box { width: 100%; max-width: 380px; animation: fade var(--duration-base) var(--ease-calm) both }
+  .empty h3 { font: 600 15px/1.3 var(--font-sans); margin: 0 }
+  .empty p { margin: 4px 0 16px; color: var(--muted-foreground) }
+  .empty .acts { display: flex; gap: 8px }
+  .drafts { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px }
+  .drafts .lbl { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); margin-bottom: 6px }
+  .draft { display: grid; grid-template-columns: 52px 1fr; gap: 0 8px; width: 100%; padding: 7px 8px; border-radius: var(--radius-md); text-align: left }
+  .draft:hover { background: var(--accent) }
+  .draft .k { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground); grid-row: span 2; padding-top: 1px }
+  .draft .s { font-size: 11.5px; color: var(--muted-foreground) }
+
+  /* 4 · foot: readiness */
+  .foot { padding: 12px 20px 14px; border-top: 1px solid var(--border); background: var(--surface-rim) }
+  .gate { display: flex; align-items: center; gap: 10px }
+  .bar { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px }
+  .bar i { position: relative; height: 4px; border-radius: 2px; background: var(--accent); box-shadow: inset 0 0 0 1px var(--border) }
+  .bar i.on::before { content: ""; position: absolute; inset: 0; border-radius: 2px; background: var(--success); transform-origin: left; animation: fill var(--duration-slow) var(--ease-calm) both }
+  .bar i:nth-child(2)::before { animation-delay: 40ms } .bar i:nth-child(3)::before { animation-delay: 80ms } .bar i:nth-child(4)::before { animation-delay: 120ms }
+  .bar i:nth-child(5)::before { animation-delay: 160ms } .bar i:nth-child(6)::before { animation-delay: 200ms } .bar i:nth-child(7)::before { animation-delay: 240ms }
+  .bar i:not(.on) { cursor: help } .bar i:not(.on)::after { content: attr(data-n); position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 3px 7px; border-radius: var(--radius-sm); background: var(--surface-body); border: 1px solid var(--input); box-shadow: var(--shadow-raised); font-size: 11px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity var(--duration-fast) var(--ease-calm) }
+  .bar i:not(.on)::before { content: ""; position: absolute; inset: -6px 0 }
+  .bar i:not(.on):hover::after { opacity: 1 }
+  .gate .n { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground) }
+  .say { display: flex; align-items: center; gap: 10px; margin-top: 9px; min-height: 30px; font-size: 12.5px; color: var(--muted-foreground) }
+  .say a { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--input); text-underline-offset: 3px; cursor: pointer }
+  .say a:hover { text-decoration-color: var(--primary) }
+  .say .ok { color: var(--success-muted-foreground); font-weight: 600 }
+  .say .btn { margin-left: auto }
+
+  /* rework dialog, over the panel */
+  .scrim { position: absolute; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; padding: 24px; animation: fade var(--duration-fast) var(--ease-calm) both }
+  .dialog { width: 100%; max-width: 400px; background: var(--surface-body); border: 1px solid var(--input); border-radius: var(--radius-xl); box-shadow: var(--shadow-raised); padding: 18px 18px 14px; animation: rise var(--duration-base) var(--ease-calm) both }
+  .dialog h3 { font: 600 15px/1.3 var(--font-sans); margin: 0 0 12px }
+  .field { display: flex; align-items: center; height: 34px; padding: 0 10px; border: 1px solid var(--primary); border-radius: var(--radius-md); box-shadow: var(--halo); background: var(--surface-body) }
+  .field input { flex: 1; border: 0; outline: 0; background: transparent }
+  .dialog p { margin: 10px 0 16px; font-size: 12.5px; color: var(--muted-foreground) }
+  .dialog .acts { display: flex; justify-content: flex-end; gap: 8px }
+
+  /* key legend and note */
+  .legend { position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 999px; background: var(--surface-content); border: 1px solid var(--border); font-size: 11px; color: var(--muted-foreground) }
+  .legend button { height: 20px; padding: 0 8px; border-radius: 999px; display: inline-flex; gap: 5px; align-items: center }
+  .legend button kbd { font: 500 10.5px var(--font-mono); color: var(--foreground) }
+  .legend button.on { background: var(--accent); color: var(--foreground) }
+  .pnote { position: fixed; bottom: 9px; right: 14px; font-size: 11px; color: var(--muted-foreground) }
+
+  @keyframes breathe { 50% { opacity: 0.35 } }
+  @keyframes fade { from { opacity: 0 } }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px) } }
+  @keyframes fill { from { transform: scaleX(0) } }
+  @keyframes saved { 0% { opacity: 0 } 15%, 70% { opacity: 1 } 100% { opacity: 0 } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important }
+    .meta .saved { opacity: 1 }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="rework" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="doc" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+  <symbol id="chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="compare" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="journal" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol>
+</svg>
+
+<div id="app">
+  <header class="chrome">
+    <span class="mark"></span>
+    <span class="ptab on"><span class="dot" style="background:var(--primary)"></span>Atlas</span>
+    <span class="ptab"><span class="dot" style="background:var(--mission-build)"></span>Billing</span>
+  </header>
+  <nav class="side">
+    <button title="New Session"><svg class="i lg"><use href="#plus"/></svg></button>
+    <button class="on" title="Sessions"><svg class="i lg"><use href="#chat"/></svg></button>
+    <button title="Search"><svg class="i lg"><use href="#search"/></svg></button>
+    <button title="Journal"><svg class="i lg"><use href="#journal"/></svg></button>
+  </nav>
+
+  <main class="work">
+    <!-- ================= chat ================= -->
+    <section class="chat">
+      <div class="chead">
+        <h1 data-s="1 4 5 7 8">Spec CSV</h1><h1 data-s="2">Rounding bug</h1><h1 data-s="3">Untitled</h1><h1 data-s="6">Billing review</h1>
+        <span class="chip define" data-s="1 2 3 4 5 7 8">define</span><span class="chip free" data-s="6">free</span>
+        <span class="grow"></span>
+        <span class="agentpill"><b>Claude Code</b>· Sonnet 5</span>
+      </div>
+      <div class="thread">
+        <!-- 1 · feature mid-plan -->
+        <div class="msg user" data-s="1 4 5 7 8"><span class="who">10:31</span><div class="bd">Accountants need a month of invoices as one CSV they can import into their ledger, from the billing page.</div></div>
+        <button class="sys" data-s="1"><svg class="i"><use href="#chev-r"/></svg><span class="mark"></span><b>Mission brief · plan</b><span>10:44</span></button>
+        <div class="msg agent" data-s="1"><span class="who"><b>Claude Code</b>10:44</span><div class="bd">
+          <div class="tool"><svg class="i"><use href="#doc"/></svg>Read <span class="loc">sources/api/src/invoices/export.service.ts</span></div>
+          <p>Shape is finished: the problem, the outcome, the scope and two stories are in the Spec. I am writing the plan: the export can reuse the invoice query of <code>export.service.ts</code> and stream its rows.</p>
+          <p>One question blocks the tasks. <b>Credit notes</b>: negative rows in the same file, or left out? I recommend negative rows, so the file total matches the ledger.<span class="cursor"></span></p>
+        </div></div>
+        <!-- 2 · bug -->
+        <div class="msg user" data-s="2"><span class="who">09:12</span><div class="bd">Multi-currency invoices are off by a cent. Accounting saw it on the September close.</div></div>
+        <button class="sys" data-s="2"><svg class="i"><use href="#chev-r"/></svg><span class="mark"></span><b>Mission brief · shape</b><span>09:12</span></button>
+        <div class="msg agent" data-s="2"><span class="who"><b>Claude Code</b>09:14</span><div class="bd">
+          <p>I reproduced it on the demo data and wrote the steps under Reproduction. You changed the amounts of step 1; I keep yours.</p>
+          <p>One question before the plan: is the total the sum of the rounded lines, or one rounding of the raw amounts? I recommend the sum of the lines: it is what the PDF prints today.</p>
+        </div></div>
+        <!-- 3 · empty define -->
+        <button class="sys" data-s="3"><svg class="i"><use href="#chev-r"/></svg><span class="mark"></span><b>Mission · define</b><span>11:02</span></button>
+        <div class="msg user" data-s="3"><span class="who">11:02</span><div class="bd">Let's write down the cent-rounding bug accounting found.</div></div>
+        <div class="msg agent" data-s="3"><span class="who"><b>Claude Code</b>11:02</span><div class="bd"><p>This Session has no Spec yet. Create one from what you said, or join a draft: <b>ATL-12</b>, written in « Rounding bug », looks like the same one.</p></div></div>
+        <!-- 4 · gate full -->
+        <button class="sys" data-s="4"><svg class="i"><use href="#chev-r"/></svg><span class="mark"></span><b>Mission brief · decompose</b><span>11:20</span></button>
+        <div class="msg agent" data-s="4"><span class="who"><b>Claude Code</b>11:31</span><div class="bd">
+          <p>Decompose is finished: four tasks, each one a slice that can be verified alone, the last one yours: checking the file imports into the ledger.</p>
+          <p>I attest the contract is complete and a build can run it without inventing a decision. Marking it ready is yours.</p>
+        </div></div>
+        <!-- 5 · ready -->
+        <button class="sys" data-s="5"><svg class="i"><use href="#chev-r"/></svg><span class="mark"></span><b>ATL-7 marked ready · rev 2</b><span>11:34</span></button>
+        <div class="msg agent" data-s="5"><span class="who"><b>Claude Code</b>11:34</span><div class="bd"><p>The Spec is frozen at revision 2. A build Session can start from it. I can no longer change it unless you rework it.</p></div></div>
+        <!-- 6 · reader -->
+        <div class="msg user" data-s="6"><span class="who">14:05</span><div class="bd">What does ATL-7 say about credit notes?</div></div>
+        <div class="msg agent" data-s="6"><span class="who"><b>Claude Code</b>14:05</span><div class="bd"><p>Story S2 covers them: negative rows in the same file, marked by a <code>type</code> column. Its second criterion says the file total must still equal the billing page total for the month.</p><p>I only read it: « Spec CSV » writes it.</p></div></div>
+        <!-- 7 · conflict -->
+        <div class="msg agent" data-s="7"><span class="who"><b>Claude Code</b>10:52</span><div class="bd"><p>I rewrote Scope (v5): payments stay out, and the currency column moved to Verification.</p></div></div>
+        <!-- 8 · stale -->
+        <button class="sys" data-s="8"><svg class="i"><use href="#chev-r"/></svg><span class="mark"></span><b>ATL-7 reworked · rev 3</b><span>« credit notes keep their invoice number »</span></button>
+        <div class="msg agent" data-s="8"><span class="who"><b>Claude Code</b>15:10</span><div class="bd"><p>Revision 3 is a full copy of 2. The reason touches the plan and the tasks, so I am declaring both again; shape still holds.<span class="cursor"></span></p></div></div>
+      </div>
+      <div class="compose"><div class="cframe">
+        <div class="cbox"><textarea rows="2" placeholder="Answer, or ask the agent…"></textarea></div>
+        <div class="cfoot"><span class="sel">Model <b>sonnet-5</b><svg class="i"><use href="#chev-d"/></svg></span><span class="sel">Effort <b>high</b></span><span class="grow"></span><button class="send" title="Send"><svg class="i lg"><use href="#up"/></svg></button></div>
+      </div></div>
+    </section>
+
+    <!-- ================= Spec panel ================= -->
+    <section class="panel">
+
+      <!-- 1 · feature, mid-plan -->
+      <div class="spec" data-s="1">
+        <div class="head">
+          <div class="hl"><span class="key">ATL-7</span><h2>CSV invoice export</h2><span class="type">feature</span><span class="status">draft</span></div>
+          <div class="phases"><span class="ph done"><i></i><span>Shape</span></span><span class="ph open"><i></i><span>Plan</span></span><span class="ph"><i></i><span>Decompose</span></span><span class="ph off"><i></i><span>Prototype</span></span></div>
+          <p class="now">Plan · the agent is writing the plan</p>
+        </div>
+        <div class="body">
+          <nav class="outline">
+            <button class="o agent"><i></i>Problem</button><button class="o agent"><i></i>Expected outcome</button><button class="o you"><i></i>Scope</button>
+            <button class="o agent"><i></i>Verification</button><button class="o agent"><i></i>Behaviour</button><button class="o writing"><i></i>Plan</button>
+            <hr><button class="o agent"><i></i>Stories<span class="n">2</span></button><button class="o agent"><i></i>Tasks<span class="n">2</span></button><button class="o on"><i></i>Questions<span class="n">1</span></button>
+          </nav>
+          <div class="stage"><div class="item">
+            <h3>Questions</h3>
+            <div class="meta">1 open<span class="sep"></span>1 answered</div>
+            <div class="list">
+              <div class="li">
+                <div class="t">Credit notes: negative rows in the same file, or left out of the export?</div>
+                <p class="r">Recommended by the agent: negative rows, so the file total matches the ledger.</p>
+                <div class="tags"><span class="tag block">blocking</span><span class="tag">plan</span><span class="tag">S2</span></div>
+                <details class="answer"><summary>Answer…</summary><textarea class="inplace" rows="2" placeholder="Your answer goes to the agent on its next turn"></textarea></details>
+              </div>
+              <div class="li done">
+                <div class="t">Which date decides the month: issue date or payment date?</div>
+                <p class="r">Issue date · you, 10:36</p>
+                <div class="tags"><span class="tag">shape</span></div>
+              </div>
+            </div>
+          </div></div>
+        </div>
+        <div class="foot">
+          <div class="gate"><div class="bar"><i class="on" data-n="contract"></i><i class="on" data-n="references"></i><i data-n="coverage · S2 has no task"></i><i class="on" data-n="cycle"></i><i data-n="questions · 1 blocking"></i><i class="on" data-n="phases"></i><i class="on" data-n="attestation"></i></div><span class="n">5/7</span></div>
+          <div class="say"><span>2 things before ready: <a>a task for S2</a>, <a>the credit-note question</a></span></div>
+        </div>
+      </div>
+
+      <!-- 2 · bug -->
+      <div class="spec" data-s="2">
+        <div class="head">
+          <div class="hl"><span class="key">ATL-12</span><h2>Totals rounded twice on multi-currency invoices</h2><span class="type">bug</span><span class="status">draft</span></div>
+          <div class="phases"><span class="ph open"><i></i><span>Shape</span></span><span class="ph"><i></i><span>Plan</span></span><span class="ph"><i></i><span>Decompose</span></span><span class="ph off"><i></i><span>Prototype</span></span></div>
+          <p class="now">Shape · waiting for your answer on one question</p>
+        </div>
+        <div class="body">
+          <nav class="outline">
+            <button class="o agent"><i></i>Problem</button><button class="o agent"><i></i>Expected outcome</button><button class="o"><i></i>Scope</button>
+            <button class="o"><i></i>Verification</button><button class="o you on"><i></i>Reproduction</button><button class="o"><i></i>Plan</button>
+            <hr><button class="o"><i></i>Tasks<span class="n">0</span></button><button class="o agent"><i></i>Questions<span class="n">1</span></button>
+          </nav>
+          <div class="stage"><div class="item">
+            <h3>Reproduction</h3>
+            <div class="meta">you<span class="sep"></span>v2<span class="sep"></span><span class="saved">saved</span><button class="tog" title="Preview the Markdown"><svg class="i"><use href="#eye"/></svg></button></div>
+            <textarea class="inplace" rows="10">1. Create an invoice in EUR with three lines at 19.99, 0.35 and 7.10, VAT 20 %.
+2. Switch the account currency to USD and open the invoice.
+3. Compare the total with the sum of the lines.
+
+Observed: the total is 33.93 USD, one cent above the lines.
+Expected: 33.92 USD, the sum of the rounded lines.</textarea>
+            <p class="quiet">Replayed after the build, by an agent or by you, to see the wrong total is gone.</p>
+          </div></div>
+        </div>
+        <div class="foot">
+          <div class="gate"><div class="bar"><i data-n="contract · scope, verification"></i><i class="on" data-n="references"></i><i data-n="coverage"></i><i class="on" data-n="cycle"></i><i data-n="questions · 1 blocking"></i><i data-n="phases"></i><i data-n="attestation"></i></div><span class="n">2/7</span></div>
+          <div class="say"><span>5 things before ready: <a>the scope</a>, <a>the verification</a>, <a>the rounding question</a> and 2 more</span></div>
+        </div>
+      </div>
+
+      <!-- 3 · empty define -->
+      <div class="empty" data-s="3"><div class="box">
+        <h3>This Session defines a Spec.</h3>
+        <p>Start one from this conversation, or join a draft another Session is writing.</p>
+        <div class="acts"><button class="btn primary"><svg class="i"><use href="#plus"/></svg>Create a Spec</button><button class="btn">Join a Spec</button></div>
+        <div class="drafts">
+          <div class="lbl">Drafts in Atlas</div>
+          <button class="draft"><span class="k">ATL-12</span><span>Totals rounded twice on multi-currency invoices</span><span class="s">written in « Rounding bug »</span></button>
+          <button class="draft"><span class="k">ATL-7</span><span>CSV invoice export</span><span class="s">written in « Spec CSV »</span></button>
+          <button class="draft"><span class="k">ATL-9</span><span>Full-text search in the journal</span><span class="s">written in « Search scope »</span></button>
+        </div>
+      </div></div>
+
+      <!-- 4 · gate full -->
+      <div class="spec" data-s="4">
+        <div class="head">
+          <div class="hl"><span class="key">ATL-7</span><h2>CSV invoice export</h2><span class="type">feature</span><span class="status">draft</span></div>
+          <div class="phases"><span class="ph done"><i></i><span>Shape</span></span><span class="ph done"><i></i><span>Plan</span></span><span class="ph done"><i></i><span>Decompose</span></span><span class="ph off"><i></i><span>Prototype</span></span></div>
+          <p class="now">Decompose · finished, the agent attests the contract is complete</p>
+        </div>
+        <div class="body">
+          <nav class="outline">
+            <button class="o agent"><i></i>Problem</button><button class="o agent"><i></i>Expected outcome</button><button class="o you"><i></i>Scope</button>
+            <button class="o agent"><i></i>Verification</button><button class="o agent"><i></i>Behaviour</button><button class="o agent"><i></i>Plan</button>
+            <hr><button class="o agent"><i></i>Stories<span class="n">2</span></button><button class="o agent on"><i></i>Tasks<span class="n">4</span></button><button class="o agent"><i></i>Questions<span class="n">0</span></button>
+          </nav>
+          <div class="stage"><div class="item">
+            <h3>Tasks</h3>
+            <div class="meta">agent<span class="sep"></span>v2<span class="sep"></span>4 tasks, 1 for you</div>
+            <div class="list">
+              <div class="li"><div class="t"><span class="k">T1</span>The month's invoice lines, streamed</div><p class="r">The export endpoint returns every line issued in the month, in issue-date order.</p><div class="tags"><span class="tag">covers S1</span><span class="tag who">agent</span></div></div>
+              <div class="li"><div class="t"><span class="k">T2</span>A CSV in the ledger's column order</div><p class="r">The billing page's Export button downloads the file; an empty month gives the header only.</p><div class="tags"><span class="tag">after T1</span><span class="tag">covers S1</span><span class="tag who">agent</span></div></div>
+              <div class="li"><div class="t"><span class="k">T3</span>Credit notes as negative rows</div><p class="r">A credit note is a row of type <code>credit</code> with negative amounts; the total still matches.</p><div class="tags"><span class="tag">after T1</span><span class="tag">covers S2</span><span class="tag who">agent</span></div></div>
+              <div class="li"><div class="t"><span class="k">T4</span>The file imports into the ledger</div><p class="r">September's file imports without an error and its total equals the billing page.</p><div class="tags"><span class="tag">after T2</span><span class="tag">after T3</span><span class="tag">covers S1</span><span class="tag">covers S2</span><span class="tag who">human</span></div></div>
+            </div>
+          </div></div>
+        </div>
+        <div class="foot">
+          <div class="gate"><div class="bar"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div><span class="n">7/7</span></div>
+          <div class="say"><span class="ok">Ready to freeze</span><button class="btn primary">Mark ready</button></div>
+        </div>
+      </div>
+
+      <!-- 5 · ready, frozen, with the rework dialog -->
+      <div class="spec" data-s="5">
+        <div class="head">
+          <div class="hl"><span class="key">ATL-7</span><h2>CSV invoice export</h2><span class="type">feature</span><span class="status ready">ready</span>
+            <span class="end"><details class="revs"><summary>rev 2<svg class="i"><use href="#chev-d"/></svg></summary><div class="menu"><div><b>rev 2</b><span class="mut grow">current, frozen</span></div><div><span>rev 1</span><span class="mut grow">read only · 22 Sep</span></div></div></details><button class="btn sm"><svg class="i"><use href="#rework"/></svg>Rework</button></span></div>
+          <div class="phases"><span class="ph done"><i></i><span>Shape</span></span><span class="ph done"><i></i><span>Plan</span></span><span class="ph done"><i></i><span>Decompose</span></span><span class="ph off"><i></i><span>Prototype</span></span></div>
+          <p class="now">Ready · frozen at revision 2, a build can start from it</p>
+        </div>
+        <div class="body">
+          <nav class="outline">
+            <button class="o agent"><i></i>Problem</button><button class="o agent on"><i></i>Expected outcome</button><button class="o you"><i></i>Scope</button>
+            <button class="o agent"><i></i>Verification</button><button class="o agent"><i></i>Behaviour</button><button class="o agent"><i></i>Plan</button>
+            <hr><button class="o agent"><i></i>Stories<span class="n">2</span></button><button class="o agent"><i></i>Tasks<span class="n">4</span></button><button class="o agent"><i></i>Questions<span class="n">0</span></button>
+          </nav>
+          <div class="stage"><div class="item">
+            <h3>Expected outcome</h3>
+            <div class="meta"><svg class="i"><use href="#lock"/></svg>agent<span class="sep"></span>rev 2<span class="sep"></span>frozen</div>
+            <p class="prose">An accountant picks a month on the billing page and downloads one CSV file holding every invoice and credit note issued that month, one row per line, in the columns their ledger imports.</p>
+            <p class="prose" style="margin-top:8px">The total of the file equals the total the billing page shows for the same month.</p>
+          </div></div>
+        </div>
+        <div class="foot">
+          <div class="gate"><div class="bar"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div><span class="n">7/7</span></div>
+          <div class="say"><span>Frozen on 23 Sep · nothing changes until you rework it</span></div>
+        </div>
+        <div class="scrim"><div class="dialog" role="dialog" aria-labelledby="rw">
+          <h3 id="rw">Rework ATL-7</h3>
+          <label class="field"><input value="Credit notes must keep the number of their invoice" aria-label="Reason"></label>
+          <p>A complete copy becomes revision 3; revision 2 stays as it is.</p>
+          <div class="acts"><button class="btn ghost">Cancel</button><button class="btn primary">Rework</button></div>
+        </div></div>
+      </div>
+
+      <!-- 6 · reader Session -->
+      <div class="spec" data-s="6">
+        <div class="reader">Written by Session <b>« Spec CSV »</b> · you read<button class="btn sm">Take over</button></div>
+        <div class="head">
+          <div class="hl"><span class="key">ATL-7</span><h2>CSV invoice export</h2><span class="type">feature</span><span class="status">draft</span></div>
+          <div class="phases"><span class="ph done"><i></i><span>Shape</span></span><span class="ph done"><i></i><span>Plan</span></span><span class="ph open"><i></i><span>Decompose</span></span><span class="ph off"><i></i><span>Prototype</span></span></div>
+          <p class="now">Decompose · the writer's agent is splitting the tasks</p>
+        </div>
+        <div class="body">
+          <nav class="outline">
+            <button class="o agent"><i></i>Problem</button><button class="o agent"><i></i>Expected outcome</button><button class="o you"><i></i>Scope</button>
+            <button class="o agent"><i></i>Verification</button><button class="o agent"><i></i>Behaviour</button><button class="o agent"><i></i>Plan</button>
+            <hr><button class="o agent on"><i></i>Stories<span class="n">2</span></button><button class="o writing"><i></i>Tasks<span class="n">3</span></button><button class="o agent"><i></i>Questions<span class="n">0</span></button>
+          </nav>
+          <div class="stage"><div class="item">
+            <h3>Stories</h3>
+            <div class="meta">agent<span class="sep"></span>v2<span class="sep"></span>you can edit; the writer's agent is told</div>
+            <div class="list">
+              <div class="li"><div class="t"><span class="k">S1</span>Export a month</div>
+                <textarea class="inplace" rows="2">As an accountant closing a month, I download every invoice of that month as one CSV, so that I import it into the ledger without retyping.</textarea>
+                <ol class="crit"><li><textarea class="inplace" rows="1">One row per invoice line issued in the month, by issue date.</textarea></li><li><textarea class="inplace" rows="1">Columns in the ledger's order: date, number, client, net, VAT, gross, currency.</textarea></li><li><textarea class="inplace" rows="1">An empty month downloads the header row only.</textarea></li></ol></div>
+              <div class="li"><div class="t"><span class="k">S2</span>Credit notes in the same file</div>
+                <textarea class="inplace" rows="2">As an accountant, I find credit notes in the same export as negative rows, so that the file total matches the ledger.</textarea>
+                <ol class="crit"><li><textarea class="inplace" rows="1">A credit note is a row of type credit with negative amounts.</textarea></li><li><textarea class="inplace" rows="1">The file total equals the billing page total for the month.</textarea></li></ol></div>
+            </div>
+          </div></div>
+        </div>
+        <div class="foot">
+          <div class="gate"><div class="bar"><i class="on"></i><i class="on"></i><i data-n="coverage · S2 has no task"></i><i class="on"></i><i class="on"></i><i data-n="phases · decompose open"></i><i data-n="attestation"></i></div><span class="n">4/7</span></div>
+          <div class="say"><span>3 things before ready: <a>a task for S2</a>, <a>decompose</a>, <a>the attestation</a></span></div>
+        </div>
+      </div>
+
+      <!-- 7 · conflict -->
+      <div class="spec" data-s="7">
+        <div class="head">
+          <div class="hl"><span class="key">ATL-7</span><h2>CSV invoice export</h2><span class="type">feature</span><span class="status">draft</span></div>
+          <div class="phases"><span class="ph done"><i></i><span>Shape</span></span><span class="ph open"><i></i><span>Plan</span></span><span class="ph"><i></i><span>Decompose</span></span><span class="ph off"><i></i><span>Prototype</span></span></div>
+          <p class="now">Plan · the agent rewrote Scope while you were editing it</p>
+        </div>
+        <div class="body">
+          <nav class="outline">
+            <button class="o agent"><i></i>Problem</button><button class="o agent"><i></i>Expected outcome</button><button class="o clash on"><i></i>Scope</button>
+            <button class="o agent"><i></i>Verification</button><button class="o agent"><i></i>Behaviour</button><button class="o writing"><i></i>Plan</button>
+            <hr><button class="o agent"><i></i>Stories<span class="n">2</span></button><button class="o agent"><i></i>Tasks<span class="n">2</span></button><button class="o agent"><i></i>Questions<span class="n">1</span></button>
+          </nav>
+          <div class="stage"><div class="item">
+            <h3>Scope</h3>
+            <div class="meta">you<span class="sep"></span>written on v3<span class="sep"></span>not saved</div>
+            <div class="conflict">Your text was written on v3; the section is at v5.
+              <div class="acts"><button class="btn sm"><svg class="i"><use href="#compare"/></svg>Compare</button><button class="btn sm">Apply mine on v5</button><button class="btn sm ghost">Discard mine</button></div></div>
+            <textarea class="inplace" rows="7">In: invoices and credit notes issued in the chosen month, in every currency, from the Export button of the billing page.
+
+Out: scheduled exports, PDF, filtering by client.
+Out: payments and refunds, which belong to the cash report.</textarea>
+          </div></div>
+        </div>
+        <div class="foot">
+          <div class="gate"><div class="bar"><i class="on"></i><i class="on"></i><i data-n="coverage · S2 has no task"></i><i class="on"></i><i data-n="questions · 1 blocking"></i><i class="on"></i><i class="on"></i></div><span class="n">5/7</span></div>
+          <div class="say"><span>2 things before ready: <a>a task for S2</a>, <a>the credit-note question</a></span></div>
+        </div>
+      </div>
+
+      <!-- 8 · stale after a rework -->
+      <div class="spec" data-s="8">
+        <div class="head">
+          <div class="hl"><span class="key">ATL-7</span><h2>CSV invoice export</h2><span class="type">feature</span><span class="status">draft</span><span class="rev">rev 3</span></div>
+          <div class="phases"><span class="ph done"><i></i><span>Shape</span></span><span class="ph stale"><i></i><span>Plan</span><small>rework</small></span><span class="ph stale"><i></i><span>Decompose</span><small>rework</small></span><span class="ph off"><i></i><span>Prototype</span></span></div>
+          <p class="now">Rework · the agent re-declares each phase</p>
+        </div>
+        <div class="body">
+          <nav class="outline">
+            <button class="o agent"><i></i>Problem</button><button class="o agent"><i></i>Expected outcome</button><button class="o you"><i></i>Scope</button>
+            <button class="o agent"><i></i>Verification</button><button class="o agent"><i></i>Behaviour</button><button class="o stale on"><i></i>Plan</button>
+            <hr><button class="o agent"><i></i>Stories<span class="n">2</span></button><button class="o stale"><i></i>Tasks<span class="n">4</span></button><button class="o agent"><i></i>Questions<span class="n">0</span></button>
+          </nav>
+          <div class="stage"><div class="item">
+            <h3>Plan</h3>
+            <div class="meta">agent<span class="sep"></span>copied from rev 2<span class="sep"></span><span class="warn">stale after the rework</span></div>
+            <textarea class="inplace" rows="9">Reuse the invoice query of export.service.ts, grouped by issue date, and stream its rows through the CSV writer of shared/csv. The endpoint lives beside the PDF export and takes the month as YYYY-MM.
+
+Credit notes come from the same query with their sign kept. Risk: the ledger rejects a file above 10 000 rows; one month of the largest account is 6 400.
+
+Verification: an integration test per story, and T4 by hand on September's data.</textarea>
+          </div></div>
+        </div>
+        <div class="foot">
+          <div class="gate"><div class="bar"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i data-n="phases · plan and decompose stale"></i><i data-n="attestation"></i></div><span class="n">5/7</span></div>
+          <div class="say"><span>2 things before ready: <a>plan and decompose declared again</a>, <a>the attestation</a></span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="legend" id="legend">
+  <button data-k="1"><kbd>1</kbd>Mid-plan</button><button data-k="2"><kbd>2</kbd>Bug</button><button data-k="3"><kbd>3</kbd>Empty</button><button data-k="4"><kbd>4</kbd>Gate full</button>
+  <button data-k="5"><kbd>5</kbd>Ready</button><button data-k="6"><kbd>6</kbd>Reader</button><button data-k="7"><kbd>7</kbd>Conflict</button><button data-k="8"><kbd>8</kbd>Stale</button>
+  <button data-k="t"><kbd>t</kbd>Theme</button>
+</div>
+<div class="pnote">Prototype · tokens and motion only</div>
+
+<script>
+  // Screen switching and the theme; nothing else is scripted.
+  function go(n) {
+    n = String(n)
+    document.querySelectorAll('[data-s]').forEach((el) => { el.hidden = !el.dataset.s.split(' ').includes(n) })
+    document.querySelectorAll('#legend [data-k]').forEach((b) => b.classList.toggle('on', b.dataset.k === n))
+    history.replaceState(null, '', '#' + n)
+  }
+  function theme() { document.documentElement.classList.toggle('dark') }
+  document.getElementById('legend').addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) b.dataset.k === 't' ? theme() : go(b.dataset.k) })
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, textarea') || e.ctrlKey || e.metaKey || e.altKey) return
+    if (/^[1-8]$/.test(e.key)) go(e.key)
+    if (e.key === 't') theme()
+  })
+  const q = new URLSearchParams(location.search)
+  if (q.get('theme') === 'light') document.documentElement.classList.remove('dark')
+  go((location.hash.match(/^#([1-8])$/) || [, '1'])[1])
+</script>
+</body>
+</html>

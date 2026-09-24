@@ -26,9 +26,9 @@ export const contextOf = (sessionId: string) =>
     const { session } = yield* sessions.one(sessionId)
     const provided = yield* context.provided(sessionId)
     const catalogue = yield* commands.list(session.projectId)
-    // Sessions have no mission yet, so every one is offered the whole set (D6-03); the list is
-    // read through the same function the guard asks, so the view shows what the guard admits.
-    const tools = offeredTools('free').map((name) => ({ name, bound: TOOL_BOUNDS[name] }))
+    // The set of the Session's mission (D6-03, D7-14), read through the same function the grant
+    // of its agent is, so the view shows what the guard admits.
+    const tools = offeredTools(session.mission).map((name) => ({ name, bound: TOOL_BOUNDS[name] }))
     const view: ContextView = {
       provided: provided.map((one) => ({
         kind: one.kind,

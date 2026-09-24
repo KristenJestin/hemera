@@ -22,6 +22,7 @@ import {
   forgetRefusal,
   loadProjects,
   projectsSnapshot,
+  renameProject,
 } from '#renderer/projects-store.ts'
 
 /** One Project, as the engine answers with one. */
@@ -36,6 +37,7 @@ function project(id: string, name: string, version = 1): Project {
     version,
     mainPath: `/tmp/${id}`,
     repositories: [],
+    specPrefix: 'SPEC',
   }
 }
 
@@ -52,6 +54,10 @@ function entry(sequence: number, projectId: string | null): JournalEntry {
     projectId,
     payload: {},
     seenAt: null,
+    sessionId: null,
+    specId: null,
+    revisionId: null,
+    phaseId: null,
   }
 }
 
@@ -112,6 +118,22 @@ describe('Le store des Projets porte ce que le moteur a répondu', () => {
     await archiveProject(project('atlas', 'Atlas', 3))
 
     expect(asked[0]?.argument).toEqual({ id: 'atlas', version: 3 })
+  })
+
+  test('the Spec prefix is changed with the identity, on the version it was read at', async () => {
+    answers.set('projects.update', project('atlas', 'Atlas', 4))
+    answers.set('projects.list', [project('atlas', 'Atlas', 4)])
+
+    await renameProject(project('atlas', 'Atlas', 3), {
+      name: 'Atlas',
+      tone: 'primary',
+      specPrefix: 'ATX',
+    })
+
+    expect(asked[0]).toEqual({
+      name: 'projects.update',
+      argument: { id: 'atlas', version: 3, name: 'Atlas', tone: 'primary', specPrefix: 'ATX' },
+    })
   })
 
   test('a refusal is kept in the words it came in, and the list is left alone', async () => {
