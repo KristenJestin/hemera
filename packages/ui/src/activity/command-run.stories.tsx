@@ -14,6 +14,7 @@ import { COMMAND_TYPES } from './command-type.ts'
  * Workspace root, and a process the reader stopped. The address is the reason the block exists,
  * so it is on the line in every story that has one. A one-off offers `Add to catalogue` beside its
  * command line, and pressing it is a request to the human's catalogue, not a promotion (D8-11).
+ * A run in another Workspace than the Session's names it (D8-08).
  */
 const SERVER_OUTPUT = [
   'vite v7.1.4 building for development...',
@@ -65,6 +66,10 @@ const meta = {
     url: { control: 'text', description: 'The address its output named.' },
     exitCode: { control: 'number', description: 'What it exited with.' },
     oneOff: { control: 'boolean', description: 'A line run without being in the catalogue.' },
+    workspace: {
+      control: 'text',
+      description: "The Workspace it runs in, when it is not the Session's own (D8-08).",
+    },
     onOpenUrl: { control: false, description: 'Opens the published address.' },
     onStop: { control: false, description: 'Stops the process.' },
     onAddToCatalogue: {
@@ -232,6 +237,32 @@ export const OneOffAddToCatalogue: Story = {
     oneOff: true,
   },
   play: aOneOffExecutionStaysOutOfTheCatalogue,
+}
+
+/**
+ * A Project-scoped service asked for from a Session in `login-form`: it runs in `main`, and the
+ * line says so beside its folder.
+ *
+ * Scenario "A Project-scoped service is one instance for all": one run, in `main`'s folder.
+ */
+async function aProjectScopedServiceIsOneInstanceForAll({
+  canvasElement,
+}: StoryContext): Promise<void> {
+  const canvas = within(canvasElement)
+  await expect(canvas.getByText('in main')).toBeVisible()
+  await oneHeader(canvasElement, 'Running', 'auth')
+}
+
+export const InAnotherWorkspace: Story = {
+  args: {
+    name: 'auth',
+    command: 'pnpm --filter auth dev',
+    folder: 'sources/auth',
+    output: '  Local:   http://localhost:4000/',
+    url: 'http://localhost:4000/',
+    workspace: 'main',
+  },
+  play: aProjectScopedServiceIsOneInstanceForAll,
 }
 
 /** A process the reader stopped: nothing exited, and the line says so. */

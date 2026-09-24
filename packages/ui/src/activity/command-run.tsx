@@ -27,7 +27,8 @@ import { TerminalOutput } from './terminal-output.tsx'
  * first line of its body, and the run itself writes nothing (D8-11).
  *
  * The type is drawn with the icon the design system fixes for it (D8-07), beside the name, so a
- * `test` reads as a test here as it does in the settings.
+ * `test` reads as a test here as it does in the settings. A run in another Workspace than the
+ * Session's says which, beside its folder (D8-08).
  */
 
 /** How a run is read at a glance: the state is the word, and the exit code is the proof. */
@@ -87,6 +88,11 @@ export interface CommandRunProps {
   exitCode?: number | undefined
   /** Whether the line was run without being in the catalogue. */
   oneOff?: boolean | undefined
+  /**
+   * The Workspace it runs in, named only when it is not the Session's own: a Project-scoped
+   * service runs in `main` whichever Workspace asked for it (D8-07, D8-08).
+   */
+  workspace?: string | undefined
   /** Whether a reader who has not touched it finds it open. */
   defaultOpen?: boolean | undefined
   /** Opens the address the command published, which this block cannot do. */
@@ -112,6 +118,7 @@ export function CommandRun({
   url,
   exitCode,
   oneOff = false,
+  workspace,
   defaultOpen = false,
   onOpenUrl,
   onStop,
@@ -144,6 +151,7 @@ export function CommandRun({
             </Badge>
             <Badge tone="neutral">{COMMAND_TYPE_LABELS[type]}</Badge>
             {oneOff && <Badge tone="neutral">One-off</Badge>}
+            {workspace !== undefined && <Badge tone="neutral">{`in ${workspace}`}</Badge>}
             <span className={FOLDER}>{folder}</span>
           </span>
         }
