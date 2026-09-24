@@ -336,6 +336,67 @@ describe('A variable set on main applies to a Session on main', () => {
   })
 })
 
+describe('A Session’s tools never list a preparation run', () => {
+  test('commands_output and commands_stop of a Session in login-form see no run of no Session', async () => {
+    const agent = fakeAgent({
+      turns: [
+        [{ does: 'uses', call: 'commands_output', arguments: {} }],
+        [{ does: 'uses', call: 'commands_stop', arguments: {} }],
+      ],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const commands = yield* Commands
+        const { session, workspaceId } = yield* inLoginForm
+        // Two runs of login-form as a preparation starts them, with no Session: one over, one
+        // still going (Decided 11).
+        const step = (name: string, code: string) =>
+          commands.run({
+            sessionId: null,
+            projectId: session.projectId,
+            commandId: null,
+            name,
+            line: `"${process.execPath}" -e "${code}"`,
+            lineWindows: null,
+            lineLinux: null,
+            type: 'script',
+            scope: 'workspace',
+            portless: false,
+            folder: null,
+            cwd: loginForm,
+            workspaceId,
+            workspaceName: 'login-form',
+            environment: {},
+            startedBy: 'user',
+          })
+        const over = yield* step('install', 'process.exit(0)')
+        yield* commands.awaited(null, over.id, 10_000)
+        const going = yield* step('watch', 'setInterval(()=>{},1000)')
+        yield* runtime.prompt(session.id, 'read the last run')
+        yield* runtime.prompt(session.id, 'stop what runs')
+        return {
+          going: yield* commands.runOf(session.projectId, going.id),
+          running: yield* commands.running(session.id),
+          recent: yield* commands.recent(session.id),
+        }
+      }),
+    )
+
+    // Neither tool found a run to read or to stop: the Session has none of its own.
+    expect(agent.answers.used[0]).toMatchObject({
+      isError: true,
+      text: 'start one with commands_run',
+    })
+    expect(agent.answers.used[1]).toMatchObject({ isError: true, text: 'nothing to stop' })
+    // The preparation's run went on, untouched by the Session's stop.
+    expect(seen.going.state).toBe('running')
+    expect(seen.running).toEqual([])
+    expect(seen.recent).toEqual([])
+  })
+})
+
 describe('The Workspace is fixed once the agent has started', () => {
   test('a change is accepted before the first turn and refused after it', async () => {
     const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
