@@ -92,9 +92,9 @@ function contract(section: string, body: string): FakeStep {
   return writes({ section, body, baseVersion: CONTRACT_VERSION }, section)
 }
 
-/** One declaration through Hemera's `spec_propose`. */
-function proposes(sent: Readonly<Record<string, string>>): FakeStep {
-  return { does: 'uses', call: 'spec_propose', arguments: sent }
+/** One declaration through Hemera's `spec_propose`, under a key of its own. */
+function proposes(sent: Readonly<Record<string, string>>, key: string): FakeStep {
+  return { does: 'uses', call: 'spec_propose', arguments: { ...sent, key: `${key}-${RUN}` } }
 }
 
 /**
@@ -107,13 +107,16 @@ const completing: readonly FakeStep[] = [
   contract('expected_outcome', WRITTEN.expected_outcome),
   contract('verification', WRITTEN.verification),
   contract('behaviour', WRITTEN.behaviour),
-  proposes({ kind: 'phase_done', phase: 'shape', summary: 'The export fix is shaped.' }),
+  proposes({ kind: 'phase_done', phase: 'shape', summary: 'The export fix is shaped.' }, 'shape'),
   writes({ section: 'plan', body: WRITTEN.plan, baseVersion: 0 }, 'plan'),
-  proposes({ kind: 'phase_done', phase: 'plan', summary: 'The approach is planned.' }),
+  proposes({ kind: 'phase_done', phase: 'plan', summary: 'The approach is planned.' }, 'plan'),
   writes({ stories: JSON.stringify([STORY]) }, 'stories'),
   writes({ tasks: JSON.stringify([TASK]) }, 'tasks'),
-  proposes({ kind: 'phase_done', phase: 'decompose', summary: 'One task covers the story.' }),
-  proposes({ kind: 'ready' }),
+  proposes(
+    { kind: 'phase_done', phase: 'decompose', summary: 'One task covers the story.' },
+    'decompose',
+  ),
+  proposes({ kind: 'ready' }, 'ready'),
 ]
 
 const script: FakeScript = {
@@ -160,7 +163,12 @@ const script: FakeScript = {
     ]
     // Asked for a Spec, it proposes one after its answer, through the tool.
     if (asked.includes(PROPOSE)) {
-      answer.push(proposes({ kind: 'spec', title: PROPOSAL.title, type: PROPOSAL.type }))
+      answer.push(
+        proposes(
+          { kind: 'spec', title: PROPOSAL.title, type: PROPOSAL.type },
+          `spec-${String(turn)}`,
+        ),
+      )
     }
     return answer
   },

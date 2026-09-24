@@ -25,7 +25,7 @@ import { Sessions } from '#engine/sessions.ts'
 import { SpecNotices } from '#engine/specs/notices.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { aSessionOn, gated, pause, threadOf, toolApplication } from './application.ts'
-import { agentOf, contracted, frozen, write } from './specs-harness.ts'
+import { agentOf, contracted, frozen, shaped, write } from './specs-harness.ts'
 import { type OpenWindow, openWindow } from './window.ts'
 
 let dataFolder: string
@@ -214,7 +214,14 @@ describe('A write on a frozen Spec is refused through the tool', () => {
 describe('A phase declared finished that fails its checks stays open', () => {
   test('shape without a scope stays open, the result names the scope, the focus stays', async () => {
     const agent = fakeAgent({
-      steps: [uses('spec_propose', { kind: 'phase_done', phase: 'shape', summary: 'Shaped.' })],
+      steps: [
+        uses('spec_propose', {
+          kind: 'phase_done',
+          phase: 'shape',
+          summary: 'Shaped.',
+          key: 'propose-1',
+        }),
+      ],
     })
     const seen = await toolApplication(dataFolder)(agent)(
       Effect.gen(function* () {
@@ -241,7 +248,7 @@ describe("A reader Session's agent is refused a write with the writer named", ()
     const agent = fakeAgent({
       steps: [
         uses('spec_write', { section: 'scope', body: 'Mine.', baseVersion: 1, key: 'reader-1' }),
-        uses('spec_propose', { kind: 'ready' }),
+        uses('spec_propose', { kind: 'ready', key: 'propose-2' }),
       ],
     })
     const seen = await toolApplication(dataFolder)(agent)(
@@ -307,6 +314,7 @@ describe('phase_done with a failing exit check changes nothing and names the che
           summary: 'Planned.',
           supporting: 'the scope',
           assumptions: '["CSV first"]',
+          key: 'propose-3',
         }),
       ],
     })
@@ -345,6 +353,7 @@ describe('phase_done with a failing exit check changes nothing and names the che
           summary: 'Shaped.',
           supporting: 'problem, scope',
           assumptions: '["CSV first"]',
+          key: 'propose-4',
         }),
       ],
     })
@@ -371,7 +380,7 @@ describe('phase_done with a failing exit check changes nothing and names the che
 
 describe('ready attests and does not freeze', () => {
   test('the attestation is recorded on the content it was made on, and the Spec stays a draft', async () => {
-    const agent = fakeAgent({ steps: [uses('spec_propose', { kind: 'ready' })] })
+    const agent = fakeAgent({ steps: [uses('spec_propose', { kind: 'ready', key: 'propose-5' })] })
     const seen = await toolApplication(dataFolder)(agent)(
       Effect.gen(function* () {
         const specs = yield* Specs
@@ -510,7 +519,12 @@ describe('The agent proposes a Spec through spec_propose in a free Session', () 
     const agent = fakeAgent({
       steps: [
         { does: 'says', text: 'You want the Journal to leave the application.' },
-        uses('spec_propose', { kind: 'spec', title: 'Export the Journal', type: 'feature' }),
+        uses('spec_propose', {
+          kind: 'spec',
+          title: 'Export the Journal',
+          type: 'feature',
+          key: 'propose-6',
+        }),
       ],
     })
     const seen = await toolApplication(dataFolder)(agent)(
@@ -543,7 +557,9 @@ describe('The agent proposes a Spec through spec_propose in a free Session', () 
 
   test('a define Session is refused a proposal', async () => {
     const proposing = fakeAgent({
-      steps: [uses('spec_propose', { kind: 'spec', title: 'Another', type: 'bug' })],
+      steps: [
+        uses('spec_propose', { kind: 'spec', title: 'Another', type: 'bug', key: 'propose-7' }),
+      ],
     })
     const defined = await toolApplication(dataFolder)(proposing)(
       Effect.gen(function* () {
@@ -557,7 +573,9 @@ describe('The agent proposes a Spec through spec_propose in a free Session', () 
   })
 
   test('a free Session is refused the kinds that need a Spec', async () => {
-    const attesting = fakeAgent({ steps: [uses('spec_propose', { kind: 'ready' })] })
+    const attesting = fakeAgent({
+      steps: [uses('spec_propose', { kind: 'ready', key: 'propose-8' })],
+    })
     await toolApplication(dataFolder)(attesting)(
       Effect.gen(function* () {
         const session = yield* aSessionOn(workspace, 'claude')
@@ -572,7 +590,14 @@ describe('The agent proposes a Spec through spec_propose in a free Session', () 
 describe('A Session whose proposal is accepted is offered the define set at its next turn', () => {
   test('its agent is started again, its conversation resumed, with the Spec tools', async () => {
     const proposing = fakeAgent({
-      steps: [uses('spec_propose', { kind: 'spec', title: 'Export the Journal', type: 'feature' })],
+      steps: [
+        uses('spec_propose', {
+          kind: 'spec',
+          title: 'Export the Journal',
+          type: 'feature',
+          key: 'propose-9',
+        }),
+      ],
     })
     const restarted = fakeAgent({ listsTools: true })
     opened = await openWindow(dataFolder, proposing, restarted)
@@ -607,7 +632,12 @@ describe('A proposal accepted during a turn takes the write tools away at once a
     const gate = gated(1)
     const proposing = fakeAgent({
       steps: [
-        uses('spec_propose', { kind: 'spec', title: 'Export the Journal', type: 'feature' }),
+        uses('spec_propose', {
+          kind: 'spec',
+          title: 'Export the Journal',
+          type: 'feature',
+          key: 'propose-10',
+        }),
         uses('fs_write', { path: 'notes.md', content: 'Written anyway.', key: 'write-1' }),
         { does: 'says', text: 'Carrying on.' },
       ],
@@ -653,5 +683,41 @@ describe('A proposal accepted during a turn takes the write tools away at once a
     expect([...(restarted.answers.tools[0] ?? [])].toSorted()).toEqual(
       [...offeredTools('define')].toSorted(),
     )
+  })
+})
+
+describe('A retried spec_propose is answered once', () => {
+  test('a proposal sent twice under one key writes one proposal, and answers the retry the same', async () => {
+    const proposal = { kind: 'spec', title: 'Export the Journal', type: 'feature', key: 'once' }
+    const agent = fakeAgent({
+      steps: [uses('spec_propose', proposal), uses('spec_propose', proposal)],
+    })
+    const entries = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const session = yield* aSessionOn(workspace, 'claude')
+        return yield* turn(session.id)
+      }),
+    )
+    expect(agent.answers.used.map((answer) => answer.isError)).toEqual([false, false])
+    expect(agent.answers.used[1]?.text).toBe(agent.answers.used[0]?.text)
+    expect(entries.filter((entry) => entry.kind === 'spec_proposal')).toHaveLength(1)
+  })
+
+  test('a phase declared twice under one key is finished once, and the retry is not refused', async () => {
+    const declared = { kind: 'phase_done', phase: 'shape', summary: 'Shaped.', key: 'shape-once' }
+    const agent = fakeAgent({
+      steps: [uses('spec_propose', declared), uses('spec_propose', declared)],
+    })
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId, projectId } = yield* defining
+        yield* shaped(specId, sessionId)
+        yield* turn(sessionId)
+        return (yield* (yield* Journal).read({ projectId, specId })).entries
+      }),
+    )
+    expect(agent.answers.used.map((answer) => answer.isError)).toEqual([false, false])
+    expect(agent.answers.used[1]?.text).toBe(agent.answers.used[0]?.text)
+    expect(seen.filter((line) => line.type === 'spec.phase_finished')).toHaveLength(1)
   })
 })
