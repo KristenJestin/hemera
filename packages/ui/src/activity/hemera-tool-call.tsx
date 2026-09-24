@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import {
+  IconBookmarkPlus,
   IconFilePlus,
   IconFileText,
   IconFolder,
@@ -83,6 +84,7 @@ export type HemeraToolMark =
   | 'stop-command'
   | 'list-commands'
   | 'command-output'
+  | 'propose-command'
   | 'project'
   | 'session'
 
@@ -96,6 +98,7 @@ const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'stop-command': <IconPlayerStop size="sm" aria-hidden="true" />,
   'list-commands': <IconListDetails size="sm" aria-hidden="true" />,
   'command-output': <IconTerminal2 size="sm" aria-hidden="true" />,
+  'propose-command': <IconBookmarkPlus size="sm" aria-hidden="true" />,
   project: <IconFolders size="sm" aria-hidden="true" />,
   session: <IconMessages size="sm" aria-hidden="true" />,
 }
