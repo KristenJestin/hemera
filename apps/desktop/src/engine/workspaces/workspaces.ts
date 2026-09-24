@@ -90,6 +90,11 @@ export interface WorkspaceView {
   readonly specId: string | null
   readonly state: WorkspaceState
   readonly main: boolean
+  /**
+   * Whether Hemera assembled it — it has worktrees or steps — as against `main` or a folder the
+   * user picked, which Hemera never cleans up (D8-14).
+   */
+  readonly dedicated: boolean
   readonly createdAt: string
   readonly cleanedAt: string | null
   readonly repositories: readonly WorktreeRecord[]
@@ -296,6 +301,16 @@ export const workspacesLayer = Layer.effect(
             ),
           )
           .pipe(Effect.mapError(failed('reading the worktrees')))
+        const prepared = yield* database
+          .selectDistinct({ workspaceId: workspaceSteps.workspaceId })
+          .from(workspaceSteps)
+          .where(
+            inArray(
+              workspaceSteps.workspaceId,
+              rows.map((row) => row.id),
+            ),
+          )
+          .pipe(Effect.mapError(failed('reading the steps')))
         return rows.map((row): WorkspaceView => ({
           id: row.id,
           projectId: row.projectId,
@@ -304,6 +319,9 @@ export const workspacesLayer = Layer.effect(
           specId: row.specId,
           state: workspaceStateIn(row.state),
           main: row.name === MAIN_WORKSPACE,
+          dedicated:
+            records.some((record) => record.workspaceId === row.id) ||
+            prepared.some((step) => step.workspaceId === row.id),
           createdAt: row.createdAt,
           cleanedAt: row.cleanedAt,
           repositories: records
@@ -597,6 +615,7 @@ export const workspacesLayer = Layer.effect(
                     specId: draft.specId,
                     state: 'preparing',
                     main: false,
+                    dedicated: true,
                     createdAt: row.createdAt,
                     cleanedAt: null,
                     repositories: worktrees,
@@ -637,6 +656,7 @@ export const workspacesLayer = Layer.effect(
                     ...row,
                     state: 'ready',
                     main: false,
+                    dedicated: false,
                     repositories: [],
                   } satisfies WorkspaceView,
                   events: [workspaceEvent(row, 'workspace.created', { name, path }, 'human')],
