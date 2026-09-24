@@ -174,7 +174,12 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
         Effect.as(true),
         Effect.catchTag('GitError', () => Effect.succeed(false)),
       ),
-    status: (cwd) => run(cwd, ['status', '--porcelain=v2', '--branch']).pipe(Effect.map(statusOf)),
+    // An observation writes nothing (D8-15): without `--no-optional-locks` a status refreshes the
+    // index and takes its lock, and a `worktree add` under way in that folder is refused for it.
+    status: (cwd) =>
+      run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch']).pipe(
+        Effect.map(statusOf),
+      ),
     // At the top of a repository the prefix is empty; inside one it is the path down to here,
     // and outside any Git refuses — which is an answer here, not a failure.
     isRepository: (path) =>

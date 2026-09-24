@@ -5,7 +5,7 @@
  * suite under the temporary directory by the machine's own `git`, and removed after it.
  */
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -50,6 +50,24 @@ describe('Each repository shows its branch, commit and changes', () => {
       unstaged: 1,
       untracked: 1,
     })
+  })
+})
+
+describe('Git state is observed when shown', () => {
+  it('reads the status without writing the index, which a worktree being made needs', async () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, 'tracked.txt'), 'one\n')
+    git(api, 'add', 'tracked.txt')
+    git(api, 'commit', '-q', '-m', 'tracked')
+    // The file is the same, its time is not: a plain `git status` refreshes the index and writes
+    // it, taking `index.lock` — the lock a `git worktree add` under way is refused by.
+    const past = new Date(Date.now() - 60_000)
+    utimesSync(join(api, 'tracked.txt'), past, past)
+    const before = readFileSync(join(api, '.git', 'index'))
+
+    await asked(Git.use((one) => one.status(api)))
+
+    expect(readFileSync(join(api, '.git', 'index')).equals(before)).toBe(true)
   })
 })
 
