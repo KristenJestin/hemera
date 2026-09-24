@@ -348,7 +348,10 @@ describe('The process is killed by hand', () => {
 describe('A start is answered however often the fiber yields', () => {
   test('a child is seen to spawn wherever the fiber yields', async () => {
     const sink = sinkOf()
-    const aliveFor = script(ALIVE_FOR)
+    // A child that leaves as soon as its input closes: the thirty stops at the end of the scope
+    // are then each as short as the child's exit, where one that ignores its input is given the
+    // whole grace on Windows, which has no signal to end it sooner.
+    const leaves = script(ENDS_WHEN_INPUT_ENDS)
 
     // A fiber yields to the scheduler once it has run its share of operations, and Node says
     // `spawn` on the next tick: a yield between the start and its listeners would let the spawn
@@ -357,7 +360,7 @@ describe('A start is answered however often the fiber yields', () => {
     // never answers, which is this test running out of time.
     const pids = await opened(sink)(
       Effect.forEach(SHARES, (share) =>
-        starting(process.execPath, [aliveFor], {}).pipe(
+        starting(process.execPath, [leaves], {}).pipe(
           Effect.map(pidOf),
           Effect.provideService(Scheduler.MaxOpsBeforeYield, share),
         ),
