@@ -32,7 +32,7 @@ import {
   sessionTitle,
   titleAfterMessage,
 } from '@hemera/core'
-import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, getColumns, isNull, lt, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
 import { StderrSink } from './agents/supervisor.ts'
@@ -323,15 +323,29 @@ function written(candidate: string) {
 }
 
 /**
- * Whether a Session's Workspace is fixed (D8-08): its agent has started — a folder was handed to
- * it, or its own session exists — and that session was opened in the Workspace's folder.
+ * Whether the user has written into a Session: 1 once its first message is in the thread, 0
+ * before. Asked of the thread in the same read as the row, so a change is judged on what the
+ * database holds at that moment.
  */
-function workspaceFixedOf(row: { cwd: string | null; nativeState: string }): boolean {
-  return row.cwd !== null || row.nativeState !== 'none'
+const SPOKEN = sql<number>`exists (select 1 from ${sessionEntries} where ${sessionEntries.sessionId} = ${sessions.id} and ${sessionEntries.role} = 'user')`
+
+/** A row of `sessions` as it is read to be a Session: its columns, and whether it was spoken to. */
+const SESSION_ROW = { ...getColumns(sessions), spoken: SPOKEN }
+
+/**
+ * Whether a Session's Workspace is fixed (D8-08): "the choice is made before the first message".
+ * From the first message the user writes, the turn that starts the agent in that Workspace is
+ * under way — the agent is opened after the message is written, and records its folder later
+ * still — so a change accepted in between would leave the row naming one Workspace and the agent
+ * running in another. An agent started without a message (a folder handed to it, its own session
+ * begun) fixes it too.
+ */
+function workspaceFixedOf(row: { spoken: number; cwd: string | null; nativeState: string }) {
+  return row.spoken !== 0 || row.cwd !== null || row.nativeState !== 'none'
 }
 
 /** A row of `sessions`, as the domain's own Session. */
-function sessionOf(row: typeof sessions.$inferSelect): Session {
+function sessionOf(row: typeof sessions.$inferSelect & { spoken: number }): Session {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -442,7 +456,7 @@ export const sessionsLayer = Layer.effect(
     const readOne = (transaction: Parameters<Parameters<typeof mutate>[1]>[0], id: string) =>
       Effect.gen(function* () {
         const found = yield* transaction
-          .select()
+          .select(SESSION_ROW)
           .from(sessions)
           .where(eq(sessions.id, id))
           .pipe(Effect.mapError(failed('reading the Session')))
@@ -520,7 +534,7 @@ export const sessionsLayer = Layer.effect(
       list: (projectId, archived = false) =>
         withDatabase(
           database
-            .select()
+            .select(SESSION_ROW)
             .from(sessions)
             .where(
               and(
@@ -815,14 +829,15 @@ export const sessionsLayer = Layer.effect(
                   projectId: sessions.projectId,
                   cwd: sessions.cwd,
                   nativeState: sessions.nativeState,
+                  spoken: SPOKEN,
                 })
                 .from(sessions)
                 .where(eq(sessions.id, id))
                 .pipe(Effect.mapError(failed('reading the Session')))
               const row = rows[0]
               if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
-              // Fixed once the agent has started (D8-08): it was started in that folder, and its
-              // own session knows no other.
+              // Fixed from the first message (D8-08): the agent that message starts is started in
+              // that folder, and its own session knows no other.
               if (workspaceFixedOf(row)) {
                 return yield* Effect.fail(new WorkspaceFixedError())
               }
@@ -906,7 +921,7 @@ export const sessionsLayer = Layer.effect(
         withDatabase(
           Effect.gen(function* () {
             const rows = yield* database
-              .select()
+              .select(SESSION_ROW)
               .from(sessions)
               .where(eq(sessions.id, id))
               .limit(1)

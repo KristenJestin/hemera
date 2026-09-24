@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Fiber } from 'effect'
 import { z } from 'zod'
 
-import { fakeAgent } from '#engine/agents/fake.ts'
+import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { runFromPanel } from '#engine/commands/panel.ts'
 import { Commands } from '#engine/commands/service.ts'
@@ -26,7 +26,7 @@ import { Database } from '#engine/storage/database.ts'
 import { workspaces } from '#engine/storage/schema.ts'
 import { UnknownWorkspaceError } from '#engine/workspaces/described.ts'
 import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
-import { threadOf, toolApplication, until } from './application.ts'
+import { application, machine, threadOf, toolApplication, until } from './application.ts'
 
 let dataFolder: string
 let main: string
@@ -423,6 +423,53 @@ describe('The Workspace is fixed once the agent has started', () => {
     expect(seen.back.workspaceId).toBe(seen.workspaceId)
     expect(seen.refused).toBeInstanceOf(WorkspaceFixedError)
     expect(seen.refused.message).toBe('The Workspace is fixed once the agent has started.')
+    expect(seen.after.session.workspaceId).toBe(seen.workspaceId)
+    expect(seen.after.native.cwd).toBe(loginForm)
+  })
+
+  test('a change asked for after the first message and before the agent recorded its folder is refused', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
+    // The agent's start held open: the message is written and the turn announced, and the
+    // agent is not yet opened, so its folder is not yet recorded.
+    let reached = false
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const supervisor = fakeSupervisorOf(
+      () => agent,
+      () => {
+        reached = true
+        return held
+      },
+    )
+
+    const seen = await application(dataFolder, undefined, machine, supervisor)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const sessions = yield* Sessions
+        const { session, workspaceId } = yield* inLoginForm
+        const turn = yield* Effect.forkScoped(runtime.prompt(session.id, 'hello'))
+        yield* until(
+          Effect.sync(() => reached),
+          (started) => started,
+        )
+        const during = yield* sessions.one(session.id)
+        // Released whatever the answer, so a change wrongly accepted fails the suite at once.
+        const refused = yield* Effect.flip(
+          sessions.chooseWorkspace(session.id, during.session.version, null),
+        ).pipe(Effect.ensuring(Effect.sync(release)))
+        yield* Fiber.join(turn)
+        const after = yield* sessions.one(session.id)
+        return { workspaceId, during, refused, after }
+      }),
+    )
+
+    // Between the message and the agent's folder: nothing recorded yet, and already fixed.
+    expect(seen.during.native.cwd).toBeNull()
+    expect(seen.during.session.workspaceFixed).toBe(true)
+    expect(seen.refused).toBeInstanceOf(WorkspaceFixedError)
+    // The row and the agent agree on the one Workspace.
     expect(seen.after.session.workspaceId).toBe(seen.workspaceId)
     expect(seen.after.native.cwd).toBe(loginForm)
   })

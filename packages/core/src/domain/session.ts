@@ -114,8 +114,9 @@ export interface Session {
    */
   workspaceId: string | null
   /**
-   * Whether that Workspace can no longer be changed (D8-08): once its agent has started, its own
-   * session was opened in that folder. The engine's rule, which a page reads rather than repeats.
+   * Whether that Workspace can no longer be changed (D8-08): from the first message the user
+   * writes, since the agent that message starts is opened in that folder, or once an agent has
+   * started there. The engine's rule, which a page reads rather than repeats.
    */
   workspaceFixed: boolean
   archivedAt: number | null

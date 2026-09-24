@@ -130,7 +130,7 @@ describe('The Workspace is fixed once the agent has started', () => {
   })
 
   test('a turn running fixes it before the engine can say so', () => {
-    // The first turn is announced before the agent is started, and its folder recorded after.
+    // The Session the page holds was read before the first message, which is what fixes it.
     expect(workspaceFixedOf(session('none'), true)).toBe(true)
   })
 

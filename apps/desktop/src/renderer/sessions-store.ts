@@ -339,9 +339,9 @@ export function workspaceRootOf(
  * Whether a Session's Workspace can no longer change (D8-08): the engine's own answer, computed
  * with the rule `sessions.chooseWorkspace` refuses on — or a turn running.
  *
- * The turn is kept because the engine's answer is not true yet during the first one: the message
- * is written and the turn announced before the agent is started, and the folder it starts in is
- * recorded only once it has. The page is not to offer a change in between.
+ * The engine fixes it from the first message written, before the agent is even started; the turn
+ * is kept because the Session the page holds was read before that message, and says so only once
+ * the list is read again. The page is not to offer a change in between.
  */
 export function workspaceFixedOf(session: Session, running: boolean): boolean {
   return session.workspaceFixed || running
