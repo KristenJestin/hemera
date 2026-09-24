@@ -44,6 +44,7 @@ import {
   sessionsSnapshot,
   writeMessage,
 } from '#renderer/sessions-store.ts'
+import { listenToTools, runsOf, toolsSnapshot } from '#renderer/tools-store.ts'
 
 /** One Session, as the engine answers with one. */
 function session(id: string, version = 1): Session {
@@ -792,5 +793,48 @@ describe('The agent starts the app and the user opens it', () => {
     const answer = reported('e3', 'message', 'It is up.')
 
     expect(activityOf([said, app, answer], 'e3').state).toBe('streaming')
+  })
+})
+
+describe("A run no Session asked for is in no Session's panel", () => {
+  test("a preparation's run is heard without being kept for a Session (Decided 11)", () => {
+    // The tools store listens in place of the agent store: the stand-in bridge holds one listener.
+    const stopTools = listenToTools()
+    const before = toolsSnapshot()
+    push({
+      event: 'run',
+      sessionId: null,
+      run: {
+        id: 'run-1',
+        projectId: 'atlas',
+        sessionId: null,
+        commandId: 'install',
+        name: 'install',
+        line: 'pnpm install',
+        type: 'configure',
+        scope: 'workspace',
+        cwd: '/home/ana/workspaces/login-form',
+        folder: null,
+        workspaceId: 'login-form',
+        workspaceName: 'login-form',
+        environment: {},
+        state: 'exited',
+        pid: null,
+        url: null,
+        readyAt: null,
+        readiness: null,
+        portConflict: null,
+        heldAgainst: [],
+        exitCode: 1,
+        output: 'ERR_PNPM_NO_LOCKFILE',
+        dropped: 0,
+        startedAt: '2026-09-24T08:00:00.000Z',
+        endedAt: '2026-09-24T08:00:01.000Z',
+        joined: false,
+      },
+    })
+    expect(toolsSnapshot()).toBe(before)
+    expect(runsOf(null)).toEqual([])
+    stopTools()
   })
 })
