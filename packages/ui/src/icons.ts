@@ -56,9 +56,13 @@ import {
   IconDotsFilled as TablerDotsFilled,
   IconEye as TablerEye,
   IconEyeFilled as TablerEyeFilled,
+  IconFileDescription as TablerFileDescription,
+  IconFileDescriptionFilled as TablerFileDescriptionFilled,
   IconFileText as TablerFileText,
   IconFilePlus as TablerFilePlus,
   IconFileTextFilled as TablerFileTextFilled,
+  IconFlag as TablerFlag,
+  IconFlagFilled as TablerFlagFilled,
   IconFlask as TablerFlask,
   IconFlaskFilled as TablerFlaskFilled,
   IconFolder as TablerFolder,
@@ -121,6 +125,8 @@ import {
   IconTrashFilled as TablerTrashFilled,
   IconUser as TablerUser,
   IconUserFilled as TablerUserFilled,
+  IconWriting as TablerWriting,
+  IconWritingFilled as TablerWritingFilled,
   IconX as TablerX,
   IconXFilled as TablerXFilled,
   type IconProps as TablerIconProps,
@@ -236,8 +242,14 @@ export const IconDots = catalogued(TablerDotsFilled, TablerDots, 'IconDots')
 export const IconEye = catalogued(TablerEyeFilled, TablerEye, 'IconEye')
 /* Tabler draws no solid file with a plus, and no solid second terminal further down: the outline
    stands for both weights. */
+export const IconFileDescription = catalogued(
+  TablerFileDescriptionFilled,
+  TablerFileDescription,
+  'IconFileDescription',
+)
 export const IconFilePlus = catalogued(TablerFilePlus, TablerFilePlus, 'IconFilePlus')
 export const IconFileText = catalogued(TablerFileTextFilled, TablerFileText, 'IconFileText')
+export const IconFlag = catalogued(TablerFlagFilled, TablerFlag, 'IconFlag')
 export const IconFlask = catalogued(TablerFlaskFilled, TablerFlask, 'IconFlask')
 export const IconFolder = catalogued(TablerFolderFilled, TablerFolder, 'IconFolder')
 export const IconFolderOpen = catalogued(TablerFolderOpenFilled, TablerFolderOpen, 'IconFolderOpen')
@@ -309,6 +321,7 @@ export const IconTimelineEvent = catalogued(
 )
 export const IconTrash = catalogued(TablerTrashFilled, TablerTrash, 'IconTrash')
 export const IconUser = catalogued(TablerUserFilled, TablerUser, 'IconUser')
+export const IconWriting = catalogued(TablerWritingFilled, TablerWriting, 'IconWriting')
 export const IconX = catalogued(TablerXFilled, TablerX, 'IconX')
 
 /**
