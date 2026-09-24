@@ -23,8 +23,8 @@ import { TerminalOutput } from './terminal-output.tsx'
  *
  * A one-off command line is marked as one: it runs inside the Workspace root, shows here, and
  * is never promoted to the catalogue by itself. The reader is the one who decides what a
- * Project keeps, which is why a one-off offers `Add to catalogue` on its line and the run itself
- * writes nothing (D8-11).
+ * Project keeps, which is why a one-off offers `Add to catalogue` beside its command line, the
+ * first line of its body, and the run itself writes nothing (D8-11).
  *
  * The type is drawn with the icon the design system fixes for it (D8-07), beside the name, so a
  * `test` reads as a test here as it does in the settings.
@@ -52,8 +52,14 @@ const TYPE_ICON = 'flex shrink-0 text-muted-foreground'
 
 const FOLDER = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
 
+/**
+ * The first line of the body: the command line, and a one-off's offer to be kept beside it, which
+ * is the line it is about.
+ */
+const COMMAND = 'flex min-w-0 items-center gap-2'
+
 /** The command line itself, under the name, as it was given to the shell. */
-const LINE = 'truncate font-mono text-xs text-muted-foreground'
+const LINE = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
 
 /** The address the command published, and what it exited with. */
 const FACTS = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground'
@@ -142,7 +148,15 @@ export function CommandRun({
           </span>
         }
       >
-        <p className={LINE}>{command}</p>
+        <div className={COMMAND}>
+          <p className={LINE}>{command}</p>
+          {oneOff && onAddToCatalogue !== undefined && (
+            <Button variant="secondary" size="sm" className="shrink-0" onClick={onAddToCatalogue}>
+              <IconBookmarkPlus size="sm" aria-hidden="true" />
+              Add to catalogue
+            </Button>
+          )}
+        </div>
         {url !== undefined && (
           <p className={FACTS}>
             {onOpenUrl === undefined ? (

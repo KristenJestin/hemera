@@ -12,8 +12,8 @@ import { COMMAND_TYPES } from './command-type.ts'
  * The stories are the four ways a run is read: an application that is running and has just
  * published its address, a check that is over and exited clean, a one-off line run inside the
  * Workspace root, and a process the reader stopped. The address is the reason the block exists,
- * so it is on the line in every story that has one. A one-off offers `Add to catalogue` on its
- * line, and pressing it is a request to the human's catalogue, not a promotion (D8-11).
+ * so it is on the line in every story that has one. A one-off offers `Add to catalogue` beside its
+ * command line, and pressing it is a request to the human's catalogue, not a promotion (D8-11).
  */
 const SERVER_OUTPUT = [
   'vite v7.1.4 building for development...',
@@ -199,14 +199,21 @@ async function aOneOffExecutionStaysOutOfTheCatalogue({
   const canvas = within(canvasElement)
   await expect(canvas.getByText('One-off')).toBeVisible()
   await expect(canvas.getByText('Exited 0')).toBeVisible()
-  await userEvent.click(canvas.getByRole('button', { name: 'Add to catalogue' }))
+  // The offer sits beside the command line it is about, the first line of the run's body.
+  await expect(canvas.queryByRole('button', { name: 'Add to catalogue' })).toBeNull()
+  await userEvent.click(canvas.getByRole('button', { name: /Exited 0/ }))
+  const add = canvas.getByRole('button', { name: 'Add to catalogue' })
+  await expect(add.parentElement).toContainElement(
+    canvas.getByText('npx vitest run src/login.test.ts', { selector: 'p' }),
+  )
+  await userEvent.click(add)
   await expect(args.onAddToCatalogue).toHaveBeenCalledTimes(1)
-  // Nothing else moved: still a one-off, still exited, still folded, and nothing was stopped.
+  // Nothing else moved: still a one-off, still exited, still open, and nothing was stopped.
   await expect(canvas.getByText('One-off')).toBeVisible()
   await expect(canvas.getByText('Exited 0')).toBeVisible()
   await expect(canvas.getByRole('button', { name: /Exited 0/ })).toHaveAttribute(
     'aria-expanded',
-    'false',
+    'true',
   )
   await expect(args.onStop).not.toHaveBeenCalled()
   await oneHeader(canvasElement, 'Exited')
