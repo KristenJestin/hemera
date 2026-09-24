@@ -1,17 +1,26 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { SpecHead } from './spec-head.tsx'
 
 /**
  * The first line of the Spec panel: the key, the title, the type, the status, and — once there
- * is more than one revision — the picker of the revisions, with `Rework` on a `ready` Spec.
+ * is more than one revision — the picker of the revisions, with `Rework` on a `ready` Spec — and
+ * at the very end the fold that takes the panel back to its band.
  */
 const meta = {
   title: 'Blocks/Spec/SpecHead',
   component: SpecHead,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },
+  decorators: [
+    (Story) => (
+      <TooltipProvider>
+        <Story />
+      </TooltipProvider>
+    ),
+  ],
   args: {
     specKey: 'ATL-7',
     title: 'CSV invoice export',
@@ -21,6 +30,7 @@ const meta = {
     revisions: [{ number: 1, detail: 'current, draft' }],
     onPickRevision: fn(),
     onRework: fn(),
+    onFold: fn(),
   },
   argTypes: {
     specKey: { control: 'text', description: 'The human key, `PREFIX-n`.' },
@@ -32,6 +42,7 @@ const meta = {
     superseded: { control: 'boolean', description: 'Whether an older revision is shown.' },
     onPickRevision: { description: 'Shows another revision.' },
     onRework: { description: 'Opens the rework of a `ready` Spec.' },
+    onFold: { description: 'Folds the panel to its band.' },
   },
 } satisfies Meta<typeof SpecHead>
 
@@ -39,14 +50,16 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** A first draft: no revision named, no picker, no Rework. */
+/** A first draft: no revision named, no picker, no Rework; the fold at the end of the line. */
 export const Draft: Story = {
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
     await expect(canvas.getByText('draft')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /rev/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
+    await expect(args.onFold).toHaveBeenCalled()
   },
 }
 

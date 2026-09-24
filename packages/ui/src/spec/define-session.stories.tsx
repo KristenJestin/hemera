@@ -36,7 +36,9 @@ import { SpecQuestion } from './spec-question.tsx'
  * The chat is the thread and the composer of the Session page, as they are; what `define` adds
  * to it is the thin Hemera line that says what the agent was handed this turn, and the questions
  * of the Spec, asked there and answered there. The panel takes the side column's place — there
- * is no side column while it is there — and is the Spec as one document under a head that stays.
+ * is no side column while it is there. It opens folded to a band of glyphs, so the chat has the
+ * width (brief revision 4): a screen that shows the panel's state opens it unfolded, and a path
+ * unfolds it first, the way a hand does.
  * A `define` Session never exists without its Spec: it starts from a Spec, or from a `free`
  * Session whose agent proposes one. Every screen is the same Spec, `ATL-7`, taken through its
  * states, consistent with the product rules: no task before `decompose`, a full gate only once
@@ -272,7 +274,15 @@ const ON = {
  * A `define` Session held together as the renderer will hold it: the Spec is held once, and both
  * the panel and the questions of the thread read it and write it.
  */
-function DefineSession({ shown, reworkOpen }: { shown: Screen; reworkOpen: boolean }): ReactNode {
+function DefineSession({
+  shown,
+  reworkOpen,
+  folded,
+}: {
+  shown: Screen
+  reworkOpen: boolean
+  folded: boolean
+}): ReactNode {
   const { spec, reader, actions } = useLiveSpec(shown.spec, shown.reader, ON)
   const asked: ScrollerEntry[] = (shown.asks ?? []).flatMap((id) => {
     const question = spec.questions.find((one) => one.id === id)
@@ -289,24 +299,24 @@ function DefineSession({ shown, reworkOpen }: { shown: Screen; reworkOpen: boole
     ]
   })
   return (
-    <div className="flex h-screen min-h-0 bg-background text-foreground">
+    // The row is the container the unfolded panel's width is a share of.
+    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
       <Chat title={shown.title} mission="DEFINE" thread={[...shown.thread, ...asked]} />
-      <div className="min-h-0 min-w-0 basis-9/20 border-l border-border">
-        <SpecPanel
-          spec={spec}
-          reader={reader}
-          defaultReworkOpen={reworkOpen}
-          onSaveSection={actions.onSaveSection}
-          onApplyMine={actions.onApplyMine}
-          onDiscardMine={actions.onDiscardMine}
-          onSaveStory={actions.onSaveStory}
-          onGoToQuestion={actions.onGoToQuestion}
-          onMarkReady={actions.onMarkReady}
-          onRework={actions.onRework}
-          onPickRevision={actions.onPickRevision}
-          onTakeOver={actions.onTakeOver}
-        />
-      </div>
+      <SpecPanel
+        spec={spec}
+        reader={reader}
+        defaultReworkOpen={reworkOpen}
+        defaultFolded={folded}
+        onSaveSection={actions.onSaveSection}
+        onApplyMine={actions.onApplyMine}
+        onDiscardMine={actions.onDiscardMine}
+        onSaveStory={actions.onSaveStory}
+        onGoToQuestion={actions.onGoToQuestion}
+        onMarkReady={actions.onMarkReady}
+        onRework={actions.onRework}
+        onPickRevision={actions.onPickRevision}
+        onTakeOver={actions.onTakeOver}
+      />
     </div>
   )
 }
@@ -344,7 +354,7 @@ function FreeThenDefine(): ReactNode {
     },
   ]
   return (
-    <div className="flex h-screen min-h-0 bg-background text-foreground">
+    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
       <Chat
         title="Invoices for the accountants"
         mission={created === null ? 'FREE' : 'DEFINE'}
@@ -354,7 +364,7 @@ function FreeThenDefine(): ReactNode {
         {created !== null && (
           <motion.div
             key="panel"
-            className="min-h-0 min-w-0 basis-9/20 border-l border-border"
+            className="flex shrink-0"
             initial={{ filter: 'opacity(0)' }}
             animate={{ filter: 'opacity(1)' }}
             transition={transition}
@@ -382,16 +392,19 @@ function FreeThenDefine(): ReactNode {
 function Screens({
   screen,
   reworkOpen = false,
+  folded = true,
 }: {
   screen: ScreenName
   reworkOpen?: boolean
+  /** Whether the panel opens folded to its band, as a Session opens it. */
+  folded?: boolean
 }): ReactNode {
   return (
     <TooltipProvider>
       {screen === 'fromFree' ? (
         <FreeThenDefine />
       ) : (
-        <DefineSession shown={SCREENS[screen]} reworkOpen={reworkOpen} />
+        <DefineSession shown={SCREENS[screen]} reworkOpen={reworkOpen} folded={folded} />
       )}
     </TooltipProvider>
   )
@@ -410,6 +423,7 @@ const meta = {
       description: 'Which screen of the brief.',
     },
     reworkOpen: { control: 'boolean', description: 'Whether the rework dialog starts open.' },
+    folded: { control: 'boolean', description: 'Whether the panel opens folded to its band.' },
   },
 } satisfies Meta<typeof Screens>
 
@@ -419,42 +433,57 @@ type Story = StoryObj<typeof meta>
 
 /*
  * The screens first, each named after the state it shows and each left as it opens: its play
- * asserts and changes nothing, so the screen the gate looks at is the screen as drawn. The paths
+ * asserts and changes nothing, so the screen the gate looks at is the screen as drawn. A Session
+ * opens its panel folded; a screen that shows the panel's own state opens it unfolded. The paths
  * through them — a link followed, a Spec marked ready, reworked, taken over, a conflict applied,
- * a question answered in the chat — are stories of their own, named after what they do.
+ * a question answered in the chat — are stories of their own, named after what they do, and
+ * start from the folded panel a Session opens on: the hand unfolds it first.
  */
 
+/** The hand unfolding the panel from its band, and the sheet once it is open. */
+async function unfold(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
+  await canvas.findByRole('region', { name: 'Stage of ATL-7' })
+}
+
 /**
- * Screen 1 · a feature being planned: the stage lands on the plan the agent writes, `Plan` open
- * in the rail, three checks of seven — no task exists before Decompose. The thread says what the
- * agent was handed in one folded Hemera line, and asks the blocking question as a block.
+ * Screen 1 · a feature being planned, as the Session opens it: the chat has the width, the panel
+ * a band beside it — the glyph of each part with its dot, the plan the agent writes breathing,
+ * `Plan` open and three checks of seven. The thread says what the agent was handed in one folded
+ * Hemera line, and asks the blocking question as a block.
  */
 export const MidPlan: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('button', { name: /Mission brief · plan/ })).toBeVisible()
+    const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(
-      canvas.getByRole('group', { name: /^Readiness ?, 3 of 7 checks pass/ }),
-    ).toBeVisible()
-    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(within(rail).getByRole('group', { name: 'Plan' })).toHaveTextContent('open')
-    await expect(canvas.getByRole('button', { name: 'Plan, being written' })).toHaveAttribute(
+      within(band).getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),
+    ).toHaveTextContent('3/7')
+    await expect(within(band).getByRole('button', { name: 'Plan phase, open' })).toBeVisible()
+    await expect(within(band).getByRole('button', { name: 'Plan, being written' })).toHaveAttribute(
       'aria-current',
       'true',
     )
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).getByRole('heading', { name: /^Plan/ })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0, not written' })).toBeVisible()
+    await expect(within(band).getByRole('button', { name: 'Tasks, 0, not written' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
+    await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
     await expect(canvas.getByRole('group', { name: /^Question: Credit notes/ })).toBeVisible()
-    await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
   },
 }
 
-/** Following a link of the readiness selects its part: the tasks, not written yet. */
+/**
+ * Unfolded, then a thing left before ready followed from the rail's foot: the tasks, not written
+ * yet, on the stage.
+ */
 export const MidPlanLinkFollowed: Story = {
   play: async ({ canvasElement }) => {
+    await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'the tasks' }))
+    await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: '4 things before ready' }))
+    await userEvent.click(await within(document.body).findByRole('button', { name: 'the tasks' }))
     await expect(canvas.getByRole('button', { name: /^Tasks/ })).toHaveAttribute(
       'aria-current',
       'true',
@@ -468,6 +497,7 @@ export const MidPlanLinkFollowed: Story = {
 /** A question answered in the chat: the register records it, and the gate stops naming it. */
 export const MidPlanQuestionAnswered: Story = {
   play: async ({ canvasElement }) => {
+    await unfold(canvasElement)
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: /^Questions/ }))
     await userEvent.click(canvas.getByRole('button', { name: /^Answer in the chat: Credit/ }))
@@ -476,15 +506,13 @@ export const MidPlanQuestionAnswered: Story = {
     await userEvent.keyboard('{Enter}')
     await expect(canvas.queryByRole('button', { name: /^Answer in the chat/ })).toBeNull()
     await expect(canvas.getByRole('heading', { name: /^Questions · 0 open/ })).toBeVisible()
-    await expect(
-      canvas.getByRole('group', { name: /^Readiness ?, 4 of 7 checks pass/ }),
-    ).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Readiness, 4 of 7 checks pass' })).toBeVisible()
   },
 }
 
 /** Screen 2 · a bug: its Shape has Reproduction, and Behaviour is never drawn. */
 export const Bug: Story = {
-  args: { screen: 'bug' },
+  args: { screen: 'bug', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: /^Reproduction/ })).toBeVisible()
@@ -496,7 +524,8 @@ export const Bug: Story = {
 
 /**
  * Screen 3 · from a free Session: the agent proposes the Spec in the thread, `Create` makes the
- * Session `define`, and the panel arrives beside the thread, which stays.
+ * Session `define`, and the panel arrives beside the thread, folded to its band, while the thread
+ * stays.
  */
 export const FromAFreeSession: Story = {
   args: { screen: 'fromFree' },
@@ -506,6 +535,7 @@ export const FromAFreeSession: Story = {
     await expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
     await expect(await canvas.findByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
     await expect(canvas.getByText(/DEFINE · Claude Code/)).toBeVisible()
     await expect(canvas.getByRole('status')).toHaveTextContent('Created ATL-7')
     await expect(canvas.getByText(/Shall I write it down as a Spec/)).toBeVisible()
@@ -514,7 +544,7 @@ export const FromAFreeSession: Story = {
 
 /** Screen 4 · every check passes: `Ready to freeze`, and `Mark ready` offered. */
 export const GateFull: Story = {
-  args: { screen: 'gateFull' },
+  args: { screen: 'gateFull', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Ready to freeze')).toBeVisible()
@@ -527,6 +557,7 @@ export const GateFull: Story = {
 export const GateFullMarkedReady: Story = {
   args: { screen: 'gateFull' },
   play: async ({ canvasElement }) => {
+    await unfold(canvasElement)
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
     await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
@@ -539,20 +570,19 @@ export const GateFullMarkedReady: Story = {
 
 /**
  * Mark ready appearing: the last blocking question answered in the chat, the bar fills, the
- * sentence becomes `Ready to freeze` and `Mark ready` is offered — and pressed.
+ * foot reads `Ready to freeze` and `Mark ready` is offered — and pressed.
  */
 export const LastQuestionAnswered: Story = {
   args: { screen: 'lastQuestion' },
   play: async ({ canvasElement }) => {
+    await unfold(canvasElement)
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await userEvent.type(
       canvas.getByRole('textbox', { name: 'Something else' }),
       'Negative rows, marked by a type column.{Enter}',
     )
-    await expect(
-      canvas.getByRole('group', { name: /^Readiness ?, 7 of 7 checks pass/ }),
-    ).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks pass' })).toBeVisible()
     await expect(canvas.getByText('Ready to freeze')).toBeVisible()
     await expect(
       canvas.getByText('Negative rows, marked by a type column.', { selector: 'p' }),
@@ -569,7 +599,7 @@ export const LastQuestionAnswered: Story = {
  * Rework at the end of the head.
  */
 export const ReadyFrozen: Story = {
-  args: { screen: 'ready' },
+  args: { screen: 'ready', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getAllByText('frozen').length).toBeGreaterThan(0)
@@ -581,7 +611,7 @@ export const ReadyFrozen: Story = {
 
 /** Screen 5, with the rework dialog open over the frozen Spec, as the brief draws it. */
 export const ReworkAsked: Story = {
-  args: { screen: 'ready', reworkOpen: true },
+  args: { screen: 'ready', reworkOpen: true, folded: false },
   play: async () => {
     const page = within(document.body)
     await expect(await page.findByRole('dialog', { name: 'Rework ATL-7' })).toBeVisible()
@@ -595,6 +625,7 @@ export const ReworkAsked: Story = {
 export const ReadyReworked: Story = {
   args: { screen: 'ready' },
   play: async ({ canvasElement }) => {
+    await unfold(canvasElement)
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Rework' }))
     const page = within(document.body)
@@ -614,7 +645,7 @@ export const ReadyReworked: Story = {
  * the agent of this Session does not write, and you still edit in place.
  */
 export const Reader: Story = {
-  args: { screen: 'reader' },
+  args: { screen: 'reader', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('« Spec CSV »')).toBeVisible()
@@ -630,6 +661,7 @@ export const Reader: Story = {
 export const ReaderEditsThenTakesOver: Story = {
   args: { screen: 'reader' },
   play: async ({ canvasElement }) => {
+    await unfold(canvasElement)
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: /^Stories/ }))
     await expect(canvas.getByText('you can edit; the agent of the writer is told')).toBeVisible()
@@ -648,7 +680,7 @@ export const ReaderEditsThenTakesOver: Story = {
  * editor, whole; Scope is the part in focus.
  */
 export const Conflict: Story = {
-  args: { screen: 'conflict' },
+  args: { screen: 'conflict', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(
@@ -660,9 +692,7 @@ export const Conflict: Story = {
     await expect(
       canvas.getByRole('heading', { name: /^Scope ?, in conflict with your text/ }),
     ).toBeVisible()
-    await expect(
-      canvas.getByRole('group', { name: /^Readiness ?, 3 of 7 checks pass/ }),
-    ).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Readiness, 3 of 7 checks pass' })).toBeVisible()
   },
 }
 
@@ -670,6 +700,7 @@ export const Conflict: Story = {
 export const ConflictApplied: Story = {
   args: { screen: 'conflict' },
   play: async ({ canvasElement }) => {
+    await unfold(canvasElement)
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Compare' }))
     await expect(canvas.getByText('v5 · agent')).toBeVisible()
@@ -686,7 +717,7 @@ export const ConflictApplied: Story = {
  * declares them again.
  */
 export const StaleAfterRework: Story = {
-  args: { screen: 'stale' },
+  args: { screen: 'stale', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Rework · the agent re-declares each phase')).toBeVisible()
@@ -697,6 +728,6 @@ export const StaleAfterRework: Story = {
       canvas.getByRole('button', { name: 'Tasks, 4, stale after the rework' }),
     ).toBeVisible()
     await expect(canvas.getByText('copied from rev 2')).toBeVisible()
-    await expect(canvas.getByText(/2 things before ready/)).toBeVisible()
+    await expect(canvas.getByRole('button', { name: '2 things before ready' })).toBeVisible()
   },
 }

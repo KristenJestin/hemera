@@ -364,11 +364,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ContextView',
       'BareModeState',
       'CommandList',
-      // Lot 19: the Spec panel of a `define` Session as a document, its parts, and the three
+      // Lot 19: the Spec panel of a `define` Session, its rail and its parts, and the three
       // blocks of the thread: what the agent was handed, a question of the Spec asked in the
       // chat, and the agent proposing a Spec in a `free` Session.
       'SpecPanel',
-      'SpecDocument',
       'SpecPart',
       'SpecStage',
       'SpecRail',
@@ -377,7 +376,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'StoriesPart',
       'TasksPart',
       'QuestionsPart',
-      'ReadinessBar',
       'ConflictBanner',
       'ReaderBar',
       'ReworkDialog',

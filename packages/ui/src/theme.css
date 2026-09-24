@@ -436,15 +436,20 @@
      is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
   --spacing-dialog-wide: 70vh;
 
-  /* How wide the rail of a Spec stands beside its stage (lot 19, revision 3), and what it folds
-     to when the panel is narrow: wide enough for `Expected outcome` beside its dot, and, folded,
-     one glyph and its margin. */
-  --spacing-rail: 10rem;
-  --spacing-rail-folded: 2.5rem;
+  /* How wide the rail of a Spec stands beside its stage (lot 19, revisions 3 and 4): wide enough
+     for `Expected outcome` beside its dot, and for `3/7 · 4 things before ready` on one line at
+     its foot. */
+  --spacing-rail: 11rem;
 
-  /* Under what width the Spec panel folds its rail to glyphs: a container size, asked of the
-     panel's own box by a container query and never measured from JavaScript. */
-  --container-spec-rail: 35rem;
+  /* The Spec panel folded (lot 19, revision 4): the band of the rail's glyphs beside the chat,
+     one glyph, its dot and the margin around them. */
+  --spacing-spec-band: 3rem;
+
+  /* The Spec panel unfolded: a share of the Session's row, the container it is asked of. A length
+     of the row rather than a fraction of the panel's own box, because the panel's box is what
+     changes while it unfolds: the sheet and what it holds are laid at this width from the first
+     frame, so nothing inside it reflows on the way. */
+  --spacing-spec-panel: 45cqw;
 
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */

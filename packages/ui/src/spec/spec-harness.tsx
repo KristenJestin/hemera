@@ -1,12 +1,15 @@
 import { type ReactNode, useState } from 'react'
 
-import type {
-  ReaderView,
-  SectionName,
-  SectionView,
-  SpecAnswer,
-  SpecView,
-  StoryView,
+import { Button } from '../components/button/button.tsx'
+import {
+  SECTION_TITLES,
+  type ReaderView,
+  type SectionName,
+  type SectionView,
+  type SpecAnswer,
+  type SpecTarget,
+  type SpecView,
+  type StoryView,
 } from './model.ts'
 import { phases } from './spec-fixtures.ts'
 import { SpecPanel } from './spec-panel.tsx'
@@ -41,6 +44,14 @@ export interface LiveSpec {
   reader: ReaderView | undefined
   /** The same actions, answered the way the engine will answer them. */
   actions: SpecActions
+  /** The agent starting on a part: the part it writes, and the sentence saying so. */
+  write: (target: SpecTarget) => void
+}
+
+/** How a part is named in the sentence of the head. */
+function partName(target: SpecTarget): string {
+  if (target === 'stories' || target === 'tasks' || target === 'questions') return target
+  return SECTION_TITLES[target].toLowerCase()
 }
 
 /** The Spec and the reader bar, held, with the actions that change them. */
@@ -172,40 +183,75 @@ export function useLiveSpec(
       setReader(undefined)
     },
   }
-  return { spec, reader, actions }
+  function write(target: SpecTarget): void {
+    setSpec((now) => ({
+      ...now,
+      focus: target,
+      now: `The agent is writing the ${partName(target)}`,
+      sections: now.sections.map((one) =>
+        one.name === target ? { ...one, mark: 'writing' } : one,
+      ),
+      tasksMark: target === 'tasks' ? 'writing' : now.tasksMark,
+      storiesMark: target === 'stories' ? 'writing' : now.storiesMark,
+    }))
+  }
+  return { spec, reader, actions, write }
 }
 
 export interface LiveSpecPanelProps extends SpecActions {
   spec: SpecView
   reader?: ReaderView | undefined
   defaultReworkOpen?: boolean | undefined
-  defaultShowAll?: boolean | undefined
+  defaultFolded?: boolean | undefined
+  onFoldChange?: ((folded: boolean) => void) | undefined
+  /** A part the agent can be made to start on, from a button where the chat stands. */
+  agentWrites?: SpecTarget | undefined
 }
 
-/** The panel over a held Spec, for the stories that show the panel alone. */
+/**
+ * The panel over a held Spec, for the stories that show the panel alone: in a Session's row,
+ * beside a stand-in for the chat, which is what it folds away from and unfolds over.
+ */
 export function LiveSpecPanel({
   spec: initial,
   reader: initialReader,
   defaultReworkOpen,
-  defaultShowAll,
+  defaultFolded,
+  onFoldChange,
+  agentWrites,
   ...on
 }: LiveSpecPanelProps): ReactNode {
-  const { spec, reader, actions } = useLiveSpec(initial, initialReader, on)
+  const { spec, reader, actions, write } = useLiveSpec(initial, initialReader, on)
   return (
-    <SpecPanel
-      spec={spec}
-      reader={reader}
-      defaultReworkOpen={defaultReworkOpen}
-      defaultShowAll={defaultShowAll}
-      onSaveSection={actions.onSaveSection}
-      onApplyMine={actions.onApplyMine}
-      onDiscardMine={actions.onDiscardMine}
-      onSaveStory={actions.onSaveStory}
-      onGoToQuestion={actions.onGoToQuestion}
-      onMarkReady={actions.onMarkReady}
-      onRework={actions.onRework}
-      onPickRevision={actions.onPickRevision}
-      onTakeOver={actions.onTakeOver}
-    />
+    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
+        <p>
+          The chat of the Session stands here, and takes whatever width the Spec panel leaves it:
+          all of it but the band while the panel is folded, and what is left beside the sheet once
+          it is unfolded.
+        </p>
+        {agentWrites !== undefined && (
+          <Button
+            onClick={() => write(agentWrites)}
+          >{`Let the agent write the ${partName(agentWrites)}`}</Button>
+        )}
+      </div>
+      <SpecPanel
+        spec={spec}
+        reader={reader}
+        defaultReworkOpen={defaultReworkOpen}
+        defaultFolded={defaultFolded}
+        onFoldChange={onFoldChange}
+        onSaveSection={actions.onSaveSection}
+        onApplyMine={actions.onApplyMine}
+        onDiscardMine={actions.onDiscardMine}
+        onSaveStory={actions.onSaveStory}
+        onGoToQuestion={actions.onGoToQuestion}
+        onMarkReady={actions.onMarkReady}
+        onRework={actions.onRework}
+        onPickRevision={actions.onPickRevision}
+        onTakeOver={actions.onTakeOver}
+      />
+    </div>
   )
 }
