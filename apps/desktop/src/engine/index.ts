@@ -207,14 +207,14 @@ function servicesOf(
     poolLayer,
   ).pipe(Layer.provide(clockLayer))
   // The Workspaces of the Projects, over the machine's `git`, made under the data folder unless a
-  // Project names a folder of its own (D8-02, D8-03), and prepared by the same supervisor that
-  // starts every other process (D8-05).
+  // Project names a folder of its own (D8-02, D8-03), and prepared through the very commands the
+  // tools run: a `run` step is one of their runs, with no Session (D8-05, Decided 11).
   const workspaces = preparationLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
     Layer.provide(git),
     Layer.provide(hostLinks),
     Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
-    Layer.provide(processes),
+    Layer.provide(tools),
     // Its diagnostic, and the window it tells when a Workspace or its steps change.
     Layer.provide(agents),
   )

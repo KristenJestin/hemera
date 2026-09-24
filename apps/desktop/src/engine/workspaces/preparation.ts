@@ -13,10 +13,10 @@
  * `run` that is done is not run again: what a command did is not something the disk can be
  * asked about.
  *
- * A `run` step runs its catalogue command in the Workspace and waits for its end. A run of the
- * Commands service belongs to a Session, and a preparation has none (D8-05): so the step starts
- * the command itself, through the same supervisor, line and environment a run would have, and
- * keeps the exit code and the end of the output on the step instead of on a run.
+ * A `run` step starts its catalogue command as a real run of the Commands service, with no
+ * Session (Decided 11), in the Workspace, and waits for its end: its line, its folder, its
+ * variables, its output and its exit code are the run's row, and the step keeps the run's
+ * identifier and how it ended (D8-05, D8-06).
  */
 
 import {
@@ -34,7 +34,8 @@ import {
   MAIN_WORKSPACE,
   type WorkspaceState,
   type WorkspaceStep,
-  lineFor,
+  commandScope,
+  commandType,
   nextPending,
   resumedSteps,
   workspaceStateOf,
@@ -43,9 +44,8 @@ import { and, asc, eq } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
-import { ProcessSupervisor, StderrSink } from '../agents/supervisor.ts'
-import { hostLookup, invocationOf } from '../commands/line.ts'
-import { OUTPUT_KEPT_BYTES } from '../commands/service.ts'
+import { StderrSink } from '../agents/supervisor.ts'
+import { Commands, type RunView, UnknownRunError } from '../commands/service.ts'
 import { Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
@@ -66,12 +66,6 @@ import {
   workspaceEvent,
   workspaceStateIn,
 } from './workspaces.ts'
-
-/** How long the pipes of a command that ended are still read: its last lines may lag its exit. */
-const DRAIN_MS = 100
-
-/** How long a command of a step is given to die quietly when the engine stops under it. */
-const GRACE_MS = 5_000
 
 /** The system refused a link, in its own words (D8-05). */
 export class LinkRefusedError extends Data.TaggedError('LinkRefusedError')<{
@@ -149,10 +143,21 @@ export class Preparation extends Context.Service<Preparation, PreparationService
   'Preparation',
 ) {}
 
-/** How a step ended. */
+/** How a step ended, and the run a `run` step started (Decided 11). */
 interface Outcome {
   readonly state: 'done' | 'skipped' | 'failed'
   readonly message: string | null
+  readonly runId?: string
+}
+
+/**
+ * How a step's run ended, in the words its step keeps: `exit <code>`, or for a run that has no
+ * code — it could not start, or was stopped — the first line of what the run says of itself.
+ * What it printed stays on the run (Decided 11).
+ */
+function endOf(run: RunView): string {
+  if (run.exitCode !== null) return `exit ${String(run.exitCode)}`
+  return run.output.split('\n')[0] || run.state
 }
 
 /** Where a step of a Workspace reads from and writes to. */
@@ -256,7 +261,7 @@ export const preparationLayer = Layer.effect(
     const links = yield* Links
     const variables = yield* Variables
     const workspacesService = yield* Workspaces
-    const supervisor = yield* ProcessSupervisor
+    const commands = yield* Commands
     /** The engine's diagnostic log: where a preparation begun in the background says it failed. */
     const diagnostic = yield* StderrSink
     /** The engine's own scope: a preparation begun in the background ends when the engine does. */
@@ -423,10 +428,11 @@ export const preparationLayer = Layer.effect(
     /**
      * A command of the catalogue, run in the Workspace until it ends (D8-05).
      *
-     * Started as a run of the Commands service would be — its machine's line, split without a
-     * shell, in its folder under the Workspace, with the Workspace's environment (D8-06, D8-07)
-     * — through the same supervisor, so an engine that stops takes it down. What it printed is
-     * kept bounded as a run's is, with its exit code, on the step.
+     * A real run with no Session (Decided 11): the Commands service runs the machine's line of
+     * the command in its folder under the Workspace, with the variables Hemera gives there
+     * (D8-06, D8-07), and keeps its output and exit code on its row. The step writes the run's
+     * identifier as soon as it has one, so the step running points at the run printing, then
+     * waits for it however long it takes: a step waits for its command.
      */
     const run = (place: Place, step: WorkspaceStep) =>
       Effect.gen(function* () {
@@ -442,50 +448,50 @@ export const preparationLayer = Layer.effect(
             message: `the command ${step.target} is no longer in the catalogue`,
           } satisfies Outcome
         }
-        const cwd = join(place.workspace.path, command.folder)
-        const invocation = invocationOf(
-          lineFor(command, process.platform),
-          process.platform,
-          hostLookup(cwd),
-        )
-        if (invocation === null) {
-          return {
-            state: 'failed',
-            message: `Hemera has nothing to run: the line of ${command.name} is empty`,
-          } satisfies Outcome
-        }
-        const env = yield* variables.environmentFor(place.workspace.projectId, place.workspace.id)
-        return yield* Effect.scoped(
-          Effect.gen(function* () {
-            const child = yield* supervisor.start(invocation.command, invocation.args, {
-              cwd,
-              env,
-              graceMilliseconds: GRACE_MS,
-              verbatim: invocation.verbatim,
-              // What it prints is its own output, kept on the step, never the engine's log.
-              logsStderr: false,
-            })
-            let kept = ''
-            const keep = (line: string) => {
-              kept += `${line}\n`
-              if (kept.length > OUTPUT_KEPT_BYTES)
-                kept = kept.slice(kept.length - OUTPUT_KEPT_BYTES)
-            }
-            child.onStdout(keep)
-            child.onStderr(keep)
-            const ended = yield* child.exited
-            yield* Effect.sleep(DRAIN_MS)
-            return {
-              state: ended.code === 0 ? 'done' : 'failed',
-              message: `exit ${String(ended.code ?? ended.signal)}\n${kept}`.trimEnd(),
-            } satisfies Outcome
-          }),
-        ).pipe(
-          Effect.catchTag('AgentSpawnError', (refused) =>
-            Effect.succeed<Outcome>({ state: 'failed', message: refused.message }),
+        const { projectId, id: workspaceId } = place.workspace
+        const started = yield* commands.run({
+          sessionId: null,
+          projectId,
+          commandId: command.id,
+          name: command.name,
+          line: command.line,
+          lineWindows: command.lineWindows,
+          lineLinux: command.lineLinux,
+          type: commandType(command.type),
+          scope: commandScope(command.scope),
+          portless: command.portless === 1,
+          folder: command.folder === '' ? null : command.folder,
+          cwd: join(place.workspace.path, command.folder),
+          workspaceId,
+          workspaceName: place.workspace.name,
+          environment: yield* variables.givenFor(projectId, workspaceId),
+          startedBy: 'user',
+        })
+        yield* withDatabase(
+          mutate('writing a step', (transaction) =>
+            transaction
+              .update(workspaceSteps)
+              .set({ runId: started.id })
+              .where(eq(workspaceSteps.id, step.id))
+              .pipe(
+                Effect.mapError(failed('writing a step')),
+                Effect.as({ result: undefined, events: [] }),
+              ),
           ),
         )
-      })
+        const ended = yield* commands.awaited(null, started.id, Number.POSITIVE_INFINITY)
+        return {
+          state: ended.state === 'exited' ? 'done' : 'failed',
+          message: endOf(ended),
+          runId: started.id,
+        } satisfies Outcome
+      }).pipe(
+        // The run it started is gone from memory and from its row: nothing the step can say.
+        Effect.catchIf(
+          (refused): refused is UnknownRunError => refused instanceof UnknownRunError,
+          (lost) => Effect.succeed<Outcome>({ state: 'failed', message: lost.message }),
+        ),
+      )
 
     const outcome = (place: Place, step: WorkspaceStep, again: boolean) => {
       switch (step.kind) {

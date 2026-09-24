@@ -190,6 +190,8 @@ function running<A, E>(
       Layer.provide(gitLayer()),
       Layer.provide(hostLinks),
       Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
+      // A `run` step is a run of the very commands the tools run (Decided 11).
+      Layer.provide(lent),
       Layer.provide(agents),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))

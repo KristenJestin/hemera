@@ -23,6 +23,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Effect, Fiber, Layer, Result } from 'effect'
 
+import { runsOf } from '#engine/commands/panel.ts'
+import { Sessions } from '#engine/sessions.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import {
   LinkRefusedError,
@@ -110,6 +112,19 @@ const stepsOf = (workspaceId: string) =>
     const preparation = yield* Preparation
     return yield* preparation.steps(workspaceId)
   })
+
+/** The runs of the data folder, as their rows keep them. */
+const runRows = Effect.gen(function* () {
+  const sql = yield* SqliteClient
+  return yield* sql<{
+    id: string
+    session_id: string | null
+    workspace_id: string | null
+    state: string
+    exit_code: number | null
+    output: string
+  }>`SELECT id, session_id, workspace_id, state, exit_code, output FROM command_runs`
+})
 
 /** What a step reads as: its kind, its target, its state and its message. */
 const shown = (steps: readonly { kind: string; target: string; state: string }[]) =>
@@ -264,7 +279,17 @@ describe('Resuming re-checks before retrying', () => {
         const events = yield* sql<{ type: string; payload: string }>`
           SELECT type, payload FROM domain_events WHERE type = 'workspace.resumed'
           ORDER BY sequence`
-        return { resumed, afterResume, installs, again, events, first }
+        const afterAgain = yield* stepsOf(workspace.id)
+        return {
+          resumed,
+          afterResume,
+          installs,
+          again,
+          afterAgain,
+          events,
+          first,
+          runs: yield* runRows,
+        }
       }),
     )
 
@@ -284,6 +309,9 @@ describe('Resuming re-checks before retrying', () => {
     expect(seen.again.state).toBe('ready')
     expect(existsSync(join(seen.first, '.git'))).toBe(true)
     expect(readFileSync(count, 'utf8')).toBe('x')
+    // The done run is the same run, the one row of it (Decided 11).
+    expect(seen.runs.map((run) => run.id)).toEqual([seen.afterResume[2]?.runId])
+    expect(seen.afterAgain[2]?.runId).toBe(seen.afterResume[2]?.runId)
     expect(seen.events.map((event) => JSON.parse(event.payload))).toEqual([
       { redone: 1, retried: 1 },
       { redone: 1, retried: 0 },
@@ -372,20 +400,64 @@ describe('A link is a junction for a folder and a symbolic link for a file on Wi
 })
 
 describe('A run step fails on a non-zero exit', () => {
-  it('fails the step with the output and the exit code, and the Workspace', async () => {
+  it('fails the step, keeps the output and the exit code on its run, and fails the Workspace', async () => {
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([{ run: node("console.log('nope');process.exit(1)") }])
         const prepared = yield* preparation.prepare(workspace.id)
-        return { prepared, steps: yield* stepsOf(workspace.id) }
+        return { prepared, steps: yield* stepsOf(workspace.id), runs: yield* runRows }
       }),
     )
 
     const install = seen.steps[2]
     expect(install?.state).toBe('failed')
-    expect(install?.message).toBe('exit 1\nnope')
+    expect(install?.message).toBe('exit 1')
     expect(seen.prepared.state).toBe('failed')
+    // The run is a real one, of no Session, in the Workspace: its output and its code are its
+    // row's, and the step points at it (Decided 11).
+    expect(seen.runs).toHaveLength(1)
+    expect(seen.runs[0]).toMatchObject({
+      id: install?.runId,
+      session_id: null,
+      workspace_id: seen.prepared.id,
+      state: 'failed',
+      exit_code: 1,
+    })
+    expect(seen.runs[0]?.output.trim()).toBe('nope')
+  })
+})
+
+describe('A Session’s panel never lists a preparation run', () => {
+  it('leaves the run out of what a Session of main and a Session of the Workspace read', async () => {
+    const release = join(folder, 'release')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const preparation = yield* Preparation
+        const sessions = yield* Sessions
+        const workspace = yield* createdWith([{ run: heldUntil(release) }])
+        const inMain = yield* sessions.create(workspace.projectId, 'claude')
+        const preparing = yield* Effect.forkScoped(preparation.prepare(workspace.id))
+        yield* until(stepsOf(workspace.id), (steps) => steps[2]?.runId !== null)
+        const whileRunning = yield* runsOf(inMain.id)
+        writeFileSync(release, '')
+        const prepared = yield* Fiber.join(preparing)
+        const inWorkspace = yield* sessions.create(workspace.projectId, 'claude', workspace.id)
+        return {
+          prepared,
+          whileRunning,
+          ofMain: yield* runsOf(inMain.id),
+          ofWorkspace: yield* runsOf(inWorkspace.id),
+          runs: yield* runRows,
+        }
+      }),
+    )
+
+    expect(seen.prepared.state).toBe('ready')
+    expect(seen.runs).toHaveLength(1)
+    expect(seen.whileRunning).toEqual([])
+    expect(seen.ofMain).toEqual([])
+    expect(seen.ofWorkspace).toEqual([])
   })
 })
 
@@ -499,7 +571,7 @@ describe('A step’s output stays off its Journal line', () => {
     ])
   })
 
-  it('says a failure by the first line of its message, and keeps the rest on the step', async () => {
+  it('says a failure by the first line of its message, and keeps the output on the run', async () => {
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
         const preparation = yield* Preparation
@@ -507,7 +579,11 @@ describe('A step’s output stays off its Journal line', () => {
           { run: node("console.log('TOKEN=secret-value');process.exit(1)") },
         ])
         yield* preparation.prepare(workspace.id)
-        return { events: yield* stepEvents, steps: yield* stepsOf(workspace.id) }
+        return {
+          events: yield* stepEvents,
+          steps: yield* stepsOf(workspace.id),
+          runs: yield* runRows,
+        }
       }),
     )
 
@@ -517,6 +593,8 @@ describe('A step’s output stays off its Journal line', () => {
       state: 'failed',
       message: 'exit 1',
     })
-    expect(seen.steps[2]?.message).toBe('exit 1\nTOKEN=secret-value')
+    // What it printed is its run's, where it is read (Decided 11).
+    expect(seen.steps[2]?.message).toBe('exit 1')
+    expect(seen.runs[0]?.output.trim()).toBe('TOKEN=secret-value')
   })
 })

@@ -14,11 +14,13 @@ import { Effect } from 'effect'
 import { InvalidVariableKeyError } from '@hemera/core'
 import { Commands } from '#engine/commands/service.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
+import { Preparation } from '#engine/workspaces/preparation.ts'
+import { Recipe } from '#engine/workspaces/recipe.ts'
 import { Variables } from '#engine/workspaces/variables.ts'
 import { UnknownWorkspaceError } from '#engine/workspaces/described.ts'
 import { Workspaces } from '#engine/workspaces/workspaces.ts'
 
-import { aSessionOf, atlas, atlasMain, workspaceEngine } from './workspace-engine.ts'
+import { aSessionOf, atlas, atlasMain, saved, workspaceEngine } from './workspace-engine.ts'
 
 let folder: string
 let main: string
@@ -95,6 +97,50 @@ describe('A Workspace’s variable overrides the Project’s', () => {
     expect(seen.run.state).toBe('exited')
     expect(seen.run.output.trim()).toBe('3001')
     expect(seen.run.environment).toMatchObject({ PORT: '3001' })
+  })
+
+  it('gives a preparation step’s run the Workspace’s value, and the run keeps it', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const variables = yield* Variables
+        const preparation = yield* Preparation
+        const commands = yield* Commands
+        const project = yield* atlas(main, ['./sources/api'])
+        const port = yield* saved(
+          project.id,
+          'port',
+          `"${process.execPath}" -e "console.log(process.env.PORT)"`,
+          'script',
+        )
+        yield* (yield* Recipe).add(project.id, {
+          kind: 'run',
+          path: null,
+          scope: 'root',
+          commandId: port.id,
+        })
+        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const workspace = yield* workspaces.create(project.id, {
+          specId: 'HEM-7',
+          name: plan.name,
+          repositories: plan.repositories.map((one) => ({
+            relativePath: one.relativePath,
+            base: one.base ?? '',
+            branch: one.branch,
+          })),
+        })
+        yield* variables.set(project.id, null, 'PORT', '3000')
+        yield* variables.set(project.id, workspace.id, 'PORT', '3001')
+        const prepared = yield* preparation.prepare(workspace.id)
+        const step = (yield* preparation.steps(workspace.id)).find((one) => one.kind === 'run')
+        return { prepared, run: yield* commands.output(null, step?.runId ?? '') }
+      }),
+    )
+
+    expect(seen.prepared.state).toBe('ready')
+    expect(seen.run.sessionId).toBeNull()
+    expect(seen.run.output.trim()).toBe('3001')
+    expect(seen.run.environment).toEqual({ PORT: '3001' })
   })
 })
 
