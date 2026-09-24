@@ -198,9 +198,35 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
 })
 
 describe('Cleanup is refused while a service runs or Git refuses', () => {
-  test("uncommitted changes are Git's refusal, said in its words, and nothing is removed", async () => {
+  test("a running service, then uncommitted changes, are refused in the engine's words", async () => {
     const project = await atlas()
     const workspace = await loginForm(opened!, project.id)
+    const { bridge } = opened!
+    await bridge.invoke('commands.create', {
+      projectId: project.id,
+      name: 'dev',
+      line: printsOnly(43918),
+      type: 'serve',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
+      folder: null,
+    })
+    const session = await bridge.invoke('sessions.create', {
+      projectId: project.id,
+      provider: 'claude',
+      workspaceId: workspace.id,
+    })
+    const dev = await bridge.invoke('commands.run', { sessionId: session.id, name: 'dev' })
+
+    // A service of it runs: the refusal names it, and nothing is removed.
+    expect(await cleanUp(project.id, workspace.id)).toBe('the service dev of login-form is running')
+    await readWorkspaces(project.id)
+    expect(workspacesOf(project.id).find((one) => one.id === workspace.id)?.state).toBe('ready')
+
+    // Stopped, the service no longer holds it; a change nobody committed does, in Git's words.
+    await bridge.invoke('commands.stopService', { projectId: project.id, runId: dev.id })
     writeFileSync(join(workspace.path, 'api', 'draft.txt'), 'not committed\n')
 
     const said = await cleanUp(project.id, workspace.id)
