@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { emulateReducedMotion, movesLess } from '../../.storybook/reduced-motion.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import type { PhaseName, ReadinessView, SpecTarget } from './model.ts'
 import { BUG, FULL_GATE, MID_PLAN, READER } from './spec-fixtures.ts'
@@ -9,12 +10,13 @@ import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.
 
 /**
  * The rail of the Spec panel: the parts of the Spec grouped by the phase that writes them, one
- * quiet row each with its state dot, what is on the stage marked by a thin rule; a group opens on
- * a header in the small type of a label, which puts the whole phase on the stage and says so with
- * `Show all` under the hand, `Showing all` once it has. The arrows walk it and Enter
- * opens a row. At its foot, how far the Spec is from ready: seven thin segments and one line,
- * whose things left open a popover of links, and `Mark ready` once every check passes. Folded,
- * it is the band of glyphs the panel folds to.
+ * quiet row each, what is on the stage marked by a thin rule. A row says only what needs
+ * attention, by a tint of the whole row, an edge on its left or a fainter name, and says it in a
+ * sentence in its tooltip. A group opens on a header in the small type of a label, which puts the
+ * whole phase on the stage; `Show all` shows under the hand and the keyboard. The arrows walk it
+ * and Enter opens a row. At its foot, how far the Spec is from ready: seven thin segments and one
+ * line, whose things left open a popover of links, and `Mark ready` once every check passes.
+ * Folded, it is the band the panel folds to, each phase a block of glyphs.
  */
 
 /** Every mark once, so the six of them are read side by side. */
@@ -143,24 +145,126 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/** The spans of a rail's rows no bigger than a dot: a state dot, which no row wears any more. */
+function dotsIn(rail: HTMLElement): Element[] {
+  return [...rail.querySelectorAll('[data-row] span')].filter((span) => {
+    const box = span.getBoundingClientRect()
+    return box.width > 0 && box.width <= 8 && box.height <= 8
+  })
+}
+
+/** The background of the tint behind a row, `none` when the row has none. */
+function tintOf(row: HTMLElement): string {
+  const tint = row.querySelector('[data-tint]')
+  return tint === null ? 'none' : getComputedStyle(tint).backgroundColor
+}
+
+/** Puts the keyboard on a row and waits for its tooltip to say that; the one before may linger. */
+async function tooltipSays(row: HTMLElement, said: string): Promise<void> {
+  row.focus()
+  await waitFor(() =>
+    expect(
+      within(document.body)
+        .getAllByRole('tooltip')
+        .map((tooltip) => tooltip.textContent),
+    ).toContain(said),
+  )
+  row.blur()
+}
+
 /**
- * The six marks, each said in words to whoever cannot see it; the row on the stage wears the
- * rule and nothing else.
+ * One row per state, and no dot anywhere: a part written and current carries nothing, a part
+ * still empty has a fainter name, the part being written, one to review and one whose text
+ * differs from yours are each tinted in their own colour, and a part you edited wears an edge on
+ * its left. Each says its state in a sentence, in its tooltip and as its accessible description.
  */
-export const Marks: Story = {
+export const States: Story = {
+  args: { initial: 'tasks' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: 'Scope, edited by you' })).toBeVisible()
-    await expect(
-      canvas.getByRole('button', { name: 'Verification, in conflict with your text' }),
-    ).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Plan, being written' })).toBeVisible()
-    await expect(
-      canvas.getByRole('button', { name: 'Behaviour, stale after the rework' }),
-    ).toBeVisible()
-    await expect(
-      canvas.getByRole('button', { name: 'Questions, 1, written by the agent' }),
-    ).toHaveAttribute('aria-current', 'true')
+    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
+    await expect(dotsIn(rail)).toEqual([])
+    const row = (name: string): HTMLElement => canvas.getByRole('button', { name })
+    const written = row('Problem')
+    const empty = row('Expected outcome')
+    const edited = row('Scope')
+    const differs = row('Verification')
+    const review = row('Behaviour')
+    const writing = row('Plan')
+    // Written and current: nothing, no tint, no edge, no sentence.
+    await expect(tintOf(written)).toBe('none')
+    await expect(getComputedStyle(written).borderLeftWidth).toBe('0px')
+    await expect(written).not.toHaveAttribute('aria-describedby')
+    // Empty: the name fainter than a written one's, and nothing behind it.
+    await expect(tintOf(empty)).toBe('none')
+    await expect(getComputedStyle(empty).color).not.toBe(getComputedStyle(written).color)
+    // The three tints, each its own.
+    const tints = [tintOf(writing), tintOf(review), tintOf(differs)]
+    await expect(tints).not.toContain('none')
+    await expect(new Set(tints).size).toBe(3)
+    // Being written: the tint breathes, the text does not.
+    const breath = writing.querySelector('[data-tint]')
+    if (!movesLess()) {
+      await expect(breath === null ? '' : getComputedStyle(breath).animationName).toBe('breathe')
+    }
+    await expect(getComputedStyle(writing).animationName).toBe('none')
+    // Edited by you: an edge on the left and no fill.
+    await expect(tintOf(edited)).toBe('none')
+    await expect(getComputedStyle(edited).borderLeftWidth).toBe('2px')
+    // Each state in a sentence.
+    await expect(empty).toHaveAccessibleDescription('Empty')
+    await expect(edited).toHaveAccessibleDescription('Edited by you')
+    await expect(differs).toHaveAccessibleDescription("Your text and the agent's differ")
+    await expect(review).toHaveAccessibleDescription('To review')
+    await expect(writing).toHaveAccessibleDescription('The agent is writing this')
+    await tooltipSays(empty, 'Empty')
+    await tooltipSays(edited, 'Edited by you')
+    await tooltipSays(differs, "Your text and the agent's differ")
+    await tooltipSays(review, 'To review')
+    await tooltipSays(writing, 'The agent is writing this')
+    await tooltipSays(written, 'Problem')
+  },
+}
+
+/**
+ * Under reduced motion the tint of the part being written holds still, and stays: the state is
+ * said by the colour, not by the breath.
+ */
+export const StatesStill: Story = {
+  args: { initial: 'tasks' },
+  play: async ({ canvasElement }) => {
+    const restore = await emulateReducedMotion()
+    if (restore === null) return
+    try {
+      const writing = within(canvasElement).getByRole('button', { name: 'Plan' })
+      const tint = writing.querySelector('[data-tint]')
+      expect(tint).not.toBeNull()
+      await waitFor(() => {
+        expect(tint === null ? '' : getComputedStyle(tint).animationName).toBe('none')
+      })
+      expect(tintOf(writing)).not.toBe('none')
+    } finally {
+      await restore()
+    }
+  },
+}
+
+/** A phase whose every part is to review says so on its header too, with the same tint. */
+export const PhaseToReview: Story = {
+  args: {
+    groups: [
+      EVERY_MARK[0]!,
+      { phase: 'plan', state: 'stale', rows: [{ target: 'plan', label: 'Plan', mark: 'stale' }] },
+      EVERY_MARK[2]!,
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const plan = within(canvas.getByRole('group', { name: 'Plan' })).getAllByRole('button')[0]!
+    const shape = within(canvas.getByRole('group', { name: 'Shape' })).getAllByRole('button')[0]!
+    await expect(tintOf(shape)).toBe('none')
+    await expect(tintOf(plan)).toBe(tintOf(canvas.getByRole('button', { name: 'Behaviour' })))
+    await expect(plan).toHaveAccessibleDescription('To review')
   },
 }
 
@@ -174,10 +278,8 @@ export const Feature: Story = {
         name: 'Plan phase, open, show all its parts',
       }),
     ).toBeVisible()
-    await expect(
-      canvas.getByRole('button', { name: 'Behaviour, written by the agent' }),
-    ).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0, not written' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Behaviour' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toBeVisible()
   },
 }
 
@@ -192,7 +294,7 @@ export const Bug: Story = {
   },
 }
 
-/** The hint at the end of a header, `Show all` or `Showing all`. */
+/** The hint at the end of a header, `Show all`. */
 function hintOf(header: HTMLElement): HTMLElement {
   const hint = header.querySelector<HTMLElement>('[data-hint]')
   if (hint === null) throw new Error('A header of the rail has no hint.')
@@ -204,11 +306,16 @@ function shown(header: HTMLElement): boolean {
   return getComputedStyle(hintOf(header)).opacity === '1'
 }
 
+/** Whether something of the rail wears the rule of what is on the stage. */
+function ruled(element: HTMLElement): boolean {
+  return getComputedStyle(element, '::before').content !== 'none'
+}
+
 /**
  * The headers of the groups read as the headers of sections, not as rows: a smaller, heavier type
  * in the muted colour, a hairline above every group but the first, the rows set in under them.
- * The hand or the keyboard on a header shows what it does, `Show all`; its group on the stage, it
- * says `Showing all` and wears the rule a row on the stage wears, and keeps its colour.
+ * `Show all` shows under the hand or the keyboard and only then, whatever is on the stage. A
+ * group on the stage wears the rule on its header and on every part under it, and nothing else.
  */
 export const GroupHeaders: Story = {
   args: { groups: railOf(MID_PLAN), initial: 'plan' },
@@ -219,8 +326,8 @@ export const GroupHeaders: Story = {
     const decompose = canvas.getByRole('button', {
       name: 'Decompose phase, pending, show all its parts',
     })
-    const problem = canvas.getByRole('button', { name: /^Problem/ })
-    const onStage = canvas.getByRole('button', { name: 'Plan, being written' })
+    const problem = canvas.getByRole('button', { name: 'Problem' })
+    const onStage = canvas.getByRole('button', { name: 'Plan' })
     const header = getComputedStyle(shape)
     const row = getComputedStyle(problem)
     await expect(header.fontSize).not.toBe(row.fontSize)
@@ -247,17 +354,32 @@ export const GroupHeaders: Story = {
     await waitFor(() => expect(shown(plan)).toBe(true))
     plan.blur()
     await waitFor(() => expect(shown(plan)).toBe(false))
-    // Its group on the stage: `Showing all`, kept without the hand, and the rule of a row.
+    // Its group on the stage: the rule on the header and on every part under it, the hint gone
+    // with the hand, and no word saying so.
     const rule = getComputedStyle(onStage, '::before').backgroundColor
     await userEvent.click(decompose)
     await userEvent.unhover(decompose)
     decompose.blur()
     await expect(decompose).toHaveAttribute('aria-current', 'true')
-    await expect(hintOf(decompose)).toHaveTextContent('Showing all')
-    await expect(shown(decompose)).toBe(true)
-    // Never cut: the longest name and the longest hint hold in the rail's width.
-    await expect(decompose.scrollWidth).toBeLessThanOrEqual(decompose.clientWidth)
+    await waitFor(() => expect(shown(decompose)).toBe(false))
+    await expect(hintOf(decompose)).toHaveTextContent('Show all')
+    await expect(canvas.queryByText('Showing all')).toBeNull()
+    await expect(ruled(decompose)).toBe(true)
     await expect(getComputedStyle(decompose, '::before').backgroundColor).toBe(rule)
+    const parts = within(canvas.getByRole('group', { name: 'Decompose' })).getAllByRole('listitem')
+    for (const part of parts) {
+      const button = within(part).getByRole('button')
+      expect(ruled(button)).toBe(true)
+      expect(getComputedStyle(button, '::before').backgroundColor).toBe(rule)
+    }
+    // Nothing else of the rail wears it.
+    await expect(ruled(onStage)).toBe(false)
+    await expect(ruled(problem)).toBe(false)
+    await expect(ruled(plan)).toBe(false)
+    // Never cut: the longest name and its hint hold in the rail's width.
+    await userEvent.hover(decompose)
+    await waitFor(() => expect(shown(decompose)).toBe(true))
+    await expect(decompose.scrollWidth).toBeLessThanOrEqual(decompose.clientWidth)
     await expect(getComputedStyle(decompose).color).toBe(header.color)
   },
 }
@@ -270,15 +392,15 @@ export const GroupChosen: Story = {
     const decompose = canvas.getByRole('button', {
       name: 'Decompose phase, pending, show all its parts',
     })
-    await expect(getComputedStyle(decompose, '::before').content).toBe('none')
+    await expect(ruled(decompose)).toBe(false)
     await userEvent.click(decompose)
     await expect(args.onSelectGroup).toHaveBeenCalledWith('decompose')
     await expect(decompose).toHaveAttribute('aria-current', 'true')
-    await expect(getComputedStyle(decompose, '::before').content).not.toBe('none')
-    await expect(hintOf(decompose)).toHaveTextContent('Showing all')
-    await expect(canvas.getByRole('button', { name: /^Questions/ })).not.toHaveAttribute(
-      'aria-current',
-    )
+    await expect(ruled(decompose)).toBe(true)
+    // The parts under it wear the rule, and the stage stays one stop of the tab order.
+    const questions = canvas.getByRole('button', { name: /^Questions/ })
+    await expect(ruled(questions)).toBe(true)
+    await expect(questions).not.toHaveAttribute('aria-current')
   },
 }
 
@@ -304,7 +426,7 @@ export const Keyboard: Story = {
     // The keyboard on a header shows what it does.
     await waitFor(() => expect(shown(decompose)).toBe(true))
     await userEvent.keyboard('{ArrowUp}')
-    const plan = canvas.getByRole('button', { name: 'Plan, being written' })
+    const plan = canvas.getByRole('button', { name: 'Plan' })
     await expect(plan).toHaveFocus()
     // Walking is not opening: the stage still shows the questions.
     await expect(args.onSelect).not.toHaveBeenCalled()
@@ -315,7 +437,6 @@ export const Keyboard: Story = {
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await expect(args.onSelectGroup).toHaveBeenCalledWith('decompose')
     await expect(decompose).toHaveAttribute('aria-current', 'true')
-    await expect(hintOf(decompose)).toHaveTextContent('Showing all')
     await userEvent.keyboard('{Home}')
     await expect(
       canvas.getByRole('button', { name: 'Shape phase, finished, show all its parts' }),
@@ -326,28 +447,69 @@ export const Keyboard: Story = {
 }
 
 /**
- * Folded, the band: a column of glyphs, the names hidden from the eye and kept as the accessible
- * name and the tooltip, and the readiness said as `3/7`.
+ * Folded, the band keeps the hierarchy: each phase a block, its glyph in a tinted square, the
+ * smaller glyphs of its parts right under it and set in, and a gap and a hairline before the next
+ * phase. The tints of the rows fill the squares of the parts; the names leave the eye and stay the
+ * accessible name and the tooltip, the state said beside the name. The readiness is said as `3/7`.
  */
 export const Folded: Story = {
-  args: { groups: railOf(MID_PLAN), initial: 'plan', folded: true },
+  args: { groups: EVERY_MARK, initial: 'tasks', folded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(canvas.queryByText('Expected outcome')).toBeNull()
+    await expect(dotsIn(rail)).toEqual([])
     await expect(
       canvas.getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),
     ).toHaveTextContent('3/7')
     await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
-    const scope = canvas.getByRole('button', { name: 'Scope, edited by you' })
-    await expect(scope).toBeVisible()
-    scope.focus()
-    await expect(await within(document.body).findByRole('tooltip')).toHaveTextContent('Scope')
-    // A phase's glyph separates its group, and says what it does.
-    canvas.getByRole('button', { name: 'Shape phase, finished, show all its parts' }).focus()
-    await waitFor(() =>
-      expect(within(document.body).getByRole('tooltip')).toHaveTextContent('Shape · show all'),
-    )
+    const blocks = ['Shape', 'Plan', 'Decompose'].map((name) => canvas.getByRole('group', { name }))
+    for (const [index, block] of blocks.entries()) {
+      const [phase, ...parts] = within(block).getAllByRole('button')
+      if (phase === undefined) throw new Error('A phase of the band has no square.')
+      // The phase's glyph in a tinted square, a step larger than the glyphs of its parts.
+      expect(getComputedStyle(phase).backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+      const phaseBox = phase.getBoundingClientRect()
+      const phaseGlyph = glyphWidthOf(phase)
+      let above = phaseBox.bottom
+      for (const part of parts) {
+        const box = part.getBoundingClientRect()
+        // Right under the phase, tight, and set in.
+        expect(box.top - above).toBeLessThan(4)
+        expect(box.left).toBeGreaterThan(phaseBox.left)
+        expect(glyphWidthOf(part)).toBeLessThan(phaseGlyph)
+        above = box.bottom
+      }
+      // A clear gap and a hairline before the next phase.
+      const next = blocks[index + 1]
+      if (next !== undefined) {
+        expect(next.getBoundingClientRect().top - above).toBeGreaterThan(8)
+        expect(getComputedStyle(next).borderTopWidth).toBe('1px')
+      }
+    }
+    // The tints land on the squares of the parts, one colour per state.
+    const square = (name: string): HTMLElement => canvas.getByRole('button', { name })
+    const tints = [
+      tintOf(square('Plan')),
+      tintOf(square('Behaviour')),
+      tintOf(square('Verification')),
+    ]
+    await expect(tints).not.toContain('none')
+    await expect(new Set(tints).size).toBe(3)
+    await expect(tintOf(square('Problem'))).toBe('none')
+    await expect(getComputedStyle(square('Scope')).borderLeftWidth).toBe('2px')
+    // The name and the state, in the tooltip.
+    await tooltipSays(square('Scope'), 'Scope · Edited by you')
+    await tooltipSays(square('Behaviour'), 'Behaviour · To review')
+    await tooltipSays(square('Problem'), 'Problem')
+    // A phase's square says what it does.
+    await tooltipSays(canvas.getByRole('button', { name: /^Shape phase/ }), 'Shape · show all')
   },
+}
+
+/** How wide the glyph of a row is drawn. */
+function glyphWidthOf(row: HTMLElement): number {
+  return row.querySelector('[data-icon]')?.getBoundingClientRect().width ?? 0
 }
 
 /** The `data-icon` of each row of a rail, the group headings among them, in order. */
@@ -379,7 +541,7 @@ export const EveryIcon: Story = {
     await expect(new Set(unfolded).size).toBe(14)
     await expect(folded).toEqual(unfolded)
     // The glyph stands before the name.
-    const scope = canvas.getAllByRole('button', { name: 'Scope, edited by you' })[0]!
+    const scope = canvas.getAllByRole('button', { name: 'Scope' })[0]!
     await expect(scope.firstElementChild).toHaveAttribute('data-icon', 'IconBorderOuter')
     await expect(scope).toHaveTextContent('Scope')
   },

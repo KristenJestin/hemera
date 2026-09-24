@@ -449,7 +449,7 @@ async function unfold(canvasElement: HTMLElement): Promise<void> {
 
 /**
  * Screen 1 · a feature being planned, as the Session opens it: the chat has the width, the panel
- * a band beside it — the glyph of each part with its dot, the plan the agent writes breathing,
+ * a band beside it — the glyph of each part, the plan the agent writes tinted and breathing,
  * `Plan` open and three checks of seven. The thread says what the agent was handed in one folded
  * Hemera line, and asks the blocking question as a block.
  */
@@ -464,11 +464,13 @@ export const MidPlan: Story = {
     await expect(
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
-    await expect(within(band).getByRole('button', { name: 'Plan, being written' })).toHaveAttribute(
+    await expect(within(band).getByRole('button', { name: 'Plan' })).toHaveAttribute(
       'aria-current',
       'true',
     )
-    await expect(within(band).getByRole('button', { name: 'Tasks, 0, not written' })).toBeVisible()
+    await expect(
+      within(band).getByRole('button', { name: 'Tasks, 0' }),
+    ).toHaveAccessibleDescription('Empty')
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
     await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
     await expect(canvas.getByRole('group', { name: /^Question: Credit notes/ })).toBeVisible()
@@ -652,7 +654,7 @@ export const Reader: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('« Spec CSV »')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Take over' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 3, being written' })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: 'Tasks, 3' })).toHaveAttribute(
       'aria-current',
       'true',
     )
@@ -671,7 +673,9 @@ export const ReaderEditsThenTakesOver: Story = {
     await userEvent.click(narrative)
     await userEvent.keyboard('{Control>}{End}{/Control} Each keeps its invoice number.')
     await userEvent.tab()
-    await expect(canvas.getByRole('button', { name: 'Stories, 2, edited by you' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Stories, 2' })).toHaveAccessibleDescription(
+      'Edited by you',
+    )
     await userEvent.click(canvas.getByRole('button', { name: 'Take over' }))
     await expect(canvas.queryByText('« Spec CSV »')).toBeNull()
   },
@@ -734,9 +738,9 @@ export const StaleAfterRework: Story = {
         name: 'Decompose phase, stale after the rework, show all its parts',
       }),
     ).toBeVisible()
-    await expect(
-      canvas.getByRole('button', { name: 'Tasks, 4, stale after the rework' }),
-    ).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tasks, 4' })).toHaveAccessibleDescription(
+      'To review',
+    )
     await expect(canvas.getByText('copied from rev 2')).toBeVisible()
     await expect(canvas.getByRole('button', { name: '2 things before ready' })).toBeVisible()
   },

@@ -8,7 +8,7 @@ import { BUG, MAINTENANCE, MID_PLAN, OLDER_REVISION } from './spec-fixtures.ts'
 
 /**
  * The Spec panel alone, in a Session's row beside a stand-in for the chat. Folded by default to a
- * band — the rail's glyphs, their dots and `3/7` — and unfolded by the band, a glyph, or the agent
+ * band — the rail's glyphs, their tints and `3/7` — and unfolded by the band, a glyph, or the agent
  * starting on a part, unless the hand folded it. Unfolded, a head that stays on top and the rail
  * beside a stage that shows one part, or every part of one phase, following the agent until a row
  * is chosen; the readiness at the rail's foot. The screens of the brief are drawn in their
@@ -68,8 +68,8 @@ function panelWidth(canvasElement: HTMLElement): number {
 const BAND = 48
 
 /**
- * Folded, as a Session opens it: a band of glyphs beside the chat, each with its state dot, the
- * dot of each phase, and the readiness as `3/7`. No head and no stage: the chat has the width.
+ * Folded, as a Session opens it: a band of glyphs beside the chat, each phase a block over the
+ * glyphs of its parts, and the readiness as `3/7`. No head and no stage: the chat has the width.
  */
 export const Folded: Story = {
   args: { defaultFolded: true },
@@ -77,7 +77,7 @@ export const Folded: Story = {
     const canvas = within(canvasElement)
     await expect(panelWidth(canvasElement)).toBe(BAND)
     const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(within(band).getByRole('button', { name: 'Plan, being written' })).toBeVisible()
+    await expect(within(band).getByRole('button', { name: 'Plan' })).toBeVisible()
     await expect(
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
@@ -105,7 +105,7 @@ export const Unfolded: Story = {
     await expect(
       within(rail).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Plan, being written' })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: 'Plan' })).toHaveAttribute(
       'aria-current',
       'true',
     )
@@ -169,7 +169,7 @@ export const UnfoldsWhenTheAgentWrites: Story = {
     await expect(args.onFoldChange).toHaveBeenCalledWith(false)
     const stage = await canvas.findByRole('region', { name: 'Stage of ATL-7' })
     await expect(within(stage).getByRole('heading', { name: /^Tasks/ })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0, being written' })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toHaveAttribute(
       'aria-current',
       'true',
     )
@@ -193,7 +193,9 @@ export const HandFoldWins: Story = {
     await waitFor(() => expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull())
     await userEvent.click(canvas.getByRole('button', { name: 'Let the agent write the tasks' }))
     // The agent is writing, and the band says so; the panel waits for the hand.
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0, being written' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toHaveAccessibleDescription(
+      'The agent is writing this',
+    )
     await expect(args.onFoldChange).toHaveBeenCalledTimes(1)
     await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
@@ -201,7 +203,7 @@ export const HandFoldWins: Story = {
     const stage = await canvas.findByRole('region', { name: 'Stage of ATL-7' })
     await expect(within(stage).getByRole('heading', { name: /^Tasks/ })).toBeVisible()
     // And unfolded, on the row of what is on the stage.
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0, being written' })).toHaveFocus()
+    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toHaveFocus()
   },
 }
 
@@ -347,9 +349,7 @@ export const RowChosen: Story = {
       'aria-current',
       'true',
     )
-    await expect(canvas.getByRole('button', { name: 'Plan, being written' })).not.toHaveAttribute(
-      'aria-current',
-    )
+    await expect(canvas.getByRole('button', { name: 'Plan' })).not.toHaveAttribute('aria-current')
   },
 }
 

@@ -1,6 +1,6 @@
 import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
-import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { Popover } from '../components/popover/popover.tsx'
@@ -18,30 +18,36 @@ import {
   type SpecView,
   shapedSectionsOf,
 } from './model.ts'
-import { MARK_WORDS } from './part-head.tsx'
 import { SPEC_PART_ICONS, SPEC_PHASE_ICONS } from './spec-icons.ts'
 
 /**
  * The rail of the Spec panel: every part of the Spec, one quiet row each, grouped by the phase
- * that writes it, and at its foot how far the Spec is from `ready` (lot 19, brief revisions 3
- * and 4).
+ * that writes them, and at its foot how far the Spec is from `ready` (lot 19, brief revisions 3
+ * and 4, and the maintainer's decisions on the rail's states).
  *
- * The rows are words in normal case with no surface of their own, the state of each is a small
- * dot at its end, and what is on the stage says so with a thin rule of the one accent and nothing
- * else. A group opens on its heading, which reads as the header of a section and not as one more
- * row: the phase's name in the small type of a label, a hairline above every group but the first,
- * the rows set in under it. Pressed, it puts every part of its phase on the stage, one under the
- * other, and says so: `Show all` under the hand or the keyboard, `Showing all` while it is on the
- * stage. The row of the part the agent is writing keeps breathing, whichever part the reader is
- * on.
+ * The foot already says what is done, so a row says only what needs attention, and says it with
+ * the row itself rather than with a mark at its end. A part written and current carries nothing. A
+ * part still empty has its name in a fainter text. The part the agent is writing is tinted in the
+ * primary, the tint breathing; a part to review is tinted in the warning colour, one whose text
+ * differs from yours in the destructive one. A part you edited, which the agent has not read yet,
+ * wears an edge of the info colour on its left, which goes with a tint rather than replacing it.
+ * Each row says its state in a sentence, in its tooltip and as its accessible description.
+ *
+ * What is on the stage says so with a thin rule of the one accent and nothing else. A group opens
+ * on its heading, which reads as the header of a section and not as one more row: the phase's name
+ * in the small type of a label, a hairline above every group but the first, the rows set in under
+ * it. It wears no state of its own — the foot says how far the phases went — but the warning tint
+ * when every part under it is to review. Pressed, it puts every part of its phase on the stage, and
+ * the rule runs on the header and on every row under it. `Show all` shows at its end under the hand
+ * and the keyboard, and only then.
  *
  * One stop of the tab order, and the arrows walk it: up and down, Home and End, Enter opens.
  *
  * Each phase and each part wears a glyph of its own, before its name. Folded, the rail is the
- * band the panel folds to beside the chat: the glyph of each phase heading its group and the glyph
- * of each part, each with its dot, and the readiness said as `3/7`. The names leave the eye and
- * stay the accessible name and the tooltip; a phase's glyph separates its group and its tooltip
- * says what it does, `Shape · show all`.
+ * band the panel folds to beside the chat, and it keeps the hierarchy: each phase a block, its
+ * glyph in a tinted square, the smaller glyphs of its parts right under it and set in, and a gap
+ * and a hairline before the next phase. The tints of the rows land on the squares of the parts;
+ * the names leave the eye and stay the accessible name and the tooltip, beside the state.
  */
 
 /** One row: where it leads, what it is called, its mark and, for a list, its count. */
@@ -111,25 +117,61 @@ export function railOf(spec: SpecView): RailGroup[] {
   ]
 }
 
-/** The dot at the end of a row: the same six marks the parts wear in their margin. */
-const DOTS: Record<Mark, string> = {
-  empty: 'size-1.5 rounded-full border border-input',
-  agent: 'size-1.5 rounded-full bg-muted-foreground',
-  human: 'size-1.5 rounded-full bg-muted-foreground outline outline-offset-1 outline-primary',
-  stale: 'size-1.5 rounded-full bg-warning',
-  conflict: 'size-1.5 rounded-full bg-destructive',
-  writing: 'size-1.5 rounded-full bg-primary',
+/**
+ * Each state said in a sentence, in the tooltip and as the accessible description. A part
+ * written and current says nothing: there is nothing to do about it.
+ */
+export const STATE_SENTENCES: Record<Mark, string | undefined> = {
+  empty: 'Empty',
+  agent: undefined,
+  human: 'Edited by you',
+  stale: 'To review',
+  conflict: "Your text and the agent's differ",
+  writing: 'The agent is writing this',
 }
 
-/** The dot of a group heading, the state of its phase; the open one breathes. */
-const PHASE_DOTS: Record<PhaseState, string> = {
-  finished: 'size-1.5 shrink-0 rounded-full bg-muted-foreground',
-  open: 'size-1.5 shrink-0 rounded-full bg-primary motion-safe:animate-breathe',
-  pending: 'size-1.5 shrink-0 rounded-full border border-input',
-  stale: 'size-1.5 shrink-0 rounded-full bg-warning',
-  unavailable: 'size-1.5 shrink-0 rounded-full border border-dashed border-input',
+/** The state a row shows: the part the agent is writing is that, whatever its mark says. */
+function rowStateOf(row: RailRow, following: SpecTarget | undefined): Mark {
+  return row.target === following ? 'writing' : row.mark
 }
 
+/** What a row says of itself: its state, and an edit of yours the agent has not read yet. */
+function sentenceOf(row: RailRow, state: Mark): string | undefined {
+  const edited = row.mark === 'human' && state !== 'human' ? STATE_SENTENCES.human : undefined
+  const said = [STATE_SENTENCES[state], edited].filter((one) => one !== undefined)
+  return said.length === 0 ? undefined : said.join('. ')
+}
+
+/**
+ * The tint behind a row that needs attention: a layer under its content, so that the one of the
+ * part being written breathes without its text breathing with it. A soft step of the colour, light
+ * enough that the text on it keeps its contrast in both themes.
+ */
+const TINT = 'pointer-events-none absolute inset-0 -z-10 rounded-sm'
+
+const TINT_FOLDED = 'pointer-events-none absolute inset-0 -z-10 rounded-md'
+
+const TINTS: Partial<Record<Mark, string>> = {
+  writing: 'bg-primary/10 motion-safe:animate-breathe',
+  stale: 'bg-warning/15',
+  conflict: 'bg-destructive/15',
+}
+
+/** The edge of a part you edited, which the agent reads next turn: beside a tint, not instead. */
+const EDITED = 'rounded-l-none border-l-2 border-info'
+
+/**
+ * The name of a part still empty, fainter than the others: as faint as small text goes on the
+ * panel and still reads. A step further and the light theme falls under the contrast it needs.
+ */
+const EMPTY = 'text-muted-foreground/90'
+
+/** Whether every part of a group is to review, which its header then says too. */
+function allStale(group: RailGroup): boolean {
+  return group.rows.length > 0 && group.rows.every((row) => row.mark === 'stale')
+}
+
+/** The phase's state, said to whoever cannot see the foot: the header draws none of it. */
 const PHASE_STATE_WORDS: Record<PhaseState, string> = {
   finished: 'finished',
   open: 'open',
@@ -139,11 +181,26 @@ const PHASE_STATE_WORDS: Record<PhaseState, string> = {
 }
 
 /** A glyph of the rail, named by `data-icon` so a play can tell one from another. */
-function Glyph({ icon: Icon }: { icon: (typeof SPEC_PART_ICONS)[SpecTarget] }): ReactNode {
+function Glyph({
+  icon: Icon,
+  size = 'sm',
+}: {
+  icon: (typeof SPEC_PART_ICONS)[SpecTarget]
+  size?: 'sm' | 'md' | undefined
+}): ReactNode {
   return (
     <span aria-hidden="true" data-icon={Icon.displayName} className="flex shrink-0">
-      <Icon size="sm" />
+      <Icon size={size} />
     </span>
+  )
+}
+
+/** The tint layer of a row or a header, when its state has one. */
+function Tint({ state, folded }: { state: Mark; folded: boolean }): ReactNode {
+  const tint = TINTS[state]
+  if (tint === undefined) return null
+  return (
+    <span aria-hidden="true" data-tint={state} className={cn(folded ? TINT_FOLDED : TINT, tint)} />
   )
 }
 
@@ -161,42 +218,61 @@ const ROWS = 'flex flex-col pl-3'
 
 const LIST_FOLDED = 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 py-2'
 
+/** A phase folded: a block, a hairline and a gap above it but the first. */
+const GROUP_FOLDED =
+  'flex flex-col items-start gap-0.5 border-t border-border pt-3 first:border-t-0 first:pt-0'
+
+/** The parts of a phase folded: stacked tight, and set in under the phase's square. */
+const ROWS_FOLDED = 'flex flex-col gap-0.5 pl-2'
+
 /**
- * A row: its glyph and its words, and no surface. The row on the stage is the foreground text and
- * a 2-pixel rule of the accent on its left; every other row is the muted text, brightening under
- * the hand. Folded, the glyph stands alone, its dot on its corner.
+ * A row: its glyph and its words, and no surface but the tint of a state that needs attention.
+ * The row on the stage is the foreground text and a 2-pixel rule of the accent on its left; every
+ * other row is the muted text, brightening under the hand. Folded, the glyph stands alone in a
+ * small square, which is what the tint fills.
  */
 const ROW =
-  'relative flex h-control-sm w-full items-center gap-2 rounded-sm px-2 text-left text-sm outline-none focus-ring hover:text-foreground'
+  'relative isolate flex h-control-sm w-full items-center gap-2 rounded-sm px-2 text-left text-sm outline-none focus-ring hover:text-foreground'
 
 const ROW_FOLDED =
-  'relative flex h-control-sm w-full items-center justify-center rounded-sm text-sm outline-none focus-ring hover:text-foreground'
+  'relative isolate flex size-6 items-center justify-center rounded-md outline-none focus-ring hover:text-foreground'
 
 /**
  * A group's header: its phase's glyph and name in the small type of a label — smaller, heavier,
  * a little spaced, and muted even on the stage, where only the rule says so — and never cut.
  */
 const HEADING =
-  'group/head relative flex h-6 w-full items-center gap-1.5 rounded-sm px-2 text-left text-xs font-medium tracking-wide whitespace-nowrap text-muted-foreground outline-none focus-ring'
+  'group/head relative isolate flex h-6 w-full items-center gap-1.5 rounded-sm px-2 text-left text-xs font-medium tracking-wide whitespace-nowrap text-muted-foreground outline-none focus-ring'
 
+/** A phase folded: its glyph in a tinted square, a step larger than the glyphs of its parts. */
 const HEADING_FOLDED =
-  'relative flex h-control-sm w-full items-center justify-center rounded-sm text-xs outline-none focus-ring hover:text-foreground'
+  'relative isolate flex size-control-sm items-center justify-center rounded-md bg-muted-foreground/15 text-muted-foreground outline-none focus-ring hover:text-foreground'
+
+/** The same square when every part of the phase is to review: the warning tint instead. */
+const HEADING_FOLDED_STALE =
+  'relative isolate flex size-control-sm items-center justify-center rounded-md text-muted-foreground outline-none focus-ring hover:text-foreground'
 
 const ROW_OFF = 'text-muted-foreground'
 
-const ROW_ON =
-  'text-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary'
+const ROW_CURRENT = 'text-foreground'
 
-/** The same rule on a header whose group is on the stage. */
-const HEADING_ON =
+/** The rule of what is on the stage: a row, a header, or every row of a group on the stage. */
+const RULE =
+  'before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary'
+
+/** The same rule on a header, whose line is shorter. */
+const HEADING_RULE =
   'before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary'
+
+/** Folded, the rule stands in the room left of the square rather than over its edge. */
+const RULE_FOLDED =
+  'before:absolute before:inset-y-1 before:-left-1 before:w-0.5 before:rounded-full before:bg-primary'
 
 const HEADING_LABEL = 'flex-1'
 
 /**
- * What pressing a header does, at its end: hidden until the hand or the keyboard is on it, and
- * kept while its group is on the stage. The hand is followed in state rather than by `:hover`,
- * so that a play can drive it.
+ * What pressing a header does, at its end: hidden until the hand or the keyboard is on it. The
+ * hand is followed in state rather than by `:hover`, so that a play can drive it.
  */
 const HINT = 'font-normal tracking-normal opacity-0 group-focus/head:opacity-100'
 
@@ -206,20 +282,13 @@ const LABEL = 'min-w-0 flex-1 truncate'
 
 const COUNT = 'text-xs text-muted-foreground tabular-nums'
 
-/** The breath of the dot of the part the agent is writing, kept whichever part is shown. */
-const BREATHE = 'motion-safe:animate-breathe'
-
-const DOT_BOX = 'flex size-2 shrink-0 items-center justify-center'
-
-const DOT_BOX_FOLDED = 'absolute top-1 right-1 flex size-2 items-center justify-center'
-
 export interface SpecRailProps {
   /** What the rail is called: `Parts of ATL-7`. */
   label: string
   groups: RailGroup[]
   /** What is on the stage: a part, or a phase's group. */
   current: StageChoice
-  /** The part the agent is writing, whose row keeps breathing. */
+  /** The part the agent is writing, whose row is tinted and breathes. */
   following?: SpecTarget | undefined
   /** Puts a part on the stage: a row, or a thing left before ready. */
   onSelect: (target: SpecTarget) => void
@@ -251,6 +320,7 @@ export function SpecRail({
   folded = false,
 }: SpecRailProps): ReactNode {
   const list = useRef<HTMLDivElement>(null)
+  const said = useId()
   // The header under the hand, whose hint shows.
   const [pointed, setPointed] = useState<PhaseName | null>(null)
   // The band stands at the window's right edge: what names a glyph opens away from it.
@@ -280,15 +350,21 @@ export function SpecRail({
         {groups.map((group) => {
           const title = PHASE_TITLES[group.phase]
           const whole = 'group' in current && current.group === group.phase
-          const hinted = whole || pointed === group.phase
+          const stale = allStale(group)
+          const headingSaid = `${said}-${group.phase}`
           return (
             <div
               key={group.phase}
               role="group"
               aria-label={title}
-              className={folded ? undefined : GROUP}
+              className={folded ? GROUP_FOLDED : GROUP}
             >
-              <Tooltip label={`${title} · show all`} side={side}>
+              <Tooltip
+                label={
+                  stale ? `${title} · ${STATE_SENTENCES.stale} · show all` : `${title} · show all`
+                }
+                side={side}
+              >
                 <button
                   type="button"
                   data-row
@@ -297,48 +373,69 @@ export function SpecRail({
                   tabIndex={whole ? 0 : -1}
                   aria-current={whole ? 'true' : undefined}
                   aria-label={`${title} phase, ${PHASE_STATE_WORDS[group.state]}, show all its parts`}
+                  aria-describedby={stale ? headingSaid : undefined}
                   className={cn(
-                    folded ? HEADING_FOLDED : HEADING,
-                    folded ? (whole ? ROW_ON : ROW_OFF) : whole && HEADING_ON,
+                    folded ? (stale ? HEADING_FOLDED_STALE : HEADING_FOLDED) : HEADING,
+                    whole && (folded ? RULE_FOLDED : HEADING_RULE),
                   )}
                   onClick={() => onSelectGroup(group.phase)}
                   onPointerEnter={() => setPointed(group.phase)}
                   onPointerLeave={() => setPointed(null)}
                 >
-                  <Glyph icon={SPEC_PHASE_ICONS[group.phase]} />
+                  {stale && <Tint state="stale" folded={folded} />}
+                  <Glyph icon={SPEC_PHASE_ICONS[group.phase]} size={folded ? 'md' : 'sm'} />
                   {!folded && (
                     <>
                       <span className={HEADING_LABEL}>{title}</span>
-                      <span aria-hidden="true" data-hint className={hinted ? HINT_SHOWN : HINT}>
-                        {whole ? 'Showing all' : 'Show all'}
+                      <span
+                        aria-hidden="true"
+                        data-hint
+                        className={pointed === group.phase ? HINT_SHOWN : HINT}
+                      >
+                        Show all
                       </span>
                     </>
                   )}
-                  <span aria-hidden="true" className={folded ? DOT_BOX_FOLDED : DOT_BOX}>
-                    <span className={PHASE_DOTS[group.state]} />
-                  </span>
                 </button>
               </Tooltip>
-              <ul className={folded ? 'flex flex-col' : ROWS}>
+              {stale && (
+                <span id={headingSaid} hidden>
+                  {STATE_SENTENCES.stale}
+                </span>
+              )}
+              <ul className={folded ? ROWS_FOLDED : ROWS}>
                 {group.rows.map((row) => {
                   const on = 'part' in current && current.part === row.target
-                  const name =
-                    row.count === undefined
-                      ? `${row.label}, ${MARK_WORDS[row.mark]}`
-                      : `${row.label}, ${row.count}, ${MARK_WORDS[row.mark]}`
-                  const breathing = row.mark === 'writing' || row.target === following
+                  const state = rowStateOf(row, following)
+                  const sentence = sentenceOf(row, state)
+                  const rowSaid = `${said}-${row.target}`
+                  const name = row.count === undefined ? row.label : `${row.label}, ${row.count}`
+                  const tip =
+                    sentence === undefined
+                      ? row.label
+                      : folded
+                        ? `${row.label} · ${sentence}`
+                        : sentence
                   return (
-                    <li key={row.target}>
-                      <Tooltip label={row.label} side={side}>
+                    <li key={row.target} className="flex">
+                      <Tooltip label={tip} side={side}>
                         <button
                           type="button"
                           data-row
+                          data-state={state}
                           tabIndex={on ? 0 : -1}
                           aria-current={on ? 'true' : undefined}
                           aria-label={name}
-                          className={cn(folded ? ROW_FOLDED : ROW, on ? ROW_ON : ROW_OFF)}
+                          aria-describedby={sentence === undefined ? undefined : rowSaid}
+                          className={cn(
+                            folded ? ROW_FOLDED : ROW,
+                            on ? ROW_CURRENT : state === 'empty' ? EMPTY : ROW_OFF,
+                            (on || whole) && (folded ? RULE_FOLDED : RULE),
+                            row.mark === 'human' && EDITED,
+                          )}
                           onClick={() => onSelect(row.target)}
                         >
+                          <Tint state={state} folded={folded} />
                           <Glyph icon={SPEC_PART_ICONS[row.target]} />
                           {!folded && (
                             <>
@@ -348,11 +445,13 @@ export function SpecRail({
                               )}
                             </>
                           )}
-                          <span aria-hidden="true" className={folded ? DOT_BOX_FOLDED : DOT_BOX}>
-                            <span className={cn(DOTS[row.mark], breathing && BREATHE)} />
-                          </span>
                         </button>
                       </Tooltip>
+                      {sentence !== undefined && (
+                        <span id={rowSaid} hidden>
+                          {sentence}
+                        </span>
+                      )}
                     </li>
                   )
                 })}

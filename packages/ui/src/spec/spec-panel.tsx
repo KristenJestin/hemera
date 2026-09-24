@@ -28,7 +28,7 @@ import { TasksPart } from './tasks-part.tsx'
  * revisions 3 and 4; core.md, "Session view").
  *
  * Mostly a text to read, so it takes the room only when it is read. By default it is folded to a
- * band beside the chat — the rail's glyphs, their dots and the readiness as `3/7` — and the chat
+ * band beside the chat — the rail's glyphs, their tints and the readiness as `3/7` — and the chat
  * has the rest of the width. The band, a glyph or its fold button unfolds it; the agent starting
  * on a part unfolds it too, onto that part, unless the hand folded it during this Session: a fold
  * by the hand holds until the hand unfolds.
