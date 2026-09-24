@@ -166,6 +166,7 @@ describe("A command's folder resolves inside the Workspace", () => {
             folder: null,
             scope: 'workspace',
             portless: false,
+            portlessName: null,
           },
           false,
         )
@@ -194,6 +195,7 @@ describe("A command's folder resolves under its base inside the Workspace", () =
     folder,
     scope: 'workspace' as const,
     portless: false,
+    portlessName: null,
   })
 
   test('src under ./sources/api runs in login-form/sources/api/src, and says so', async () => {
@@ -269,6 +271,7 @@ describe('A Project-scoped service is one instance for all', () => {
             folder: null,
             scope: 'project',
             portless: false,
+            portlessName: null,
           },
           false,
         )
@@ -309,6 +312,7 @@ describe('A Project-scoped service is one instance for all', () => {
             folder: null,
             scope: 'project',
             portless: false,
+            portlessName: null,
           },
           false,
         )
@@ -377,6 +381,7 @@ describe('A variable set on main applies to a Session on main', () => {
             folder: null,
             scope: 'workspace',
             portless: false,
+            portlessName: null,
           },
           false,
         )
@@ -426,6 +431,7 @@ describe('A Session’s tools never list a preparation run', () => {
             type: 'script',
             scope: 'workspace',
             portless: false,
+            portlessName: null,
             folder: null,
             cwd: loginForm,
             workspaceId,

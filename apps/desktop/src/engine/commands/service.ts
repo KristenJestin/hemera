@@ -29,7 +29,10 @@
  * A run belongs to a Workspace (D8-08) and runs the machine's own line of its command (D8-07): a
  * `serve` joins the one running in its Workspace, or the Project's one when its scope says so; the
  * address it publishes is requested until it answers, and its port is compared with the Project's
- * other runs, whose holder is named (D8-09); a Portless command runs through `portless` (D8-10).
+ * other runs, whose holder is named (D8-09); a Portless command runs through `portless` under
+ * its own name or its Project's, suffixed by a dedicated Workspace's, and a line that already runs
+ * `portless` runs as it is written (D8-10 as amended by recette 1). Whether `portless` is on the
+ * machine is looked up once per engine.
  */
 
 import {
@@ -49,7 +52,8 @@ import {
   MAIN_WORKSPACE,
   mergedEnvironment,
   portOf,
-  slugify,
+  portlessNameFor,
+  runsPortless,
 } from '@hemera/core'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
@@ -66,7 +70,10 @@ import {
   type RunState,
   commandRuns,
   projectCommands,
+  projects,
   sessions,
+  workspaceRepositories,
+  workspaceSteps,
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
@@ -174,7 +181,8 @@ export const Platform = Context.Reference<string>('CommandsPlatform', {
 
 /**
  * Where a program is looked for, for a line run in a folder: this process's `PATH` by default,
- * and another one for a suite that needs a machine without `portless` (D8-10).
+ * and another one for a suite that needs a machine without `portless` (D8-10). `portless` itself
+ * is looked for once per engine, from the engine's own folder.
  */
 export const ProgramLookup = Context.Reference<(cwd: string) => Lookup>('CommandsProgramLookup', {
   defaultValue: () => hostLookup,
@@ -327,9 +335,11 @@ export interface RunRequest {
   /** What a second `serve` run joins; `workspace` for a one-off (D8-07). */
   readonly scope: CommandScope
   readonly portless: boolean
+  /** The name Portless serves it under, null for the Project's name as a slug (D8-10). */
+  readonly portlessName: string | null
   /** The command's folder relative to the Workspace root, and null for the root itself. */
   readonly folder: string | null
-  /** Where it runs: the Workspace root, or one of the Project's repositories under it. */
+  /** Where it runs: its folder under its base, under the Workspace (D8-07 as amended). */
   readonly cwd: string
   /** The Workspace it runs in, and null for `main` (D8-08). */
   readonly workspaceId: string | null
@@ -354,6 +364,8 @@ export interface CommandEdit {
   readonly folder: string | null
   readonly scope: string
   readonly portless: boolean
+  /** The name Portless serves it under, null for the Project's name as a slug (D8-10). */
+  readonly portlessName: string | null
 }
 
 export interface CommandsService {
@@ -369,6 +381,11 @@ export interface CommandsService {
     projectId: string,
     name: string,
   ) => Effect.Effect<void, DatabaseError | UnknownCommandError>
+  /**
+   * Whether `portless` is on this machine's `PATH` (D8-10 as amended by recette 1): looked up
+   * once per engine, the first time it is asked, and answered from then on.
+   */
+  readonly portless: () => Effect.Effect<{ readonly installed: boolean }>
   /** Starts a run, or hands back the one that is already going (D6-12). */
   readonly run: (asked: RunRequest) => Effect.Effect<RunView, DatabaseError>
   /**
@@ -576,6 +593,16 @@ export const commandsLayer = Layer.effect(
     const readiness = yield* ReadinessSettings
     const lookupIn = yield* ProgramLookup
     const live = new Map<string, Live>()
+    /** Where `portless` is on this machine, once looked up; undefined until then (D8-10). */
+    let portlessAt: string | null | undefined
+    const portlessFound = () =>
+      Effect.sync(() => {
+        // Null is an answer too — not installed — and it is kept as one.
+        if (portlessAt === undefined) {
+          portlessAt = findOnPath('portless', lookupIn(globalThis.process.cwd()), platform)
+        }
+        return portlessAt
+      })
 
     /** An effect that needs a scope, run in the engine's: everything it starts dies with it. */
     const owned = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>): Effect.Effect<A, E> =>
@@ -867,6 +894,44 @@ export const commandsLayer = Layer.effect(
               Effect.map((rows) => rows[0]?.specId ?? null),
             )
 
+    /**
+     * The name a Portless run serves under (D8-10 as amended by recette 1): the command's own, or
+     * its Project's as a slug, followed by its Workspace's when that one is dedicated — made by
+     * Hemera, with worktrees or steps, as against `main` or a folder the user picked.
+     */
+    const portlessNameOf = (asked: RunRequest) =>
+      Effect.gen(function* () {
+        const project = yield* database
+          .select({ name: projects.name })
+          .from(projects)
+          .where(eq(projects.id, asked.projectId))
+          .pipe(Effect.mapError(failed('reading the Project of a run')))
+        const workspaceId = asked.workspaceId
+        const made =
+          workspaceId === null || asked.workspaceName === MAIN_WORKSPACE
+            ? []
+            : [
+                ...(yield* database
+                  .select({ id: workspaceRepositories.id })
+                  .from(workspaceRepositories)
+                  .where(eq(workspaceRepositories.workspaceId, workspaceId))
+                  .limit(1)
+                  .pipe(Effect.mapError(failed('reading the worktrees of a run')))),
+                ...(yield* database
+                  .select({ id: workspaceSteps.id })
+                  .from(workspaceSteps)
+                  .where(eq(workspaceSteps.workspaceId, workspaceId))
+                  .limit(1)
+                  .pipe(Effect.mapError(failed('reading the steps of a run')))),
+              ]
+        return portlessNameFor({
+          name: asked.portlessName,
+          projectName: project[0]?.name ?? '',
+          workspaceName: asked.workspaceName,
+          dedicated: made.length > 0,
+        })
+      })
+
     /** The Project a Session belongs to, and null for a Session this database does not hold. */
     const projectOf = (sessionId: string) =>
       database
@@ -1018,6 +1083,7 @@ export const commandsLayer = Layer.effect(
                     folder: row.folder,
                     scope: commandScope(row.scope),
                     portless: row.portless === 1,
+                    portlessName: row.portlessName,
                     createdAt: Date.parse(row.createdAt),
                   })),
                 catch: (cause) => new DatabaseError({ doing: 'reading the commands', cause }),
@@ -1035,6 +1101,7 @@ export const commandsLayer = Layer.effect(
               const runsIn = commandScope(edit.scope)
               const lines = { lineWindows: edit.lineWindows, lineLinux: edit.lineLinux }
               const portless = edit.portless ? 1 : 0
+              const portlessName = edit.portlessName
               const at = new Date().toISOString()
               const existing = yield* transaction
                 .select()
@@ -1065,6 +1132,7 @@ export const commandsLayer = Layer.effect(
                     ...place,
                     scope: runsIn,
                     portless,
+                    portlessName,
                     createdAt,
                     updatedAt: at,
                   })
@@ -1072,7 +1140,16 @@ export const commandsLayer = Layer.effect(
               } else {
                 yield* transaction
                   .update(projectCommands)
-                  .set({ line, ...lines, type, ...place, scope: runsIn, portless, updatedAt: at })
+                  .set({
+                    line,
+                    ...lines,
+                    type,
+                    ...place,
+                    scope: runsIn,
+                    portless,
+                    portlessName,
+                    updatedAt: at,
+                  })
                   .where(eq(projectCommands.id, id))
                   .pipe(Effect.mapError(failed('writing the commands')))
               }
@@ -1087,6 +1164,7 @@ export const commandsLayer = Layer.effect(
                   ...place,
                   scope: runsIn,
                   portless: edit.portless,
+                  portlessName,
                   createdAt: Date.parse(createdAt),
                 } satisfies Command,
                 events: [
@@ -1135,6 +1213,8 @@ export const commandsLayer = Layer.effect(
           ),
         ),
 
+      portless: () => portlessFound().pipe(Effect.map((found) => ({ installed: found !== null }))),
+
       run: (asked) =>
         Effect.gen(function* () {
           // A server is shared, not the Session's (D6-12): a second Session that asks for the
@@ -1159,11 +1239,13 @@ export const commandsLayer = Layer.effect(
           // The machine's own line when the command has one, and the run keeps the line it ran.
           const own = lineFor(asked, platform)
           const lookup = lookupIn(asked.cwd)
-          // A Portless command runs as `portless <name> <line>`, the name being its Workspace's
-          // and its own, and `portless` is looked for before anything starts (D8-10).
-          const named = slugify(`${asked.workspaceName}-${asked.name}`)
-          const portless = asked.portless ? findOnPath('portless', lookup, platform) : null
-          const line = asked.portless ? `portless ${named} ${own}` : own
+          // A Portless command runs as `portless <name> <line>`, and `portless` is looked for
+          // before anything starts (D8-10); a line that runs `portless` itself runs as written
+          // (D8-10 as amended by recette 1).
+          const wraps = asked.portless && !runsPortless(own)
+          const named = wraps ? yield* portlessNameOf(asked) : ''
+          const portless = wraps ? yield* portlessFound() : null
+          const line = wraps ? `portless ${named} ${own}` : own
           const record: Live = {
             sessionId: asked.sessionId,
             projectId: asked.projectId,
@@ -1200,7 +1282,7 @@ export const commandsLayer = Layer.effect(
           live.set(id, record)
 
           // Refused by name, and nothing started: the box says Portless, and there is none.
-          if (asked.portless && portless === null) {
+          if (wraps && portless === null) {
             record.state = 'failed'
             record.kept = 'portless was not found on the PATH: nothing was started'
             record.endedAt = startedAt

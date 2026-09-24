@@ -3,19 +3,21 @@
  *
  * A command is a name the agent asks for and a line that runs, typed by what it is for: `serve`
  * for what stays up and publishes an address, and `test`, `lint`, `build`, `configure`, `debug`
- * and `script` for what ends with an exit code. The folder is optional and means the Workspace
- * root when it is absent, or one of the Project's repositories when it is there — never a path
- * outside both. A command may carry a line of its own for Windows and for Linux; the machine
- * runs its own when it is set and the default line otherwise (D8-07). `scope` says whether a
- * `serve` command runs once per Workspace or once for the whole Project.
+ * and `script` for what ends with an exit code. It runs in a folder under a base: the Workspace
+ * root, or one of the Project's repositories — never a path outside its base. A command may carry
+ * a line of its own for Windows and for Linux; the machine runs its own when it is set and the
+ * default line otherwise (D8-07). `scope` says whether a `serve` command runs once per Workspace
+ * or once for the whole Project.
  *
- * Three of the rules live here because they are rules and not plumbing: a `serve` command that
- * is already running is returned rather than started again, the line a machine runs is its own
- * variant when it has one, and the address a reader sees is the first one the output names —
- * a loopback address or a `*.localhost` name such as Portless prints (D8-09). Everything else
- * about a command — starting it, keeping its output, stopping its tree — belongs to the engine,
- * which owns the process.
+ * The rules live here because they are rules and not plumbing: a `serve` command that is already
+ * running is returned rather than started again, the line a machine runs is its own variant when
+ * it has one, the address a reader sees is the first one the output names — a loopback address or
+ * a `*.localhost` name such as Portless prints (D8-09) — and the name a Portless command runs
+ * under (D8-10). Everything else about a command — starting it, keeping its output, stopping its
+ * tree — belongs to the engine, which owns the process.
  */
+
+import { slugify } from './workspace.ts'
 
 /**
  * What a command is for (D8-07): the design system draws each with the icon it fixes, and the
@@ -69,7 +71,62 @@ export interface Command {
   readonly scope: CommandScope
   /** Whether the line runs through Portless, which names its address (D8-10). */
   readonly portless: boolean
+  /**
+   * The name Portless serves it under, and null for the Project's name as a slug (D8-10 as
+   * amended by recette 1); a dedicated Workspace suffixes it with its own.
+   */
+  readonly portlessName: string | null
   readonly createdAt: number
+}
+
+/** A Portless name that is no single word of a command line (D8-10). */
+export class InvalidPortlessNameError extends Error {
+  readonly candidate: string
+
+  constructor(candidate: string) {
+    super(`a Portless name is one word, without spaces or quotes, and "${candidate}" is not`)
+    this.name = 'InvalidPortlessNameError'
+    this.candidate = candidate
+  }
+}
+
+/**
+ * The Portless name a command is saved with (D8-10 as amended): null for none — nothing, or only
+ * spaces — and otherwise one word, since it is given to `portless` as one argument of its line.
+ */
+export function portlessName(candidate: string | null): string | null {
+  const name = candidate?.trim() ?? ''
+  if (name === '') return null
+  if (/[\s"']/.test(name)) throw new InvalidPortlessNameError(candidate ?? '')
+  return name
+}
+
+/**
+ * Whether a line runs `portless` itself (D8-10 as amended): one of its words is the program
+ * `portless` — bare, by a path, or as a Windows shim — so Hemera runs the line as written.
+ */
+export function runsPortless(line: string): boolean {
+  return line
+    .split(/\s+/)
+    .map((word) => word.replace(/^["']|["']$/g, ''))
+    .map((word) => word.slice(Math.max(word.lastIndexOf('/'), word.lastIndexOf('\\')) + 1))
+    .some((program) => /^portless(?:\.(?:cmd|exe|ps1|bat))?$/i.test(program))
+}
+
+/**
+ * The name a Portless command runs under (D8-10 as amended): its own name when it has one, the
+ * Project's name as a slug otherwise; in a dedicated Workspace — neither `main` nor a folder the
+ * user picked — followed by `-<Workspace name as a slug>`, so two instances never share one.
+ */
+export function portlessNameFor(asked: {
+  readonly name: string | null
+  readonly projectName: string
+  readonly workspaceName: string
+  readonly dedicated: boolean
+}): string {
+  const base = asked.name ?? (slugify(asked.projectName) || 'hemera')
+  const suffix = slugify(asked.workspaceName)
+  return asked.dedicated && suffix !== '' ? `${base}-${suffix}` : base
 }
 
 /** A folder of a command that is absolute, or leaves the base it is relative to. */

@@ -77,7 +77,7 @@ const SPECS_MIGRATION = '20260924122302_specs'
  * the Workspaces, their steps and variables, and the commands typed by seven types (D8-01, D8-05,
  * D8-06, D8-07).
  */
-const WORKSPACES_MIGRATION = '20260924201502_workspaces'
+const WORKSPACES_MIGRATION = '20260924201731_workspaces'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -1098,6 +1098,9 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     expect(kept.main).toEqual([{ state: 'ready', spec_id: null }])
     expect(kept.repositories).toEqual([{ included_by_default: 1 }])
     expect(kept.columns.map((column) => column.name)).not.toContain('kind')
+    // A Portless command runs under the Project's name until one of its own is given (D8-10 as
+    // amended by recette 1).
+    expect(kept.columns.map((column) => column.name)).toContain('portless_name')
 
     const schema = (await on(dataFolder, schemaOf)).join('\n')
     for (const table of [

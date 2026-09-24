@@ -145,6 +145,7 @@ const inCatalogue = (
         folder: null,
         scope: 'workspace',
         portless: false,
+        portlessName: null,
       },
       false,
     )
@@ -291,6 +292,7 @@ describe('A running app is not started twice', () => {
           type: dev.type,
           scope: 'workspace',
           portless: false,
+          portlessName: null,
           folder: null,
           cwd: workspace,
           workspaceId: null,
@@ -1020,6 +1022,7 @@ describe('A command saved in the settings is listed to the agent at once', () =>
           folder: null,
           scope: 'workspace',
           portless: false,
+          portlessName: null,
         })
         yield* runtime.prompt(session.id, 'what can I run?')
       }),

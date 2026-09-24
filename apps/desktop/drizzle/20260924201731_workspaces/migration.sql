@@ -65,6 +65,7 @@ ALTER TABLE `project_commands` ADD `line_linux` text;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `scope` text DEFAULT 'workspace' NOT NULL;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `portless` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `folder_base` text;--> statement-breakpoint
+ALTER TABLE `project_commands` ADD `portless_name` text;--> statement-breakpoint
 ALTER TABLE `project_repositories` ADD `included_by_default` integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE `projects` ADD `workspaces_root` text;--> statement-breakpoint
 ALTER TABLE `projects` ADD `branch_prefix` text;--> statement-breakpoint
@@ -124,6 +125,7 @@ CREATE TABLE `__new_project_commands` (
 	`scope` text DEFAULT 'workspace' NOT NULL,
 	`portless` integer DEFAULT 0 NOT NULL,
 	`folder_base` text,
+	`portless_name` text,
 	CONSTRAINT `fk_project_commands_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `command_name_in_project` UNIQUE(`project_id`,`name`),
 	CONSTRAINT "command_type_is_known" CHECK("type" IN ('serve', 'test', 'lint', 'build', 'configure', 'debug', 'script')),

@@ -414,6 +414,7 @@ describe('The agent starts the app and the user opens it', () => {
       'commands.create',
       'commands.list',
       'commands.output',
+      'commands.portless',
       'commands.proposeAccept',
       'commands.proposeDecline',
       'commands.remove',

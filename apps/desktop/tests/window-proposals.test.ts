@@ -120,6 +120,7 @@ describe('A proposal enters the catalogue only when accepted', () => {
       folder: null,
       scope: 'workspace',
       portless: false,
+      portlessName: null,
     })
     expect(await acceptProposal(session.id, proposals().get('fixtures')?.proposalId ?? '')).toBe(
       'a command named fixtures is already in this Project: it is refused, not replaced',

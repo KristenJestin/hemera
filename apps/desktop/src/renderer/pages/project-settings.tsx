@@ -67,6 +67,7 @@ type CommandWrite = Pick<
   | 'folder'
   | 'scope'
   | 'portless'
+  | 'portlessName'
 >
 
 /** A row as the engine writes it. */
@@ -82,6 +83,8 @@ function writeOf(line: CommandLine): CommandWrite {
     folder: line.folder === '' ? null : line.folder,
     scope: line.scope,
     portless: line.portless,
+    // The row has no field for it yet: the Project's name as a slug.
+    portlessName: null,
   }
 }
 

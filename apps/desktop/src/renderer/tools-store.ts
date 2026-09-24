@@ -212,6 +212,7 @@ export interface CommandDraft {
   readonly folder: string | null
   readonly scope: CommandScope
   readonly portless: boolean
+  readonly portlessName: string | null
 }
 
 /**
@@ -253,6 +254,7 @@ export async function addToCatalogue(run: CommandRun): Promise<string | null> {
       folder: run.folder,
       scope: 'workspace',
       portless: false,
+      portlessName: null,
     },
     false,
   )

@@ -25,6 +25,7 @@ import type {
   EmptyMessageError,
   EmptyTitleError,
   InvalidCommandFolderError,
+  InvalidPortlessNameError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
   InvalidSpecPrefixError,
@@ -352,6 +353,8 @@ export function answer(
     // tools, and the window through these.
     const commands = yield* Commands
     if (decision.name === 'commands.list') return yield* commands.list(decision.argument.projectId)
+    // Whether `portless` is on this machine, looked up once per engine (D8-10 as amended).
+    if (decision.name === 'commands.portless') return yield* commands.portless()
     if (decision.name === 'commands.create') return yield* createCommand(decision.argument)
     if (decision.name === 'commands.update') return yield* updateCommand(decision.argument)
     if (decision.name === 'commands.remove') {
@@ -563,6 +566,7 @@ export type Refusal =
   | UnknownCommandError
   | UnknownCommandFolderError
   | InvalidCommandFolderError
+  | InvalidPortlessNameError
   | UnknownRunError
   | NothingToRunError
   | UnreadableInstructionsError

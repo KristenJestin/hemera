@@ -9,6 +9,7 @@ import {
   COMMAND_SCOPES,
   COMMAND_TYPES,
   InvalidCommandFolderError,
+  InvalidPortlessNameError,
   UnknownCommandScopeError,
   UnknownCommandTypeError,
   addressIn,
@@ -19,6 +20,9 @@ import {
   joinsRunningRun,
   lineFor,
   portOf,
+  portlessName,
+  portlessNameFor,
+  runsPortless,
 } from '#index.ts'
 
 describe('The address a dev server prints is found', () => {
@@ -131,5 +135,52 @@ describe("A command's folder resolves under its base", () => {
     expect(commandPlace({ folderBase: './web', folder: null })).toBe('./web')
     expect(commandPlace({ folderBase: './web', folder: './src' })).toBe('./web/src')
     expect(commandPlace({ folderBase: null, folder: './tools' })).toBe('./tools')
+  })
+})
+
+describe('A Portless command is named by its Project, suffixed in a dedicated Workspace', () => {
+  const named = (name: string | null, workspaceName: string, dedicated: boolean) =>
+    portlessNameFor({ name, projectName: 'Atlas Café', workspaceName, dedicated })
+
+  test("main and a folder the user picked run under the Project's name as a slug", () => {
+    expect(named(null, 'main', false)).toBe('atlas-cafe')
+    expect(named(null, 'spike', false)).toBe('atlas-cafe')
+  })
+
+  test('a dedicated Workspace adds its own name, so two instances never clash', () => {
+    expect(named(null, 'Login Form', true)).toBe('atlas-cafe-login-form')
+  })
+
+  test("a name of the command's own takes the Project's place, and keeps the suffix", () => {
+    expect(named('api', 'main', false)).toBe('api')
+    expect(named('api', 'login-form', true)).toBe('api-login-form')
+  })
+
+  test('a Project whose name makes no slug still has a name', () => {
+    expect(
+      portlessNameFor({ name: null, projectName: '日本', workspaceName: 'main', dedicated: false }),
+    ).toBe('hemera')
+  })
+
+  test('a name of its own is one word, and a blank one is none', () => {
+    expect(portlessName(null)).toBeNull()
+    expect(portlessName('  ')).toBeNull()
+    expect(portlessName(' api ')).toBe('api')
+    expect(() => portlessName('my api')).toThrow(InvalidPortlessNameError)
+  })
+})
+
+describe('A line that already runs portless is recognised', () => {
+  test.each([
+    'portless myapp pnpm dev',
+    'npx portless myapp next dev',
+    './node_modules/.bin/portless myapp vite',
+    '"C:/tools/portless.cmd" myapp vite',
+  ])('%s', (line) => {
+    expect(runsPortless(line)).toBe(true)
+  })
+
+  test.each(['pnpm dev', 'pnpm dev --portless', 'node portless-proxy.js'])('%s is not', (line) => {
+    expect(runsPortless(line)).toBe(false)
   })
 })

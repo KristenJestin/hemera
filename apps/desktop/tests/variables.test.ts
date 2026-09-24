@@ -76,6 +76,7 @@ describe('A Workspace’s variable overrides the Project’s', () => {
           type: 'script',
           scope: 'workspace',
           portless: false,
+          portlessName: null,
           folder: null,
           cwd: workspace.path,
           workspaceId: workspace.id,

@@ -47,6 +47,8 @@ export const commandSchema = z.object({
   folder: z.string().nullable(),
   scope: commandScopeSchema,
   portless: z.boolean(),
+  /** The name Portless serves it under, null for the Project's name as a slug (D8-10). */
+  portlessName: z.string().nullable(),
   createdAt: z.number(),
 })
 

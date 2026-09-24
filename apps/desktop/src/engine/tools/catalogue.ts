@@ -928,6 +928,7 @@ export const toolCatalogueLayer: Layer.Layer<
                 type: entry?.type ?? 'script',
                 scope: entry?.scope ?? 'workspace',
                 portless: entry?.portless ?? false,
+                portlessName: entry?.portlessName ?? null,
                 folder: folder === '.' ? null : folder,
                 cwd: inside.path,
                 // D8-08: the run belongs to the Workspace it runs in, which names it too.

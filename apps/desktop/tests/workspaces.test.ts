@@ -520,6 +520,7 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
           type: dev.type,
           scope: dev.scope,
           portless: dev.portless,
+          portlessName: null,
           folder: null,
           cwd: workspace.path,
           workspaceId: workspace.id,

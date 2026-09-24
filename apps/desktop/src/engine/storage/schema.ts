@@ -440,7 +440,8 @@ export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
  * decides whether a second run starts a second process: a `serve` already running is joined.
  * `line_windows` and `line_linux` are the machine's own line, null when it runs the default one;
  * `scope` says whether a `serve` runs once per Workspace or once for the Project; `portless`
- * whether its line runs through Portless (D8-10).
+ * whether its line runs through Portless (D8-10), and `portless_name` the name it runs under,
+ * null for the Project's name as a slug (D8-10 as amended by recette 1).
  */
 export const projectCommands = sqliteTable(
   'project_commands',
@@ -460,6 +461,7 @@ export const projectCommands = sqliteTable(
     scope: text('scope').notNull().default('workspace'),
     portless: integer('portless').notNull().default(0),
     folderBase: text('folder_base'),
+    portlessName: text('portless_name'),
   },
   (table) => [
     check('command_type_is_known', sql`${table.type} IN (${sql.raw(oneOf(COMMAND_TYPES))})`),

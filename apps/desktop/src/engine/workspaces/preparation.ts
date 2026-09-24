@@ -487,6 +487,7 @@ export const preparationLayer = Layer.effect(
           type: commandType(command.type),
           scope: commandScope(command.scope),
           portless: command.portless === 1,
+          portlessName: command.portlessName,
           folder,
           cwd,
           workspaceId,

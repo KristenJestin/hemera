@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "6eb15398-b1e9-4080-986c-f0faebfebd99",
+  "id": "10a0b912-63d7-4ba9-a6f2-1e4ffcc941bd",
   "prevIds": ["584c3df8-84a3-46a5-b8ed-861e5f6d2c30"],
   "ddl": [
     {
@@ -809,6 +809,16 @@
       "default": null,
       "generated": null,
       "name": "folder_base",
+      "entityType": "columns",
+      "table": "project_commands"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "portless_name",
       "entityType": "columns",
       "table": "project_commands"
     },

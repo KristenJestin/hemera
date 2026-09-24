@@ -16,9 +16,11 @@ import {
   EmptyCommandLineError,
   EmptyCommandNameError,
   InvalidCommandFolderError,
+  InvalidPortlessNameError,
   commandFolder,
   commandLine,
   commandName,
+  portlessName,
   repositoryPath,
   runsInMain,
 } from '@hemera/core'
@@ -61,6 +63,8 @@ export interface CommandDraft {
   readonly folder: string | null
   readonly scope: CommandScope
   readonly portless: boolean
+  /** The name Portless serves it under, and null for the Project's name as a slug (D8-10). */
+  readonly portlessName: string | null
 }
 
 /** The Project a command or a Session belongs to, read among every Project. */
@@ -89,9 +93,15 @@ const sessionOf = (sessionId: string) =>
  */
 const read = (draft: CommandDraft) =>
   Effect.try({
-    try: () => ({ name: commandName(draft.name), line: commandLine(draft.line) }),
+    try: () => ({
+      name: commandName(draft.name),
+      line: commandLine(draft.line),
+      portlessName: portlessName(draft.portlessName),
+    }),
     catch: (refused) =>
-      refused instanceof EmptyCommandLineError ? refused : new EmptyCommandNameError(),
+      refused instanceof EmptyCommandLineError || refused instanceof InvalidPortlessNameError
+        ? refused
+        : new EmptyCommandNameError(),
   })
 
 /**
@@ -127,23 +137,23 @@ const placeOf = (draft: CommandDraft) =>
 /** Adds a command to the catalogue; a name it already holds is refused, not replaced. */
 export const createCommand = (draft: CommandDraft) =>
   Effect.gen(function* () {
-    const { name, line } = yield* read(draft)
+    const { name, line, portlessName: named } = yield* read(draft)
     const place = yield* placeOf(draft)
     const commands = yield* Commands
-    return yield* commands.save({ ...draft, name, line, ...place }, false)
+    return yield* commands.save({ ...draft, name, line, portlessName: named, ...place }, false)
   })
 
 /** Rewrites a command the catalogue holds, by its name; one it does not hold is refused. */
 export const updateCommand = (draft: CommandDraft) =>
   Effect.gen(function* () {
-    const { name, line } = yield* read(draft)
+    const { name, line, portlessName: named } = yield* read(draft)
     const place = yield* placeOf(draft)
     const commands = yield* Commands
     const held = yield* commands.list(draft.projectId)
     if (!held.some((one) => one.name === name)) {
       return yield* Effect.fail(new UnknownCommandError(name))
     }
-    return yield* commands.save({ ...draft, name, line, ...place }, true)
+    return yield* commands.save({ ...draft, name, line, portlessName: named, ...place }, true)
   })
 
 /**
@@ -207,6 +217,7 @@ export const runFromPanel = (
         type: entry.type,
         scope: entry.scope,
         portless: entry.portless,
+        portlessName: entry.portlessName,
         folder,
         cwd,
         workspaceId: home.id,
@@ -228,6 +239,7 @@ export const runFromPanel = (
       type: 'script',
       scope: 'workspace',
       portless: false,
+      portlessName: null,
       folder: null,
       cwd: workspace.path,
       workspaceId: workspace.id,

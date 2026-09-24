@@ -218,6 +218,7 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      portlessName: null,
       folderBase: null,
       folder: null,
     })
@@ -304,6 +305,7 @@ describe('A port conflict names its holder', () => {
         lineLinux: null,
         scope: 'workspace',
         portless: false,
+        portlessName: null,
         folderBase: null,
         folder: null,
       })
@@ -368,6 +370,7 @@ describe('The steps follow the recipe in order', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      portlessName: null,
       folderBase: null,
       folder: null,
     })
@@ -418,6 +421,7 @@ describe('A run step fails on a non-zero exit', () => {
       lineLinux: null,
       scope: 'workspace',
       portless: false,
+      portlessName: null,
       folderBase: null,
       folder: null,
     })

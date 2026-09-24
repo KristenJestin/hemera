@@ -60,6 +60,7 @@ describe('The catalogue is edited and read', () => {
       lineLinux: null,
       scope: 'workspace' as const,
       portless: false,
+      portlessName: null,
     }
     expect(await saveCommand({ ...draft, folderBase: './api', folder: null }, false)).toBeNull()
     expect(

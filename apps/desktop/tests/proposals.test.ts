@@ -238,6 +238,7 @@ describe('a proposal the catalogue cannot take as it stands', () => {
             folder: null,
             scope: 'workspace',
             portless: false,
+            portlessName: null,
           },
           false,
         )
@@ -277,6 +278,7 @@ describe('a proposal the catalogue cannot take as it stands', () => {
             folder: null,
             scope: 'workspace',
             portless: false,
+            portlessName: null,
           },
           false,
         )

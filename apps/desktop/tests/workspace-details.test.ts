@@ -124,6 +124,7 @@ describe('The cards say the engine views in their own words', () => {
           folder: null,
           scope: 'workspace',
           portless: true,
+          portlessName: null,
           createdAt: 0,
         },
       ],

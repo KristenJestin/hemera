@@ -124,6 +124,7 @@ export const CHANNELS = {
   // What Hemera lends the agent, relayed the same way: a Project's commands and the runs they
   // became, and what a Session was provided (design D6-10, D6-12).
   'commands.list': ENGINE_REQUESTS['commands.list'],
+  'commands.portless': ENGINE_REQUESTS['commands.portless'],
   'commands.create': ENGINE_REQUESTS['commands.create'],
   'commands.update': ENGINE_REQUESTS['commands.update'],
   'commands.remove': ENGINE_REQUESTS['commands.remove'],

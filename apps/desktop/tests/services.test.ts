@@ -29,7 +29,7 @@ import {
 } from '#engine/commands/service.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { Database } from '#engine/storage/database.ts'
-import { workspaces } from '#engine/storage/schema.ts'
+import { workspaceSteps, workspaces } from '#engine/storage/schema.ts'
 
 import { localhostCertificate } from './certificate.ts'
 import {
@@ -464,6 +464,63 @@ describe('A run reaches the window with its Workspace, scope, folder, readiness 
   })
 })
 
+/**
+ * A stand-in for `portless` in `bin`: it prints the address the real one would for the name it is
+ * given, then runs the rest of its line. A shell script on POSIX; on Windows a `.cmd`, found
+ * through `PATHEXT` and run by `cmd.exe`, as an npm shim of the real one would be (Decided 13).
+ */
+const standIn = (bin: string): void => {
+  mkdirSync(bin, { recursive: true })
+  if (process.platform === 'win32') {
+    writeFileSync(
+      join(bin, 'portless.cmd'),
+      '@echo off\r\necho https://%~1.localhost\r\n%2 %3 %4 %5 %6 %7 %8 %9\r\n',
+    )
+    return
+  }
+  writeFileSync(join(bin, 'portless'), '#!/bin/sh\necho "https://$1.localhost"\nshift\nexec "$@"\n')
+  chmodSync(join(bin, 'portless'), 0o755)
+}
+
+/** Makes a Workspace one Hemera assembled: a worktree step of its preparation, done. */
+const dedicate = (workspaceId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    yield* database.insert(workspaceSteps).values({
+      id: crypto.randomUUID(),
+      workspaceId,
+      position: 1,
+      kind: 'worktree',
+      target: './sources/api',
+      state: 'done',
+    })
+  })
+
+describe('Portless is looked for once per engine', () => {
+  it('answers not installed, keeps that answer, and a new engine finds it installed', async () => {
+    const bin = join(scratch.folder, 'bin')
+    mkdirSync(bin)
+    const first = await engine(onlyIn(bin))(
+      Effect.gen(function* () {
+        const commands = yield* Commands
+        const before = yield* commands.portless()
+        // Installed while the engine runs: the engine keeps what it looked up.
+        standIn(bin)
+        return { before, after: yield* commands.portless() }
+      }),
+    )
+    const next = await engine(onlyIn(bin))(
+      Effect.gen(function* () {
+        return yield* (yield* Commands).portless()
+      }),
+    )
+
+    expect(first.before).toEqual({ installed: false })
+    expect(first.after).toEqual({ installed: false })
+    expect(next).toEqual({ installed: true })
+  })
+})
+
 describe('Portless is refused when it is not installed', () => {
   it('refuses the launch naming portless, and starts nothing', async () => {
     const empty = join(scratch.folder, 'bin')
@@ -492,73 +549,89 @@ describe('Portless is refused when it is not installed', () => {
   })
 })
 
-describe('A Portless command runs through portless under its Workspace name', () => {
+describe('A line that already runs portless runs as written', () => {
+  it('is neither wrapped nor refused, even with no portless on the machine', async () => {
+    const empty = join(scratch.folder, 'bin')
+    mkdirSync(empty)
+    // `portless` is a word of the line: the line is the user's own call of it.
+    const line = `"${process.execPath}" -e "console.log('as written')" portless`
+    const seen = await engine(onlyIn(empty))(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const started = yield* commands.run(
+          request(session, { name: 'dev', line, type: 'script', portless: true }),
+        )
+        return yield* commands.awaited(session.sessionId, started.id, 10_000)
+      }),
+    )
+
+    expect(seen.line).toBe(line)
+    expect(seen.state).toBe('exited')
+    expect(seen.output).toContain('as written')
+  })
+})
+
+describe('A Portless command runs under its Project name, suffixed in a dedicated Workspace', () => {
   /** What the stand-in is given to run after the name: a line that prints its words and stays up. */
   const line = `"${process.execPath}" -e "console.log(process.argv.slice(1).join('|'));setInterval(()=>{},1000)" two words`
 
-  /** `Dev`, a Portless `serve` of login-form, run on a machine whose `PATH` is `bin` alone. */
-  const runThrough = (bin: string) =>
-    engine(onlyIn(bin))(
+  it('runs portless atlas in main, atlas-login-form in login-form, and api-login-form by name', async () => {
+    const bin = join(scratch.folder, 'bin')
+    standIn(bin)
+    const seen = await engine(onlyIn(bin))(
       Effect.gen(function* () {
-        const { workspace, inLoginForm } = yield* twoWorkspaces
+        const { main, workspace, inLoginForm } = yield* twoWorkspaces
+        yield* dedicate(workspace.id)
         const commands = yield* Commands
-        const started = yield* commands.run(
-          request(inLoginForm, {
+        const inWorkspace = {
+          cwd: workspace.path,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+        }
+        const up = (session: typeof main, asked: Parameters<typeof request>[1]) =>
+          commands
+            .run(request(session, asked))
+            .pipe(
+              Effect.flatMap((started) =>
+                until(
+                  commands.output(session.sessionId, started.id),
+                  (view) => view.url !== null && view.output.includes('two|words'),
+                ),
+              ),
+            )
+        return {
+          inMain: yield* up(main, { name: 'Dev', line, type: 'serve', portless: true }),
+          dedicated: yield* up(inLoginForm, {
             name: 'Dev',
             line,
             type: 'serve',
             portless: true,
-            cwd: workspace.path,
-            workspaceId: workspace.id,
-            workspaceName: workspace.name,
+            ...inWorkspace,
           }),
-        )
-        return yield* until(
-          commands.output(inLoginForm.sessionId, started.id),
-          (view) => view.url !== null && view.output.includes('two|words'),
-        )
+          named: yield* up(inLoginForm, {
+            name: 'Api',
+            line,
+            type: 'serve',
+            portless: true,
+            portlessName: 'api',
+            ...inWorkspace,
+          }),
+        }
       }),
     )
 
-  it.runIf(process.platform !== 'win32')(
-    'runs portless <workspace>-<name> <line>, reads its address, and names no conflict',
-    async () => {
-      // A stand-in for `portless`: it prints the address the real one would, then runs the line.
-      const bin = join(scratch.folder, 'bin')
-      mkdirSync(bin)
-      writeFileSync(
-        join(bin, 'portless'),
-        '#!/bin/sh\necho "https://$1.localhost"\nshift\nexec "$@"\n',
-      )
-      chmodSync(join(bin, 'portless'), 0o755)
-      const seen = await runThrough(bin)
-
-      expect(seen.line).toBe(`portless login-form-dev ${line}`)
-      expect(seen.state).toBe('running')
-      expect(seen.url).toBe('https://login-form-dev.localhost')
-      expect(seen.output).toContain('two|words')
-      expect(seen.portConflict).toBeNull()
-    },
-  )
-
-  it.runIf(process.platform === 'win32')(
-    'runs portless.cmd <workspace>-<name> <line> on Windows, reads its address, and names no conflict',
-    async () => {
-      // The same stand-in as a `.cmd`, found through `PATHEXT` and run by `cmd.exe`, as an npm
-      // shim of the real one would be (Decided 13): the address, then the line's own words.
-      const bin = join(scratch.folder, 'bin')
-      mkdirSync(bin)
-      writeFileSync(
-        join(bin, 'portless.cmd'),
-        '@echo off\r\necho https://%~1.localhost\r\n%2 %3 %4 %5 %6 %7 %8 %9\r\n',
-      )
-      const seen = await runThrough(bin)
-
-      expect(seen.line).toBe(`portless login-form-dev ${line}`)
-      expect(seen.state).toBe('running')
-      expect(seen.url).toBe('https://login-form-dev.localhost')
-      expect(seen.output).toContain('two|words')
-      expect(seen.portConflict).toBeNull()
-    },
-  )
+    // `main` is not dedicated: the Project's name as a slug, and nothing after it.
+    expect(seen.inMain.line).toBe(`portless atlas ${line}`)
+    expect(seen.inMain.url).toBe('https://atlas.localhost')
+    // A dedicated Workspace suffixes it with its own, so two instances never clash.
+    expect(seen.dedicated.line).toBe(`portless atlas-login-form ${line}`)
+    expect(seen.dedicated.url).toBe('https://atlas-login-form.localhost')
+    expect(seen.dedicated.state).toBe('running')
+    expect(seen.dedicated.output).toContain('two|words')
+    expect(seen.dedicated.portConflict).toBeNull()
+    // A name of the command's own takes the Project's place, and keeps the suffix.
+    expect(seen.named.line).toBe(`portless api-login-form ${line}`)
+    expect(seen.named.url).toBe('https://api-login-form.localhost')
+  })
 })

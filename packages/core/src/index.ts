@@ -83,6 +83,7 @@ export {
   EmptyCommandLineError,
   EmptyCommandNameError,
   InvalidCommandFolderError,
+  InvalidPortlessNameError,
   UnknownCommandScopeError,
   UnknownCommandTypeError,
   addressIn,
@@ -94,8 +95,11 @@ export {
   commandType,
   joinsRunningRun,
   runsInMain,
+  runsPortless,
   lineFor,
   portOf,
+  portlessName,
+  portlessNameFor,
 } from './domain/commands.ts'
 export type { Command, CommandScope, CommandType } from './domain/commands.ts'
 export {

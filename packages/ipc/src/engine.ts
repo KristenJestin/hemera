@@ -603,6 +603,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ projectId: z.string() }),
     response: z.array(commandSchema),
   },
+  // Whether `portless` is on this machine's PATH, looked up once per engine: what a Portless box
+  // says before a launch is refused for it (D8-10 as amended by recette 1).
+  'commands.portless': {
+    arguments: nothingSchema,
+    response: z.object({ installed: z.boolean() }),
+  },
   'commands.create': {
     arguments: z.object({
       projectId: z.string(),
@@ -615,6 +621,7 @@ export const ENGINE_REQUESTS = {
       folder: z.string().nullable(),
       scope: commandScopeSchema,
       portless: z.boolean(),
+      portlessName: z.string().nullable(),
     }),
     response: commandSchema,
   },
@@ -630,6 +637,7 @@ export const ENGINE_REQUESTS = {
       folder: z.string().nullable(),
       scope: commandScopeSchema,
       portless: z.boolean(),
+      portlessName: z.string().nullable(),
     }),
     response: commandSchema,
   },

@@ -134,6 +134,7 @@ export const request = (
   lineLinux: null,
   scope: 'workspace',
   portless: false,
+  portlessName: null,
   folder: null,
   cwd: scratch.root,
   workspaceId: null,
