@@ -230,6 +230,12 @@ The engine holds the agents as well, under `apps/desktop/src/engine/agents/`: th
 supervisor of the agent processes, what the machine has installed and the adapter of each agent.
 An agent is started, stopped and asked from there, and its thread is written from there.
 
+The product Workspaces live under `apps/desktop/src/engine/workspaces/`: the Workspaces of a
+Project (created, observed, cleaned up), their preparation step by step, the Project's recipe and
+the variables given to what runs in them. Git is `apps/desktop/src/engine/git.ts`: the machine's
+own `git`, spawned with its arguments and no shell, never inside a transaction, its refusal
+answered as Git wrote it.
+
 `data` and `engine` are the names the code uses; `Profile` is the word the interface keeps for
 the same folder, in the settings, in the Journal filter and on the `profile` events the engine
 writes at start-up.
