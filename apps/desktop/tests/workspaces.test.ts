@@ -591,6 +591,28 @@ describe('main cannot be cleaned up', () => {
   })
 })
 
+describe('A run step never starts a service', () => {
+  it('refuses a serve command in the recipe, naming why, and adds nothing', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const recipe = yield* Recipe
+        const project = yield* atlas(main, [API])
+        const dev = yield* saved(project.id, 'dev', 'pnpm dev', 'serve')
+        const refused = yield* Effect.flip(
+          recipe.add(project.id, { kind: 'run', path: null, scope: 'root', commandId: dev.id }),
+        )
+        return { refused, left: yield* recipe.list(project.id) }
+      }),
+    )
+
+    expect(seen.refused).toBeInstanceOf(RecipeRefusedError)
+    expect(seen.refused.message).toBe(
+      'a service never ends: a preparation step waits for its command to end',
+    )
+    expect(seen.left).toEqual([])
+  })
+})
+
 describe('The recipe of a Project is kept in the order the user sets', () => {
   it('adds at the end, moves one place, removes, and refuses what it cannot hold', async () => {
     const seen = await workspaceEngine(folder)(

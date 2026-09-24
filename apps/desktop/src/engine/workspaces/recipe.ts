@@ -142,7 +142,7 @@ export const recipeLayer = Layer.effect(
               if (edit.kind === 'run') {
                 // A run starts a command of this Project's catalogue, and nothing else.
                 const found = yield* transaction
-                  .select({ id: projectCommands.id })
+                  .select({ id: projectCommands.id, type: projectCommands.type })
                   .from(projectCommands)
                   .where(
                     and(
@@ -155,6 +155,16 @@ export const recipeLayer = Layer.effect(
                   return yield* Effect.fail(
                     new RecipeRefusedError({
                       reason: 'a run step starts a command of this Project, and none was named',
+                    }),
+                  )
+                }
+                // A step waits for its command to end, and a service is up until it is stopped:
+                // a `serve` in the recipe would hold the preparation for ever (D8-05, D8-07).
+                if (found[0].type === 'serve') {
+                  return yield* Effect.fail(
+                    new RecipeRefusedError({
+                      reason:
+                        'a service never ends: a preparation step waits for its command to end',
                     }),
                   )
                 }
