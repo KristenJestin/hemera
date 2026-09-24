@@ -15,12 +15,14 @@ import {
   forgetWorkspacesRefusal,
   listenToWorkspaces,
   moveRecipeStep,
+  readProjectVariables,
   readWorkspaces,
   removeRecipeStep,
   removeVariable,
   resumePreparation,
   selectRun,
   serviceChange,
+  setVariable,
   showStepRun,
   showWorkspace,
   stopService,
@@ -417,6 +419,46 @@ describe('An older answer never lands over a newer one', () => {
     await settled()
 
     expect(workspacesSnapshot().shown?.status).toEqual(clean)
+  })
+
+  test('a slow variables reading of the showing is dropped once an edit read them again', async () => {
+    answersForShowing()
+    const slow = later<{ key: string; value: string; workspaceId: string }[]>()
+    answers.set(
+      'variables.list',
+      new InTurn([slow.answer, [{ key: 'PORT', value: '4001', workspaceId: 'login-form' }]]),
+    )
+    answers.set('variables.set', { key: 'PORT', value: '4001', workspaceId: 'login-form' })
+    const showing = showWorkspace(LOGIN_FORM)
+    await settled()
+
+    // The value is edited before the showing's own reading came back.
+    expect(await setVariable('atlas', 'login-form', 'PORT', '4001')).toBeNull()
+    slow.arrive([{ key: 'PORT', value: '3001', workspaceId: 'login-form' }])
+    await showing
+
+    expect(workspacesSnapshot().shown?.variables.map((one) => one.value)).toEqual(['4001'])
+  })
+
+  test("a slow reading of the Project's variables is dropped once an edit read them again", async () => {
+    const slow = later<{ key: string; value: string; workspaceId: null }[]>()
+    answers.set(
+      'variables.list',
+      new InTurn([slow.answer, [{ key: 'PORT', value: '4000', workspaceId: null }]]),
+    )
+    answers.set('variables.set', { key: 'PORT', value: '4000', workspaceId: null })
+    const opening = readProjectVariables('atlas')
+    await settled()
+
+    expect(await setVariable('atlas', null, 'PORT', '4000')).toBeNull()
+    slow.arrive([{ key: 'PORT', value: '3000', workspaceId: null }])
+    await opening
+
+    expect(
+      workspacesSnapshot()
+        .variables.get('atlas')
+        ?.map((one) => one.value),
+    ).toEqual(['4000'])
   })
 
   test('a slow step reading is dropped once a later one was written', async () => {

@@ -196,9 +196,16 @@ export function projectVariablesOf(projectId: string | null): readonly Variable[
   return state.variables.get(projectId) ?? []
 }
 
+/**
+ * Reads the Project's own variables. Like every reading here, an answer lands only over an older
+ * one: the settings opening and an edit both read them, and the opening's answer arriving last
+ * would put back the value the edit had just replaced (recette 1, item 10).
+ */
 export async function readProjectVariables(projectId: string): Promise<void> {
+  const asked = asking()
   try {
     const read = await window.hemera.invoke('variables.list', { projectId, workspaceId: null })
+    if (!newest(`variables:${projectId}`, asked)) return
     replace({ ...state, variables: withKey(state.variables, projectId, read) })
   } catch (cause) {
     refused(cause)
@@ -300,11 +307,18 @@ async function readSteps(workspaceId: string): Promise<void> {
   }
 }
 
+/**
+ * Reads the variables of the Workspace shown. The showing reads them and so does every edit: an
+ * older answer never lands over a newer one, or the showing's reading, arriving after an edit's,
+ * would put the old value back on screen (recette 1, item 10).
+ */
 async function readWorkspaceVariables(workspaceId: string): Promise<void> {
   const projectId = state.shown?.projectId
   if (projectId === undefined) return
+  const asked = asking()
   try {
     const variables = await window.hemera.invoke('variables.list', { projectId, workspaceId })
+    if (!newest(`variables:${workspaceId}`, asked)) return
     onShown(workspaceId, (shown) => ({ ...shown, variables }))
   } catch (cause) {
     refused(cause)
