@@ -605,8 +605,12 @@ export const Complete: Story = {
     await expect(canvas.getByRole('img', { name: 'Cancelled' })).toBeInTheDocument()
     await expect(canvas.queryByText('Failed')).toBeNull()
     // And the rail marks the reader's own message and nothing else: one question asked, one
-    // mark to come back to.
-    await expect(canvas.getAllByRole('button', { name: /forty thousand rows/ })).toHaveLength(1)
+    // mark to come back to. The rail is drawn once the thread has been measured, in an effect:
+    // counted where it is still on its way, the count is zero. So the mark is found first, with
+    // the patience the grammar above is given for the same reason.
+    const patience = { timeout: 10_000 }
+    const marked = await canvas.findAllByRole('button', { name: /forty thousand rows/ }, patience)
+    await expect(marked).toHaveLength(1)
 
     /*
      * The foot of the page, as the trial of 22 September 2026 settled it: the agent, its model,

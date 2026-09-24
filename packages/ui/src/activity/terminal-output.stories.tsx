@@ -88,8 +88,14 @@ export const AFoldClosing: Story = {
     const written = /\[39\] packages\/ui\/src\/session\/session\.tsx/
 
     await userEvent.click(row)
+    // Waited out until the fold has made its room, not until the output is "visible": the body
+    // arrives at no height and faded by a filter, which `toBeVisible` reads as visible from the
+    // first frame. Pressed again before the spring has played a frame, the fold would close from
+    // no height to no height — nothing to play, so it is gone at once — and the check below
+    // would be reading the press, not the fold.
     await waitFor(() => {
-      expect(canvas.getByText(written)).toBeVisible()
+      const room = canvasElement.ownerDocument.getElementById(row.getAttribute('aria-controls')!)
+      expect(room?.getBoundingClientRect().height).toBeGreaterThan(0)
     })
 
     await userEvent.click(row)

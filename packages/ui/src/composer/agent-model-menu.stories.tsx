@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
+import { waitForAnimations } from 'storybook/preview-api'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { AgentModelMenu } from './agent-model-menu.tsx'
@@ -538,6 +539,15 @@ export const Modes: Story = {
         canvas.getByRole('button', { name: /Opus 4\.5 · High · Bypass permissions/ }),
       ).toBeVisible()
     })
+
+    /*
+     * The panel is left where it will stay before the play hands over. The a11y check runs on
+     * the frame the play returns, in the addon's own afterEach, and it reads what is drawn: a popup
+     * caught in its 260ms entrance is its text at a fraction of its opacity, a contrast no reader
+     * ever sees, and a story failing on an animation rather than on what it shows. So nothing is
+     * left moving, the popup transition and the rail travel alike.
+     */
+    await waitForAnimations()
   },
 }
 

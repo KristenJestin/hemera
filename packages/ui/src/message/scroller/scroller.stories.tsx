@@ -395,8 +395,15 @@ export const States: Story = {
 
     // A Session opens on what was written last: both rails are on their last mark, and neither
     // thread offers a way back to an edge the reader has not left.
-    expect(marksOf(EDGE).at(-1)).toHaveAttribute('aria-current', 'true')
-    expect(marksOf(AWAY).at(-1)).toHaveAttribute('aria-current', 'true')
+    // Where the reader is comes from the measuring, one effect after the rail itself: waited for
+    // rather than read, with the patience a machine busy with the rest of the run asks for.
+    await waitFor(
+      () => {
+        expect(marksOf(EDGE).at(-1)).toHaveAttribute('aria-current', 'true')
+        expect(marksOf(AWAY).at(-1)).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
     expect(canvas.queryAllByRole('button', { name: 'Latest' })).toHaveLength(0)
 
     // The middle of the scrollable range: as far from the live edge as this thread allows.
@@ -424,14 +431,23 @@ export const ARealThread: Story = {
   args: { entries: THREAD },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const rail = canvas.getByRole('navigation', { name: /^Marks of/ })
-    const marks = within(rail).getAllByRole('button')
+    // The rail is drawn once the thread has been measured, in an effect: read on the frame the
+    // story was drawn it is not there at all, and a machine busy with the rest of the run
+    // measures later than the default patience of a wait.
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
 
     // Twelve messages and two days: one mark per message, and none for the days — a day is a
     // heading over what follows it, and a heading is not somewhere to go.
     expect(marks).toHaveLength(12)
     expect(canvas.getByRole('log').scrollTop).toBeGreaterThan(0)
-    expect(marks.at(-1)).toHaveAttribute('aria-current', 'true')
+    // The reading position is one effect further on than the rail, as in `States`.
+    await waitFor(
+      () => {
+        expect(marks.at(-1)).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
     expect(canvas.queryByRole('button', { name: 'Latest' })).toBeNull()
   },
 }
@@ -476,16 +492,24 @@ export const AMarkPressed: Story = {
   args: { entries: THREAD },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const rail = canvas.getByRole('navigation', { name: /^Marks of/ })
-    const marks = within(rail).getAllByRole('button')
+    // The rail is drawn once the thread has been measured, in an effect: read on the frame the
+    // story was drawn it is not there at all, and a machine busy with the rest of the run
+    // measures later than the default patience of a wait.
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
 
     await userEvent.click(marks[4]!)
-
-    await waitFor(() => {
-      expect(marks[4]).toHaveAttribute('aria-current', 'true')
-    })
+    // The press carries the thread there in a journey of its own, so the reading position is read
+    // once it has arrived: on a machine busy with the rest of the run it arrives later than a bare
+    // read allows for.
+    await waitFor(
+      () => {
+        expect(marks[4]).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
     // The reader is on a message in the middle of the thread, so the way back is offered.
-    expect(canvas.getByRole('button', { name: 'Latest' })).toBeInTheDocument()
+    await canvas.findByRole('button', { name: 'Latest' })
   },
 }
 
@@ -503,20 +527,32 @@ export const OnlyWhatAsksForAMark: Story = {
   args: { entries: ASKED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const rail = canvas.getByRole('navigation', { name: /^Marks of/ })
-    const marks = within(rail).getAllByRole('button')
+    // The rail is drawn once the thread has been measured, in an effect: read on the frame the
+    // story was drawn it is not there at all, and a machine busy with the rest of the run
+    // measures later than the default patience of a wait.
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
 
     // Four marks where `ARealThread` drew twelve: only what asked for one has one.
     expect(marks).toHaveLength(ASKED_FOR.length)
-    // And the reading position is still the last mark, which is where the Session opened.
-    expect(marks.at(-1)).toHaveAttribute('aria-current', 'true')
+    // And the reading position is still the last mark, which is where the Session opened: the
+    // index comes from the same measuring as the rail, so it is waited for rather than read.
+    await waitFor(
+      () => {
+        expect(marks.at(-1)).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
 
     // Pressed, a mark still lands on its own entry and on no other: the rail counts what it
     // drew, so its indices and its anchors cannot come apart.
     await userEvent.click(marks[1]!)
-    await waitFor(() => {
-      expect(marks[1]).toHaveAttribute('aria-current', 'true')
-    })
+    await waitFor(
+      () => {
+        expect(marks[1]).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
     expect(marks.filter((mark) => mark.getAttribute('aria-current') === 'true')).toHaveLength(1)
   },
 }
