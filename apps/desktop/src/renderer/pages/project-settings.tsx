@@ -56,6 +56,7 @@ export function ProjectSettingsPage({
   onMainPathChange,
   onAddRepository,
   onRemoveRepository,
+  onToggleIncluded,
   commands,
   onSaveCommand,
   onRemoveCommand,
@@ -71,6 +72,8 @@ export function ProjectSettingsPage({
   onMainPathChange: (path: string) => void
   onAddRepository: (path: string) => Promise<string | null>
   onRemoveRepository: (path: string) => void
+  /** Says whether a repository is in every dedicated Workspace unless left out (D8-04). */
+  onToggleIncluded: (path: string, included: boolean) => void
   /** The catalogue of the Project, as the engine answered it (D6-12). */
   commands: readonly Command[]
   /**
@@ -94,6 +97,7 @@ export function ProjectSettingsPage({
         onMainPathChange={onMainPathChange}
         onAddRepository={onAddRepository}
         onRemoveRepository={onRemoveRepository}
+        onToggleIncluded={onToggleIncluded}
         commands={commands.map(lineOf)}
         onAddCommand={async (line) => await onSaveCommand(writeOf(line), false)}
         onUpdateCommand={async (line) => await onSaveCommand(writeOf(line), true)}

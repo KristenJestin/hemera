@@ -141,6 +141,50 @@ export async function removeRepository(project: Project, relativePath: string): 
   })
 }
 
+/**
+ * Where the Project's dedicated Workspaces are made (D8-02): a folder, or a blank for Hemera's
+ * own, which the channel carries as the default (Decided 17).
+ */
+export async function setWorkspacesRoot(project: Project, path: string | null): Promise<boolean> {
+  return await acting(async () => {
+    await window.hemera.invoke('projects.setWorkspacesRoot', {
+      id: project.id,
+      version: project.version,
+      path,
+    })
+    return await window.hemera.invoke('projects.list', {})
+  })
+}
+
+/** What their branches start with (D8-04): a prefix, or a blank for the Project's slug. */
+export async function setBranchPrefix(project: Project, prefix: string | null): Promise<boolean> {
+  return await acting(async () => {
+    await window.hemera.invoke('projects.setBranchPrefix', {
+      id: project.id,
+      version: project.version,
+      prefix,
+    })
+    return await window.hemera.invoke('projects.list', {})
+  })
+}
+
+/** Whether a repository gets a worktree in every dedicated Workspace unless left out (D8-04). */
+export async function setRepositoryIncluded(
+  project: Project,
+  relativePath: string,
+  included: boolean,
+): Promise<boolean> {
+  return await acting(async () => {
+    await window.hemera.invoke('projects.setRepositoryIncluded', {
+      id: project.id,
+      version: project.version,
+      path: relativePath,
+      included,
+    })
+    return await window.hemera.invoke('projects.list', {})
+  })
+}
+
 /** What was archived, which only the settings ask for. */
 export async function archivedProjects(): Promise<Project[]> {
   const all = await window.hemera.invoke('projects.list', { includeArchived: true })

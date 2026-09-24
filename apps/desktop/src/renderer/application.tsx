@@ -139,6 +139,9 @@ import {
   removeRepository,
   renameProject,
   restoreProject,
+  setBranchPrefix,
+  setRepositoryIncluded,
+  setWorkspacesRoot,
   subscribeToProjects,
 } from './projects-store.ts'
 import {
@@ -612,8 +615,8 @@ export function Application() {
             path: one.path,
             branch: one.git,
             exists: one.exists,
-            // D8-04: read from the Project once phase 2 wires `included_by_default`.
-            includedByDefault: true,
+            // What the Project says of it, which is what a dedicated Workspace takes (D8-04).
+            includedByDefault: current.included.includes(one.path),
           })),
         )
       })
@@ -992,20 +995,34 @@ export function Application() {
             name: current.name,
             tone: current.tone,
             mainPath: current.mainPath,
-            // D8-02: the Workspaces folder and the branch prefix are wired by phase 2.
-            workspacesRoot: null,
-            branchPrefix: null,
+            workspacesRoot: current.workspacesRoot,
+            branchPrefix: current.branchPrefix,
           }}
           repositories={repositories}
           onSave={async (draft: ProjectDraft) => {
+            // One change after the other, each carrying the version the one before it left: sent
+            // together, the second would be refused as stale.
+            const latest = () =>
+              projectsSnapshot().projects.find((one) => one.id === current.id) ?? current
             const renamed = await renameProject(current, { name: draft.name, tone: draft.tone })
             if (!renamed) return projectsSnapshot().refusal
-            if (draft.mainPath === current.mainPath) return null
-            const moved = await moveMainWorkspace(
-              projectsSnapshot().projects.find((one) => one.id === current.id) ?? current,
-              draft.mainPath,
-            )
-            return moved ? null : projectsSnapshot().refusal
+            const changes = [
+              draft.mainPath === current.mainPath
+                ? null
+                : async () => await moveMainWorkspace(latest(), draft.mainPath),
+              // A blank is the default, which the channel carries as null (Decided 17).
+              draft.workspacesRoot === current.workspacesRoot
+                ? null
+                : async () => await setWorkspacesRoot(latest(), draft.workspacesRoot),
+              draft.branchPrefix === current.branchPrefix
+                ? null
+                : async () => await setBranchPrefix(latest(), draft.branchPrefix),
+            ]
+            for (const change of changes) {
+              // oxlint-disable-next-line no-await-in-loop -- one version at a time; see above
+              if (change !== null && !(await change())) return projectsSnapshot().refusal
+            }
+            return null
           }}
           folders={folders}
           onBrowse={pickFolder}
@@ -1020,6 +1037,11 @@ export function Application() {
             return went ? null : projectsSnapshot().refusal
           }}
           onRemoveRepository={(path) => void removeRepository(current, path)}
+          onToggleIncluded={(path, included) => {
+            const latest =
+              projectsSnapshot().projects.find((one) => one.id === current.id) ?? current
+            void setRepositoryIncluded(latest, path, included)
+          }}
           commands={tools.catalogues.get(current.id) ?? []}
           onSaveCommand={async (command, existing) =>
             await saveCommand({ projectId: current.id, ...command }, existing)
