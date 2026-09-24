@@ -24,6 +24,7 @@ import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
 import { type Commands, commandsLayer } from '#engine/commands/service.ts'
 import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
@@ -31,7 +32,7 @@ import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
 import { type Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
-import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import type { Database } from '#engine/storage/database.ts'
@@ -87,6 +88,7 @@ function running<A, E>(
     | Workspaces
     | Preparation
     | Recipe
+    | Proposals
   >,
 ) {
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
@@ -129,6 +131,7 @@ function running<A, E>(
     check: () => Effect.succeed([]),
     update: () => Effect.die('nothing in this file updates an agent'),
   })
+  const lent = tools.pipe(Layer.provide(rows), Layer.provide(agents), Layer.provide(heldWordsLayer))
   const services: Layer.Layer<
     | Preferences
     | EngineStatus
@@ -144,6 +147,7 @@ function running<A, E>(
     | Workspaces
     | Preparation
     | Recipe
+    | Proposals
     | Database
     | SqliteClient
   > = Layer.mergeAll(
@@ -158,12 +162,14 @@ function running<A, E>(
       Layer.provide(preferencesLayer),
       // Handed up, as the engine hands them up: the settings and the Commands panel ask for the
       // very catalogue and runs the runtime lends.
-      Layer.provideMerge(tools.pipe(Layer.provide(rows), Layer.provide(agents))),
+      Layer.provideMerge(lent),
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provide(agents),
       Layer.provide(heldWordsLayer),
       Layer.provide(agentDirectoriesLayer(dataFolder)),
     ),
+    // What a human decides of the commands the agent proposed, on the very catalogue (D8-11).
+    proposalsLayer.pipe(Layer.provide(lent), Layer.provide(rows), Layer.provide(agents)),
     // The Workspaces of the Projects, made under the data folder over the machine's `git`, and
     // prepared in the scope of these services: what a background preparation runs in.
     preparationLayer.pipe(
@@ -489,6 +495,94 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.picked).toMatchObject({ name: 'spike', state: 'ready', dedicated: false })
   })
 
+  test('a Project, a Session and a proposal are decided through their channels', async () => {
+    const seen = await running(
+      Effect.gen(function* () {
+        const created = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: main,
+        })
+        const added = yield* asked('repositories.add', {
+          id: created.id,
+          version: created.version,
+          relativePath: './sources/api',
+        })
+        const left = yield* asked('projects.setRepositoryIncluded', {
+          id: added.id,
+          version: added.version,
+          path: './sources/api',
+          included: false,
+        })
+        const rooted = yield* asked('projects.setWorkspacesRoot', {
+          id: left.id,
+          version: left.version,
+          path: join(dataFolder, 'elsewhere'),
+        })
+        const project = yield* asked('projects.setBranchPrefix', {
+          id: rooted.id,
+          version: rooted.version,
+          prefix: 'hemera',
+        })
+
+        const picked = yield* asked('workspaces.createOnFolder', {
+          projectId: project.id,
+          path: join(dataFolder, 'spike'),
+          name: 'spike',
+        })
+        const sessions = yield* Sessions
+        const session = yield* sessions.create(project.id, 'claude')
+        const chosen = yield* asked('sessions.chooseWorkspace', {
+          id: session.id,
+          version: session.version,
+          workspaceId: picked.id,
+        })
+        const services = yield* asked('commands.services', {
+          projectId: project.id,
+          workspaceId: picked.id,
+        })
+
+        // Two proposals as `commands_propose` writes them: one accepted, one declined (D8-11).
+        for (const [proposalId, name] of [
+          ['p-1', 'seed'],
+          ['p-2', 'reset'],
+        ] as const) {
+          yield* sessions.write(session.id, {
+            role: 'hemera',
+            kind: 'command_proposal',
+            body: name,
+            payload: JSON.stringify({
+              proposalId,
+              name,
+              line: `node ${name}.js`,
+              type: 'script',
+              folder: null,
+              why: 'run by hand twice',
+              state: 'pending',
+            }),
+            correlationId: `proposal:${proposalId}`,
+            state: 'pending',
+          })
+        }
+        const accepted = yield* asked('commands.proposeAccept', {
+          sessionId: session.id,
+          proposalId: 'p-1',
+        })
+        yield* asked('commands.proposeDecline', { sessionId: session.id, proposalId: 'p-2' })
+        const catalogue = yield* asked('commands.list', { projectId: project.id })
+        return { left, rooted, project, chosen, picked, services, accepted, catalogue }
+      }),
+    )
+
+    expect(seen.left.included).toEqual([])
+    expect(seen.rooted.workspacesRoot).toBe(join(dataFolder, 'elsewhere'))
+    expect(seen.project).toMatchObject({ branchPrefix: 'hemera', repositories: ['./sources/api'] })
+    expect(seen.chosen.workspaceId).toBe(seen.picked.id)
+    expect(seen.services).toEqual([])
+    expect(seen.accepted).toMatchObject({ name: 'seed', line: 'node seed.js' })
+    expect(seen.catalogue.map((command) => command.name)).toEqual(['seed'])
+  })
+
   test.each([
     ['workspaces.create', { projectId: 'atlas', specId: null, name: 'login-form' }, 'repositories'],
     ['preparation.prepare', {}, 'workspaceId'],
@@ -498,6 +592,10 @@ describe('Every Workspace channel reaches its use case', () => {
       'kind',
     ],
     ['variables.set', { projectId: 'atlas', workspaceId: null, key: 'PORT' }, 'value'],
+    ['projects.setBranchPrefix', { id: 'atlas', prefix: 'hemera' }, 'version'],
+    ['sessions.chooseWorkspace', { id: 'session-1', version: 1 }, 'workspaceId'],
+    ['commands.services', { workspaceId: null }, 'projectId'],
+    ['commands.proposeAccept', { sessionId: 'session-1' }, 'proposalId'],
   ])('%s refuses %o, naming the field', (name, argument, field) => {
     const decision = decideRequest(name, argument)
 

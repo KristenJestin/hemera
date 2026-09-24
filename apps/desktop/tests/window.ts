@@ -34,6 +34,7 @@ import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
+import { proposalsLayer } from '#engine/commands/proposals.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
 import { PUSHED, named } from '#engine/index.ts'
@@ -119,6 +120,7 @@ export async function openWindow(
     Layer.provide(gitLayer()),
   )
   const services = runtimeLayer.pipe(
+    Layer.provideMerge(proposalsLayer),
     Layer.provideMerge(workspaces),
     Layer.provideMerge(tools),
     Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),

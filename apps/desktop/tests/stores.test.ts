@@ -36,6 +36,9 @@ function project(id: string, name: string, version = 1): Project {
     version,
     mainPath: `/tmp/${id}`,
     repositories: [],
+    workspacesRoot: null,
+    branchPrefix: null,
+    included: [],
   }
 }
 

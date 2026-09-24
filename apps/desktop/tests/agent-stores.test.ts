@@ -55,6 +55,7 @@ function session(id: string, version = 1): Session {
     provider: 'claude',
     model: null,
     nativeState: 'none',
+    workspaceId: null,
     archivedAt: null,
     createdAt: 0,
     lastWrittenAt: 0,

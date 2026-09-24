@@ -198,6 +198,12 @@ export const projectSchema = z.object({
   version: z.number(),
   mainPath: z.string(),
   repositories: z.array(z.string()),
+  /** Where its dedicated Workspaces are made, and null for Hemera's own folder (D8-02). */
+  workspacesRoot: z.string().nullable(),
+  /** What their branches start with, and null for the Project's name as a slug (D8-04). */
+  branchPrefix: z.string().nullable(),
+  /** The repositories a dedicated Workspace gets a worktree of unless left out (D8-04). */
+  included: z.array(z.string()),
 })
 
 export type Project = z.infer<typeof projectSchema>
@@ -298,6 +304,8 @@ export const sessionSchema = z.object({
   provider: agentProviderSchema.nullable(),
   model: z.string().nullable(),
   nativeState: nativeStateSchema,
+  /** The Workspace it works in, and null for `main` (D8-08). */
+  workspaceId: z.string().nullable(),
   archivedAt: z.number().nullable(),
   createdAt: z.number(),
   lastWrittenAt: z.number(),
@@ -384,6 +392,21 @@ export const ENGINE_REQUESTS = {
     arguments: addressedSchema.extend({ relativePath: z.string() }),
     response: projectSchema,
   },
+  // What a Project's dedicated Workspaces are made with: their folder, absolute and outside
+  // `main` (D8-02), the prefix of their branches (D8-04), and whether each repository gets a
+  // worktree unless left out. Null is the default for the first two.
+  'projects.setWorkspacesRoot': {
+    arguments: addressedSchema.extend({ path: z.string().nullable() }),
+    response: projectSchema,
+  },
+  'projects.setBranchPrefix': {
+    arguments: addressedSchema.extend({ prefix: z.string().nullable() }),
+    response: projectSchema,
+  },
+  'projects.setRepositoryIncluded': {
+    arguments: addressedSchema.extend({ path: z.string(), included: z.boolean() }),
+    response: projectSchema,
+  },
 
   'journal.read': {
     arguments: z.object({
@@ -433,6 +456,12 @@ export const ENGINE_REQUESTS = {
   },
   'sessions.rename': {
     arguments: addressedSchema.extend({ title: z.string() }),
+    response: sessionSchema,
+  },
+  'sessions.chooseWorkspace': {
+    // One of the Project's `ready` Workspaces, or null for `main`; refused once the agent has
+    // started, because its own session was opened in that folder (D8-08).
+    arguments: addressedSchema.extend({ workspaceId: z.string().nullable() }),
     response: sessionSchema,
   },
   'sessions.archive': { arguments: addressedSchema, response: sessionSchema },
@@ -596,6 +625,22 @@ export const ENGINE_REQUESTS = {
   'commands.output': {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,
+  },
+  // The services of a Workspace: every `serve` run of it that is running, whoever started it,
+  // oldest first; `workspaceId` null is `main` (D8-08, D8-09).
+  'commands.services': {
+    arguments: z.object({ projectId: z.string(), workspaceId: z.string().nullable() }),
+    response: z.array(commandRunSchema),
+  },
+  // What a human decides of a command the agent proposed in a Session (D8-11): accepted, it is
+  // written into the catalogue and answered; declined, nothing enters it.
+  'commands.proposeAccept': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: commandSchema,
+  },
+  'commands.proposeDecline': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
   },
 
   // What a Session was provided, what it may consult, and what stays its agent's (design D6-10).

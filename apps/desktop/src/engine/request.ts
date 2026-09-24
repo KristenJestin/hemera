@@ -43,13 +43,28 @@ import {
   runsOf,
   updateCommand,
 } from './commands/panel.ts'
+import {
+  type ProposalDecidedError,
+  Proposals,
+  type UnknownProposalError,
+} from './commands/proposals.ts'
 import { Commands, type UnknownCommandError, type UnknownRunError } from './commands/service.ts'
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
-import { Projects, type UnknownProjectError } from './projects.ts'
-import { Sessions, type UnknownSessionError } from './sessions.ts'
+import {
+  type InvalidBranchPrefixError,
+  type InvalidWorkspacesRootError,
+  Projects,
+  type UnknownProjectError,
+} from './projects.ts'
+import {
+  Sessions,
+  type UnknownSessionError,
+  type WorkspaceFixedError,
+  type WorkspaceNotReadyError,
+} from './sessions.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
@@ -170,6 +185,7 @@ export function answer(
   | Workspaces
   | Preparation
   | Recipe
+  | Proposals
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -208,6 +224,10 @@ export function answer(
       const { id, version, title } = decision.argument
       return yield* sessions.rename(id, version, title)
     }
+    if (decision.name === 'sessions.chooseWorkspace') {
+      const { id, version, workspaceId } = decision.argument
+      return yield* sessions.chooseWorkspace(id, version, workspaceId)
+    }
     if (decision.name === 'sessions.archive') {
       return yield* sessions.archive(decision.argument.id, decision.argument.version)
     }
@@ -242,6 +262,18 @@ export function answer(
     if (decision.name === 'repositories.add') {
       const { id, version, relativePath } = decision.argument
       return yield* projects.addRepository(id, version, relativePath)
+    }
+    if (decision.name === 'projects.setWorkspacesRoot') {
+      const { id, version, path } = decision.argument
+      return yield* projects.setWorkspacesRoot(id, version, path)
+    }
+    if (decision.name === 'projects.setBranchPrefix') {
+      const { id, version, prefix } = decision.argument
+      return yield* projects.setBranchPrefix(id, version, prefix)
+    }
+    if (decision.name === 'projects.setRepositoryIncluded') {
+      const { id, version, path, included } = decision.argument
+      return yield* projects.setRepositoryIncluded(id, version, path, included)
     }
     if (decision.name === 'agents.list') {
       const discovery = yield* Discovery
@@ -334,6 +366,23 @@ export function answer(
     if (decision.name === 'commands.output') {
       const { sessionId, runId } = decision.argument
       return yield* commands.output(sessionId, runId)
+    }
+    if (decision.name === 'commands.services') {
+      const { projectId, workspaceId } = decision.argument
+      // D8-09: a Workspace's services are its running `serve` runs, whoever started them. Read
+      // from what it has running until `Commands.services(projectId, workspaceId)` answers it.
+      const running = yield* commands.runningIn(workspaceId, projectId)
+      return running.filter((run) => run.type === 'serve')
+    }
+    // What a human decides of a command the agent proposed: the one way into the catalogue
+    // besides the settings (D8-11).
+    if (decision.name === 'commands.proposeAccept') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* Proposals).accept(sessionId, proposalId)
+    }
+    if (decision.name === 'commands.proposeDecline') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* Proposals).decline(sessionId, proposalId)
     }
     // What a Session was provided, may consult, and keeps to its agent (D6-10).
     if (decision.name === 'context.read') return yield* contextOf(decision.argument.sessionId)
@@ -441,3 +490,9 @@ export type Refusal =
   | PreparationRunningError
   | RecipeRefusedError
   | InvalidVariableKeyError
+  | InvalidWorkspacesRootError
+  | InvalidBranchPrefixError
+  | WorkspaceNotReadyError
+  | WorkspaceFixedError
+  | UnknownProposalError
+  | ProposalDecidedError
