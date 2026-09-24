@@ -123,9 +123,11 @@ describe('Deux emplacements déclarés', () => {
     // refused by are rules a form can check, and a refusal that took a round trip to the engine
     // to say "that climbs out" is a refusal that arrives after the next character was typed.
     expect(await shows('climbs out of the Workspace')).toBe(true)
-    // And the list is left exactly as it was: two locations, not three.
+    // And the list is left exactly as it was: two locations, not three. Counted on the rows, by
+    // the button that takes each one away, and not on the page's text: a row also says its path
+    // to a screen reader beside its "In every Workspace by default" box (D8-04).
     const declared = await browser.execute(
-      () => (document.body.textContent ?? '').match(/\.\/sources\//g)?.length ?? 0,
+      () => document.querySelectorAll('button[aria-label^="Remove ."]').length,
     )
     expect(declared).toBe(2)
   })
