@@ -37,6 +37,12 @@ const SESSIONS: ShellSession[] = [
   { id: 'drizzle', title: 'Migrate to Drizzle 1.0' },
 ]
 
+/** Twenty Sessions, for the story that asks what a rail does with more than it can show. */
+const MANY_SESSIONS: ShellSession[] = Array.from({ length: 20 }, (_, index) => ({
+  id: `session-${index}`,
+  title: `Session number ${index + 1}`,
+}))
+
 /** Twelve Projects, for the story that asks what a full bar does. */
 const MANY: ShellProject[] = Array.from({ length: 12 }, (_, index) => ({
   id: `project-${index}`,
@@ -125,7 +131,7 @@ function Harness({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Shell/Shell',
   component: Harness,
   parameters: { layout: 'fullscreen' },
@@ -147,13 +153,90 @@ type Story = StoryObj<typeof meta>
 
 export const Playground: Story = {}
 
-export const Collapsed: Story = {
-  args: { collapsed: true },
+/**
+ * The folded rail as the eye reads it, and what it must not hold (recette 5 of 24 September 2026).
+ *
+ * The heads of the groups used to fade to nothing and keep their height, and the rail was drawn
+ * with holes in it: two rules around the room the Sessions would have had, a lone Session with
+ * empty space on either side of it. Every row of the rail is an icon or a rule, a rule sits only
+ * between two groups that hold something, the rows stack at the scale's gap — never a gap as tall
+ * as a row — and the foot stays at the bottom.
+ */
+async function expectATightRail(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  const rail = canvas.getByRole('complementary')
+  await waitFor(() => {
+    expect(rail.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_RAIL, 0)
+  })
+  // In the order the column lays them, which is the order they are read in: sorting by position
+  // would mix a list scrolled under the foot with the foot itself.
+  const rows = [...rail.querySelectorAll<HTMLElement>('button, [data-separator]')].filter(
+    (row) => row.getBoundingClientRect().height > 0,
+  )
+  const isRule = (row: HTMLElement | undefined) => row?.hasAttribute('data-separator') === true
+  expect(isRule(rows[0]), 'the rail starts on a rule').toBe(false)
+  expect(isRule(rows.at(-1)), 'the rail ends on a rule').toBe(false)
+  rows.forEach((row, index) => {
+    if (isRule(row)) expect(isRule(rows[index + 1]), 'two rules around an empty group').toBe(false)
+  })
+
+  const settings = canvas.getByRole('button', { name: 'Settings' })
+  const foot = rows.indexOf(settings) - 1
+  const one = canvas.getByRole('button', { name: 'Home' }).getBoundingClientRect().height
+  for (let index = 1; index < rows.length; index += 1) {
+    // The one gap that is meant: the column above gives the foot the rest of the height.
+    if (index === foot) continue
+    const gap =
+      rows[index]!.getBoundingClientRect().top - rows[index - 1]!.getBoundingClientRect().bottom
+    expect(
+      gap,
+      `a hole before ${rows[index]!.getAttribute('aria-label') ?? 'a rule'}`,
+    ).toBeLessThan(one)
+  }
+  // The foot is anchored: nothing but the panel's own padding under it.
+  expect(
+    rail.getBoundingClientRect().bottom - settings.getBoundingClientRect().bottom,
+  ).toBeLessThan(one)
+}
+
+/** Folded with no Session: one rule between the Home and the Journal, and no room for a list. */
+export const FoldedWithNoSession: Story = {
+  args: { collapsed: true, sessions: [] },
   play: async ({ canvasElement }) => {
-    const rail = within(canvasElement).getByRole('complementary')
-    await waitFor(() => {
-      expect(rail.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_RAIL, 0)
-    })
+    await expectATightRail(canvasElement)
+    const canvas = within(canvasElement)
+    // Two rules in all: between the places and the Project's, and above the foot.
+    expect(canvasElement.querySelectorAll('[data-separator]')).toHaveLength(2)
+    expect(canvas.queryByText('Sessions')).toBeNull()
+    expect(canvas.queryByText('No Session yet')).toBeNull()
+
+    // Unfolded, the heads and the sentence come back, and so does the rule of the empty list.
+    await userEvent.click(canvas.getByRole('button', { name: 'Expand the sidebar' }))
+    await waitFor(
+      () => {
+        expect(canvas.getByText('No Session yet')).toBeVisible()
+        expect(canvas.getByText('Project')).toBeVisible()
+      },
+      { timeout: 3000 },
+    )
+    expect(canvasElement.querySelectorAll('[data-separator]')).toHaveLength(3)
+  },
+}
+
+/** Folded with one Session: its icon sits between the two rules, at the gap of every other row. */
+export const FoldedWithOneSession: Story = {
+  args: { collapsed: true, sessions: SESSIONS.slice(0, 1) },
+  play: async ({ canvasElement }) => {
+    await expectATightRail(canvasElement)
+    expect(canvasElement.querySelectorAll('[data-separator]')).toHaveLength(3)
+  },
+}
+
+/** Folded with more Sessions than the rail is tall: the list scrolls, and the foot stays put. */
+export const FoldedWithManySessions: Story = {
+  args: { collapsed: true, sessions: MANY_SESSIONS },
+  play: async ({ canvasElement }) => {
+    await expectATightRail(canvasElement)
   },
 }
 

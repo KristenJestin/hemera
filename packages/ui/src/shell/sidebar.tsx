@@ -1,10 +1,18 @@
 import { cn } from 'cn'
-import { LayoutGroup, motion } from 'motion/react'
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import type { Transition } from 'motion/react'
 import { type ReactElement, type ReactNode, useId } from 'react'
 
 import { IconCommand, IconHome, IconPlus, IconSettings, IconTimelineEvent } from '../icons.ts'
-import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
+import {
+  LABEL_DELAY,
+  LABEL_TRAVEL,
+  collapse,
+  expand,
+  instant,
+  morph,
+  useTransition,
+} from '../motion.ts'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
@@ -208,28 +216,27 @@ export function Sidebar({
             onSelect={onSelectEntry}
           />
           <Rule />
-          <div className="flex items-center gap-1">
-            <motion.p
-              className={cn(GROUP, 'flex-1')}
-              initial={false}
-              animate={{ opacity: collapsed ? 0 : 1 }}
-              transition={labels}
-            >
-              Sessions
-            </motion.p>
-            {/* The `+` is the one control that makes a Session, and it is the same control in the
-                same place whatever the list holds: a second way to start, further down, is a
-                control the eye has to look for twice. */}
-            {onNewSession !== undefined && (
-              <IconButton
-                variant="ghost"
-                size="sm"
-                icon={<IconPlus size="sm" />}
-                aria-label="New Session"
-                onClick={onNewSession}
-              />
-            )}
-          </div>
+          {/* Folded, the head of a group is not drawn at all rather than drawn invisible: a label
+              faded to nothing that kept its height was a hole in the rail with no icon in it
+              (recette 5 of 24 September 2026). It folds away with the width and comes back with
+              it. The `+` goes with it: on the rail it was never more than a clipped half. */}
+          <Folds shown={!collapsed} transition={labels}>
+            <div className="flex items-center gap-1">
+              <p className={cn(GROUP, 'flex-1')}>Sessions</p>
+              {/* The `+` is the one control that makes a Session, and it is the same control in
+                  the same place whatever the list holds: a second way to start, further down, is
+                  a control the eye has to look for twice. */}
+              {onNewSession !== undefined && (
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  icon={<IconPlus size="sm" />}
+                  aria-label="New Session"
+                  onClick={onNewSession}
+                />
+              )}
+            </div>
+          </Folds>
           {/* A Session is the one entry of this list that carries commands of its own, so its
               row is its own component — see `session/session.tsx`. The mark is still the panel's:
               the `LayoutGroup` above prefixes the identifier, and the filled surface is handed
@@ -252,18 +259,21 @@ export function Sidebar({
           {/* No Session yet, said in words — the way to make one is the `+` above, which is where
               it is whether the list holds one Session or none. An empty list that says nothing is
               a list the user believes is still loading. */}
-          {sessions.length === 0 && !collapsed && (
-            <p className="px-3 py-1 text-xs text-muted-foreground">No Session yet</p>
+          {/* Folded with no Session, the group is empty and its closing rule goes with it: one
+              rule between the Home and the Journal, not two around nothing. */}
+          {sessions.length === 0 ? (
+            <Folds shown={!collapsed} transition={labels}>
+              <div className="flex flex-col gap-1">
+                <p className="truncate px-3 py-1 text-xs text-muted-foreground">No Session yet</p>
+                <Rule />
+              </div>
+            </Folds>
+          ) : (
+            <Rule />
           )}
-          <Rule />
-          <motion.p
-            className={GROUP}
-            initial={false}
-            animate={{ opacity: collapsed ? 0 : 1 }}
-            transition={labels}
-          >
-            Project
-          </motion.p>
+          <Folds shown={!collapsed} transition={labels}>
+            <p className={GROUP}>Project</p>
+          </Folds>
           <Entry
             id={JOURNAL_ENTRY}
             label="Journal"
@@ -340,6 +350,38 @@ function Folding({
     <Tooltip label={label} side="right" disabled={!collapsed}>
       {children}
     </Tooltip>
+  )
+}
+
+/**
+ * What the rail has no room for — the head of a group, the sentence of an empty list — and so
+ * takes out of the column, height and all, on the `collapse` kind, bringing it back on `expand`.
+ * Held by `AnimatePresence` for as long as it takes to fold, then gone: the gap the column puts
+ * between its rows goes with it, and the icons of the rail stack at the scale's gap.
+ */
+function Folds({
+  shown,
+  transition,
+  children,
+}: {
+  shown: boolean
+  transition: Transition
+  children: ReactNode
+}): ReactNode {
+  return (
+    <AnimatePresence initial={false}>
+      {shown && (
+        <motion.div
+          className="shrink-0 overflow-hidden"
+          initial={collapse}
+          animate={expand}
+          exit={collapse}
+          transition={transition}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 
