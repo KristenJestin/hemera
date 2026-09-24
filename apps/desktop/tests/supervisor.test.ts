@@ -21,7 +21,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Layer, Ref } from 'effect'
+import { Effect, Layer, Ref, Scheduler } from 'effect'
 import type { Scope } from 'effect'
 
 import type { SupervisedProcess } from '#engine/agents/supervisor.ts'
@@ -238,6 +238,9 @@ async function untilTrue(check: () => boolean, milliseconds: number): Promise<bo
  */
 const goneWithin = (pid: number, milliseconds: number) => untilTrue(() => !alive(pid), milliseconds)
 
+/** The operation budgets a start is tried under, each yielding at other steps than the last. */
+const SHARES = Array.from({ length: 30 }, (_, index) => index + 3)
+
 /** The pid of a child that has one, or a refusal to go on with a test that needs one. */
 function pidOf(child: SupervisedProcess): number {
   if (child.pid === undefined) throw new Error('the child has no pid')
@@ -339,6 +342,29 @@ describe('The process is killed by hand', () => {
     )
 
     expect(said(sink).some((line) => line.endsWith(': heard bonjour'))).toBe(true)
+  })
+})
+
+describe('A start is answered however often the fiber yields', () => {
+  test('a child is seen to spawn wherever the fiber yields', async () => {
+    const sink = sinkOf()
+    const aliveFor = script(ALIVE_FOR)
+
+    // A fiber yields to the scheduler once it has run its share of operations, and Node says
+    // `spawn` on the next tick: a yield between the start and its listeners would let the spawn
+    // pass unheard. Each share below puts the yields at other steps of the start, so that one of
+    // them lands wherever a real run's count happens to. A spawn left unheard is a start that
+    // never answers, which is this test running out of time.
+    const pids = await opened(sink)(
+      Effect.forEach(SHARES, (share) =>
+        starting(process.execPath, [aliveFor], {}).pipe(
+          Effect.map(pidOf),
+          Effect.provideService(Scheduler.MaxOpsBeforeYield, share),
+        ),
+      ),
+    )
+
+    expect(new Set(pids).size).toBe(SHARES.length)
   })
 })
 
