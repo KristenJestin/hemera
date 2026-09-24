@@ -604,8 +604,11 @@ export const Complete: Story = {
     await expect(canvas.queryByText('Failed')).toBeNull()
     // And the rail marks the reader's own message and nothing else: one question asked, one
     // mark to come back to. The rail is drawn once the thread has been measured, in an effect:
-    // counted where it is still on its way, the count is zero. So the mark is waited for.
-    const marked = await canvas.findAllByRole('button', { name: /forty thousand rows/ })
+    // counted where it is still on its way, the count is zero. So the mark is found first, with
+    // ten seconds of patience: a thread this long, measured on a machine busy with the rest of
+    // the run, takes longer than the default patience of a wait.
+    const patience = { timeout: 10_000 }
+    const marked = await canvas.findAllByRole('button', { name: /forty thousand rows/ }, patience)
     await expect(marked).toHaveLength(1)
 
     /*
