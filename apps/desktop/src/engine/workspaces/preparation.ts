@@ -343,8 +343,9 @@ export const preparationLayer = Layer.effect(
      *
      * Git makes the folder itself; its parents are made first. A worktree a resume makes again
      * after its folder was removed by hand is one Git still holds as registered, on a branch
-     * this step already made: that registration is pruned and the branch checked out again,
-     * rather than refused as a branch that already exists.
+     * this step already made: that registration is pruned (D8-03 as amended by Decided 15) and
+     * the branch checked out again, rather than refused as a branch that already exists (D8-04
+     * and D8-05 as amended by Decided 14).
      */
     const worktree = (place: Place, step: WorkspaceStep, again: boolean) =>
       Effect.gen(function* () {

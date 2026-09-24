@@ -701,11 +701,15 @@ export const workspacesLayer = Layer.effect(
           if (row.name === MAIN_WORKSPACE) {
             return yield* refuseCleanup(row, `${MAIN_WORKSPACE} cannot be cleaned up`)
           }
+          // Beyond `main`, a running service, a build Session and Git's refusal, D8-14 as amended
+          // by Decided 14 refuses three more: a Workspace already cleaned, one made on a folder
+          // the user picked, and one being prepared.
           if (row.state === 'cleaned') {
             return yield* refuseCleanup(row, `${row.name} is already cleaned up`)
           }
           // A Workspace made on a folder of the user's has no step: that folder is theirs, and a
-          // cleanup that deleted it would delete their work (D8-02, D8-14).
+          // cleanup that deleted it would delete their work (D8-02; D8-14 as amended by
+          // Decided 14).
           const steps = yield* database
             .select({ state: workspaceSteps.state })
             .from(workspaceSteps)
@@ -718,7 +722,8 @@ export const workspacesLayer = Layer.effect(
             )
           }
           // A preparation under way is writing into the folder a cleanup would delete: the two
-          // never overlap, and the preparation is let to end first (D8-05, D8-14).
+          // never overlap, and the preparation is let to end first (D8-05, D8-14 as amended by
+          // Decided 14).
           if (row.state === 'preparing' || steps.some((step) => step.state === 'running')) {
             return yield* refuseCleanup(row, `the Workspace ${row.name} is being prepared`)
           }
@@ -775,7 +780,8 @@ export const workspacesLayer = Layer.effect(
             const repository = join(main, record.relativePath)
             const worktree = join(row.path, record.relativePath)
             // A worktree never made, or removed by hand, is one Git still holds as registered:
-            // forgetting it is all there is to do, and never `--force` (D8-14).
+            // forgetting it is all there is to do, and never `--force` (D8-14; the prune is D8-03
+            // as amended by Decided 15).
             const removal = existsSync(worktree)
               ? git.worktreeRemove(repository, worktree)
               : git.worktreePrune(repository)

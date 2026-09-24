@@ -66,7 +66,8 @@ export interface GitService {
   ) => Effect.Effect<void, Refusal>
   /**
    * A worktree at `path` on a branch that already exists: the one a worktree step made before
-   * its folder was removed by hand, which a resume puts back (D8-05).
+   * its folder was removed by hand, which a resume puts back (D8-04 and D8-05 as amended by
+   * Decided 14: a creation never checks out an existing branch, a resume re-attaches its own).
    */
   readonly worktreeAttach: (
     cwd: string,
@@ -79,12 +80,14 @@ export interface GitService {
    */
   readonly worktreeRemove: (cwd: string, path: string) => Effect.Effect<void, Refusal>
   /**
-   * Forgets the worktrees whose folder is gone, which Git otherwise holds as still there.
+   * Forgets the worktrees whose folder is gone, which Git otherwise holds as still there (D8-03
+   * as amended by Decided 15: run when a worktree folder is found missing on a resume or a
+   * cleanup).
    *
-   * Repository-wide: it also forgets a stale worktree the user made themselves, whose folder is
-   * gone too (one that is locked is kept). It is kept all the same, because it is the one way
-   * every Git the user may have forgets a worktree whose folder is missing: a redone worktree and
-   * a cleanup of a worktree that was never made both need that, and nothing narrower.
+   * Repository-wide, as Decided 15 accepts: it also forgets a stale worktree the user made
+   * themselves, whose folder is gone too (one that is locked is kept). It is the one way every Git
+   * the user may have forgets a worktree whose folder is missing: a redone worktree and a cleanup
+   * of a worktree that was never made both need that, and nothing narrower.
    */
   readonly worktreePrune: (cwd: string) => Effect.Effect<void, Refusal>
   readonly branchExists: (cwd: string, branch: string) => Effect.Effect<boolean, Refusal>
