@@ -181,38 +181,56 @@ function timeOf(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
+/** `DD Mon HH:MM` of a moment, in the zone the test runs in, which is the one the window reads in. */
+function atOf(iso: string): string {
+  const at = new Date(iso)
+  const day = at.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+  return `${day} ${timeOf(iso)}`
+}
+
+/** The root the page reads its Workspace at. */
+const ROOT = '/home/kris/projects/atlas'
+
+/** When the fixtures of this block were provided, unless they say otherwise. */
+const STARTED = '2026-09-23T08:00:00.000Z'
+
 describe('The Context tab says how the instructions reached the agent', () => {
-  test('AGENTS.md given at the start is one line, and the base one line after it', () => {
+  test('AGENTS.md given at the start is one line, and the base one line after it, each with its time', () => {
     const view = aViewOf([
       aSource('base', 'embedded_resource'),
       aSource('provided', 'session_start'),
     ])
 
-    expect(contextListsOf(view).instructions).toEqual([
-      { label: 'AGENTS.md', detail: 'given at the start of the Session' },
-      { label: 'The base', detail: 'as a resource of the first prompt' },
+    expect(contextListsOf(view, ROOT).instructions).toEqual([
+      {
+        label: 'AGENTS.md',
+        file: true,
+        detail: 'given at the start of the Session',
+        at: atOf(STARTED),
+      },
+      { label: 'The base', detail: 'as a resource of the first prompt', at: atOf(STARTED) },
     ])
   })
 
   test('AGENTS.md read by the agent says so, and the base goes through its system prompt', () => {
     const view = aViewOf([aSource('base', 'system_prompt'), aSource('native', 'read_natively')])
 
-    expect(contextListsOf(view).instructions).toEqual([
-      { label: 'AGENTS.md', detail: 'read by the agent' },
-      { label: 'The base', detail: 'through its system prompt' },
+    expect(contextListsOf(view, ROOT).instructions).toEqual([
+      { label: 'AGENTS.md', file: true, detail: 'read by the agent', at: atOf(STARTED) },
+      { label: 'The base', detail: 'through its system prompt', at: atOf(STARTED) },
     ])
   })
 
   test('a Workspace without AGENTS.md says so in a sentence', () => {
     const view = aViewOf([aSource('base', 'embedded_resource')])
 
-    expect(contextListsOf(view).instructions).toEqual([
+    expect(contextListsOf(view, ROOT).instructions).toEqual([
       { label: 'This Workspace has no AGENTS.md' },
-      { label: 'The base', detail: 'as a resource of the first prompt' },
+      { label: 'The base', detail: 'as a resource of the first prompt', at: atOf(STARTED) },
     ])
   })
 
-  test('the last change is the latest delivery, with its time', () => {
+  test('the last change is the latest delivery, with its time, and the file says it changed then', () => {
     const view = aViewOf([
       aSource('base', 'embedded_resource'),
       aSource('provided', 'session_start'),
@@ -220,8 +238,14 @@ describe('The Context tab says how the instructions reached the agent', () => {
       aSource('instructions', 'delivery_prompt', '2026-09-23T12:40:00.000Z'),
     ])
 
-    const [file, change, base] = contextListsOf(view).instructions
-    expect(file).toEqual({ label: 'AGENTS.md', detail: 'given at the start of the Session' })
+    const [file, change, base] = contextListsOf(view, ROOT).instructions
+    expect(file).toEqual({
+      label: 'AGENTS.md',
+      file: true,
+      detail: 'given at the start of the Session',
+      at: atOf(STARTED),
+      changed: atOf('2026-09-23T12:40:00.000Z'),
+    })
     expect(change?.label).toBe('Last change')
     expect(change?.detail).toBe('delivered between two turns')
     expect(change?.at).toMatch(/^\d\d Sep/)
@@ -235,16 +259,17 @@ describe('The Context tab says how the instructions reached the agent', () => {
       aSource('instructions', 'delivery_prompt', '2026-09-23T12:40:00.000Z'),
     ])
 
-    const lines = contextListsOf(view).instructions
+    const lines = contextListsOf(view, ROOT).instructions
     expect(lines.map((line) => [line.label, line.detail])).toEqual([
       ['AGENTS.md', 'none at the start of the Session'],
       ['Last change', 'delivered between two turns'],
       ['The base', 'as a resource of the first prompt'],
     ])
+    expect(lines[0]?.changed).toBe(atOf('2026-09-23T12:40:00.000Z'))
   })
 
   test('nothing is listed before anything has gone to the agent', () => {
-    expect(contextListsOf(aViewOf([])).instructions).toEqual([])
+    expect(contextListsOf(aViewOf([]), ROOT).instructions).toEqual([])
   })
 
   test('the tools and the catalogue are listed as the engine answered them', () => {
@@ -253,9 +278,19 @@ describe('The Context tab says how the instructions reached the agent', () => {
       commands: [{ name: 'check', line: 'pnpm check' }],
     }
 
-    const lists = contextListsOf(view)
+    const lists = contextListsOf(view, ROOT)
     expect(lists.tools).toEqual([{ name: 'search', bound: '200 matches and 1 MiB scanned a call' }])
     expect(lists.commands).toEqual([{ name: 'check', command: 'pnpm check' }])
+  })
+
+  test('the Workspace is the main one, at the root the page reads', () => {
+    expect(contextListsOf(aViewOf([]), ROOT).workspace).toEqual({ name: 'main', path: ROOT })
+  })
+
+  test('the tools were lent when the base went in, and have no time before it', () => {
+    expect(contextListsOf(aViewOf([]), ROOT).lentAt).toBeUndefined()
+    const view = aViewOf([aSource('base', 'embedded_resource', '2026-09-23T09:30:00.000Z')])
+    expect(contextListsOf(view, ROOT).lentAt).toBe(atOf('2026-09-23T09:30:00.000Z'))
   })
 })
 

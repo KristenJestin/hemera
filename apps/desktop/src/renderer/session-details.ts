@@ -1,9 +1,11 @@
+import { MAIN_WORKSPACE } from '@hemera/core'
 import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import type {
   CommandPanelRun,
   ContextCommand,
   ContextEntry,
   ContextTool,
+  ContextWorkspace,
   SessionDetailsTab,
 } from '@hemera/ui'
 
@@ -103,21 +105,29 @@ function atOf(iso: string): string {
   return `${day} ${time}`
 }
 
-/** What the Context view draws: the lines of the instructions, the tools and the catalogue. */
+/**
+ * What the Context view draws: the Workspace, the lines of the instructions, the tools with the
+ * moment they were lent, and the catalogue.
+ */
 export interface ContextLists {
+  workspace: ContextWorkspace
   instructions: ContextEntry[]
   tools: ContextTool[]
+  lentAt: string | undefined
   commands: ContextCommand[]
 }
 
 /**
  * The instructions of a Session in three lines (trial of 23 September 2026): how `AGENTS.md`
- * reached the agent, the last change delivered since with its time, and the base.
+ * reached the agent, the last change delivered since, and the base — each with the time it
+ * reached the agent (recette 5 of 24 September 2026).
  *
  * Nothing is listed before anything has gone to the agent, which is a Session before its first
  * message. A Workspace without the file says so in a sentence; one whose file appeared during the
- * Session had none at its start, and its delivery is the last change. Fingerprints are left out:
- * the time of the change is what tells a reader the file moved under the Session.
+ * Session had none at its start, and its delivery is the last change. The file is named by its
+ * path from the Workspace root, as the engine recorded it, and says when it last changed once a
+ * change was delivered. Fingerprints are left out: the time of the change is what tells a reader
+ * the file moved under the Session.
  */
 function instructionsOf(provided: ContextView['provided']): ContextEntry[] {
   if (provided.length === 0) return []
@@ -132,24 +142,45 @@ function instructionsOf(provided: ContextView['provided']): ContextEntry[] {
       at: atOf(change.deliveredAt),
     })
   }
-  if (base !== undefined) lines.push({ label: 'The base', detail: REACHED[base.reached] })
+  if (base !== undefined) {
+    lines.push({ label: 'The base', detail: REACHED[base.reached], at: atOf(base.deliveredAt) })
+  }
   return lines
 }
 
-/** The line of `AGENTS.md` itself: how it reached the agent, or that there was none. */
+/** The line of `AGENTS.md` itself: its path, how and when it reached the agent, or that there was none. */
 function fileLineOf(file: Provided | undefined, change: Provided | undefined): ContextEntry {
-  if (file !== undefined) return { label: 'AGENTS.md', detail: REACHED[file.reached] }
+  const changed = change === undefined ? undefined : atOf(change.deliveredAt)
+  if (file !== undefined) {
+    return {
+      label: file.path,
+      file: true,
+      detail: REACHED[file.reached],
+      at: atOf(file.deliveredAt),
+      changed,
+    }
+  }
   if (change !== undefined) {
-    return { label: 'AGENTS.md', detail: 'none at the start of the Session' }
+    return { label: change.path, file: true, detail: 'none at the start of the Session', changed }
   }
   return { label: 'This Workspace has no AGENTS.md' }
 }
 
-/** The Context view of a Session, in the words the view draws it with (D6-10). */
-export function contextListsOf(view: ContextView): ContextLists {
+/**
+ * The Context view of a Session, in the words the view draws it with (D6-10).
+ *
+ * The Workspace is the Project's `main` one, the only one a Session runs in until lot 7, at the
+ * root the page already reads its runs from. The tools were lent when the agent's session was
+ * opened, which is the moment the base was recorded: the engine provides a session the instant it
+ * opens it, with the tools already in its hands. Before that there is no time to give.
+ */
+export function contextListsOf(view: ContextView, root: string): ContextLists {
+  const base = view.provided.find((one) => one.kind === 'base')
   return {
+    workspace: { name: MAIN_WORKSPACE, path: root },
     instructions: instructionsOf(view.provided),
     tools: view.tools.map((tool) => ({ name: tool.name, bound: tool.bound })),
+    lentAt: base === undefined ? undefined : atOf(base.deliveredAt),
     commands: view.commands.map((command) => ({ name: command.name, command: command.line })),
   }
 }
