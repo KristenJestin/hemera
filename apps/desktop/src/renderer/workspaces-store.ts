@@ -38,7 +38,10 @@ export interface ShownWorkspace {
   readonly variables: readonly Variable[]
   /** Its running `serve` runs, whoever started them, with their holders' sides (D8-08). */
   readonly services: readonly CommandRun[]
-  /** The run whose details are shown, as last answered or pushed; null when none is. */
+  /**
+   * The run whose details are shown — one of its services, or the run a step of its preparation
+   * started — as last answered or pushed; null when none is.
+   */
   readonly run: CommandRun | null
 }
 
@@ -360,6 +363,27 @@ export function selectRun(runId: string | null): void {
     ...state,
     shown: { ...shown, run: shown.services.find((one) => one.id === runId) ?? null },
   })
+}
+
+/**
+ * Shows the run a step of the Workspace's preparation started, or none (D8-05, Decided 11): read
+ * by its id among the Project's runs, since no Session asked for it, and followed from then on as
+ * any run is, by what the engine pushes of it.
+ */
+export async function showStepRun(runId: string | null): Promise<void> {
+  forgetWorkspacesRefusal()
+  const shown = state.shown
+  if (shown === null) return
+  if (runId === null) {
+    replace({ ...state, shown: { ...shown, run: null } })
+    return
+  }
+  try {
+    const run = await window.hemera.invoke('commands.runOf', { projectId: shown.projectId, runId })
+    onShown(shown.workspaceId, (now) => ({ ...now, run }))
+  } catch (cause) {
+    refused(cause)
+  }
 }
 
 /** Stops one service of the Workspace shown, that instance and no other (D8-08). */

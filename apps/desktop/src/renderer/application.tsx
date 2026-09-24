@@ -111,6 +111,7 @@ import {
   resumePreparation,
   selectRun,
   setVariable,
+  showStepRun,
   showWorkspace,
   stopService,
   subscribeToWorkspaces,
@@ -1126,6 +1127,7 @@ export function Application() {
             onRemoveVariable: (workspaceId, key) =>
               void removeVariable(current.id, workspaceId, key),
             onSelectRun: selectRun,
+            onShowStepRun: (runId) => void showStepRun(runId),
             onStopService: (runId) => void stopService(runId),
           }}
           onCreateWorkspace={async (path, name) => await createOnFolder(current.id, path, name)}

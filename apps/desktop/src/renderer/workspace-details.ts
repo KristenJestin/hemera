@@ -113,6 +113,8 @@ export function stepLinesOf(steps: readonly WorkspaceStep[]): PreparationStepLin
           : step.target,
       state: step.state,
       message: step.message ?? undefined,
+      // The run a `run` step started, whose details the step offers (D8-05, Decided 11).
+      runId: step.runId ?? undefined,
     }))
 }
 

@@ -21,6 +21,7 @@ import {
   resumePreparation,
   selectRun,
   serviceChange,
+  showStepRun,
   showWorkspace,
   stopService,
   workspacesOf,
@@ -481,5 +482,39 @@ describe('An older answer never lands over a newer one', () => {
     const [dev, auth] = workspacesSnapshot().shown?.services ?? []
     expect(dev).toMatchObject({ output: pushed.output, readiness: 'ready', heldAgainst: [claim] })
     expect(auth?.name).toBe('auth')
+  })
+})
+
+describe('The run a step started is shown and followed', () => {
+  test('it is read by its id among the Project runs, and a push of it takes its place', async () => {
+    answersForShowing()
+    answers.set('preparation.steps', [
+      step(1, { kind: 'run', target: 'install', runId: 'run-install' }),
+    ])
+    await showWorkspace(LOGIN_FORM)
+    const install = run('run-install', {
+      sessionId: null,
+      name: 'install',
+      type: 'script',
+      url: null,
+      readiness: null,
+    })
+    answers.set('commands.runOf', install)
+
+    await showStepRun('run-install')
+
+    expect(asked.find((one) => one.name === 'commands.runOf')?.argument).toEqual({
+      projectId: 'atlas',
+      runId: 'run-install',
+    })
+    expect(workspacesSnapshot().shown?.run?.id).toBe('run-install')
+
+    const ended = { ...install, state: 'failed' as const, exitCode: 1, output: 'exit 1\n' }
+    push({ event: 'run', sessionId: null, run: ended })
+    await settled()
+    expect(workspacesSnapshot().shown?.run).toMatchObject({ state: 'failed', exitCode: 1 })
+
+    await showStepRun(null)
+    expect(workspacesSnapshot().shown?.run).toBeNull()
   })
 })

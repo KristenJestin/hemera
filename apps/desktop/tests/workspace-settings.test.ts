@@ -18,6 +18,7 @@ import {
   branchesKeptOf,
   recipeAddOf,
   recipeLinesOf,
+  runDetailsOf,
   serviceLinesOf,
   stepLinesOf,
   workspaceCardOf,
@@ -36,6 +37,7 @@ import {
   recipeOf,
   removeRecipeStep,
   setVariable,
+  showStepRun,
   showWorkspace,
   stopService,
   workspacesOf,
@@ -135,7 +137,11 @@ describe('The folder, the prefix and the inclusion of dedicated Workspaces are s
  * A dedicated Workspace `login-form` of the Project, made from its plan and prepared through the
  * channels the Spec panel will use, and waited for until the engine says it is `ready`.
  */
-async function loginForm(engine: OpenWindow, projectId: string) {
+async function loginForm(
+  engine: OpenWindow,
+  projectId: string,
+  ends: 'ready' | 'failed' = 'ready',
+) {
   const plan = await engine.bridge.invoke('workspaces.plan', {
     projectId,
     key: 'HEM-7',
@@ -156,11 +162,11 @@ async function loginForm(engine: OpenWindow, projectId: string) {
     // oxlint-disable-next-line no-await-in-loop -- the preparation runs in the engine; its state is read until it ends
     const listed = await engine.bridge.invoke('workspaces.list', { projectId })
     const now = listed.find((one) => one.id === made.id)
-    if (now?.state === 'ready') return now
+    if (now?.state === ends && !now.live) return now
     // oxlint-disable-next-line no-await-in-loop -- see above
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
-  throw new Error('login-form was never ready')
+  throw new Error(`login-form was never ${ends}`)
 }
 
 describe("A Workspace on a chosen folder takes the folder's name", () => {
@@ -396,5 +402,45 @@ describe('The steps follow the recipe in order', () => {
     await removeRecipeStep(project.id, first!.id)
     expect(workspacesSnapshot().refusal).not.toBeNull()
     expect(recipeOf(project.id).map((one) => one.kind)).toEqual(['copy'])
+  })
+})
+
+describe('A run step fails on a non-zero exit', () => {
+  test('its step says the exit, and opening it shows the run with its output and code', async () => {
+    const project = await atlas()
+    const { bridge } = opened!
+    const failing = await bridge.invoke('commands.create', {
+      projectId: project.id,
+      name: 'install',
+      line: `"${process.execPath}" -e "console.log('lockfile out of date');process.exit(1)"`,
+      type: 'script',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
+      folder: null,
+    })
+    expect(
+      await addRecipeStep(project.id, recipeAddOf({ kind: 'run', commandId: failing.id })),
+    ).toBeNull()
+
+    const workspace = await loginForm(opened!, project.id, 'failed')
+    await showWorkspace(workspace)
+    const failed = stepLinesOf(workspacesSnapshot().shown!.steps).find((one) => one.kind === 'run')
+    // The step line sums the run up; the run itself is one no Session asked for (Decided 11).
+    expect(failed).toMatchObject({ state: 'failed', message: 'exit 1' })
+    expect(failed?.runId).toBeDefined()
+
+    await showStepRun(failed!.runId!)
+
+    const details = runDetailsOf(workspacesSnapshot().shown!.run!)
+    expect(details).toMatchObject({ name: 'install', state: 'failed', exitCode: 1 })
+    expect(details.output).toContain('lockfile out of date')
+
+    // Another Project's run, or none, is the engine's refusal, said on the page.
+    await showStepRun('no-such-run')
+    expect(workspacesSnapshot().refusal).toContain('no-such-run')
+    await showStepRun(null)
+    expect(workspacesSnapshot().shown?.run).toBeNull()
   })
 })

@@ -81,6 +81,8 @@ export interface WorkspaceActions {
   onRemoveVariable: (workspaceId: string, key: string) => void
   /** Shows the details of one of its services, or none. */
   onSelectRun: (runId: string | null) => void
+  /** Shows the run a step of its preparation started, or none (D8-05). */
+  onShowStepRun: (runId: string | null) => void
   /** Stops that one instance of a service, whoever started it (D8-08). */
   onStopService: (runId: string) => void
 }
@@ -105,6 +107,15 @@ function ShownWorkspaceCards({
   actions: WorkspaceActions
   onCleanup: () => void
 }): ReactNode {
+  const { run } = shown
+  // Its details sit under the list it was opened from: the steps, or the services.
+  const details =
+    run === null ? null : (
+      <Card>
+        <RunDetails {...runDetailsOf(run)} />
+      </Card>
+    )
+  const ofAStep = run !== null && shown.steps.some((step) => step.runId === run.id)
   return (
     <>
       {/* "Resume" is the preparation's, under its steps and the note that it re-checks them
@@ -115,8 +126,12 @@ function ShownWorkspaceCards({
           steps={stepLinesOf(shown.steps)}
           onResume={() => actions.onResume(workspace.id)}
           interrupted={interruptedOf(workspace)}
+          shownRun={run?.id ?? null}
+          // Pressed again, the run shown is put away.
+          onShowRun={(id) => actions.onShowStepRun(run?.id === id ? null : id)}
         />
       )}
+      {ofAStep && details}
       <VariablesEditor
         scope="workspace"
         name={workspace.name}
@@ -127,14 +142,10 @@ function ShownWorkspaceCards({
       <ServiceList
         services={serviceLinesOf(shown.services, catalogue)}
         onStop={actions.onStopService}
-        selected={shown.run?.id ?? null}
-        onSelect={(id) => actions.onSelectRun(shown.run?.id === id ? null : id)}
+        selected={run?.id ?? null}
+        onSelect={(id) => actions.onSelectRun(run?.id === id ? null : id)}
       />
-      {shown.run !== null && (
-        <Card>
-          <RunDetails {...runDetailsOf(shown.run)} />
-        </Card>
-      )}
+      {!ofAStep && details}
     </>
   )
 }
