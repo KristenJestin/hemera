@@ -12,7 +12,7 @@ import { DiffBlock } from './diff-block.tsx'
  * “show me”.
  */
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/DiffBlock',
   component: DiffBlock,
   parameters: { layout: 'padded' },
