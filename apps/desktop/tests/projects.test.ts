@@ -450,6 +450,7 @@ describe('Aucune suppression', () => {
       'setRepositoryIncluded',
       'setWorkspacesRoot',
       'update',
+      'updateRepository',
     ])
   })
 })

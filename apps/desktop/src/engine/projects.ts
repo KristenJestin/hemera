@@ -8,6 +8,8 @@ import {
   InvalidSpecPrefixError,
   MAIN_WORKSPACE,
   type ProjectTone,
+  REPOSITORY_ICONS,
+  type RepositoryIcon,
   projectName,
   rankBetween,
   repositoryPath,
@@ -18,7 +20,13 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
 import { Database, DatabaseError, type EngineTransaction } from './storage/database.ts'
-import { projectRepositories, projects, workspaces } from './storage/schema.ts'
+import {
+  projectCommands,
+  projectPreparationSteps,
+  projectRepositories,
+  projects,
+  workspaces,
+} from './storage/schema.ts'
 import { type Mutation, StaleVersionError, mutate } from './transaction.ts'
 
 /**
@@ -45,6 +53,21 @@ export interface Project extends DomainProject {
   included: string[]
   /** What its Spec keys start with, `PREFIX-n` (D7-02). */
   specPrefix: string
+  /** The icon each repository wears, by its path; one that wears none is not in it (item 11). */
+  repositoryIcons: Record<string, RepositoryIcon>
+}
+
+/** What a repository of a Project is rewritten with, all at once (recette 1, item 11). */
+export interface RepositoryEdit {
+  readonly id: string
+  readonly version: number
+  /** The repository as the Project declares it now. */
+  readonly relativePath: string
+  /** Where it is to be read from, relative to the root: itself, or another place. */
+  readonly newPath: string
+  readonly icon: RepositoryIcon | null
+  /** Whether a dedicated Workspace gets a worktree of it unless left out (D8-04). */
+  readonly included: boolean
 }
 
 /** A Project was asked for by an identifier nothing answers to. */
@@ -148,6 +171,15 @@ export interface ProjectsService {
     version: number,
     relativePath: string,
     included: boolean,
+  ) => Effect.Effect<Project, Refusal | InvalidRepositoryPathError>
+  /**
+   * Rewrites a repository in one transaction (recette 1, item 11): its path, validated as an
+   * added one is, its icon and its default inclusion — and every command's base and every recipe
+   * step's base that named its old path, so nothing points at a place the Project no longer
+   * declares.
+   */
+  readonly updateRepository: (
+    edit: RepositoryEdit,
   ) => Effect.Effect<Project, Refusal | InvalidRepositoryPathError>
 }
 
@@ -306,6 +338,14 @@ export const projectsLayer = Layer.effect(
             .filter((one) => one.projectId === row.id && one.includedByDefault === 1)
             .map((one) => one.relativePath),
           specPrefix: row.specPrefix,
+          repositoryIcons: Object.fromEntries(
+            locations.flatMap((one) => {
+              const icon = REPOSITORY_ICONS.find((known) => known === one.icon)
+              return one.projectId === row.id && icon !== undefined
+                ? [[one.relativePath, icon] as const]
+                : []
+            }),
+          ),
         }))
       })
 
@@ -423,6 +463,7 @@ export const projectsLayer = Layer.effect(
                 version: 1,
                 mainPath,
                 repositories: [],
+                repositoryIcons: {},
                 workspacesRoot: null,
                 branchPrefix: null,
                 included: [],
@@ -746,6 +787,77 @@ export const projectsLayer = Layer.effect(
                     author: 'human',
                     projectId: id,
                     payload: { relativePath, included },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      updateRepository: (edit) =>
+        withDatabase(
+          mutate('changing a repository', (transaction) =>
+            Effect.gen(function* () {
+              const { id, version, relativePath, icon, included } = edit
+              // The new path is refused as an added one is: absolute, climbing out of the root,
+              // or another repository already declared there.
+              const newPath = yield* located(edit.newPath)
+              const project = yield* readOne(id)
+              if (!project.repositories.includes(relativePath)) {
+                return yield* Effect.fail(
+                  new InvalidRepositoryPathError(relativePath, 'it is not declared'),
+                )
+              }
+              if (newPath !== relativePath && project.repositories.includes(newPath)) {
+                return yield* Effect.fail(
+                  new InvalidRepositoryPathError(edit.newPath, 'it is declared twice'),
+                )
+              }
+              yield* bump(transaction, id, version, {})
+              yield* transaction
+                .update(projectRepositories)
+                .set({ relativePath: newPath, icon, includedByDefault: included ? 1 : 0 })
+                .where(
+                  and(
+                    eq(projectRepositories.projectId, id),
+                    eq(projectRepositories.relativePath, relativePath),
+                  ),
+                )
+                .pipe(Effect.mapError(failed('writing the repository')))
+              // What named the old path follows it: a command runs under it, a step of the
+              // recipe applies under it (D8-07, D8-05 as amended by recette 1).
+              yield* transaction
+                .update(projectCommands)
+                .set({ folderBase: newPath })
+                .where(
+                  and(
+                    eq(projectCommands.projectId, id),
+                    eq(projectCommands.folderBase, relativePath),
+                  ),
+                )
+                .pipe(Effect.mapError(failed('writing the commands')))
+              yield* transaction
+                .update(projectPreparationSteps)
+                .set({ base: newPath })
+                .where(
+                  and(
+                    eq(projectPreparationSteps.projectId, id),
+                    eq(projectPreparationSteps.base, relativePath),
+                  ),
+                )
+                .pipe(Effect.mapError(failed('writing the recipe')))
+              const after = yield* readOne(id)
+              return {
+                result: after,
+                events: [
+                  {
+                    type: 'project.repository_updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { relativePath, newPath, icon, included },
                   },
                 ],
               } satisfies Mutation<Project>

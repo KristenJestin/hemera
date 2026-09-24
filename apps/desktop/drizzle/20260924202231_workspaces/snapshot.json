@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "5a0d0d39-7f2d-4722-a8ca-4df3b6ee58e0",
+  "id": "b5fa5192-1228-4684-a8d9-49d2c728d876",
   "prevIds": ["584c3df8-84a3-46a5-b8ed-861e5f6d2c30"],
   "ddl": [
     {
@@ -939,6 +939,16 @@
       "default": "1",
       "generated": null,
       "name": "included_by_default",
+      "entityType": "columns",
+      "table": "project_repositories"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "icon",
       "entityType": "columns",
       "table": "project_repositories"
     },
@@ -3289,6 +3299,12 @@
       "name": "recipe_kind_is_known",
       "entityType": "checks",
       "table": "project_preparation_steps"
+    },
+    {
+      "value": "\"icon\" IS NULL OR \"icon\" IN ('folder', 'server', 'browser', 'database', 'package', 'book', 'mobile', 'terminal')",
+      "name": "repository_icon_is_known",
+      "entityType": "checks",
+      "table": "project_repositories"
     },
     {
       "value": "\"tone\" IN ('primary', 'info', 'success', 'warning', 'neutral')",

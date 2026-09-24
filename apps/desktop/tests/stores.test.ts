@@ -41,6 +41,7 @@ function project(id: string, name: string, version = 1): Project {
     branchPrefix: null,
     included: [],
     specPrefix: 'SPEC',
+    repositoryIcons: {},
   }
 }
 

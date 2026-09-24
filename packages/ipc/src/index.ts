@@ -41,6 +41,7 @@ export {
   journalEntrySchema,
   projectSchema,
   projectToneSchema,
+  repositoryIconSchema,
   sessionEntryOriginSchema,
   sessionEntrySchema,
   sessionSchema,
@@ -50,6 +51,7 @@ export {
 } from './engine.ts'
 export type {
   Channel,
+  RepositoryIcon,
   ComposerChoice,
   DisplayPreferences,
   DisplayPreferencesChange,

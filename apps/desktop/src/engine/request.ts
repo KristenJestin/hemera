@@ -276,6 +276,9 @@ export function answer(
       const { id, version, prefix } = decision.argument
       return yield* projects.setBranchPrefix(id, version, prefix)
     }
+    if (decision.name === 'repositories.update') {
+      return yield* projects.updateRepository(decision.argument)
+    }
     if (decision.name === 'projects.setRepositoryIncluded') {
       const { id, version, path, included } = decision.argument
       return yield* projects.setRepositoryIncluded(id, version, path, included)

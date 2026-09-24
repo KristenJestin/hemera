@@ -178,6 +178,7 @@ const RELAYED = [
   'projects.restore',
   'repositories.add',
   'repositories.remove',
+  'repositories.update',
   'projects.setWorkspacesRoot',
   'projects.setBranchPrefix',
   'projects.setRepositoryIncluded',

@@ -77,7 +77,7 @@ const SPECS_MIGRATION = '20260924122302_specs'
  * the Workspaces, their steps and variables, and the commands typed by seven types (D8-01, D8-05,
  * D8-06, D8-07).
  */
-const WORKSPACES_MIGRATION = '20260924202015_workspaces'
+const WORKSPACES_MIGRATION = '20260924202231_workspaces'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -1036,8 +1036,8 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
           SELECT payload FROM session_entries WHERE id = 'entry-1'`
         const main = yield* sql<{ state: string; spec_id: string | null }>`
           SELECT state, spec_id FROM workspaces WHERE id = 'main-1'`
-        const repositories = yield* sql<{ included_by_default: number }>`
-          SELECT included_by_default FROM project_repositories WHERE id = 'repo-1'`
+        const repositories = yield* sql<{ included_by_default: number; icon: string | null }>`
+          SELECT included_by_default, icon FROM project_repositories WHERE id = 'repo-1'`
         const columns = yield* sql<{
           name: string
         }>`SELECT name FROM pragma_table_info('project_commands')`
@@ -1096,7 +1096,8 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     expect(payload).not.toHaveProperty('kind')
     // `main` is ready, as every Workspace written before this lot is (D8-01).
     expect(kept.main).toEqual([{ state: 'ready', spec_id: null }])
-    expect(kept.repositories).toEqual([{ included_by_default: 1 }])
+    // Included by default, and wearing no icon until one is chosen (recette 1, item 11).
+    expect(kept.repositories).toEqual([{ included_by_default: 1, icon: null }])
     expect(kept.columns.map((column) => column.name)).not.toContain('kind')
     // A Portless command runs under the Project's name until one of its own is given (D8-10 as
     // amended by recette 1).

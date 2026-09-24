@@ -189,6 +189,23 @@ export const eventAuthorSchema = z.enum(['human', 'hemera', 'agent', 'mcp', 'sys
 export const eventSourceSchema = z.enum(['ui', 'system'])
 
 /** A Project as the interface is handed one: the domain's own, its path and its locations. */
+/**
+ * The icons a repository may wear (recette 1, item 11): a fixed set the design system draws, and
+ * the same list as the domain's.
+ */
+export const repositoryIconSchema = z.enum([
+  'folder',
+  'server',
+  'browser',
+  'database',
+  'package',
+  'book',
+  'mobile',
+  'terminal',
+])
+
+export type RepositoryIcon = z.infer<typeof repositoryIconSchema>
+
 export const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -207,6 +224,8 @@ export const projectSchema = z.object({
   included: z.array(z.string()),
   /** What the keys of its Specs start with, `PREFIX-n` (D7-02). */
   specPrefix: z.string(),
+  /** The icon each repository wears, keyed by its path; one that wears none is absent. */
+  repositoryIcons: z.record(z.string(), repositoryIconSchema),
 })
 
 export type Project = z.infer<typeof projectSchema>
@@ -419,6 +438,18 @@ export const ENGINE_REQUESTS = {
   },
   'repositories.remove': {
     arguments: addressedSchema.extend({ relativePath: z.string() }),
+    response: projectSchema,
+  },
+  // A repository rewritten at once (recette 1, item 11): its path, validated as an added one is,
+  // its icon, and whether a dedicated Workspace gets it by default. The commands and the recipe
+  // steps that named its old path follow it to the new one.
+  'repositories.update': {
+    arguments: addressedSchema.extend({
+      relativePath: z.string(),
+      newPath: z.string(),
+      icon: repositoryIconSchema.nullable(),
+      included: z.boolean(),
+    }),
     response: projectSchema,
   },
   // What a Project's dedicated Workspaces are made with: their folder, absolute and outside

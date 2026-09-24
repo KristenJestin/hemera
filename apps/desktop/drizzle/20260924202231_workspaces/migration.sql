@@ -65,6 +65,7 @@ ALTER TABLE `project_commands` ADD `portless` integer DEFAULT 0 NOT NULL;--> sta
 ALTER TABLE `project_commands` ADD `folder_base` text;--> statement-breakpoint
 ALTER TABLE `project_commands` ADD `portless_name` text;--> statement-breakpoint
 ALTER TABLE `project_repositories` ADD `included_by_default` integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE `project_repositories` ADD `icon` text;--> statement-breakpoint
 ALTER TABLE `projects` ADD `workspaces_root` text;--> statement-breakpoint
 ALTER TABLE `projects` ADD `branch_prefix` text;--> statement-breakpoint
 ALTER TABLE `sessions` ADD `workspace_id` text REFERENCES workspaces(id) ON DELETE SET NULL;--> statement-breakpoint
@@ -135,6 +136,23 @@ DROP TABLE `project_commands`;--> statement-breakpoint
 ALTER TABLE `__new_project_commands` RENAME TO `project_commands`;--> statement-breakpoint
 UPDATE `project_commands` SET `folder_base` = `folder`, `folder` = NULL WHERE `folder` IN (SELECT `relative_path` FROM `project_repositories` WHERE `project_repositories`.`project_id` = `project_commands`.`project_id`);--> statement-breakpoint
 UPDATE `project_commands` SET `folder` = NULL WHERE `folder` = '';--> statement-breakpoint
+PRAGMA foreign_keys=ON;--> statement-breakpoint
+PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE `__new_project_repositories` (
+	`id` text PRIMARY KEY,
+	`project_id` text NOT NULL,
+	`relative_path` text NOT NULL,
+	`rank` text NOT NULL,
+	`included_by_default` integer DEFAULT 1 NOT NULL,
+	`icon` text,
+	CONSTRAINT `fk_project_repositories_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
+	CONSTRAINT `repository_once_in_project` UNIQUE(`project_id`,`relative_path`),
+	CONSTRAINT "repository_icon_is_known" CHECK("icon" IS NULL OR "icon" IN ('folder', 'server', 'browser', 'database', 'package', 'book', 'mobile', 'terminal'))
+);
+--> statement-breakpoint
+INSERT INTO `__new_project_repositories`(`id`, `project_id`, `relative_path`, `rank`) SELECT `id`, `project_id`, `relative_path`, `rank` FROM `project_repositories`;--> statement-breakpoint
+DROP TABLE `project_repositories`;--> statement-breakpoint
+ALTER TABLE `__new_project_repositories` RENAME TO `project_repositories`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_workspaces` (

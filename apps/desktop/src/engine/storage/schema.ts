@@ -39,6 +39,7 @@ import {
   PHASE_STATES,
   PROJECT_TONES,
   RECIPE_KINDS,
+  REPOSITORY_ICONS,
   SECTION_NAMES,
   SESSION_ENTRY_KINDS,
   SESSION_ENTRY_ORIGINS,
@@ -204,7 +205,8 @@ export const workspaceRepositories = sqliteTable(
  *
  * `included_by_default` says whether a dedicated Workspace gets a worktree of it unless the
  * user leaves it out at creation (D8-04): 1 by default, which is what every repository declared
- * before this lot is.
+ * before this lot is. `icon` is the one of a fixed set it wears (recette 1, item 11), and null
+ * for none.
  */
 export const projectRepositories = sqliteTable(
   'project_repositories',
@@ -216,8 +218,15 @@ export const projectRepositories = sqliteTable(
     relativePath: text('relative_path').notNull(),
     rank: text('rank').notNull(),
     includedByDefault: integer('included_by_default').notNull().default(1),
+    icon: text('icon'),
   },
-  (table) => [unique('repository_once_in_project').on(table.projectId, table.relativePath)],
+  (table) => [
+    unique('repository_once_in_project').on(table.projectId, table.relativePath),
+    check(
+      'repository_icon_is_known',
+      sql`${table.icon} IS NULL OR ${table.icon} IN (${sql.raw(oneOf(REPOSITORY_ICONS))})`,
+    ),
+  ],
 )
 
 /**

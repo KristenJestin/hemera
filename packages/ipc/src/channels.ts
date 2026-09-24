@@ -72,6 +72,7 @@ export const CHANNELS = {
   'projects.restore': ENGINE_REQUESTS['projects.restore'],
   'repositories.add': ENGINE_REQUESTS['repositories.add'],
   'repositories.remove': ENGINE_REQUESTS['repositories.remove'],
+  'repositories.update': ENGINE_REQUESTS['repositories.update'],
   'projects.setWorkspacesRoot': ENGINE_REQUESTS['projects.setWorkspacesRoot'],
   'projects.setBranchPrefix': ENGINE_REQUESTS['projects.setBranchPrefix'],
   'projects.setRepositoryIncluded': ENGINE_REQUESTS['projects.setRepositoryIncluded'],

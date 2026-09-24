@@ -671,3 +671,105 @@ describe('The recipe of a Project is kept in the order the user sets', () => {
     expect(seen.events).toHaveLength(5)
   })
 })
+
+describe('A repository is rewritten with its icon, and what named it follows', () => {
+  it('moves api to server, sets its icon and inclusion, and its command and step follow', async () => {
+    writeFileSync(join(main, 'sources', 'api', 'CLAUDE.md'), '# api')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const commands = yield* Commands
+        const recipe = yield* Recipe
+        const project = yield* atlas(main, [API, FRONT])
+        yield* commands.save(
+          {
+            projectId: project.id,
+            name: 'dev',
+            line: 'pnpm dev',
+            lineWindows: null,
+            lineLinux: null,
+            type: 'serve',
+            folderBase: API,
+            folder: './src',
+            scope: 'workspace',
+            portless: false,
+            portlessName: null,
+          },
+          false,
+        )
+        yield* recipe.add(project.id, {
+          kind: 'link',
+          base: API,
+          path: 'CLAUDE.md',
+          commandId: null,
+        })
+        const moved = yield* projects.updateRepository({
+          id: project.id,
+          version: project.version,
+          relativePath: API,
+          newPath: 'sources/server',
+          icon: 'server',
+          included: false,
+        })
+        const taken = yield* Effect.flip(
+          projects.updateRepository({
+            id: project.id,
+            version: moved.version,
+            relativePath: './sources/server',
+            newPath: FRONT,
+            icon: null,
+            included: true,
+          }),
+        )
+        const unknown = yield* Effect.flip(
+          projects.updateRepository({
+            id: project.id,
+            version: moved.version,
+            relativePath: API,
+            newPath: API,
+            icon: null,
+            included: true,
+          }),
+        )
+        const outside = yield* Effect.flip(
+          projects.updateRepository({
+            id: project.id,
+            version: moved.version,
+            relativePath: './sources/server',
+            newPath: '../elsewhere',
+            icon: null,
+            included: true,
+          }),
+        )
+        const sql = yield* SqliteClient
+        const events = yield* sql<{ payload: string }>`
+          SELECT payload FROM domain_events WHERE type = 'project.repository_updated'`
+        return {
+          moved,
+          taken,
+          unknown,
+          outside,
+          events,
+          catalogue: yield* commands.list(project.id),
+          steps: yield* recipe.list(project.id),
+        }
+      }),
+    )
+
+    // Its place in the list is kept, under its new path, with the icon it now wears.
+    expect(seen.moved.repositories).toEqual(['./sources/server', FRONT])
+    expect(seen.moved.repositoryIcons).toEqual({ './sources/server': 'server' })
+    expect(seen.moved.included).toEqual([FRONT])
+    // The command still runs under it, and the step still applies there.
+    expect(seen.catalogue[0]).toMatchObject({ folderBase: './sources/server', folder: './src' })
+    expect(seen.steps[0]).toMatchObject({ base: './sources/server', path: './CLAUDE.md' })
+    // Refused as an added one would be: taken, not declared, or out of the root.
+    expect(seen.taken).toBeInstanceOf(InvalidRepositoryPathError)
+    expect(seen.taken.message).toContain('it is declared twice')
+    expect(seen.unknown.message).toContain('it is not declared')
+    expect(seen.outside.message).toContain('it resolves outside the workspace root')
+    expect(seen.events.map((event) => JSON.parse(event.payload))).toEqual([
+      { relativePath: API, newPath: './sources/server', icon: 'server', included: false },
+    ])
+  })
+})

@@ -15,12 +15,13 @@ export {
   MAIN_WORKSPACE,
   MAX_PROJECT_NAME_LENGTH,
   PROJECT_TONES,
+  REPOSITORY_ICONS,
   ROOT_REPOSITORY,
   projectName,
   repositoryLocations,
   repositoryPath,
 } from './domain/project.ts'
-export type { Project, ProjectTone, Workspace } from './domain/project.ts'
+export type { Project, ProjectTone, RepositoryIcon, Workspace } from './domain/project.ts'
 export {
   EmptyMessageError,
   EmptyTitleError,
