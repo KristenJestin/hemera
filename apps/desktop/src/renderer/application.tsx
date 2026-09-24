@@ -98,11 +98,19 @@ import {
 } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
+  cleanUp,
+  createOnFolder,
+  listenToWorkspaces,
+  readWorkspaces,
+  subscribeToWorkspaces,
+  workspacesSnapshot,
+} from './workspaces-store.ts'
+import {
   archivedSessions,
   archiveSession,
   chooseWorkspace,
   closeSessions,
-  listenToWorkspaces,
+  listenToWorkspaces as listenToOfferedWorkspaces,
   offeredWorkspacesOf,
   openSession,
   openSessions,
@@ -289,6 +297,8 @@ export function Application() {
   // The runs of the Sessions, as they were last pushed: the thread's blocks and the Commands
   // panel read the same run from here (design D6-12).
   const tools = useSyncExternalStore(subscribeToTools, toolsSnapshot, toolsSnapshot)
+  // The Workspaces of the Project whose settings are open, and the one shown under them (D8-02).
+  const places = useSyncExternalStore(subscribeToWorkspaces, workspacesSnapshot, workspacesSnapshot)
   // What a page holds is a name, and what the channels take is one of the agents the engine
   // knows: resolved among them here rather than asserted at each call, so a name that answers to
   // none of them asks for nothing at all.
@@ -490,6 +500,9 @@ export function Application() {
   useEffect(() => listenToTools(), [])
   // And the Workspaces of the Project in front, which the composer's pill offers: one becomes
   // `ready`, or is cleaned up, while a Home or a Session is on screen (D8-08).
+  useEffect(() => listenToOfferedWorkspaces(), [])
+  // And the Workspaces the settings show, heard on it too: a preparation moves on whatever page
+  // is on screen (D8-05).
   useEffect(() => listenToWorkspaces(), [])
 
   // The list the sidebar draws is read again when a Session gets its first entry: the engine
@@ -530,6 +543,8 @@ export function Application() {
   useEffect(() => {
     if (settingsOf === null) return
     void readCatalogue(settingsOf)
+    // And its Workspaces, which the engine's `workspace` event keeps current from then on (D8-02).
+    void readWorkspaces(settingsOf)
   }, [settingsOf])
 
   // And what it was provided, for its Context tab: read when it is opened, and again by the store
@@ -1048,6 +1063,9 @@ export function Application() {
           }
           onRemoveCommand={(name) => void removeCommand(current.id, name)}
           onArchive={() => void archiveProject(current)}
+          workspaces={places.workspaces.get(current.id) ?? []}
+          onCreateWorkspace={async (path, name) => await createOnFolder(current.id, path, name)}
+          onCleanupWorkspace={async (id) => await cleanUp(current.id, id)}
         />
       )
     }

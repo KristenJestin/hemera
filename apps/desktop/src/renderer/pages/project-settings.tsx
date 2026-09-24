@@ -1,12 +1,16 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
-import type { Command } from '@hemera/ipc'
+import type { Command, Workspace } from '@hemera/ipc'
 import {
+  CleanupDialog,
   ProjectSettings,
+  WorkspaceList,
   type CommandLine,
   type ProjectDraft,
   type RepositoryLine,
 } from '@hemera/ui'
+
+import { branchesKeptOf, workspaceRowsOf } from '../workspace-details.ts'
 
 /** A command of the catalogue, as its row draws it: the Workspace root is `.` on screen. */
 function lineOf(command: Command): CommandLine {
@@ -44,6 +48,60 @@ function writeOf(line: CommandLine): CommandWrite {
   }
 }
 
+/**
+ * The Workspaces of the Project (D8-02, D8-14): the list, a new one on a folder the user picks,
+ * and the cleanup of a dedicated one, confirmed in its dialog — which says the branches kept and,
+ * when the engine refuses, its reason as it gave it.
+ */
+function WorkspacesCards({
+  workspaces,
+  onBrowse,
+  onCreate,
+  onCleanup,
+}: {
+  workspaces: readonly Workspace[]
+  onBrowse: () => Promise<string | null>
+  onCreate: (path: string, name: string) => Promise<string | null>
+  onCleanup: (id: string) => Promise<string | null>
+}): ReactNode {
+  /** The Workspace whose cleanup is being confirmed, and what the engine refused it with. */
+  const [cleaning, setCleaning] = useState<Workspace | null>(null)
+  const [refusal, setRefusal] = useState<string | null>(null)
+
+  const ask = (id: string) => {
+    setRefusal(null)
+    setCleaning(workspaces.find((one) => one.id === id) ?? null)
+  }
+
+  return (
+    <>
+      <WorkspaceList
+        workspaces={workspaceRowsOf(workspaces)}
+        onBrowse={onBrowse}
+        onCreate={onCreate}
+        onCleanup={ask}
+      />
+      {cleaning !== null && (
+        <CleanupDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setCleaning(null)
+          }}
+          name={cleaning.name}
+          branches={branchesKeptOf(cleaning)}
+          refusal={refusal}
+          onConfirm={() => {
+            void onCleanup(cleaning.id).then((said) => {
+              if (said === null) setCleaning(null)
+              else setRefusal(said)
+            })
+          }}
+        />
+      )}
+    </>
+  )
+}
+
 /** The settings of the active Project (design D4-07): composed, and bound to its callbacks. */
 export function ProjectSettingsPage({
   project,
@@ -61,6 +119,9 @@ export function ProjectSettingsPage({
   onSaveCommand,
   onRemoveCommand,
   onArchive,
+  workspaces,
+  onCreateWorkspace,
+  onCleanupWorkspace,
 }: {
   project: ProjectDraft
   subtitle?: string
@@ -83,6 +144,12 @@ export function ProjectSettingsPage({
   onSaveCommand: (command: CommandWrite, existing: boolean) => Promise<string | null>
   onRemoveCommand: (name: string) => void
   onArchive: () => void
+  /** The Workspaces of the Project, as the engine listed them (D8-02). */
+  workspaces: readonly Workspace[]
+  /** Makes a Workspace on a folder the user picked; answers the engine's refusal, or null. */
+  onCreateWorkspace: (path: string, name: string) => Promise<string | null>
+  /** Cleans a dedicated Workspace up; answers the engine's refusal, or null (D8-14). */
+  onCleanupWorkspace: (id: string) => Promise<string | null>
 }): ReactNode {
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
@@ -103,7 +170,14 @@ export function ProjectSettingsPage({
         onUpdateCommand={async (line) => await onSaveCommand(writeOf(line), true)}
         onRemoveCommand={onRemoveCommand}
         onArchive={onArchive}
-      />
+      >
+        <WorkspacesCards
+          workspaces={workspaces}
+          onBrowse={onBrowse}
+          onCreate={onCreateWorkspace}
+          onCleanup={onCleanupWorkspace}
+        />
+      </ProjectSettings>
     </div>
   )
 }
