@@ -78,6 +78,8 @@ const meta = {
       control: 'boolean',
       description: 'Whether Hemera was closed before the preparation ended, no step failed.',
     },
+    onShowRun: { control: false, description: 'Shows the details of the run a step started.' },
+    shownRun: { control: 'text', description: 'The run whose details are shown.' },
     className: { control: false, description: 'Where the card sits; never how it looks.' },
   },
 } satisfies Meta<typeof PreparationSteps>
@@ -285,13 +287,49 @@ export const Interrupted: Story = {
   play: aPreparationInterruptedByAQuitCanBeResumed,
 }
 
-/** The one control of the list, Resume, reached and pressed with the keyboard. */
+/** `install` failed and its run is there: the step sums it up, and its details are offered. */
+const FAILED_INSTALL = stepsAt(['done', 'done', 'done', 'done', 'failed'], {
+  at: 4,
+  text: 'exit 1',
+})
+
+const WITH_ITS_RUN = FAILED_INSTALL.toSpliced(4, 1, { ...FAILED_INSTALL[4]!, runId: 'run-install' })
+
+// Scenario "A run step fails on a non-zero exit": its run keeps the output and the exit code.
+async function aRunStepShowsItsRun({ canvasElement, args }: Context) {
+  const run = rowsIn(canvasElement)[4]!
+  await expect(within(run).getByText('exit 1')).toBeVisible()
+  // Only the step that started a run offers one.
+  await expect(within(canvasElement).getAllByRole('button', { name: /^Details of/ })).toHaveLength(
+    1,
+  )
+  await userEvent.click(within(run).getByRole('button', { name: 'Details of run install' }))
+  await expect(args.onShowRun).toHaveBeenCalledWith('run-install')
+}
+
+/** The run of `install` is shown beside the list: its step's button is pressed. */
+export const RunShown: Story = {
+  args: { steps: WITH_ITS_RUN, onShowRun: fn(), shownRun: 'run-install' },
+  play: async (context) => {
+    await expect(
+      within(context.canvasElement).getByRole('button', { name: 'Details of run install' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    await aRunStepShowsItsRun(context)
+  },
+}
+
+/** The list's controls by the keyboard: a run's Details, then Resume, in reading order. */
 export const Keyboard: Story = {
-  args: { steps: stepsAt(['done', 'failed'], { at: 1, text: GIT_REFUSED }) },
+  args: { steps: WITH_ITS_RUN, onShowRun: fn() },
   play: async ({ canvasElement, args }) => {
     args.onResume?.mockClear()
+    const canvas = within(canvasElement)
     await userEvent.tab()
-    await expect(within(canvasElement).getByRole('button', { name: 'Resume' })).toHaveFocus()
+    await expect(canvas.getByRole('button', { name: 'Details of run install' })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onShowRun).toHaveBeenCalledWith('run-install')
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Resume' })).toHaveFocus()
     await userEvent.keyboard('{Enter}')
     await expect(args.onResume).toHaveBeenCalledTimes(1)
   },

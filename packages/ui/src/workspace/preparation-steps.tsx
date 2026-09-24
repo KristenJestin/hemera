@@ -30,6 +30,9 @@ import type { PreparationStepLine, StepKind, StepState } from './model.ts'
  * A preparation Hemera was closed in the middle of has no failed step: the step that was running
  * is `pending` again, and the Workspace still says it is being prepared while nothing prepares it.
  * That is resumed the same way, and the list says why it stopped.
+ *
+ * A `run` step that started its run offers its details — the line, the variables, the output and
+ * the exit code — which the step's own line only sums up.
  */
 const STEPS = 'flex flex-col'
 
@@ -82,6 +85,10 @@ export interface PreparationStepsProps {
    * it ran, and nothing prepares the Workspace any more.
    */
   interrupted?: boolean | undefined
+  /** Shows the details of the run a `run` step started; without it, no step offers them. */
+  onShowRun?: ((runId: string) => void) | undefined
+  /** The run whose details are shown, whose step says so; null or absent when none is. */
+  shownRun?: string | null | undefined
   /** Where the card sits; never how it looks. */
   className?: string | undefined
 }
@@ -90,6 +97,8 @@ export function PreparationSteps({
   steps,
   onResume,
   interrupted = false,
+  onShowRun,
+  shownRun = null,
   className,
 }: PreparationStepsProps): ReactNode {
   const failed = steps.some((step) => step.state === 'failed')
@@ -120,6 +129,7 @@ export function PreparationSteps({
           const Kind = KIND_ICONS[step.kind]
           const state = STATES[step.state]
           const State = state.icon
+          const { runId } = step
           return (
             <li key={step.id} className={STEP}>
               <span className={KIND}>
@@ -136,6 +146,18 @@ export function PreparationSteps({
                     <span className={WHY}>{step.message}</span>
                   ))}
               </span>
+              {runId !== undefined && onShowRun !== undefined && (
+                <Button
+                  variant={shownRun === runId ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="shrink-0"
+                  aria-label={`Details of ${step.kind} ${step.target}`}
+                  aria-pressed={shownRun === runId}
+                  onClick={() => onShowRun(runId)}
+                >
+                  Details
+                </Button>
+              )}
               <span className={cn(STATE, state.tone)}>
                 <State size="sm" aria-hidden="true" />
                 {state.word}

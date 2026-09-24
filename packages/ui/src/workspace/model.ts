@@ -45,6 +45,8 @@ export interface PreparationStepLine {
   readonly state: StepState
   /** The failure as Git or the disk said it, or why the step was skipped. */
   readonly message?: string | undefined
+  /** The run a `run` step started, once it started one: what its details are read from. */
+  readonly runId?: string | undefined
 }
 
 /** One repository of the plan a dedicated Workspace is created from (D8-04). */
