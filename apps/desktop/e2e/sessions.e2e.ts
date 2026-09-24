@@ -191,7 +191,8 @@ describe('The agent starts the app and the user opens it', () => {
     await press('Project settings')
     await browser.pause(600)
     await fill('Command name', 'check')
-    await fill('Command line', CHECK)
+    // The default line: a command may carry a line of its own for Windows or Linux (D8-07).
+    await fill('Default line', CHECK)
     await press('Add a command')
     await awaits('Workspace root')
 
