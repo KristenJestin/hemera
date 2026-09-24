@@ -335,7 +335,8 @@ export function ProjectSettingsPage({
   workspacesRefusal: string | null
 }): ReactNode {
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-10">
+    // Wide enough for the navigation beside a section (recette 1).
+    <div className="mx-auto w-full max-w-5xl px-6 py-10">
       <ProjectSettings
         project={project}
         subtitle={subtitle}
