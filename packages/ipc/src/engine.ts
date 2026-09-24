@@ -238,6 +238,16 @@ const limitSchema = z.number().int().positive().max(200)
 /** What every change to an existing Project carries: which one, and the version it was read at. */
 const addressedSchema = z.object({ id: z.string(), version: z.number().int().nonnegative() })
 
+/**
+ * A setting whose blank is its default (Decided 17): a field left empty, or holding only spaces,
+ * crosses as null, and null is what the engine reads as "the default". The engine's contract
+ * stays one value for the default; a cleared field in the settings is that value on the way in.
+ */
+const blankAsDefaultSchema = z
+  .string()
+  .nullable()
+  .transform((value) => (value === null || value.trim() === '' ? null : value))
+
 /** A call that takes no argument, which both declarations say the same way. */
 export const nothingSchema = z.object({})
 
@@ -394,13 +404,13 @@ export const ENGINE_REQUESTS = {
   },
   // What a Project's dedicated Workspaces are made with: their folder, absolute and outside
   // `main` (D8-02), the prefix of their branches (D8-04), and whether each repository gets a
-  // worktree unless left out. Null is the default for the first two.
+  // worktree unless left out. Null, or a blank, is the default for the first two.
   'projects.setWorkspacesRoot': {
-    arguments: addressedSchema.extend({ path: z.string().nullable() }),
+    arguments: addressedSchema.extend({ path: blankAsDefaultSchema }),
     response: projectSchema,
   },
   'projects.setBranchPrefix': {
-    arguments: addressedSchema.extend({ prefix: z.string().nullable() }),
+    arguments: addressedSchema.extend({ prefix: blankAsDefaultSchema }),
     response: projectSchema,
   },
   'projects.setRepositoryIncluded': {
