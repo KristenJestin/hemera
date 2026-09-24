@@ -516,7 +516,7 @@ export function SessionPage({
             onSend={write}
             workspaces={[...workspaces]}
             workspace={workspace?.name}
-            workspaceFixed={workspaceFixedOf(session, thread, agent.running)}
+            workspaceFixed={workspaceFixedOf(session, agent.running)}
             onWorkspaceChange={(name) => {
               const chosen = workspaces.find((one) => one.name === name)
               if (chosen !== undefined && chosen.id !== session.workspaceId) {

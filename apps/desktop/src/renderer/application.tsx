@@ -121,6 +121,7 @@ import {
   archiveSession,
   chooseWorkspace,
   closeSessions,
+  endedTurnsOf,
   listenToWorkspaces as listenToOfferedWorkspaces,
   offeredWorkspacesOf,
   workspaceRootOf,
@@ -361,6 +362,8 @@ export function Application() {
    * session", so the first entry of one is what sends it to the list again.
    */
   const named = useRef(new Set<string>())
+  /** The ended turns that already sent the list to be read again for a Session's Workspace. */
+  const turnsRead = useRef(new Set<string>())
   /** The folder the settings are showing, which is what everything below it is read against. */
   const [shownPath, setShownPath] = useState<string | null>(null)
 
@@ -533,6 +536,18 @@ export function Application() {
     }
     if (stale) void readSessions(projectId)
   }, [agents.sessions, shell.activeProjectId])
+
+  // And when a turn ends in a Session the list still says is free to change Workspace: its agent
+  // started during that turn, after the read above, and the pill is fixed from then on (D8-08).
+  useEffect(() => {
+    const projectId = shell.activeProjectId
+    if (projectId === null) return
+    const unread = endedTurnsOf(sessions.sessions, agents.sessions).filter(
+      (id) => !turnsRead.current.has(id),
+    )
+    for (const id of unread) turnsRead.current.add(id)
+    if (unread.length > 0) void readSessions(projectId)
+  }, [agents.sessions, sessions.sessions, shell.activeProjectId])
 
   // What the agent of the Session on screen offers, asked when that Session becomes the one the
   // window is on: an agent announces its models and its modes when it starts, and what it is on

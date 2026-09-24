@@ -18,6 +18,7 @@ import { listenToAgents, say } from '#renderer/agent-store.ts'
 import {
   chooseWorkspace,
   closeSessions,
+  endedTurnsOf,
   listenToWorkspaces,
   offeredWorkspacesOf,
   openSessions,
@@ -123,14 +124,26 @@ describe('The composer works in the folder of the Workspace it writes about', ()
 })
 
 describe('The Workspace is fixed once the agent has started', () => {
-  test('a Session whose agent never started can still change', () => {
-    expect(workspaceFixedOf(session('none'), [entry('message')], false)).toBe(false)
+  test("the engine's answer is what fixes it", () => {
+    expect(workspaceFixedOf(session('none'), false)).toBe(false)
+    expect(workspaceFixedOf(session('attached'), false)).toBe(true)
   })
 
-  test('an agent in a native state, a turn running or a turn in the thread fixes it', () => {
-    expect(workspaceFixedOf(session('attached'), [], false)).toBe(true)
-    expect(workspaceFixedOf(session('none'), [entry('message')], true)).toBe(true)
-    expect(workspaceFixedOf(session('none'), [entry('message'), entry('turn')], false)).toBe(true)
+  test('a turn running fixes it before the engine can say so', () => {
+    // The first turn is announced before the agent is started, and its folder recorded after.
+    expect(workspaceFixedOf(session('none'), true)).toBe(true)
+  })
+
+  test('a turn that ended in a Session the list says is free sends the list to be read again', () => {
+    const free = session('none')
+    const fixed = { ...session('attached'), id: 'session-2' }
+    const pushed = new Map([
+      [free.id, { entries: [entry('message'), entry('turn')] }],
+      [fixed.id, { entries: [{ ...entry('turn'), id: 'entry-turn-2' }] }],
+    ])
+    expect(endedTurnsOf([free, fixed], pushed)).toEqual(['entry-turn'])
+    // Once the list says fixed, no turn of it asks for anything.
+    expect(endedTurnsOf([{ ...free, workspaceFixed: true }, fixed], pushed)).toEqual([])
   })
 })
 
@@ -195,11 +208,14 @@ describe('A Session is made and moved in the Workspace the pill chose', () => {
     expect(held === undefined ? false : await chooseWorkspace(held, null)).toBe(true)
     const moved = sessionsSnapshot().sessions.find((one) => one.id === made?.id)
     expect(moved?.workspaceId).toBeNull()
+    expect(moved?.workspaceFixed).toBe(false)
 
     // Once the agent has answered, a change is refused, said, and the Session keeps `main`.
     await say(made?.id ?? '', 'Where are you?')
     await openSessions(project.id)
     const started = sessionsSnapshot().sessions.find((one) => one.id === made?.id)
+    // The engine says so on the Session itself, which is what the pill reads.
+    expect(started?.workspaceFixed).toBe(true)
     expect(started === undefined ? true : await chooseWorkspace(started, picked.id)).toBe(false)
     expect(sessionsSnapshot().refusal).toBe('The Workspace is fixed once the agent has started.')
     const [kept] = await bridge.invoke('sessions.list', { projectId: project.id })

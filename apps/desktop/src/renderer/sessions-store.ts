@@ -336,16 +336,33 @@ export function workspaceRootOf(
 }
 
 /**
- * Whether a Session's Workspace can no longer change (D8-08): once its agent has started — the
- * agent's own session was opened in that folder, which the engine records as a native state —
- * or once a turn has run in it, which the thread says before the list is read again.
+ * Whether a Session's Workspace can no longer change (D8-08): the engine's own answer, computed
+ * with the rule `sessions.chooseWorkspace` refuses on — or a turn running.
+ *
+ * The turn is kept because the engine's answer is not true yet during the first one: the message
+ * is written and the turn announced before the agent is started, and the folder it starts in is
+ * recorded only once it has. The page is not to offer a change in between.
  */
-export function workspaceFixedOf(
-  session: Session,
-  thread: readonly SessionEntry[],
-  running: boolean,
-): boolean {
-  return session.nativeState !== 'none' || running || thread.some((one) => one.kind === 'turn')
+export function workspaceFixedOf(session: Session, running: boolean): boolean {
+  return session.workspaceFixed || running
+}
+
+/**
+ * The turns that ended in a Session the list still says is free to change Workspace (D8-08).
+ *
+ * The engine records the agent's folder during the first turn, after the first message sent the
+ * list to be read again: the row read then still says free. Each turn that ends in such a Session
+ * is a reason to read the list again, so the pill says fixed without a reload once it is.
+ */
+export function endedTurnsOf(
+  sessions: readonly Session[],
+  pushed: ReadonlyMap<string, { readonly entries: readonly SessionEntry[] }>,
+): string[] {
+  return sessions
+    .filter((one) => !one.workspaceFixed)
+    .flatMap((one) => pushed.get(one.id)?.entries ?? [])
+    .filter((entry) => entry.kind === 'turn')
+    .map((entry) => entry.id)
 }
 
 /** What was archived, which only the archived page asks for. */
