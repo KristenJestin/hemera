@@ -4,7 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconButton } from '../components/button/button.tsx'
 import { Tooltip, TooltipProvider } from '../components/tooltip/tooltip.tsx'
-import { IconLayoutSidebarRight } from '../icons.ts'
+import { IconInfoCircle } from '../icons.ts'
 import { CommandsPanel } from './commands-panel.tsx'
 import { ContextView } from './context-view.tsx'
 import { SessionDetails, type SessionDetailsProps } from './session-details.tsx'
@@ -30,7 +30,7 @@ function Harness(props: Omit<SessionDetailsProps, 'open' | 'onOpenChange'>): Rea
         <IconButton
           variant="ghost"
           size="sm"
-          icon={<IconLayoutSidebarRight size="sm" />}
+          icon={<IconInfoCircle size="sm" />}
           aria-label="Session details"
           onClick={() => {
             setOpen(true)

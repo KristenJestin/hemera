@@ -11,7 +11,7 @@ import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import {
   IconArchive,
   IconDots,
-  IconLayoutSidebarRight,
+  IconInfoCircle,
   IconMessages,
   IconPencil,
   IconRestore,
@@ -209,7 +209,7 @@ export function SessionHeader({
             <IconButton
               variant="ghost"
               size="sm"
-              icon={<IconLayoutSidebarRight size="sm" />}
+              icon={<IconInfoCircle size="sm" />}
               aria-label="Session details"
               onClick={onOpenDetails}
             />
