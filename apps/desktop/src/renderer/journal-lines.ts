@@ -93,6 +93,44 @@ function labelOf(entry: JournalEntry): string {
       return 'Session archived'
     case 'session.restored':
       return 'Session restored'
+    case 'session.mission_set':
+      return `Mission set to ${said('mission')}`
+    // A Spec's steps (D7-13). The phase a step belongs to is a correlation of the event rather
+    // than a word of its payload, and it is read from there.
+    case 'spec.created':
+      return `Spec ${said('key')} “${said('title')}” created`
+    case 'spec.joined':
+      return payload.writer === true
+        ? 'Session opened on the Spec, as its writer'
+        : 'Session opened on the Spec, as a reader'
+    case 'spec.section_written':
+      return `${said('name')} written by ${said('author')} · v${said('version')}`
+    case 'spec.stories_written':
+      return `Stories written · ${said('stories')}`
+    case 'spec.tasks_written':
+      return `Tasks written · ${said('tasks')}`
+    case 'spec.question_raised':
+      return `Question asked: ${said('body')}`
+    case 'spec.question_answered':
+      return 'Question answered'
+    case 'spec.phase_opened':
+      return `Phase ${entry.phaseId ?? said('phase')} opened`
+    case 'spec.phase_declared':
+      return `Phase ${entry.phaseId ?? said('phase')} declared finished`
+    case 'spec.phase_finished':
+      return `Phase ${entry.phaseId ?? said('phase')} finished`
+    case 'spec.phase_stale':
+      return `Phase ${entry.phaseId ?? said('phase')} stale`
+    case 'spec.attested':
+      return 'Contract attested by the agent'
+    case 'spec.write_right_transferred':
+      return 'Write right taken over'
+    case 'spec.ready':
+      return `Spec ${said('key')} marked ready`
+    case 'spec.reopened':
+      return (payload.reason ?? null) === null
+        ? `Reworked into revision ${said('number')}`
+        : `Reworked into revision ${said('number')}: ${said('reason')}`
     default:
       // An event written by a version that knew more still has a type, and a type read out is
       // more use than a line that says nothing at all.
@@ -101,11 +139,12 @@ function labelOf(entry: JournalEntry): string {
 }
 
 /**
- * The entity a line is drawn under. The Journal tells a Project, a Session and the Profile apart;
- * a Workspace, a command and a launch (D8-16) belong to their Project, and are drawn under it.
+ * The entity a line is drawn under. The Journal tells a Project, a Session, a Spec and the Profile
+ * apart; a Workspace, a command and a launch (D8-16) belong to their Project, and are drawn under
+ * it.
  */
 function drawnKind(kind: JournalEntry['entityKind']): JournalLine['kind'] {
-  return kind === 'session' || kind === 'profile' ? kind : 'project'
+  return kind === 'session' || kind === 'profile' || kind === 'spec' ? kind : 'project'
 }
 
 /** One entry, as the Journal and the Activity frame draw one. */
