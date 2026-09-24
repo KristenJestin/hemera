@@ -8,7 +8,7 @@
  * of the machine running the tests.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -165,6 +165,54 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
     expect(workspace.specId).toBe('HEM-7')
     expect(workspace.repositories.map((one) => one.relativePath)).toEqual([API, FRONT])
     expect(git(join(main, 'sources', 'api'), 'remote')).toBe('')
+  })
+})
+
+describe('A dedicated Workspace is made from the Project settings, with no Spec', () => {
+  it('plans <prefix>/<slug> with no key, and is prepared with its worktrees and its recipe', async () => {
+    writeFileSync(join(main, 'sources', 'api', '.env'), 'PORT=3000\n')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const preparation = yield* Preparation
+        const project = yield* atlas(main, [API, FRONT])
+        yield* (yield* Recipe).add(project.id, {
+          kind: 'copy',
+          base: API,
+          path: '.env',
+          commandId: null,
+        })
+        const plan = yield* workspaces.plan(project.id, null, 'spike')
+        const workspace = yield* workspaces.create(project.id, {
+          specId: null,
+          name: plan.name,
+          repositories: plan.repositories
+            .filter((one) => one.included)
+            .map((one) => ({
+              relativePath: one.relativePath,
+              base: one.base ?? '',
+              branch: one.branch,
+            })),
+        })
+        const ready = yield* preparation.prepare(workspace.id)
+        return { plan, ready, steps: yield* preparation.steps(workspace.id) }
+      }),
+    )
+
+    expect(seen.plan.repositories.map((one) => one.branch)).toEqual(['atlas/spike', 'atlas/spike'])
+    expect(seen.ready).toMatchObject({ state: 'ready', specId: null, dedicated: true })
+    expect(seen.steps.map((step) => [step.kind, step.state])).toEqual([
+      ['worktree', 'done'],
+      ['worktree', 'done'],
+      ['copy', 'done'],
+    ])
+    for (const repository of ['api', 'front']) {
+      const worktree = join(seen.ready.path, 'sources', repository)
+      expect(git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('atlas/spike')
+    }
+    expect(readFileSync(join(seen.ready.path, 'sources', 'api', '.env'), 'utf8')).toBe(
+      'PORT=3000\n',
+    )
   })
 })
 

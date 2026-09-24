@@ -145,10 +145,13 @@ export interface WorkspacesService {
   /** The Workspaces of a Project, `main` first, then in the order they were made. */
   readonly list: (projectId: string) => Effect.Effect<WorkspaceView[], DatabaseError>
   readonly one: (id: string) => Effect.Effect<WorkspaceView, DatabaseError | UnknownWorkspaceError>
-  /** What a Workspace for Spec `key` named `slug` would be made of, proposed and editable. */
+  /**
+   * What a Workspace named `slug` would be made of, proposed and editable: for Spec `key`, or
+   * with no key for one made from the Project's settings, whose branches are `<prefix>/<slug>`.
+   */
   readonly plan: (
     projectId: string,
-    key: string,
+    key: string | null,
     slug: string,
   ) => Effect.Effect<WorkspacePlan, DatabaseError | UnknownProjectError>
   /** Checks the draft with Git, then writes it `preparing` with its steps — and nothing else. */

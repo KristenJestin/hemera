@@ -741,8 +741,10 @@ export const ENGINE_REQUESTS = {
     response: z.array(workspaceSchema),
   },
   'workspaces.plan': {
-    // `key` and `slug` are the Spec's: the branch proposed is `<prefix>/<key>-<slug>` (D8-04).
-    arguments: z.object({ projectId: z.string(), key: z.string(), slug: z.string() }),
+    // `key` and `slug` are the Spec's: the branch proposed is `<prefix>/<key>-<slug>` (D8-04). A
+    // null key is a dedicated Workspace made from the Project's settings, with no Spec: its
+    // branch is `<prefix>/<slug>`.
+    arguments: z.object({ projectId: z.string(), key: z.string().nullable(), slug: z.string() }),
     response: workspacePlanSchema,
   },
   'workspaces.create': {

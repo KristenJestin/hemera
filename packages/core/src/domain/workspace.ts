@@ -132,9 +132,12 @@ export function defaultBranchPrefix(projectName: string): string {
   return slug === '' ? 'hemera' : slug
 }
 
-/** The branch a dedicated Workspace is created on: `<prefix>/<key>-<slug>` (D8-04). */
-export function branchNameFor(prefix: string, key: string, slug: string): string {
-  return `${prefix}/${key}-${slug}`
+/**
+ * The branch a dedicated Workspace is created on (D8-04): `<prefix>/<key>-<slug>` for a Spec's,
+ * and `<prefix>/<slug>` for one made from the Project's settings, which has no Spec and no key.
+ */
+export function branchNameFor(prefix: string, key: string | null, slug: string): string {
+  return key === null ? `${prefix}/${slug}` : `${prefix}/${key}-${slug}`
 }
 
 /**

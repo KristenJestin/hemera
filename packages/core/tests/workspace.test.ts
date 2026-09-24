@@ -180,4 +180,8 @@ describe('A branch is named after the prefix, the key and the slug', () => {
   test('`<prefix>/<key>-<slug>`', () => {
     expect(branchNameFor('hemera', 'HEM-7', 'login-form')).toBe('hemera/HEM-7-login-form')
   })
+
+  test('`<prefix>/<slug>` for a Workspace made from the settings, with no Spec to key it', () => {
+    expect(branchNameFor('hemera', null, 'spike')).toBe('hemera/spike')
+  })
 })
