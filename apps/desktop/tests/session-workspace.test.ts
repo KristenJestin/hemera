@@ -28,6 +28,7 @@ import { workspaces } from '#engine/storage/schema.ts'
 import { UnknownWorkspaceError } from '#engine/workspaces/described.ts'
 import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { application, machine, threadOf, toolApplication, until } from './application.ts'
+import { withQualifiedOpenCode } from './unqualified.ts'
 
 let dataFolder: string
 let main: string
@@ -328,6 +329,7 @@ describe('A Project-scoped service is one instance for all', () => {
 })
 
 describe('An agent is given the variables of its Workspace', () => {
+  withQualifiedOpenCode()
   test('PORT=3001 of login-form reaches the agent’s process, and its bare means stays on top', async () => {
     const agent = fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
 
