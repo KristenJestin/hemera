@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { type ReactNode, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { AT_ONCE, movesLess, withinFrames } from '../../.storybook/reduced-motion.ts'
@@ -9,9 +10,10 @@ import { Disclosure } from './disclosure.tsx'
  * What folds: the line a block is read by, and what it holds once it is asked for (design
  * D17-05).
  *
- * Three stories, which are the three things a fold has to answer for: opened; closed while it is
+ * Four stories, which are the four things a fold has to answer for: opened; closed while it is
  * still opening — the moment it used to grow for a frame after the press instead of turning round
- * (issue #64); and a body on its way out, which the keyboard can no longer reach (issue #69).
+ * (issue #64); a body on its way out, which the keyboard can no longer reach (issue #69); and a
+ * row that names a body only once there is one.
  */
 const BODY = Array.from(
   { length: 12 },
@@ -272,5 +274,55 @@ export const NothingReachableWhileFolding: Story = {
     await expect(await withinFrames(() => roomOf(canvasElement, row) === null, PATIENCE)).toBe(true)
     await expect(row).not.toHaveAttribute('aria-controls')
     await expect(canvas.queryByText(written)).toBeNull()
+  },
+}
+
+/** The three moments of a block whose body comes late, each one a press away from the last. */
+const LATE = [
+  { open: true, body: false },
+  { open: false, body: false },
+  { open: false, body: true },
+]
+
+/**
+ * A block told to be open before it has a body, then closed, then handed its body while closed:
+ * the order a caller that holds the state and fills the body later can go through.
+ */
+function LateBody(): ReactNode {
+  const [moment, setMoment] = useState(0)
+  const { open, body } = LATE[moment]!
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <Button size="sm" onClick={() => setMoment((at) => Math.min(at + 1, LATE.length - 1))}>
+        Next
+      </Button>
+      <Disclosure summary="Read src/session/session.tsx" open={open}>
+        {body ? (
+          <div className="font-mono text-xs whitespace-pre text-muted-foreground">{BODY}</div>
+        ) : undefined}
+      </Disclosure>
+    </div>
+  )
+}
+
+/**
+ * A row names a body only once there is one (issue #69).
+ *
+ * Shown with nothing to show, a block has no room and so no exit, and the end of an exit is what
+ * says a body has left: counted as present there, the block closed and was then handed a body
+ * while closed, and the row named a room that was never in the page.
+ */
+export const NoBodyNamedBeforeThereIsOne: Story = {
+  render: () => <LateBody />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const next = canvas.getByRole('button', { name: 'Next' })
+    await userEvent.click(next)
+    await userEvent.click(next)
+    const row = await waitFor(() =>
+      canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ }),
+    )
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await expect(row).not.toHaveAttribute('aria-controls')
   },
 }

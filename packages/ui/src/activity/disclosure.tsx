@@ -195,9 +195,11 @@ export function Disclosure({
   // opening played backwards, so the body outlives the state that closed it. What says it has
   // left is the end of the exit and nothing else — a timer would be a guess at the length of a
   // spring — and a reference that resolves to nothing is a broken one (issue #69). Kept in step
-  // while rendering, so opening it again names the body on the frame it comes back.
-  const [left, setLeft] = useState(!shown)
-  if (shown && left) setLeft(false)
+  // while rendering, so opening it again names the body on the frame it comes back. Only a body
+  // that is there counts: shown with nothing to show, there is no room and so no exit to end.
+  const present = shown && children !== undefined
+  const [left, setLeft] = useState(!present)
+  if (present && left) setLeft(false)
   const controls = left ? undefined : body
   // A controlled block is the caller's answer: the reader's press is reported and the shown state
   // stays whatever the caller said.
