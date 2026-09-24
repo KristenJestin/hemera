@@ -2,10 +2,15 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
+import type { WorkspaceRow } from '../workspace/model.ts'
+import type { VariableLine } from '../workspace/services-model.ts'
+import { PreparationSteps } from '../workspace/preparation-steps.tsx'
+import { ServiceList } from '../workspace/service-list.tsx'
 import { VariablesEditor } from '../workspace/variables-editor.tsx'
 import { WorkspaceList } from '../workspace/workspace-list.tsx'
+import { WorkspaceRepositories } from '../workspace/workspace-repositories.tsx'
 import type { CommandLine, ProjectSettingsDraft, RepositoryLine } from './model.ts'
-import { PreparationEditor } from './preparation-editor.tsx'
+import { PreparationEditor, type RecipeStepLine } from './preparation-editor.tsx'
 import { ProjectSettings, type ProjectSettingsProps } from './project-settings.tsx'
 
 /**
@@ -121,67 +126,187 @@ const FOLDERS: RepositoryLine[] = [
   { path: './scripts', branch: null, exists: true, includedByDefault: true, icon: null },
 ]
 
-/** The Workspaces section as the application composes it: the list of the Project's. */
-const WORKSPACES = (
-  <WorkspaceList
-    workspaces={[
-      {
-        id: 'main',
-        name: 'main',
-        path: ATLAS.mainPath,
-        state: 'ready',
-        main: true,
-        dedicated: false,
-      },
-      {
-        id: 'login-form',
-        name: 'login-form',
-        path: '/home/someone/.local/share/hemera/workspaces/atlas/login-form',
-        state: 'ready',
-        main: false,
-        dedicated: true,
-      },
-    ]}
-    onCreateDedicated={fn()}
-    onBrowse={fn(async () => await Promise.resolve(null))}
-    onMapFolder={fn(async () => await Promise.resolve(null))}
-    onCleanup={fn()}
-  />
-)
+/** The Workspaces of Atlas: `main`, one made for a Spec, one mapped folder. */
+const ROWS: WorkspaceRow[] = [
+  {
+    id: 'main',
+    name: 'main',
+    path: ATLAS.mainPath,
+    state: 'ready',
+    main: true,
+    dedicated: false,
+    summary: {
+      branch: 'develop',
+      commit: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b',
+      changes: 'clean',
+    },
+  },
+  {
+    id: 'login-form',
+    name: 'login-form',
+    path: '/home/someone/.local/share/hemera/workspaces/atlas/login-form',
+    state: 'ready',
+    main: false,
+    dedicated: true,
+    specKey: 'ATL-7',
+  },
+  {
+    id: 'spike',
+    name: 'spike',
+    path: '/home/someone/Projects/spike',
+    state: 'ready',
+    main: false,
+    dedicated: false,
+  },
+]
 
-/** The Preparation section: the recipe every dedicated Workspace replays (D8-05). */
-const PREPARATION = (
-  <PreparationEditor
-    steps={[
-      { id: 'copy-env', kind: 'copy', base: './sources/api', path: '.env', commandId: null },
-      { id: 'link-claude', kind: 'link', base: null, path: 'CLAUDE.md', commandId: null },
-      { id: 'run-env', kind: 'run', base: null, path: null, commandId: 'env' },
-    ]}
-    repositories={REPOSITORIES.map((one) => one.path)}
-    commands={[
-      { id: 'env', name: 'env', type: 'configure' },
-      { id: 'check', name: 'check', type: 'test' },
-    ]}
-    onAdd={fn(async () => await Promise.resolve(null))}
-    onUpdate={fn(async () => await Promise.resolve(null))}
-    onRemove={fn()}
-    onMove={fn()}
-  />
-)
+/**
+ * What the settings draw under an open row, as the application composes it: the Workspace's
+ * repositories with their Git state, its preparation, its services and its own variables.
+ */
+function detailsOf(id: string) {
+  return (
+    <>
+      <WorkspaceRepositories
+        name={id}
+        repositories={[
+          {
+            path: './sources/api',
+            git: {
+              ok: true,
+              branch: `atlas/${id}`,
+              commit: '4f2c9a1e0b7d3c5a8e6f1d2b9c0a7e4f3d2c1b0a',
+              staged: 0,
+              unstaged: 1,
+              untracked: 0,
+            },
+          },
+        ]}
+      />
+      <PreparationSteps
+        steps={[
+          { id: 'w1', kind: 'worktree', target: './sources/api', state: 'done' },
+          { id: 'r1', kind: 'run', target: 'env', state: 'done' },
+        ]}
+        onResume={fn()}
+      />
+      <ServiceList
+        services={[
+          {
+            id: `dev-${id}`,
+            name: 'dev',
+            workspace: id,
+            folder: './sources/front',
+            scope: 'workspace',
+            state: 'running',
+            url: 'http://localhost:5173',
+            readiness: 'ready',
+            startedBy: 'user',
+          },
+        ]}
+        onStop={fn()}
+      />
+      <VariablesEditor
+        scope="workspace"
+        name={id}
+        variables={[
+          { key: 'PORT', value: '3001', overrides: '3000' },
+          { key: 'DATABASE_URL', value: 'postgres://localhost:5432/atlas', inherited: true },
+        ]}
+        onSet={fn(async () => await Promise.resolve(null))}
+        onRemove={fn()}
+      />
+    </>
+  )
+}
 
-/** The Variables section: the Project's own (D8-06). */
-const VARIABLES = (
-  <VariablesEditor
-    scope="project"
-    name="Atlas"
-    variables={[
-      { key: 'DATABASE_URL', value: 'postgres://localhost:5432/atlas' },
-      { key: 'PORT', value: '3000' },
-    ]}
-    onSet={fn(async () => await Promise.resolve(null))}
-    onRemove={fn()}
-  />
-)
+/**
+ * The Workspaces section as the application composes it: the list of the Project's, one row
+ * open at a time, the open one showing what the Workspace holds.
+ */
+function HeldWorkspaces({ expanded = null }: { expanded?: string | null }) {
+  const [open, setOpen] = useState(expanded)
+  return (
+    <WorkspaceList
+      workspaces={ROWS}
+      onCreateDedicated={fn()}
+      onBrowse={fn(async () => await Promise.resolve(null))}
+      onMapFolder={fn(async () => await Promise.resolve(null))}
+      onCleanup={fn()}
+      renderDetails={detailsOf}
+      expanded={open}
+      onExpandedChange={setOpen}
+    />
+  )
+}
+
+const WORKSPACES = <HeldWorkspaces />
+
+/** The recipe of Atlas: the api's `.env` copied, `CLAUDE.md` linked at the root, `env` run. */
+const RECIPE: RecipeStepLine[] = [
+  { id: 'copy-env', kind: 'copy', base: './sources/api', path: '.env', commandId: null },
+  { id: 'link-claude', kind: 'link', base: null, path: 'CLAUDE.md', commandId: null },
+  { id: 'run-env', kind: 'run', base: null, path: null, commandId: 'env' },
+]
+
+/**
+ * The Preparation section: the recipe every dedicated Workspace replays (D8-05), held the way the
+ * application holds it, so a step added or edited in its dialog lands in the list.
+ */
+function HeldPreparation() {
+  const [steps, setSteps] = useState(RECIPE)
+  return (
+    <PreparationEditor
+      steps={steps}
+      repositories={REPOSITORIES.map((one) => one.path)}
+      commands={[
+        { id: 'env', name: 'env', type: 'configure' },
+        { id: 'check', name: 'check', type: 'test' },
+      ]}
+      onAdd={async (step) => {
+        setSteps((now) => [...now, { id: `${step.kind}-${String(now.length)}`, ...step }])
+        return await Promise.resolve(null)
+      }}
+      onUpdate={async (id, step) => {
+        setSteps((now) => now.map((one) => (one.id === id ? { id, ...step } : one)))
+        return await Promise.resolve(null)
+      }}
+      onRemove={(id) => setSteps((now) => now.filter((one) => one.id !== id))}
+      onMove={fn()}
+    />
+  )
+}
+
+const PREPARATION = <HeldPreparation />
+
+/**
+ * The Variables section: the Project's own (D8-06), held so that a variable added or edited in
+ * its dialog lands in the list.
+ */
+function HeldVariables() {
+  const [variables, setVariables] = useState<VariableLine[]>([
+    { key: 'DATABASE_URL', value: 'postgres://localhost:5432/atlas' },
+    { key: 'PORT', value: '3000' },
+  ])
+  return (
+    <VariablesEditor
+      scope="project"
+      name="Atlas"
+      variables={variables}
+      onSet={async (key, value) => {
+        setVariables((now) =>
+          now.some((one) => one.key === key)
+            ? now.map((one) => (one.key === key ? { key, value } : one))
+            : [...now, { key, value }],
+        )
+        return await Promise.resolve(null)
+      }}
+      onRemove={(key) => setVariables((now) => now.filter((one) => one.key !== key))}
+    />
+  )
+}
+
+const VARIABLES = <HeldVariables />
 
 interface Extra {
   /** What saving answers: nothing, or the refusal the engine sent back. */
@@ -658,31 +783,86 @@ export const NoCommandDeclared: Story = {
   },
 }
 
-/** Workspaces: the list the caller composes, drawn as it is handed. */
+/**
+ * Workspaces: the list the caller composes, `main` first, with a row open in place — the
+ * Workspace's repositories, its preparation, its services and its own variables inside its row —
+ * and the two ways to add one: a new dedicated Workspace, or an existing folder mapped.
+ */
 export const Workspaces: Story = {
-  args: { defaultSection: 'workspaces' },
+  args: { defaultSection: 'workspaces', workspaces: <HeldWorkspaces expanded="login-form" /> },
   play: async ({ canvasElement }) => {
     const panel = panelOf(canvasElement)
-    await expect(panel.getByRole('list', { name: 'Workspaces' })).toBeVisible()
-    await expect(panel.getByText('login-form')).toBeVisible()
+    const list = within(panel.getByRole('list', { name: 'Workspaces' }))
+    const loginForm = within(
+      list.getAllByText('login-form', { selector: 'span' })[0]!.closest('li')!,
+    )
+    await expect(loginForm.getByRole('button', { name: 'Details of login-form' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    await expect(loginForm.getByRole('list', { name: 'Repositories of login-form' })).toBeVisible()
+    await expect(loginForm.getByRole('list', { name: 'Steps' })).toBeVisible()
+    await expect(loginForm.getByRole('list', { name: 'Services' })).toBeVisible()
+    await expect(loginForm.getByRole('list', { name: 'Variables of login-form' })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'New Workspace' })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Other ways to add a Workspace' })).toBeVisible()
+    // The room has finished opening before the colours are judged.
+    const room = loginForm
+      .getByRole('button', { name: 'Details of login-form' })
+      .getAttribute('aria-controls')!
+    await waitFor(() => {
+      expect(document.getElementById(room)).toHaveStyle({ filter: 'opacity(1)' })
+    })
   },
 }
 
-/** Preparation: the recipe the caller composes, drawn as it is handed. */
+/**
+ * Preparation: the recipe the caller composes, each step from its base, and a step edited in its
+ * dialog where it stands.
+ */
 export const Preparation: Story = {
   args: { defaultSection: 'preparation' },
   play: async ({ canvasElement }) => {
     const panel = panelOf(canvasElement)
-    await expect(panel.getByText('copy .env in each repository')).toBeVisible()
+    const steps = within(panel.getByRole('list', { name: 'Steps' }))
+    await expect(steps.getAllByRole('listitem').map((row) => row.textContent)).toEqual([
+      'copy .env from api',
+      'link CLAUDE.md at the root',
+      'run env',
+    ])
+
+    await userEvent.click(panel.getByRole('button', { name: /^Edit: copy \.env from api/ }))
+    const inside = within(await waitFor(() => within(document.body).getByRole('dialog')))
+    await expect(inside.getByRole('heading', { name: 'Edit step' })).toBeInTheDocument()
+    const path = inside.getByRole('textbox', { name: 'Path' })
+    await userEvent.clear(path)
+    await userEvent.type(path, '.env.local')
+    await userEvent.click(inside.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    await expect(steps.getAllByRole('listitem')[0]).toHaveTextContent('copy .env.local from api')
   },
 }
 
-/** Variables: the Project's own, composed by the caller. */
+/** Variables: the Project's own, composed by the caller, a value edited in its dialog. */
 export const Variables: Story = {
   args: { defaultSection: 'variables' },
   play: async ({ canvasElement }) => {
     const panel = panelOf(canvasElement)
     await expect(panel.getByText('DATABASE_URL')).toBeVisible()
+
+    await userEvent.click(panel.getByRole('button', { name: 'Edit PORT' }))
+    const inside = within(await waitFor(() => within(document.body).getByRole('dialog')))
+    await expect(inside.getByRole('heading', { name: 'Edit variable' })).toBeInTheDocument()
+    const value = inside.getByRole('textbox', { name: 'Value' })
+    await userEvent.clear(value)
+    await userEvent.type(value, '4000')
+    await userEvent.click(inside.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    await expect(panel.getByText('4000')).toBeVisible()
   },
 }
 
