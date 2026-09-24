@@ -24,7 +24,16 @@ import {
   type FakeScript,
   type FakeStep,
 } from '../../src/engine/agents/fake.ts'
-import { MODEL_OPTION, NOTES, READ_ANSWER, VERSION, modelOption, turnOf } from './script.ts'
+import {
+  MODEL_OPTION,
+  NOTES,
+  PROPOSAL,
+  PROPOSE_ANSWER,
+  READ_ANSWER,
+  VERSION,
+  modelOption,
+  turnOf,
+} from './script.ts'
 
 // The version is the first thing the machine is asked, and it is asked of the command itself:
 // discovery starts it with `--version` before any session exists.
@@ -84,6 +93,14 @@ const script: FakeScript = {
       return [
         { does: 'uses', call: 'fs_read', arguments: { path: NOTES } },
         { does: 'says', text: READ_ANSWER, messageId: `read-${RUN}-${String(turn)}` },
+      ]
+    }
+    // A prompt that names the proposed command is a proposal through Hemera's own tool, then an
+    // answer: the catalogue is the human's to write (D8-11).
+    if (asked.includes(PROPOSAL.name)) {
+      return [
+        { does: 'uses', call: 'commands_propose', arguments: { ...PROPOSAL } },
+        { does: 'says', text: PROPOSE_ANSWER, messageId: `propose-${RUN}-${String(turn)}` },
       ]
     }
     const said = turnOf(turn + (continued() ? 1 : 0))

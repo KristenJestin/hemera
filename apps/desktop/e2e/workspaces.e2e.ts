@@ -12,6 +12,9 @@
  * creation dialog is the Spec panel's (D8-12), which waits for the Spec lot. Everything after
  * that is read from the window: the settings page shows it, its steps, its services.
  *
+ * The agent is the suite's fake one (`agent/program.ts`): a turn that names `seed` proposes it for
+ * the catalogue through Hemera's `commands_propose`, which only the human's click writes.
+ *
  * Each suite is named after the scenario of the issue's Spec it covers.
  */
 
@@ -25,7 +28,7 @@ import { $, browser, expect } from '@wdio/globals'
 import { git, repository } from '../tests/repositories.ts'
 import { e2eDataOf } from '../wdio.conf.ts'
 import { fakeWorkspace } from './agent/install.ts'
-import { AGENT, ANSWERS, MODELS } from './agent/script.ts'
+import { AGENT, ANSWERS, MODELS, PROPOSAL, PROPOSE_ANSWER } from './agent/script.ts'
 import { addProject, awaits, choose, control, fill, press, pressTab, shows, write } from './hand.ts'
 
 /** The folder of `main`, which holds both repositories; kept for the reason `install.ts` gives. */
@@ -42,6 +45,9 @@ const E2E_DATA = e2eDataOf('workspaces.e2e.ts')
  * and nothing answers there, which is the "starting" the scenario is about (D8-09).
  */
 const GO = join(tmpdir(), 'hemera-e2e-workspaces-go')
+
+/** A one-off line, run from the Commands panel; a one-off is named after its first word. */
+const ONCE = `node -e "console.log('once')"`
 
 /** The port `dev` publishes, free when the suite starts; both instances publish it. */
 let port = 0
@@ -154,6 +160,15 @@ async function sessionCount(): Promise<number> {
   return await browser.execute(async (id: string) => {
     const sessions = await window.hemera.invoke('sessions.list', { projectId: id })
     return sessions.length
+  }, project)
+}
+
+/** The names the Project's catalogue holds, asked of the engine. */
+async function catalogue(): Promise<string[]> {
+  const project = await projectId()
+  return await browser.execute(async (id: string) => {
+    const commands = await window.hemera.invoke('commands.list', { projectId: id })
+    return commands.map((one) => one.name)
   }, project)
 }
 
@@ -409,5 +424,57 @@ describe('Stopping one instance leaves the other running', () => {
     // Put away, so the port is free again once the suite ends.
     await press('Stop dev in main')
     await awaits('No service is running')
+  })
+})
+
+describe('A proposal enters the catalogue only when accepted', () => {
+  it('shows the proposal in the thread, and writes the catalogue on Accept only', async () => {
+    await press('Serve the app in main.')
+    await browser.pause(900)
+    await write(`Keep the ${PROPOSAL.name} command, please.`)
+    await press('Send')
+    await awaits(PROPOSE_ANSWER)
+
+    const proposal = `section[aria-label="Proposed command ${PROPOSAL.name}"]`
+    expect(await $(proposal).isExisting()).toBe(true)
+    // Proposed is not added: the catalogue is the human's to write (D8-11).
+    expect(await catalogue()).not.toContain(PROPOSAL.name)
+
+    await $(proposal).$('button=Accept').click()
+    await awaitsIn(proposal, 'Added to the catalogue')
+
+    await press('Project settings')
+    await browser.pause(600)
+    expect(await $(`button[aria-label="Remove ${PROPOSAL.name}"]`).isExisting()).toBe(true)
+  })
+})
+
+describe('A one-off execution stays out of the catalogue', () => {
+  it('runs a line from the Commands panel as a one-off, and the catalogue is unchanged', async () => {
+    await press('Serve the app in main.')
+    await browser.pause(900)
+    await openCommands()
+    const held = await catalogue()
+    await runLine(ONCE)
+    await awaitsIn('[role="dialog"]', 'Exited 0')
+    expect(await textOf('[role="dialog"]')).toContain('One-off')
+    expect(await catalogue()).toEqual(held)
+  })
+})
+
+describe('Add to catalogue', () => {
+  it('keeps the one-off in the catalogue on the click, under its first word', async () => {
+    await $('[role="dialog"]').$('button*=Add to catalogue').click()
+    await browser.waitUntil(async () => (await catalogue()).includes('node'), {
+      timeout: 10_000,
+      interval: 200,
+      timeoutMsg: 'the one-off never entered the catalogue',
+    })
+    await browser.keys('Escape')
+    await browser.pause(400)
+
+    await press('Project settings')
+    await browser.pause(600)
+    expect(await $('button[aria-label="Remove node"]').isExisting()).toBe(true)
   })
 })
