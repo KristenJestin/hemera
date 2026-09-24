@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
-import { DELIVERY_MARKER, contextUri } from '@hemera/core'
+import { DEFINE_MISSION_BRIEF, DELIVERY_MARKER, contextUri, readerLine } from '@hemera/core'
 
 import { AgentRuntime, NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
@@ -419,5 +419,37 @@ describe('A human edit is recorded and reaches the agent', () => {
     expect(thread.filter((entry) => entry.role === 'user').map((entry) => entry.body)).toEqual([
       'First turn.',
     ])
+  })
+})
+
+describe('A Session that takes the write right is briefed as the writer at the next safe point', () => {
+  test('a reader briefed as one takes the right while no turn runs, and is handed the writer brief at once', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'hemera-request-workspace-'))
+    const { sessionId, specId } = await defined(workspace)
+    // A second Session reads the draft, and its agent was briefed as a reader.
+    const readerAgent = fakeAgent()
+    const reader = await running(
+      Effect.gen(function* () {
+        const opened = yield* (yield* Specs).openSession({ specId, provider: 'claude' })
+        yield* (yield* AgentRuntime).prompt(opened.session.id, 'Reading along.')
+        const { spec } = yield* (yield* Specs).read(specId)
+        const writer = yield* (yield* Sessions).one(sessionId)
+        return { id: opened.session.id, key: spec.key, writerTitle: writer.session.title }
+      }),
+      readerAgent,
+    )
+    const agent = fakeAgent()
+
+    await sentWhileIdle(reader.id, 'specs.transferWrite', { specId, sessionId: reader.id }, agent)
+    rmSync(workspace, { recursive: true, force: true })
+
+    expect(
+      handedAt(readerAgent, 0, contextUri('brief'))?.startsWith(
+        readerLine(reader.key, reader.writerTitle),
+      ),
+    ).toBe(true)
+    // Taken over, it is briefed again at once, as the writer: no reader line any more.
+    expect(agent.answers.prompts).toEqual([DELIVERY_MARKER])
+    expect(handedAt(agent, 0, contextUri('brief'))?.startsWith(DEFINE_MISSION_BRIEF)).toBe(true)
   })
 })

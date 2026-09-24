@@ -2,14 +2,14 @@
  * What a `define` Session's agent is handed of its Spec at a safe point (D7-09, onto D6-08).
  *
  * The mission brief does not ride the prompt: it is a delivery of its own, handed over at the
- * first safe point of the Session, again whenever the phase in focus is not the one the last brief
- * was composed for, and again to an agent whose own session was opened afresh or rebuilt, which
- * holds none. Between two briefs, what a human wrote into a section and answered in the chat goes
+ * first safe point of the Session, again whenever the revision, the phase in focus or the
+ * Session's part — writer or reader — is not what the last brief was composed for, and again to an
+ * agent whose own session was opened afresh or rebuilt, which holds none. Between two briefs, what a human wrote into a section and answered in the chat goes
  * the same way, as an `edit` and an `answer` delivery: everything since the agent was last told,
  * in one delivery, a section edited twice listed once as it now reads. Never as a human message.
  *
- * Which phase the last brief was composed for is its `context_deliveries` row: a `brief` row's path
- * is that phase. The rows and `briefed_at` are written together once the agent took the delivery
+ * What the last brief was composed for is its `context_deliveries` row: a `brief` row's path names
+ * the phase, the revision and the part (`briefKey`). The rows and `briefed_at` are written together once the agent took the delivery
  * (Decided 17), `briefed_at` moving to the moment it was composed: a delivery the agent did not
  * take leaves everything for the next safe point, and what was written meanwhile is listed then.
  */
@@ -38,6 +38,17 @@ export interface Brief {
   block: string
   /** The phase in focus, which the folded entry is titled with. */
   phase: PhaseId | null
+  /** What it was composed for, which the next brief is measured against (`briefKey`). */
+  key: string
+}
+
+/**
+ * What a brief is composed for: the phase in focus, the revision and whether the Session writes
+ * or reads. A change of any of the three is a brief to hand over again — a Rework back on the
+ * phase last briefed is a new revision, and a reader that took the write right writes now.
+ */
+export function briefKey(phase: PhaseId | null, revision: number, reads: boolean): string {
+  return `${phase ?? 'no phase'} · revision ${revision} · ${reads ? 'reader' : 'writer'}`
 }
 
 /** What waits for a `define` Session's agent: a brief, or the human edits and answers since. */
@@ -120,7 +131,13 @@ function composed(sessionId: string, holdsNone: boolean) {
         .limit(1)
         .pipe(Effect.mapError(failed('reading the last brief')))
 
-      if (!holdsNone && last[0]?.path === (phase ?? '')) {
+      // A reader is told it reads, and who writes, so its agent does not try writes that will be
+      // refused (Decided 17). Every Spec is born with a writer (Decided 20).
+      const writer = snapshot.spec.writerSessionId
+      const writerOther = writer === sessionId ? null : writer
+      const key = briefKey(phase, snapshot.revision.number, writerOther !== null)
+
+      if (!holdsNone && last[0]?.path === key) {
         if (humanEdits.length === 0 && answers.length === 0) return null
         const between: SpecDelivery = {
           brief: null,
@@ -137,18 +154,13 @@ function composed(sessionId: string, holdsNone: boolean) {
         return between
       }
 
-      // A reader is told it reads, and who writes, so its agent does not try writes that will be
-      // refused (Decided 17).
-      const writer = snapshot.spec.writerSessionId
-      // Every Spec is born with a writer (Decided 20).
       const readsFrom =
-        writer === sessionId || writer === null
-          ? undefined
-          : (yield* sessionRow(transaction, writer)).title
+        writerOther === null ? undefined : (yield* sessionRow(transaction, writerOther)).title
       const brief: SpecDelivery = {
         brief: {
           block: composeBrief({ snapshot, focus: phase, humanEdits, answers, readsFrom }),
           phase,
+          key,
         },
         edits: null,
         answers: null,
@@ -160,8 +172,8 @@ function composed(sessionId: string, holdsNone: boolean) {
 }
 
 /**
- * The agent took the delivery: what it listed is not listed again, and a brief's phase is the one
- * the next is measured against (Decided 17). One row per kind it carried, in the same transaction.
+ * The agent took the delivery: what it listed is not listed again, and a brief's key is what the
+ * next is measured against (Decided 17). One row per kind it carried, in the same transaction.
  */
 export function briefed(sessionId: string, delivery: SpecDelivery) {
   return mutate('marking the brief', (transaction) =>
@@ -173,7 +185,7 @@ export function briefed(sessionId: string, delivery: SpecDelivery) {
         .pipe(Effect.mapError(failed('marking the brief')))
       const given: { kind: ContextDeliveryKind; path: string; text: string }[] = []
       if (delivery.brief !== null) {
-        given.push({ kind: 'brief', path: delivery.brief.phase ?? '', text: delivery.brief.block })
+        given.push({ kind: 'brief', path: delivery.brief.key, text: delivery.brief.block })
       }
       if (delivery.edits !== null) given.push({ kind: 'edit', path: '', text: delivery.edits.text })
       if (delivery.answers !== null) {

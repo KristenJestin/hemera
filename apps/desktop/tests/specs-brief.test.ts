@@ -32,7 +32,7 @@ import { briefFor } from '#engine/specs/brief.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { Database } from '#engine/storage/database.ts'
 import { application, aSession, gated, heldInThread, threadOf } from './application.ts'
-import { humanOf, shaped, write } from './specs-harness.ts'
+import { frozen, humanOf, shaped, write } from './specs-harness.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -133,7 +133,10 @@ describe('The brief is part of the turn, never a human message', () => {
 
         const provided = yield* (yield* AgentContext).provided(sessionId)
         expect(provided.filter((one) => one.kind === 'brief')).toEqual([
-          expect.objectContaining({ path: 'shape', reached: 'delivery_prompt' }),
+          expect.objectContaining({
+            path: 'shape · revision 1 · writer',
+            reached: 'delivery_prompt',
+          }),
         ])
       }),
     )
@@ -395,6 +398,47 @@ describe("A reader's brief says who writes", () => {
         const opening = `${readerLine(spec.key, 'Shape the export')}\n\n${DEFINE_MISSION_BRIEF}`
         expect(read?.startsWith(opening)).toBe(true)
         expect(written?.startsWith(DEFINE_MISSION_BRIEF)).toBe(true)
+      }),
+    )
+  })
+})
+
+describe('A Rework is briefed even when the focus is the phase last briefed', () => {
+  test('a Spec finished, frozen and reworked between two turns is briefed on its new revision, back on shape', async () => {
+    const agent = fakeAgent()
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        const runtime = yield* AgentRuntime
+        const specs = yield* Specs
+        yield* runtime.prompt(sessionId, 'First turn.')
+
+        // Everything happens before the next safe point: the three phases, the attestation, the
+        // click and the Rework. The focus is back on shape, the phase the last brief was for.
+        const ready = yield* frozen(specId, sessionId)
+        yield* specs.reopen({
+          specId,
+          expectedRevisionId: ready.revision.id,
+          reason: 'The export needs a second format.',
+          sessionId,
+        })
+        yield* runtime.prompt(sessionId, 'Second turn.')
+
+        expect(agent.answers.prompts).toEqual([
+          DELIVERY_MARKER,
+          'First turn.',
+          DELIVERY_MARKER,
+          'Second turn.',
+        ])
+        const reworked = deliveriesTo(agent)[1]?.get(contextUri('brief')) ?? ''
+        expect(reworked.startsWith(`${DEFINE_MISSION_BRIEF}\n\n${PHASE_BRIEFS.shape}`)).toBe(true)
+        expect(reworked).toContain('Status: draft · Revision: 2')
+        const provided = yield* (yield* AgentContext).provided(sessionId)
+        expect(provided.filter((one) => one.kind === 'brief').map((one) => one.path)).toEqual([
+          'shape · revision 1 · writer',
+          'shape · revision 2 · writer',
+        ])
       }),
     )
   })

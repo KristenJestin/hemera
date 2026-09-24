@@ -368,7 +368,12 @@ export function answer(
       yield* runtime.specChanged(decision.argument.specId)
       return answered
     }
-    if (decision.name === 'specs.markReady') return yield* specs.markReady(decision.argument)
+    if (decision.name === 'specs.markReady') {
+      // Frozen: the agents defining the Spec are told at their next safe point.
+      const frozen = yield* specs.markReady(decision.argument)
+      yield* runtime.specChanged(decision.argument.specId)
+      return frozen
+    }
     if (decision.name === 'specs.reopen') {
       // A Rework makes the phases stale: the brief of the one back in focus goes the same way.
       const reopened = yield* specs.reopen(decision.argument)
@@ -376,8 +381,11 @@ export function answer(
       return reopened
     }
     if (decision.name === 'specs.transferWrite') {
-      // Never under a turn the writer is running (Decided 14).
-      return yield* specs.transferWrite(decision.argument, runtime.running)
+      // Never under a turn the writer is running (Decided 14). Both Sessions are briefed again
+      // at their next safe point, the one that took the right as the writer (D7-11).
+      const taken = yield* specs.transferWrite(decision.argument, runtime.running)
+      yield* runtime.specChanged(decision.argument.specId)
+      return taken
     }
     if (decision.name === 'specs.buffers.read') {
       return yield* specs.buffers.read(decision.argument.specId)
