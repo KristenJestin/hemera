@@ -26,6 +26,7 @@ import type {
   EmptyTitleError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
+  InvalidVariableKeyError,
   NoAgentError,
 } from '@hemera/core'
 
@@ -44,7 +45,6 @@ import {
 } from './commands/panel.ts'
 import { Commands, type UnknownCommandError, type UnknownRunError } from './commands/service.ts'
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
-import type { Variables } from './workspaces/variables.ts'
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
@@ -53,6 +53,15 @@ import { Sessions, type UnknownSessionError } from './sessions.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
+import type { UnknownWorkspaceError } from './workspaces/described.ts'
+import { Preparation, type PreparationRunningError } from './workspaces/preparation.ts'
+import { Recipe, type RecipeRefusedError } from './workspaces/recipe.ts'
+import { Variables } from './workspaces/variables.ts'
+import {
+  type CleanupRefusedError,
+  type CreationRefusedError,
+  Workspaces,
+} from './workspaces/workspaces.ts'
 
 /**
  * The options an agent announced, in the page's words.
@@ -158,6 +167,9 @@ export function answer(
   | Commands
   | Context
   | Variables
+  | Workspaces
+  | Preparation
+  | Recipe
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -326,6 +338,69 @@ export function answer(
     // What a Session was provided, may consult, and keeps to its agent (D6-10).
     if (decision.name === 'context.read') return yield* contextOf(decision.argument.sessionId)
 
+    // The Workspaces of a Project, as its settings and the Spec's creation dialog ask for them
+    // (D8-01, D8-02, D8-04, D8-14, D8-15).
+    const workspaces = yield* Workspaces
+    if (decision.name === 'workspaces.list') {
+      return yield* workspaces.list(decision.argument.projectId)
+    }
+    if (decision.name === 'workspaces.plan') {
+      const { projectId, key, slug } = decision.argument
+      return yield* workspaces.plan(projectId, key, slug)
+    }
+    if (decision.name === 'workspaces.create') {
+      const { projectId, ...draft } = decision.argument
+      return yield* workspaces.create(projectId, draft)
+    }
+    if (decision.name === 'workspaces.createOnFolder') {
+      const { projectId, path, name } = decision.argument
+      return yield* workspaces.createOnFolder(projectId, path, name)
+    }
+    if (decision.name === 'workspaces.status') return yield* workspaces.status(decision.argument.id)
+    if (decision.name === 'workspaces.cleanup') {
+      return yield* workspaces.cleanup(decision.argument.id)
+    }
+    // A preparation is begun and not awaited: it can take minutes, and the window follows it
+    // through the `workspace` event (D8-05).
+    const preparation = yield* Preparation
+    if (decision.name === 'preparation.steps') {
+      return yield* preparation.steps(decision.argument.workspaceId)
+    }
+    if (decision.name === 'preparation.prepare') {
+      return yield* preparation.begin(decision.argument.workspaceId, false)
+    }
+    if (decision.name === 'preparation.resume') {
+      return yield* preparation.begin(decision.argument.workspaceId, true)
+    }
+    // The Project's recipe (D8-05) and its variables, overridden per Workspace (D8-06).
+    const recipe = yield* Recipe
+    if (decision.name === 'recipe.list') return yield* recipe.list(decision.argument.projectId)
+    if (decision.name === 'recipe.add') {
+      const { projectId, ...edit } = decision.argument
+      return yield* recipe.add(projectId, edit)
+    }
+    if (decision.name === 'recipe.remove') {
+      const { projectId, id } = decision.argument
+      return yield* recipe.remove(projectId, id)
+    }
+    if (decision.name === 'recipe.move') {
+      const { projectId, id, direction } = decision.argument
+      return yield* recipe.move(projectId, id, direction)
+    }
+    const variables = yield* Variables
+    if (decision.name === 'variables.list') {
+      const { projectId, workspaceId } = decision.argument
+      return yield* variables.list(projectId, workspaceId)
+    }
+    if (decision.name === 'variables.set') {
+      const { projectId, workspaceId, key, value } = decision.argument
+      return yield* variables.set(projectId, workspaceId, key, value)
+    }
+    if (decision.name === 'variables.remove') {
+      const { projectId, workspaceId, key } = decision.argument
+      return yield* variables.remove(projectId, workspaceId, key)
+    }
+
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
   })
@@ -360,3 +435,9 @@ export type Refusal =
   | UnknownRunError
   | NothingToRunError
   | UnreadableInstructionsError
+  | UnknownWorkspaceError
+  | CreationRefusedError
+  | CleanupRefusedError
+  | PreparationRunningError
+  | RecipeRefusedError
+  | InvalidVariableKeyError

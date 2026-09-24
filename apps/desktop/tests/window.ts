@@ -50,7 +50,10 @@ import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { toolServerLayer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
+import { hostLinks, preparationLayer } from '#engine/workspaces/preparation.ts'
+import { recipeLayer } from '#engine/workspaces/recipe.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { SHIPPED, VERSION, besideTheAgent, machine } from './application.ts'
 
@@ -108,7 +111,15 @@ export async function openWindow(
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(variablesLayer),
   )
+  // The Workspaces of the Projects, made under the data folder, over the machine's `git`.
+  const workspaces = preparationLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer)),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
+    Layer.provide(hostLinks),
+    Layer.provide(gitLayer()),
+  )
   const services = runtimeLayer.pipe(
+    Layer.provideMerge(workspaces),
     Layer.provideMerge(tools),
     Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),
     Layer.provideMerge(journalLayer),

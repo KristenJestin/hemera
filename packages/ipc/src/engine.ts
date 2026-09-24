@@ -30,6 +30,17 @@ import {
   commandTypeSchema,
   contextViewSchema,
 } from './tools.ts'
+import {
+  recipeKindSchema,
+  recipeScopeSchema,
+  recipeStepSchema,
+  repositoryStateSchema,
+  variableSchema,
+  workspacePlanSchema,
+  workspaceSchema,
+  workspaceStepSchema,
+  worktreeSchema,
+} from './workspaces.ts'
 
 /**
  * Which build this is, and therefore which data folder it opens.
@@ -591,6 +602,112 @@ export const ENGINE_REQUESTS = {
   'context.read': {
     arguments: z.object({ sessionId: z.string() }),
     response: contextViewSchema,
+  },
+
+  // The Workspaces of a Project (D8-01, D8-02): listed `main` first, planned and created from
+  // the plan the user edited (D8-04), made on a folder the user picked, observed through Git
+  // when shown (D8-15), and cleaned up on a click (D8-14).
+  'workspaces.list': {
+    arguments: z.object({ projectId: z.string() }),
+    response: z.array(workspaceSchema),
+  },
+  'workspaces.plan': {
+    // `key` and `slug` are the Spec's: the branch proposed is `<prefix>/<key>-<slug>` (D8-04).
+    arguments: z.object({ projectId: z.string(), key: z.string(), slug: z.string() }),
+    response: workspacePlanSchema,
+  },
+  'workspaces.create': {
+    // Every check runs before anything is written, and one that fails refuses the whole
+    // creation, naming it; what comes back is the Workspace `preparing`, nothing on disk (D8-04).
+    arguments: z.object({
+      projectId: z.string(),
+      specId: z.string().nullable(),
+      name: z.string(),
+      repositories: z.array(worktreeSchema),
+    }),
+    response: workspaceSchema,
+  },
+  'workspaces.createOnFolder': {
+    // `ready` at once, with no worktree and no step; named after the folder unless named (D8-02).
+    arguments: z.object({ projectId: z.string(), path: z.string(), name: z.string().optional() }),
+    response: workspaceSchema,
+  },
+  'workspaces.status': {
+    arguments: z.object({ id: z.string() }),
+    response: z.array(repositoryStateSchema),
+  },
+  'workspaces.cleanup': {
+    arguments: z.object({ id: z.string() }),
+    response: workspaceSchema,
+  },
+
+  // The preparation of a Workspace (D8-05). `prepare` and `resume` answer at once with the steps
+  // as they stand and run in the engine: a preparation can take minutes, and the window follows
+  // it through the `workspace` event. One already running is refused by name.
+  'preparation.steps': {
+    arguments: z.object({ workspaceId: z.string() }),
+    response: z.array(workspaceStepSchema),
+  },
+  'preparation.prepare': {
+    arguments: z.object({ workspaceId: z.string() }),
+    response: z.array(workspaceStepSchema),
+  },
+  'preparation.resume': {
+    arguments: z.object({ workspaceId: z.string() }),
+    response: z.array(workspaceStepSchema),
+  },
+
+  // The Project's recipe, which each dedicated Workspace is prepared from (D8-05). Every change
+  // answers the recipe as it now is.
+  'recipe.list': {
+    arguments: z.object({ projectId: z.string() }),
+    response: z.array(recipeStepSchema),
+  },
+  'recipe.add': {
+    arguments: z.object({
+      projectId: z.string(),
+      kind: recipeKindSchema,
+      path: z.string().nullable(),
+      scope: recipeScopeSchema,
+      commandId: z.string().nullable(),
+    }),
+    response: z.array(recipeStepSchema),
+  },
+  'recipe.remove': {
+    arguments: z.object({ projectId: z.string(), id: z.string() }),
+    response: z.array(recipeStepSchema),
+  },
+  'recipe.move': {
+    arguments: z.object({
+      projectId: z.string(),
+      id: z.string(),
+      direction: z.enum(['up', 'down']),
+    }),
+    response: z.array(recipeStepSchema),
+  },
+
+  // The variables of a Project, and those a Workspace sets over them (D8-06): `workspaceId` null
+  // is the Project's own scope.
+  'variables.list': {
+    arguments: z.object({ projectId: z.string(), workspaceId: z.string().nullable() }),
+    response: z.array(variableSchema),
+  },
+  'variables.set': {
+    arguments: z.object({
+      projectId: z.string(),
+      workspaceId: z.string().nullable(),
+      key: z.string(),
+      value: z.string(),
+    }),
+    response: variableSchema,
+  },
+  'variables.remove': {
+    arguments: z.object({
+      projectId: z.string(),
+      workspaceId: z.string().nullable(),
+      key: z.string(),
+    }),
+    response: z.void(),
   },
 } as const
 

@@ -111,6 +111,25 @@ export const CHANNELS = {
   'commands.output': ENGINE_REQUESTS['commands.output'],
   'context.read': ENGINE_REQUESTS['context.read'],
 
+  // The Workspaces of a Project, their preparation, the Project's recipe and its variables,
+  // relayed the same way: a worktree, a step and a variable are the engine's (D8-01 to D8-06).
+  'workspaces.list': ENGINE_REQUESTS['workspaces.list'],
+  'workspaces.plan': ENGINE_REQUESTS['workspaces.plan'],
+  'workspaces.create': ENGINE_REQUESTS['workspaces.create'],
+  'workspaces.createOnFolder': ENGINE_REQUESTS['workspaces.createOnFolder'],
+  'workspaces.status': ENGINE_REQUESTS['workspaces.status'],
+  'workspaces.cleanup': ENGINE_REQUESTS['workspaces.cleanup'],
+  'preparation.steps': ENGINE_REQUESTS['preparation.steps'],
+  'preparation.prepare': ENGINE_REQUESTS['preparation.prepare'],
+  'preparation.resume': ENGINE_REQUESTS['preparation.resume'],
+  'recipe.list': ENGINE_REQUESTS['recipe.list'],
+  'recipe.add': ENGINE_REQUESTS['recipe.add'],
+  'recipe.remove': ENGINE_REQUESTS['recipe.remove'],
+  'recipe.move': ENGINE_REQUESTS['recipe.move'],
+  'variables.list': ENGINE_REQUESTS['variables.list'],
+  'variables.set': ENGINE_REQUESTS['variables.set'],
+  'variables.remove': ENGINE_REQUESTS['variables.remove'],
+
   /**
    * The four the main process answers itself, because each of them is something only it can do.
    *

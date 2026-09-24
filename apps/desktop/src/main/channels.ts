@@ -212,6 +212,24 @@ const RELAYED = [
   'commands.stop',
   'commands.output',
   'context.read',
+  // The Workspaces of a Project, their preparation, the recipe and the variables: rows, worktrees
+  // and steps the engine holds and runs (D8-01 to D8-06).
+  'workspaces.list',
+  'workspaces.plan',
+  'workspaces.create',
+  'workspaces.createOnFolder',
+  'workspaces.status',
+  'workspaces.cleanup',
+  'preparation.steps',
+  'preparation.prepare',
+  'preparation.resume',
+  'recipe.list',
+  'recipe.add',
+  'recipe.remove',
+  'recipe.move',
+  'variables.list',
+  'variables.set',
+  'variables.remove',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

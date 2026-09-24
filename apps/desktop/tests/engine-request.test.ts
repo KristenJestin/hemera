@@ -6,11 +6,13 @@
  * follows an accepted one is a service standing on a database made for the test.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
+
+import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
 
 import { NoNotices, runtimeLayer } from '#engine/agents/runtime.ts'
 import type { AgentRuntime } from '#engine/agents/runtime.ts'
@@ -37,7 +39,13 @@ import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
+import { type Preparation, hostLinks, preparationLayer } from '#engine/workspaces/preparation.ts'
+import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
+import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
+
+import { until } from './application.ts'
+import { repository } from './repositories.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /**
@@ -76,6 +84,9 @@ function running<A, E>(
     | Commands
     | Context
     | Variables
+    | Workspaces
+    | Preparation
+    | Recipe
   >,
 ) {
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
@@ -130,6 +141,9 @@ function running<A, E>(
     | Commands
     | Context
     | Variables
+    | Workspaces
+    | Preparation
+    | Recipe
     | Database
     | SqliteClient
   > = Layer.mergeAll(
@@ -149,6 +163,16 @@ function running<A, E>(
       Layer.provide(agents),
       Layer.provide(heldWordsLayer),
       Layer.provide(agentDirectoriesLayer(dataFolder)),
+    ),
+    // The Workspaces of the Projects, made under the data folder over the machine's `git`, and
+    // prepared in the scope of these services: what a background preparation runs in.
+    preparationLayer.pipe(
+      Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer)),
+      Layer.provide(variablesLayer),
+      Layer.provide(gitLayer()),
+      Layer.provide(hostLinks),
+      Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
+      Layer.provide(agents),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
 
@@ -300,5 +324,187 @@ describe('Une erreur typée traverse la frontière', () => {
 
     expect(failed).toBeInstanceOf(DatabaseError)
     if (failed instanceof DatabaseError) expect(failed.doing).toBe('reading the preferences')
+  })
+})
+
+/**
+ * Decides a message and answers it, inside a program that runs several: what a background
+ * preparation runs in is the scope of the services that program stands on.
+ */
+function asked<K extends EngineRequestName>(name: K, argument: EngineArguments<K>) {
+  const decision = decideRequest(name, argument)
+  if (!decision.accepted) return Effect.die(decision.reason)
+  return answer(decision).pipe(
+    // SAFETY: the answer of the use case `name`, which the router answers by that very name.
+    Effect.map((value) => value as EngineResponse<K>),
+  )
+}
+
+describe('Every Workspace channel reaches its use case', () => {
+  let main: string
+
+  beforeEach(() => {
+    main = join(dataFolder, 'main')
+    repository(join(main, 'sources', 'api'))
+    writeFileSync(join(main, '.env'), 'PORT=3000\n')
+    mkdirSync(join(main, 'docs'))
+    mkdirSync(join(dataFolder, 'spike'))
+  })
+
+  test('a dedicated Workspace is planned, created, prepared, observed and cleaned up', async () => {
+    const seen = await running(
+      Effect.gen(function* () {
+        const created = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: main,
+        })
+        const project = yield* asked('repositories.add', {
+          id: created.id,
+          version: created.version,
+          relativePath: './sources/api',
+        })
+        const projectId = project.id
+
+        // The recipe: two steps added, the second moved above the first, then taken out.
+        yield* asked('recipe.add', {
+          projectId,
+          kind: 'copy',
+          path: '.env',
+          scope: 'root',
+          commandId: null,
+        })
+        const added = yield* asked('recipe.add', {
+          projectId,
+          kind: 'link',
+          path: 'docs',
+          scope: 'root',
+          commandId: null,
+        })
+        const moved = yield* asked('recipe.move', {
+          projectId,
+          id: added[1]?.id ?? '',
+          direction: 'up',
+        })
+        yield* asked('recipe.remove', { projectId, id: moved[0]?.id ?? '' })
+        const recipe = yield* asked('recipe.list', { projectId })
+
+        const plan = yield* asked('workspaces.plan', {
+          projectId,
+          key: 'HEM-7',
+          slug: 'login-form',
+        })
+        const workspace = yield* asked('workspaces.create', {
+          projectId,
+          specId: null,
+          name: plan.name,
+          repositories: plan.repositories.map((one) => ({
+            relativePath: one.relativePath,
+            base: one.base ?? '',
+            branch: one.branch,
+          })),
+        })
+        const begun = yield* asked('preparation.prepare', { workspaceId: workspace.id })
+        // A second preparation while the first runs is still answered as a refusal.
+        const twice = yield* Effect.flip(
+          asked('preparation.prepare', { workspaceId: workspace.id }),
+        )
+        const listed = yield* until(asked('workspaces.list', { projectId }), (all) =>
+          all.some((one) => one.id === workspace.id && one.state === 'ready'),
+        )
+        const steps = yield* asked('preparation.steps', { workspaceId: workspace.id })
+        const status = yield* asked('workspaces.status', { id: workspace.id })
+
+        yield* asked('variables.set', { projectId, workspaceId: null, key: 'PORT', value: '3000' })
+        const set = yield* asked('variables.set', {
+          projectId,
+          workspaceId: workspace.id,
+          key: 'PORT',
+          value: '3001',
+        })
+        yield* asked('variables.remove', { projectId, workspaceId: null, key: 'PORT' })
+        const variables = {
+          project: yield* asked('variables.list', { projectId, workspaceId: null }),
+          workspace: yield* asked('variables.list', { projectId, workspaceId: workspace.id }),
+        }
+
+        const cleaned = yield* asked('workspaces.cleanup', { id: workspace.id })
+        const resumed = yield* asked('preparation.resume', { workspaceId: workspace.id })
+        const picked = yield* asked('workspaces.createOnFolder', {
+          projectId,
+          path: join(dataFolder, 'spike'),
+        })
+        return {
+          recipe,
+          moved,
+          plan,
+          workspace,
+          begun,
+          twice,
+          listed,
+          steps,
+          status,
+          set,
+          variables,
+          cleaned,
+          resumed,
+          picked,
+        }
+      }),
+    )
+
+    expect(seen.moved.map((step) => step.kind)).toEqual(['link', 'copy'])
+    expect(seen.recipe.map((step) => [step.kind, step.path])).toEqual([['copy', './.env']])
+
+    expect(seen.plan).toMatchObject({ name: 'login-form', gitAvailable: true })
+    expect(seen.plan.repositories).toEqual([
+      expect.objectContaining({ relativePath: './sources/api', branch: 'atlas/HEM-7-login-form' }),
+    ])
+    expect(seen.workspace).toMatchObject({ state: 'preparing', dedicated: true, main: false })
+
+    // Answered at once, before any step ran; the Workspace became ready afterwards.
+    expect(seen.begun.map((step) => [step.kind, step.state])).toEqual([
+      ['worktree', 'pending'],
+      ['copy', 'pending'],
+    ])
+    expect(seen.twice.message).toBe('this Workspace is already being prepared')
+    expect(seen.listed.map((one) => [one.name, one.main])).toEqual([
+      ['main', true],
+      ['login-form', false],
+    ])
+    expect(seen.steps.map((step) => step.state)).toEqual(['done', 'done'])
+    expect(seen.status).toEqual([
+      {
+        relativePath: './sources/api',
+        git: expect.objectContaining({ ok: true, branch: 'atlas/HEM-7-login-form' }),
+      },
+    ])
+
+    expect(seen.set).toEqual({ key: 'PORT', value: '3001', workspaceId: seen.workspace.id })
+    expect(seen.variables.project).toEqual([])
+    expect(seen.variables.workspace).toEqual([seen.set])
+
+    expect(seen.cleaned).toMatchObject({ state: 'cleaned' })
+    expect(seen.resumed).toHaveLength(2)
+    expect(seen.picked).toMatchObject({ name: 'spike', state: 'ready', dedicated: false })
+  })
+
+  test.each([
+    ['workspaces.create', { projectId: 'atlas', specId: null, name: 'login-form' }, 'repositories'],
+    ['preparation.prepare', {}, 'workspaceId'],
+    [
+      'recipe.add',
+      { projectId: 'atlas', kind: 'delete', path: null, scope: 'root', commandId: null },
+      'kind',
+    ],
+    ['variables.set', { projectId: 'atlas', workspaceId: null, key: 'PORT' }, 'value'],
+  ])('%s refuses %o, naming the field', (name, argument, field) => {
+    const decision = decideRequest(name, argument)
+
+    expect(decision.accepted).toBe(false)
+    if (!decision.accepted) {
+      expect(decision.reason).toContain(name)
+      expect(decision.reason).toContain(field)
+    }
   })
 })

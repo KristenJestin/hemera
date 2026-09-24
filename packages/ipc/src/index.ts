@@ -114,3 +114,25 @@ export type {
   Provided,
   RunState,
 } from './tools.ts'
+export {
+  recipeKindSchema,
+  recipeScopeSchema,
+  recipeStepSchema,
+  repositoryStateSchema,
+  variableSchema,
+  workspacePlanSchema,
+  workspaceSchema,
+  workspaceStateSchema,
+  workspaceStepSchema,
+  worktreeSchema,
+} from './workspaces.ts'
+export type {
+  RecipeStep,
+  RepositoryState,
+  Variable,
+  Workspace,
+  WorkspacePlan,
+  WorkspaceState,
+  WorkspaceStep,
+  Worktree,
+} from './workspaces.ts'
