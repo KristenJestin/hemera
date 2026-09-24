@@ -18,7 +18,7 @@ const BODY = Array.from(
 ).join('\n')
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/Disclosure',
   component: Disclosure,
   parameters: { layout: 'padded' },
