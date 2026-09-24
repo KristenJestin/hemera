@@ -460,6 +460,36 @@ export function SessionPage({
   // Which tabs have something to show, which is what the details open on.
   const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
 
+  /**
+   * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
+   * Session has its Spec. A `free` Session has no panel and nothing that offers one: a Spec begins
+   * with the agent's proposal in the thread (D7-07). `build` plugs in here, with the panel of its
+   * tasks, workers and evidence standing in the same `MissionPanel` the Spec stands in.
+   */
+  function missionPanel(): ReactNode {
+    if (session.mission !== 'define' || spec === null || defined === null) return null
+    return (
+      <SpecPanel
+        spec={spec}
+        reader={readerOf(defined, session.id, sessions, running)}
+        // Checked against the version the edit was opened on, which the panel hands back:
+        // an agent may have written the section meanwhile (D7-12).
+        onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
+        onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
+        onDiscardMine={(name) => void discardMine(name)}
+        onSaveStory={(story) => void saveStory(session.id, story)}
+        onGoToQuestion={goToQuestion}
+        onMarkReady={() => void markReady(session.id)}
+        onRework={(reason) => void rework(session.id, reason)}
+        onPickRevision={(revision) => {
+          const current = stored.revisions.find((one) => one.id === defined.spec.currentRevisionId)
+          void selectRevision(revision === current?.number ? null : revision)
+        }}
+        onTakeOver={() => void takeOver(session.id)}
+      />
+    )
+  }
+
   return (
     /*
       One column (review of #40, defect 2): the header, the thread and the composer share one
@@ -638,34 +668,12 @@ export function SessionPage({
         defaultTab={openingTabOf(commandRuns, tabs)}
       />
       {/*
-        A `define` Session has its Spec beside the chat, the working surface the thread gave up
-        width for, where the side column stood before the Session details took its plan and its
-        files into a dialog. A `free` Session has no panel and nothing that offers one: a Spec
-        begins with the agent's proposal in the thread (D7-07). It opens folded to a band beside the
-        chat, and unfolds pushing it aside when the hand or the agent asks (brief revisions 4, 4b).
+        The panel of the Session's mission, beside the chat: the working surface the thread gave
+        up width for, where the side column stood before the Session details took its plan and its
+        files into a dialog. It opens folded to a band beside the chat, and unfolds pushing it
+        aside when the hand or the agent asks (brief revisions 4, 4b).
       */}
-      {session.mission === 'define' && spec !== null && defined !== null && (
-        <SpecPanel
-          spec={spec}
-          reader={readerOf(defined, session.id, sessions, running)}
-          // Checked against the version the edit was opened on, which the panel hands back:
-          // an agent may have written the section meanwhile (D7-12).
-          onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
-          onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
-          onDiscardMine={(name) => void discardMine(name)}
-          onSaveStory={(story) => void saveStory(session.id, story)}
-          onGoToQuestion={goToQuestion}
-          onMarkReady={() => void markReady(session.id)}
-          onRework={(reason) => void rework(session.id, reason)}
-          onPickRevision={(revision) => {
-            const current = stored.revisions.find(
-              (one) => one.id === defined.spec.currentRevisionId,
-            )
-            void selectRevision(revision === current?.number ? null : revision)
-          }}
-          onTakeOver={() => void takeOver(session.id)}
-        />
-      )}
+      {missionPanel()}
     </div>
   )
 }

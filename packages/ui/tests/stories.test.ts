@@ -382,6 +382,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'MissionBrief',
       'SpecQuestion',
       'CreateSpecProposal',
+      // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
+      // and the rail it is fed with.
+      'MissionPanel',
+      'MissionRail',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

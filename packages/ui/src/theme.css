@@ -436,21 +436,20 @@
      is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
   --spacing-dialog-wide: 70vh;
 
-  /* How wide the rail of a Spec stands beside its stage (lot 19, revisions 3, 4 and 4b): wide
-     enough for `Expected outcome` between its glyph and its dot, for `Decompose` and `Showing all`
-     between its glyph and its dot, and for
-     `3/7 · 4 things before ready` on one line at its foot. */
+  /* How wide the rail of a mission panel stands beside its stage (lot 19, revisions 3, 4 and 4b):
+     wide enough for the Spec's `Expected outcome` after its glyph, for `Decompose` and
+     `Show all` after its glyph, and for `3/7 · 4 things before ready` on one line at its foot. */
   --spacing-rail: 13rem;
 
-  /* The Spec panel folded (lot 19, revision 4): the band of the rail's glyphs beside the chat,
-     one glyph, its dot and the margin around them. */
-  --spacing-spec-band: 3rem;
+  /* A mission panel folded (lot 19, revision 4): the band of the rail's glyphs beside the chat,
+     a group's square, the set-in squares of its items and the margin around them. */
+  --spacing-mission-band: 3rem;
 
-  /* The Spec panel unfolded: a share of the Session's row, the container it is asked of. A length
+  /* A mission panel unfolded: a share of the Session's row, the container it is asked of. A length
      of the row rather than a fraction of the panel's own box, because the panel's box is what
      changes while it unfolds: what the panel holds is laid at this width from the first frame,
      so nothing inside it reflows on the way. */
-  --spacing-spec-panel: 45cqw;
+  --spacing-mission-panel: 45cqw;
 
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
@@ -566,16 +565,16 @@
   grid-template-columns: var(--sidebar-current-width, var(--spacing-sidebar)) 1fr;
 }
 
-/* The slot the Spec panel takes in a Session's row (lot 19, revision 4b): the band, the unfolded
-   width, or a width between the two, which the panel writes as `--spec-open` on every frame of a
-   fold — 0 folded, 1 unfolded — so the chat beside it is pushed as it moves. A share and not a
-   length, because the two ends are lengths of different kinds, rems and a share of the row, and
+/* The slot a mission panel takes in a Session's row (lot 19, revision 4b): the band, the unfolded
+   width, or a width between the two, which the panel writes as `--mission-panel-open` on every
+   frame of a fold — 0 folded, 1 unfolded — so the chat beside it is pushed as it moves. A share
+   and not a length, because the two ends are lengths of different kinds, rems and a share of the row, and
    only the browser can put them on one line; at rest it is one of the two tokens exactly, and
    stays so while the window is resized. The fallback is the band, which the panel opens at. */
-@utility spec-slot {
+@utility mission-panel-slot {
   width: calc(
-    var(--spacing-spec-band) + (var(--spacing-spec-panel) - var(--spacing-spec-band)) *
-      var(--spec-open, 0)
+    var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
+      var(--mission-panel-open, 0)
   );
 }
 

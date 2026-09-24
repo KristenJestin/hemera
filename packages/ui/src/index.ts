@@ -357,6 +357,21 @@ export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
 } from './session/resume-fallback-banner.tsx'
+/**
+ * The panel a Session's mission opens beside the chat, and the rail it is fed with: the fold, the
+ * width that pushes the chat, the band; groups of items that say what needs attention. The Spec
+ * panel stands in it; a `build` panel is the next.
+ */
+export { MissionPanel, type MissionPanelProps } from './session/mission-panel.tsx'
+export {
+  MissionRail,
+  type MissionRailGroup,
+  type MissionRailItem,
+  type MissionRailProps,
+  type RailAttention,
+  type RailChoice,
+  type RailIcon,
+} from './session/mission-rail.tsx'
 
 /**
  * The Spec panel of a `define` Session (lot 19, brief revision 4): folded to a band beside the

@@ -89,7 +89,7 @@ function Held({
   const [current, setCurrent] = useState<StageChoice>({ part: initial })
   return (
     <TooltipProvider>
-      <div className={folded ? 'flex h-screen w-spec-band flex-col' : 'flex h-screen'}>
+      <div className={folded ? 'flex h-screen w-mission-band flex-col' : 'flex h-screen'}>
         <SpecRail
           label={label}
           groups={groups}
