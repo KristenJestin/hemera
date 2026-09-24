@@ -1,25 +1,24 @@
 /**
  * A Spec written beside the chat of a `define` Session (designs D7-01, D7-03, D7-07, D7-09,
- * D7-11, D7-12).
+ * D7-11, D7-12, D7-14).
  *
  * One journey, in the order a hand makes it, on one data folder: a `free` Session whose agent
- * proposes a Spec, the proposal accepted, the brief that rides the next turn, a human edit, a
- * question asked and answered in the chat, a conflict applied, and a second Session that reads
- * the draft and takes it over. The restart is `specs.reopened.e2e.ts`, which starts a second
- * instance on the folder this one wrote (`wdio.conf.ts`, `CONTINUED`) and finds the draft, its
- * phases and the text left in a buffer.
+ * proposes a Spec through `spec_propose`, the proposal accepted, the brief handed over before the
+ * next turn, a human edit handed over as it is saved, a question asked and answered in the chat, a
+ * conflict applied, and a second Session that reads the draft and takes it over. The restart is
+ * `specs.reopened.e2e.ts`, which starts a second instance on the folder this one wrote
+ * (`wdio.conf.ts`, `CONTINUED`), finds the draft, its phases and the text left in a buffer, and
+ * takes the Spec to `ready`.
  *
- * Three acts are not a hand's, and say so where they are made:
+ * Two acts are not a hand's, and say so where they are made:
  *
- * - The agent's own writes. The fake agent has no Hemera tools before phase 1b: it proposes the
- *   Spec with its marker line (`agent/script.ts`) and writes nothing in it. What it would write —
- *   a section under the human's open editor, a question — goes through the window's own bridge,
- *   as the human actor the renderer always is, which moves the section's version all the same.
+ * - Some of the agent's writes. The fake agent follows a script fixed when its turn starts, so it
+ *   cannot write on a version it reads during the turn: what it would write under the human's
+ *   open editor, and the question, go through the window's own bridge, as the human actor the
+ *   renderer always is, which moves the section's version all the same. What it writes on its
+ *   own, through `spec_write`, is `specs.reopened.e2e.ts`'s.
  * - The second Session. Nothing in the window lists Specs yet: it is opened on the Spec through
  *   `specs.openSession`, the call such a list would make.
- * - Mark ready. The gate needs every phase declared finished and the agent's attestation, which
- *   only the agent gives (`declarePhase` and `attest` are not on the wire before phase 1b): here
- *   the button is checked absent, and the click is covered by the engine's suites.
  *
  * Each suite is named after the scenario it covers.
  */
@@ -62,6 +61,9 @@ const DEFINING = 'Let us shape the export fix.'
 
 /** What the human writes in `Problem`. */
 const PROBLEM = 'The CSV export leaves the invoice date column empty.'
+
+/** The line the thread says once the human's edit of `Problem` was handed to the agent. */
+const EDIT_HANDED = 'Hemera handed the agent the human edits of problem.'
 
 /** The question asked in the chat, and the option it is answered with. */
 const QUESTION = 'Which date decides the month of an invoice?'
@@ -158,8 +160,14 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
     await awaits(ANSWERS[0])
     await awaits('Create the Spec')
 
-    // The marker line is Hemera's and never the reader's: the message is written without it.
-    expect(await region(THREAD)).not.toContain('hemera:propose-spec')
+    // The agent proposed through Hemera's `spec_propose`: a Hemera call of the thread, wearing
+    // the tool's own mark, and the proposal below it.
+    const proposed = await browser.execute(
+      (thread: string) =>
+        document.querySelector(thread)?.querySelector('[data-mark="propose-spec"]') !== null,
+      THREAD,
+    )
+    expect(proposed).toBe(true)
     expect(await region(PROPOSAL_CARD)).toContain('feature')
     // A `free` Session has no panel, and nothing that offers one but the proposal.
     expect(await region('section[aria-label^="Spec "]')).toBe('')
@@ -218,25 +226,22 @@ describe('A human edit is recorded and reaches the agent', () => {
   })
 
   it('lists the edit in the brief of the next turn', async () => {
+    // No turn runs, so the edit is handed over at once, as a delivery of its own: a line of
+    // Hemera's in the thread, never a message of the user's.
+    await awaits(EDIT_HANDED)
     await write('Is the problem clear now?')
     await press('Send')
-    await browser.waitUntil(async () => (await timesInThread('Mission brief · shape')) === 2, {
+    await browser.waitUntil(async () => (await timesInThread(ANSWERS[1])) === 2, {
       timeout: 20_000,
       interval: 200,
-      timeoutMsg: 'the second brief never came',
+      timeoutMsg: 'the turn after the edit never answered',
     })
     await browser.pause(1500)
-    // The last brief, opened: what the agent was handed this turn.
-    await browser.execute(() => {
-      const briefs = [...document.querySelectorAll('button')].filter((one) =>
-        (one.textContent ?? '').includes('Mission brief · shape'),
-      )
-      briefs.at(-1)?.click()
-    })
-    await browser.pause(700)
-    const thread = await region(THREAD)
-    expect(thread).toContain('Human edits since your last turn')
-    expect(thread).toContain(PROBLEM)
+
+    // The brief is one per phase: `shape` is still the focus, so no second brief came, and the
+    // edit went over once.
+    expect(await timesInThread('Mission brief · shape')).toBe(1)
+    expect(await timesInThread(EDIT_HANDED)).toBe(1)
   })
 })
 
