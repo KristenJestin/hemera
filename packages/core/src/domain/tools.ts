@@ -150,17 +150,15 @@ const READ_ONLY_CODE_TOOLS = [
 /**
  * The tools of a Session, by its mission.
  *
- * A `free` Session is offered the code tools, and not the Spec's: it has none to read or write.
- * A `define` Session produces a Spec and not code (D7-14): it reads the Workspace, never writes
+ * A `free` Session is offered the code tools, and of the Spec's only `spec_propose`: it has no
+ * Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session produces a Spec and not code (D7-14): it reads the Workspace, never writes
  * to it nor runs anything, and writes its Spec through the three Spec tools. `build` has no
  * Session to offer anything to yet.
  */
 export function offeredTools(mission: Mission): readonly ToolName[] {
   switch (mission) {
     case 'free':
-      return TOOL_NAMES.filter(
-        (name) => name !== 'spec_read' && name !== 'spec_write' && name !== 'spec_propose',
-      )
+      return TOOL_NAMES.filter((name) => name !== 'spec_read' && name !== 'spec_write')
     case 'define':
       return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
     case 'build':

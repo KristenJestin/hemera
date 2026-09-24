@@ -499,3 +499,67 @@ describe('Stories, tasks and a question are written through the tool', () => {
     expect(asked).toMatchObject({ role: 'hemera', body: 'Which format first?' })
   })
 })
+
+describe('The agent proposes a Spec through spec_propose in a free Session', () => {
+  test('the proposal entry is written, and nothing else: no Spec, the Session stays free', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'You want the Journal to leave the application.' },
+        uses('spec_propose', { kind: 'spec', title: 'Export the Journal', type: 'feature' }),
+      ],
+    })
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const session = yield* aSessionOn(workspace, 'claude')
+        const entries = yield* turn(session.id)
+        return {
+          entries,
+          specs: yield* (yield* Specs).list(session.projectId),
+          after: (yield* (yield* Sessions).one(session.id)).session,
+        }
+      }),
+    )
+    expect(agent.answers.tools[0]).toContain('spec_propose')
+    expect(agent.answers.used[0]).toMatchObject({ isError: false })
+    const proposals = seen.entries.filter((entry) => entry.kind === 'spec_proposal')
+    expect(proposals).toHaveLength(1)
+    expect(proposals[0]).toMatchObject({ role: 'hemera', body: 'Export the Journal' })
+    expect(JSON.parse(proposals[0]?.payload ?? '{}')).toEqual({
+      title: 'Export the Journal',
+      type: 'feature',
+    })
+    // What the agent said before it proposed is before the proposal in the thread.
+    const said = seen.entries.find((entry) => entry.kind === 'message' && entry.role === 'agent')
+    expect(said?.body).toBe('You want the Journal to leave the application.')
+    expect(said?.seq).toBeLessThan(proposals[0]?.seq ?? 0)
+    expect(seen.specs).toEqual([])
+    expect(seen.after).toMatchObject({ mission: 'free', specId: null })
+  })
+
+  test('a define Session is refused a proposal', async () => {
+    const proposing = fakeAgent({
+      steps: [uses('spec_propose', { kind: 'spec', title: 'Another', type: 'bug' })],
+    })
+    const defined = await toolApplication(dataFolder)(proposing)(
+      Effect.gen(function* () {
+        const { sessionId } = yield* defining
+        return yield* turn(sessionId)
+      }),
+    )
+    expect(proposing.answers.used[0]).toMatchObject({ isError: true })
+    expect(proposing.answers.used[0]?.text).toContain('only a free Session proposes a Spec')
+    expect(defined.some((entry) => entry.kind === 'spec_proposal')).toBe(false)
+  })
+
+  test('a free Session is refused the kinds that need a Spec', async () => {
+    const attesting = fakeAgent({ steps: [uses('spec_propose', { kind: 'ready' })] })
+    await toolApplication(dataFolder)(attesting)(
+      Effect.gen(function* () {
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* turn(session.id)
+      }),
+    )
+    expect(attesting.answers.used[0]).toMatchObject({ isError: true })
+    expect(attesting.answers.used[0]?.text).toContain('it defines none')
+  })
+})

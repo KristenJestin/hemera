@@ -19,7 +19,6 @@ import {
   focusOf,
   nextPhaseStates,
   phaseExit,
-  proposalIn,
   readyGate,
   slugOf,
   specKey,
@@ -534,35 +533,5 @@ describe('Answers to a question', () => {
       'Tabloid',
     )
     expect(answerWords(question())).toBeNull()
-  })
-})
-
-describe('The agent’s proposal in its answer becomes a proposal entry, stripped from the message', () => {
-  test('the marker line gives the title and the type, and is taken out of the text', () => {
-    const answer = [
-      'You want the Journal to leave the application.',
-      '<!-- hemera:propose-spec title="Export the Journal" type="feature" -->',
-      'Shall I write it down as a Spec?',
-    ].join('\n')
-    expect(proposalIn(answer)).toEqual({
-      title: 'Export the Journal',
-      type: 'feature',
-      text: 'You want the Journal to leave the application.\nShall I write it down as a Spec?',
-    })
-  })
-
-  test('the attributes are read in any order, and a marker at the end leaves the text before it', () => {
-    expect(
-      proposalIn(
-        'A crash on save.\n  <!--hemera:propose-spec type="bug" title=" Save crashes "-->',
-      ),
-    ).toEqual({ title: 'Save crashes', type: 'bug', text: 'A crash on save.' })
-  })
-
-  test('no marker, no title or an unknown type proposes nothing', () => {
-    expect(proposalIn('Just an answer.')).toBeNull()
-    expect(proposalIn('<!-- hemera:propose-spec title="" type="bug" -->')).toBeNull()
-    expect(proposalIn('<!-- hemera:propose-spec title="X" type="epic" -->')).toBeNull()
-    expect(proposalIn('Inline <!-- hemera:propose-spec title="X" type="bug" --> text')).toBeNull()
   })
 })

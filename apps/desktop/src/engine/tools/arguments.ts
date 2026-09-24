@@ -17,6 +17,7 @@ import {
   SEARCH_SCAN_BYTES,
   SECTION_NAMES,
   SPEC_PAGE_CHARACTERS,
+  SPEC_TYPES,
   TASK_EXECUTORS,
   type ToolName,
 } from '@hemera/core'
@@ -144,7 +145,7 @@ const LIST_CHARACTERS = SPEC_PAGE_CHARACTERS
 const SPEC_WRITES = ['section', 'stories', 'tasks', 'question'] as const
 
 /** What `spec_propose` hands over. */
-export const PROPOSALS = ['phase_done', 'ready'] as const
+export const PROPOSALS = ['phase_done', 'ready', 'spec'] as const
 
 /**
  * The arguments of every tool, as the agent is told them and as they are read back.
@@ -335,7 +336,7 @@ export const TOOL_ARGUMENTS = {
       kind: z
         .enum(PROPOSALS)
         .describe(
-          'phase_done: declare a phase finished, with a summary; ready: attest the contract is complete, for the user to mark it ready',
+          'phase_done: declare a phase finished, with a summary; ready: attest the contract is complete, for the user to mark it ready; spec: from a free Session, propose the user a Spec to create, with a title and a type',
         ),
       phase: z.enum(PHASE_IDS).optional().describe('with phase_done: the phase declared finished'),
       summary: z
@@ -356,6 +357,8 @@ export const TOOL_ARGUMENTS = {
         .describe(
           'with phase_done: the assumptions and questions still open, as a JSON array of strings',
         ),
+      title: z.string().trim().min(1).max(200).optional().describe('with spec: its title'),
+      type: z.enum(SPEC_TYPES).optional().describe('with spec: feature, bug or maintenance'),
     })
     .superRefine((sent, context) => {
       if (sent.kind === 'phase_done' && (sent.phase === undefined || sent.summary === undefined)) {
@@ -363,6 +366,9 @@ export const TOOL_ARGUMENTS = {
           code: 'custom',
           message: 'phase_done is sent with a phase and a summary',
         })
+      }
+      if (sent.kind === 'spec' && (sent.title === undefined || sent.type === undefined)) {
+        context.addIssue({ code: 'custom', message: 'spec is sent with a title and a type' })
       }
       if (sent.assumptions === undefined) return
       const listed = jsonList(z.string()).safeParse(sent.assumptions)
@@ -397,7 +403,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   spec_read: `Read the Spec this Session defines, rendered as Markdown: its key, type, status and revision, each section with its version as <!-- version: n -->, the stories with their criteria, the tasks, the phases and the open questions. The current revision, or an older one by number, which is read-only. One call returns at most ${SPEC_PAGE_CHARACTERS} characters and ends with the range read as JSON: offset, end, size, truncated and next.`,
   spec_write: `Write the current draft of the Spec this Session defines, and only while this Session holds its write right. Exactly one of: a section, with its whole body and the version you read it at; every story; every task; or a question for the user, asked in the chat. A section that changed since the version you send, a Spec that is not a draft, an older revision, and a Session that does not hold the write right are refused, and nothing is written. Send a key so that a retry after a lost answer does not write twice.`,
   spec_propose:
-    "Hand the Spec this Session defines over to Hemera's checks. phase_done declares a phase finished with a summary, the elements of the Spec that support it and the assumptions still open: Hemera runs the phase's exit checks, and either finishes it and opens the phases that wait on it, or answers what fails and changes nothing. ready attests the contract is complete and executable: the user's Mark ready is what freezes it, never this call. Only while this Session holds the write right.",
+    "Hand the Spec this Session defines over to Hemera's checks. phase_done declares a phase finished with a summary, the elements of the Spec that support it and the assumptions still open: Hemera runs the phase's exit checks, and either finishes it and opens the phases that wait on it, or answers what fails and changes nothing. ready attests the contract is complete and executable: the user's Mark ready is what freezes it, never this call. Both only while this Session holds the write right. spec is for a free Session, which defines no Spec yet: it proposes one, a title and a type, and the user creates it or not.",
 }
 
 /**
@@ -420,7 +426,8 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   session_get: `this Session and its last ${THREAD_TAIL} entries`,
   spec_read: `this Session's Spec, ${SPEC_PAGE_CHARACTERS / 1024} K characters a page`,
   spec_write: "one write of this Session's draft, on its current version",
-  spec_propose: 'a phase declared finished, or the contract attested; never marked ready',
+  spec_propose:
+    'a phase declared finished, the contract attested, or a Spec proposed; never marked ready',
 }
 
 /** What one reading of the arguments answered. */

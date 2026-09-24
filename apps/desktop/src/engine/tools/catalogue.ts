@@ -274,7 +274,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const access = yield* ToolAccess
     const held = yield* HeldWords
     const notices = yield* AgentNotices
-    const spec = specTools({ specs: yield* Specs, sessions, held })
+    const specs = yield* Specs
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -288,6 +288,8 @@ export const toolCatalogueLayer: Layer.Layer<
         Effect.andThen(() => sessions.write(sessionId, entry)),
         Effect.tap((written) => Effect.sync(() => notices.wrote(sessionId, written.entry))),
       )
+
+    const spec = specTools({ specs, sessions, held, inThread })
 
     /**
      * The answers already given, per Session and by tool and key, so a retry is answered and not

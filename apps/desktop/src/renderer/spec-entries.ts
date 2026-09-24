@@ -37,7 +37,7 @@ const answerSchema = z.object({
   text: z.string().optional(),
 })
 
-/** What the agent of a `free` Session proposed, from its marker line. */
+/** What the agent of a `free` Session proposed, through `spec_propose`. */
 const proposalSchema = z.object({ title: z.string(), type: specTypeSchema })
 
 function parsed<S extends z.ZodType>(schema: S, payload: string): z.infer<S> | null {

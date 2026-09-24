@@ -27,9 +27,9 @@ describe('Every tool has a label and a mark', () => {
 })
 
 describe('A mission is offered its own tools', () => {
-  test('a free Session is offered the code tools and no Spec tool, a build one none', () => {
+  test('a free Session is offered the code tools and spec_propose alone, a build one none', () => {
     expect(offeredTools('free')).toEqual(
-      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write', 'spec_propose'].includes(tool)),
+      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write'].includes(tool)),
     )
     expect(offeredTools('build')).toEqual([])
   })

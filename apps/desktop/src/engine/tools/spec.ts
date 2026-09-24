@@ -11,19 +11,21 @@
  */
 
 import {
-  type PhaseId,
+  PHASE_IDS,
+  type Session,
   type SpecSnapshot,
   SPEC_PAGE_CHARACTERS,
+  SPEC_TYPES,
   StaleSectionError,
   focusOf,
   renderSpecMarkdown,
   writable,
 } from '@hemera/core'
-import { Effect, Option } from 'effect'
+import { Effect, Option, Result } from 'effect'
 import { z } from 'zod'
 
 import type { HeldWordsService } from '../agents/held.ts'
-import type { SessionsService } from '../sessions.ts'
+import type { SessionsService, ThreadWrite } from '../sessions.ts'
 import type { SpecRefusal, SpecsService } from '../specs/specs.ts'
 import { DatabaseError } from '../storage/database.ts'
 import { OPTION_SENT, STORY_SENT, TASK_SENT, type ParsedCall, jsonList } from './arguments.ts'
@@ -32,12 +34,22 @@ import type { Answer } from './catalogue.ts'
 /** A call to one of the three, as `parseCall` read it. */
 type SpecCall = Extract<ParsedCall, { tool: 'spec_read' | 'spec_write' | 'spec_propose' }>
 
-/** What the Spec tools stand on: the Specs, the Sessions, and what the agent holds unwritten. */
+/**
+ * What the Spec tools stand on: the Specs, the Sessions, what the agent holds unwritten, and the
+ * catalogue's own way of writing an entry into a thread below it.
+ */
 export interface SpecToolsNeeds {
   readonly specs: SpecsService
   readonly sessions: SessionsService
   readonly held: HeldWordsService
+  readonly inThread: (sessionId: string, entry: ThreadWrite) => ReturnType<SessionsService['write']>
 }
+
+/** The phase a `phase_done` names, which its schema requires it to send. */
+const PHASE_NAMED = z.object({ phase: z.enum(PHASE_IDS) })
+
+/** The Spec a `spec` proposal names, which its schema requires it to send. */
+const SPEC_PROPOSED = z.object({ title: z.string(), type: z.enum(SPEC_TYPES) })
 
 function completed(summary: string, text: string): Answer {
   return { ok: true, summary, text, paths: [] }
@@ -91,11 +103,11 @@ function pageOf(text: string, offset: number, limit: number) {
 }
 
 /** The three tools, over the services they need. */
-export function specTools({ specs, sessions, held }: SpecToolsNeeds) {
-  /** The Spec a Session defines, as its row says now: read at every call, never remembered. */
-  const specOf = (sessionId: string) =>
+export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
+  /** The Session as its row says now, its mission and its Spec: read at every call. */
+  const sessionNow = (sessionId: string) =>
     sessions.one(sessionId).pipe(
-      Effect.map(({ session }) => session.specId),
+      Effect.map(({ session }): Session | null => session),
       Effect.orElseSucceed(() => null),
     )
 
@@ -225,9 +237,7 @@ export function specTools({ specs, sessions, held }: SpecToolsNeeds) {
           ].join('\n'),
         )
       }
-      // SAFETY: the arguments were read against the schema of `spec_propose`, which refuses a
-      // `phase_done` sent without its phase and its summary.
-      const phase = call.phase as PhaseId
+      const { phase } = PHASE_NAMED.parse(call)
       const snapshot = yield* specs.declarePhase(specId, sessionId, phase, {
         summary: call.summary ?? '',
         assumptions:
@@ -240,14 +250,55 @@ export function specTools({ specs, sessions, held }: SpecToolsNeeds) {
       )
     })
 
+  /**
+   * The Spec a `free` Session's agent proposes (D7-07): the entry the human accepts or not, and
+   * nothing else — the Spec is created, and the Session turns `define`, only when they accept.
+   */
+  const proposeSpec = (
+    session: Session,
+    call: Extract<SpecCall, { tool: 'spec_propose' }>['arguments'],
+  ) =>
+    Effect.gen(function* () {
+      if (session.mission !== 'free') {
+        return refused(
+          `the Session "${session.title}" is ${session.mission}: only a free Session proposes a Spec`,
+        )
+      }
+      const { title, type } = SPEC_PROPOSED.parse(call)
+      const written = yield* inThread(session.id, {
+        role: 'hemera',
+        kind: 'spec_proposal',
+        body: title,
+        payload: JSON.stringify({ title, type }),
+        correlationId: `proposal:${crypto.randomUUID()}`,
+        settled: true,
+      }).pipe(Effect.result)
+      if (Result.isFailure(written)) {
+        return {
+          ok: false,
+          summary: 'the proposal could not be written',
+          text: written.failure.message,
+          paths: [],
+        }
+      }
+      return completed(
+        `proposed the ${type} Spec "${title}"`,
+        `The user is asked in the chat to create the ${type} Spec "${title}"; this Session defines it once they accept.`,
+      )
+    })
+
   /** One call to a Spec tool, for the Session its token was minted for. */
   return (sessionId: string, call: SpecCall): Effect.Effect<Answer> =>
     Effect.gen(function* () {
-      const specId = yield* specOf(sessionId)
+      const session = yield* sessionNow(sessionId)
+      if (session !== null && call.tool === 'spec_propose' && call.arguments.kind === 'spec') {
+        return yield* proposeSpec(session, call.arguments)
+      }
+      const specId = session?.specId ?? null
       if (specId === null) {
         return refused(
           'this Session defines no Spec',
-          `${call.tool} acts on the Spec this Session defines, and it defines none.`,
+          `${call.tool} acts on the Spec this Session defines, and it defines none: a free Session proposes one with spec_propose and kind spec.`,
         )
       }
       switch (call.tool) {
