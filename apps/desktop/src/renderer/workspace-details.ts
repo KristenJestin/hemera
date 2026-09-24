@@ -1,3 +1,4 @@
+import { branchNameFor, slugify } from '@hemera/core'
 import type {
   ChannelArguments,
   Command,
@@ -6,9 +7,12 @@ import type {
   RepositoryState,
   Variable,
   Workspace,
+  WorkspacePlan,
   WorkspaceStep,
+  Worktree,
 } from '@hemera/ipc'
 import type {
+  PlanRepositoryLine,
   PreparationStepLine,
   RecipeCommand,
   RecipeStepDraft,
@@ -16,8 +20,10 @@ import type {
   RunDetailsProps,
   ServiceLine,
   VariableLine,
+  WorkspaceDraft,
   WorkspaceRepositoriesProps,
   WorkspaceRow,
+  WorkspaceSummary,
 } from '@hemera/ui'
 
 import { whenOf } from './journal-lines.ts'
@@ -31,8 +37,15 @@ import { whenOf } from './journal-lines.ts'
  * Kept apart from the page, which imports the components, so a test reads it without a DOM.
  */
 
-/** The Workspaces of a Project as its settings list them: `main` first, the rest in order. */
-export function workspaceRowsOf(workspaces: readonly Workspace[]): WorkspaceRow[] {
+/**
+ * The Workspaces of a Project as its settings list them: `main` first, the rest in order, and
+ * `main`'s row with what Git answered of it when the settings opened (D8-15).
+ */
+export function workspaceRowsOf(
+  workspaces: readonly Workspace[],
+  mainStatus: readonly RepositoryState[] | null = null,
+): WorkspaceRow[] {
+  const summary = mainStatus === null ? undefined : summaryOf(mainStatus)
   return workspaces
     .toSorted((one, other) => Number(other.main) - Number(one.main))
     .map((workspace) => ({
@@ -43,7 +56,36 @@ export function workspaceRowsOf(workspaces: readonly Workspace[]): WorkspaceRow[
       main: workspace.main,
       // The engine's own word: made by Hemera, the only kind cleaned up (D8-14).
       dedicated: workspace.dedicated,
+      summary: workspace.main ? summary : undefined,
     }))
+}
+
+/** Counts of changes as a row says them: `2 staged, 1 unstaged`, or `clean` when there is none. */
+export function changesOf(counts: { staged: number; unstaged: number; untracked: number }): string {
+  const said = [
+    { count: counts.staged, word: 'staged' },
+    { count: counts.unstaged, word: 'unstaged' },
+    { count: counts.untracked, word: 'untracked' },
+  ]
+    .filter((one) => one.count > 0)
+    .map((one) => `${String(one.count)} ${one.word}`)
+  return said.length === 0 ? 'clean' : said.join(', ')
+}
+
+/**
+ * What `main`'s row says of Git (D8-15): the first repository Git answered for — its branch, its
+ * commit and its changes — which is the root itself for a Project with no declared repository.
+ * One repository and not a sum: a branch and a commit belong to one repository, and changes summed
+ * over several would be said beside a branch they are not all on. The row opened shows them all.
+ * None when Git answered for none of them.
+ */
+export function summaryOf(status: readonly RepositoryState[]): WorkspaceSummary | undefined {
+  for (const one of status) {
+    if (one.git.ok) {
+      return { branch: one.git.branch, commit: one.git.commit, changes: changesOf(one.git) }
+    }
+  }
+  return undefined
 }
 
 /**
@@ -212,6 +254,37 @@ export function recipeLinesOf(steps: readonly RecipeStep[]): RecipeStepLine[] {
 /** The commands a `run` step may start: the whole catalogue (D8-05). */
 export function recipeCommandsOf(catalogue: readonly Command[]): RecipeCommand[] {
   return catalogue.map((one) => ({ id: one.id, name: one.name, type: one.type }))
+}
+
+/**
+ * The plan of a dedicated Workspace as its creation dialog takes it (D8-04): each repository of
+ * the Project, whether `main` holds one there, its base and its branch.
+ */
+export function planLinesOf(plan: WorkspacePlan): PlanRepositoryLine[] {
+  return plan.repositories.map((one) => ({
+    path: one.relativePath,
+    holdsRepository: one.holdsRepository,
+    base: one.base,
+    branch: one.branch,
+    included: one.included,
+  }))
+}
+
+/**
+ * The branch a name makes for a dedicated Workspace with no Spec (D8-04): `<prefix>/<slug>`, the
+ * prefix the plan answered and the name as the engine slugs it.
+ */
+export function branchOfName(prefix: string): (name: string) => string {
+  return (name) => branchNameFor(prefix, null, slugify(name))
+}
+
+/** The repositories the dialog kept, as the engine creates their worktrees. */
+export function worktreesOf(draft: WorkspaceDraft): Worktree[] {
+  return draft.repositories.map((one) => ({
+    relativePath: one.path,
+    branch: one.branch,
+    base: one.base,
+  }))
 }
 
 /** A step of the recipe as the engine adds it, to the Project it is asked for. */

@@ -12,9 +12,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import type { EngineEvent, WorkspaceStep } from '@hemera/ipc'
 import {
   cleanUp,
+  createDedicated,
   forgetWorkspacesRefusal,
   listenToWorkspaces,
   moveRecipeStep,
+  planDedicated,
+  readMainStatus,
   readProjectVariables,
   readWorkspaces,
   recipeOf,
@@ -560,6 +563,73 @@ describe('The run a step started is shown and followed', () => {
 
     await showStepRun(null)
     expect(workspacesSnapshot().shown?.run).toBeNull()
+  })
+})
+
+describe('A dedicated Workspace is made from the settings, then prepared', () => {
+  test('the plan is asked with no Spec key and no name, for the dialog to name it', async () => {
+    answers.set('workspaces.plan', { name: '', repositories: [] })
+
+    expect(await planDedicated('atlas')).toEqual({ name: '', repositories: [] })
+    expect(asked[0]).toEqual({
+      name: 'workspaces.plan',
+      argument: { projectId: 'atlas', key: null, slug: '' },
+    })
+  })
+
+  test('a plan the engine refuses opens nothing, and its sentence is said on the page', async () => {
+    answers.set('workspaces.plan', new Error('no Project atlas'))
+
+    expect(await planDedicated('atlas')).toBeNull()
+    expect(workspacesSnapshot().refusal).toBe('no Project atlas')
+  })
+
+  test('it is created with no Spec, prepared, listed again and opened in the list', async () => {
+    const preparing = { ...LOGIN_FORM, state: 'preparing' as const, live: true }
+    answers.set('workspaces.create', preparing)
+    answers.set('preparation.prepare', [step(1, { state: 'running' })])
+    answers.set('workspaces.list', [MAIN, preparing])
+    answersForShowing()
+    const worktree = { relativePath: 'sources/api', branch: 'atlas/login-form', base: 'a' }
+
+    expect(await createDedicated('atlas', 'login-form', [worktree])).toBeNull()
+
+    expect(asked.slice(0, 3).map((one) => one.name)).toEqual([
+      'workspaces.create',
+      'preparation.prepare',
+      'workspaces.list',
+    ])
+    expect(asked[0]?.argument).toEqual({
+      projectId: 'atlas',
+      specId: null,
+      name: 'login-form',
+      repositories: [worktree],
+    })
+    expect(asked[1]?.argument).toEqual({ workspaceId: 'login-form' })
+    expect(workspacesOf('atlas').find((one) => one.id === 'login-form')?.state).toBe('preparing')
+    expect(workspacesSnapshot().shown?.workspaceId).toBe('login-form')
+  })
+
+  test('a creation the engine refuses is its sentence, and nothing is prepared', async () => {
+    answers.set('workspaces.create', new Error("the branch 'atlas/login-form' already exists"))
+
+    expect(await createDedicated('atlas', 'login-form', [])).toBe(
+      "the branch 'atlas/login-form' already exists",
+    )
+    expect(asked.map((one) => one.name)).toEqual(['workspaces.create'])
+  })
+})
+
+describe("main's Git state is read when the settings open", () => {
+  test('it asks Git about main, once the list says which Workspace main is', async () => {
+    answers.set('workspaces.list', [MAIN, LOGIN_FORM])
+    answers.set('workspaces.status', STATUS)
+    await readWorkspaces('atlas')
+
+    await readMainStatus('atlas')
+
+    expect(asked.find((one) => one.name === 'workspaces.status')?.argument).toEqual({ id: 'main' })
+    expect(workspacesSnapshot().mainStatus.get('atlas')).toEqual(STATUS)
   })
 })
 

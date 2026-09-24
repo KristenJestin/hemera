@@ -6,7 +6,9 @@ import type {
   RepositoryState,
   Variable,
   Workspace,
+  WorkspacePlan,
   WorkspaceStep,
+  Worktree,
 } from '@hemera/ipc'
 
 /**
@@ -52,6 +54,11 @@ export interface WorkspacesState {
   recipes: ReadonlyMap<string, readonly RecipeStep[]>
   /** The variables of each Project read, its own scope (D8-06). */
   variables: ReadonlyMap<string, readonly Variable[]>
+  /**
+   * What Git answered of each Project's `main` when its settings opened, which its row sums up
+   * (D8-15); absent until it answered.
+   */
+  mainStatus: ReadonlyMap<string, readonly RepositoryState[]>
   shown: ShownWorkspace | null
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
@@ -61,6 +68,7 @@ const EMPTY: WorkspacesState = {
   workspaces: new Map(),
   recipes: new Map(),
   variables: new Map(),
+  mainStatus: new Map(),
   shown: null,
   refusal: null,
 }
@@ -210,6 +218,77 @@ export async function readProjectVariables(projectId: string): Promise<void> {
   } catch (cause) {
     refused(cause)
   }
+}
+
+/**
+ * Reads what Git says of the Project's `main` now, for its row (D8-15): once its settings open,
+ * after its Workspaces were read. Never held as the truth of anything: the next reading replaces
+ * it, and a Project whose `main` is not listed yet asks nothing.
+ */
+export async function readMainStatus(projectId: string): Promise<void> {
+  const main = workspacesOf(projectId).find((one) => one.main)
+  if (main === undefined) return
+  const asked = asking()
+  try {
+    const status = await window.hemera.invoke('workspaces.status', { id: main.id })
+    if (!newest(`main-status:${projectId}`, asked)) return
+    replace({ ...state, mainStatus: withKey(state.mainStatus, projectId, status) })
+  } catch (cause) {
+    refused(cause)
+  }
+}
+
+/**
+ * Plans a dedicated Workspace of the Project with no Spec (D8-04): no key, and no name yet — the
+ * creation dialog names it, and its branches follow the name. Answers the plan, or null when the
+ * engine refused, its sentence then kept for the page to say: no dialog opens on it.
+ */
+export async function planDedicated(projectId: string): Promise<WorkspacePlan | null> {
+  forgetWorkspacesRefusal()
+  try {
+    return await window.hemera.invoke('workspaces.plan', { projectId, key: null, slug: '' })
+  } catch (cause) {
+    refused(cause)
+    return null
+  }
+}
+
+/**
+ * Creates a dedicated Workspace from the plan the dialog kept, with no Spec (D8-04), then starts
+ * its preparation (D8-05). The engine answers the Workspace `preparing` and prepares it on its own;
+ * the list is read again, the Workspace is opened in it, and its steps follow the `workspace`
+ * events from there.
+ *
+ * Answers the engine's sentence when it refuses — a name taken, a base Git does not know, a branch
+ * that exists — with nothing written, and null once it is created.
+ */
+export async function createDedicated(
+  projectId: string,
+  name: string,
+  repositories: readonly Worktree[],
+): Promise<string | null> {
+  forgetWorkspacesRefusal()
+  let made: Workspace
+  try {
+    made = await window.hemera.invoke('workspaces.create', {
+      projectId,
+      specId: null,
+      name,
+      repositories: [...repositories],
+    })
+  } catch (cause) {
+    return message(cause)
+  }
+  // Created is created: a preparation the engine refuses to start is said on the page, and the
+  // Workspace is there all the same, to be resumed.
+  try {
+    await window.hemera.invoke('preparation.prepare', { workspaceId: made.id })
+  } catch (cause) {
+    refused(cause)
+  }
+  await readWorkspaces(projectId)
+  await showWorkspace(workspacesOf(projectId).find((one) => one.id === made.id) ?? made)
+  return null
 }
 
 /**

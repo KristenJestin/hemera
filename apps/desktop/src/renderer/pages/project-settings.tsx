@@ -1,9 +1,18 @@
 import { type ReactNode, useState } from 'react'
 
-import type { Command, RecipeStep, Variable, Workspace } from '@hemera/ipc'
+import type {
+  Command,
+  RecipeStep,
+  RepositoryState,
+  Variable,
+  Workspace,
+  WorkspacePlan,
+  Worktree,
+} from '@hemera/ipc'
 import {
   Card,
   CleanupDialog,
+  CreateWorkspaceDialog,
   PreparationEditor,
   PreparationSteps,
   ProjectSettings,
@@ -19,8 +28,10 @@ import {
 
 import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
 import {
+  branchOfName,
   branchesKeptOf,
   interruptedOf,
+  planLinesOf,
   projectVariablesOf,
   recipeAddOf,
   recipeCommandsOf,
@@ -32,6 +43,7 @@ import {
   workspaceCardOf,
   workspaceRowsOf,
   workspaceVariablesOf,
+  worktreesOf,
 } from '../workspace-details.ts'
 import type { ShownWorkspace } from '../workspaces-store.ts'
 
@@ -114,32 +126,52 @@ function ShownWorkspaceCards({
 }
 
 /**
- * The Workspaces of the Project (D8-02, D8-14): the list, a new one on a folder the user picks,
- * the one opened in its row, and the cleanup of a dedicated one, confirmed in its dialog — which says
- * the branches kept and, when the engine refuses, its reason as it gave it.
+ * The Workspaces of the Project (D8-02, D8-04, D8-14, D8-15): the list, `main`'s row with what Git
+ * says of it, a dedicated one made in its creation dialog from the plan the engine proposed, a
+ * folder the user maps, the one opened in its row, and the cleanup of a dedicated one, confirmed
+ * in its dialog — which says the branches kept and, when the engine refuses, its reason as it
+ * gave it.
  */
 function WorkspacesCards({
   workspaces,
+  mainStatus,
   shown,
   projectVariables,
   catalogue,
   actions,
   onBrowse,
+  onPlan,
+  onCreateDedicated,
   onCreate,
   onCleanup,
 }: {
   workspaces: readonly Workspace[]
+  mainStatus: readonly RepositoryState[] | null
   shown: ShownWorkspace | null
   projectVariables: readonly Variable[]
   catalogue: readonly Command[]
   actions: WorkspaceActions
   onBrowse: () => Promise<string | null>
+  onPlan: () => Promise<WorkspacePlan | null>
+  onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
   onCreate: (path: string, name: string) => Promise<string | null>
   onCleanup: (id: string) => Promise<string | null>
 }): ReactNode {
   /** The Workspace whose cleanup is being confirmed, and what the engine refused it with. */
   const [cleaning, setCleaning] = useState<Workspace | null>(null)
   const [refusal, setRefusal] = useState<string | null>(null)
+  /** The plan the creation dialog is open on; kept while it closes, so it does not empty. */
+  const [plan, setPlan] = useState<WorkspacePlan | null>(null)
+  const [creating, setCreating] = useState(false)
+
+  // The plan is asked first, and the dialog opens on it: it takes its rows as it opens.
+  const create = () => {
+    void onPlan().then((planned) => {
+      if (planned === null) return
+      setPlan(planned)
+      setCreating(true)
+    })
+  }
 
   const ask = (id: string) => {
     setRefusal(null)
@@ -152,9 +184,8 @@ function WorkspacesCards({
   return (
     <>
       <WorkspaceList
-        workspaces={workspaceRowsOf(workspaces)}
-        // A dedicated Workspace from the settings is wired with its creation dialog next.
-        onCreateDedicated={() => undefined}
+        workspaces={workspaceRowsOf(workspaces, mainStatus)}
+        onCreateDedicated={create}
         onBrowse={onBrowse}
         onMapFolder={onCreate}
         onCleanup={ask}
@@ -172,6 +203,19 @@ function WorkspacesCards({
           ) : null
         }
       />
+      {plan !== null && (
+        <CreateWorkspaceDialog
+          open={creating}
+          onOpenChange={setCreating}
+          root={plan.root}
+          defaultName={plan.name}
+          repositories={planLinesOf(plan)}
+          // No Spec to name the branches after: they follow the name (D8-04).
+          branchOf={branchOfName(plan.branchPrefix)}
+          gitMissing={!plan.gitAvailable}
+          onCreate={async (draft) => await onCreateDedicated(draft.name, worktreesOf(draft))}
+        />
+      )}
       {cleaning !== null && (
         <CleanupDialog
           open
@@ -212,9 +256,12 @@ export function ProjectSettingsPage({
   onRemoveCommand,
   onArchive,
   workspaces,
+  mainStatus,
   shown,
   projectVariables,
   workspaceActions,
+  onPlanWorkspace,
+  onCreateDedicated,
   onCreateWorkspace,
   onCleanupWorkspace,
   recipe,
@@ -254,11 +301,17 @@ export function ProjectSettingsPage({
   onArchive: () => void
   /** The Workspaces of the Project, as the engine listed them (D8-02). */
   workspaces: readonly Workspace[]
-  /** The Workspace shown under the list, and what was read of it; null when none is. */
+  /** What Git answered of `main` when the settings opened, or null until it did (D8-15). */
+  mainStatus: readonly RepositoryState[] | null
+  /** The Workspace opened in the list, and what was read of it; null when none is. */
   shown: ShownWorkspace | null
   /** The Project's own variables, which a Workspace's are over (D8-06). */
   projectVariables: readonly Variable[]
   workspaceActions: WorkspaceActions
+  /** Plans a dedicated Workspace with no Spec; null when the engine refused (D8-04). */
+  onPlanWorkspace: () => Promise<WorkspacePlan | null>
+  /** Creates it from what the dialog kept, then prepares it; answers the refusal, or null. */
+  onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
   /** Makes a Workspace on a folder the user picked; answers the engine's refusal, or null. */
   onCreateWorkspace: (path: string, name: string) => Promise<string | null>
   /** Cleans a dedicated Workspace up; answers the engine's refusal, or null (D8-14). */
@@ -305,11 +358,14 @@ export function ProjectSettingsPage({
         workspaces={
           <WorkspacesCards
             workspaces={workspaces}
+            mainStatus={mainStatus}
             shown={shown}
             projectVariables={projectVariables}
             catalogue={commands}
             actions={workspaceActions}
             onBrowse={onBrowse}
+            onPlan={onPlanWorkspace}
+            onCreateDedicated={onCreateDedicated}
             onCreate={onCreateWorkspace}
             onCleanup={onCleanupWorkspace}
           />

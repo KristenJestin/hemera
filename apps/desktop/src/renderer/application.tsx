@@ -102,9 +102,12 @@ import { repositoryLinesOf } from './project-lines.ts'
 import {
   addRecipeStep,
   cleanUp,
+  createDedicated,
   createOnFolder,
   listenToWorkspaces,
   moveRecipeStep,
+  planDedicated,
+  readMainStatus,
   readProjectVariables,
   readRecipe,
   readWorkspaces,
@@ -605,8 +608,9 @@ export function Application() {
     // And whether this machine has Portless, which the engine looks up once (D8-10).
     void readPortless()
     // And its Workspaces, which the engine's `workspace` event keeps current from then on (D8-02),
-    // and its own variables, which a Workspace shown lists under its own (D8-06).
-    void readWorkspaces(settingsOf)
+    // then what Git says of `main`, which its row sums up (D8-15); and its own variables, which a
+    // Workspace shown lists under its own (D8-06).
+    void readWorkspaces(settingsOf).then(async () => await readMainStatus(settingsOf))
     void readProjectVariables(settingsOf)
     // And the recipe each dedicated Workspace is prepared with (D8-05).
     void readRecipe(settingsOf)
@@ -1155,6 +1159,7 @@ export function Application() {
           onRemoveCommand={(name) => void removeCommand(current.id, name)}
           onArchive={() => void archiveProject(current)}
           workspaces={places.workspaces.get(current.id) ?? []}
+          mainStatus={places.mainStatus.get(current.id) ?? null}
           shown={places.shown?.projectId === current.id ? places.shown : null}
           projectVariables={places.variables.get(current.id) ?? []}
           workspaceActions={{
@@ -1171,6 +1176,10 @@ export function Application() {
             onShowStepRun: (runId) => void showStepRun(runId),
             onStopService: (runId) => void stopService(runId),
           }}
+          onPlanWorkspace={async () => await planDedicated(current.id)}
+          onCreateDedicated={async (name, worktrees) =>
+            await createDedicated(current.id, name, worktrees)
+          }
           onCreateWorkspace={async (path, name) => await createOnFolder(current.id, path, name)}
           onCleanupWorkspace={async (id) => await cleanUp(current.id, id)}
           recipe={places.recipes.get(current.id) ?? []}

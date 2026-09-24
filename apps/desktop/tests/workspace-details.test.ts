@@ -6,18 +6,23 @@
 
 import { describe, expect, test } from 'vite-plus/test'
 
-import type { Variable } from '@hemera/ipc'
+import type { RepositoryState, Variable, WorkspacePlan } from '@hemera/ipc'
 import {
+  branchOfName,
   branchesKeptOf,
+  changesOf,
   interruptedOf,
+  planLinesOf,
   recipeAddOf,
   recipeLinesOf,
   runDetailsOf,
   serviceLinesOf,
   stepLinesOf,
+  summaryOf,
   workspaceCardOf,
   workspaceRowsOf,
   workspaceVariablesOf,
+  worktreesOf,
 } from '#renderer/workspace-details.ts'
 
 import { LOGIN_FORM, MAIN, STATUS, run, step, workspace } from './workspace-views.ts'
@@ -186,5 +191,102 @@ describe('The cards say the engine views in their own words', () => {
     expect(interruptedOf(workspace('login-form', { state: 'preparing', live: false }))).toBe(true)
     expect(interruptedOf(workspace('login-form', { state: 'preparing', live: true }))).toBe(false)
     expect(interruptedOf(workspace('login-form', { state: 'failed', live: false }))).toBe(false)
+  })
+})
+
+describe("main's row says what Git says of its folder", () => {
+  test('the first repository Git answered for: its branch, its commit and its changes', () => {
+    const rows = workspaceRowsOf([LOGIN_FORM, MAIN], STATUS)
+
+    expect(rows[0]?.summary).toEqual({
+      branch: 'atlas/HEM-7-login-form',
+      commit: 'c'.repeat(40),
+      changes: '1 staged, 1 unstaged, 1 untracked',
+    })
+    // Only main's row carries it: another Workspace says its Git state once opened.
+    expect(rows[1]?.summary).toBeUndefined()
+  })
+
+  test('no change is "clean", and a repository Git refused gives way to the next one', () => {
+    const refused: RepositoryState = {
+      relativePath: 'sources/front',
+      git: { ok: false, error: 'fatal: not a git repository' },
+    }
+    const clean: RepositoryState = {
+      relativePath: 'sources/web',
+      git: {
+        ok: true,
+        branch: 'main',
+        commit: 'd'.repeat(40),
+        staged: 0,
+        unstaged: 0,
+        untracked: 0,
+      },
+    }
+
+    expect(summaryOf([refused, clean])).toEqual({
+      branch: 'main',
+      commit: 'd'.repeat(40),
+      changes: 'clean',
+    })
+    expect(changesOf({ staged: 2, unstaged: 1, untracked: 0 })).toBe('2 staged, 1 unstaged')
+    // Git refused every one of them: the row says nothing it was not told.
+    expect(summaryOf([refused])).toBeUndefined()
+  })
+
+  test('before Git answered, the row says nothing of it', () => {
+    expect(workspaceRowsOf([MAIN], null)[0]?.summary).toBeUndefined()
+  })
+})
+
+describe('A dedicated Workspace from the settings is made from its plan', () => {
+  const plan: WorkspacePlan = {
+    name: '',
+    root: '/data/workspaces/atlas',
+    path: '/data/workspaces/atlas',
+    branchPrefix: 'atlas',
+    repositories: [
+      {
+        relativePath: 'sources/api',
+        holdsRepository: true,
+        base: 'a'.repeat(40),
+        branch: 'atlas/',
+        included: true,
+      },
+      {
+        relativePath: 'docs',
+        holdsRepository: false,
+        base: null,
+        branch: 'atlas/',
+        included: false,
+      },
+    ],
+    gitAvailable: true,
+  }
+
+  test('the dialog takes each repository of the plan, one with none in main included', () => {
+    expect(planLinesOf(plan)).toEqual([
+      {
+        path: 'sources/api',
+        holdsRepository: true,
+        base: 'a'.repeat(40),
+        branch: 'atlas/',
+        included: true,
+      },
+      { path: 'docs', holdsRepository: false, base: null, branch: 'atlas/', included: false },
+    ])
+  })
+
+  test('its branches follow the name as the engine slugs it, under the prefix of the plan', () => {
+    expect(branchOfName(plan.branchPrefix)('Login form')).toBe('atlas/login-form')
+  })
+
+  test('what the dialog kept is created as worktrees, base and branch as typed', () => {
+    expect(
+      worktreesOf({
+        name: 'login-form',
+        repositories: [{ path: 'sources/api', base: 'a'.repeat(40), branch: 'kris/login' }],
+      }),
+    ).toEqual([{ relativePath: 'sources/api', base: 'a'.repeat(40), branch: 'kris/login' }])
   })
 })

@@ -16,7 +16,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { repositoryLinesOf } from '#renderer/project-lines.ts'
 import {
+  branchOfName,
   branchesKeptOf,
+  planLinesOf,
   recipeAddOf,
   recipeLinesOf,
   runDetailsOf,
@@ -25,13 +27,17 @@ import {
   workspaceCardOf,
   workspaceRowsOf,
   workspaceVariablesOf,
+  worktreesOf,
 } from '#renderer/workspace-details.ts'
 import {
   addRecipeStep,
   cleanUp,
+  createDedicated,
   createOnFolder,
   listenToWorkspaces,
   moveRecipeStep,
+  planDedicated,
+  readMainStatus,
   readProjectVariables,
   readRecipe,
   readWorkspaces,
@@ -496,6 +502,54 @@ describe('A run step fails on a non-zero exit', () => {
     expect(workspacesSnapshot().refusal).toContain('no-such-run')
     await showStepRun(null)
     expect(workspacesSnapshot().shown?.run).toBeNull()
+  })
+})
+
+describe('A dedicated Workspace is made from the settings with no Spec', () => {
+  test('its branch is the prefix and the name, it is prepared, and main says its Git state', async () => {
+    const project = await atlas()
+    const stop = listenToWorkspaces()
+    try {
+      await readWorkspaces(project.id)
+      await readMainStatus(project.id)
+      // main's row: the repository api on its branch, nothing changed.
+      const [mainRow] = workspaceRowsOf(
+        workspacesOf(project.id),
+        workspacesSnapshot().mainStatus.get(project.id) ?? null,
+      )
+      expect(mainRow?.summary).toMatchObject({ changes: 'clean' })
+
+      const plan = await planDedicated(project.id)
+      expect(plan).not.toBeNull()
+      // What the dialog hands over once named: every repository of the plan, on the branch the
+      // name makes.
+      const branch = branchOfName(plan!.branchPrefix)('Spike one')
+      const worktrees = worktreesOf({
+        name: 'spike-one',
+        repositories: planLinesOf(plan!).map((one) => ({
+          path: one.path,
+          base: one.base!,
+          branch,
+        })),
+      })
+
+      expect(await createDedicated(project.id, 'spike-one', worktrees)).toBeNull()
+
+      const made = workspacesOf(project.id).find((one) => one.name === 'spike-one')!
+      expect(workspacesSnapshot().shown?.workspaceId).toBe(made.id)
+      await until(
+        () => workspacesOf(project.id).find((one) => one.id === made.id)?.state === 'ready',
+      )
+      expect(workspacesOf(project.id).find((one) => one.id === made.id)).toMatchObject({
+        specId: null,
+        state: 'ready',
+        repositories: [{ relativePath: './api', branch: 'atlas/spike-one' }],
+      })
+      // The same name again is refused before anything is written, in the engine's words.
+      expect(await createDedicated(project.id, 'spike-one', worktrees)).toMatch(/spike-one/)
+    } finally {
+      stop()
+    }
   })
 })
 
