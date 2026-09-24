@@ -1,9 +1,10 @@
 import { type ReactNode, useState } from 'react'
 
-import type { Command, Variable, Workspace } from '@hemera/ipc'
+import type { Command, RecipeStep, Variable, Workspace } from '@hemera/ipc'
 import {
   Card,
   CleanupDialog,
+  PreparationEditor,
   PreparationSteps,
   ProjectSettings,
   RunDetails,
@@ -18,6 +19,11 @@ import {
 
 import {
   branchesKeptOf,
+  projectVariablesOf,
+  recipeAddOf,
+  recipeCommandsOf,
+  recipeLinesOf,
+  type RecipeAdd,
   runDetailsOf,
   serviceLinesOf,
   stepLinesOf,
@@ -232,6 +238,12 @@ export function ProjectSettingsPage({
   workspaceActions,
   onCreateWorkspace,
   onCleanupWorkspace,
+  recipe,
+  onAddRecipeStep,
+  onRemoveRecipeStep,
+  onMoveRecipeStep,
+  onSetProjectVariable,
+  onRemoveProjectVariable,
 }: {
   project: ProjectDraft
   subtitle?: string
@@ -265,6 +277,15 @@ export function ProjectSettingsPage({
   onCreateWorkspace: (path: string, name: string) => Promise<string | null>
   /** Cleans a dedicated Workspace up; answers the engine's refusal, or null (D8-14). */
   onCleanupWorkspace: (id: string) => Promise<string | null>
+  /** The recipe every dedicated Workspace is prepared with, in its order (D8-05). */
+  recipe: readonly RecipeStep[]
+  /** Adds a step at the end of the recipe; answers the engine's refusal, or null. */
+  onAddRecipeStep: (step: RecipeAdd) => Promise<string | null>
+  onRemoveRecipeStep: (id: string) => void
+  onMoveRecipeStep: (id: string, direction: 'up' | 'down') => void
+  /** Sets one of the Project's own variables; answers the engine's refusal, or null (D8-06). */
+  onSetProjectVariable: (key: string, value: string) => Promise<string | null>
+  onRemoveProjectVariable: (key: string) => void
 }): ReactNode {
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
@@ -295,6 +316,20 @@ export function ProjectSettingsPage({
           onBrowse={onBrowse}
           onCreate={onCreateWorkspace}
           onCleanup={onCleanupWorkspace}
+        />
+        <PreparationEditor
+          steps={recipeLinesOf(recipe, commands)}
+          commands={recipeCommandsOf(commands)}
+          onAdd={async (step) => await onAddRecipeStep(recipeAddOf(step))}
+          onRemove={onRemoveRecipeStep}
+          onMove={onMoveRecipeStep}
+        />
+        <VariablesEditor
+          scope="project"
+          name={project.name}
+          variables={projectVariablesOf(projectVariables)}
+          onSet={onSetProjectVariable}
+          onRemove={onRemoveProjectVariable}
         />
       </ProjectSettings>
     </div>

@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import {
   branchesKeptOf,
+  recipeAddOf,
+  recipeLinesOf,
   serviceLinesOf,
   stepLinesOf,
   workspaceCardOf,
@@ -23,11 +25,16 @@ import {
   workspaceVariablesOf,
 } from '#renderer/workspace-details.ts'
 import {
+  addRecipeStep,
   cleanUp,
   createOnFolder,
   listenToWorkspaces,
+  moveRecipeStep,
   readProjectVariables,
+  readRecipe,
   readWorkspaces,
+  recipeOf,
+  removeRecipeStep,
   setVariable,
   showWorkspace,
   stopService,
@@ -310,5 +317,51 @@ describe('A port conflict names its holder', () => {
     } finally {
       stop()
     }
+  })
+})
+
+describe('The steps follow the recipe in order', () => {
+  test('the recipe written in the settings is the order a new Workspace is prepared in', async () => {
+    const project = await atlas()
+    const { bridge } = opened!
+    const installing = await bridge.invoke('commands.create', {
+      projectId: project.id,
+      name: 'install',
+      line: `"${process.execPath}" -e ""`,
+      type: 'script',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
+      folder: null,
+    })
+    await readRecipe(project.id)
+    expect(recipeOf(project.id)).toEqual([])
+
+    const run = recipeAddOf({ kind: 'run', commandId: installing.id })
+    expect(await addRecipeStep(project.id, run)).toBeNull()
+    const copy = recipeAddOf({ kind: 'copy', path: '.env', scope: 'repositories' })
+    expect(await addRecipeStep(project.id, copy)).toBeNull()
+    // A path that leaves the Workspace is the engine's refusal, in its words.
+    const outside = recipeAddOf({ kind: 'link', path: '../elsewhere', scope: 'root' })
+    expect(await addRecipeStep(project.id, outside)).not.toBeNull()
+    const [first, second] = recipeOf(project.id)
+    await moveRecipeStep(project.id, second!.id, 'up')
+    expect(recipeLinesOf(recipeOf(project.id), [installing]).map((one) => one.kind)).toEqual([
+      'copy',
+      'run',
+    ])
+
+    const workspace = await loginForm(opened!, project.id)
+    const steps = await bridge.invoke('preparation.steps', { workspaceId: workspace.id })
+    expect(stepLinesOf(steps).map((one) => [one.kind, one.target])).toEqual([
+      ['worktree', './api'],
+      // The path as the engine keeps it, relative to the root.
+      ['copy', './.env in each repository'],
+      ['run', 'install'],
+    ])
+
+    await removeRecipeStep(project.id, first!.id)
+    expect(recipeOf(project.id).map((one) => one.kind)).toEqual(['copy'])
   })
 })

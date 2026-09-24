@@ -98,11 +98,15 @@ import {
 } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import {
+  addRecipeStep,
   cleanUp,
   createOnFolder,
   listenToWorkspaces,
+  moveRecipeStep,
   readProjectVariables,
+  readRecipe,
   readWorkspaces,
+  removeRecipeStep,
   removeVariable,
   resumePreparation,
   selectRun,
@@ -554,6 +558,8 @@ export function Application() {
     // and its own variables, which a Workspace shown lists under its own (D8-06).
     void readWorkspaces(settingsOf)
     void readProjectVariables(settingsOf)
+    // And the recipe each dedicated Workspace is prepared with (D8-05).
+    void readRecipe(settingsOf)
     // The Workspace shown is the page's: leaving it puts the Workspace away.
     return () => void showWorkspace(null)
   }, [settingsOf])
@@ -1092,6 +1098,14 @@ export function Application() {
           }}
           onCreateWorkspace={async (path, name) => await createOnFolder(current.id, path, name)}
           onCleanupWorkspace={async (id) => await cleanUp(current.id, id)}
+          recipe={places.recipes.get(current.id) ?? []}
+          onAddRecipeStep={async (step) => await addRecipeStep(current.id, step)}
+          onRemoveRecipeStep={(id) => void removeRecipeStep(current.id, id)}
+          onMoveRecipeStep={(id, direction) => void moveRecipeStep(current.id, id, direction)}
+          onSetProjectVariable={async (key, value) =>
+            await setVariable(current.id, null, key, value)
+          }
+          onRemoveProjectVariable={(key) => void removeVariable(current.id, null, key)}
         />
       )
     }
