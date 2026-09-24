@@ -24,8 +24,9 @@ export const REBUILT_BYTES = 32 * 1024
 const SPEAKER = { user: 'User', agent: 'Agent', hemera: 'Hemera' } as const
 
 /**
- * What Hemera wrote for itself rather than said in the conversation: the mission brief that rode
- * a turn (the next turn composes its own) and a Spec proposal (the Spec is created or it is not).
+ * What Hemera wrote for itself rather than said in the conversation: a mission brief handed over
+ * as a delivery (an agent whose conversation is rebuilt is handed a new one) and a Spec proposal
+ * (the Spec is created or it is not).
  * Kept out of the block, a few briefs cannot push the conversation out of its budget. A question
  * of a Spec and its answer stay: they are one line each, and they are the conversation.
  */

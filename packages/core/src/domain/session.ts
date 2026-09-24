@@ -65,8 +65,9 @@ export type SessionEntryOrigin = (typeof SESSION_ENTRY_ORIGINS)[number]
  *
  * `body` carries what a one-line reader shows — the markdown of a message, the title of a tool
  * call — and `payload` the shape its own reader parses, so a block that needs a diff, a plan or
- * a set of options finds them without a column per kind. `mission_brief` is the folded block
- * Hemera composes before each turn of a `define` Session, never a human message (D7-09);
+ * a set of options finds them without a column per kind. `mission_brief` is the folded block of
+ * the mission brief Hemera hands a `define` Session's agent as a delivery at a safe point, never a
+ * human message (D7-09);
  * `spec_question` is a question of a Spec asked in the chat and `spec_answer` the human's answer
  * beside it (D7-01, D7-03); `spec_proposal` is the Spec the agent of a `free` Session proposes to
  * create (D7-07).
