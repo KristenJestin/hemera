@@ -177,7 +177,7 @@ describe('A write on a frozen Spec is refused through the tool', () => {
     await browser.pause(1200)
 
     // The call is recorded like any other, refused with the reason, and nothing changed.
-    expect(await region(THREAD)).toContain(`${KEY} is ready: only a draft is written`)
+    expect(await region(THREAD)).toContain(`${KEY} is marked ready; only a draft can be changed`)
     const spec = await specNow()
     expect(spec.status).toBe('ready')
     expect(spec.revision).toBe(1)

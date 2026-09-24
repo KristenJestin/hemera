@@ -101,7 +101,7 @@ const SCREENS = {
     asks: ['q-credit-notes'],
     thread: [
       ASK,
-      hemera('brief', 'Mission brief · plan', '10:44', PLAN_BRIEF),
+      hemera('brief', 'What the agent was told · Plan', '10:44', PLAN_BRIEF),
       agents(
         'answer',
         'Shape is finished: the problem, the outcome, the scope and two stories are in the Spec. I am writing the plan: the export can reuse the invoice query of `export.service.ts` and stream its rows.\n\nOne question blocks the plan:',
@@ -118,7 +118,12 @@ const SCREENS = {
         '09:12',
         'Multi-currency invoices are off by a cent. Accounting saw it on the September close.',
       ),
-      hemera('brief', 'Mission brief · shape', '09:12', '**Shape** · frame the need of `ATL-12`.'),
+      hemera(
+        'brief',
+        'What the agent was told · Shape',
+        '09:12',
+        '**Shape** · frame the need of `ATL-12`.',
+      ),
       agents(
         'answer',
         'I reproduced it on the demo data and wrote the steps under Reproduction. You changed the amounts of step 1; I keep yours.\n\nOne question before the plan:',
@@ -130,7 +135,12 @@ const SCREENS = {
     spec: GATE_FULL,
     thread: [
       ASK,
-      hemera('brief', 'Mission brief · decompose', '11:20', '**Decompose** · slice `ATL-7`.'),
+      hemera(
+        'brief',
+        'What the agent was told · Decompose',
+        '11:20',
+        '**Decompose** · slice `ATL-7`.',
+      ),
       agents(
         'answer',
         'Decompose is finished: four tasks, each one a slice that can be verified alone, the last one yours: checking the file imports into the ledger.\n\nI attest the contract is complete and a build can run it without inventing a decision. Marking it ready is yours.',
@@ -143,7 +153,12 @@ const SCREENS = {
     asks: ['q-credit-notes'],
     thread: [
       ASK,
-      hemera('brief', 'Mission brief · decompose', '11:20', '**Decompose** · slice `ATL-7`.'),
+      hemera(
+        'brief',
+        'What the agent was told · Decompose',
+        '11:20',
+        '**Decompose** · slice `ATL-7`.',
+      ),
       agents(
         'answer',
         'Decompose is finished and I attest the contract. One question is still yours before it can be marked ready:',
@@ -179,7 +194,7 @@ const SCREENS = {
     spec: CONFLICT,
     thread: [
       ASK,
-      hemera('brief', 'Mission brief · plan', '10:44', PLAN_BRIEF),
+      hemera('brief', 'What the agent was told · Plan', '10:44', PLAN_BRIEF),
       agents(
         'answer',
         'I rewrote Scope (v5): payments stay out, and the currency column moved to Verification.',
@@ -456,7 +471,9 @@ async function unfold(canvasElement: HTMLElement): Promise<void> {
 export const MidPlan: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: /Mission brief · plan/ })).toBeVisible()
+    await expect(
+      canvas.getByRole('button', { name: /What the agent was told · Plan/ }),
+    ).toBeVisible()
     const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(
       within(band).getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),

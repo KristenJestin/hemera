@@ -1995,23 +1995,28 @@ export const runtimeLayer = Layer.effect(
       if (brief !== null) {
         provisions.push({ uri: contextUri('brief'), text: brief.block, mimeType: 'text/markdown' })
       }
-      const told: { kind: 'edit' | 'answer'; text: string; what: string }[] = []
+      // `said` is the line the thread shows once the agent took it, in the user's words.
+      const told: { kind: 'edit' | 'answer'; text: string; what: string; said: string }[] = []
       if (edits !== null) {
+        const named = edits.sections.map((section) => section.replaceAll('_', ' ')).join(', ')
         told.push({
           kind: 'edit',
           text: edits.text,
-          what: `the human edits of ${edits.sections.join(', ')}`,
+          what: `your edits to ${named}`,
+          said: `Your edits to ${named} went to the agent.`,
         })
       }
       if (answers !== null) {
         const [only] = answers.questions
+        const what =
+          answers.questions.length === 1
+            ? `the answer to “${only ?? ''}”`
+            : `the answers to ${answers.questions.length} questions`
         told.push({
           kind: 'answer',
           text: answers.text,
-          what:
-            answers.questions.length === 1
-              ? `the answer to “${only ?? ''}”`
-              : `the answers to ${answers.questions.length} questions`,
+          what,
+          said: `Hemera handed the agent ${what}.`,
         })
       }
       for (const one of told) {
@@ -2025,9 +2030,7 @@ export const runtimeLayer = Layer.effect(
               sessionId,
               `delivery:${correlation}:${one.kind}`,
               turnId,
-              handed
-                ? `Hemera handed the agent ${one.what}.`
-                : `Not handed over, waiting for the next safe point: ${one.what}.`,
+              handed ? one.said : `Not handed over, waiting for the next safe point: ${one.what}.`,
               handed ? null : 'failed',
               {
                 kind: one.kind,

@@ -48,12 +48,12 @@ const QUESTION = entry(
 describe('The brief is part of the turn, never a human message', () => {
   test('a brief is a folded Hemera line titled with its phase, holding what was handed', () => {
     expect(briefOf(entry('mission_brief', JSON.stringify({ phase: 'shape' })))).toEqual({
-      title: 'Mission brief · shape',
+      title: 'What the agent was told · Shape',
       detail: '10:44',
       brief: '# Mission: define',
     })
     expect(briefOf(entry('mission_brief', JSON.stringify({ phase: null }))).title).toBe(
-      'Mission brief',
+      'What the agent was told',
     )
   })
 })

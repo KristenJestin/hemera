@@ -230,7 +230,7 @@ describe('A human edit made during a turn waits for the next brief', () => {
         const line = entries.find((entry) => entry.kind === 'context_delivery')
         expect(line).toMatchObject({
           role: 'hemera',
-          body: 'Hemera handed the agent the human edits of scope.',
+          body: 'Your edits to scope went to the agent.',
           state: null,
         })
         expect(JSON.parse(line?.payload ?? '{}')).toMatchObject({
@@ -330,13 +330,13 @@ describe('An edit made during a delivery turn is handed over once that turn ends
         yield* write(humanOf(sessionId), specId, 'scope', 'CSV only.')
         yield* runtime.specChanged(specId)
         yield* heldInThread(sessionId, (entries) =>
-          entries.some((entry) => entry.body.endsWith('the human edits of scope.')),
+          entries.some((entry) => entry.body.endsWith('Your edits to scope went to the agent.')),
         )
         // While it runs, the human saves problem.
         yield* write(humanOf(sessionId), specId, 'problem', 'The Journal cannot leave Hemera.')
         gate.carryOn()
         const entries = yield* heldInThread(sessionId, (thread) =>
-          thread.some((entry) => entry.body.endsWith('the human edits of problem.')),
+          thread.some((entry) => entry.body.endsWith('Your edits to problem went to the agent.')),
         )
         expect(agent.answers.prompts).toEqual([
           DELIVERY_MARKER,
@@ -404,7 +404,7 @@ describe('A delivery the agent did not take keeps the human edits for the next s
         )
         expect(deliveries).toBe(2)
         expect(entries.find((entry) => entry.kind === 'context_delivery')?.body).toBe(
-          'Not handed over, waiting for the next safe point: the human edits of scope.',
+          'Not handed over, waiting for the next safe point: your edits to scope.',
         )
         expect((yield* specs.read(specId)).briefedAt).toBe(briefedAt)
 

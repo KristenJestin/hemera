@@ -19,7 +19,7 @@ const LINE = 'flex min-w-0 flex-1 items-center gap-2 text-xs text-muted-foregrou
 const RULE = 'flex-1 border-t border-border'
 
 export interface MissionBriefProps {
-  /** What the line says: `Mission brief · plan`, `ATL-7 marked ready`. */
+  /** What the line says: `What the agent was told · Plan`, `ATL-7 marked ready`. */
   title: string
   /** When, or why, already written: `10:44`. */
   detail: string

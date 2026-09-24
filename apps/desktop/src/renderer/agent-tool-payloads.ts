@@ -283,17 +283,62 @@ export function hemeraToolCallOf(
   const read = readPayload(hemeraToolCallPayloadSchema, entry.payload)
   if (read === null) return null
   const { tool, state, arguments: bounded, ms } = read
+  const said = state === 'completed' ? entry.body : plainRefusal(entry.body)
   return {
     tool,
     ...hemeraToolLabelOf(tool),
     subject: subjectOf(tool, bounded, runs),
     status: state,
-    summary: entry.body,
+    summary: said,
     arguments: argumentsOf(bounded),
     ms,
-    error: state !== 'completed' ? entry.body : undefined,
+    error: state !== 'completed' ? said : undefined,
     defaultOpen: state !== 'completed',
   }
+}
+
+/** What a Spec's status is, said to the reader where the engine names the value. */
+function statusSaid(status: string): string {
+  if (status === 'ready') return 'is marked ready'
+  if (status === 'in_progress') return 'is being built'
+  return 'was cancelled'
+}
+
+/**
+ * The core's refusals of a Spec write, in the reader's words (`writable`, `StaleSectionError`).
+ *
+ * The agent is answered in the engine's words, which name the revision, the version and the
+ * status it works with; the card in the thread says the same refusal as the Spec panel would.
+ * The sentence is matched at its start and what follows it is kept; one this does not know is
+ * shown as the engine wrote it.
+ */
+const REFUSALS: readonly (readonly [RegExp, (...parts: string[]) => string])[] = [
+  [
+    /^revision \d+ of (\S+) is not its current revision/,
+    (key) => `This is an earlier version of ${key}; only the latest can be changed`,
+  ],
+  [
+    /^(\S+) is (ready|in_progress|cancelled): only a draft is written/,
+    (key, status) => `${key} ${statusSaid(status)}; only a draft can be changed`,
+  ],
+  [/^(\S+) has no writer Session/, (key) => `No Session is set to change ${key}`],
+  [
+    /^the write right on (\S+) belongs to the Session "(.*)"/,
+    (key, title) => `Only the Session "${title}" can change ${key}`,
+  ],
+  [
+    /^the (\w+) section changed since version \d+: it is at version \d+/,
+    (section) => `The ${section.replaceAll('_', ' ')} section changed since the agent read it`,
+  ],
+]
+
+/** A refused call's line in the reader's words, or the line as it came when it is not a Spec's. */
+export function plainRefusal(text: string): string {
+  for (const [pattern, say] of REFUSALS) {
+    const found = pattern.exec(text)
+    if (found !== null) return say(...found.slice(1)) + text.slice(found[0].length)
+  }
+  return text
 }
 
 /** What `CommandRun` needs, read off a `command_run` entry. */

@@ -54,11 +54,17 @@ function timeOf(at: number): string {
   return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
-/** The folded line of a turn's brief: `Mission brief · shape`, its time, and what was handed. */
+/**
+ * The folded line of a turn's brief: `What the agent was told · Shape`, its time, and what was
+ * handed. Said as the reader would say it: `mission brief` is the engine's word for it.
+ */
 export function briefOf(entry: SessionEntry): MissionBriefProps {
   const phase = parsed(briefSchema, entry.payload)?.phase ?? null
   return {
-    title: phase === null ? 'Mission brief' : `Mission brief · ${phase}`,
+    title:
+      phase === null
+        ? 'What the agent was told'
+        : `What the agent was told · ${phase.charAt(0).toUpperCase()}${phase.slice(1)}`,
     detail: timeOf(entry.createdAt),
     brief: entry.body,
   }

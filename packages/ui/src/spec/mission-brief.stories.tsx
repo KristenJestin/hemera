@@ -10,7 +10,7 @@ const meta = {
   tags: ['autodocs', 'new'],
   parameters: { layout: 'padded' },
   args: {
-    title: 'Mission brief · plan',
+    title: 'What the agent was told · Plan',
     detail: '10:44',
     brief:
       '**Plan** · analyse the code and fix the technical approach of `ATL-7`, its risks and how it is verified. Shape is finished; one blocking question is open.\n\nSince the last turn you edited **Scope** (v4).',
@@ -30,10 +30,9 @@ type Story = StoryObj<typeof meta>
 export const Folded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: /Mission brief · plan/ })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    )
+    await expect(
+      canvas.getByRole('button', { name: /What the agent was told · Plan/ }),
+    ).toHaveAttribute('aria-expanded', 'false')
   },
 }
 
@@ -41,7 +40,7 @@ export const Folded: Story = {
 export const Unfolded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /Mission brief · plan/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /What the agent was told · Plan/ }))
     await expect(await canvas.findByText(/Since the last turn you edited/)).toBeVisible()
   },
 }

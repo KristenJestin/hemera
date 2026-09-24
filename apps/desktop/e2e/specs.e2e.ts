@@ -63,7 +63,7 @@ const DEFINING = 'Let us shape the export fix.'
 const PROBLEM = 'The CSV export leaves the invoice date column empty.'
 
 /** The line the thread says once the human's edit of `Problem` was handed to the agent. */
-const EDIT_HANDED = 'Hemera handed the agent the human edits of problem.'
+const EDIT_HANDED = 'Your edits to problem went to the agent.'
 
 /** The question asked in the chat, and the option it is answered with. */
 const QUESTION = 'Which date decides the month of an invoice?'
@@ -203,7 +203,7 @@ describe('The brief is part of the turn, never a human message', () => {
   it('folds a mission brief titled with the phase in focus above the answer', async () => {
     await write(DEFINING)
     await press('Send')
-    await awaits('Mission brief · shape')
+    await awaits('What the agent was told · Shape')
     await awaits(ANSWERS[1])
 
     // The sentence was written once, as the user's; the brief is Hemera's, and folded.
@@ -240,7 +240,7 @@ describe('A human edit is recorded and reaches the agent', () => {
 
     // The brief is one per phase: `shape` is still the focus, so no second brief came, and the
     // edit went over once.
-    expect(await timesInThread('Mission brief · shape')).toBe(1)
+    expect(await timesInThread('What the agent was told · Shape')).toBe(1)
     expect(await timesInThread(EDIT_HANDED)).toBe(1)
   })
 })
