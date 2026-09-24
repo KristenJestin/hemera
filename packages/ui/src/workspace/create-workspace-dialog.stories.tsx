@@ -76,7 +76,7 @@ function Controlled({
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Surfaces/Workspace/Create',
+  title: 'Blocks/Workspace/CreateWorkspaceDialog',
   component: CreateWorkspaceDialog,
   render: (args) => <Controlled {...args} />,
   parameters: { layout: 'fullscreen' },

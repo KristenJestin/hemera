@@ -82,7 +82,7 @@ function Growing({ workspaces, onCreate, ...rest }: WorkspaceListProps) {
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Surfaces/Project/Workspaces',
+  title: 'Blocks/Workspace/WorkspaceList',
   component: WorkspaceList,
   parameters: { layout: 'padded' },
   args: {

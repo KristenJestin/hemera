@@ -25,7 +25,7 @@ const FOLDER = '/home/someone/.hemera/workspaces/atlas/login-form/sources/api'
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Blocks/Activity/RunDetails',
+  title: 'Blocks/Workspace/RunDetails',
   component: RunDetails,
   parameters: { layout: 'padded' },
   args: {

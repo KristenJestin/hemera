@@ -41,7 +41,7 @@ function Controlled({ open, onOpenChange, ...rest }: CleanupDialogProps) {
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Surfaces/Project/Workspaces/Cleanup',
+  title: 'Blocks/Workspace/CleanupDialog',
   component: CleanupDialog,
   render: (args) => <Controlled {...args} />,
   parameters: { layout: 'fullscreen' },

@@ -23,7 +23,7 @@ const WORKSPACE: VariableLine[] = [
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Surfaces/Workspace/Variables',
+  title: 'Blocks/Workspace/VariablesEditor',
   component: VariablesEditor,
   parameters: { layout: 'padded' },
   args: {

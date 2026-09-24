@@ -36,7 +36,7 @@ const FRONT: WorkspaceRepositoryLine = { path: './sources/front', git: CLEAN }
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Surfaces/Workspace/Card',
+  title: 'Blocks/Workspace/WorkspaceCard',
   component: WorkspaceCard,
   parameters: { layout: 'padded' },
   args: {

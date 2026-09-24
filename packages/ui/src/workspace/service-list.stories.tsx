@@ -50,7 +50,7 @@ const AUTH: ServiceLine = {
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Surfaces/Workspace/Services',
+  title: 'Blocks/Workspace/ServiceList',
   component: ServiceList,
   parameters: { layout: 'padded' },
   args: {

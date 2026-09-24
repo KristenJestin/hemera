@@ -73,7 +73,7 @@ function Controlled({ steps, commands, onAdd, onRemove, onMove, ...rest }: Prepa
 
 const meta = {
   tags: ['autodocs', 'new'],
-  title: 'Surfaces/Project/Preparation',
+  title: 'Blocks/Workspace/PreparationEditor',
   component: PreparationEditor,
   render: (args) => <Controlled {...args} />,
   parameters: { layout: 'fullscreen' },
