@@ -1,8 +1,8 @@
 /**
  * "Add to catalogue" on a one-off run, as the window does it (design D8-11).
  *
- * Over the whole engine, with the tools store listening as the application does: a line run from
- * the Commands panel stays a one-off and out of the catalogue, until the human adds it — under
+ * Over the whole engine, with the tools store listening as the application does: a line run twice
+ * from the Commands panel is two one-offs and stays out of the catalogue, until the human adds it — under
  * the run's name, with the line it ran, as a `script` at the Workspace root — and the run itself
  * is not rewritten. A second press is the engine's refusal, in its words.
  */
@@ -55,7 +55,7 @@ async function until(ready: () => boolean): Promise<void> {
 const ONE_OFF = `"${process.execPath}" -e "process.exit(0)"`
 
 describe('A one-off execution stays out of the catalogue', () => {
-  test('until the human adds it, and the run stays a one-off', async () => {
+  test('two runs of the same line stay out until the human adds one, and both stay one-offs', async () => {
     opened = await openWindow(dataFolder, fakeAgent({ steps: [] }))
     install(opened.bridge)
     stops = [listenToTools()]
@@ -70,10 +70,15 @@ describe('A one-off execution stays out of the catalogue', () => {
       provider: 'claude',
     })
 
+    // The same line run twice: two runs in the Session, and repeating it promotes nothing.
     expect(await runCommand(session.id, { line: ONE_OFF })).toBeNull()
-    await until(() => runsOf(session.id)[0]?.state === 'exited')
+    expect(await runCommand(session.id, { line: ONE_OFF })).toBeNull()
+    await until(() => runsOf(session.id).filter((one) => one.state === 'exited').length === 2)
+    expect(runsOf(session.id).map((one) => [one.line, one.state, one.commandId])).toEqual([
+      [ONE_OFF, 'exited', null],
+      [ONE_OFF, 'exited', null],
+    ])
     const [run] = runsOf(session.id)
-    expect(run?.commandId).toBeNull()
     expect(await bridge.invoke('commands.list', { projectId: project.id })).toEqual([])
 
     // The human's click: the run's name, the line it ran, a script at the root, the defaults.
@@ -91,9 +96,9 @@ describe('A one-off execution stays out of the catalogue', () => {
       }),
     ])
 
-    // The run is what it was: a one-off.
+    // The runs are what they were: one-offs.
     await readRuns(session.id)
-    expect(runsOf(session.id).map((one) => one.commandId)).toEqual([null])
+    expect(runsOf(session.id).map((one) => one.commandId)).toEqual([null, null])
 
     // Pressed again, the name is taken: the engine's sentence, and nothing replaced.
     expect(run === undefined ? null : await addToCatalogue(run)).toBe(
