@@ -26,6 +26,10 @@ import type { PreparationStepLine, StepKind, StepState } from './model.ts'
  * keeps what was done, so the failed step shows the message as Git, the disk or the command said
  * it, and the steps after it stay `pending`. Resuming re-checks what was done before it retries
  * anything, which the note under the button says, because it is what makes pressing it safe.
+ *
+ * A preparation Hemera was closed in the middle of has no failed step: the step that was running
+ * is `pending` again, and the Workspace still says it is being prepared while nothing prepares it.
+ * That is resumed the same way, and the list says why it stopped.
  */
 const STEPS = 'flex flex-col'
 
@@ -68,15 +72,28 @@ const STATE = 'flex shrink-0 items-center gap-1 text-sm'
 export interface PreparationStepsProps {
   /** The steps, in the order they run. */
   steps: readonly PreparationStepLine[]
-  /** Re-checks what was done and retries the failed step; offered once a step has failed. */
+  /**
+   * Re-checks what was done and retries the failed step; offered once a step has failed, or when
+   * the preparation was interrupted.
+   */
   onResume?: (() => void) | undefined
+  /**
+   * Whether the preparation stopped before it ended with no step failed: Hemera was closed while
+   * it ran, and nothing prepares the Workspace any more.
+   */
+  interrupted?: boolean | undefined
   /** Where the card sits; never how it looks. */
   className?: string | undefined
 }
 
-export function PreparationSteps({ steps, onResume, className }: PreparationStepsProps): ReactNode {
+export function PreparationSteps({
+  steps,
+  onResume,
+  interrupted = false,
+  className,
+}: PreparationStepsProps): ReactNode {
   const failed = steps.some((step) => step.state === 'failed')
-  const resumable = failed && onResume !== undefined
+  const resumable = (failed || interrupted) && onResume !== undefined
   return (
     <Card
       title="Preparation"
@@ -90,7 +107,9 @@ export function PreparationSteps({ steps, onResume, className }: PreparationStep
               Resume
             </Button>
             <p className={NOTE}>
-              What was done is checked again against the disk before anything is retried.
+              {failed
+                ? 'What was done is checked again against the disk before anything is retried.'
+                : 'Hemera was closed before the preparation ended. What was done is checked again against the disk before it carries on.'}
             </p>
           </>
         ) : undefined

@@ -74,6 +74,10 @@ const meta = {
   argTypes: {
     steps: { control: 'object', description: 'The steps, in the order they run.' },
     onResume: { control: false, description: 'Re-checks what was done, retries the failed step.' },
+    interrupted: {
+      control: 'boolean',
+      description: 'Whether Hemera was closed before the preparation ended, no step failed.',
+    },
     className: { control: false, description: 'Where the card sits; never how it looks.' },
   },
 } satisfies Meta<typeof PreparationSteps>
@@ -252,6 +256,33 @@ export const Resumed: Story = {
   args: { steps: BEFORE_RESUME },
   render: (args) => <Resuming {...args} />,
   play: resumingReChecksBeforeRetrying,
+}
+
+// Scenario "A preparation interrupted by a quit can be resumed".
+async function aPreparationInterruptedByAQuitCanBeResumed({ canvasElement, args }: Context) {
+  args.onResume?.mockClear()
+  const canvas = within(canvasElement)
+  // The step that was running when Hemera was closed is waiting again, and nothing failed.
+  await expect(rowsIn(canvasElement).map(stateOf)).toEqual([
+    'Done',
+    'Done',
+    'Pending',
+    'Pending',
+    'Pending',
+  ])
+  await expect(canvas.queryByText('Failed')).toBeNull()
+  await expect(canvas.getByText(/Hemera was closed before the preparation ended/)).toBeVisible()
+  await userEvent.click(canvas.getByRole('button', { name: 'Resume' }))
+  await expect(args.onResume).toHaveBeenCalledTimes(1)
+}
+
+/**
+ * Hemera was closed while the copy ran: the copy is `pending` again, the Workspace still says it
+ * is being prepared, and nothing prepares it. Resume is offered all the same.
+ */
+export const Interrupted: Story = {
+  args: { steps: stepsAt(['done', 'done', 'pending']), interrupted: true },
+  play: aPreparationInterruptedByAQuitCanBeResumed,
 }
 
 /** The one control of the list, Resume, reached and pressed with the keyboard. */
