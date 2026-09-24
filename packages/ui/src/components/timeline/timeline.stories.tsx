@@ -19,13 +19,14 @@ import { Timeline, TimelineSection, TimelineStop } from './timeline.tsx'
  * a Session will draw a third.
  */
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Timeline',
   component: TimelineStop,
   parameters: { layout: 'padded' },
   args: {
     marker: '#61',
     quiet: false,
+    tone: 'primary',
     children: (
       <>
         <Badge tone="info">project</Badge>
@@ -45,6 +46,11 @@ const meta = {
   argTypes: {
     marker: { control: 'text', description: 'What identifies the stop where a reader quotes it.' },
     quiet: { control: 'boolean', description: 'Whether the engine did it rather than the user.' },
+    tone: {
+      control: 'inline-radio',
+      options: ['primary', 'info', 'success', 'warning', 'neutral', 'define'],
+      description: 'What the stop is about, in the tone the dot is filled with.',
+    },
     children: { control: false, description: 'What the stop is about.' },
     meta: { control: false, description: 'Where and when and by whom.' },
   },
@@ -137,6 +143,31 @@ export const States: Story = {
   },
 }
 
+/**
+ * Every tone a stop can wear, the define one included: a Spec's steps are drawn in the colour of
+ * the define mission, told apart from a Project's and a Session's (lot 19).
+ */
+export const Tones: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <Timeline label="Tones">
+      <TimelineStop tone="primary">Session started</TimelineStop>
+      <TimelineStop tone="info">Project created</TimelineStop>
+      <TimelineStop tone="success">Build finished</TimelineStop>
+      <TimelineStop tone="warning">Migration held back</TimelineStop>
+      <TimelineStop tone="neutral">Hemera started</TimelineStop>
+      <TimelineStop tone="define">Spec ATL-7 created</TimelineStop>
+    </Timeline>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const stop = canvas.getByText('Spec ATL-7 created').closest('[role="listitem"]')
+    const dot = stop?.querySelector('[aria-hidden="true"] > span')
+    await expect(dot).toHaveClass('bg-mission-define')
+    expect(canvas.getAllByRole('listitem')).toHaveLength(6)
+  },
+}
+
 /** The three entries every candidate is drawn with, so only the drawing differs. */
 /**
  * Who acted, as the head of a line. The timeline knows nothing of actors — it draws whatever
@@ -223,6 +254,12 @@ function Sample() {
         </TimelineStop>
         <TimelineStop marker={<By who="mcp" />} tone="info" quiet meta={<span>14:20</span>}>
           Project settings read by a connected client
+        </TimelineStop>
+        <TimelineStop marker={<By who="you" />} tone="define" meta={<span>15:30</span>}>
+          Spec ATL-7 “Export invoices as CSV” created
+        </TimelineStop>
+        <TimelineStop marker={<By who="agent" />} tone="define" quiet meta={<span>16:12</span>}>
+          Phase shape finished
         </TimelineStop>
       </TimelineSection>
     </>

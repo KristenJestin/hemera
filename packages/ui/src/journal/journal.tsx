@@ -94,7 +94,7 @@ const TONE: Record<JournalEntityKind, TimelineTone> = {
   project: 'info',
   session: 'primary',
   profile: 'neutral',
-  spec: 'success',
+  spec: 'define',
 }
 
 /** One event, as a stop of the timeline: its sequence, what it was about, and what it says. */
