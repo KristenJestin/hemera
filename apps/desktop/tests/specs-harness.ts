@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { Effect, Layer } from 'effect'
 
 import { type SectionName, type SpecType, type SpecWriter, contractOf } from '@hemera/core'
+import { StderrSink } from '#engine/agents/supervisor.ts'
 import { journalLayer } from '#engine/journal.ts'
 import type { Journal } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -33,7 +34,11 @@ export function openedOn(dataFolder: string, notices: Layer.Layer<SpecNotices> =
     sessionsLayer,
     specsLayer.pipe(Layer.provide(notices)),
     journalLayer,
-  ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
+  ).pipe(
+    Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
+    // Where the Sessions tell a write that came too late: nowhere, in a suite that reads none.
+    Layer.provide(Layer.succeed(StderrSink, { write: () => Effect.void })),
+  )
   return <A, E>(program: Effect.Effect<A, E, SpecServices>) =>
     Effect.runPromise(
       Effect.scoped(
