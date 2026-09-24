@@ -1111,6 +1111,14 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     ]) {
       expect(schema).toContain(table)
     }
+    // A recipe step and a Workspace's step apply under a base, a repository or the root: the
+    // `scope` of each repository is gone (D8-05 as amended by recette 1).
+    const tables = await on(dataFolder, schemaOf)
+    for (const table of ['project_preparation_steps', 'workspace_steps']) {
+      const created = tables.find((row) => row.startsWith(`${table}:`))
+      expect(created).toContain('`base` text')
+      expect(created).not.toContain('scope')
+    }
 
     // And the Journal says what was done to the data: the first opening, then this one.
     expect(kept.events.map((event) => event.type)).toEqual([
