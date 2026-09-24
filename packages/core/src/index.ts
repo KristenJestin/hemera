@@ -96,6 +96,7 @@ export {
   DELIVERY_MARKER,
   contextUri,
   deliveryText,
+  internalText,
 } from './domain/context.ts'
 export type { BaseReach, ContextReach, ContextSource } from './domain/context.ts'
 export {

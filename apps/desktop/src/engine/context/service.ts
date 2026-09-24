@@ -104,6 +104,8 @@ export interface ContextService {
    * and the file reading as it is no longer a change.
    */
   readonly delivered: (sessionId: string, given: Pending) => Effect.Effect<Delivery, Refusal>
+  /** Records a sub-agent's result as given, once the agent took it (D7-14). */
+  readonly handedInternal: (sessionId: string, text: string) => Effect.Effect<void, Refusal>
   /** Everything a Session was provided, oldest first. */
   readonly provided: (sessionId: string) => Effect.Effect<Delivery[], Refusal>
 }
@@ -394,6 +396,9 @@ export const contextLayer = Layer.effect(
         return { ...row, reached: 'delivery_prompt' as const }
       })
 
+    const handedInternal = (sessionId: string, text: string): Effect.Effect<void, Refusal> =>
+      record(sessionId, 'internal', '', fingerprintOf(text)).pipe(Effect.asVoid)
+
     /**
      * How the base reaches the agent of this Session: by the means its adapter declares, on the
      * platform this engine runs on (D6-07). A Session with no agent yet has been given nothing, and
@@ -442,6 +447,6 @@ export const contextLayer = Layer.effect(
         }))
       })
 
-    return { start, pending, delivered, provided }
+    return { start, pending, delivered, handedInternal, provided }
   }),
 )

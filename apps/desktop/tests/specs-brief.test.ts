@@ -1,6 +1,7 @@
 /**
- * The mission brief, the human's edits and answers of a `define` Session, handed to its agent as
- * deliveries at the safe point, on the fake provider (design D7-09, onto D6-08).
+ * The mission brief, the human's edits and answers of a `define` Session, and a sub-agent's
+ * result, handed to its agent as deliveries at the safe point, on the fake provider (design D7-09,
+ * D7-14, onto D6-08).
  *
  * A turn really happens: the runtime starts the fake agent, sends it the prompts and writes the
  * thread, so what is asserted is what the agent received and what the thread holds. Each suite
@@ -19,6 +20,7 @@ import {
   DELIVERY_MARKER,
   PHASE_BRIEFS,
   contextUri,
+  internalText,
   readerLine,
 } from '@hemera/core'
 import { type FakeAgent, fakeAgent } from '#engine/agents/fake.ts'
@@ -484,6 +486,64 @@ describe('A define Session whose agent lost its session is briefed again', () =>
       true,
     )
     expect(lost.answers.prompts[1]?.endsWith('Third turn.')).toBe(true)
+  })
+})
+
+describe('A sub-agent result arrives as internal', () => {
+  test('a result queued during a turn is handed over once the turn is over, as an internal delivery and never as a human entry', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({ steps: SHAPING, between: gate.between })
+    const result = 'Three call sites read the Journal: export.ts, feed.ts and search.ts.'
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId } = yield* defining
+        const runtime = yield* AgentRuntime
+        const running = yield* Effect.forkScoped(runtime.prompt(sessionId, 'First turn.'))
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.role === 'agent' && entry.body.startsWith('Shaping')),
+        )
+
+        // A sub-agent of the Session's finishes while its turn runs: nothing goes out then.
+        yield* runtime.deliverInternal(sessionId, result)
+        expect(agent.answers.prompts).toEqual([DELIVERY_MARKER, 'First turn.'])
+
+        gate.carryOn()
+        yield* Fiber.join(running)
+        const entries = yield* heldInThread(sessionId, deliveredAlone)
+
+        // Between the two turns, a delivery of its own: the marker and the result, said internal.
+        expect(agent.answers.prompts).toEqual([DELIVERY_MARKER, 'First turn.', DELIVERY_MARKER])
+        expect(agent.answers.blocks[2]).toEqual([
+          { type: 'text', text: DELIVERY_MARKER },
+          {
+            type: 'resource',
+            resource: {
+              uri: contextUri('internal'),
+              mimeType: 'text/markdown',
+              text: internalText(result),
+            },
+          },
+        ])
+        const line = entries.find((entry) => entry.kind === 'context_delivery')
+        expect(line).toMatchObject({
+          role: 'hemera',
+          body: 'Hemera handed the agent the result of a sub-agent.',
+          turnId: expect.any(String),
+        })
+        expect(JSON.parse(line?.payload ?? '{}')).toMatchObject({ kind: 'internal' })
+        expect(usersOf(entries)).toEqual(['First turn.'])
+        expect(entries.some((entry) => entry.body.includes(result))).toBe(false)
+        const provided = yield* (yield* AgentContext).provided(sessionId)
+        expect(provided.filter((one) => one.kind === 'internal')).toEqual([
+          expect.objectContaining({ reached: 'delivery_prompt' }),
+        ])
+
+        // Handed over once: the next turn is the user's text alone.
+        yield* runtime.prompt(sessionId, 'Second turn.')
+        expect(agent.answers.prompts.slice(3)).toEqual(['Second turn.'])
+      }),
+    )
   })
 })
 

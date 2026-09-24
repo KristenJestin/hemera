@@ -42,6 +42,7 @@ import {
   CONTEXT_BASE,
   contextUri,
   hemeraToolNamed,
+  internalText,
   type Session,
   type SessionEntryOrigin,
   type SpecProposal,
@@ -265,6 +266,11 @@ export interface AgentRuntimeService {
    * once the running one is over otherwise (D7-09). Returns at once, never waiting on a turn.
    */
   readonly specChanged: (specId: string) => Effect.Effect<void>
+  /**
+   * Queues a sub-agent's result for the Session's agent, handed over at its next safe point as
+   * an `internal` delivery, never as a message of the user's (D7-14). Returns at once.
+   */
+  readonly deliverInternal: (sessionId: string, text: string) => Effect.Effect<void>
 }
 
 export { AgentNotices, NoNotices } from './notices.ts'
@@ -2087,6 +2093,59 @@ export const runtimeLayer = Layer.effect(
     }
 
     /**
+     * The results of sub-agents waiting for a Session's next safe point, oldest first (D7-14).
+     *
+     * Held in memory, as the sub-agent that produced one is: a result the quit catches before its
+     * safe point goes with it.
+     */
+    const results = new Map<string, readonly string[]>()
+
+    /**
+     * A sub-agent's results (D7-14): each a resource said to be internal and a line of Hemera's,
+     * never a message of the user's. Taken off the queue only once the agent took them.
+     */
+    const internalParcel = (sessionId: string, waiting: readonly string[]): Parcel => {
+      const correlation = crypto.randomUUID()
+      const lines = (turnId: string | null, handed: boolean) =>
+        Effect.forEach(
+          waiting,
+          (text, index) =>
+            deliveryLine(
+              sessionId,
+              `delivery:${correlation}:${index}`,
+              turnId,
+              handed
+                ? 'Hemera handed the agent the result of a sub-agent.'
+                : 'Not handed over, waiting for the next safe point: the result of a sub-agent.',
+              handed ? null : 'failed',
+              {
+                kind: 'internal',
+                fingerprint: fingerprintOf(text),
+                deliveredAt: handed ? new Date().toISOString() : null,
+                reached: 'delivery_prompt',
+              },
+            ),
+          { discard: true },
+        )
+      return {
+        provisions: waiting.map((text) => ({
+          uri: contextUri('internal'),
+          text: internalText(text),
+          mimeType: 'text/markdown',
+        })),
+        announce: (turnId) => lines(turnId, true),
+        taken: Effect.gen(function* () {
+          // Queued meanwhile, a later result stays for the next safe point.
+          results.set(sessionId, (results.get(sessionId) ?? []).slice(waiting.length))
+          for (const text of waiting) {
+            yield* attempt('recording the delivery', context.handedInternal(sessionId, text))
+          }
+        }),
+        missed: (turnId) => lines(turnId, false),
+      }
+    }
+
+    /**
      * What waits for a Session's next safe point, in the order it is handed over.
      *
      * The Workspace's instructions are read only when asked for: a change of the file waits for
@@ -2105,6 +2164,8 @@ export const runtimeLayer = Layer.effect(
           briefFor(sessionId, held.unbriefed).pipe(Effect.provideService(Database, database)),
         )
         if (spec !== null) parcels.push(specParcel(sessionId, held, spec))
+        const queued = results.get(sessionId) ?? []
+        if (queued.length > 0) parcels.push(internalParcel(sessionId, queued))
         return parcels
       })
 
@@ -2704,6 +2765,12 @@ export const runtimeLayer = Layer.effect(
       alive: Effect.sync(() => [...live.keys()]),
       running: (sessionId) => turns.has(sessionId) || starting.has(sessionId),
       specChanged,
+      deliverInternal: (sessionId, text) =>
+        Effect.sync(() => {
+          results.set(sessionId, [...(results.get(sessionId) ?? []), text])
+          // An agent that is not running is handed it when its next prompt starts one.
+          if (live.has(sessionId)) deliverSoon(sessionId, false)
+        }),
     }
     return service
   }),
