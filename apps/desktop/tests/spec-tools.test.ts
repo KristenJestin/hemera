@@ -26,6 +26,7 @@ import { SpecNotices } from '#engine/specs/notices.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { aSessionOn, threadOf, toolApplication } from './application.ts'
 import { agentOf, contracted, frozen, write } from './specs-harness.ts'
+import { type OpenWindow, openWindow } from './window.ts'
 
 let dataFolder: string
 let workspace: string
@@ -35,7 +36,11 @@ beforeEach(() => {
   workspace = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-spec-workspace-')))
 })
 
-afterEach(() => {
+let opened: OpenWindow | null = null
+
+afterEach(async () => {
+  await opened?.close()
+  opened = null
   rmSync(dataFolder, { recursive: true, force: true })
   rmSync(workspace, { recursive: true, force: true })
 })
@@ -561,5 +566,38 @@ describe('The agent proposes a Spec through spec_propose in a free Session', () 
     )
     expect(attesting.answers.used[0]).toMatchObject({ isError: true })
     expect(attesting.answers.used[0]?.text).toContain('it defines none')
+  })
+})
+
+describe('A Session whose proposal is accepted is offered the define set at its next turn', () => {
+  test('its agent is started again, its conversation resumed, with the Spec tools', async () => {
+    const proposing = fakeAgent({
+      steps: [uses('spec_propose', { kind: 'spec', title: 'Export the Journal', type: 'feature' })],
+    })
+    const restarted = fakeAgent({ listsTools: true })
+    opened = await openWindow(dataFolder, proposing, restarted)
+    const { bridge } = opened
+    const project = await bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: workspace,
+    })
+    const session = await bridge.invoke('sessions.create', {
+      projectId: project.id,
+      provider: 'claude',
+    })
+    await bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Export the Journal.' })
+    await bridge.invoke('specs.create', {
+      sessionId: session.id,
+      type: 'feature',
+      title: 'Export the Journal',
+    })
+    await bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Shape it.' })
+
+    expect(proposing.answers.tools).toEqual([[...offeredTools('free')]])
+    expect(restarted.answers.resumes).toBe(1)
+    expect([...(restarted.answers.tools[0] ?? [])].toSorted()).toEqual(
+      [...offeredTools('define')].toSorted(),
+    )
   })
 })
