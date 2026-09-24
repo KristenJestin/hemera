@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { AGENTS_FILE, TOOL_NAMES } from '@hemera/core'
+import { AGENTS_FILE, offeredTools } from '@hemera/core'
 import type { CommandRun } from '@hemera/ipc'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
@@ -222,7 +222,7 @@ describe('The view lists the sources with their provenance', () => {
       ['provided', AGENTS_FILE, 'session_start'],
     ])
     expect(view.provided[1]?.fingerprint).toMatch(/^[0-9a-f]{64}$/)
-    expect(view.tools.map((one) => one.name)).toEqual([...TOOL_NAMES])
+    expect(view.tools.map((one) => one.name)).toEqual([...offeredTools('free')])
     expect(view.tools.find((one) => one.name === 'search')?.bound).toBe(
       '200 matches and 1 MiB scanned a call',
     )

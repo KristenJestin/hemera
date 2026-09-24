@@ -27,9 +27,32 @@ describe('Every tool has a label and a mark', () => {
 })
 
 describe('A mission is offered its own tools', () => {
-  test('a free Session is offered every tool, a define or build one none before its set', () => {
-    expect(offeredTools('free')).toEqual(TOOL_NAMES)
-    expect(offeredTools('define')).toEqual([])
+  test('a free Session is offered the code tools and no Spec tool, a build one none', () => {
+    expect(offeredTools('free')).toEqual(
+      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write', 'spec_propose'].includes(tool)),
+    )
     expect(offeredTools('build')).toEqual([])
+  })
+})
+
+describe('A define Session is offered the Spec tools and no write tool', () => {
+  test('the Spec tools beside a read-only code set', () => {
+    expect([...offeredTools('define')].toSorted()).toEqual(
+      [
+        'commands_list',
+        'commands_output',
+        'fs_list',
+        'fs_read',
+        'project_get',
+        'search',
+        'session_get',
+        'spec_propose',
+        'spec_read',
+        'spec_write',
+      ].toSorted(),
+    )
+    for (const writes of ['fs_write', 'fs_edit', 'commands_run', 'commands_stop'] as const) {
+      expect(offeredTools('define')).not.toContain(writes)
+    }
   })
 })

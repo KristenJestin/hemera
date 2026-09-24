@@ -39,6 +39,8 @@ export class PhaseRefusedError extends Data.TaggedError('PhaseRefusedError')<{
 export interface Declaration {
   summary: string
   assumptions: readonly string[]
+  /** The elements of the Spec the agent says support it, kept in the Journal line. */
+  supporting?: string | undefined
 }
 
 /** The event a phase entering a state is journaled as (D7-13). */
@@ -209,6 +211,7 @@ export function declare(
         phase,
         summary: declaration.summary,
         assumptions: declaration.assumptions.length,
+        supporting: declaration.supporting ?? null,
       },
     })
     const settled = yield* settle(

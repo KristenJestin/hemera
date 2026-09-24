@@ -109,10 +109,10 @@ export const shaped = (specId: string, sessionId: string) =>
   })
 
 /**
- * The whole contract written by the writer's agent, the three phases declared and the content
- * attested: the gate is empty (D7-10).
+ * The whole contract written by the writer's agent and the three phases declared: the gate lists
+ * the attestation alone (D7-10).
  */
-export const complete = (specId: string, sessionId: string) =>
+export const contracted = (specId: string, sessionId: string) =>
   Effect.gen(function* () {
     const specs = yield* Specs
     const agent = agentOf(sessionId)
@@ -154,11 +154,17 @@ export const complete = (specId: string, sessionId: string) =>
         },
       ],
     })
-    yield* specs.declarePhase(specId, sessionId, 'decompose', {
+    return yield* specs.declarePhase(specId, sessionId, 'decompose', {
       summary: 'Decomposed.',
       assumptions: ['One file format'],
     })
-    return yield* specs.attest(specId, sessionId)
+  })
+
+/** `contracted`, and the content attested: the gate is empty (D7-10). */
+export const complete = (specId: string, sessionId: string) =>
+  Effect.gen(function* () {
+    yield* contracted(specId, sessionId)
+    return yield* (yield* Specs).attest(specId, sessionId)
   })
 
 /** `complete`, then the human click: a `ready` Spec. */

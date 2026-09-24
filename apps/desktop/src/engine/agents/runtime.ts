@@ -1522,8 +1522,13 @@ export const runtimeLayer = Layer.effect(
 
         // The token is minted for this process and for this Session, and it is the whole of what
         // says whose call a tool call is (D6-01). It travels as a bearer header, which the three
-        // agents take, and not in the address, which is what a log or a proxy would keep.
-        const granted = yield* access.granted(sessionId, String(process.pid ?? 'unknown'), 'free')
+        // agents take, and not in the address, which is what a log or a proxy would keep. What it
+        // may ask for is the set of the Session's mission (D7-14).
+        const granted = yield* access.granted(
+          sessionId,
+          String(process.pid ?? 'unknown'),
+          session.mission,
+        )
         const mcp: readonly McpServer[] = [
           {
             type: 'http',

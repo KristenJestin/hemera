@@ -1,5 +1,5 @@
 /**
- * The eleven tools, and the one door every call goes through (design D6-03, D6-04, D6-05).
+ * The tools, and the one door every call goes through (design D6-03, D6-04, D6-05).
  *
  * A call arrives here as a name, a flat bag of arguments, and the set the Session was offered.
  * Nothing else about it is trusted: the name is checked against the catalogue, the arguments
@@ -37,6 +37,7 @@ import { AgentNotices } from '../agents/notices.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
+import { Specs } from '../specs/specs.ts'
 import { Database } from '../storage/database.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
@@ -51,6 +52,7 @@ import { type RefusedPathError, resolveInside } from './paths.ts'
 import { type OutsideAnswer, ToolPermissions } from './permissions.ts'
 import { type Page, type ReadRange, numbered, readPage } from './read.ts'
 import { searchIn } from './search.ts'
+import { specTools } from './spec.ts'
 
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
 const ARGUMENTS_KEPT = 400
@@ -149,8 +151,10 @@ function argumentsSent(sent: ToolArguments): string {
 }
 
 /** What a tool hands back before it has been written down. */
-interface Answer {
+export interface Answer {
   readonly ok: boolean
+  /** A failure that is a rule saying no rather than something going wrong: written `refused`. */
+  readonly refused?: boolean
   readonly summary: string
   readonly text: string
   readonly paths: readonly string[]
@@ -257,6 +261,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | ToolPermissions
   | HeldWords
   | AgentNotices
+  | Specs
   | Database
 > = Layer.effect(
   ToolCatalogue,
@@ -269,6 +274,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const access = yield* ToolAccess
     const held = yield* HeldWords
     const notices = yield* AgentNotices
+    const spec = specTools({ specs: yield* Specs, sessions, held })
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -1020,6 +1026,11 @@ export const toolCatalogueLayer: Layer.Layer<
               ].join('\n'),
             )
           }
+
+          case 'spec_read':
+          case 'spec_write':
+          case 'spec_propose':
+            return yield* spec(asked.sessionId, call)
         }
       })
 
@@ -1098,7 +1109,7 @@ export const toolCatalogueLayer: Layer.Layer<
             asked,
             { ...made, milliseconds: Math.round((performance.now() - began) * 1000) / 1000 },
             answer,
-            answer.ok ? 'completed' : 'failed',
+            answer.ok ? 'completed' : answer.refused === true ? 'refused' : 'failed',
           )
         }).pipe(
           // The agent gave up on the call — its request was aborted — and what the call was

@@ -195,6 +195,9 @@ function servicesOf(
   // The processes a command becomes and the processes an agent is are started by the same
   // supervisor, built once: a quit closes one scope and every tree of both goes with it (D5-04).
   const processes = processSupervisorLayer.pipe(Layer.provide(agents))
+  // The Specs, and the window that hears of them: one service, which the Spec tools write through
+  // as the window's own requests do.
+  const specs = specsLayer.pipe(Layer.provide(specNoticesTo(port, log)))
   // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
   // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
   // rather than minting a second one, and a token of one book means nothing to the other.
@@ -204,6 +207,7 @@ function servicesOf(
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
     Layer.provide(rows),
+    Layer.provide(specs),
     Layer.provide(processes),
     Layer.provide(agents),
     // What an agent holds in memory, written before a call or a run is: the runtime hands its
@@ -220,7 +224,7 @@ function servicesOf(
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),
     journalLayer,
     rows,
-    specsLayer.pipe(Layer.provide(specNoticesTo(port, log))),
+    specs,
     listed,
     runtimeLayer.pipe(
       // Discovery is handed up rather than hidden: the settings page asks this process what the
