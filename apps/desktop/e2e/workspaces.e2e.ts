@@ -464,6 +464,8 @@ describe('A one-off execution stays out of the catalogue', () => {
 
 describe('Add to catalogue', () => {
   it('keeps the one-off in the catalogue on the click, under its first word', async () => {
+    // A one-off that exited 0 is folded, and the offer sits beside its command line, in its body.
+    await $('[role="dialog"]').$('button*=One-off').click()
     await $('[role="dialog"]').$('button*=Add to catalogue').click()
     await browser.waitUntil(async () => (await catalogue()).includes('node'), {
       timeout: 10_000,
