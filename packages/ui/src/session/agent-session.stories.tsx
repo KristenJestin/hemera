@@ -530,14 +530,12 @@ export const Complete: Story = {
     // The plan is the details', and the thread does not repeat it.
     expect(canvas.queryByText('2 of 4')).toBeNull()
     // The change is read in the language of its file, which is what the extension bought. The
-    // grammar of that language is a module loaded on demand, so the first diff of a session waits
-    // for it: on a cold machine that load is slower than the default patience of a wait.
-    await waitFor(
-      () => {
-        expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
-      },
-      { timeout: 10_000 },
-    )
+    // grammar of that language is a module loaded on demand, so the first diff of a session is
+    // drawn plain and coloured once the grammar has arrived — no patience beyond the default,
+    // since a draw that came back plain because the grammar had not read yet is no longer kept.
+    await waitFor(() => {
+      expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
+    })
     // A call to one of Hemera's own tools wears the mark of its kind, as a native call does, and
     // is announced as Hemera's, so it is not read as a native call.
     await expect(canvas.getByRole('button', { name: /^Hemera Read file/ })).toBeVisible()
@@ -606,10 +604,8 @@ export const Complete: Story = {
     await expect(canvas.queryByText('Failed')).toBeNull()
     // And the rail marks the reader's own message and nothing else: one question asked, one
     // mark to come back to. The rail is drawn once the thread has been measured, in an effect:
-    // counted where it is still on its way, the count is zero. So the mark is found first, with
-    // the patience the grammar above is given for the same reason.
-    const patience = { timeout: 10_000 }
-    const marked = await canvas.findAllByRole('button', { name: /forty thousand rows/ }, patience)
+    // counted where it is still on its way, the count is zero. So the mark is waited for.
+    const marked = await canvas.findAllByRole('button', { name: /forty thousand rows/ })
     await expect(marked).toHaveLength(1)
 
     /*
