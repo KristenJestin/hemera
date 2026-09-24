@@ -35,6 +35,7 @@ import {
   specRevisions,
   specSections,
   specTasks,
+  sessions,
   specs,
   taskDependencies,
   taskSets,
@@ -273,6 +274,11 @@ export function readSnapshot(
       .from(specPhases)
       .where(eq(specPhases.revisionId, revision.id))
       .pipe(read('phases'))
+    const writer = yield* transaction
+      .select({ briefedAt: sessions.briefedAt })
+      .from(sessions)
+      .where(eq(sessions.id, spec.writerSessionId ?? ''))
+      .pipe(read('writer Session'))
 
     const byRank = (left: { rank: string }, right: { rank: string }) =>
       compareRanks(left.rank, right.rank)
@@ -338,6 +344,7 @@ export function readSnapshot(
       phases: phases
         .map(phaseOf)
         .toSorted((left, right) => phaseOrder(left.phase) - phaseOrder(right.phase)),
+      briefedAt: epoch(writer[0]?.briefedAt ?? null),
     }
   })
 }

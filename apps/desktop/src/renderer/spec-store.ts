@@ -324,9 +324,13 @@ export function forgetSpecRefusal(): void {
  * Listens for `spec.changed`, once for the whole window: the Spec on screen is read again when
  * it is the one that changed, and `changed` hears of every change with its Project — a Spec step
  * can change a Session too (its mission, its Spec, a new Session opened on it).
+ *
+ * The end of a turn is heard too: it is when the writer's agent was briefed, so an edit marked
+ * "sent to the agent next turn" stops being one (Decided 17).
  */
 export function listenToSpecs(changed: (projectId: string) => void): () => void {
   return window.hemera.on((event: EngineEvent) => {
+    if (event.event === 'turn' && shown !== null) void refresh(shown)
     if (event.event !== 'spec.changed') return
     changed(event.projectId)
     if (event.specId === shown) void refresh(event.specId)

@@ -201,6 +201,11 @@ export interface SpecSnapshot {
   taskStories: TaskStory[]
   questions: SpecQuestion[]
   phases: SpecPhase[]
+  /**
+   * When the writer Session's agent was last briefed, or null before its first brief (Decided
+   * 17): a human edit after it is sent to the agent with the next turn.
+   */
+  briefedAt: number | null
 }
 
 export class InvalidSpecTitleError extends Error {
@@ -684,6 +689,18 @@ export function takeOverRefusal(
     return `The Session "${writerTitle ?? 'another Session'}" is running a turn on ${spec.key}: take over once it ends.`
   }
   return null
+}
+
+/**
+ * Whether a section is a human edit the agent has not been briefed on since `briefedAt` (D7-09,
+ * Decided 17). A section still as the Spec's creation left it, empty, is not an edit.
+ */
+export function unbriefedEdit(section: SpecSection, briefedAt: number | null): boolean {
+  return (
+    section.author === 'human' &&
+    (briefedAt === null || section.updatedAt > briefedAt) &&
+    (section.body !== '' || section.version > 1)
+  )
 }
 
 /** The prefix used when a Project name gives nothing usable (Decided 2). */

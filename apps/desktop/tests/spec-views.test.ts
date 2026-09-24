@@ -124,6 +124,7 @@ function snapshot(change: Partial<SpecSnapshot> = {}): SpecSnapshot {
     dependencies: [],
     taskStories: [],
     questions: [],
+    briefedAt: null,
     phases: phases('open', 'pending', 'pending'),
     ...change,
   }
@@ -226,6 +227,19 @@ describe('Each section wears its mark', () => {
       ],
     })
     expect(sectionsOf(stale, []).map((one) => one.mark)).toEqual(['stale', 'agent'])
+  })
+})
+
+describe('An edit of yours is sent to the agent next turn', () => {
+  test('a human edit after the writer was last briefed is pending, and none once briefed', () => {
+    const pending = (briefedAt: number | null) =>
+      sectionsOf(snapshot({ briefedAt }), [])
+        .filter((one) => one.pendingForAgent === true)
+        .map((one) => one.name)
+    // The agent's section and the empty ones the Spec was born with are no edit of yours.
+    expect(pending(null)).toEqual(['scope'])
+    expect(pending(-1)).toEqual(['scope'])
+    expect(pending(0)).toEqual([])
   })
 })
 

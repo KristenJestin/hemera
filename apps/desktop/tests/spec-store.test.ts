@@ -74,6 +74,7 @@ function snapshot(version: number, writer = 'writer', number = 1): SpecSnapshot 
     dependencies: [],
     taskStories: [],
     questions: [],
+    briefedAt: null,
     phases: [],
   }
 }

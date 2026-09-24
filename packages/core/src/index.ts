@@ -132,6 +132,7 @@ export {
   staleAfterWrite,
   takeOverRefusal,
   taskGraph,
+  unbriefedEdit,
   writable,
 } from './domain/spec.ts'
 export type {

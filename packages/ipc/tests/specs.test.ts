@@ -97,6 +97,7 @@ const SNAPSHOT: SpecSnapshot = {
       resolvedAt: null,
     },
   ],
+  briefedAt: null,
   phases: [
     {
       id: 'phase-1',

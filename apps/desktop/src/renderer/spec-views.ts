@@ -5,6 +5,7 @@ import {
   readyGate,
   sectionOwner,
   takeOverRefusal,
+  unbriefedEdit,
 } from '@hemera/core'
 import type {
   ChannelArguments,
@@ -156,8 +157,9 @@ function sectionMark(
 }
 
 /**
- * The sections, each with its mark and, when a text of yours was kept on another version than
- * the one it is at, the conflict the banner says (D7-12). A frozen revision shows no conflict:
+ * The sections, each with its mark, whether your edit is still to reach the agent, and, when a
+ * text of yours was kept on another version than the one it is at, the conflict the banner says
+ * (D7-12). A frozen revision shows no conflict:
  * nothing is saved on it.
  */
 export function sectionsOf(snapshot: SpecSnapshot, buffers: readonly EditBuffer[]): SectionView[] {
@@ -173,6 +175,8 @@ export function sectionsOf(snapshot: SpecSnapshot, buffers: readonly EditBuffer[
       version: section.version,
       author,
       mark: sectionMark(snapshot, section.name, author, kept !== undefined),
+      // "Sent to the agent next turn": an edit of yours its writer has not been briefed on.
+      pendingForAgent: editable && unbriefedEdit(section, snapshot.briefedAt),
       conflict:
         kept === undefined
           ? undefined

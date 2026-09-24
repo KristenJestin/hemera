@@ -107,6 +107,7 @@ export function passingSnapshot(): SpecSnapshot {
         resolvedAt: 1,
       },
     ],
+    briefedAt: null,
     phases: [
       {
         id: 'phase-shape',

@@ -167,6 +167,23 @@ describe('A human edit is recorded and reaches the agent', () => {
   })
 })
 
+describe('The Spec read says when its writer was last briefed', () => {
+  test('briefedAt is null before the first turn, and set once the agent took one', async () => {
+    const agent = fakeAgent()
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        const specs = yield* Specs
+        expect((yield* specs.read(specId)).briefedAt).toBe(null)
+
+        yield* (yield* AgentRuntime).prompt(sessionId, 'First turn.')
+        expect((yield* specs.read(specId)).briefedAt).toEqual(expect.any(Number))
+      }),
+    )
+  })
+})
+
 describe('A failed turn keeps the human edits for the next brief', () => {
   test('the brief of a turn the agent never took is composed again, the human edit still in it', async () => {
     const storage = failing()

@@ -11,7 +11,7 @@
  * the next brief, and what was written while the turn ran is listed by the next one.
  */
 
-import { type PhaseId, composeBrief, focusOf } from '@hemera/core'
+import { type PhaseId, composeBrief, focusOf, unbriefedEdit } from '@hemera/core'
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
@@ -64,13 +64,7 @@ function composed(sessionId: string) {
 
       const snapshot = yield* readSnapshot(transaction, session.specId)
       const since = session.briefedAt === null ? null : Date.parse(session.briefedAt)
-      const humanEdits = snapshot.sections.filter(
-        (section) =>
-          section.author === 'human' &&
-          (since === null || section.updatedAt > since) &&
-          // A section still as the Spec's creation left it, empty, is not an edit.
-          (section.body !== '' || section.version > 1),
-      )
+      const humanEdits = snapshot.sections.filter((section) => unbriefedEdit(section, since))
       // What the human answered in the chat reaches the agent here, "The user answered: …"
       // (D7-01, D7-09).
       const answers = snapshot.questions.filter(

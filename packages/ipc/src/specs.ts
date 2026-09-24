@@ -212,6 +212,8 @@ export const specSnapshotSchema = z.object({
   taskStories: z.array(taskStorySchema),
   questions: z.array(specQuestionSchema),
   phases: z.array(specPhaseSchema),
+  /** When the writer's agent was last briefed: a later human edit is still to send (Decided 17). */
+  briefedAt: z.number().nullable(),
 })
 
 export type SpecSnapshot = z.infer<typeof specSnapshotSchema>
