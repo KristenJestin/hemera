@@ -306,9 +306,23 @@ export type RunState = (typeof COMMAND_RUN_STATES)[number]
 
 /**
  * What a delivery of the context was: the base, the record of a native read, the file given at
- * the start to an agent that does not read it, or a change.
+ * the start to an agent that does not read it, or a change; and, for a `define` Session, the
+ * mission brief, the human's answers and edits of the Spec, and a sub-agent's result (D7-09,
+ * D7-14).
  */
-export const CONTEXT_DELIVERY_KINDS = ['base', 'native', 'provided', 'instructions'] as const
+export const CONTEXT_DELIVERY_KINDS = [
+  'base',
+  'native',
+  'provided',
+  'instructions',
+  'brief',
+  'answer',
+  'edit',
+  'internal',
+] as const
+
+/** The kinds recorded once per Session and fingerprint: what a Session starts with. */
+const STARTED_WITH: readonly ContextDeliveryKind[] = ['base', 'native', 'provided']
 
 export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
 
@@ -400,11 +414,14 @@ export const commandRuns = sqliteTable(
  * agent itself, with its fingerprint, which is why the view can say it was read natively rather
  * than sent. `provided` is that file given by Hemera at the start of the Session, to an agent
  * whose bare mode keeps it from reading it. `instructions` is a change of that file delivered
- * between two turns.
+ * between two turns. A `define` Session is handed four more the same way (D7-09, D7-14): `brief`,
+ * the mission brief, whose path is the phase it was composed for (`''` for none); `answer` and
+ * `edit`, the human's answers and section edits since the last one; `internal`, a sub-agent's
+ * result.
  *
  * The fingerprint is what makes a delivery identifiable. The base and the file as the Session
  * started with it are recorded once per Session and fingerprint, which the unique index enforces. A delivery is not
- * held to that: a file edited A, then B, then back to A is delivered each time it changes, and
+ * held to that, whatever its kind: a file edited A, then B, then back to A is delivered each time it changes, and
  * what decides that is the last fingerprint given, not every one ever given.
  */
 export const contextDeliveries = sqliteTable(
@@ -427,7 +444,7 @@ export const contextDeliveries = sqliteTable(
     ),
     uniqueIndex('delivery_once_per_change')
       .on(table.sessionId, table.kind, table.path, table.fingerprint)
-      .where(sql`${table.kind} <> 'instructions'`),
+      .where(sql`${table.kind} IN (${sql.raw(oneOf(STARTED_WITH))})`),
   ],
 )
 

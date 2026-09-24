@@ -70,7 +70,7 @@ const AGENTS_MIGRATION = '20260921133441_sessions_with_agents'
  */
 const TOOLS_MIGRATION = '20260922075631_tools_commands_and_context'
 /** The migration lot 19 adds, the Specs (design D7-01): one a profile of lot 5 has never run. */
-const SPECS_MIGRATION = '20260924074930_specs'
+const SPECS_MIGRATION = '20260924122302_specs'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -626,6 +626,56 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
       specEvent: true,
       unknownKind: false,
     })
+  })
+
+  test('a brief, an answer, an edit and an internal result are deliveries, each written again', async () => {
+    const dataFolder = join(workspace, 'spec-deliveries')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(TOOLS_MIGRATION), '0.5.0'))
+    // A delivery a profile of lot 6 made: the table is rebuilt for its wider check, and keeps it.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', '2026-09-24T10:00:00.000Z', '2026-09-24T10:00:00.000Z', 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'T', 'derived', '2026-09-24T10:00:00.000Z', '2026-09-24T10:00:00.000Z', 1)`
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('d0', 'session-1', 'instructions', 'AGENTS.md', 'abc', '2026-09-24T10:00:00.000Z')`
+      }),
+    )
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+
+    const seen = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const tried = (id: string, kind: string, path: string) =>
+          Effect.map(
+            Effect.exit(sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+              VALUES (${id}, 'session-1', ${kind}, ${path}, 'same', '2026-09-24T10:01:00.000Z')`),
+            (exit) => Exit.isSuccess(exit),
+          )
+        // The same text handed over twice is two deliveries, of each of the four kinds (D7-09).
+        const accepted: boolean[] = []
+        for (const kind of ['brief', 'answer', 'edit', 'internal']) {
+          const path = kind === 'brief' ? 'shape' : ''
+          accepted.push(
+            yield* tried(`${kind}-1`, kind, path),
+            yield* tried(`${kind}-2`, kind, path),
+          )
+        }
+        const unknown = yield* tried('rumour-1', 'rumour', '')
+        const kept = yield* sql<{
+          kind: string
+        }>`SELECT kind FROM context_deliveries WHERE id = 'd0'`
+        return { accepted, unknown, kept }
+      }),
+    )
+
+    expect(seen.accepted).toEqual(Array.from({ length: 8 }, () => true))
+    expect(seen.unknown).toBe(false)
+    expect(seen.kept).toEqual([{ kind: 'instructions' }])
   })
 
   test('a Spec’s Journal lines are read through an index on spec_id', async () => {

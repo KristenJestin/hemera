@@ -211,6 +211,10 @@ export const contextLayer = Layer.effect(
         case 'native':
         case 'provided':
         case 'instructions':
+        case 'brief':
+        case 'answer':
+        case 'edit':
+        case 'internal':
           return kind
         default:
           return 'instructions'
@@ -421,6 +425,10 @@ export const contextLayer = Layer.effect(
             case 'provided':
               return 'session_start'
             case 'instructions':
+            case 'brief':
+            case 'answer':
+            case 'edit':
+            case 'internal':
               return 'delivery_prompt'
           }
         }

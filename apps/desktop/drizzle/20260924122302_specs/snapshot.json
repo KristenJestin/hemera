@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "dacf5811-db58-4271-aa81-5158693c67f9",
+  "id": "584c3df8-84a3-46a5-b8ed-861e5f6d2c30",
   "prevIds": ["afd29bb9-b5c5-4a02-8ef9-8fa8a2b1284f"],
   "ddl": [
     {
@@ -2319,7 +2319,7 @@
         }
       ],
       "isUnique": true,
-      "where": "\"context_deliveries\".\"kind\" <> 'instructions'",
+      "where": "\"context_deliveries\".\"kind\" IN ('base', 'native', 'provided')",
       "origin": "manual",
       "name": "delivery_once_per_change",
       "entityType": "indexes",
@@ -2530,7 +2530,7 @@
       "table": "command_runs"
     },
     {
-      "value": "\"kind\" IN ('base', 'native', 'provided', 'instructions')",
+      "value": "\"kind\" IN ('base', 'native', 'provided', 'instructions', 'brief', 'answer', 'edit', 'internal')",
       "name": "delivery_kind_is_known",
       "entityType": "checks",
       "table": "context_deliveries"
