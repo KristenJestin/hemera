@@ -653,7 +653,8 @@ where it is. Once the user has chosen an effort in the Session, it is kept acros
 The composer of a Project's Home follows the same rule before the Session exists.
 
 The views surrounding the main surface are closable and mutually exclusive:
-the user opens only one at a time. A working surface can display, as
+the user opens only one at a time. The Spec panel of a `define` Session is not one of them: it
+is that Session's working surface, and it has no close control. A working surface can display, as
 needed, a Spec, tasks, a prototype, a diff, a review or a document.
 
 The mission gives a focus and a default behaviour; it does not limit the activities
@@ -758,8 +759,12 @@ it was requested.
 
 Several phases can be open simultaneously. Hemera keeps a phase focus to
 know which phase provides the main brief for the current turn, but this cursor is not
-the global state of the mission. Each phase has its own durable state. If an input on which
-a phase depends changes, its result can become stale. A mere evolution of a prototype's
+the global state of the mission. The focus is the first phase, in the protocol's order, that is
+open or stale: a stale phase has to be declared again, and that is the work the turn points at.
+Each phase has its own durable state. If an input on which a phase depends changes, its result
+can become stale. Writing a section makes stale the finished phase that owns it along with the
+finished phases that depend on it, so the owner's exit checks are asked again rather than kept on
+a text that changed. A mere evolution of a prototype's
 content does not, however, make `decompose` stale, since the tasks reference the prototype
 instead of duplicating its rendering.
 
