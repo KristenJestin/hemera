@@ -74,10 +74,10 @@ const SPECS_MIGRATION = '20260924122302_specs'
 
 /**
  * The migration lot 20 adds, after the Specs: the one a profile of lot 19 has never heard of —
- * the Workspaces, their steps and variables, and the commands typed by seven types (D8-01, D8-05,
- * D8-06, D8-07).
+ * the Workspaces, their steps and variables, the commands typed by seven types (D8-01, D8-05,
+ * D8-06, D8-07), and the launches with the revision a `build` Session was started on (D8-13).
  */
-const WORKSPACES_MIGRATION = '20260924202231_workspaces'
+const WORKSPACES_MIGRATION = '20260924223401_workspaces'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -1191,6 +1191,9 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
           )
         yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
           VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        // The Spec these Workspaces are made for exists: the foreign key says so (D8-12).
+        yield* sql`INSERT INTO specs (id, project_id, key, slug, status, current_revision_id, created_at, updated_at)
+          VALUES ('HEM-7', 'atlas', 'HEM-7', 'the-login-form', 'draft', 'revision-1', ${at}, ${at})`
         // Two live Workspaces of the same name and the same Spec: the second is refused.
         const first = yield* insert('w1', 'ready')
         const second = yield* insert('w2', 'preparing')
@@ -1221,6 +1224,9 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
         const at = '2026-09-23T10:00:00.000Z'
         yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
           VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        // The Spec these Workspaces are made for exists: the foreign key says so (D8-12).
+        yield* sql`INSERT INTO specs (id, project_id, key, slug, status, current_revision_id, created_at, updated_at)
+          VALUES ('HEM-7', 'atlas', 'HEM-7', 'the-login-form', 'draft', 'revision-1', ${at}, ${at})`
         const insert = (id: string, name: string) =>
           Effect.exit(
             Effect.gen(function* () {
@@ -1235,5 +1241,74 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     )
 
     expect(exits).toEqual([true, false])
+  })
+
+  test('A launch is written and read back with its Spec, revision and Workspace', async () => {
+    const dataFolder = join(workspace, 'launch-twenty')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+
+    const written = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-24T22:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO workspaces (id, project_id, name, path, created_at, state)
+          VALUES ('main-1', 'atlas', 'main', '/work/atlas', ${at}, 'ready')`
+        // The Spec exists before the Workspace made for it, and is given it after (D8-12):
+        // each names the other, so one of the two writes comes second.
+        yield* sql`INSERT INTO specs (id, project_id, key, slug, status, current_revision_id, created_at, updated_at)
+          VALUES ('spec-1', 'atlas', 'HEM-7', 'the-login-form', 'ready', 'revision-2', ${at}, ${at})`
+        yield* sql`INSERT INTO spec_revisions (id, spec_id, number, title, type, created_by, created_at)
+          VALUES ('revision-2', 'spec-1', 2, 'The login form', 'feature', 'human', ${at})`
+        yield* sql`INSERT INTO workspaces (id, project_id, name, path, created_at, spec_id, state)
+          VALUES ('ws-1', 'atlas', 'login-form', '/work/atlas-login-form', ${at}, 'spec-1', 'ready')`
+        yield* sql`UPDATE specs SET workspace_id = 'ws-1' WHERE id = 'spec-1'`
+        // The request, then the Session it starts: the two are read back together (D8-13).
+        yield* sql`INSERT INTO build_launches (id, spec_id, revision_id, workspace_id, state, created_at, updated_at)
+          VALUES ('launch-1', 'spec-1', 'revision-2', 'ws-1', 'waiting', ${at}, ${at})`
+        const waiting = yield* sql<{ state: string; session_id: string | null }>`
+          SELECT state, session_id FROM build_launches WHERE id = 'launch-1'`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, mission, spec_id, revision_id, workspace_id, created_at, last_written_at, version)
+          VALUES ('session-build', 'atlas', 'Build HEM-7', 'derived', 'build', 'spec-1', 'revision-2', 'ws-1', ${at}, ${at}, 1)`
+        yield* sql`UPDATE build_launches SET state = 'started', session_id = 'session-build' WHERE id = 'launch-1'`
+        const started = yield* sql<{
+          state: string
+          key: string
+          revision: number
+          workspace: string
+          mission: string
+          session_revision: string | null
+        }>`SELECT launch.state, specs.key, revisions.number AS revision, workspaces.name AS workspace,
+              sessions.mission, sessions.revision_id AS session_revision
+            FROM build_launches AS launch
+            JOIN specs ON specs.id = launch.spec_id
+            JOIN spec_revisions AS revisions ON revisions.id = launch.revision_id
+            JOIN workspaces ON workspaces.id = launch.workspace_id
+            JOIN sessions ON sessions.id = launch.session_id`
+        // A state nobody wrote is refused, the way a type or a step state is (D8-13).
+        const unknown = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO build_launches (id, spec_id, revision_id, state, created_at, updated_at)
+              VALUES ('launch-2', 'spec-1', 'revision-2', 'launched', ${at}, ${at})`
+          }),
+        )
+        return { waiting, started, refused: Exit.isFailure(unknown) }
+      }),
+    )
+
+    expect(written.waiting).toEqual([{ state: 'waiting', session_id: null }])
+    expect(written.started).toEqual([
+      {
+        state: 'started',
+        key: 'HEM-7',
+        revision: 2,
+        workspace: 'login-form',
+        mission: 'build',
+        session_revision: 'revision-2',
+      },
+    ])
+    expect(written.refused).toBe(true)
   })
 })

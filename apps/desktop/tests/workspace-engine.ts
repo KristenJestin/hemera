@@ -27,7 +27,7 @@ import { type Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
-import { type Database, type SqliteClient, databaseLayer } from '#engine/storage/database.ts'
+import { type Database, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import {
   type Links,
   type Preparation,
@@ -115,7 +115,22 @@ export function atlasMain(folder: string): string {
   return main
 }
 
-/** `Atlas` on that `main`, declaring the locations named, in that order. */
+/**
+ * The Spec `HEM-7` of a Project, written as the Specs' own lot writes one: the revision it is
+ * on, in the same breath. A Workspace made for a Spec names it, and `workspaces.spec_id` is a
+ * foreign key to `specs.id` (D8-12), so it has to exist for the row to be written.
+ */
+export const aSpecOf = (projectId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqliteClient
+    const at = '2026-09-04T08:00:00.000Z'
+    yield* sql`INSERT INTO specs (id, project_id, key, slug, status, current_revision_id, created_at, updated_at)
+      VALUES ('HEM-7', ${projectId}, 'HEM-7', 'the-login-form', 'ready', 'HEM-7-r1', ${at}, ${at})`
+    yield* sql`INSERT INTO spec_revisions (id, spec_id, number, title, type, created_by, created_at)
+      VALUES ('HEM-7-r1', 'HEM-7', 1, 'The login form', 'feature', 'human', ${at})`
+  })
+
+/** `Atlas` on that `main`, declaring the locations named, in that order, and the Spec `HEM-7`. */
 export const atlas = (main: string, locations: readonly string[]) =>
   Effect.gen(function* () {
     const projects = yield* Projects
@@ -123,6 +138,7 @@ export const atlas = (main: string, locations: readonly string[]) =>
     for (const location of locations) {
       project = yield* projects.addRepository(project.id, project.version, location)
     }
+    yield* aSpecOf(project.id)
     return project
   })
 

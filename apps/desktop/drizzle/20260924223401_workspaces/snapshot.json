@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "b5fa5192-1228-4684-a8d9-49d2c728d876",
+  "id": "af6b9af5-29c4-4a53-a74f-2ecd286e1525",
   "prevIds": ["584c3df8-84a3-46a5-b8ed-861e5f6d2c30"],
   "ddl": [
     {
@@ -10,6 +10,10 @@
     },
     {
       "name": "app_preferences",
+      "entityType": "tables"
+    },
+    {
+      "name": "build_launches",
       "entityType": "tables"
     },
     {
@@ -171,6 +175,96 @@
       "name": "value",
       "entityType": "columns",
       "table": "app_preferences"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "build_launches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "spec_id",
+      "entityType": "columns",
+      "table": "build_launches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision_id",
+      "entityType": "columns",
+      "table": "build_launches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workspace_id",
+      "entityType": "columns",
+      "table": "build_launches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "build_launches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "build_launches"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "detail",
+      "entityType": "columns",
+      "table": "build_launches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "build_launches"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "build_launches"
     },
     {
       "type": "text",
@@ -1284,6 +1378,16 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision_id",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": "'free'",
@@ -2354,6 +2458,39 @@
       "table": "acceptance_criteria"
     },
     {
+      "columns": ["spec_id"],
+      "tableTo": "specs",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_build_launches_spec_id_specs_id_fk",
+      "entityType": "fks",
+      "table": "build_launches"
+    },
+    {
+      "columns": ["workspace_id"],
+      "tableTo": "workspaces",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "fk_build_launches_workspace_id_workspaces_id_fk",
+      "entityType": "fks",
+      "table": "build_launches"
+    },
+    {
+      "columns": ["session_id"],
+      "tableTo": "sessions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "fk_build_launches_session_id_sessions_id_fk",
+      "entityType": "fks",
+      "table": "build_launches"
+    },
+    {
       "columns": ["session_id"],
       "tableTo": "sessions",
       "columnsTo": ["id"],
@@ -2585,6 +2722,17 @@
       "table": "specs"
     },
     {
+      "columns": ["workspace_id"],
+      "tableTo": "workspaces",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "fk_specs_workspace_id_workspaces_id_fk",
+      "entityType": "fks",
+      "table": "specs"
+    },
+    {
       "columns": ["writer_session_id"],
       "tableTo": "sessions",
       "columnsTo": ["id"],
@@ -2717,6 +2865,17 @@
       "table": "workspaces"
     },
     {
+      "columns": ["spec_id"],
+      "tableTo": "specs",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "fk_workspaces_spec_id_specs_id_fk",
+      "entityType": "fks",
+      "table": "workspaces"
+    },
+    {
       "columns": ["spec_id", "name"],
       "nameExplicit": false,
       "name": "spec_edit_buffers_pk",
@@ -2749,6 +2908,13 @@
       "nameExplicit": false,
       "name": "app_preferences_pk",
       "table": "app_preferences",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "build_launches_pk",
+      "table": "build_launches",
       "entityType": "pks"
     },
     {
@@ -2904,6 +3070,24 @@
       "name": "workspaces_pk",
       "table": "workspaces",
       "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "spec_id",
+          "isExpression": false
+        },
+        {
+          "value": "state",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "launch_by_spec",
+      "entityType": "indexes",
+      "table": "build_launches"
     },
     {
       "columns": [
@@ -3233,6 +3417,12 @@
       "name": "step_once_in_workspace",
       "entityType": "uniques",
       "table": "workspace_steps"
+    },
+    {
+      "value": "\"state\" IN ('waiting', 'starting', 'started', 'failed', 'cancelled')",
+      "name": "launch_state_is_known",
+      "entityType": "checks",
+      "table": "build_launches"
     },
     {
       "value": "\"state\" IN ('running', 'exited', 'failed', 'stopped')",
