@@ -16,7 +16,7 @@ import type {
   RunDetailsProps,
   ServiceLine,
   VariableLine,
-  WorkspaceCardProps,
+  WorkspaceRepositoriesProps,
   WorkspaceRow,
 } from '@hemera/ui'
 
@@ -57,16 +57,9 @@ export function workspaceCardOf(
   workspace: Workspace,
   status: readonly RepositoryState[] | null,
   now: number = Date.now(),
-): Pick<
-  WorkspaceCardProps,
-  'name' | 'path' | 'state' | 'main' | 'dedicated' | 'repositories' | 'cleanedAt'
-> {
+): Pick<WorkspaceRepositoriesProps, 'name' | 'repositories' | 'cleanedAt'> {
   return {
     name: workspace.name,
-    path: workspace.path,
-    state: workspace.state,
-    main: workspace.main,
-    dedicated: workspace.dedicated,
     repositories:
       workspace.state === 'cleaned'
         ? []

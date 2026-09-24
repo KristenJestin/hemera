@@ -10,8 +10,8 @@ import {
   RunDetails,
   ServiceList,
   VariablesEditor,
-  WorkspaceCard,
   WorkspaceList,
+  WorkspaceRepositories,
   type CommandLine,
   type ProjectSettingsDraft,
   type RepositoryLine,
@@ -83,9 +83,9 @@ function folderOf(line: CommandLine): string | null {
   return parts.length === 0 ? null : parts.join('/')
 }
 
-/** What a Workspace shown under the list is asked through (D8-05, D8-06, D8-08). */
+/** What a Workspace opened in the list is asked through (D8-05, D8-06, D8-08). */
 export interface WorkspaceActions {
-  /** Shows a Workspace under the list, or none. */
+  /** Opens a Workspace's row in the list, or none. */
   onShow: (id: string | null) => void
   /** Resumes its preparation; the steps then follow through the engine's events (D8-05). */
   onResume: (id: string) => void
@@ -101,7 +101,7 @@ export interface WorkspaceActions {
 }
 
 /**
- * One Workspace, under the list (D8-05, D8-06, D8-08, D8-09, D8-15): what Git says of each of its
+ * One Workspace, in its open row (D8-05, D8-06, D8-08, D8-09, D8-15): what Git says of each of its
  * repositories, its preparation when it has one, its variables over the Project's, its services
  * whoever started them and, for the one asked, what that run ran.
  */
@@ -111,14 +111,12 @@ function ShownWorkspaceCards({
   projectVariables,
   catalogue,
   actions,
-  onCleanup,
 }: {
   workspace: Workspace
   shown: ShownWorkspace
   projectVariables: readonly Variable[]
   catalogue: readonly Command[]
   actions: WorkspaceActions
-  onCleanup: () => void
 }): ReactNode {
   const { run } = shown
   // Its details sit under the list it was opened from: the steps, or the services.
@@ -132,8 +130,8 @@ function ShownWorkspaceCards({
   return (
     <>
       {/* "Resume" is the preparation's, under its steps and the note that it re-checks them
-          first: offered on the card as well, the page would hold two buttons for one act. */}
-      <WorkspaceCard {...workspaceCardOf(workspace, shown.status)} onCleanup={onCleanup} />
+          first; "Clean up" is the row's. */}
+      <WorkspaceRepositories {...workspaceCardOf(workspace, shown.status)} />
       {shown.steps.length > 0 && (
         <PreparationSteps
           steps={stepLinesOf(shown.steps)}
@@ -165,7 +163,7 @@ function ShownWorkspaceCards({
 
 /**
  * The Workspaces of the Project (D8-02, D8-14): the list, a new one on a folder the user picks,
- * the one shown under it, and the cleanup of a dedicated one, confirmed in its dialog — which says
+ * the one opened in its row, and the cleanup of a dedicated one, confirmed in its dialog — which says
  * the branches kept and, when the engine refuses, its reason as it gave it.
  */
 function WorkspacesCards({
@@ -203,23 +201,25 @@ function WorkspacesCards({
     <>
       <WorkspaceList
         workspaces={workspaceRowsOf(workspaces)}
+        // A dedicated Workspace from the settings is wired with its creation dialog next.
+        onCreateDedicated={() => undefined}
         onBrowse={onBrowse}
-        onCreate={onCreate}
+        onMapFolder={onCreate}
         onCleanup={ask}
-        selected={selected}
-        // Pressed again, the Workspace shown is put away.
-        onSelect={(id) => actions.onShow(id === selected ? null : id)}
+        expanded={selected}
+        onExpandedChange={actions.onShow}
+        renderDetails={(id) =>
+          shown !== null && showing !== undefined && showing.id === id ? (
+            <ShownWorkspaceCards
+              workspace={showing}
+              shown={shown}
+              projectVariables={projectVariables}
+              catalogue={catalogue}
+              actions={actions}
+            />
+          ) : null
+        }
       />
-      {shown !== null && showing !== undefined && (
-        <ShownWorkspaceCards
-          workspace={showing}
-          shown={shown}
-          projectVariables={projectVariables}
-          catalogue={catalogue}
-          actions={actions}
-          onCleanup={() => ask(showing.id)}
-        />
-      )}
       {cleaning !== null && (
         <CleanupDialog
           open

@@ -73,6 +73,17 @@ export interface WorkspaceDraft {
   }[]
 }
 
+/**
+ * What Git says of a Workspace's own folder, summed up by the caller for its row: the branch, the
+ * commit and the changes, already said (D8-15).
+ */
+export interface WorkspaceSummary {
+  readonly branch: string
+  readonly commit: string
+  /** The changes, already said: `clean`, `2 unstaged`. */
+  readonly changes: string
+}
+
 /** One Workspace of a Project, as its settings list it (D8-02). */
 export interface WorkspaceRow {
   readonly id: string
@@ -82,10 +93,13 @@ export interface WorkspaceRow {
   /** Whether it is the Project's own folder, which is never cleaned up. */
   readonly main: boolean
   /**
-   * Whether Hemera made it for a Spec, with its worktrees: the only kind that is cleaned up
-   * (D8-14). A folder the user picked is theirs, and Hemera removes nothing from it.
+   * Whether Hemera made it, with its worktrees — for a Spec or from the settings: the only kind
+   * that is cleaned up (D8-14). A folder the user mapped is theirs, and Hemera removes nothing
+   * from it.
    */
   readonly dedicated: boolean
   /** The key of the Spec it was made for, when it was made for one. */
   readonly specKey?: string | undefined
+  /** What Git says of its folder, shown on its row: `main`'s, which the caller reads. */
+  readonly summary?: WorkspaceSummary | undefined
 }

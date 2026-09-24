@@ -417,10 +417,14 @@ export {
   type WorkspaceRepositoryLine,
   type WorkspaceRow,
   type WorkspaceState,
+  type WorkspaceSummary,
 } from './workspace/model.ts'
 export { PreparationSteps, type PreparationStepsProps } from './workspace/preparation-steps.tsx'
-export { WorkspaceCard, type WorkspaceCardProps } from './workspace/workspace-card.tsx'
 export { WorkspaceList, type WorkspaceListProps } from './workspace/workspace-list.tsx'
+export {
+  WorkspaceRepositories,
+  type WorkspaceRepositoriesProps,
+} from './workspace/workspace-repositories.tsx'
 /**
  * The panel a Session's mission opens beside the chat, and the rail it is fed with: the fold, the
  * width that pushes the chat, the band; groups of items that say what needs attention. The Spec

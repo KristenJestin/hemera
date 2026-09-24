@@ -142,8 +142,9 @@ const WORKSPACES = (
         dedicated: true,
       },
     ]}
+    onCreateDedicated={fn()}
     onBrowse={fn(async () => await Promise.resolve(null))}
-    onCreate={fn(async () => await Promise.resolve(null))}
+    onMapFolder={fn(async () => await Promise.resolve(null))}
     onCleanup={fn()}
   />
 )

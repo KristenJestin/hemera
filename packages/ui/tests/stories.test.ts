@@ -123,10 +123,10 @@ const SURFACES = {
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
-  // Lot 20: what a Workspace is made of: the card, its creation, its preparation, the list of a
-  // Project's Workspaces and their cleanup, the variables and the services.
+  // Lot 20: what a Workspace is made of: its repositories, its creation, its preparation, the list
+  // of a Project's Workspaces and their cleanup, the variables and the services.
   workspace: [
-    'workspace-card',
+    'workspace-repositories',
     'create-workspace-dialog',
     'preparation-steps',
     'workspace-list',
@@ -175,10 +175,7 @@ const NAMED_STATES = new Map([
       'Keyboard',
     ],
   ],
-  [
-    'workspace/workspace-card',
-    ['Main', 'PickedFolder', 'Preparing', 'Ready', 'Failed', 'Cleaned', 'Loading', 'GitError'],
-  ],
+  ['workspace/workspace-repositories', ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError']],
   [
     'workspace/create-workspace-dialog',
     [
@@ -205,7 +202,10 @@ const NAMED_STATES = new Map([
       'Keyboard',
     ],
   ],
-  ['workspace/workspace-list', ['MainOnly', 'Filled', 'Creating', 'Keyboard']],
+  [
+    'workspace/workspace-list',
+    ['MainOnly', 'Filled', 'Expanded', 'NewWorkspace', 'MapFolder', 'Keyboard'],
+  ],
   [
     'workspace/cleanup-dialog',
     ['Confirm', 'RefusedRunningService', 'RefusedGit', 'RefusedBuildSession', 'Keyboard'],
@@ -479,10 +479,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'VariablesEditor',
       'ServiceList',
       'RunDetails',
-      // Lot 20: a Workspace with what Git says of it, the dialog that creates one, its
+      // Lot 20: what Git says of a Workspace's repositories, the dialog that creates one, its
       // preparation step by step, the Workspaces of a Project, and the cleanup that keeps the
       // branches.
-      'WorkspaceCard',
+      'WorkspaceRepositories',
       'CreateWorkspaceDialog',
       'PreparationSteps',
       'WorkspaceList',
