@@ -10,7 +10,7 @@ const MARKS = ['empty', 'agent', 'human', 'stale', 'conflict', 'writing']
 const meta = {
   title: 'Blocks/Spec/TasksPart',
   component: TasksPart,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { tasks: TASKS, mark: 'agent' },
   argTypes: {

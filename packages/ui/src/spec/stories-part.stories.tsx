@@ -12,7 +12,7 @@ const MARKS = ['empty', 'agent', 'human', 'stale', 'conflict', 'writing']
 const meta = {
   title: 'Blocks/Spec/StoriesPart',
   component: StoriesPart,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { stories: STORIES, mark: 'agent', editable: true, onSaveStory: fn() },
   argTypes: {

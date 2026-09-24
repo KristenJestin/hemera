@@ -19,7 +19,7 @@ import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
  */
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/HemeraToolCall',
   component: HemeraToolCall,
   parameters: { layout: 'padded' },

@@ -7,7 +7,7 @@ import { ReaderBar } from './reader-bar.tsx'
 const meta = {
   title: 'Blocks/Spec/ReaderBar',
   component: ReaderBar,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { writer: 'Spec CSV', takeOverRefused: null, onTakeOver: fn() },
   argTypes: {

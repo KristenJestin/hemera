@@ -7,7 +7,7 @@ import { ReworkDialog } from './rework-dialog.tsx'
 const meta = {
   title: 'Blocks/Spec/ReworkDialog',
   component: ReworkDialog,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { open: true, onOpenChange: fn(), specKey: 'ATL-7', revision: 2, onRework: fn() },
   argTypes: {

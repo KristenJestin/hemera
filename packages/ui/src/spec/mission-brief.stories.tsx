@@ -7,7 +7,7 @@ import { MissionBrief } from './mission-brief.tsx'
 const meta = {
   title: 'Blocks/Spec/MissionBrief',
   component: MissionBrief,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     title: 'What the agent was told · Plan',

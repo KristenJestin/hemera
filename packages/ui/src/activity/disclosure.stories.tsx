@@ -1,16 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { type ReactNode, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { AT_ONCE, movesLess, withinFrames } from '../../.storybook/reduced-motion.ts'
+import { Button } from '../components/button/button.tsx'
 import { Disclosure } from './disclosure.tsx'
 
 /**
  * What folds: the line a block is read by, and what it holds once it is asked for (design
  * D17-05).
  *
- * Two stories, which are the two ways a fold is read: opened, and closed while it is still
- * opening — the moment it used to grow for a frame after the press instead of turning round
- * (issue #64).
+ * Four stories, which are the four things a fold has to answer for: opened; closed while it is
+ * still opening — the moment it used to grow for a frame after the press instead of turning round
+ * (issue #64); a body on its way out, which the keyboard can no longer reach (issue #69); and a
+ * row that names a body only once there is one.
  */
 const BODY = Array.from(
   { length: 12 },
@@ -18,7 +21,7 @@ const BODY = Array.from(
 ).join('\n')
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/Disclosure',
   component: Disclosure,
   parameters: { layout: 'padded' },
@@ -168,5 +171,158 @@ export const ClosedWhileOpening: Story = {
     await waitFor(() => {
       expect(canvas.queryByText(written)).toBeNull()
     })
+  },
+}
+
+/** The press the body holds, which is what the keyboard reaches while the fold is open. */
+const INSIDE = 'Open the file the call read'
+
+/** The body the room holds: what the fold takes out of the keyboard's reach as it closes. */
+function bodyOf(room: HTMLElement): HTMLElement | null {
+  const body = room.firstElementChild
+  return body instanceof HTMLElement ? body : null
+}
+
+/**
+ * A body on its way out is out of the reader's reach (issue #69).
+ *
+ * The fold is the opening played backwards, so the body stays in the page for the whole of the
+ * exit while the line already says the fold is closed. Tab walked into it there: the reader
+ * closes a block and the next Tab lands in what they have just closed, on a press that still
+ * fires. From the press the body is `inert` — the keyboard does not walk into it and nothing it
+ * holds is announced — while the row goes on naming it, because a reference that resolves to
+ * nothing is a broken one and only the end of the exit says the body has left. A focus that was
+ * inside it goes back to the row rather than being dropped on the document.
+ *
+ * What is asserted is what the keyboard does, mid-fold: the body is `inert` and the row names it,
+ * the press it holds cannot take the focus back, and no Tab of a walk that keeps to the frames of
+ * the fold lands in it. Then that the body has left and that the row stops naming it.
+ */
+export const NothingReachableWhileFolding: Story = {
+  args: {
+    children: (
+      <div className="flex flex-col items-start gap-2">
+        <div className="font-mono text-xs whitespace-pre text-muted-foreground">{BODY}</div>
+        <Button size="sm">{INSIDE}</Button>
+      </div>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const page = canvasElement.ownerDocument
+    const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
+    const written = /\[11\] packages\/ui\/src\/session\/session\.tsx/
+
+    // The reader is on the press the body holds when the row is pressed: it is the only thing
+    // under the line that the keyboard can land on.
+    await userEvent.click(row)
+    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    const inside = await waitFor(() => canvas.getByRole('button', { name: INSIDE }))
+    inside.focus()
+    await expect(inside).toHaveFocus()
+
+    // A press that does not move the focus: a pointer would put it on the row before the press
+    // runs, and the hand-over below would then pass with nothing handed over.
+    row.click()
+    await expect(
+      await withinFrames(() => row.getAttribute('aria-expanded') === 'false', AT_ONCE),
+    ).toBe(true)
+
+    if (movesLess()) {
+      // Asked for less movement there is no journey to walk into: the body is gone with the few
+      // frames a press takes to land, and what is left to answer for is that it left and that the
+      // row stopped naming it.
+      await expect(await withinFrames(() => roomOf(canvasElement, row) === null, AT_ONCE)).toBe(
+        true,
+      )
+      // The focus that was inside it is on the row all the same: the hand-over is the press's, and
+      // it does not depend on how long the fold takes.
+      await expect(page.activeElement).toBe(row)
+      await expect(row).not.toHaveAttribute('aria-controls')
+      return
+    }
+
+    // Mid-exit: the line already says the fold is closed, the body is still in the page, and the
+    // row still names it.
+    const room = roomOf(canvasElement, row)
+    expect(
+      room,
+      'the row named no body while the body folds, or one that is not in the page',
+    ).not.toBeNull()
+    // Out of the keyboard's reach from the press, rather than unlikely to be reached: the body is
+    // `inert` while it is still in the page.
+    const body = bodyOf(room!)
+    expect(body, 'the room holds nothing to be inert').not.toBeNull()
+    await expect(body!).toHaveAttribute('inert')
+    // The press inside it cannot take the focus back, and the one it had is on the row.
+    inside.focus()
+    await expect(page.activeElement).toBe(row)
+
+    // Tab while it folds, a frame at a time, and read where the keyboard landed on each: a walk
+    // that keeps to the frames of the fold, so a landing is caught on the frame it happens.
+    const landings: boolean[] = []
+    while (roomOf(canvasElement, row) !== null && landings.length < PATIENCE) {
+      // oxlint-disable-next-line no-await-in-loop -- one Tab, then a look, then the next: the order is the point
+      await userEvent.tab()
+      const folding = roomOf(canvasElement, row)
+      landings.push(folding !== null && folding.contains(page.activeElement))
+    }
+    await expect(landings.length, 'the fold was over before a single Tab').toBeGreaterThan(0)
+    await expect(landings.filter((landed) => landed)).toEqual([])
+
+    // Gone, and the row names nothing: a reference that resolves to nothing is a broken one.
+    await expect(await withinFrames(() => roomOf(canvasElement, row) === null, PATIENCE)).toBe(true)
+    await expect(row).not.toHaveAttribute('aria-controls')
+    await expect(canvas.queryByText(written)).toBeNull()
+  },
+}
+
+/** The three moments of a block whose body comes late, each one a press away from the last. */
+const LATE = [
+  { open: true, body: false },
+  { open: false, body: false },
+  { open: false, body: true },
+]
+
+/**
+ * A block told to be open before it has a body, then closed, then handed its body while closed:
+ * the order a caller that holds the state and fills the body later can go through.
+ */
+function LateBody(): ReactNode {
+  const [moment, setMoment] = useState(0)
+  const { open, body } = LATE[moment]!
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <Button size="sm" onClick={() => setMoment((at) => Math.min(at + 1, LATE.length - 1))}>
+        Next
+      </Button>
+      <Disclosure summary="Read src/session/session.tsx" open={open}>
+        {body ? (
+          <div className="font-mono text-xs whitespace-pre text-muted-foreground">{BODY}</div>
+        ) : undefined}
+      </Disclosure>
+    </div>
+  )
+}
+
+/**
+ * A row names a body only once there is one (issue #69).
+ *
+ * Shown with nothing to show, a block has no room and so no exit, and the end of an exit is what
+ * says a body has left: counted as present there, the block closed and was then handed a body
+ * while closed, and the row named a room that was never in the page.
+ */
+export const NoBodyNamedBeforeThereIsOne: Story = {
+  render: () => <LateBody />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const next = canvas.getByRole('button', { name: 'Next' })
+    await userEvent.click(next)
+    await userEvent.click(next)
+    const row = await waitFor(() =>
+      canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ }),
+    )
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await expect(row).not.toHaveAttribute('aria-controls')
   },
 }

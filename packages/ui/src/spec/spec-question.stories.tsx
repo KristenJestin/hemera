@@ -11,7 +11,7 @@ import { SpecQuestion } from './spec-question.tsx'
 const meta = {
   title: 'Blocks/Spec/SpecQuestion',
   component: SpecQuestion,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { question: CREDIT_NOTES, onAnswer: fn() },
   argTypes: {
