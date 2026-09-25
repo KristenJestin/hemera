@@ -35,7 +35,7 @@ const CLEAN: Extract<GitState, { ok: true }> = {
 const FRONT: WorkspaceRepositoryLine = { path: './sources/front', git: CLEAN }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/WorkspaceRepositories',
   component: WorkspaceRepositories,
   parameters: { layout: 'padded' },

@@ -10,7 +10,7 @@ import { WorkspacePill } from './workspace-pill.tsx'
  * fixed once the agent has started. A Project with no dedicated Workspace offers `main` alone.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Composer/WorkspacePill',
   component: WorkspacePill,
   parameters: { layout: 'padded' },

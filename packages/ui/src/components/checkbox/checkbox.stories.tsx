@@ -29,7 +29,7 @@ function Kept({
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Components/Checkbox',
   component: Checkbox,
   parameters: { layout: 'centered' },

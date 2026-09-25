@@ -45,7 +45,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Project/Dialog',
   component: ProjectDialog,
   render: (args) => <Controlled {...args} />,

@@ -82,7 +82,7 @@ function Controlled({ steps, onAdd, onUpdate, onRemove, onMove, ...rest }: Prepa
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/PreparationEditor',
   component: PreparationEditor,
   render: (args) => <Controlled {...args} />,

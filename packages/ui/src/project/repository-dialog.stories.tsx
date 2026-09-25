@@ -61,7 +61,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/RepositoryDialog',
   component: RepositoryDialog,
   render: (args) => <Controlled {...args} />,

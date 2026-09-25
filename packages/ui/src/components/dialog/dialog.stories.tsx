@@ -20,7 +20,7 @@ const SHORT = 'This runs on your machine and nowhere else.'
 const LINES = Array.from({ length: 60 }, (_, index) => `Line ${index + 1} of what the dialog holds`)
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/Dialog',
   component: Dialog,
   args: {
