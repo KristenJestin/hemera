@@ -323,6 +323,50 @@ describe('A launch is claimed only in a Workspace that is ready', () => {
   })
 })
 
+describe('A launch waiting on a Workspace that will never be ready ends', () => {
+  test('A preparation that fails fails the launches that waited on it', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        // The repository the worktree was to be made from is gone: the step fails, and the
+        // Workspace with it — what waited on it has nothing left to wait for (D8-13).
+        rmSync(join(dataFolder, 'main', 'sources', 'api'), { recursive: true, force: true })
+        const prepared = yield* (yield* Preparation).prepare(workspace.id)
+        return { asked, prepared, launch: yield* launched.one(asked.id), builds: yield* builds }
+      }),
+    )
+    expect(seen.prepared.state).toBe('failed')
+    expect(seen.launch.state).toBe('failed')
+    expect(seen.launch.detail).toContain('The Workspace could not be prepared: ')
+    expect(seen.builds).toEqual([])
+  })
+
+  test('A cleanup cancels the launches that waited on the Workspace', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspaces = yield* Workspaces
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        // The user removes the Workspace while the build still waits for it (D8-14): nothing will
+        // ever prepare that folder, and the launch says so on itself (D8-13).
+        const removed = yield* workspaces.cleanup(workspace.id)
+        return { asked, removed, launch: yield* launched.one(asked.id), builds: yield* builds }
+      }),
+    )
+    expect(seen.removed.state).toBe('cleaned')
+    expect(seen.launch.state).toBe('cancelled')
+    expect(seen.launch.detail).toBe('The Workspace was removed')
+    expect(seen.builds).toEqual([])
+  })
+})
+
 describe('A failed start is retried on its own', () => {
   test('A failed agent launch is retried without redoing the preparation', async () => {
     // A machine that holds none of the agents' bare means: the agent cannot be started (D6-02).

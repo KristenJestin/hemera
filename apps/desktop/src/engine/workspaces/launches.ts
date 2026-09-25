@@ -31,11 +31,11 @@ import {
   focusOf,
   renderSpecMarkdown,
 } from '@hemera/core'
-import { type SQL, and, eq } from 'drizzle-orm'
+import { type SQL, and, eq, inArray } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, Result } from 'effect'
 
 import { AgentRuntime } from '../agents/runtime.ts'
-import { type InvalidCursorError } from '../journal.ts'
+import { type InvalidCursorError, type NewEvent } from '../journal.ts'
 import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
 import {
@@ -46,7 +46,7 @@ import {
   readSnapshot,
   reading,
 } from '../specs/snapshot.ts'
-import { Database, type DatabaseError } from '../storage/database.ts'
+import { Database, type DatabaseError, type EngineTransaction } from '../storage/database.ts'
 import {
   buildLaunches,
   sessions as sessionRows,
@@ -128,6 +128,63 @@ export interface LaunchesService {
 }
 
 export class Launches extends Context.Service<Launches, LaunchesService>()('Launches') {}
+
+/** What a launch waiting on a Workspace whose preparation failed is told (D8-13). */
+const NOT_PREPARED = 'The Workspace could not be prepared'
+
+/** What a launch waiting on a Workspace that was cleaned up is told (D8-13). */
+const REMOVED = 'The Workspace was removed'
+
+/**
+ * The launches still waiting on a Workspace that will never be ready: ended, saying why, in the
+ * very transaction that says the Workspace failed or was cleaned up — a launch left `waiting` on a
+ * folder that is gone is a build the user can neither see nor ask for again (D8-13).
+ *
+ * The preparation and the cleanup hold the transaction that says what became of the Workspace,
+ * so they cannot ask this service: they call here, with that very transaction.
+ */
+export function endWaitingLaunches(
+  transaction: EngineTransaction,
+  workspaceId: string,
+  ended: { readonly state: 'failed'; readonly cause: string } | { readonly state: 'cancelled' },
+): Effect.Effect<readonly NewEvent[], DatabaseError> {
+  return Effect.gen(function* () {
+    const waiting = yield* transaction
+      .select({ launch: buildLaunches, projectId: specs.projectId })
+      .from(buildLaunches)
+      .innerJoin(specs, eq(specs.id, buildLaunches.specId))
+      .where(and(eq(buildLaunches.workspaceId, workspaceId), eq(buildLaunches.state, 'waiting')))
+      .orderBy(buildLaunches.createdAt)
+      .pipe(Effect.mapError(failed('reading the launches that wait')))
+    if (waiting.length === 0) return []
+    const detail = ended.state === 'failed' ? `${NOT_PREPARED}: ${ended.cause}` : REMOVED
+    // The preparation failing is Hemera's own doing; the Workspace removed is the hand of the
+    // user who asked for it (D8-14).
+    const author: 'hemera' | 'human' = ended.state === 'failed' ? 'hemera' : 'human'
+    const at = now()
+    yield* transaction
+      .update(buildLaunches)
+      .set({ state: ended.state, detail, updatedAt: at })
+      .where(
+        inArray(
+          buildLaunches.id,
+          waiting.map(({ launch }) => launch.id),
+        ),
+      )
+      .pipe(Effect.mapError(failed('writing the launch')))
+    return waiting.map(({ launch, projectId }) =>
+      launchEvent(
+        launch,
+        projectId,
+        ended.state === 'failed' ? 'launch.failed' : 'launch.cancelled',
+        ended.state === 'failed'
+          ? { sessionId: launch.sessionId, reason: detail }
+          : { reason: detail },
+        author,
+      ),
+    )
+  })
+}
 
 export const launchesLayer = Layer.effect(
   Launches,
