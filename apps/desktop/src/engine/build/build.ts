@@ -40,7 +40,7 @@ import {
   taskLabels,
 } from '@hemera/core'
 import { and, asc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
-import { Context, Data, Effect, Layer, Result } from 'effect'
+import { Context, Data, Deferred, Effect, Layer, Result } from 'effect'
 
 import { StderrSink } from '../agents/supervisor.ts'
 import { Git } from '../git.ts'
@@ -51,6 +51,7 @@ import {
   buildAttemptTrees,
   buildAttempts,
   buildBlockers,
+  buildCheckResults,
   buildLaunches,
   buildTasks,
   sessionEntries,
@@ -86,6 +87,7 @@ import {
   stateOf,
   taskEvent,
   verdictOf,
+  waitsForUser,
 } from './tasks.ts'
 
 export type { BuildDelivery } from './brief.ts'
@@ -262,6 +264,9 @@ export interface BuildAnswer {
   readonly paths: readonly string[]
 }
 
+/** What a paused build answers every new call with (L8). */
+export const PAUSED = 'the build is paused: nothing new starts until the user resumes it'
+
 const BUILD_TOOLS: readonly ToolName[] = ['build_read', 'task_finished', 'task_blocked']
 
 /** Which of the Project's checks judge an attempt, by what it is about (D10-06). */
@@ -315,9 +320,10 @@ export interface BuildsService {
     turnId: string,
   ) => Effect.Effect<void, DatabaseError>
   /**
-   * One Hemera tool call of a Session, before it runs (L3): a closed build refuses its build tools,
-   * and the first call after a delivery handed tasks starts them — or finds the build obsolete, and
-   * refuses. Any other Session's call runs as it is.
+   * One Hemera tool call of a Session, before it runs (L3, L8): a paused build refuses it, a
+   * closed one refuses its build tools, and the first call after a delivery handed tasks starts
+   * them — or finds the build obsolete, and refuses. Any other Session's call runs as it is.
+   * While it runs it is counted, so a Pause stops the turn only once it ended.
    */
   readonly admitted: <A>(
     sessionId: string,
@@ -328,6 +334,10 @@ export interface BuildsService {
   /** `build_read`, `task_finished`, `task_blocked` (D10-04, D10-13). */
   readonly tool: (sessionId: string, call: BuildCall) => Effect.Effect<BuildAnswer>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /** L8: nothing new starts; the running Hemera call ends, then the turn stops. */
+  readonly pause: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /** L8, D10-09: the agent is handed the resume brief at once. */
+  readonly resume: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** A task waiting for the user, done by them (D10-08). */
   readonly taskDone: (buildTaskId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** A task waiting for the user, skipped with its reason, its dependants let go on or not (L6). */
@@ -338,6 +348,11 @@ export interface BuildsService {
   ) => Effect.Effect<BuildView, BuildRefusal>
   /** A blocker dismissed: its task is ready again, its dependants wait again (D10-08). */
   readonly dismissBlocker: (blockerId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /**
+   * At the engine's start (L9): the checks a stopped engine left running run again, and every
+   * build that is not paused has its agent started and handed the resume brief.
+   */
+  readonly recover: () => Effect.Effect<void, DatabaseError>
 }
 
 export class Builds extends Context.Service<Builds, BuildsService>()('Builds') {}
@@ -578,6 +593,16 @@ export const buildsLayer = Layer.effect(
 
     /** The runtime, once it handed itself over. */
     let agent: BuildAgent | null = null
+    /** The builds whose agent is due the resume brief: after a Resume or a restart (L9). */
+    const resumeDue = new Set<string>()
+    /**
+     * The builds paused in this run, as the Pause wrote it: read with the call count in one step,
+     * so a call is either counted before the Pause or refused by it — never neither (L8).
+     */
+    const pausedNow = new Set<string>()
+    /** The Hemera calls running, per Session, and who waits for them to be over. */
+    const running = new Map<string, number>()
+    const over = new Map<string, Deferred.Deferred<void>>()
 
     const told = (sessionId: string) => Effect.sync(() => notices.changed(sessionId))
 
@@ -805,6 +830,29 @@ export const buildsLayer = Layer.effect(
         return refusal
       })
 
+    /** A Hemera call of this Session is over; whoever waits for the last one is told. */
+    const leave = (sessionId: string) =>
+      Effect.gen(function* () {
+        const left = (running.get(sessionId) ?? 1) - 1
+        if (left > 0) {
+          running.set(sessionId, left)
+          return
+        }
+        running.delete(sessionId)
+        const waiting = over.get(sessionId)
+        over.delete(sessionId)
+        if (waiting !== undefined) yield* Deferred.succeed(waiting, undefined)
+      })
+
+    /** Waits for the Hemera calls of this Session running now to be over. */
+    const idle = (sessionId: string) =>
+      Effect.gen(function* () {
+        if ((running.get(sessionId) ?? 0) === 0) return
+        const waiting = over.get(sessionId) ?? Deferred.makeUnsafe<void>()
+        over.set(sessionId, waiting)
+        yield* Deferred.await(waiting)
+      })
+
     const admitted = <A>(
       sessionId: string,
       tool: ToolName,
@@ -822,6 +870,10 @@ export const buildsLayer = Layer.effect(
               : `the build is stopped${row.buildDetail === null ? '' : `: ${row.buildDetail}`}`,
           )
         }
+        // Read and counted in one step, with nothing yielded in between: a Pause either sees this
+        // call running and waits for it, or this call sees the Pause and is refused (L8).
+        if (row.buildPausedAt !== null || pausedNow.has(sessionId)) return yield* refuse(PAUSED)
+        running.set(sessionId, (running.get(sessionId) ?? 0) + 1)
         return yield* Effect.gen(function* () {
           const refusal = yield* start(sessionId).pipe(
             Effect.catch((cause) =>
@@ -832,7 +884,7 @@ export const buildsLayer = Layer.effect(
           )
           if (refusal !== null) return yield* refuse(refusal)
           return yield* run
-        })
+        }).pipe(Effect.ensuring(leave(sessionId)))
       })
 
     /** Reads a task by the label the agent named, or answers why it cannot act on it. */
@@ -1162,6 +1214,23 @@ export const buildsLayer = Layer.effect(
       return Effect.succeed(task)
     }
 
+    /** New attempts at the story and end checks that wait for the user: Resume tries again (L7). */
+    const retried = (transaction: EngineTransaction, rows: BuildRows, at: string) =>
+      Effect.gen(function* () {
+        const jobs: CheckJob[] = []
+        const lasts = new Map<string, AttemptRow>()
+        for (const attempt of rows.attempts.filter((one) => one.scope !== 'task')) {
+          const key = `${attempt.scope}:${attempt.storyId ?? ''}`
+          const known = lasts.get(key)
+          if (known === undefined || attempt.number > known.number) lasts.set(key, attempt)
+        }
+        for (const attempt of lasts.values()) {
+          if (!waitsForUser(attempt)) continue
+          jobs.push(yield* again(transaction, attempt, at))
+        }
+        return jobs
+      })
+
     /** A new attempt on the same subject as one that was red, and its checks to run. */
     const again = (transaction: EngineTransaction, attempt: AttemptRow, at: string) =>
       Effect.gen(function* () {
@@ -1299,7 +1368,9 @@ export const buildsLayer = Layer.effect(
 
       waiting: (sessionId, holdsNone) =>
         read(sessionId).pipe(
-          Effect.map((rows) => (rows === null ? null : deliveryFor(rows, holdsNone))),
+          Effect.map((rows) =>
+            rows === null ? null : deliveryFor(rows, holdsNone || resumeDue.has(sessionId)),
+          ),
         ),
 
       handing: (delivery) =>
@@ -1313,6 +1384,14 @@ export const buildsLayer = Layer.effect(
         withDatabase(
           mutate('recording the delivery taken', (transaction) =>
             taken(transaction, delivery).pipe(Effect.as({ result: undefined, events: [] })),
+          ),
+        ).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              if (delivery.kind === 'resume' || delivery.kind === 'prepare') {
+                resumeDue.delete(delivery.sessionId)
+              }
+            }),
           ),
         ),
 
@@ -1402,6 +1481,55 @@ export const buildsLayer = Layer.effect(
       admitted,
       tool,
       view,
+
+      pause: (sessionId) =>
+        Effect.gen(function* () {
+          const rows = yield* open(sessionId)
+          if (rows.session.buildPausedAt === null) {
+            pausedNow.add(sessionId)
+            const at = now()
+            yield* withDatabase(
+              mutate('pausing the build', (transaction) =>
+                transaction
+                  .update(sessions)
+                  .set({ buildPausedAt: at })
+                  .where(eq(sessions.id, sessionId))
+                  .pipe(
+                    Effect.mapError(failed('pausing the build')),
+                    Effect.as({
+                      result: undefined,
+                      events: [buildEvent(rows, 'build.paused', 'human')],
+                    }),
+                  ),
+              ),
+            )
+            // The call running now ends as it would have; then the turn stops (L8, D10-09).
+            yield* Effect.forkIn(scope)(idle(sessionId).pipe(Effect.andThen(stopTurn(sessionId))))
+            yield* told(sessionId)
+          }
+          return yield* view(sessionId)
+        }),
+
+      resume: (sessionId) =>
+        Effect.gen(function* () {
+          yield* open(sessionId)
+          pausedNow.delete(sessionId)
+          resumeDue.add(sessionId)
+          return yield* acted(sessionId, 'resuming the build', (transaction, rows, at) =>
+            Effect.gen(function* () {
+              yield* transaction
+                .update(sessions)
+                .set({ buildPausedAt: null })
+                .where(eq(sessions.id, sessionId))
+                .pipe(Effect.mapError(failed('resuming the build')))
+              return {
+                events: [buildEvent(rows, 'build.resumed', 'human')],
+                follows: false,
+                jobs: yield* retried(transaction, rows, at),
+              }
+            }),
+          )
+        }),
 
       taskDone: (buildTaskId) =>
         Effect.gen(function* () {
@@ -1498,7 +1626,58 @@ export const buildsLayer = Layer.effect(
             }),
           )
         }),
+
+      recover: () =>
+        Effect.gen(function* () {
+          const active = yield* database
+            .select({ id: sessions.id, pausedAt: sessions.buildPausedAt })
+            .from(sessions)
+            .where(and(eq(sessions.mission, 'build'), inArray(sessions.buildPhase, [...ACTIVE])))
+            .pipe(Effect.mapError(failed('reading the builds a stopped engine left')))
+          for (const build of active) {
+            const rows = yield* read(build.id)
+            if (rows === null) continue
+            // The checks a stopped engine left running never said anything: what they wrote is
+            // dropped, and they run again (L9).
+            const left = rows.attempts.filter((attempt) => {
+              if (attempt.endedAt !== null) return false
+              if (attempt.scope !== 'task') return true
+              const task = rows.tasks.find((one) => one.id === attempt.buildTaskId)
+              return task !== undefined && stateOf(task) === 'checking'
+            })
+            if (left.length > 0) {
+              yield* withDatabase(
+                mutate('dropping the checks a stopped engine left', (transaction) =>
+                  transaction
+                    .delete(buildCheckResults)
+                    .where(
+                      inArray(
+                        buildCheckResults.attemptId,
+                        left.map((attempt) => attempt.id),
+                      ),
+                    )
+                    .pipe(
+                      Effect.mapError(failed('dropping the checks a stopped engine left')),
+                      Effect.as({ result: undefined, events: [] }),
+                    ),
+                ),
+              )
+            }
+            yield* runJobs(
+              build.id,
+              left.map((attempt) => ({ attemptId: attempt.id, when: WHEN[scopeOf(attempt)] })),
+            )
+            if (build.pausedAt !== null) continue
+            resumeDue.add(build.id)
+            yield* wake(build.id)
+          }
+        }),
     }
     return service
   }),
 )
+
+/** What the engine does once at its start, after the launches came back (L9). */
+export const recoveredBuilds = Effect.gen(function* () {
+  yield* (yield* Builds).recover()
+})

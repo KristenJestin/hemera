@@ -34,7 +34,7 @@ import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
-import { BuildNotices, type Builds, buildsLayer } from './build/build.ts'
+import { BuildNotices, type Builds, buildsLayer, recoveredBuilds } from './build/build.ts'
 import { BuildChecks } from './build/checks.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
@@ -419,6 +419,8 @@ if (process.parentPort !== undefined) {
           // What the last engine left going is not going any more: its runs are ended and its
           // steps wait for a resume (D8-05, D6-12).
           yield* Effect.provide(recovered, context)
+          // The builds a stopped engine left: their checks run again, their agents resume (L9).
+          yield* Effect.provide(recoveredBuilds, context)
 
           port.on('message', (event) => {
             // SAFETY: what the main process put on the port; `decideRequest` is what reads it.

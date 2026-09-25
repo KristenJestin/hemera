@@ -7,31 +7,36 @@
  * tasks — T1 and T2 with no dependency, T3 depending on both — built in the Project's `main`.
  */
 
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Effect, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { Builds } from '#engine/build/build.ts'
+import type { FakeStep } from '#engine/agents/fake.ts'
+import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { Builds, PAUSED, recoveredBuilds } from '#engine/build/build.ts'
 import { OBSOLETE } from '#engine/build/tasks.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { Launches } from '#engine/workspaces/launches.ts'
+import { recovered } from '#engine/workspaces/preparation.ts'
 
-import { gated } from './application.ts'
+import { gated, held, threadOf } from './application.ts'
 import {
   THREE,
   aReadySpec,
   buildAgent,
   buildOf,
   eventually,
+  finished,
   journalOf,
   launched,
   NOTE,
+  scriptedChecks,
   statesOf,
 } from './build-harness.ts'
-import { type OpenWindow, openWindow } from './window.ts'
+import { type OpenWindow, openWindow, openWindowChecked } from './window.ts'
 
 let dataFolder: string
 let opened: OpenWindow | undefined
@@ -166,20 +171,201 @@ describe('The first task started moves the Spec to in progress', () => {
   })
 })
 
+/** The file an agent writes for a task, relative to the Workspace root. */
+const written = (name: string): FakeStep => ({
+  does: 'uses',
+  call: 'fs_write',
+  arguments: { path: `sources/api/${name}`, content: 'export {}\n', key: name },
+})
+
+describe('A restart resumes the build where it stood', () => {
+  test('two tasks done and one in progress: the same states, and a resume brief of each', async () => {
+    // T1 and T2 are written and finished; T3 is started, and the engine closes on it.
+    const first = buildAgent({
+      execute: (labels) =>
+        labels.includes('T3')
+          ? [{ does: 'uses', call: 'build_read' }]
+          : [written('export.ts'), finished('T1'), written('reader.ts'), finished('T2')],
+    })
+    opened = await openWindow(dataFolder, first.agent)
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const view = yield* eventually(
+          buildOf(sessionId),
+          (one) => one.tasks.find((task) => task.label === 'T3')?.state === 'in_progress',
+        )
+        return { sessionId, view }
+      }),
+    )
+    await opened.close()
+
+    const second = buildAgent()
+    opened = await openWindow(dataFolder, second.agent)
+    const back = await opened.running(
+      Effect.gen(function* () {
+        // What the engine does at its start: the launches, then the builds (L9).
+        yield* recovered
+        yield* recoveredBuilds
+        yield* eventually(Effect.succeed(second.handed), (handed) => handed.length > 0)
+        return yield* buildOf(left.sessionId)
+      }),
+    )
+    expect(statesOf(left.view)).toEqual({ T1: 'done', T2: 'done', T3: 'in_progress' })
+    expect(statesOf(back)).toEqual(statesOf(left.view))
+    expect(back.tasks).toEqual(left.view.tasks)
+    // The agent starting over is handed where the build stands, never the `prepare` brief again.
+    const [resume] = second.handed
+    expect(resume).toContain('# Before you continue')
+    expect(resume).toContain('## Done')
+    expect(resume).toContain('- T1 · Write the exporter: done, not verified, attempt 1')
+    expect(resume).toContain('sources/api: export.ts (A +1 -0)')
+    expect(resume).toContain('## In progress')
+    expect(resume).toContain('- T3 · Wire them')
+    expect(resume).toContain('  Attempt 1: running')
+    expect(resume).not.toContain('# Phase: prepare')
+  })
+})
+
+describe('A restart checks again what it left checking', () => {
+  test('a task whose checks a stopped engine left running is checked again, and done', async () => {
+    // The first engine holds the check of T1 for ever; the second one answers it.
+    const never = held()
+    const first = buildAgent({
+      execute: (labels) => labels.filter((label) => label === 'T1').map(finished),
+    })
+    opened = await openWindowChecked(
+      dataFolder,
+      scriptedChecks(async (request) => {
+        if (request.when === 'task') await never.promise
+        return []
+      }),
+      first.agent,
+    )
+    const sessionId = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const launchedOn = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(launchedOn), (view) => view.tasks[0]?.state === 'checking')
+        return launchedOn
+      }),
+    )
+    await opened.close()
+
+    const second = buildAgent({ resume: () => [] })
+    const checked: string[] = []
+    opened = await openWindowChecked(
+      dataFolder,
+      scriptedChecks((request) => {
+        checked.push(request.attemptId)
+        return request.when === 'task' ? [{ name: 'lint', verdict: 'green' }] : []
+      }),
+      second.agent,
+    )
+    const back = await opened.running(
+      Effect.gen(function* () {
+        yield* recovered
+        yield* recoveredBuilds
+        return yield* eventually(buildOf(sessionId), (view) => view.tasks[0]?.state === 'done')
+      }),
+    )
+    expect(back.tasks[0]?.attempts.map((attempt) => [attempt.number, attempt.result])).toEqual([
+      [1, 'green'],
+    ])
+    expect(checked).toEqual([back.tasks[0]?.attempts[0]?.id])
+  })
+})
+
+describe('Pause stops at the next safe point', () => {
+  test('the write completes, no new call starts, and Resume goes on with the task in progress', async () => {
+    // The write asks the user first — it goes outside the Workspace — which holds it open; the
+    // agent is then held before its next call — its note was one step, the write the second — and
+    // keeps going after a cancel, as some agents do.
+    const gate = gated(2)
+    const outside = join(dataFolder, 'outside.txt')
+    const { agent, handed } = buildAgent(
+      {
+        execute: (labels) =>
+          labels.includes('T1')
+            ? [
+                {
+                  does: 'uses',
+                  call: 'fs_write',
+                  arguments: { path: '../outside.txt', content: 'x', key: 'outside' },
+                },
+                { does: 'uses', call: 'fs_read', arguments: { path: 'sources/api' } },
+              ]
+            : [],
+      },
+      { between: gate.between, ignoresCancel: true },
+    )
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const entries = yield* eventually(threadOf(sessionId), (thread) =>
+          thread.some((entry) => entry.kind === 'permission_request' && entry.state === 'pending'),
+        )
+        const builds = yield* Builds
+        const paused = yield* builds.pause(sessionId)
+        // The write was admitted before the Pause: it is answered and completes.
+        const question = entries.find(
+          (entry) => entry.kind === 'permission_request' && entry.state === 'pending',
+        )
+        const toolCallId = JSON.parse(question?.payload ?? '{}').toolCallId
+        yield* (yield* AgentRuntime).decide(sessionId, toolCallId, 'allowed')
+        // Then the turn is stopped; the agent's next call comes after the Pause.
+        yield* eventually(
+          Effect.sync(() => agent.answers.cancels),
+          (cancels) => cancels > 0,
+        )
+        gate.carryOn()
+        yield* eventually(
+          Effect.sync(() => agent.answers.used.length),
+          (used) => used === 2,
+        )
+        const during = yield* buildOf(sessionId)
+        const resumed = yield* builds.resume(sessionId)
+        yield* eventually(
+          Effect.sync(() => handed.length),
+          (count) => count === 3,
+        )
+        return { paused, during, resumed, after: yield* buildOf(sessionId) }
+      }),
+    )
+    const [write, read] = agent.answers.used
+    expect(seen.paused.pausedAt).not.toBeNull()
+    expect(write?.isError).toBe(false)
+    expect(existsSync(outside)).toBe(true)
+    expect(read?.isError).toBe(true)
+    expect(read?.text).toContain(PAUSED)
+    expect(statesOf(seen.during)).toMatchObject({ T1: 'in_progress', T2: 'in_progress' })
+    expect(seen.resumed.pausedAt).toBeNull()
+    expect(statesOf(seen.after)).toMatchObject({ T1: 'in_progress', T2: 'in_progress' })
+    expect(handed[2]).toContain('# Before you continue')
+    expect(handed[2]).toContain('- T1 · Write the exporter')
+  })
+})
+
 describe('One build per Spec', () => {
-  test('a second build of the same Spec is refused with its reason', async () => {
+  test('a second build of the same Spec is refused with its reason, also during a pause', async () => {
     const { agent } = buildAgent({ execute: () => [] })
     opened = await openWindow(dataFolder, agent)
     const seen = await opened.running(
       Effect.gen(function* () {
         const spec = yield* aReadySpec(dataFolder, THREE)
-        yield* launched(spec.specId, spec.workspaceId)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
         const launches = yield* Launches
         const running = yield* Effect.flip(launches.request(spec.specId, spec.workspaceId))
-        return { key: spec.key, running }
+        yield* (yield* Builds).pause(sessionId)
+        const paused = yield* Effect.flip(launches.request(spec.specId, spec.workspaceId))
+        return { key: spec.key, running, paused }
       }),
     )
     expect(seen.running.message).toMatch(new RegExp(`^“${seen.key}” already has a build: it is`))
+    expect(seen.paused.message).toBe(`“${seen.key}” already has a build: it is paused.`)
   })
 
   test('the obsolete build — reworked before its first task — is stopped and stays readable', async () => {
