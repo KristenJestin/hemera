@@ -391,9 +391,9 @@ export const V6Blocked: Story = {
     const canvas = within(canvasElement)
     await oneStop(canvas)
     // The chip says it and waits: nothing unfolds by itself.
-    await expect(canvas.getByRole('button', { name: /Open the chat/ })).toHaveTextContent(
-      'Blocker on S2',
-    )
+    await expect(
+      canvas.getByRole('button', { name: 'Open the chat · Blocker on S2' }),
+    ).toBeVisible()
     await expect(canvas.queryByRole('region', { name: 'Chat' })).toBeNull()
     await hidesNothing(canvasElement)
     // The answer is a decision of the panel.

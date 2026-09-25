@@ -3,19 +3,17 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useRef, useState } from 'react'
 
 import { StopBuild } from '../../build/stop-build.tsx'
-import { AgentMark } from '../../composer/agent-mark.tsx'
 import { Badge } from '../../components/badge/badge.tsx'
 import { Button, IconButton } from '../../components/button/button.tsx'
 import { Card } from '../../components/card/card.tsx'
 import { StatusDot } from '../../components/status-dot/status-dot.tsx'
-import { Loading } from '../../components/loading/loading.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {
   IconCheck,
   IconChevronDown,
   IconCircleCheck,
   IconHandStop,
-  IconMessageQuestion,
+  IconRobot,
   IconPlayerPause,
 } from '../../icons.ts'
 import { CROSSFADE, crossfade, morph, useTransition } from '../../motion.ts'
@@ -414,15 +412,17 @@ function V6Head({
 }
 
 /**
- * The minimised chat, as a chip at the head's right end: what happens there, said in words.
+ * The minimised chat: one round button at the head's right end, the robot of the chat — never the
+ * provider's mark, which says who answers and not that a chat is there — and what happens in the
+ * chat said by the button itself, not by a dot beside it.
  *
- * - The agent works: its mark turning, and what it does (`Working on S1 · the column order`).
- * - It waits for the user: the chip takes the accent, a question mark, and what it waits for
- *   (`Blocker on S2`, `3 points to confirm`, `Your review`) — the one state that asks the
- *   hand, so the one that stands out.
- * - Nothing going on: its mark and "Chat".
+ * - The agent works: an arc turns around the button.
+ * - It waits for the user: the button takes the accent and a halo holds around it — the one state
+ *   that asks the hand, so the one that stands out.
+ * - Nothing going on: the button alone.
  *
- * Whatever it says, a press opens the chat.
+ * The words are the tooltip's and the label's: `Blocker on S2`, `Working on S1 · the column
+ * order`. A press opens the chat.
  */
 function ChatChip({
   agent,
@@ -437,24 +437,32 @@ function ChatChip({
   const works = !asks && agent.tone === 'running'
   const words = asks ? attention.title : works ? agent.says : 'Chat'
   return (
-    <span className="flex min-w-0 max-w-chat-preview">
-      <Tooltip label={asks ? attention.preview : `${agent.name} · ${agent.says}`} side="bottom">
-        <Button
+    <span className="relative flex" data-state={asks ? 'asks' : works ? 'works' : 'idle'}>
+      {works && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -inset-1 rounded-full border-2 border-primary border-r-transparent border-b-transparent motion-safe:animate-turn"
+        />
+      )}
+      {asks && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -inset-1 rounded-full border-2 border-primary-muted"
+        />
+      )}
+      <Tooltip
+        label={asks ? `${attention.title} · ${attention.preview}` : `${agent.name} · ${words}`}
+        side="bottom"
+      >
+        <IconButton
           variant={asks ? 'primary' : 'secondary'}
-          size="sm"
           shape="pill"
-          aria-label={`Open the chat · ${agent.name} · ${words}`}
+          size="md"
+          icon={<IconRobot size="sm" />}
+          aria-label={`Open the chat · ${words}`}
           data-restore
           onClick={onOpen}
-        >
-          {asks ? (
-            <IconMessageQuestion size="sm" />
-          ) : (
-            <AgentMark agent={agent.name} agentId={agent.agentId} />
-          )}
-          {works && <Loading size="sm" label={agent.says} />}
-          <span className="min-w-0 truncate">{words}</span>
-        </Button>
+        />
       </Tooltip>
     </span>
   )
