@@ -326,7 +326,8 @@ export interface BuildsService {
   readonly missed: (delivery: BuildDelivery) => Effect.Effect<void, DatabaseError>
   /**
    * The turn a delivery was handed in ended (L2, L7): the answer to `prepare` is the approach note,
-   * and the checks whose failures it carried run again.
+   * the end checks run once the `verify` brief was handed, and the checks whose failures it
+   * carried run again.
    */
   readonly turnEnded: (
     delivery: BuildDelivery,
@@ -1488,6 +1489,35 @@ export const buildsLayer = Layer.effect(
               yield* told(sessionId)
               yield* wake(sessionId)
             }
+          }
+          if (delivery.phase === 'verify') {
+            // The turn that handed the `verify` brief is over: the end checks run now, once
+            // (D10-07), and Accept waits for them.
+            const at = now()
+            const started = yield* withDatabase(
+              mutate('running the end checks', (transaction) =>
+                Effect.gen(function* () {
+                  const rows = yield* readBuild(transaction, sessionId)
+                  if (rows === null || rows.phase !== 'verify') return { result: [], events: [] }
+                  if (rows.attempts.some((attempt) => attempt.scope === 'build')) {
+                    return { result: [], events: [] }
+                  }
+                  const attemptId = yield* openAttempt(transaction, {
+                    sessionId,
+                    scope: 'build',
+                    buildTaskId: null,
+                    storyId: null,
+                    number: 1,
+                    at,
+                    trees: [],
+                  })
+                  const job: CheckJob = { attemptId, when: 'end' }
+                  return { result: [job], events: [] }
+                }),
+              ),
+            )
+            yield* runJobs(sessionId, started)
+            yield* told(sessionId)
           }
           if (delivery.retold.length === 0) return
           // The turn that carried a story's or the end checks' failures is over: they run again

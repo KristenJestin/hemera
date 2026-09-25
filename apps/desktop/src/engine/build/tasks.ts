@@ -411,8 +411,8 @@ export function movePhase(
  * What follows a change of the tasks, read from the rows as they now stand (D10-03, D10-07,
  * D10-08): the waiting tasks whose dependencies are met move on — an agent's `ready`, a human's
  * `yours` —; a story whose every task is done and was never checked gets its first attempt; and a
- * build in `execute` whose tasks are all settled goes to `verify`, with its first attempt at the end
- * checks. The checks are the caller's to start once this committed.
+ * build in `execute` whose tasks are all settled goes to `verify`. The checks are the caller's to
+ * start once this committed.
  */
 export function follow(transaction: EngineTransaction, sessionId: string, at: string) {
   return Effect.gen(function* () {
@@ -453,20 +453,11 @@ export function follow(transaction: EngineTransaction, sessionId: string, at: st
       })
       jobs.push({ attemptId, when: 'story' })
     }
+    // The end checks wait for the agent's own verification: they run once the turn that handed it
+    // the `verify` brief is over, never beside it (D10-07).
     if (rows.phase === 'execute' && tasksSettled(tasks)) {
       yield* movePhase(transaction, sessionId, 'verify')
       events.push(buildEvent(rows, 'build.phase_started', 'hemera', { phase: 'verify' }))
-      const ends = rows.attempts.filter((attempt) => attempt.scope === 'build').length
-      const attemptId = yield* openAttempt(transaction, {
-        sessionId,
-        scope: 'build',
-        buildTaskId: null,
-        storyId: null,
-        number: ends + 1,
-        at,
-        trees: [],
-      })
-      jobs.push({ attemptId, when: 'end' })
     }
     return { events, jobs }
   })

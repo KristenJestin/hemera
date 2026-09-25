@@ -28,6 +28,7 @@ import {
   launched,
   scriptedChecks,
 } from './build-harness.ts'
+import { held } from './application.ts'
 import { git } from './repositories.ts'
 import { type OpenWindow, openWindowChecked } from './window.ts'
 
@@ -115,6 +116,45 @@ describe('Accept ends the build', () => {
     expect(seen.accepted.tasks[0]?.attempts[0]?.files).toEqual([
       { repository: 'sources/api', path: 'export.ts', status: 'A', added: 1, removed: 0 },
     ])
+  })
+})
+
+describe('The end checks wait for the verify turn', () => {
+  test('verify hands its brief first, runs the end checks once that turn is over, then Accept', async () => {
+    // The agent's answer to the verify brief is held until the suite lets it go.
+    const answer = held()
+    let verifying = false
+    const { agent } = buildAgent(
+      {
+        verify: () => {
+          verifying = true
+          return [{ does: 'says', text: 'Verified against the Spec.' }]
+        },
+      },
+      { between: () => (verifying ? answer.promise : Promise.resolve()) },
+    )
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const during = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.phase === 'verify' && verifying,
+        )
+        // Given the time a check would have taken, had it been started with the phase.
+        yield* Effect.sleep('200 millis')
+        const still = yield* buildOf(sessionId)
+        const refused = yield* Effect.flip((yield* Builds).accept(sessionId))
+        answer.carryOn()
+        const after = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        return { during, still, refused, after }
+      }),
+    )
+    expect(seen.still.endAttempts).toEqual([])
+    expect(seen.still.canAccept).toBe(false)
+    expect(seen.refused.message).toBe('The final checks are still running.')
+    expect(seen.after.endAttempts.map((attempt) => attempt.result)).toEqual(['green'])
   })
 })
 
