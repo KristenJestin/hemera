@@ -326,9 +326,7 @@ export const V5Restated: Story = {
 async function hidesNothing(canvasElement: HTMLElement): Promise<void> {
   const head = canvasElement.querySelector<HTMLElement>('[data-head]')
   if (head === null) throw new Error('no head on the page')
-  const parts = [
-    ...canvasElement.querySelectorAll<HTMLElement>('[data-chat-control], [data-chat-attention]'),
-  ]
+  const parts = [...canvasElement.querySelectorAll<HTMLElement>('[data-chat-control]')]
   await expect(parts.length).toBeGreaterThan(0)
   await expect(parts.filter((part) => !head.contains(part))).toEqual([])
 }
@@ -392,9 +390,10 @@ export const V6Blocked: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await oneStop(canvas)
-    // The preview beside the bubble says it and waits: nothing unfolds by itself.
-    const preview = canvas.getByRole('region', { name: 'The agent needs you' })
-    await expect(preview).toHaveTextContent('Answer it in the panel')
+    // The chip says it and waits: nothing unfolds by itself.
+    await expect(canvas.getByRole('button', { name: /Open the chat/ })).toHaveTextContent(
+      'Blocker on S2',
+    )
     await expect(canvas.queryByRole('region', { name: 'Chat' })).toBeNull()
     await hidesNothing(canvasElement)
     // The answer is a decision of the panel.

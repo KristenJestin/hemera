@@ -590,6 +590,12 @@
   );
 }
 
+/* The chat at the width it has beside the mission panel at its share (exploration V6): held while
+   the panel grows over it to the page, so the chat is covered rather than squeezed. */
+@utility chat-pinned {
+  width: calc(100cqw - var(--spacing-mission-panel));
+}
+
 /* The same slot for the chat beside a build (lot 22, D10-12), which unfolds to its narrower share. */
 @utility mission-panel-slot-narrow {
   width: calc(

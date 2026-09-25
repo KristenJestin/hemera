@@ -8,12 +8,14 @@ import { Badge } from '../../components/badge/badge.tsx'
 import { Button, IconButton } from '../../components/button/button.tsx'
 import { Card } from '../../components/card/card.tsx'
 import { StatusDot } from '../../components/status-dot/status-dot.tsx'
+import { Loading } from '../../components/loading/loading.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {
   IconCheck,
   IconChevronDown,
   IconCircleCheck,
   IconHandStop,
+  IconMessageQuestion,
   IconPlayerPause,
 } from '../../icons.ts'
 import { CROSSFADE, crossfade, morph, useTransition } from '../../motion.ts'
@@ -82,12 +84,18 @@ export function V6Layout({ session }: { session: SessionFixture }): ReactNode {
           inert={!chatOpen}
           aria-hidden={chatOpen ? undefined : true}
         >
-          <ChatPane
-            thread={session.thread}
-            running={session.running}
-            workspaces={session.workspaces}
-            workspaceBound={session.mission !== 'free'}
-          />
+          {/* Laid at its open width whenever the panel is at its share or growing past it, so the
+              panel covers the chat on its way to the page and the text under it never reflows. */}
+          <div
+            className={cn('flex min-w-0 shrink-0', hasPanel && !folded ? 'chat-pinned' : 'flex-1')}
+          >
+            <ChatPane
+              thread={session.thread}
+              running={session.running}
+              workspaces={session.workspaces}
+              workspaceBound={session.mission !== 'free'}
+            />
+          </div>
         </motion.div>
         {hasPanel && (
           <PanelSlot
@@ -347,10 +355,9 @@ function BlockerDecision({ blocker }: { blocker: BlockerProgress }): ReactNode {
  * title renames on a click, and archiving is the sidebar's (its Session row), so the head's right
  * end is free for the one control a mission Session needs there.
  *
- * Open, the control minimises the chat. Minimised, it is the agent's mark and the dot of its
- * state, and brings the chat back. When the agent needs the user, a line in the head beside it says
- * so, with "Open": it stands in the head and never over the page, so it hides none of the build's
- * own controls under the head. Nothing unfolds by itself, and the content never moves.
+ * Open, the control minimises the chat. Minimised, it is the chat's chip: it says what happens in
+ * the chat in words, not in a dot, and brings the chat back. Nothing unfolds by itself, and the
+ * content never moves.
  */
 function V6Head({
   session,
@@ -364,7 +371,6 @@ function V6Head({
   onMinimise: (() => void) | undefined
   onOpen: () => void
 }): ReactNode {
-  const fade = useTransition(crossfade)
   const agent = session.agent
   const attention = chatOpen ? undefined : session.attention
   return (
@@ -381,28 +387,6 @@ function V6Head({
           onStartEditing={undefined}
         />
       </div>
-      <AnimatePresence initial={false}>
-        {attention !== undefined && (
-          <motion.section
-            key="attention"
-            aria-label="The agent needs you"
-            data-chat-attention
-            className="flex min-w-0 max-w-chat-preview shrink items-center gap-2 self-center rounded-lg border border-border bg-card py-1 pr-1 pl-3"
-            initial={CROSSFADE.from}
-            animate={CROSSFADE.to}
-            exit={CROSSFADE.from}
-            transition={fade}
-          >
-            <p className="min-w-0 truncate text-sm" title={attention.preview}>
-              <span className="font-medium">{attention.title}</span>
-              <span className="text-muted-foreground">{` · ${attention.preview}`}</span>
-            </p>
-            <Button variant="primary" size="sm" onClick={onOpen}>
-              Open
-            </Button>
-          </motion.section>
-        )}
-      </AnimatePresence>
       {onMinimise !== undefined && (
         <span data-chat-control className="relative flex shrink-0 self-center">
           {chatOpen ? (
@@ -417,23 +401,57 @@ function V6Head({
               />
             </Tooltip>
           ) : (
-            <span className="relative flex">
-              <Tooltip label={`${agent.name} · ${agent.says}`} side="bottom">
-                <IconButton
-                  variant="secondary"
-                  shape="pill"
-                  size="sm"
-                  icon={<AgentMark agent={agent.name} agentId={agent.agentId} />}
-                  aria-label={`Open the chat · ${agent.name} · ${agent.says}`}
-                  data-restore
-                  onClick={onOpen}
-                />
-              </Tooltip>
-              <StatusDot status={agent.tone} size="md" className="absolute -top-0.5 -right-0.5" />
-            </span>
+            <ChatChip agent={agent} attention={attention} onOpen={onOpen} />
           )}
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * The minimised chat, as a chip at the head's right end: what happens there, said in words.
+ *
+ * - The agent works: its mark turning, and what it does (`Working on S1 · the column order`).
+ * - It waits for the user: the chip takes the accent, a question mark, and what it waits for
+ *   (`Blocker on S2`, `3 points to confirm`, `Your review`) — the one state that asks the
+ *   hand, so the one that stands out.
+ * - Nothing going on: its mark and "Chat".
+ *
+ * Whatever it says, a press opens the chat.
+ */
+function ChatChip({
+  agent,
+  attention,
+  onOpen,
+}: {
+  agent: SessionFixture['agent']
+  attention: SessionFixture['attention']
+  onOpen: () => void
+}): ReactNode {
+  const asks = attention !== undefined
+  const works = !asks && agent.tone === 'running'
+  const words = asks ? attention.title : works ? agent.says : 'Chat'
+  return (
+    <span className="flex min-w-0 max-w-chat-preview">
+      <Tooltip label={asks ? attention.preview : `${agent.name} · ${agent.says}`} side="bottom">
+        <Button
+          variant={asks ? 'primary' : 'secondary'}
+          size="sm"
+          shape="pill"
+          aria-label={`Open the chat · ${agent.name} · ${words}`}
+          data-restore
+          onClick={onOpen}
+        >
+          {asks ? (
+            <IconMessageQuestion size="sm" />
+          ) : (
+            <AgentMark agent={agent.name} agentId={agent.agentId} />
+          )}
+          {works && <Loading size="sm" label={agent.says} />}
+          <span className="min-w-0 truncate">{words}</span>
+        </Button>
+      </Tooltip>
+    </span>
   )
 }
