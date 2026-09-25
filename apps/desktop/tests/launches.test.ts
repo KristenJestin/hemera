@@ -340,7 +340,9 @@ describe('A retry reads its launch where it writes', () => {
         const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
         // A Rework cancels it — the row is where the Rework left it — and the start again reads it
         // in the very transaction that writes it: nothing is started for a build nothing asks for
-        // (D8-13).
+        // (D8-13). The Rework lands before this call here: what the test pins is that the refusal
+        // is said and nothing is started. Arming it between the read and the claim takes a seam the
+        // window the suite composes has not, so it is green at the base too.
         yield* sql`UPDATE build_launches SET state = 'cancelled' WHERE id = ${asked.id}`
         const refused = yield* Effect.flip(launched.retry(asked.id))
         return { failed, refused, rows: yield* launches, builds: yield* builds }
