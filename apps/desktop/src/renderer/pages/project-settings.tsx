@@ -26,7 +26,12 @@ import {
   type RepositoryLine,
 } from '@hemera/ui'
 
-import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
+import {
+  type CommandWrite,
+  commandLineOf,
+  commandWriteOf,
+  folderUnderBase,
+} from '../project-lines.ts'
 import {
   branchOfName,
   branchesKeptOf,
@@ -353,6 +358,12 @@ export function ProjectSettingsPage({
         onAddCommand={async (line) => await onSaveCommand(commandWriteOf(line), false)}
         onUpdateCommand={async (line) => await onSaveCommand(commandWriteOf(line), true)}
         onRemoveCommand={onRemoveCommand}
+        // The picker of the system, answered from where the command runs: what comes back is the
+        // folder of the field, relative to that base (recette 2).
+        onBrowseCommandFolder={async (base) => {
+          const chosen = await onBrowse()
+          return chosen === null ? null : folderUnderBase(project.mainPath, base, chosen)
+        }}
         portlessInstalled={portlessInstalled}
         onArchive={onArchive}
         slotRefusal={workspacesRefusal}

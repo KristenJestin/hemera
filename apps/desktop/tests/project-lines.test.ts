@@ -1,13 +1,18 @@
 /**
  * The Commands and Repositories sections of a Project's settings say the engine's views and hand
- * them back without losing anything (D8-04, D8-07, D8-10, recette 1): read without a DOM, from the
- * module the page hands the components from.
+ * them back without losing anything (D8-04, D8-07, D8-10, recette 1 and 2): read without a DOM,
+ * from the module the page hands the components from.
  */
 
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { Command } from '@hemera/ipc'
-import { commandLineOf, commandWriteOf, repositoryLinesOf } from '#renderer/project-lines.ts'
+import {
+  commandLineOf,
+  commandWriteOf,
+  folderUnderBase,
+  repositoryLinesOf,
+} from '#renderer/project-lines.ts'
 
 /** A command of `atlas`'s catalogue, as the engine lists one. */
 function command(change: Partial<Command> = {}): Command {
@@ -59,6 +64,36 @@ describe('A command is read and saved with nothing lost', () => {
 
     expect(line).toMatchObject({ folderBase: null, folder: '', portlessName: null })
     expect(commandWriteOf(line)).toMatchObject({ folderBase: null, folder: null })
+  })
+})
+
+describe('A folder the picker answered is written relative to where a command runs', () => {
+  test('a folder under the base, and the base itself, are the path under it', () => {
+    expect(folderUnderBase('/work/atlas', null, '/work/atlas')).toBe('.')
+    expect(folderUnderBase('/work/atlas', null, '/work/atlas/apps/api')).toBe('apps/api')
+    expect(folderUnderBase('/work/atlas', './sources/api', '/work/atlas/sources/api/src')).toBe(
+      'src',
+    )
+  })
+
+  test('a folder beside the base, or above it, climbs back out of it', () => {
+    expect(folderUnderBase('/work/atlas', './sources/api', '/work/atlas/sources/web')).toBe(
+      '../web',
+    )
+    expect(folderUnderBase('/work/atlas', './sources/api', '/work/atlas')).toBe('../..')
+  })
+
+  test('a folder outside the Project is the `..` that would reach it, which the field refuses', () => {
+    expect(folderUnderBase('/work/atlas', './sources/api', '/home/kris/scratch')).toBe(
+      '../../../../home/kris/scratch',
+    )
+  })
+
+  test('a Windows path is compared as Windows does, whatever the case of its drive', () => {
+    expect(folderUnderBase('D:\\Projects\\atlas', null, 'd:\\projects\\atlas\\apps')).toBe('apps')
+    expect(folderUnderBase('D:\\Projects\\atlas', './sources/api', 'D:\\Projects\\atlas')).toBe(
+      '../..',
+    )
   })
 })
 
