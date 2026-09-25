@@ -52,4 +52,14 @@ describe('Tout canal déclaré est branché', () => {
     expect(lent).toHaveLength(15)
     expect(lent.filter((channel) => !names.has(channel))).toEqual([])
   })
+
+  test('the build and the checks reach the engine, relayed and not answered here', () => {
+    const relayed = LIST.exec(SOURCE)?.[1] ?? ''
+    const names = new Set([...relayed.matchAll(NAME)].map(([, name]) => name ?? ''))
+    const built = Object.keys(CHANNELS).filter(
+      (channel) => channel.startsWith('build.') || channel.startsWith('checks.'),
+    )
+    expect(built).toHaveLength(12)
+    expect(built.filter((channel) => !names.has(channel))).toEqual([])
+  })
 })

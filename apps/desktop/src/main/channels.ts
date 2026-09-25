@@ -259,6 +259,20 @@ const RELAYED = [
   'specs.buffers.read',
   'specs.buffers.save',
   'specs.buffers.discard',
+  // The build of a `build` Session and the checks it is judged by, the engine's like the rest
+  // (D10-04, D10-06).
+  'build.read',
+  'build.pause',
+  'build.resume',
+  'build.accept',
+  'build.stop',
+  'build.taskDone',
+  'build.taskSkip',
+  'build.dismissBlocker',
+  'checks.list',
+  'checks.save',
+  'checks.remove',
+  'checks.acceptProposed',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

@@ -38,6 +38,8 @@ import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
+import { type BuildRefusedError, Builds, type UnknownBuildError } from './build/build.ts'
+import { type CheckRefusedError, ProjectChecks, type UnknownCheckError } from './build/checks.ts'
 import {
   type NothingToRunError,
   type UnknownCommandFolderError,
@@ -193,6 +195,8 @@ export function answer(
   | Recipe
   | Proposals
   | Specs
+  | ProjectChecks
+  | Builds
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -541,8 +545,45 @@ export function answer(
       return yield* specs.buffers.discard(decision.argument)
     }
 
-    const { id, version, relativePath } = decision.argument
-    return yield* projects.removeRepository(id, version, relativePath)
+    // The Build section of the Project settings (D10-06): nothing proposed is saved until the
+    // user accepts it.
+    const checks = yield* ProjectChecks
+    if (decision.name === 'checks.list') {
+      const { projectId } = decision.argument
+      return { checks: yield* checks.list(projectId), proposed: yield* checks.proposed(projectId) }
+    }
+    if (decision.name === 'checks.save') {
+      const { projectId, id, draft } = decision.argument
+      return yield* checks.save(projectId, draft, id)
+    }
+    if (decision.name === 'checks.remove') return yield* checks.remove(decision.argument.id)
+    if (decision.name === 'checks.acceptProposed') {
+      const { projectId, drafts } = decision.argument
+      return yield* checks.acceptProposed(projectId, drafts)
+    }
+
+    if (decision.name === 'repositories.remove') {
+      const { id, version, relativePath } = decision.argument
+      return yield* projects.removeRepository(id, version, relativePath)
+    }
+
+    // The build of a `build` Session (D10-04): the window says what the user did, and the engine
+    // decides what follows; every act answers the build it leaves.
+    const builds = yield* Builds
+    const { sessionId } = decision.argument
+    if (decision.name === 'build.pause') return yield* builds.pause(sessionId)
+    if (decision.name === 'build.resume') return yield* builds.resume(sessionId)
+    if (decision.name === 'build.accept') return yield* builds.accept(sessionId)
+    if (decision.name === 'build.stop') return yield* builds.stop(sessionId)
+    if (decision.name === 'build.taskDone') return yield* builds.taskDone(decision.argument.taskId)
+    if (decision.name === 'build.taskSkip') {
+      const { taskId, reason, unblock } = decision.argument
+      return yield* builds.taskSkip(taskId, reason, unblock)
+    }
+    if (decision.name === 'build.dismissBlocker') {
+      return yield* builds.dismissBlocker(decision.argument.blockerId)
+    }
+    return yield* builds.view(sessionId)
   })
 }
 
@@ -591,3 +632,7 @@ export type Refusal =
   | WorkspaceFixedError
   | UnknownProposalError
   | ProposalDecidedError
+  | CheckRefusedError
+  | UnknownCheckError
+  | BuildRefusedError
+  | UnknownBuildError
