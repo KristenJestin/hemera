@@ -14,6 +14,8 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import { Builds } from '#engine/build/build.ts'
+
 import { held } from './application.ts'
 import {
   THREE,
@@ -113,6 +115,137 @@ describe("The agent's signal is not a verdict", () => {
     expect(handed[2]).toContain('## T1 · Write the exporter')
     expect(handed[2]).toContain('Attempt 1 was red')
     expect(handed[2]).toContain('src/export.ts:1 missing semicolon')
+  })
+})
+
+describe('A human task waits for the user', () => {
+  const HUMAN = [
+    { title: 'Write the exporter' },
+    { title: 'Sign the export format', executor: 'human' as const },
+    { title: 'Publish it', dependsOn: ['Sign the export format'] },
+  ]
+
+  test('it is yours, the others go on, and Done moves it on', async () => {
+    const { agent, handed } = buildAgent()
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, HUMAN)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const waiting = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[0]?.state === 'done',
+        )
+        const builds = yield* Builds
+        const refused = yield* Effect.flip(builds.taskDone(waiting.tasks[0]?.id ?? ''))
+        yield* builds.taskDone(waiting.tasks[1]?.id ?? '')
+        const after = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[2]?.state === 'done',
+        )
+        return { sessionId, waiting, refused, after, journal: yield* journalOf(sessionId) }
+      }),
+    )
+    expect(statesOf(seen.waiting)).toEqual({ T1: 'done', T2: 'yours', T3: 'waiting' })
+    // The window is told, and draws the banner from the view (D10-08).
+    expect(opened.built).toContain(seen.sessionId)
+    // Never handed to the agent, never acknowledged by Hemera.
+    expect(handed.some((text) => handedLabels(text).includes('T2'))).toBe(false)
+    expect(seen.refused.message).toBe('T1 is not waiting for you.')
+    expect(statesOf(seen.after)).toEqual({ T1: 'done', T2: 'done', T3: 'done' })
+    expect(seen.journal.filter((line) => line.type === 'task.yours')).toHaveLength(1)
+    const done = seen.journal.find(
+      (line) => line.type === 'task.done' && line.entity_id === seen.after.tasks[1]?.id,
+    )
+    expect(JSON.parse(done?.payload ?? '{}')).toEqual({ label: 'T2' })
+  })
+
+  test('Skip with a reason moves it on, its dependants let go on', async () => {
+    const { agent } = buildAgent()
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, HUMAN)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const waiting = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[0]?.state === 'done',
+        )
+        const builds = yield* Builds
+        const refused = yield* Effect.flip(builds.taskSkip(waiting.tasks[1]?.id ?? '', ' ', true))
+        yield* builds.taskSkip(waiting.tasks[1]?.id ?? '', 'The format is the old one', true)
+        const after = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[2]?.state === 'done',
+        )
+        return { refused, after, journal: yield* journalOf(sessionId) }
+      }),
+    )
+    expect(seen.refused.message).toBe('Say why the task is skipped.')
+    expect(statesOf(seen.after)).toEqual({ T1: 'done', T2: 'skipped', T3: 'done' })
+    expect(seen.after.tasks[1]?.skipReason).toBe('The format is the old one')
+    const skipped = seen.journal.find((line) => line.type === 'task.skipped')
+    expect(JSON.parse(skipped?.payload ?? '{}')).toEqual({
+      label: 'T2',
+      reason: 'The format is the old one',
+      unblocks: true,
+    })
+  })
+})
+
+describe('A blocker suspends the task and its dependants only', () => {
+  test('T1 and T3 are blocked, T2 goes on, and dismissing it makes T1 ready again', async () => {
+    const TASKS = [
+      { title: 'Write the exporter' },
+      { title: 'Write the reader' },
+      { title: 'Wire the exporter', dependsOn: ['Write the exporter'] },
+    ]
+    const { agent, handed } = buildAgent({
+      execute: (labels, text) => {
+        if (text.includes('The user dismissed it')) return labels.map(finished)
+        return labels.flatMap((label) =>
+          label === 'T1'
+            ? [
+                {
+                  does: 'uses' as const,
+                  call: 'task_blocked',
+                  arguments: { task: 'T1', reason: 'The Spec asks for CSV and for JSON at once' },
+                },
+              ]
+            : [finished(label)],
+        )
+      },
+    })
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, TASKS)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const blocked = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[1]?.state === 'done' && view.tasks[0]?.state === 'blocked',
+        )
+        const dismissed = yield* (yield* Builds).dismissBlocker(blocked.blockers[0]?.id ?? '')
+        const after = yield* eventually(buildOf(sessionId), (view) => view.phase === 'verify')
+        return { blocked, dismissed, after, journal: yield* journalOf(sessionId) }
+      }),
+    )
+    expect(statesOf(seen.blocked)).toEqual({ T1: 'blocked', T2: 'done', T3: 'blocked' })
+    expect(seen.blocked.blockers.map((one) => [one.label, one.reason, one.dismissedAt])).toEqual([
+      ['T1', 'The Spec asks for CSV and for JSON at once', null],
+    ])
+    expect(statesOf(seen.dismissed)).toEqual({ T1: 'ready', T2: 'done', T3: 'waiting' })
+    // Handed again with the dismissal, then carried out, T3 after it.
+    expect(handed.some((text) => text.includes('# Blockers the user dismissed'))).toBe(true)
+    expect(statesOf(seen.after)).toEqual({ T1: 'done', T2: 'done', T3: 'done' })
+    expect(
+      seen.journal
+        .filter((line) => line.type === 'task.blocked')
+        .map((line) => JSON.parse(line.payload)),
+    ).toEqual([
+      { label: 'T1', reason: 'The Spec asks for CSV and for JSON at once' },
+      { label: 'T3', because: 'T1' },
+    ])
   })
 })
 

@@ -34,11 +34,12 @@ import {
   type TaskState,
   type ToolName,
   attemptResult,
+  dependantsOf,
   renderSpecMarkdown,
   stateAfterAttempt,
   taskLabels,
 } from '@hemera/core'
-import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, Result } from 'effect'
 
 import { StderrSink } from '../agents/supervisor.ts'
@@ -49,6 +50,7 @@ import {
   buildAttemptFiles,
   buildAttemptTrees,
   buildAttempts,
+  buildBlockers,
   buildLaunches,
   buildTasks,
   sessionEntries,
@@ -224,6 +226,15 @@ export class BuildNotices extends Context.Service<BuildNotices, BuildNoticesServ
 /** Nobody watching. */
 export const NoBuildNotices = Layer.succeed(BuildNotices, { changed: () => undefined })
 
+/** What the user asked of a build is refused, with the sentence the window shows. */
+export class BuildRefusedError extends Data.TaggedError('BuildRefusedError')<{
+  readonly reason: string
+}> {
+  override get message(): string {
+    return this.reason
+  }
+}
+
 /** A build, a task or a blocker was asked for by an identifier nothing answers to. */
 export class UnknownBuildError extends Data.TaggedError('UnknownBuildError')<{
   readonly id: string
@@ -234,10 +245,13 @@ export class UnknownBuildError extends Data.TaggedError('UnknownBuildError')<{
 }
 
 /** Everything a user's action on a build can be answered with. */
-export type BuildRefusal = DatabaseError | UnknownBuildError
+export type BuildRefusal = DatabaseError | BuildRefusedError | UnknownBuildError
 
-/** A call to one of the build tools, as `parseCall` read it. */
-export type BuildCall = Extract<ParsedCall, { tool: 'build_read' | 'task_finished' }>
+/** A call to one of the three build tools, as `parseCall` read it. */
+export type BuildCall = Extract<
+  ParsedCall,
+  { tool: 'build_read' | 'task_finished' | 'task_blocked' }
+>
 
 /** What a build tool answers: the catalogue's `Answer`, which it writes down like any other. */
 export interface BuildAnswer {
@@ -311,9 +325,19 @@ export interface BuildsService {
     run: Effect.Effect<A>,
     refuse: (reason: string) => Effect.Effect<A>,
   ) => Effect.Effect<A>
-  /** `build_read`, `task_finished` (D10-04, D10-13). */
+  /** `build_read`, `task_finished`, `task_blocked` (D10-04, D10-13). */
   readonly tool: (sessionId: string, call: BuildCall) => Effect.Effect<BuildAnswer>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /** A task waiting for the user, done by them (D10-08). */
+  readonly taskDone: (buildTaskId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /** A task waiting for the user, skipped with its reason, its dependants let go on or not (L6). */
+  readonly taskSkip: (
+    buildTaskId: string,
+    reason: string,
+    unblocks: boolean,
+  ) => Effect.Effect<BuildView, BuildRefusal>
+  /** A blocker dismissed: its task is ready again, its dependants wait again (D10-08). */
+  readonly dismissBlocker: (blockerId: string) => Effect.Effect<BuildView, BuildRefusal>
 }
 
 export class Builds extends Context.Service<Builds, BuildsService>()('Builds') {}
@@ -965,6 +989,71 @@ export const buildsLayer = Layer.effect(
         )
       })
 
+    /**
+     * `task_blocked` (D10-08): a blocker with the agent's reason; the task and the tasks waiting on
+     * it are suspended, and the others go on.
+     */
+    const block = (sessionId: string, call: Extract<BuildCall, { tool: 'task_blocked' }>) =>
+      Effect.gen(function* () {
+        const rows = yield* read(sessionId)
+        if (rows === null) return refusedAnswer('this Session runs no build')
+        const { task, refusal } = labelled(rows, call.arguments.task)
+        if (task === null) return refusedAnswer(refusal)
+        const refused = signalRefusal(task)
+        if (refused !== null) return refusedAnswer(refused)
+        const at = now()
+        const held = yield* withDatabase(
+          mutate('recording a blocker', (transaction) =>
+            Effect.gen(function* () {
+              const fresh = yield* readBuild(transaction, sessionId)
+              const subject = fresh?.tasks.find((one) => one.id === task.id)
+              if (fresh === null || subject === undefined || signalRefusal(subject) !== null) {
+                return { result: null, events: [] }
+              }
+              const blockerId = crypto.randomUUID()
+              yield* transaction
+                .insert(buildBlockers)
+                .values({
+                  id: blockerId,
+                  sessionId,
+                  buildTaskId: task.id,
+                  reason: call.arguments.reason,
+                  raisedAt: at,
+                })
+                .pipe(Effect.mapError(failed('writing the blocker')))
+              // The attempt running on it ends here, judged by nothing: the task is suspended.
+              yield* transaction
+                .update(buildAttempts)
+                .set({ endedAt: at })
+                .where(and(eq(buildAttempts.buildTaskId, task.id), isNull(buildAttempts.endedAt)))
+                .pipe(Effect.mapError(failed('ending the attempt')))
+              yield* moveTask(transaction, task, 'blocked', at)
+              const events = [
+                taskEvent(fresh, task, 'task.blocked', 'agent', { reason: call.arguments.reason }),
+              ]
+              const waiting = dependantsOf(task.taskId, fresh.snapshot.dependencies).flatMap(
+                (taskId) =>
+                  fresh.tasks.filter((one) => one.taskId === taskId && stateOf(one) === 'waiting'),
+              )
+              for (const dependant of waiting) {
+                yield* moveTask(transaction, dependant, 'blocked', at)
+                events.push(
+                  taskEvent(fresh, dependant, 'task.blocked', 'hemera', { because: task.label }),
+                )
+              }
+              return { result: waiting.map((one) => one.label), events }
+            }),
+          ),
+        )
+        if (held === null) return refusedAnswer(`${task.label} can no longer be blocked`)
+        yield* told(sessionId)
+        const along = held.length === 0 ? '' : `, and ${held.join(', ')} with it`
+        return completed(
+          `${task.label} is blocked${along}: the user decides`,
+          `${task.label} is blocked${along}: the user decides. Carry on with the other tasks.`,
+        )
+      })
+
     /** The use case of one build tool. */
     const used = (sessionId: string, call: BuildCall) => {
       switch (call.tool) {
@@ -972,6 +1061,8 @@ export const buildsLayer = Layer.effect(
           return buildRead(sessionId, call)
         case 'task_finished':
           return finish(sessionId, call)
+        case 'task_blocked':
+          return block(sessionId, call)
       }
     }
 
@@ -987,7 +1078,89 @@ export const buildsLayer = Layer.effect(
         ),
       )
 
+    /** The rows of a build a user acts on, refused when it is closed. */
+    const open = (sessionId: string) =>
+      Effect.gen(function* () {
+        const rows = yield* must(sessionId)
+        if (rows.phase === 'accepted' || rows.phase === 'stopped' || rows.phase === null) {
+          return yield* Effect.fail(
+            new BuildRefusedError({
+              reason:
+                rows.phase === 'accepted' ? 'This build was accepted.' : 'This build is stopped.',
+            }),
+          )
+        }
+        return rows
+      })
+
     const view = (sessionId: string) => must(sessionId).pipe(Effect.map(viewOf))
+
+    /** A change the user made, written with its line, then what follows it started. */
+    const acted = (
+      sessionId: string,
+      doing: string,
+      body: (
+        transaction: EngineTransaction,
+        rows: BuildRows,
+        at: string,
+      ) => Effect.Effect<
+        { events: NewEvent[]; follows: boolean; jobs?: readonly CheckJob[] },
+        BuildRefusal
+      >,
+    ) =>
+      Effect.gen(function* () {
+        const at = now()
+        const jobs = yield* withDatabase(
+          mutate(doing, (transaction) =>
+            Effect.gen(function* () {
+              const rows = yield* readBuild(transaction, sessionId)
+              if (rows === null) return yield* Effect.fail(new UnknownBuildError({ id: sessionId }))
+              const done = yield* body(transaction, rows, at)
+              const asked = done.jobs ?? []
+              if (!done.follows) return { result: asked, events: done.events }
+              const followed = yield* follow(transaction, sessionId, at)
+              return {
+                result: [...asked, ...followed.jobs],
+                events: [...done.events, ...followed.events],
+              }
+            }),
+          ),
+        )
+        yield* runJobs(sessionId, jobs)
+        yield* told(sessionId)
+        yield* wake(sessionId)
+        return yield* view(sessionId)
+      })
+
+    /** The build task a user's action names, and the Session it belongs to. */
+    const taskNamed = (buildTaskId: string) =>
+      withDatabase(
+        reading('reading the task', (transaction) =>
+          transaction
+            .select({ sessionId: buildTasks.sessionId })
+            .from(buildTasks)
+            .where(eq(buildTasks.id, buildTaskId))
+            .pipe(Effect.mapError(failed('reading the task'))),
+        ),
+      ).pipe(
+        Effect.flatMap((found) =>
+          found[0] === undefined
+            ? Effect.fail(new UnknownBuildError({ id: buildTaskId }))
+            : Effect.succeed(found[0].sessionId),
+        ),
+      )
+
+    /** A task of the rows, which must be waiting for the user. */
+    const yoursIn = (rows: BuildRows, buildTaskId: string) => {
+      const task = rows.tasks.find((one) => one.id === buildTaskId)
+      if (task === undefined) return Effect.fail(new UnknownBuildError({ id: buildTaskId }))
+      if (stateOf(task) !== 'yours') {
+        return Effect.fail(
+          new BuildRefusedError({ reason: `${task.label} is not waiting for you.` }),
+        )
+      }
+      return Effect.succeed(task)
+    }
 
     /** A new attempt on the same subject as one that was red, and its checks to run. */
     const again = (transaction: EngineTransaction, attempt: AttemptRow, at: string) =>
@@ -1229,6 +1402,102 @@ export const buildsLayer = Layer.effect(
       admitted,
       tool,
       view,
+
+      taskDone: (buildTaskId) =>
+        Effect.gen(function* () {
+          const sessionId = yield* taskNamed(buildTaskId)
+          yield* open(sessionId)
+          return yield* acted(sessionId, 'marking a task done', (transaction, rows, at) =>
+            Effect.gen(function* () {
+              const task = yield* yoursIn(rows, buildTaskId)
+              yield* moveTask(transaction, task, 'done', at, { endedAt: at })
+              return { events: [taskEvent(rows, task, 'task.done', 'human')], follows: true }
+            }),
+          )
+        }),
+
+      taskSkip: (buildTaskId, reason, unblocks) =>
+        Effect.gen(function* () {
+          const why = reason.trim()
+          if (why === '') {
+            return yield* Effect.fail(
+              new BuildRefusedError({ reason: 'Say why the task is skipped.' }),
+            )
+          }
+          const sessionId = yield* taskNamed(buildTaskId)
+          yield* open(sessionId)
+          return yield* acted(sessionId, 'skipping a task', (transaction, rows, at) =>
+            Effect.gen(function* () {
+              const task = yield* yoursIn(rows, buildTaskId)
+              yield* transaction
+                .update(buildTasks)
+                .set({
+                  state: 'skipped',
+                  skipReason: why,
+                  skipUnblocks: unblocks,
+                  endedAt: at,
+                  updatedAt: at,
+                })
+                .where(eq(buildTasks.id, task.id))
+                .pipe(Effect.mapError(failed('skipping the task')))
+              return {
+                events: [taskEvent(rows, task, 'task.skipped', 'human', { reason: why, unblocks })],
+                follows: true,
+              }
+            }),
+          )
+        }),
+
+      dismissBlocker: (blockerId) =>
+        Effect.gen(function* () {
+          const found = yield* database
+            .select({ sessionId: buildBlockers.sessionId })
+            .from(buildBlockers)
+            .where(eq(buildBlockers.id, blockerId))
+            .pipe(Effect.mapError(failed('reading the blocker')))
+          const sessionId = found[0]?.sessionId
+          if (sessionId === undefined) {
+            return yield* Effect.fail(new UnknownBuildError({ id: blockerId }))
+          }
+          yield* open(sessionId)
+          return yield* acted(sessionId, 'dismissing a blocker', (transaction, rows, at) =>
+            Effect.gen(function* () {
+              const blocker = rows.blockers.find((one) => one.id === blockerId)
+              const task = rows.tasks.find((one) => one.id === blocker?.buildTaskId)
+              if (blocker === undefined || task === undefined || blocker.dismissedAt !== null) {
+                return yield* Effect.fail(
+                  new BuildRefusedError({ reason: 'This blocker was already dismissed.' }),
+                )
+              }
+              yield* transaction
+                .update(buildBlockers)
+                .set({ dismissedAt: at })
+                .where(eq(buildBlockers.id, blockerId))
+                .pipe(Effect.mapError(failed('dismissing the blocker')))
+              // The task is ready again and handed again, with the dismissal (D10-08).
+              yield* moveTask(transaction, task, 'ready', at, { handedAt: null })
+              const events: NewEvent[] = [taskEvent(rows, task, 'task.ready', 'human')]
+              const { dependencies } = rows.snapshot
+              const stillHeld = new Set(
+                rows.blockers
+                  .filter((one) => one.id !== blockerId && one.dismissedAt === null)
+                  .flatMap((one) => {
+                    const held = rows.tasks.find((other) => other.id === one.buildTaskId)
+                    return held === undefined
+                      ? []
+                      : [held.taskId].concat(dependantsOf(held.taskId, dependencies))
+                  }),
+              )
+              for (const taskId of dependantsOf(task.taskId, dependencies)) {
+                const dependant = rows.tasks.find((one) => one.taskId === taskId)
+                if (dependant === undefined || stateOf(dependant) !== 'blocked') continue
+                if (stillHeld.has(taskId)) continue
+                yield* moveTask(transaction, dependant, 'waiting', at)
+              }
+              return { events, follows: true }
+            }),
+          )
+        }),
     }
     return service
   }),

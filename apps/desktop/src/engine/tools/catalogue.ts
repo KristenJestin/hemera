@@ -1139,12 +1139,8 @@ export const toolCatalogueLayer: Layer.Layer<
 
           case 'build_read':
           case 'task_finished':
-            return yield* builds.tool(asked.sessionId, call)
           case 'task_blocked':
-            return failed(
-              'the build tools are not wired yet',
-              'the build tools are not wired yet: nothing was read or recorded',
-            )
+            return yield* builds.tool(asked.sessionId, call)
         }
       })
 
