@@ -977,9 +977,10 @@ export const Keyboard: Story = {
       'aria-selected',
       'true',
     )
-    // Tab leaves the navigation for the first control of the section.
+    // Tab leaves the navigation for the first control of the section, once the section is there.
+    const addCommand = await canvas.findByRole('button', { name: 'Add command' })
     await userEvent.tab()
-    await expect(canvas.getByRole('button', { name: 'Add command' })).toHaveFocus()
+    await expect(addCommand).toHaveFocus()
 
     const pencil = canvas.getByRole('button', { name: 'Edit check' })
     pencil.focus()
