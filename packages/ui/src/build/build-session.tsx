@@ -4,210 +4,206 @@ import { type ReactNode, useRef, useState } from 'react'
 import { IconButton } from '../components/button/button.tsx'
 import { StatusDot } from '../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconChevronRight, IconMessages } from '../icons.ts'
+import { IconChevronRight, IconHammer } from '../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 import { MissionPanel } from '../session/mission-panel.tsx'
+import { type ChatState, SessionLayout } from '../session/session-layout.tsx'
 import type { SpecView } from '../spec/model.ts'
-import { BlockerBlock } from './blocker-block.tsx'
 import { BuildSpecPanel } from './build-spec-panel.tsx'
-import { BuildView, type BuildViewProps, dependantsOf } from './build-view.tsx'
-import { openBlockerOf } from './model.ts'
-import { YoursBlock } from './yours-block.tsx'
+import { type BuildViewProps, BuildView } from './build-view.tsx'
+import { openBlockerOf, waitingOf } from './model.ts'
 
 /**
- * A `build` Session's page (D10-12): the define layout turned over. The build view stands at the
- * centre and takes the larger part of the row; the chat stands narrow on its right, folded to a
- * band or unfolded, in the same mission panel the Spec of a `define` Session stands in — the same
- * fold, the same width that pushes, the same rule that the hand's fold holds against the agent.
+ * A `build` Session's page (D10-12, lot 5c of issue #115): the layout every Session has — the chat
+ * at the centre, the mission panel on its right — with the build standing in the panel.
  *
- * "Spec" in the build view's head opens the frozen Spec beside the view, read only. The views
- * around the build are closable and never open together (core.md, "Session view"): opening the
- * Spec folds the chat to its band, unfolding the chat closes the Spec, and closing the Spec gives
- * the chat back the way it was. The chat is never out of reach: folded, its band stays at the
- * edge of the row, and says when something in it waits for the user.
+ * The `build` used to stand at the centre with the chat folded into a mission panel of its own;
+ * since lot 5c the chat is the centre of every mission, and the build is what the panel holds. Its
+ * default is still its own: a build opens with the chat minimised, so the build view is the page,
+ * and the chat is the button at the end of the head until it is asked for.
+ *
+ * "Spec" in the build view's head opens the frozen Spec beside the view, read only, inside the same
+ * panel: the two are never open together (core.md, "Session view") — opening the Spec folds
+ * nothing, and closing it gives the view the whole panel back.
  *
  * What waits for the user in the build — a task that is theirs, a blocker the agent raised — is
- * said in the view, and as a banner above the chat's composer: the page hands that banner to the
- * chat it is given, which puts it where the composer's own waiting strip goes. The banner's
- * "Open" puts the task on the view's stage.
+ * said by the band when the panel is folded, and above the chat's composer by whoever arranges the
+ * chat (`build-banner.tsx`), which the page hands the same build.
  */
 
-const ROW = '@container flex h-full min-h-0 bg-background text-foreground'
+const PANEL_HEAD = 'flex shrink-0 items-center gap-2 border-b border-border px-4 py-2'
+
+const PANEL_TITLE = 'text-sm font-medium'
+
+/** The build view and the frozen Spec, side by side inside the panel. */
+const ROW = 'flex min-h-0 min-w-0 flex-1'
 
 const CENTRE = 'flex min-h-0 min-w-0 flex-1 flex-col'
 
 const SIDE = 'flex shrink-0'
 
-const CHAT_HEAD = 'flex shrink-0 items-center gap-2 border-b border-border px-4 py-2'
-
-const CHAT_TITLE = 'text-sm font-medium'
-
-const CHAT_STAGE = 'flex min-h-0 min-w-0 flex-1 flex-col'
-
 const BAND = 'flex flex-col items-center gap-3 pt-3 text-muted-foreground'
 
-export interface BuildSessionProps extends Omit<
-  BuildViewProps,
-  'selected' | 'onSelect' | 'specOpen' | 'onToggleSpec'
-> {
-  /** The head of the Session, drawn across the top of the page: its title, its details. */
-  header?: ReactNode
+export interface BuildSessionProps extends Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> {
+  /** The Session's head, drawn across the top of the page: its title, and the chat's button. */
+  head?: ReactNode | undefined
   /** The frozen revision the build works from, which "Spec" opens read only. */
   spec: SpecView
-  /**
-   * The chat: the thread and the composer, handed the banner of what waits for the user in the
-   * build, to stand above the composer; `null` when nothing does.
-   */
-  chat: (banner: ReactNode) => ReactNode
-  /**
-   * What waits for the user in the chat, in a sentence — a permission the agent asks — which the
-   * band says while the chat is folded. When it changes to something, the chat unfolds onto it,
-   * unless the hand folded it.
-   */
-  chatWaiting?: string | undefined
-  /** Whether the chat opens folded to its band; it opens unfolded unless told otherwise. */
-  defaultChatFolded?: boolean | undefined
+  /** The chat: the thread and the composer, with what waits for the user above it. */
+  chat: ReactNode
+  /** Whether the chat is open. The page holds it, since it remembers it per Session. */
+  chatOpen?: boolean | undefined
+  onChatOpenChange?: ((open: boolean) => void) | undefined
+  /** What the chat's button says: the state of the chat, in a ring and in words. */
+  chatState?: ChatState | undefined
+  chatWords?: string | undefined
+  chatDetail?: string | undefined
   /** Whether the frozen Spec opens beside the view, for the story that shows it. */
   defaultSpecOpen?: boolean | undefined
 }
 
 export function BuildSession({
-  header,
+  head,
+  build,
+  now,
+  selected,
+  onSelect,
   spec,
   chat,
-  chatWaiting,
-  defaultChatFolded = false,
+  chatOpen = true,
+  onChatOpenChange,
+  chatState = 'idle',
+  chatWords,
+  chatDetail,
   defaultSpecOpen = false,
-  ...view
+  onPause,
+  onResume,
+  onAccept,
+  onStop,
+  onTaskDone,
+  onTaskSkip,
+  onDismissBlocker,
 }: BuildSessionProps): ReactNode {
-  const { build, now } = view
-  const [selected, setSelected] = useState<string | undefined>(undefined)
   const [specOpen, setSpecOpen] = useState(defaultSpecOpen)
-  // What the page asks of the chat's fold: folded while the Spec is open, and back to how it was
-  // once the Spec closes.
-  const [chatFolded, setChatFolded] = useState(defaultChatFolded || defaultSpecOpen)
-  const before = useRef(defaultChatFolded)
-  const page = useRef<HTMLDivElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
   const fade = useTransition(crossfade)
   const closed = build.phase === 'accepted' || build.phase === 'stopped'
 
-  const openSpec = () => {
-    before.current = chatFolded
-    setChatFolded(true)
-    setSpecOpen(true)
-  }
-
-  const closeSpec = () => {
+  /** Closes the frozen Spec and gives the keyboard back the control that opened it. */
+  function closeSpec(): void {
     setSpecOpen(false)
-    setChatFolded(before.current)
     // The control that closed it is gone with it: the keyboard goes back to what opened it.
-    page.current?.querySelector<HTMLElement>('[data-spec-toggle]')?.focus()
+    panel.current?.querySelector<HTMLElement>('[data-spec-toggle]')?.focus()
   }
 
-  /** The banner of the first thing in the build that waits for the user, if any. */
-  function banner(): ReactNode {
-    if (closed) return null
-    const yours = build.tasks.find((task) => task.state === 'yours')
-    if (yours !== undefined) {
-      return (
-        <YoursBlock
-          variant="banner"
-          task={yours}
-          dependants={dependantsOf(yours.label, build.tasks)}
-          onDone={() => view.onTaskDone(yours.id)}
-          onSkip={(reason, unblock) => view.onTaskSkip(yours.id, reason, unblock)}
-          onOpen={() => setSelected(yours.id)}
-        />
-      )
-    }
-    const blocked = build.tasks.find((task) => openBlockerOf(task, build.blockers) !== undefined)
-    const blocker = blocked === undefined ? undefined : openBlockerOf(blocked, build.blockers)
-    if (blocked === undefined || blocker === undefined) return null
+  // What waits for the user, said by the band while the panel is folded, and by the chat's
+  // button while the chat is minimised: the rail is not drawn, and a build nothing can be done
+  // with is a build to come back to.
+  const waiting = waitingOf(build)
+  const waits = waiting !== undefined && !closed
+  const wait = waiting === undefined ? undefined : openBlockerOf(waiting, build.blockers)
+  // What it is called, in the words of the build: the blocker on the task, or the task itself.
+  const words =
+    waiting === undefined
+      ? undefined
+      : wait === undefined
+        ? `${waiting.label} is yours`
+        : `Blocker on ${waiting.label}`
+
+  /** The panel of a `build` Session: the build view, and the frozen Spec beside it. */
+  function mission(page: boolean): ReactNode {
     return (
-      <BlockerBlock
-        variant="banner"
-        blocker={blocker}
-        specKey={build.specKey}
-        now={now}
-        suspended={dependantsOf(blocked.label, build.tasks)}
-        onDismiss={() => view.onDismissBlocker(blocker.id)}
-        onStop={view.onStop}
-        onOpen={() => setSelected(blocked.id)}
+      <MissionPanel
+        label={`Build ${build.specKey}`}
+        noun="build"
+        // The panel is the page while the chat is minimised, which is where a build starts.
+        page={page}
+        width="wide"
+        defaultFolded={false}
+        head={(fold) => (
+          <header className={PANEL_HEAD}>
+            <IconHammer size="sm" aria-hidden="true" />
+            <h2 className={PANEL_TITLE}>Build</h2>
+            {
+              // While the chat is minimised the panel is the page and nothing is folded: the
+              // control that folds it belongs to the head, and this head is drawn without one.
+              page ? null : (
+                <span className="ml-auto flex">
+                  <Tooltip label="Fold the build">
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      icon={<IconChevronRight size="sm" />}
+                      aria-label="Fold the build"
+                      data-fold
+                      onClick={fold}
+                    />
+                  </Tooltip>
+                </span>
+              )
+            }
+          </header>
+        )}
+        rail={null}
+        stage={
+          <div ref={panel} className={ROW}>
+            <div className={CENTRE}>
+              <BuildView
+                build={build}
+                now={now}
+                selected={selected}
+                onSelect={onSelect}
+                specOpen={specOpen}
+                onToggleSpec={() => (specOpen ? closeSpec() : setSpecOpen(true))}
+                onPause={onPause}
+                onResume={onResume}
+                onAccept={onAccept}
+                onStop={onStop}
+                onTaskDone={onTaskDone}
+                onTaskSkip={onTaskSkip}
+                onDismissBlocker={onDismissBlocker}
+              />
+            </div>
+            <AnimatePresence initial={false}>
+              {specOpen && (
+                <motion.div
+                  key="spec"
+                  className={SIDE}
+                  initial={CROSSFADE.from}
+                  animate={CROSSFADE.to}
+                  exit={CROSSFADE.from}
+                  transition={fade}
+                >
+                  <BuildSpecPanel spec={spec} onClose={closeSpec} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        }
+        band={
+          <div className={BAND}>
+            <IconHammer size="md" aria-hidden="true" />
+            {!closed && waits && (
+              <StatusDot status="running" label="Something in the build waits for you" />
+            )}
+          </div>
+        }
       />
     )
   }
 
-  const said = banner()
-  const waiting =
-    chatWaiting ?? (said === null ? undefined : 'Something in the build waits for you')
-
   return (
-    <div ref={page} className="flex h-full min-h-0 flex-col">
-      {header}
-      <div className={ROW}>
-        <div className={CENTRE}>
-          <BuildView
-            {...view}
-            selected={selected}
-            onSelect={setSelected}
-            specOpen={specOpen}
-            onToggleSpec={() => (specOpen ? closeSpec() : openSpec())}
-          />
-        </div>
-        <AnimatePresence initial={false}>
-          {specOpen && (
-            <motion.div
-              key="spec"
-              className={SIDE}
-              initial={CROSSFADE.from}
-              animate={CROSSFADE.to}
-              exit={CROSSFADE.from}
-              transition={fade}
-            >
-              <BuildSpecPanel spec={spec} onClose={closeSpec} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <MissionPanel
-          label="Chat"
-          noun="chat"
-          width="narrow"
-          defaultFolded={chatFolded}
-          folded={chatFolded}
-          following={chatWaiting}
-          onFoldChange={(folded) => {
-            setChatFolded(folded)
-            // The chat unfolded by the hand, or by the agent asking: the Spec gives it the room.
-            if (!folded) setSpecOpen(false)
-          }}
-          head={(fold) => (
-            <header className={CHAT_HEAD}>
-              <IconMessages size="sm" aria-hidden="true" />
-              <h2 className={CHAT_TITLE}>Chat</h2>
-              <span className="ml-auto flex">
-                <Tooltip label="Fold the chat">
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={<IconChevronRight size="sm" />}
-                    aria-label="Fold the chat"
-                    data-fold
-                    onClick={fold}
-                  />
-                </Tooltip>
-              </span>
-            </header>
-          )}
-          rail={null}
-          stage={<div className={CHAT_STAGE}>{chat(said)}</div>}
-          band={
-            <div className={BAND}>
-              <IconMessages size="md" aria-hidden="true" />
-              {waiting !== undefined && <StatusDot status="running" label={waiting} />}
-            </div>
-          }
-        />
-      </div>
-    </div>
+    <SessionLayout
+      head={head}
+      chat={chat}
+      panel={mission}
+      chatOpen={chatOpen}
+      onChatOpenChange={onChatOpenChange}
+      // What waits for the user in the build comes before the turn's own state: a ring that
+      // breathes is the one thing a minimised chat has to say about it (issue #115).
+      chatState={waits ? 'waiting' : chatState}
+      chatWords={waits ? words : chatWords}
+      chatDetail={chatDetail}
+    />
   )
 }

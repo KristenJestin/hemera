@@ -433,6 +433,20 @@ export {
   type WorkspaceRepositoriesProps,
 } from './workspace/workspace-repositories.tsx'
 /**
+ * The page of a Session (lot 5c, issue #115): the head across the top with the control that
+ * minimises the chat at its end, the chat at the centre — covered and uncovered as the panel
+ * grows over it — and, in a `define` or a `build`, the mission panel on its right. A `free`
+ * Session is the chat alone.
+ */
+export {
+  ChatButton,
+  type ChatButtonProps,
+  type ChatState,
+  SessionLayout,
+  type SessionLayoutProps,
+} from './session/session-layout.tsx'
+
+/**
  * The panel a Session's mission opens beside the chat, and the rail it is fed with: the fold, the
  * width that pushes the chat, the band; groups of items that say what needs attention. The Spec
  * panel stands in it; a `build` panel is the next.
@@ -533,6 +547,8 @@ export { YoursBlock, type YoursBlockProps } from './build/yours-block.tsx'
 export { BlockerBlock, type BlockerBlockProps } from './build/blocker-block.tsx'
 export { BuildSpecPanel, type BuildSpecPanelProps } from './build/build-spec-panel.tsx'
 export { BuildSession, type BuildSessionProps } from './build/build-session.tsx'
+export { BuildBanner, type BuildBannerProps } from './build/build-banner.tsx'
+export { waitsOf, waitingOf } from './build/model.ts'
 export type {
   BuildAttemptResult,
   BuildAttemptScope,

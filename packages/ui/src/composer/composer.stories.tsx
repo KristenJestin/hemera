@@ -166,7 +166,7 @@ function frameOf(box: HTMLElement): HTMLElement {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
@@ -195,6 +195,11 @@ const meta = {
     workspaceFixed: {
       control: 'boolean',
       description: 'Whether the agent has started, which fixes the Workspace.',
+      table: { defaultValue: { summary: 'false' } },
+    },
+    workspaceBound: {
+      control: 'boolean',
+      description: "Whether the Session is bound to its Spec's Workspace, which is then a label.",
       table: { defaultValue: { summary: 'false' } },
     },
     action: {

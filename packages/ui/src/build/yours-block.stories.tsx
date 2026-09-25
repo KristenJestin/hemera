@@ -13,7 +13,7 @@ import { YoursBlock } from './yours-block.tsx'
 const meta = {
   title: 'Blocks/Build/YoursBlock',
   component: YoursBlock,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     task: T4_YOURS,

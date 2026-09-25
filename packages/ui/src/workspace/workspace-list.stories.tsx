@@ -227,7 +227,7 @@ function Held({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/WorkspaceList',
   component: WorkspaceList,
   render: (args) => <Held {...args} />,

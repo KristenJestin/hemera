@@ -35,6 +35,8 @@ export interface ComposerActionsProps {
   onWorkspaceChange: (workspace: string) => void
   /** Whether the agent has started, which fixes the Workspace (D8-08). */
   workspaceFixed?: boolean | undefined
+  /** Whether the Session is bound to its Spec's Workspace, which is then a label. */
+  workspaceBound?: boolean | undefined
   /** Whether there is anything to send at all. */
   ready: boolean
   /** Whether a send is in flight, which is what the arrow morphs into. */
@@ -78,6 +80,7 @@ export function ComposerActions({
   workspace,
   onWorkspaceChange,
   workspaceFixed = false,
+  workspaceBound = false,
   ready,
   sending,
   running = false,
@@ -103,6 +106,7 @@ export function ComposerActions({
         workspace={workspace}
         onWorkspaceChange={onWorkspaceChange}
         fixed={workspaceFixed}
+        bound={workspaceBound}
       />
       <span className="ml-auto flex items-center gap-2">
         {spec && (

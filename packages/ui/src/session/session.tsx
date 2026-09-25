@@ -6,16 +6,8 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
-import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import {
-  IconArchive,
-  IconDots,
-  IconInfoCircle,
-  IconMessages,
-  IconPencil,
-  IconRestore,
-} from '../icons.ts'
+import { IconArchive, IconInfoCircle, IconMessages, IconPencil, IconRestore } from '../icons.ts'
 import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
 
 /**
@@ -36,7 +28,7 @@ import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../mot
 /** What the head of a Session says, and what it offers to do with it. */
 const HEAD = 'flex items-center gap-3'
 
-/** The title and where the Session lives, on one line, taking the room the menu leaves. */
+/** The title and where the Session lives, on one line, taking the room its controls leave. */
 const COLUMN = 'flex min-w-0 flex-1 items-baseline gap-3'
 
 /** The title, which truncates rather than pushing the directory and the menu out of the line. */
@@ -46,8 +38,8 @@ const TITLE = 'min-w-0 truncate text-2xl font-medium'
  * The title as a control, which is what opens Rename.
  *
  * It is drawn as the title it is and not as a button beside it: the words are already on the
- * line, and the hand that wants the name changed is on them. The pencil inside the menu says the
- * same thing for whoever reads the menu before touching anything.
+ * line, and the hand that wants the name changed is on them — the one control that names a
+ * Session since the head's `…` menu went (lot 5c, issue #115).
  */
 const TITLE_ACTION = 'focus-ring -mx-1 min-w-0 truncate rounded-md px-1 text-left hover:bg-accent'
 
@@ -107,16 +99,6 @@ export interface SessionHeaderProps {
   onStartEditing?: (() => void) | undefined
   /** Closes it without keeping what was typed. */
   onCancelEditing?: (() => void) | undefined
-  /** Takes the Session out of the sidebar. Nothing is deleted, and nothing asks twice here. */
-  onArchive?: (() => void) | undefined
-  /**
-   * Whether there is anything to archive yet.
-   *
-   * The page knows whether the thread is empty, and an empty Session has nothing to keep: the
-   * control is drawn refused rather than hidden, so the two states of the head are the same
-   * head and the eye does not have to find the control again when the first line is written.
-   */
-  archiveDisabled?: boolean | undefined
   /**
    * Opens the Session's details: its plan and files, its commands, and what its agent works from.
    *
@@ -135,10 +117,10 @@ export interface SessionHeaderProps {
  * being named — and the title is itself the control that opens the field, because that is where
  * the hand already is.
  *
- * Rename and Archive sit behind one `…` menu instead of standing open at the end of the line: two
- * words at the top of every thread are two words to read on the way to the content, and a command
- * that opens on purpose is read once. Nothing is deleted by Archive, so it does not ask twice —
- * it is a command in the menu, and the thread is still in the sidebar when it goes.
+ * The head carries no command menu (lot 5c, issue #115): Rename is the title itself, and Archive
+ * is the Session's row in the sidebar, where the Session is listed and where a Session is looked
+ * for. The end of the head's line is left to the one control a mission Session needs there, the
+ * button that stands for its chat, and this file draws no control of its own beside it.
  *
  * Nothing here carries an outer margin: where the head sits in the page is the page's, and a
  * component that spaced itself would be a component that could not be moved.
@@ -151,8 +133,6 @@ export function SessionHeader({
   editing = false,
   onStartEditing,
   onCancelEditing,
-  onArchive,
-  archiveDisabled = false,
   onOpenDetails,
 }: SessionHeaderProps): ReactNode {
   const titleControl = useRef<HTMLButtonElement>(null)
@@ -165,21 +145,6 @@ export function SessionHeader({
     if (wasEditing.current && !editing) titleControl.current?.focus()
     wasEditing.current = editing
   }, [editing])
-  // What the menu holds, in the order it is read. While the title is being typed there is no
-  // Rename to offer: the field is the renaming, and a command that opened the same field a second
-  // time would be a command that does nothing.
-  const commands: MenuItem[] = []
-  if (!editing && onStartEditing !== undefined) {
-    commands.push({ label: 'Rename', icon: <IconPencil size="sm" />, onSelect: onStartEditing })
-  }
-  if (onArchive !== undefined) {
-    commands.push({
-      label: 'Archive',
-      icon: <IconArchive size="sm" />,
-      disabled: archiveDisabled,
-      onSelect: onArchive,
-    })
-  }
   return (
     <div className={HEAD}>
       <div className={COLUMN}>
@@ -214,9 +179,6 @@ export function SessionHeader({
               onClick={onOpenDetails}
             />
           </Tooltip>
-        )}
-        {commands.length > 0 && (
-          <Menu label={`Commands for ${title}`} icon={<IconDots size="sm" />} groups={[commands]} />
         )}
       </div>
     </div>

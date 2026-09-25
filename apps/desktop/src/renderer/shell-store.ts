@@ -27,6 +27,15 @@ export interface ShellState {
   collapsed: boolean
   /** The width the sidebar opens at, in pixels, always inside the theme's bounds. */
   width: number
+  /**
+   * Which Sessions the user has the chat minimised in, by Session id (lot 5c, issue #115).
+   *
+   * Held for as long as the window lives and no longer: which mission a Session is decides how
+   * its chat opens, and what the user did to it after that is a thing about this run of the
+   * window, not a preference — the data folder holds what is chosen once and kept, and this is
+   * the state of a page the user is looking at.
+   */
+  chatMinimised: Readonly<Record<string, boolean>>
 }
 
 const listeners = new Set<() => void>()
@@ -36,6 +45,7 @@ let state: ShellState = {
   activeEntryId: HOME_ENTRY,
   collapsed: false,
   width: SIDEBAR_DEFAULT,
+  chatMinimised: {},
 }
 
 /**
@@ -148,6 +158,18 @@ export function setCollapsed(collapsed: boolean): void {
 export function toggleCollapsed(): void {
   change({ ...state, collapsed: !state.collapsed })
   persist()
+}
+
+/**
+ * Remembers that the chat of one Session is minimised, or brings it back, and says nothing when
+ * it is already that way.
+ *
+ * Nothing is written down: what a Session's chat is doing is not a preference, and the next time
+ * the session is opened its mission decides again.
+ */
+export function setChatMinimised(sessionId: string, minimised: boolean): void {
+  if (state.chatMinimised[sessionId] === minimised) return
+  change({ ...state, chatMinimised: { ...state.chatMinimised, [sessionId]: minimised } })
 }
 
 /** Sets the width the sidebar opens at, held inside the bounds the theme declares. */

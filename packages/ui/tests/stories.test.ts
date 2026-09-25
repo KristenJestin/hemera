@@ -294,9 +294,13 @@ const NAMED_STATES = new Map([
       'Paused',
       'FinalChecks',
       'Accepted',
-      'ChatFolded',
+      // Lot 5c (issue #115): the chat is minimised rather than folded — one word for one
+      // movement, the panel growing over the chat instead of the chat closing — it comes back,
+      // and "Spec" opens the frozen revision beside the view rather than in its place.
+      'ChatMinimised',
+      'ChatComesBack',
       'SpecOpen',
-      'SpecAndChatTakeTurns',
+      'SpecOpensBesideTheView',
       'BannerOpensTheTask',
       'Keyboard',
     ],
@@ -592,6 +596,11 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // and the rail it is fed with.
       'MissionPanel',
       'MissionRail',
+      // Lot 5c (issue #115): the page of a Session whatever its mission — the chat at the centre,
+      // the panel on its right, the head across the top — and the control at the head's right end
+      // that minimises the chat and wears what the chat is doing in its ring.
+      'SessionLayout',
+      'ChatButton',
       // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
       'CommandDialog',
       'RepositoryDialog',
@@ -602,6 +611,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'BlockerBlock',
       'BuildSpecPanel',
       'BuildSession',
+      // Lot 5c (issue #115): the banner above the chat's composer, which opens what waits for the
+      // user in the build on the view's stage.
+      'BuildBanner',
       'BuildChecks',
       'CheckDialog',
     ]
@@ -638,6 +650,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'EVERYWHERE_PREFIX',
       // Lot 22: the entry of the build view's list that puts the final checks on its stage.
       'FINAL_CHECKS_ENTRY',
+      // Lot 5c (issue #115): the one answer three readings of a build ask — does it wait for the
+      // hand, and on what.
+      'waitsOf',
+      'waitingOf',
       'HOME_ENTRY',
       'JOURNAL_ENTRY',
       'NESTED_RADIUS',

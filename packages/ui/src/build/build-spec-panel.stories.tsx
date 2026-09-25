@@ -14,7 +14,7 @@ import { BuildSpecPanel } from './build-spec-panel.tsx'
 const meta = {
   title: 'Blocks/Build/BuildSpecPanel',
   component: BuildSpecPanel,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
