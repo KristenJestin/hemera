@@ -304,6 +304,23 @@ export const launchesLayer = Layer.effect(
               if (row.state !== 'waiting') {
                 return { result: viewOf(row), events: [] } satisfies Mutation<LaunchView>
               }
+              // The Workspace is read again here, in the very transaction that writes the
+              // Session (D8-08): one cleaned up or failed since the launch was written gets no
+              // build in a folder that is gone (D8-13).
+              if (row.workspaceId !== null) {
+                const place = yield* transaction
+                  .select({ name: workspaces.name, state: workspaces.state })
+                  .from(workspaces)
+                  .where(eq(workspaces.id, row.workspaceId))
+                  .pipe(Effect.mapError(failed('reading the Workspace')))
+                const chosen = place[0]
+                if (chosen === undefined) {
+                  return yield* Effect.fail(new UnknownWorkspaceError(row.workspaceId))
+                }
+                if (chosen.state !== 'ready') {
+                  return yield* Effect.fail(new WorkspaceNotReadyError(chosen.name, chosen.state))
+                }
+              }
               const at = now()
               yield* transaction
                 .insert(sessionRows)

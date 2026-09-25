@@ -299,6 +299,30 @@ describe('A request whose start is refused says so on its launch', () => {
   })
 })
 
+describe('A launch is claimed only in a Workspace that is ready', () => {
+  test('A launch claimed on a Workspace that is not ready gets no Session', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        // The ready step is what starts what waited on a Workspace, and this one is still being
+        // prepared: read again in the transaction that writes the Session, the claim refuses
+        // rather than writing a build in a folder that is not ready (D8-08, D8-13).
+        yield* launched.workspaceReady(workspace.id)
+        return { asked, builds: yield* builds, launch: yield* launched.one(asked.id) }
+      }),
+    )
+    expect(seen.asked.state).toBe('waiting')
+    expect(seen.launch.state).toBe('failed')
+    expect(seen.launch.sessionId).toBeNull()
+    expect(seen.launch.detail).toContain('is preparing, and a Session works only in a ready one')
+    expect(seen.builds).toEqual([])
+  })
+})
+
 describe('A failed start is retried on its own', () => {
   test('A failed agent launch is retried without redoing the preparation', async () => {
     // A machine that holds none of the agents' bare means: the agent cannot be started (D6-02).
