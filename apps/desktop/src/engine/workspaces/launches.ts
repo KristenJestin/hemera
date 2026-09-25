@@ -35,7 +35,7 @@ import { type SQL, and, eq } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, Result } from 'effect'
 
 import { AgentRuntime } from '../agents/runtime.ts'
-import { type InvalidCursorError, type NewEvent } from '../journal.ts'
+import { type InvalidCursorError } from '../journal.ts'
 import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
 import {
@@ -56,6 +56,7 @@ import {
 } from '../storage/schema.ts'
 import { type Mutation, type StaleVersionError, mutate } from '../transaction.ts'
 import { UnknownWorkspaceError } from './described.ts'
+import { launchEvent } from './launch-journal.ts'
 
 /** One launch as the interface reads it: the Spec, the revision, the Workspace, the build. */
 export interface LaunchView {
@@ -127,25 +128,6 @@ export interface LaunchesService {
 }
 
 export class Launches extends Context.Service<Launches, LaunchesService>()('Launches') {}
-
-/** What the Journal says of a launch: the entity is the launch itself (D8-16). */
-function launchEvent(
-  launch: { readonly id: string; readonly specId: string; readonly revisionId: string },
-  projectId: string,
-  type: string,
-  payload: Record<string, string | null>,
-  author: 'human' | 'hemera',
-): NewEvent {
-  return {
-    type,
-    entityKind: 'launch',
-    entityId: launch.id,
-    source: author === 'human' ? 'ui' : 'system',
-    author,
-    projectId,
-    payload: { specId: launch.specId, revisionId: launch.revisionId, ...payload },
-  }
-}
 
 export const launchesLayer = Layer.effect(
   Launches,
