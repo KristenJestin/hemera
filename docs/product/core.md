@@ -1041,7 +1041,9 @@ where it stood.
 - **Accept**: once the end checks are green and nothing waits for the user, the build view
   offers Accept; the build is accepted, the Spec stays `in_progress`, and the branch and the
   files stay in the Workspace for delivery. Stop closes a build for good; a stopped build stays
-  readable and frees the Spec for another.
+  readable and frees its slot, but a Spec whose first task had started stays `in_progress` and is
+  neither built again nor reworked: only a build stopped before its first task leaves the Spec
+  `ready` for another.
 
 The checks are the Project's, set in the Build section of its settings, and all optional. A check
 runs a catalogue command or a line of the user's; where — at the Workspace root (for a command,
