@@ -134,6 +134,8 @@ const SURFACES = {
     'variables-editor',
     'service-list',
   ],
+  // Lot 22: the build view, the stage of a task, and the blocks that hand a task to the user.
+  build: ['task-stage'],
 }
 
 /**
@@ -231,6 +233,8 @@ const NAMED_STATES = new Map([
       'Keyboard',
     ],
   ],
+  // Lot 22: a task of a build in each of the states its stage draws.
+  ['build/task-stage', ['Working', 'Checking', 'Done', 'DoneNotVerified', 'Waiting', 'Skipped']],
   ['project/repository-dialog', ['Add', 'Edit', 'Invalid', 'Refused', 'Keyboard']],
   [
     'project/command-dialog',
@@ -512,6 +516,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
       'CommandDialog',
       'RepositoryDialog',
+      // Lot 22: the build view of a `build` Session and its blocks.
+      'TaskStage',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add

@@ -506,3 +506,26 @@ export type {
   StoryView,
   TaskView,
 } from './spec/model.ts'
+
+/**
+ * The build view of a `build` Session (lot 22, D10-12): the stage of one task with its tries,
+ * their checks and the files they changed. View types only, close to the engine's `BuildView`: the
+ * renderer maps one onto the other.
+ */
+export { TaskStage, type TaskStageProps } from './build/task-stage.tsx'
+export type {
+  BuildAttemptResult,
+  BuildAttemptScope,
+  BuildAttemptView,
+  BuildBlockerView,
+  BuildCheckVerdict,
+  BuildCheckView,
+  BuildExecutor,
+  BuildFileView,
+  BuildPhase,
+  BuildStoryState,
+  BuildStoryView,
+  BuildTaskState,
+  BuildTaskView,
+  BuildViewData,
+} from './build/model.ts'
