@@ -155,6 +155,8 @@ export interface BuildTaskView {
   readonly endedAt: string | null
   readonly updatedAt: string
   readonly skipReason: string | null
+  /** Whether the user's skip let its dependants go on (D10-03). */
+  readonly skipUnblocks: boolean
   readonly attempts: readonly AttemptView[]
 }
 
@@ -193,6 +195,8 @@ export interface BuildView {
   readonly specId: string
   readonly specKey: string
   readonly specTitle: string
+  /** The number of the revision the build was started on, which "Spec" opens read only. */
+  readonly revision: number
   readonly phase: BuildPhase
   readonly pausedAt: string | null
   readonly detail: string | null
@@ -501,6 +505,7 @@ export function viewOf(rows: BuildRows): BuildView {
     specId: rows.specId,
     specKey: rows.snapshot.spec.key,
     specTitle: rows.snapshot.revision.title,
+    revision: rows.snapshot.revision.number,
     phase: rows.phase ?? 'prepare',
     pausedAt: rows.session.buildPausedAt,
     detail: rows.session.buildDetail,
@@ -529,6 +534,7 @@ export function viewOf(rows: BuildRows): BuildView {
         endedAt: task.endedAt,
         updatedAt: task.updatedAt,
         skipReason: task.skipReason,
+        skipUnblocks: task.skipUnblocks,
         attempts: attemptsOf(rows, task).map((attempt) => attemptView(rows, attempt)),
       }
     }),
@@ -540,6 +546,7 @@ export function viewOf(rows: BuildRows): BuildView {
       raisedAt: blocker.raisedAt,
       dismissedAt: blocker.dismissedAt,
     })),
+    // In the revision's rank order, which the snapshot keeps: the window keys them `S1`, `S2`.
     stories: rows.snapshot.stories.map((story) => {
       const attempts = rows.attempts
         .filter((attempt) => attempt.storyId === story.id)

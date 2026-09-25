@@ -190,6 +190,9 @@ describe('A human task waits for the user', () => {
     expect(seen.refused.message).toBe('Say why the task is skipped.')
     expect(statesOf(seen.after)).toEqual({ T1: 'done', T2: 'skipped', T3: 'done' })
     expect(seen.after.tasks[1]?.skipReason).toBe('The format is the old one')
+    expect(seen.after.tasks[1]?.skipUnblocks).toBe(true)
+    // The revision the build was started on, which the window opens read only.
+    expect(seen.after.revision).toBe(1)
     const skipped = seen.journal.find((line) => line.type === 'task.skipped')
     expect(JSON.parse(skipped?.payload ?? '{}')).toEqual({
       label: 'T2',
