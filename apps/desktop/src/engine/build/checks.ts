@@ -10,6 +10,7 @@
 import {
   CHECK_WHEN,
   CHECK_WHERE,
+  type ChangedFile,
   type CheckDraft,
   type CheckVerdict,
   type CheckWhen,
@@ -46,12 +47,13 @@ export interface CheckRunRequest {
   readonly attemptId: string
   /**
    * What the work changed, per repository: its path relative to the Workspace root (`''` for a
-   * repository at the root) and the files changed in it, relative to that repository. What a
-   * `changed` check runs in, and what `{files}` is expanded from.
+   * repository at the root) and the files changed in it, relative to that repository, each with
+   * Git's status letter — a deleted file is never handed to a line. What a `changed` check runs
+   * in, and what `{files}` is expanded from.
    */
   readonly changes: readonly {
     readonly repository: string
-    readonly files: readonly string[]
+    readonly files: readonly Pick<ChangedFile, 'path' | 'status'>[]
   }[]
 }
 
