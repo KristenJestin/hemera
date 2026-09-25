@@ -69,6 +69,7 @@ import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
+import { type BuildDelivery, Builds } from '../build/build.ts'
 import { Commands } from '../commands/service.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
@@ -556,6 +557,8 @@ export const runtimeLayer = Layer.effect(
     const pool = yield* Pool
     // The variables of a Session's Workspace, which its agent is started with (D8-06).
     const variables = yield* Variables
+    // What waits for a `build` Session's agent, and what it hands back once taken (D10-02).
+    const builds = yield* Builds
     // Where each agent's bare means is written: a directory of Hemera's, never the user's (D6-09).
     const directories = yield* AgentDirectories
     const database = yield* Database
@@ -1932,6 +1935,8 @@ export const runtimeLayer = Layer.effect(
       readonly announce: (turnId: string | null) => Effect.Effect<void, AgentRuntimeError>
       readonly taken: Effect.Effect<void, AgentRuntimeError>
       readonly missed: (turnId: string | null) => Effect.Effect<void, AgentRuntimeError>
+      /** What follows once the delivery turn it went out in ended, for the build's parcel (L2, L7). */
+      readonly ended?: (turnId: string) => Effect.Effect<void>
     }
 
     /**
@@ -2152,6 +2157,62 @@ export const runtimeLayer = Layer.effect(
     }
 
     /**
+     * What a `build` Session's agent is handed (D10-02, D10-03, D10-09): a phase's first brief, and
+     * the resume brief, folded in the thread as the `mission_brief` entry; what follows inside a
+     * phase — the next ready tasks, the failures to address — a line of Hemera's. What it hands is
+     * marked as it goes out, since the agent's first call inside it is what starts those tasks (L3);
+     * it counts as given once the agent took it. The end of the turn it went out in is what the
+     * build waits for: the approach note, the checks to run again (L2, L7).
+     */
+    const buildParcel = (sessionId: string, held: Live, delivery: BuildDelivery): Parcel => {
+      const correlation = crypto.randomUUID()
+      const line = (turnId: string | null, handed: boolean) =>
+        deliveryLine(
+          sessionId,
+          `delivery:${correlation}`,
+          turnId,
+          handed ? delivery.said : 'Not handed over, waiting for the next safe point: the build.',
+          handed ? null : 'failed',
+          {
+            kind: 'build',
+            fingerprint: fingerprintOf(delivery.text),
+            deliveredAt: handed ? new Date().toISOString() : null,
+            reached: 'delivery_prompt',
+          },
+        )
+      return {
+        provisions: [{ uri: contextUri('brief'), text: delivery.text, mimeType: 'text/markdown' }],
+        announce: (turnId) =>
+          Effect.gen(function* () {
+            yield* attempt('handing the build its delivery', builds.handing(delivery))
+            if (!delivery.opens) return yield* line(turnId, true)
+            yield* write(sessionId, {
+              role: 'hemera',
+              kind: 'mission_brief',
+              body: delivery.text,
+              payload: JSON.stringify({ phase: delivery.phase }),
+              correlationId: `brief:${correlation}`,
+              turnId,
+            })
+          }),
+        taken: attempt('recording the delivery', builds.taken(delivery)).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              // The `prepare` brief and the resume brief carry the mission: the agent holds one.
+              if (delivery.kind === 'prepare' || delivery.kind === 'resume') held.unbriefed = false
+            }),
+          ),
+        ),
+        missed: (turnId) =>
+          Effect.gen(function* () {
+            if (!delivery.opens) yield* line(turnId, false)
+            yield* attempt('taking the delivery back', builds.missed(delivery))
+          }),
+        ended: (turnId) => builds.turnEnded(delivery, turnId).pipe(Effect.ignore),
+      }
+    }
+
+    /**
      * What waits for a Session's next safe point, in the order it is handed over.
      *
      * The Workspace's instructions are read only when asked for: a change of the file waits for
@@ -2170,6 +2231,12 @@ export const runtimeLayer = Layer.effect(
           briefFor(sessionId, held.unbriefed).pipe(Effect.provideService(Database, database)),
         )
         if (spec !== null) parcels.push(specParcel(sessionId, held, spec))
+        // A `build` Session is never handed the `define` brief: its own is the build's (D10-02).
+        const build = yield* attempt(
+          'composing the build brief',
+          builds.waiting(sessionId, held.unbriefed),
+        )
+        if (build !== null) parcels.push(buildParcel(sessionId, held, build))
         const queued = results.get(sessionId) ?? []
         if (queued.length > 0) parcels.push(internalParcel(sessionId, queued))
         return parcels
@@ -2285,6 +2352,7 @@ export const runtimeLayer = Layer.effect(
             // while it ran — an edit, a phase the agent finished in answer to it — goes once it is
             // over. A delivery that was stopped or not taken is left for the next prompt.
             if (turn.closed === null && Result.isSuccess(sent) && stopReason !== 'cancelled') {
+              for (const parcel of parcels) yield* parcel.ended?.(turn.id) ?? Effect.void
               deliverSoon(sessionId, false)
             }
           }).pipe(
@@ -2775,6 +2843,30 @@ export const runtimeLayer = Layer.effect(
         }
       }),
     )
+
+    // A build is driven by Hemera, never by a message of the user's (D10-02): what waits for its
+    // agent is handed at the next safe point, and an agent the pool let go of is started again to
+    // be handed it. A Pause and a Stop stop its turn as the user's Stop does (L8).
+    builds.drivenBy({
+      wake: (sessionId) =>
+        Effect.sync(() => {
+          if (live.get(sessionId)?.death === null) {
+            deliverSoon(sessionId, false)
+            return
+          }
+          runOwned(
+            owned(opened(sessionId)).pipe(
+              Effect.tap(() => Effect.sync(() => deliverSoon(sessionId, false))),
+              Effect.catch((refused) =>
+                diagnostic.write(
+                  `agents: the build of Session ${sessionId} could not start its agent: ${refused.message}`,
+                ),
+              ),
+            ),
+          ).catch(() => undefined)
+        }),
+      stopTurn: (sessionId) => owned(stop(sessionId)),
+    })
 
     /**
      * What the engine sees.

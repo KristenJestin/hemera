@@ -33,9 +33,10 @@ import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
 
 import { Database, type DatabaseError } from '../storage/database.ts'
-import { buildLaunches, buildTasks, sessions } from '../storage/schema.ts'
+import { buildLaunches, buildTasks, sessionEntries, sessions } from '../storage/schema.ts'
 import { failed, now, reading } from '../specs/snapshot.ts'
 import { mutate } from '../transaction.ts'
+import { type BuildDelivery, deliveryFor, handing, missed, taken } from './brief.ts'
 import {
   type AttemptRow,
   type BuildRows,
@@ -51,6 +52,8 @@ import {
   stateOf,
   verdictOf,
 } from './tasks.ts'
+
+export type { BuildDelivery } from './brief.ts'
 
 /** One check's run, as the build view shows it (D10-12). */
 export interface CheckResultView {
@@ -220,6 +223,27 @@ export interface BuildsService {
   readonly wake: (sessionId: string) => Effect.Effect<void>
   /** The runtime, once it is built: how the build reaches its agent. */
   readonly drivenBy: (agent: BuildAgent) => void
+  /**
+   * What waits for a build Session's agent at a safe point, or null (D10-02, D10-03, D10-09).
+   * `holdsNone` says the agent's own session holds no brief: it is handed the resume brief.
+   */
+  readonly waiting: (
+    sessionId: string,
+    holdsNone: boolean,
+  ) => Effect.Effect<BuildDelivery | null, DatabaseError>
+  /** The delivery goes out: what it hands is marked, before the agent reads it (L3). */
+  readonly handing: (delivery: BuildDelivery) => Effect.Effect<void, DatabaseError>
+  /** The agent took it. */
+  readonly taken: (delivery: BuildDelivery) => Effect.Effect<void, DatabaseError>
+  /** The agent did not take it: it waits for the next safe point. */
+  readonly missed: (delivery: BuildDelivery) => Effect.Effect<void, DatabaseError>
+  /**
+   * The turn a delivery was handed in ended (L2): the answer to `prepare` is the approach note.
+   */
+  readonly turnEnded: (
+    delivery: BuildDelivery,
+    turnId: string,
+  ) => Effect.Effect<void, DatabaseError>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
 }
 
@@ -493,6 +517,82 @@ export const buildsLayer = Layer.effect(
       drivenBy: (driven) => {
         agent = driven
       },
+
+      waiting: (sessionId, holdsNone) =>
+        read(sessionId).pipe(
+          Effect.map((rows) => (rows === null ? null : deliveryFor(rows, holdsNone))),
+        ),
+
+      handing: (delivery) =>
+        withDatabase(
+          mutate('handing the build its delivery', (transaction) =>
+            handing(transaction, delivery).pipe(Effect.as({ result: undefined, events: [] })),
+          ),
+        ).pipe(Effect.tap(() => told(delivery.sessionId))),
+
+      taken: (delivery) =>
+        withDatabase(
+          mutate('recording the delivery taken', (transaction) =>
+            taken(transaction, delivery).pipe(Effect.as({ result: undefined, events: [] })),
+          ),
+        ),
+
+      missed: (delivery) =>
+        withDatabase(
+          mutate('taking back a delivery not taken', (transaction) =>
+            missed(transaction, delivery).pipe(Effect.as({ result: undefined, events: [] })),
+          ),
+        ).pipe(Effect.tap(() => told(delivery.sessionId))),
+
+      turnEnded: (delivery, turnId) =>
+        Effect.gen(function* () {
+          const { sessionId } = delivery
+          if (delivery.kind === 'prepare') {
+            // The approach note is the agent's answer to the `prepare` brief (L2): what it said in
+            // that turn. An empty answer leaves the build in `prepare`, and Resume asks again.
+            const said = yield* database
+              .select({ body: sessionEntries.body })
+              .from(sessionEntries)
+              .where(
+                and(
+                  eq(sessionEntries.sessionId, sessionId),
+                  eq(sessionEntries.turnId, turnId),
+                  eq(sessionEntries.role, 'agent'),
+                  eq(sessionEntries.kind, 'message'),
+                ),
+              )
+              .orderBy(asc(sessionEntries.seq))
+              .pipe(Effect.mapError(failed('reading the approach note')))
+            const note = said
+              .map((entry) => entry.body.trim())
+              .filter((body) => body !== '')
+              .join('\n\n')
+            if (note !== '') {
+              const at = now()
+              yield* withDatabase(
+                mutate('keeping the approach note', (transaction) =>
+                  Effect.gen(function* () {
+                    const rows = yield* readBuild(transaction, sessionId)
+                    if (rows === null || rows.phase !== 'prepare') {
+                      return { result: [], events: [] }
+                    }
+                    yield* movePhase(transaction, sessionId, 'execute', { approachNote: note })
+                    const followed = yield* follow(transaction, sessionId, at)
+                    return {
+                      result: followed.jobs,
+                      events: [
+                        buildEvent(rows, 'build.phase_started', 'hemera', { phase: 'execute' }),
+                        ...followed.events,
+                      ],
+                    }
+                  }),
+                ),
+              )
+              yield* told(sessionId)
+              yield* wake(sessionId)
+            }
+          }
+        }),
 
       view,
     }

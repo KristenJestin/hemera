@@ -9,6 +9,7 @@ import { join } from 'node:path'
 
 import { Effect, Layer } from 'effect'
 
+import { type FakeScript, type FakeStep, fakeAgent } from '#engine/agents/fake.ts'
 import { type BuildView, Builds, NoBuildNotices, buildsLayer } from '#engine/build/build.ts'
 import { gitLayer } from '#engine/git.ts'
 import { Projects } from '#engine/projects.ts'
@@ -121,6 +122,58 @@ export const launched = (specId: string, workspaceId: string) =>
     if (launch.sessionId === null) return yield* Effect.die('the build did not start')
     return launch.sessionId
   })
+
+/** The agent's approach note, as a suite's agent answers the `prepare` brief. */
+export const NOTE =
+  'T1: the exporter first. T2: the reader. T3: wire them; the risk is the encoding.'
+
+/** The labels of the tasks a delivery hands now, in the order it lists them. */
+export function handedLabels(handed: string): string[] {
+  return [...handed.matchAll(/^## (T\d+) · /gm)].map((match) => match[1] ?? '')
+}
+
+/** `task_finished` on a task, as the agent calls it (D10-04). */
+export const finished = (label: string): FakeStep => ({
+  does: 'uses',
+  call: 'task_finished',
+  arguments: { task: label },
+})
+
+/** How a suite's build agent answers each kind of delivery. */
+export interface BuildPlan {
+  /** Its answer to `prepare`; the note by default. */
+  readonly prepare?: readonly FakeStep[]
+  /** What it does with the tasks an `execute` delivery hands; each finished by default. */
+  readonly execute?: (labels: readonly string[], handed: string) => readonly FakeStep[]
+  /** What it does with a resume brief; nothing by default. */
+  readonly resume?: (labels: readonly string[], handed: string) => readonly FakeStep[]
+  /** What it does in `verify`; a sentence by default. */
+  readonly verify?: (handed: string) => readonly FakeStep[]
+}
+
+/**
+ * A build agent: what it answers each delivery with, chosen from the brief it was handed, and every
+ * text it was handed, in order — which is what a suite reads the briefs from.
+ */
+export function buildAgent(plan: BuildPlan = {}, script: Partial<FakeScript> = {}) {
+  const handed: string[] = []
+  const agent = fakeAgent({
+    ...script,
+    answersDeliveryWith: (text) => {
+      handed.push(text)
+      const labels = handedLabels(text)
+      if (text.includes('# Before you continue')) return plan.resume?.(labels, text) ?? []
+      if (text.includes('# Phase: prepare')) {
+        return plan.prepare ?? [{ does: 'says', text: NOTE }]
+      }
+      if (text.includes('# Phase: verify')) {
+        return plan.verify?.(text) ?? [{ does: 'says', text: 'Verified against the Spec.' }]
+      }
+      return plan.execute?.(labels, text) ?? labels.map(finished)
+    },
+  })
+  return { agent, handed }
+}
 
 /** The build as the window reads it. */
 export const buildOf = (sessionId: string) =>
