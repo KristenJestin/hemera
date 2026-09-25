@@ -1,5 +1,6 @@
 /**
- * The engine's part of the build view: Accept and Stop (design D10-11, D10-12).
+ * The engine's part of the build view: Accept and Stop, and the Journal a build writes (design
+ * D10-11, D10-12, D10-14).
  *
  * Named after the scenario of `Spec · build-view` it covers, over the whole engine on the fake
  * agent, with the Project's checks scripted green.
@@ -23,6 +24,7 @@ import {
   buildOf,
   eventually,
   finished,
+  journalOf,
   launched,
   scriptedChecks,
 } from './build-harness.ts'
@@ -113,6 +115,67 @@ describe('Accept ends the build', () => {
     expect(seen.accepted.tasks[0]?.attempts[0]?.files).toEqual([
       { repository: 'sources/api', path: 'export.ts', status: 'A', added: 1, removed: 0 },
     ])
+  })
+})
+
+describe('A build writes its Journal lines', () => {
+  test('each phase, each task move and each of the user’s actions, correlated (D10-14)', async () => {
+    const { agent } = buildAgent()
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const builds = yield* Builds
+        yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        yield* builds.pause(sessionId)
+        yield* builds.resume(sessionId)
+        const view = yield* builds.accept(sessionId)
+        return { spec, view, lines: yield* journalOf(sessionId) }
+      }),
+    )
+    const build = seen.lines.filter(
+      (line) => line.type.startsWith('build.') || line.type.startsWith('task.'),
+    )
+    const byType = (type: string) => build.filter((line) => line.type === type)
+    expect(byType('build.phase_started').map((line) => JSON.parse(line.payload).phase)).toEqual([
+      'prepare',
+      'execute',
+      'verify',
+    ])
+    for (const type of [
+      'task.ready',
+      'task.started',
+      'task.finished',
+      'task.checked',
+      'task.done',
+    ]) {
+      expect(
+        byType(type)
+          .map((line) => JSON.parse(line.payload).label)
+          .toSorted(),
+      ).toEqual(['T1', 'T2', 'T3'])
+    }
+    expect(byType('build.paused')).toHaveLength(1)
+    expect(byType('build.resumed')).toHaveLength(1)
+    expect(byType('build.accepted')).toHaveLength(1)
+    // Every line names the Session, the Spec and the revision; a task's names its row.
+    for (const line of build) {
+      expect(line.spec_id).toBe(seen.spec.specId)
+      expect(line.revision_id).toBe(seen.spec.revisionId)
+      expect(line.session_id).toBe(seen.view.sessionId)
+    }
+    const ids = new Set(seen.view.tasks.map((task) => task.id))
+    for (const line of build.filter((one) => one.type.startsWith('task.'))) {
+      expect(line.entity_kind).toBe('task')
+      expect(ids.has(line.entity_id)).toBe(true)
+    }
+    expect(JSON.parse(byType('task.checked')[0]?.payload ?? '{}')).toMatchObject({
+      attempt: 1,
+      result: 'green',
+    })
+    // The Spec's own line when its first task started (D10-10).
+    expect(seen.lines.filter((line) => line.type === 'spec.in_progress')).toHaveLength(1)
   })
 })
 
