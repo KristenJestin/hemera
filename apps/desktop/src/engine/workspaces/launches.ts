@@ -39,7 +39,7 @@ import { type InvalidCursorError, type NewEvent } from '../journal.ts'
 import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
 import {
-  type UnknownRevisionError,
+  UnknownRevisionError,
   type UnknownSpecError,
   failed,
   now,
