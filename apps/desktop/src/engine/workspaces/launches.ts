@@ -15,8 +15,10 @@
  * and stays on screen, and `retry` starts that same Session's agent again without touching the
  * Workspace or its steps.
  *
- * The window asks for a build through `launches.request`; the preparation's last step starts what
- * waited on its Workspace.
+ * The window asks for all of it now (D8-12): `launches.forSpec` reads the whole panel in one
+ * transaction — the launch, the Workspace the Spec is set on, the ones a build may be started in
+ * and the step one of them is running while it waits — and every launch written tells the window,
+ * so the panel follows what it asked for.
  */
 
 import {
@@ -25,13 +27,15 @@ import {
   type NoAgentError,
   LAUNCH_STATES,
   type LaunchState,
+  MAIN_WORKSPACE,
   NEW_SESSION_TITLE,
   type Spec,
   WORKSPACE_STATES,
 } from '@hemera/core'
-import { type SQL, and, eq } from 'drizzle-orm'
+import { type SQL, and, desc, eq } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, Result } from 'effect'
 
+import { AgentNotices } from '../agents/notices.ts'
 import { AgentRuntime } from '../agents/runtime.ts'
 import { Builds } from '../build/build.ts'
 import { slotHolder } from '../build/tasks.ts'
@@ -52,6 +56,7 @@ import {
   sessions as sessionRows,
   specRevisions,
   specs,
+  workspaceSteps,
   workspaces,
 } from '../storage/schema.ts'
 import { type Mutation, type StaleVersionError, mutate } from '../transaction.ts'
@@ -125,9 +130,30 @@ export interface LaunchesService {
   readonly recover: () => Effect.Effect<void, LaunchRefusal>
   /** Starts a build that failed, again: its Session, its revision and its Workspace stand. */
   readonly retry: (id: string) => Effect.Effect<LaunchView, LaunchRefusal>
+  /** The whole panel of a Spec: its launch, its Workspace, and the ones a build may use (D8-12). */
+  readonly forSpec: (specId: string) => Effect.Effect<SpecLaunchesView, LaunchRefusal>
 }
 
 export class Launches extends Context.Service<Launches, LaunchesService>()('Launches') {}
+
+/** A Workspace named by what it is called: what the panel offers, and what it says. */
+export interface LaunchWorkspaceView {
+  readonly id: string
+  readonly name: string
+}
+
+/**
+ * What the panel of a Spec is drawn from (D8-12, D8-13), read whole: the launch of its build and
+ * where that build stands, the Workspace the Spec is set on, the ones a build of it may be
+ * started in, and the step the launch is waiting on while its Workspace is prepared.
+ */
+export interface SpecLaunchesView {
+  readonly launch: LaunchView | null
+  readonly workspace: LaunchWorkspaceView | null
+  readonly workspaces: LaunchWorkspaceView[]
+  /** The preparation step running while it waits, as the Workspace names it (D8-05). */
+  readonly step: string | null
+}
 
 export const launchesLayer = Layer.effect(
   Launches,
@@ -137,9 +163,16 @@ export const launchesLayer = Layer.effect(
     const preferences = yield* Preferences
     const runtime = yield* AgentRuntime
     const builds = yield* Builds
+    const notices = yield* AgentNotices
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
+
+    /** The window told that the launch of a Spec changed (D8-13): its panel reads it again. */
+    const tell = (launch: LaunchView, projectId: string) =>
+      Effect.sync(() => {
+        notices.launched(launch.specId, projectId)
+      })
 
     /** A row of the table as the interface reads it: what the column holds, and no more. */
     const viewOf = (row: typeof buildLaunches.$inferSelect): LaunchView => ({
@@ -273,7 +306,7 @@ export const launchesLayer = Layer.effect(
               } satisfies Mutation<LaunchView>
             }),
           ),
-        )
+        ).pipe(Effect.tap((held) => tell(held, projectId)))
       })
 
     /**
@@ -359,7 +392,7 @@ export const launchesLayer = Layer.effect(
               } satisfies Mutation<LaunchView>
             }),
           ),
-        )
+        ).pipe(Effect.tap((held) => tell(held, projectId)))
         // Another starter — a request and the Workspace becoming ready at once — took the launch
         // between the two reads: what it said of the build is not this caller's to say again.
         if (starting.state !== 'starting') return starting
@@ -399,7 +432,7 @@ export const launchesLayer = Layer.effect(
               } satisfies Mutation<undefined>
             }),
           ),
-        )
+        ).pipe(Effect.tap(() => tell(launch, projectId)))
       })
 
     /**
@@ -514,6 +547,71 @@ export const launchesLayer = Layer.effect(
         )
       })
 
+    /**
+     * The panel of a Spec, read whole in one transaction (D8-12): the launch asked for last and
+     * where its build stands, the Workspace the Spec is set on, the ones a build of it may be
+     * started in — `main` first — and the step its Workspace is running while the launch waits.
+     * Three reads would be three chances to draw them apart.
+     */
+    const forSpec = (specId: string) =>
+      withDatabase(
+        reading('reading the panel of the Spec', (transaction) =>
+          Effect.gen(function* () {
+            const snapshot = yield* readSnapshot(transaction, specId)
+            const launches = yield* transaction
+              .select()
+              .from(buildLaunches)
+              .where(eq(buildLaunches.specId, specId))
+              .orderBy(desc(buildLaunches.createdAt))
+              .pipe(Effect.mapError(failed('reading the launches of the Spec')))
+            const held = yield* transaction
+              .select({
+                id: workspaces.id,
+                name: workspaces.name,
+                specId: workspaces.specId,
+                state: workspaces.state,
+              })
+              .from(workspaces)
+              .where(eq(workspaces.projectId, snapshot.spec.projectId))
+              .pipe(Effect.mapError(failed('reading the Workspaces of the Project')))
+            const first = launches[0]
+            const launch = first === undefined ? null : viewOf(first)
+            const own = snapshot.spec.workspaceId
+            const worked = own === null ? undefined : held.find((each) => each.id === own)
+            const offered = held.filter(
+              (each) => each.specId === null && each.state !== 'cleaned' && each.state !== 'failed',
+            )
+            const step =
+              launch === null || launch.state !== 'waiting' || launch.workspaceId === null
+                ? null
+                : yield* transaction
+                    .select({ target: workspaceSteps.target })
+                    .from(workspaceSteps)
+                    .where(
+                      and(
+                        eq(workspaceSteps.workspaceId, launch.workspaceId),
+                        eq(workspaceSteps.state, 'running'),
+                      ),
+                    )
+                    .limit(1)
+                    .pipe(
+                      Effect.mapError(failed('reading the step the build waits on')),
+                      Effect.map((rows) => rows[0]?.target ?? null),
+                    )
+            return {
+              launch,
+              workspace: worked === undefined ? null : { id: worked.id, name: worked.name },
+              // `main` first: the Workspace every Project has, then the ones made by hand.
+              workspaces: [
+                ...offered.filter((each) => each.name === MAIN_WORKSPACE),
+                ...offered.filter((each) => each.name !== MAIN_WORKSPACE),
+              ].map((each) => ({ id: each.id, name: each.name })),
+              step,
+            } satisfies SpecLaunchesView
+          }),
+        ),
+      )
+
     return {
       one,
       request: (specId, workspaceId) =>
@@ -622,13 +720,14 @@ export const launchesLayer = Layer.effect(
                 } satisfies Mutation<{ launch: LaunchView; ready: boolean }>
               }),
             ),
-          )
+          ).pipe(Effect.tap((written) => tell(written.launch, snapshot.spec.projectId)))
           // A Workspace already ready has nothing to wait for: the build starts now, and it starts
           // once — whoever finds the launch `waiting` starts it, here or in the ready step (D8-13).
           if (!asked.ready) return asked.launch
           return yield* start(asked.launch)
         }),
 
+      forSpec,
       retry: (id) =>
         Effect.gen(function* () {
           const launch = yield* one(id)
@@ -655,7 +754,7 @@ export const launchesLayer = Layer.effect(
                 } satisfies Mutation<LaunchView>
               }),
             ),
-          )
+          ).pipe(Effect.tap((held) => tell(held, snapshot.spec.projectId)))
           return yield* settled(starting, launch.sessionId, snapshot.spec.projectId)
         }),
 

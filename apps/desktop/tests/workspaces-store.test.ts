@@ -13,10 +13,12 @@ import type { EngineEvent, WorkspaceStep } from '@hemera/ipc'
 import {
   cleanUp,
   createDedicated,
+  createForSpec,
   forgetWorkspacesRefusal,
   listenToWorkspaces,
   moveRecipeStep,
   planDedicated,
+  planForSpec,
   readMainStatus,
   readProjectVariables,
   readWorkspaces,
@@ -705,5 +707,63 @@ describe('A recipe step is rewritten where it stands', () => {
         lineLinux: null,
       }),
     ).toBe('.env.local is not in main')
+  })
+})
+describe("A Workspace is made for a Spec's build (D8-12)", () => {
+  test('the plan follows the Spec, so the dialog opens on branches named after it', async () => {
+    answers.set('workspaces.plan', { name: 'csv-invoice-export', repositories: [] })
+
+    expect(await planForSpec('atlas', 'ATL-7', 'csv-invoice-export')).toEqual({
+      name: 'csv-invoice-export',
+      repositories: [],
+    })
+    expect(asked[0]).toEqual({
+      name: 'workspaces.plan',
+      argument: { projectId: 'atlas', key: 'ATL-7', slug: 'csv-invoice-export' },
+    })
+  })
+
+  test('it is created for that Spec, the Spec is set on it, then prepared and opened', async () => {
+    const preparing = { ...LOGIN_FORM, state: 'preparing' as const, live: true, specId: 'spec-7' }
+    answers.set('workspaces.create', preparing)
+    answers.set('specs.useWorkspace', null)
+    answers.set('preparation.prepare', [step(1, { state: 'running' })])
+    answers.set('workspaces.list', [MAIN, preparing])
+    answersForShowing()
+    const worktree = {
+      relativePath: 'sources/api',
+      branch: 'atlas/ATL-7-csv-invoice-export',
+      base: 'a',
+    }
+
+    expect(await createForSpec('atlas', 'spec-7', 'csv-invoice-export', [worktree])).toEqual({
+      workspace: preparing,
+      refusal: null,
+    })
+
+    expect(asked.slice(0, 3).map((one) => one.name)).toEqual([
+      'workspaces.create',
+      'specs.useWorkspace',
+      'preparation.prepare',
+    ])
+    expect(asked[0]?.argument).toEqual({
+      projectId: 'atlas',
+      specId: 'spec-7',
+      name: 'csv-invoice-export',
+      repositories: [worktree],
+    })
+    expect(asked[1]?.argument).toEqual({ specId: 'spec-7', workspaceId: 'login-form' })
+    expect(asked[2]?.argument).toEqual({ workspaceId: 'login-form' })
+    expect(workspacesSnapshot().shown?.workspaceId).toBe('login-form')
+  })
+
+  test('a creation the engine refuses is its sentence, and the Spec is set on nothing', async () => {
+    answers.set('workspaces.create', new Error("the branch 'atlas/ATL-7' already exists"))
+
+    expect(await createForSpec('atlas', 'spec-7', 'csv-invoice-export', [])).toEqual({
+      workspace: null,
+      refusal: "the branch 'atlas/ATL-7' already exists",
+    })
+    expect(asked.map((one) => one.name)).toEqual(['workspaces.create'])
   })
 })

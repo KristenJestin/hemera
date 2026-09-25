@@ -18,8 +18,10 @@ import type { LaunchView, LaunchWorkspace } from './model.ts'
 /**
  * What to do next on a frozen Spec, and where the build it starts stands (D8-12, D8-13).
  *
- * The Spec panel's head holds it, on a `ready` Spec alone: a Spec being written offers nothing to
- * build, and an older revision of a frozen one is read only (D7-05).
+ * The Spec panel's head holds it on a Spec that is not being written: a Spec being written offers
+ * nothing to build, and an older revision of a frozen one is read only (D7-05). A launch already
+ * asked for keeps the actions where they are once the Spec moves on — the build it started is
+ * reached through `Open`, and one a Rework took back says so (D8-13).
  *
  * With no Workspace yet, the two ways in are the hand's: prepare one from the plan and start the
  * build in it, or start the build in a Workspace the Project already has — `main`, which every

@@ -268,6 +268,12 @@ const RELAYED = [
   'specs.buffers.read',
   'specs.buffers.save',
   'specs.buffers.discard',
+  // The Workspace a Spec is set on, and the launch of its build (D8-12, D8-13).
+  'specs.useWorkspace',
+  'launches.forSpec',
+  'launches.request',
+  'launches.start',
+  'launches.retry',
   // The build of a `build` Session and the checks it is judged by, the engine's like the rest
   // (D10-04, D10-06).
   'build.read',

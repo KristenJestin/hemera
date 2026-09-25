@@ -284,7 +284,8 @@ describe('The Spec is read only in a build', () => {
       readyRefused: null,
     })
 
-    expect(view.status).toBe('ready')
+    // The panel carries core's own status since #84: a Spec being built is `in_progress`, still frozen.
+    expect(view.status).toBe('in_progress')
     expect(view.revision).toBe(2)
   })
 })

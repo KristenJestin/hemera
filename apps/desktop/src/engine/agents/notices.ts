@@ -43,6 +43,12 @@ export interface AgentNoticesService {
    * page showing that Workspace reads it again.
    */
   readonly workspace: (projectId: string, workspaceId: string) => void
+  /**
+   * The launch of a Spec changed (D8-12, D8-13): asked for, started, refused, started again, or
+   * taken back by a Rework. About a Spec rather than a Session, like `workspace` is about a
+   * Project: the panel open on that Spec reads it again, and reads the whole of where it stands.
+   */
+  readonly launched: (specId: string, projectId: string) => void
 }
 
 export class AgentNotices extends Context.Service<AgentNotices, AgentNoticesService>()(
@@ -61,4 +67,5 @@ export const NoNotices = Layer.succeed(AgentNotices, {
   changed: () => undefined,
   ran: () => undefined,
   workspace: () => undefined,
+  launched: () => undefined,
 })

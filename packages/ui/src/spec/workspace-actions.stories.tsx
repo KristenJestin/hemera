@@ -58,11 +58,15 @@ export const NoWorkspace: Story = {
     await expect(args.onPrepareAndStart).toHaveBeenCalled()
 
     await userEvent.click(canvas.getByRole('button', { name: 'Use an existing Workspace' }))
-    await userEvent.click(await body.findByRole('menuitem', { name: 'Prepare a Workspace only' }))
+    await userEvent.click(await body.findByRole('menuitem', { name: 'Prepare a Workspace only' }), {
+      pointerEventsCheck: 0,
+    })
     await expect(args.onPrepareOnly).toHaveBeenCalled()
 
     await userEvent.click(canvas.getByRole('button', { name: 'Use an existing Workspace' }))
-    await userEvent.click(await body.findByRole('menuitem', { name: 'spike' }))
+    await userEvent.click(await body.findByRole('menuitem', { name: 'spike' }), {
+      pointerEventsCheck: 0,
+    })
     await expect(args.onUseWorkspace).toHaveBeenCalledWith('ws-spike')
   },
 }

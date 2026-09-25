@@ -105,6 +105,12 @@ export const CHANNELS = {
   'specs.buffers.read': ENGINE_REQUESTS['specs.buffers.read'],
   'specs.buffers.save': ENGINE_REQUESTS['specs.buffers.save'],
   'specs.buffers.discard': ENGINE_REQUESTS['specs.buffers.discard'],
+  // The Workspace a Spec's build is given, and the launch of that build (D8-12, D8-13).
+  'specs.useWorkspace': ENGINE_REQUESTS['specs.useWorkspace'],
+  'launches.forSpec': ENGINE_REQUESTS['launches.forSpec'],
+  'launches.request': ENGINE_REQUESTS['launches.request'],
+  'launches.start': ENGINE_REQUESTS['launches.start'],
+  'launches.retry': ENGINE_REQUESTS['launches.retry'],
 
   // The agents, relayed the same way: what this machine has, what a Session's agent offers, and
   // what the window asks of a Session that is running — a turn, a stop, a decision, a resume.
@@ -159,7 +165,6 @@ export const CHANNELS = {
   'variables.list': ENGINE_REQUESTS['variables.list'],
   'variables.set': ENGINE_REQUESTS['variables.set'],
   'variables.remove': ENGINE_REQUESTS['variables.remove'],
-  'launches.request': ENGINE_REQUESTS['launches.request'],
 
   // The build of a `build` Session and the checks of a Project, relayed the same way: a task's
   // state, an attempt and a check are the engine's, and the window only says what the user did

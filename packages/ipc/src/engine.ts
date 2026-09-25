@@ -31,7 +31,6 @@ import {
   contextViewSchema,
 } from './tools.ts'
 import {
-  launchViewSchema,
   recipeKindSchema,
   recipeStepSchema,
   repositoryStateSchema,
@@ -41,6 +40,7 @@ import {
   workspaceStepSchema,
   worktreeSchema,
 } from './workspaces.ts'
+import { LAUNCH_REQUESTS } from './launches.ts'
 import { SPEC_REQUESTS, missionSchema, specSnapshotSchema, specTypeSchema } from './specs.ts'
 import { BUILD_REQUESTS } from './build.ts'
 
@@ -866,15 +866,11 @@ export const ENGINE_REQUESTS = {
     response: z.void(),
   },
 
-  // A build of a ready Spec asked for in one of its Project's Workspaces (D8-13): started at once
-  // in a ready Workspace, waiting for one still being prepared.
-  'launches.request': {
-    arguments: z.object({ specId: z.string(), workspaceId: z.string() }),
-    response: launchViewSchema,
-  },
-
   // The Specs a `define` Session writes and a human freezes (D7-01).
   ...SPEC_REQUESTS,
+  // The build of a ready Spec: asking for one, reading where it stands, starting a refused one
+  // again (D8-12, D8-13).
+  ...LAUNCH_REQUESTS,
   // The two that make a Session `define` answer the Session as well as the Spec: its mission,
   // its Spec and its version changed with them (D7-07).
   'specs.create': {
@@ -975,6 +971,16 @@ export const ENGINE_EVENTS = {
     projectId: z.string(),
   }),
   /**
+   * The launch of a Spec changed (D8-13): asked for, started, refused, started again, or taken
+   * back by a Rework. Only the names cross — the panel open on that Spec reads it again, as it
+   * stands — and it is about a Spec rather than a Session, like the change above it.
+   */
+  launch_changed: z.object({
+    event: z.literal('launch.changed'),
+    specId: z.string(),
+    projectId: z.string(),
+  }),
+  /**
    * A build changed (D10-04): a task moved, a check ran, a blocker was raised or dismissed, the
    * build was paused, resumed, accepted or stopped. Only its Session crosses: the page that shows
    * that build reads it again, as it stands.
@@ -987,7 +993,7 @@ export const ENGINE_EVENTS = {
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the eight names it carries. */
+/** One pushed message, of whichever of the ten names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

@@ -85,7 +85,10 @@ export interface EngineStart {
 /** The name each change of a Session travels under, on the one channel the page listens on. */
 export const PUSHED: Record<
   Notice,
-  Exclude<EngineEventName, 'entry' | 'run' | 'spec_changed' | 'workspace' | 'build_changed'>
+  Exclude<
+    EngineEventName,
+    'entry' | 'run' | 'spec_changed' | 'launch_changed' | 'workspace' | 'build_changed'
+  >
 > = {
   permission_requested: 'permission',
   turn_started: 'turn_start',
@@ -134,6 +137,13 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
         port.postMessage({ event: 'workspace', projectId, workspaceId })
       } catch (died) {
         log(`pushing a Workspace failed: ${named(died)}`)
+      }
+    },
+    launched: (specId, projectId) => {
+      try {
+        port.postMessage({ event: 'launch.changed', specId, projectId })
+      } catch (died) {
+        log(`pushing a launch failed: ${named(died)}`)
       }
     },
   })
@@ -333,6 +343,8 @@ function servicesOf(
     Layer.provide(rows),
     Layer.provide(preferencesLayer),
     Layer.provide(runtime),
+    // Its diagnostic, and the window it tells when a launch changes.
+    Layer.provide(agents),
   )
 
   // The Workspaces of the Projects, over the machine's `git`, made under the data folder unless a

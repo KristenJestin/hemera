@@ -76,7 +76,7 @@ import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
 import type { UnknownWorkspaceError } from './workspaces/described.ts'
 import { Preparation, type PreparationRunningError } from './workspaces/preparation.ts'
-import { Launches, type LaunchRefusal } from './workspaces/launches.ts'
+import { LaunchRefusedError, Launches, type LaunchRefusal } from './workspaces/launches.ts'
 import { Recipe, type RecipeRefusedError } from './workspaces/recipe.ts'
 import { Variables } from './workspaces/variables.ts'
 import {
@@ -477,12 +477,6 @@ export function answer(
       return yield* variables.remove(projectId, workspaceId, key)
     }
 
-    // A build of a ready Spec, asked for in a Workspace: started at once in a ready one (D8-13).
-    if (decision.name === 'launches.request') {
-      const { specId, workspaceId } = decision.argument
-      return yield* (yield* Launches).request(specId, workspaceId)
-    }
-
     // The Spec use cases (D7-03). The renderer is the human actor: whatever it writes carries
     // human provenance and the Session whose panel it came from (D7-04, D7-11).
     const specs = yield* Specs
@@ -550,6 +544,37 @@ export function answer(
     if (decision.name === 'specs.buffers.discard') {
       return yield* specs.buffers.discard(decision.argument)
     }
+    if (decision.name === 'specs.useWorkspace') {
+      const { specId, workspaceId } = decision.argument
+      return yield* specs.useWorkspace(specId, workspaceId)
+    }
+
+    // The build of a ready Spec (D8-12, D8-13): the panel of a Spec reads the whole of it at
+    // once, asks for a build in a Workspace, starts the one the Spec is already set on, and
+    // starts a refused one again. `start` is what "Start the build" presses once a preparation
+    // made only: no Workspace named, the one D8-12 gave the Spec.
+    const launches = yield* Launches
+    if (decision.name === 'launches.forSpec') {
+      return yield* launches.forSpec(decision.argument.specId)
+    }
+    if (decision.name === 'launches.request') {
+      const { specId, workspaceId } = decision.argument
+      return yield* launches.request(specId, workspaceId)
+    }
+    if (decision.name === 'launches.start') {
+      const { specId } = decision.argument
+      const settled = yield* specs.read(specId)
+      const workspaceId = settled.spec.workspaceId
+      if (workspaceId === null) {
+        return yield* Effect.fail(
+          new LaunchRefusedError({ reason: 'this Spec has no Workspace yet: prepare one first.' }),
+        )
+      }
+      return yield* launches.request(specId, workspaceId)
+    }
+    if (decision.name === 'launches.retry') {
+      return yield* launches.retry(decision.argument.launchId)
+    }
 
     // The Build section of the Project settings (D10-06): nothing proposed is saved until the
     // user accepts it.
@@ -603,6 +628,7 @@ export function answer(
  */
 export type Refusal =
   | SpecRefusal
+  | LaunchRefusal
   | AgentRuntimeError
   | AgentUpdateRefusedError
   | DatabaseError
