@@ -1,5 +1,5 @@
 /**
- * The same build, in an application that was started again (issue #22, designs D10-01, D10-09,
+ * The same build, in an application that was started again (designs D10-01, D10-09,
  * D10-11).
  *
  * A build is Hemera's and lives in its data folder: its phase, each task's state and dates, every

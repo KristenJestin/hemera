@@ -1,6 +1,6 @@
 /**
- * A build, from a ready Spec to the user's task, in the built application (issue #22, designs
- * D10-02 to D10-12).
+ * A build, from a ready Spec to the user's task, in the built application (designs D10-02
+ * to D10-12).
  *
  * The Project `Atlas` points at a `main` holding one repository, `./sources/api`, made here with
  * the machine's own `git` and removed after the run. Its one check is a line of the user's, run at

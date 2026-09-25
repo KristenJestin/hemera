@@ -1,5 +1,5 @@
 /**
- * What the build suites read and press (lot 22).
+ * What the build suites read and press.
  *
  * Not a spec file — `wdio.conf.ts` takes `*.e2e.ts` and this is not one. It reads a build as the
  * engine holds it, through the bridge, and presses a button by its exact words: a build view says

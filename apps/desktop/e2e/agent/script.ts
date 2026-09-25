@@ -158,7 +158,7 @@ export const REWRITTEN = 'Every row of every CSV export carries its issue date.'
 export const REWRITE_ANSWER = 'I tried to tighten the expected outcome.'
 
 /**
- * What makes the writer's agent write a Spec a build can run (lot 22): the whole contract of a
+ * What makes the writer's agent write a Spec a build can run: the whole contract of a
  * `feature`, one story, and three tasks each depending on the one before — the second one the
  * user's — then every phase declared and the contract attested. Only the human's Mark ready
  * freezes it.
