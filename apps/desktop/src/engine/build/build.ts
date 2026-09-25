@@ -768,7 +768,7 @@ export const buildsLayer = Layer.effect(
         const attempt = rows?.attempts.find((one) => one.id === job.attemptId)
         // A build stopped or accepted meanwhile is judged no more.
         if (rows === null || attempt === undefined || !working(rows)) return
-        yield* checks
+        const outcomes = yield* checks
           .run({
             sessionId,
             projectId: rows.session.projectId,
@@ -780,9 +780,9 @@ export const buildsLayer = Layer.effect(
             changes: changesFor(rows, attempt),
           })
           .pipe(
-            Effect.flatMap((outcomes) => verdict(sessionId, attempt, outcomes)),
             // Checks that could not run are red, said on the try, and the try is judged all the
-            // same: its task never stays checking for ever.
+            // same: its task never stays checking for ever. A verdict that cannot be written is
+            // no check that failed: the try stays checking, and a restart judges it again.
             Effect.catch((cause) =>
               withDatabase(
                 mutate('recording checks that could not run', (transaction) =>
@@ -799,9 +799,10 @@ export const buildsLayer = Layer.effect(
                     now(),
                   ).pipe(Effect.as({ result: undefined, events: [] })),
                 ),
-              ).pipe(Effect.andThen(verdict(sessionId, attempt, []))),
+              ).pipe(Effect.as([])),
             ),
           )
+        yield* verdict(sessionId, attempt, outcomes)
       }).pipe(logged(`checking an attempt of ${sessionId}`))
 
     /** Starts the check runs a committed change asked for, each in the background. */

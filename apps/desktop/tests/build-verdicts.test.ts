@@ -15,10 +15,11 @@ import { Effect, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { AgentRuntime } from '#engine/agents/runtime.ts'
-import { Builds } from '#engine/build/build.ts'
+import { Builds, recoveredBuilds } from '#engine/build/build.ts'
 import { BuildChecks, ProjectChecks } from '#engine/build/checks.ts'
 import { Commands } from '#engine/commands/service.ts'
-import { DatabaseError } from '#engine/storage/database.ts'
+import { DatabaseError, SqliteClient } from '#engine/storage/database.ts'
+import { recovered } from '#engine/workspaces/preparation.ts'
 
 import {
   THREE,
@@ -267,5 +268,56 @@ describe('An error is never masked in the evidence', () => {
     expect(first?.result).toBe('red')
     expect(first?.checks.map((check) => [check.name, check.verdict])).toEqual([['Checks', 'red']])
     expect(first?.checks[0]?.detail).toContain('disk I/O error')
+  })
+
+  test('a verdict that cannot be written leaves the try as its checks said, and is judged at restart', async () => {
+    const green = scriptedChecks((request) =>
+      request.when === 'task' ? [{ name: 'lint', verdict: 'green' }] : [],
+    )
+    const first = buildAgent({
+      execute: (labels) => labels.filter((label) => label === 'T1').map(finished),
+    })
+    opened = await openWindowChecked(dataFolder, green, first.agent)
+    const written = opened.written
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        // The database refuses every verdict, as a locked or full one would.
+        const sql = yield* SqliteClient
+        yield* sql.unsafe(
+          "CREATE TRIGGER refuse_verdicts BEFORE UPDATE OF result ON build_attempts BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+        )
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(
+          Effect.sync(() => written),
+          (lines) =>
+            lines.some((line) => line.startsWith(`builds: checking an attempt of ${sessionId}`)),
+        )
+        yield* sql.unsafe('DROP TRIGGER refuse_verdicts')
+        return { sessionId, view: yield* buildOf(sessionId) }
+      }),
+    )
+    await opened.close()
+
+    const second = buildAgent({ resume: () => [] })
+    opened = await openWindowChecked(dataFolder, green, second.agent)
+    const back = await opened.running(
+      Effect.gen(function* () {
+        yield* recovered
+        yield* recoveredBuilds
+        return yield* eventually(
+          buildOf(left.sessionId),
+          (view) => view.tasks[0]?.state !== 'checking',
+        )
+      }),
+    )
+    // Nothing but the check itself is written on the try: the failed write is no red check.
+    const [tried] = left.view.tasks[0]?.attempts ?? []
+    expect(left.view.tasks[0]?.state).toBe('checking')
+    expect(tried?.checks.map((check) => [check.name, check.verdict])).toEqual([['lint', 'green']])
+    expect(back.tasks[0]?.state).toBe('done')
+    expect(back.tasks[0]?.attempts.map((attempt) => [attempt.number, attempt.result])).toEqual([
+      [1, 'green'],
+    ])
   })
 })
