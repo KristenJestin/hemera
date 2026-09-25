@@ -73,9 +73,12 @@ describe('Git state is observed when shown', () => {
 
 describe('A Git error is surfaced as is', () => {
   it("answers Git's own message for a worktree whose .git file is broken", async () => {
+    // A worktree is the fixture, because a worktree is where .git is a file: the break is written
+    // over that file. A repository folder removed to put a file in its place leaves the write
+    // racing the removal, and a loaded runner loses that race.
+    const source = repository(join(folder, 'source'))
     const broken = join(folder, 'broken')
-    repository(broken)
-    rmSync(join(broken, '.git'), { recursive: true, force: true })
+    git(source, 'worktree', 'add', '-q', '-b', 'slice', broken)
     writeFileSync(join(broken, '.git'), 'gitdir: /nowhere/hemera\n')
 
     const refused = await asked(Effect.flip(Git.use((one) => one.status(broken))))
