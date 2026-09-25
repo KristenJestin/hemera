@@ -212,10 +212,20 @@ const NAMED_STATES = new Map([
     ['Confirm', 'RefusedRunningService', 'RefusedGit', 'RefusedBuildSession', 'Keyboard'],
   ],
   // Lot 20: the recipe of a Project, with nothing in it, in order, being added to and edited, a
-  // source main does not hold, and walked.
+  // source main does not hold, walked, and — recette 2 — a run carrying its own line and a copy's
+  // path picked outside its base.
   [
     'project/preparation-editor',
-    ['Empty', 'Filled', 'Adding', 'Editing', 'SourceMissing', 'Keyboard'],
+    [
+      'Empty',
+      'Filled',
+      'Adding',
+      'Editing',
+      'SourceMissing',
+      'OwnLine',
+      'PickedOutside',
+      'Keyboard',
+    ],
   ],
   // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
   [

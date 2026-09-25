@@ -141,8 +141,10 @@ export function stepLinesOf(steps: readonly WorkspaceStep[]): PreparationStepLin
     .map((step) => ({
       id: step.id,
       kind: step.kind,
-      // A copy or a link names its path under its base (D8-05 as amended by recette 1).
-      target: step.base === null ? step.target : underBase(step.base, step.target),
+      // A copy or a link names its path under its base (D8-05 as amended by recette 1); a run
+      // names what it runs — a command of the catalogue, or the line it carries itself.
+      target:
+        step.kind === 'run' || step.base === null ? step.target : underBase(step.base, step.target),
       state: step.state,
       message: step.message ?? undefined,
       // The run a `run` step started, whose details the step offers (D8-05, Decided 11).
@@ -248,6 +250,9 @@ export function recipeLinesOf(steps: readonly RecipeStep[]): RecipeStepLine[] {
     base: step.base,
     path: step.path,
     commandId: step.commandId,
+    line: step.line,
+    lineWindows: step.lineWindows,
+    lineLinux: step.lineLinux,
   }))
 }
 
@@ -293,12 +298,33 @@ export function worktreesOf(draft: WorkspaceDraft): Worktree[] {
 export type RecipeAdd = Omit<ChannelArguments<'recipe.add'>, 'projectId'>
 
 /**
- * A step the card hands over, as the engine adds it: a command, or a file or a folder under the
- * base it names (D8-05 as amended by recette 1).
+ * A step the card hands over, as the engine adds it: a command of the catalogue, a line the step
+ * carries on its own, or a file or a folder under the base it names (D8-05 as amended by recette 1
+ * and recette 2).
+ *
+ * A run of a command keeps no base and no folder of its own: where it runs is the command's
+ * business. A line of the step's own keeps both, and the lines it carries.
  */
 export function recipeAddOf(draft: RecipeStepDraft): RecipeAdd {
   if (draft.kind === 'run') {
-    return { kind: 'run', base: null, path: null, commandId: draft.commandId }
+    const own = draft.commandId === null
+    return {
+      kind: 'run',
+      base: own ? draft.base : null,
+      path: own ? draft.path : null,
+      commandId: draft.commandId,
+      line: draft.line,
+      lineWindows: draft.lineWindows,
+      lineLinux: draft.lineLinux,
+    }
   }
-  return { kind: draft.kind, base: draft.base, path: draft.path, commandId: null }
+  return {
+    kind: draft.kind,
+    base: draft.base,
+    path: draft.path,
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  }
 }

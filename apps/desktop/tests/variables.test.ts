@@ -124,6 +124,9 @@ describe('A Workspace’s variable overrides the Project’s', () => {
           base: null,
           path: null,
           commandId: port.id,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
         const workspace = yield* workspaces.create(project.id, {

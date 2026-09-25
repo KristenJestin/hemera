@@ -249,19 +249,8 @@ export function commandPlace(command: Pick<Command, 'folderBase' | 'folder'>): s
   return segments.length === 0 ? null : `./${segments.join('/')}`
 }
 
-/**
- * The line this machine runs (D8-07): its own variant when the command has one, the line every
- * system runs otherwise — which is the one a system with no variant of its own runs, macOS among
- * them (recette 2). `platform` is Node's own word for the system — `win32`, `linux`, `darwin`.
- */
-export function lineFor(
-  command: Pick<Command, 'line' | 'lineWindows' | 'lineLinux'>,
-  platform: string,
-): string {
-  if (platform === 'win32') return command.lineWindows ?? command.line
-  if (platform === 'linux') return command.lineLinux ?? command.line
-  return command.line
-}
+/** The line a command runs here: one place says it, for a command and for a step alike (recette 2). */
+export { lineFor } from './lines.ts'
 
 /**
  * Whether a run of this command starts a process, or hands back the one already running.

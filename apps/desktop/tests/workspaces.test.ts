@@ -202,6 +202,9 @@ describe('A dedicated Workspace is made from the Project settings, with no Spec'
           base: API,
           path: '.env',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const plan = yield* workspaces.plan(project.id, null, 'spike')
         const workspace = yield* workspaces.create(project.id, {
@@ -762,7 +765,15 @@ describe('A run step never starts a service', () => {
         const project = yield* atlas(main, [API])
         const dev = yield* saved(project.id, 'dev', 'pnpm dev', 'serve')
         const refused = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'run', base: null, path: null, commandId: dev.id }),
+          recipe.add(project.id, {
+            kind: 'run',
+            base: null,
+            path: null,
+            commandId: dev.id,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         return { refused, left: yield* recipe.list(project.id) }
       }),
@@ -790,27 +801,52 @@ describe('The recipe of a Project is kept in the order the user sets', () => {
           base: API,
           path: '.env',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         yield* recipe.add(project.id, {
           kind: 'link',
           base: null,
           path: 'CLAUDE.md',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const three = yield* recipe.add(project.id, {
           kind: 'run',
           base: null,
           path: null,
           commandId: install.id,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const moved = yield* recipe.move(project.id, three[2]!.id, 'up')
         const first = yield* recipe.move(project.id, moved[0]!.id, 'up')
         const removed = yield* recipe.remove(project.id, moved[0]!.id)
         const outside = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'copy', base: null, path: '../x', commandId: null }),
+          recipe.add(project.id, {
+            kind: 'copy',
+            base: null,
+            path: '../x',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         const stranger = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'run', base: null, path: null, commandId: 'nobody' }),
+          recipe.add(project.id, {
+            kind: 'run',
+            base: null,
+            path: null,
+            commandId: 'nobody',
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         const sql = yield* SqliteClient
         const events = yield* sql<{ type: string }>`
@@ -864,6 +900,9 @@ describe('A repository is rewritten with its icon, and what named it follows', (
           base: API,
           path: 'CLAUDE.md',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const moved = yield* projects.updateRepository({
           id: project.id,

@@ -164,26 +164,69 @@ describe('The cards say the engine views in their own words', () => {
 
   test('a recipe step is added as the engine takes it, with the base it names', () => {
     expect(
-      recipeAddOf({ kind: 'copy', base: './sources/api', path: '.env', commandId: null }),
+      recipeAddOf({
+        kind: 'copy',
+        base: './sources/api',
+        path: '.env',
+        commandId: null,
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
+      }),
     ).toEqual({
       kind: 'copy',
       base: './sources/api',
       path: '.env',
       commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
     })
     expect(
-      recipeAddOf({ kind: 'run', base: null, path: null, commandId: 'command-install' }),
+      recipeAddOf({
+        kind: 'run',
+        base: null,
+        path: null,
+        commandId: 'command-install',
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
+      }),
     ).toEqual({
       kind: 'run',
       base: null,
       path: null,
       commandId: 'command-install',
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
     })
     expect(
       recipeLinesOf([
-        { id: 'r1', kind: 'run', base: null, path: null, commandId: 'command-dev', rank: 'a' },
+        {
+          id: 'r1',
+          kind: 'run',
+          base: null,
+          path: null,
+          commandId: 'command-dev',
+          rank: 'a',
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
+        },
       ]),
-    ).toEqual([{ id: 'r1', kind: 'run', base: null, path: null, commandId: 'command-dev' }])
+    ).toEqual([
+      {
+        id: 'r1',
+        kind: 'run',
+        base: null,
+        path: null,
+        commandId: 'command-dev',
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
+      },
+    ])
   })
 
   // Scenario: "A preparation interrupted by a quit can be resumed".

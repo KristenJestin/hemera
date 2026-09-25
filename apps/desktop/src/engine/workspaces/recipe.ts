@@ -3,8 +3,9 @@
  *
  * An ordered list of `copy`, `link` and `run` steps: a copy and a link name a file or a folder of
  * `main` by its path under a base — one of the Project's repositories, or the Workspace root — so
- * several repositories are several steps (D8-05 as amended by recette 1); a run names a command of
- * the Project's catalogue. A copy or a link is accepted only when its source is in `main`: the step
+ * several repositories are several steps (D8-05 as amended by recette 1); a run starts a command
+ * of the Project's catalogue, or carries a line of its own, which is not in the catalogue and that
+ * no agent reads (recette 2). A copy or a link is accepted only when its source is in `main`: the step
  * dialog checks it before the step is written, not the day a Workspace is prepared. The order is a
  * rank, as the repositories' is, so moving one step never renumbers the others. A Workspace is
  * prepared from the recipe as it was when the Workspace was created: editing it afterwards changes
@@ -54,14 +55,23 @@ export class RecipeRefusedError extends Data.TaggedError('RecipeRefusedError')<{
 export interface RecipeEdit {
   readonly kind: RecipeKind
   /**
-   * Where a copy or a link applies: a repository the Project declares, and null for the Workspace
-   * root. Nothing for a run.
+   * Where a copy or a link applies, and where a run of a line of its own runs from: a repository
+   * the Project declares, and null for the Workspace root. Nothing for a run of a command.
    */
   readonly base: string | null
-  /** The file or folder, relative to the base: for a copy and a link, and null for a run. */
+  /**
+   * The file or folder, relative to the base: for a copy and a link, and for a run of a line of
+   * its own. Null for a run of a command, and for a run of a line of its own that runs in its base
+   * itself.
+   */
   readonly path: string | null
-  /** The catalogue command a run starts, and null for a copy and a link. */
+  /** The catalogue command a run starts, and null for a copy, a link and a run of a line. */
   readonly commandId: string | null
+  /** The line a run of its own carries, and null for every other step (recette 2). */
+  readonly line: string | null
+  /** The line Windows runs instead of `line`, and null when it runs `line` (D8-07). */
+  readonly lineWindows: string | null
+  readonly lineLinux: string | null
 }
 
 export interface RecipeService {
@@ -100,6 +110,9 @@ export function recipeStepOf(row: typeof projectPreparationSteps.$inferSelect): 
     base: row.base,
     path: row.path,
     commandId: row.commandId,
+    line: row.line,
+    lineWindows: row.lineWindows,
+    lineLinux: row.lineLinux,
     rank: row.rank,
   }
 }
@@ -131,11 +144,14 @@ function changed(projectId: string, change: string, kind: RecipeKind) {
   }
 }
 
-/** What a step is written with once checked: its base, its path, its command. */
+/** What a step is written with once checked: its base, its path, its command or its own line. */
 interface Checked {
   readonly base: string | null
   readonly path: string | null
   readonly commandId: string | null
+  readonly line: string | null
+  readonly lineWindows: string | null
+  readonly lineLinux: string | null
 }
 
 const refuse = (reason: string) => Effect.fail(new RecipeRefusedError({ reason }))
@@ -161,6 +177,38 @@ export const recipeLayer = Layer.effect(
       )
 
     /**
+     * The base a step acts under (D8-05 as amended by recette 1): the Workspace root, or a
+     * repository the Project declares. Read from the disk outside any transaction, as every disk
+     * is.
+     */
+    const based = (projectId: string, edit: RecipeEdit) =>
+      Effect.gen(function* () {
+        const saidBase = edit.base?.trim() ?? ''
+        if (saidBase === '' || saidBase === '.' || saidBase === './') return null
+        const base = yield* Effect.try({
+          try: () => repositoryPath(saidBase),
+          catch: (cause) =>
+            cause instanceof InvalidRepositoryPathError
+              ? cause
+              : new InvalidRepositoryPathError(saidBase, String(cause)),
+        })
+        const declared = yield* database
+          .select({ relativePath: projectRepositories.relativePath })
+          .from(projectRepositories)
+          .where(
+            and(
+              eq(projectRepositories.projectId, projectId),
+              eq(projectRepositories.relativePath, base),
+            ),
+          )
+          .pipe(Effect.mapError(failed('reading the repositories')))
+        if (declared.length === 0) {
+          return yield* refuse(`${saidBase} is not a repository of this Project`)
+        }
+        return base
+      })
+
+    /**
      * A copy's or a link's base, path and source, checked before anything is written (D8-05 as
      * amended by recette 1): the base is the root or a repository the Project declares, the path
      * never leaves it, and the file or folder is in `main` there — read from the disk outside any
@@ -168,32 +216,7 @@ export const recipeLayer = Layer.effect(
      */
     const placed = (projectId: string, edit: RecipeEdit) =>
       Effect.gen(function* () {
-        const saidBase = edit.base?.trim() ?? ''
-        const base =
-          saidBase === '' || saidBase === '.' || saidBase === './'
-            ? null
-            : yield* Effect.try({
-                try: () => repositoryPath(saidBase),
-                catch: (cause) =>
-                  cause instanceof InvalidRepositoryPathError
-                    ? cause
-                    : new InvalidRepositoryPathError(saidBase, String(cause)),
-              })
-        if (base !== null) {
-          const declared = yield* database
-            .select({ relativePath: projectRepositories.relativePath })
-            .from(projectRepositories)
-            .where(
-              and(
-                eq(projectRepositories.projectId, projectId),
-                eq(projectRepositories.relativePath, base),
-              ),
-            )
-            .pipe(Effect.mapError(failed('reading the repositories')))
-          if (declared.length === 0) {
-            return yield* refuse(`${saidBase} is not a repository of this Project`)
-          }
-        }
+        const base = yield* based(projectId, edit)
         // A copy and a link are relative to their base and never leave it (D8-05).
         const asked = edit.path ?? ''
         const path = yield* Effect.try({
@@ -217,13 +240,57 @@ export const recipeLayer = Layer.effect(
         if (!existsSync(source)) {
           return yield* refuse(`${source} does not exist in main: a ${edit.kind} needs its source`)
         }
-        return { base, path, commandId: null } satisfies Checked
+        return {
+          base,
+          path,
+          commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
+        } satisfies Checked
       })
 
-    /** A run's command, checked inside the transaction that writes its step. */
+    /**
+     * The line a run carries itself, with the base and the folder it runs in (recette 2), checked
+     * before anything is written: it is not in the catalogue, and no agent reads it. Its base and
+     * its folder are kept as a command's are — the folder relative to the base, null for the base
+     * itself — so that a step's own line runs exactly as a catalogue command runs.
+     */
+    const ownLine = (projectId: string, edit: RecipeEdit) =>
+      Effect.gen(function* () {
+        const line = (edit.line ?? '').trim()
+        if (line.length === 0) {
+          return yield* refuse(
+            'a run step starts a command of this Project, or carries a line of its own, and neither was named',
+          )
+        }
+        const base = yield* based(projectId, edit)
+        const asked = edit.path?.trim() ?? ''
+        const path =
+          asked === ''
+            ? null
+            : yield* Effect.try({
+                try: () => repositoryPath(asked),
+                catch: (cause) =>
+                  cause instanceof InvalidRepositoryPathError
+                    ? cause
+                    : new InvalidRepositoryPathError(asked, String(cause)),
+              })
+        return {
+          base,
+          path,
+          commandId: null,
+          line,
+          lineWindows: edit.lineWindows,
+          lineLinux: edit.lineLinux,
+        } satisfies Checked
+      })
+
+    /** A run's line, checked inside the transaction that writes its step. */
     const commanded = (transaction: EngineTransaction, projectId: string, edit: RecipeEdit) =>
       Effect.gen(function* () {
-        // A run starts a command of this Project's catalogue, and nothing else.
+        // A run starts a command of this Project's catalogue, and nothing else here: a run of a
+        // line of its own has been checked outside the transaction, as a copy's source is.
         const found = yield* transaction
           .select({ id: projectCommands.id, type: projectCommands.type })
           .from(projectCommands)
@@ -244,7 +311,14 @@ export const recipeLayer = Layer.effect(
             'a service never ends: a preparation step waits for its command to end',
           )
         }
-        return { base: null, path: null, commandId: found[0].id } satisfies Checked
+        return {
+          base: null,
+          path: null,
+          commandId: found[0].id,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
+        } satisfies Checked
       })
 
     return {
@@ -252,8 +326,14 @@ export const recipeLayer = Layer.effect(
 
       add: (projectId, edit) =>
         Effect.gen(function* () {
-          // A copy or a link is checked on the disk first; a run, inside the transaction.
-          const place = edit.kind === 'run' ? null : yield* placed(projectId, edit)
+          // A copy, a link and a run of a line of its own are checked on the disk first; a run of
+          // a command, inside the transaction.
+          const place =
+            edit.kind !== 'run'
+              ? yield* placed(projectId, edit)
+              : edit.commandId === null
+                ? yield* ownLine(projectId, edit)
+                : null
           return yield* withDatabase(
             mutate('adding a step to the recipe', (transaction) =>
               Effect.gen(function* () {
@@ -280,8 +360,14 @@ export const recipeLayer = Layer.effect(
 
       update: (projectId, id, edit) =>
         Effect.gen(function* () {
-          // A copy or a link is checked on the disk first; a run, inside the transaction.
-          const place = edit.kind === 'run' ? null : yield* placed(projectId, edit)
+          // A copy, a link and a run of a line of its own are checked on the disk first; a run of
+          // a command, inside the transaction.
+          const place =
+            edit.kind !== 'run'
+              ? yield* placed(projectId, edit)
+              : edit.commandId === null
+                ? yield* ownLine(projectId, edit)
+                : null
           return yield* withDatabase(
             mutate('changing a step of the recipe', (transaction) =>
               Effect.gen(function* () {

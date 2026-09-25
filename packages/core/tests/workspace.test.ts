@@ -23,52 +23,133 @@ import {
   workspaceStateOf,
 } from '#index.ts'
 
-/** The recipe of the scenario: copy `.env` in the api, link CLAUDE.md at the root, run install. */
+/**
+ * The recipe of the scenario: copy `.env` in the api, link CLAUDE.md at the root, run install,
+ * then run the api's own line — which the catalogue never holds (recette 2).
+ */
 const RECIPE: RecipeStep[] = [
-  { id: 'r1', kind: 'copy', base: './sources/api', path: '.env', commandId: null, rank: 'a' },
-  { id: 'r2', kind: 'link', base: null, path: 'CLAUDE.md', commandId: null, rank: 'b' },
-  { id: 'r3', kind: 'run', base: null, path: null, commandId: 'install-id', rank: 'c' },
+  {
+    id: 'r1',
+    kind: 'copy',
+    base: './sources/api',
+    path: '.env',
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+    rank: 'a',
+  },
+  {
+    id: 'r2',
+    kind: 'link',
+    base: null,
+    path: 'CLAUDE.md',
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+    rank: 'b',
+  },
+  {
+    id: 'r3',
+    kind: 'run',
+    base: null,
+    path: null,
+    commandId: 'install-id',
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+    rank: 'c',
+  },
+  {
+    id: 'r4',
+    kind: 'run',
+    base: './sources/api',
+    path: './tools',
+    commandId: null,
+    line: 'bun run lint',
+    lineWindows: 'bun run lint:windows',
+    lineLinux: 'bun run lint:linux',
+    rank: 'd',
+  },
 ]
 
 const NAMES = new Map([['install-id', 'install']])
 
 /** The steps of the scenario, with an identifier each, as the engine reads them back. */
-function stepsWithIds(): WorkspaceStep[] {
-  return stepsFor(['./sources/api', './sources/front'], RECIPE, NAMES).map((step, index) =>
-    Object.assign({ id: `s${index + 1}` }, step),
+function stepsWithIds(platform = 'linux'): WorkspaceStep[] {
+  return stepsFor(['./sources/api', './sources/front'], RECIPE, NAMES, platform).map(
+    (step, index) => Object.assign({ id: `s${index + 1}` }, step),
   )
 }
 
 describe('The steps follow the recipe in order', () => {
-  test('the two worktrees, then the copy, the link and the run, all pending', () => {
-    const steps = stepsFor(['./sources/api', './sources/front'], RECIPE, NAMES)
+  test('the two worktrees, then the copy, the link, the run and the own line, all pending', () => {
+    const steps = stepsFor(['./sources/api', './sources/front'], RECIPE, NAMES, 'linux')
     expect(steps.map((step) => [step.position, step.kind, step.target, step.state])).toEqual([
       [1, 'worktree', './sources/api', 'pending'],
       [2, 'worktree', './sources/front', 'pending'],
       [3, 'copy', '.env', 'pending'],
       [4, 'link', 'CLAUDE.md', 'pending'],
       [5, 'run', 'install', 'pending'],
+      [6, 'run', 'bun run lint:linux', 'pending'],
     ])
   })
 
   test('a recipe step keeps its base and its command; a worktree has neither', () => {
-    const steps = stepsFor(['./sources/api'], RECIPE, NAMES)
-    expect(steps[0]).toMatchObject({ base: null, commandId: null, message: null, runId: null })
-    expect(steps[1]).toMatchObject({ base: './sources/api', target: '.env', commandId: null })
-    expect(steps[2]).toMatchObject({ base: null, target: 'CLAUDE.md' })
-    expect(steps[3]).toMatchObject({ base: null, commandId: 'install-id' })
+    const steps = stepsFor(['./sources/api'], RECIPE, NAMES, 'linux')
+    expect(steps[0]).toMatchObject({
+      base: null,
+      path: null,
+      commandId: null,
+      message: null,
+      runId: null,
+    })
+    expect(steps[1]).toMatchObject({
+      base: './sources/api',
+      target: '.env',
+      path: null,
+      commandId: null,
+    })
+    expect(steps[2]).toMatchObject({ base: null, target: 'CLAUDE.md', path: null })
+    expect(steps[3]).toMatchObject({ base: null, path: null, commandId: 'install-id' })
+  })
+})
+
+describe("A step's own line runs on this system and is not in the catalogue", () => {
+  test('the step targets the line Linux runs, with the folder it starts in', () => {
+    const steps = stepsFor(['./sources/api'], RECIPE, NAMES, 'linux')
+    expect(steps[4]).toMatchObject({
+      kind: 'run',
+      target: 'bun run lint:linux',
+      base: './sources/api',
+      path: './tools',
+      commandId: null,
+    })
+  })
+
+  test('the step targets the line Windows runs', () => {
+    const steps = stepsFor(['./sources/api'], RECIPE, NAMES, 'win32')
+    expect(steps[4]).toMatchObject({ target: 'bun run lint:windows', path: './tools' })
+  })
+
+  test("a copy's and a link's own path is null: their target is the path itself", () => {
+    const steps = stepsFor(['./sources/api'], RECIPE, NAMES, 'linux')
+    expect(steps[1]).toMatchObject({ kind: 'copy', target: '.env', path: null })
+    expect(steps[2]).toMatchObject({ kind: 'link', target: 'CLAUDE.md', path: null })
   })
 })
 
 describe('Resuming re-checks before retrying', () => {
   test('a done step gone from the disk is redone, the failed one retried, a done run kept', () => {
-    const [api, front, copy, link, run] = stepsWithIds()
+    const [api, front, copy, link, run, lint] = stepsWithIds()
     const before: WorkspaceStep[] = [
       { ...api!, state: 'done' },
       { ...front!, state: 'failed', message: 'fatal: a branch named x already exists' },
       { ...copy!, state: 'done' },
       { ...link!, state: 'done' },
       { ...run!, state: 'done', runId: 'run-1' },
+      { ...lint!, state: 'done', runId: 'run-2' },
     ]
     // The first worktree's folder was removed by hand; everything else is still there.
     const resumed = resumedSteps(before, (step) => step.id !== api!.id)
@@ -76,6 +157,7 @@ describe('Resuming re-checks before retrying', () => {
     expect(resumed.map((step) => step.state)).toEqual([
       'pending',
       'pending',
+      'done',
       'done',
       'done',
       'done',
