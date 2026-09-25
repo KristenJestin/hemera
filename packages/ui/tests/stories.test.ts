@@ -239,6 +239,7 @@ const NAMED_STATES = new Map([
       'Commands',
       'Preparation',
       'Variables',
+      'Build',
       'Refused',
       'Keyboard',
     ],
