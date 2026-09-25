@@ -351,14 +351,19 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
     await pressTab('Commands')
     await press('Add command')
     await fill('Name', 'dev')
-    await fill('Default line', serve)
+    await fill('Line', serve)
     await choose('Type', 'Serve')
     await choose('Runs from', 'api')
     await pressIn('[role="dialog"]', 'Add command')
     await browser.pause(600)
     expect(await $('button[aria-label="Remove dev"]').isExisting()).toBe(true)
-    // Its row says the base it runs from, as it was written.
-    expect(await textOf('ul[aria-label="Commands"]')).toContain('api')
+    // Its row says its name and its line, and none of the badges the four of them used to be:
+    // the scope, the base and its folder are the dialog's (recette 2).
+    const rows = await textOf('ul[aria-label="Commands"]')
+    expect(rows).toContain('dev')
+    expect(rows).toContain(`localhost:${String(port)}`)
+    expect(rows).not.toContain('Per Workspace')
+    expect(rows).not.toContain('Workspace root')
   })
 
   it("says on main's row what Git answers of its first repository", async () => {

@@ -206,10 +206,11 @@ describe('The agent starts the app and the user opens it', () => {
     await pressTab('Commands')
     await press('Add command')
     await fill('Name', 'check')
-    // The default line: a command may carry a line of its own for Windows or Linux (D8-07).
-    await fill('Default line', CHECK)
+    // One line, run on every system: the other mode gives it a line per system (recette 2,
+    // D8-07).
+    await fill('Line', CHECK)
     await pressIn('[role="dialog"]', 'Add command')
-    await awaits('Workspace root')
+    await awaits('checked')
 
     // Back in the Session, the Commands tab of its details runs it by name.
     await press(NAMED)
