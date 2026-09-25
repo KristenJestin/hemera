@@ -25,11 +25,18 @@ import {
   type FakeStep,
 } from '../../src/engine/agents/fake.ts'
 import {
+  APPROACH,
+  BUILDABLE,
+  BUILDABLE_DONE,
+  BUILDABLE_SECTIONS,
+  BUILD_TASKS,
   COMMAND_PROPOSAL,
   COMMAND_PROPOSE_ANSWER,
   COMPLETE,
   COMPLETED,
   CONTRACT_VERSION,
+  EXPORTER,
+  FIXED,
   MODEL_OPTION,
   NOTES,
   PROPOSAL,
@@ -40,6 +47,7 @@ import {
   REWRITTEN,
   STORY,
   TASK,
+  VERIFIED,
   VERSION,
   WRITTEN,
   modelOption,
@@ -121,6 +129,67 @@ const completing: readonly FakeStep[] = [
   proposes({ kind: 'ready' }, 'ready'),
 ]
 
+/** A Spec a build can run, written and attested in the order `completing` follows. */
+const buildable: readonly FakeStep[] = [
+  ...Object.entries(BUILDABLE_SECTIONS).map(([section, body]) => contract(section, body)),
+  proposes({ kind: 'phase_done', phase: 'shape', summary: 'The export is shaped.' }, 'b-shape'),
+  writes({ section: 'plan', body: WRITTEN.plan, baseVersion: 0 }, 'b-plan'),
+  proposes({ kind: 'phase_done', phase: 'plan', summary: 'The export is planned.' }, 'b-plan'),
+  writes({ stories: JSON.stringify([STORY]) }, 'b-stories'),
+  writes({ tasks: JSON.stringify(BUILD_TASKS) }, 'b-tasks'),
+  proposes(
+    { kind: 'phase_done', phase: 'decompose', summary: 'Three tasks, one after the other.' },
+    'b-decompose',
+  ),
+  proposes({ kind: 'ready' }, 'b-ready'),
+]
+
+/** The labels of the tasks a build delivery hands, in the order it lists them. */
+function handedLabels(handed: string): string[] {
+  return [...handed.matchAll(/^## (T\d+) · /gm)].map((match) => match[1] ?? '')
+}
+
+/**
+ * What the build's agent does with a delivery, chosen from the brief (D10-02 to D10-09): the
+ * `prepare` brief is answered with the approach note; an `execute` delivery has every task it
+ * hands finished — after writing the exporter in the repository, and the file the check looks
+ * for, when the delivery carries a red try; the final checks are answered with a sentence; a
+ * resume brief with nothing, the user's task being the one that waits. Any other delivery — a
+ * `define` Session's — is taken in silently.
+ */
+function answerDelivery(handed: string): readonly FakeStep[] {
+  if (handed.includes('# Before you continue')) return []
+  if (handed.includes('# Phase: prepare')) {
+    return [{ does: 'says', text: APPROACH, messageId: `note-${RUN}` }]
+  }
+  if (handed.includes('# Phase: verify')) {
+    return [{ does: 'says', text: VERIFIED, messageId: `verified-${RUN}` }]
+  }
+  const labels = handedLabels(handed)
+  const fixing: FakeStep[] = handed.includes('was red')
+    ? [
+        {
+          does: 'uses',
+          call: 'fs_write',
+          arguments: { path: EXPORTER.path, content: EXPORTER.content, key: `exporter-${RUN}` },
+        },
+        {
+          does: 'uses',
+          call: 'fs_write',
+          arguments: { path: FIXED, content: 'fixed\n', key: `fix-${RUN}` },
+        },
+      ]
+    : []
+  return [
+    ...fixing,
+    ...labels.map((label): FakeStep => ({
+      does: 'uses',
+      call: 'task_finished',
+      arguments: { task: label },
+    })),
+  ]
+}
+
 const script: FakeScript = {
   // It can be loaded as well as resumed: the two ways back into a session are both offered, and
   // which one Hemera takes is Hemera's business (D5-07).
@@ -131,6 +200,7 @@ const script: FakeScript = {
   // It connects to the MCP server it is handed, as a real agent does, and lists Hemera's tools:
   // the one it calls is chosen by the prompt, after the session was opened (D6-11).
   listsTools: true,
+  answersDeliveryWith: answerDelivery,
   onPrompt: (text) => {
     turn += 1
     asked = text
@@ -150,6 +220,9 @@ const script: FakeScript = {
         { does: 'uses', call: 'commands_propose', arguments: { ...COMMAND_PROPOSAL } },
         { does: 'says', text: COMMAND_PROPOSE_ANSWER, messageId: `propose-${RUN}-${String(turn)}` },
       ]
+    }
+    if (asked.includes(BUILDABLE)) {
+      return [...buildable, { does: 'says', text: BUILDABLE_DONE, messageId: `buildable-${RUN}` }]
     }
     if (asked.includes(COMPLETE)) {
       return [...completing, { does: 'says', text: COMPLETED, messageId: `spec-${RUN}` }]
