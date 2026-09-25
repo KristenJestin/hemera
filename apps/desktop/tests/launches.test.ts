@@ -323,6 +323,28 @@ describe('A launch is claimed only in a Workspace that is ready', () => {
   })
 })
 
+describe('The Spec of a request is read where the launch is written', () => {
+  test('A request reads the Spec’s status alone, and asks in that transaction', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        // The sections belong to the brief, read when the Session is written: the request reads the
+        // Spec's status and its current revision, in the very transaction that writes the launch,
+        // and a database that cannot read the sections still lets it ask (D8-13).
+        const sql = yield* SqliteClient
+        yield* sql`ALTER TABLE spec_sections RENAME TO spec_sections_gone`
+        const asked = yield* launched.request(specId, workspace.id)
+        return { asked, rows: yield* launches }
+      }),
+    )
+    expect(seen.asked.state).toBe('waiting')
+    expect(seen.rows).toEqual([{ state: 'waiting', session_id: null, detail: null }])
+  })
+})
+
 describe('A refusal says the Session the start had written', () => {
   test('A start refused after its claim is failed, naming the Session it wrote', async () => {
     opened = await openWindow(dataFolder, fakeAgent())

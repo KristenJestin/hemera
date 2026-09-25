@@ -40,7 +40,7 @@ import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
 import {
   UnknownRevisionError,
-  type UnknownSpecError,
+  UnknownSpecError,
   failed,
   now,
   readSnapshot,
@@ -231,9 +231,6 @@ export const launchesLayer = Layer.effect(
       })
 
     /** The Spec as it stands now, read through the one reader of a revision (D7-05). */
-    const readSpec = (specId: string) =>
-      withDatabase(reading('reading the Spec', (transaction) => readSnapshot(transaction, specId)))
-
     /**
      * The Spec as it stood on the revision a launch names: a build gets what it was launched on,
      * even when the Spec has moved on since (D8-13).
@@ -610,29 +607,44 @@ export const launchesLayer = Layer.effect(
       one,
       request: (specId, workspaceId) =>
         Effect.gen(function* () {
-          const snapshot = yield* readSpec(specId)
-          if (snapshot.spec.status !== 'ready') {
-            return yield* Effect.fail(
-              new LaunchRefusedError({
-                reason: `"${snapshot.spec.key}" is ${snapshot.spec.status}: only a ready Spec is built.`,
-              }),
-            )
-          }
-          // The Workspace is read in the very transaction that writes the launch (D8-13), as a
-          // Session's own check reads it (D8-08): read outside it, the preparation may make the
-          // Workspace ready in between, and the ready step would then read no launch at all —
-          // leaving one that waits for an environment already there, forever.
+          // The Spec's status and its current revision are read in the very transaction that
+          // writes the launch (D8-13), as the Workspace is: read outside it, a Rework may revise
+          // the Spec in between, and the launch would be written on a revision the Spec no longer
+          // has.
+          //
+          // The Workspace is read there too (D8-13), as a Session's own check reads it (D8-08):
+          // read outside it, the preparation may make the Workspace ready in between, and the ready
+          // step would then read no launch at all — leaving one that waits for an environment
+          // already there, forever.
           const asked = yield* withDatabase(
             mutate('asking for a build', (transaction) =>
               Effect.gen(function* () {
+                const specRows = yield* transaction
+                  .select({
+                    key: specs.key,
+                    status: specs.status,
+                    projectId: specs.projectId,
+                    revisionId: specs.currentRevisionId,
+                  })
+                  .from(specs)
+                  .where(eq(specs.id, specId))
+                  .pipe(Effect.mapError(failed('reading the Spec')))
+                const spec = specRows[0]
+                if (spec === undefined) {
+                  return yield* Effect.fail(new UnknownSpecError({ id: specId }))
+                }
+                if (spec.status !== 'ready') {
+                  return yield* Effect.fail(
+                    new LaunchRefusedError({
+                      reason: `"${spec.key}" is ${spec.status}: only a ready Spec is built.`,
+                    }),
+                  )
+                }
                 const found = yield* transaction
                   .select({ name: workspaces.name, state: workspaces.state })
                   .from(workspaces)
                   .where(
-                    and(
-                      eq(workspaces.id, workspaceId),
-                      eq(workspaces.projectId, snapshot.spec.projectId),
-                    ),
+                    and(eq(workspaces.id, workspaceId), eq(workspaces.projectId, spec.projectId)),
                   )
                   .pipe(Effect.mapError(failed('reading the Workspace')))
                 const chosen = found[0]
@@ -652,7 +664,7 @@ export const launchesLayer = Layer.effect(
                   .values({
                     id,
                     specId,
-                    revisionId: snapshot.revision.id,
+                    revisionId: spec.revisionId,
                     workspaceId,
                     state: 'waiting',
                     createdAt: at,
@@ -671,7 +683,7 @@ export const launchesLayer = Layer.effect(
                     launch: {
                       id,
                       specId,
-                      revisionId: snapshot.revision.id,
+                      revisionId: spec.revisionId,
                       workspaceId,
                       state: 'waiting' as const,
                       sessionId: null,
@@ -681,13 +693,13 @@ export const launchesLayer = Layer.effect(
                     },
                     // Whether the Workspace is ready is decided on the very row the launch is
                     // written against, in that transaction: the start reads it from here (D8-13).
-                    projectId: snapshot.spec.projectId,
+                    projectId: spec.projectId,
                     ready: state === 'ready',
                   },
                   events: [
                     launchEvent(
-                      { id, specId, revisionId: snapshot.revision.id },
-                      snapshot.spec.projectId,
+                      { id, specId, revisionId: spec.revisionId },
+                      spec.projectId,
                       'launch.requested',
                       { workspaceId },
                       'human',
