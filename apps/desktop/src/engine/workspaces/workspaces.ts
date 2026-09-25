@@ -52,6 +52,7 @@ import {
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { UnknownWorkspaceError, describedWorkspace } from './described.ts'
+import { endWaitingLaunches } from './launches.ts'
 import { recipeOf } from './recipe.ts'
 
 /** What a creation checks before it writes anything (D8-04). */
@@ -590,17 +591,23 @@ export const workspacesLayer = Layer.effect(
         const cleanedAt = new Date().toISOString()
         yield* withDatabase(
           mutate('cleaning up a Workspace', (transaction) =>
-            transaction
-              .update(workspaces)
-              .set({ state: 'cleaned', cleanedAt })
-              .where(eq(workspaces.id, row.id))
-              .pipe(
-                Effect.mapError(failed('writing the Workspace')),
-                Effect.as({
-                  result: undefined,
-                  events: [workspaceEvent(row, 'workspace.cleaned', { path: row.path }, 'human')],
-                }),
-              ),
+            Effect.gen(function* () {
+              yield* transaction
+                .update(workspaces)
+                .set({ state: 'cleaned', cleanedAt })
+                .where(eq(workspaces.id, row.id))
+                .pipe(Effect.mapError(failed('writing the Workspace')))
+              // What still waited on that folder has nothing left to wait for: its launches are
+              // cancelled, saying the Workspace was removed, in this very transaction (D8-13).
+              const ended = yield* endWaitingLaunches(transaction, row.id, { state: 'cancelled' })
+              return {
+                result: undefined,
+                events: [
+                  workspaceEvent(row, 'workspace.cleaned', { path: row.path }, 'human'),
+                  ...ended,
+                ],
+              }
+            }),
           ),
         )
       })
