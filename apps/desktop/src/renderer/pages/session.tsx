@@ -61,7 +61,7 @@ import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
-import { selectEntry } from '../shell-store.ts'
+import { selectEntry, setChatMinimised, shellState, subscribeToShell } from '../shell-store.ts'
 import { type DefinedSpec, questionAnchor } from '../spec-entries.ts'
 import {
   answerQuestion,
@@ -326,7 +326,16 @@ export function SessionPage({
     mission it opens on is the one that decides — a build opens with the build view as its page
     and its chat a button, every other mission opens with the chat at the centre.
   */
-  const [chatMinimised, setChatMinimised] = useState(session.mission === 'build')
+  /*
+    The chat's state is the shell's, remembered by Session: leaving a Session and coming back to
+    it finds the chat as it was left (lot 5c, issue #115). A Session nobody has touched opens on
+    its mission's own default — a build's chat is minimised and every other mission's is open —
+    and the panel is given the width it takes from the row in the same breath.
+  */
+  const shell = useSyncExternalStore(subscribeToShell, shellState, shellState)
+  const remembered = shell.chatMinimised[session.id]
+  const chatMinimised = remembered ?? session.mission === 'build'
+  const minimiseChat = (minimised: boolean): void => setChatMinimised(session.id, minimised)
   // Which task the banner above the composer opened, on the build view's stage: the banner and
   // the view are two readings of one build, and the head's own choice answers to the same state.
   const [openBuildTask, setOpenBuildTask] = useState<string | undefined>(undefined)
@@ -878,7 +887,7 @@ export function SessionPage({
             </>
           }
           chatOpen={!chatMinimised}
-          onChatOpenChange={(open) => setChatMinimised(!open)}
+          onChatOpenChange={(open) => minimiseChat(!open)}
           chatState={chatStateOf(activity)}
           chatDetail={activity?.detail}
         />
@@ -925,7 +934,7 @@ export function SessionPage({
         }
         panel={missionPanel}
         chatOpen={!chatMinimised}
-        onChatOpenChange={(open) => setChatMinimised(!open)}
+        onChatOpenChange={(open) => minimiseChat(!open)}
         chatState={chatStateOf(activity)}
         chatDetail={activity?.detail}
       />
