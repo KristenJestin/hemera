@@ -429,7 +429,7 @@ export const TOOL_ARGUMENTS = {
       .string()
       .max(SPEC_PAGE_CHARACTERS)
       .optional()
-      .describe('what you did, in a few lines, kept with the attempt'),
+      .describe("what you did, in a few lines, written in the Journal beside the task's line"),
   }),
   task_blocked: z.object({
     task: z.string().min(1).describe('the task that contradicts the Spec, by its label: T3'),

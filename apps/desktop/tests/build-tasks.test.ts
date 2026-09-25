@@ -15,6 +15,7 @@ import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { Builds } from '#engine/build/build.ts'
+import { TOOL_ARGUMENTS } from '#engine/tools/arguments.ts'
 
 import { held } from './application.ts'
 import {
@@ -429,5 +430,37 @@ describe('The agent signals only about the tasks it was handed', () => {
     expect(read?.isError).toBe(false)
     expect(read?.text).toContain('# T1 · Write the exporter')
     expect(read?.text).toContain('## Attempt 1')
+  })
+})
+
+describe('What the agent says it did goes to the Journal', () => {
+  test('the summary of task_finished is on its Journal line, as the tool says', async () => {
+    const { agent } = buildAgent({
+      execute: (labels) =>
+        labels.includes('T1')
+          ? [
+              {
+                does: 'uses',
+                call: 'task_finished',
+                arguments: { task: 'T1', summary: 'Streams the rows' },
+              },
+            ]
+          : [],
+    })
+    opened = await openWindow(dataFolder, agent)
+    const lines = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(sessionId), (view) => view.tasks[0]?.state === 'done')
+        return yield* journalOf(sessionId)
+      }),
+    )
+    const said = lines.find((line) => line.type === 'task.finished')
+    expect(JSON.parse(said?.payload ?? '{}')).toMatchObject({
+      label: 'T1',
+      summary: 'Streams the rows',
+    })
+    expect(TOOL_ARGUMENTS.task_finished.shape.summary.description).toContain('Journal')
   })
 })
