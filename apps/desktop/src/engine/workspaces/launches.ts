@@ -34,6 +34,7 @@ import { Context, Data, Effect, Layer, Result } from 'effect'
 
 import { AgentRuntime } from '../agents/runtime.ts'
 import { Builds } from '../build/build.ts'
+import { slotHolder } from '../build/tasks.ts'
 import { type InvalidCursorError, type NewEvent } from '../journal.ts'
 import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
@@ -578,6 +579,16 @@ export const launchesLayer = Layer.effect(
                 // wait for nothing, so it is refused as a Session's own check refuses it.
                 if (state === undefined || state === 'cleaned' || state === 'failed') {
                   return yield* Effect.fail(new WorkspaceNotReadyError(chosen.name, chosen.state))
+                }
+                // Read again in the transaction that writes the launch: two requests at once never
+                // both find the Spec's one build free (L10).
+                const held = yield* slotHolder(transaction, specId)
+                if (held !== null) {
+                  return yield* Effect.fail(
+                    new LaunchRefusedError({
+                      reason: `“${snapshot.spec.key}” already has a build: ${held}.`,
+                    }),
+                  )
                 }
                 const id = crypto.randomUUID()
                 const at = now()

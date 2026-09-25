@@ -29,17 +29,18 @@ import {
   storyDone,
   tasksSettled,
 } from '@hemera/core'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
 import { Effect } from 'effect'
 
 import type { EventAuthor, NewEvent } from '../journal.ts'
-import { DatabaseError, type EngineTransaction } from '../storage/database.ts'
+import { DatabaseError, type EngineDatabase, type EngineTransaction } from '../storage/database.ts'
 import {
   buildAttemptFiles,
   buildAttemptTrees,
   buildAttempts,
   buildBlockers,
   buildCheckResults,
+  buildLaunches,
   buildTasks,
   contextDeliveries,
   sessions,
@@ -487,4 +488,50 @@ export function changesFor(rows: BuildRows, attempt: AttemptRow) {
       : null
   const tasks = rows.tasks.filter((task) => covering === null || covering.has(task.taskId))
   return changesOf(rows, lastAttemptsOf(rows, tasks))
+}
+
+/**
+ * Why a Spec already has its one build, in words a refusal ends with, or null when it has none
+ * (L10): a build that is not stopped — paused, verifying or accepted included — or a launch that
+ * waits or starts. Read where the caller reads, so a launch reads it in the transaction that writes
+ * it: two requests at once never both find the slot free.
+ */
+export function slotHolder(reader: EngineDatabase | EngineTransaction, specId: string) {
+  return Effect.gen(function* () {
+    const builds = yield* reader
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.specId, specId),
+          eq(sessions.mission, 'build'),
+          isNotNull(sessions.buildPhase),
+          ne(sessions.buildPhase, 'stopped'),
+        ),
+      )
+      .orderBy(asc(sessions.createdAt))
+      .pipe(Effect.mapError(failed('reading the builds of the Spec')))
+    const holding = builds[0]
+    if (holding !== undefined) {
+      const phase = phaseOf(holding)
+      if (holding.buildPausedAt !== null) return 'it is paused'
+      if (phase === 'prepare') return 'it is getting ready'
+      if (phase === 'execute') return 'it is building'
+      if (phase === 'verify') return 'it is in its final checks'
+      return 'it was accepted'
+    }
+    const launches = yield* reader
+      .select({ state: buildLaunches.state })
+      .from(buildLaunches)
+      .where(
+        and(
+          eq(buildLaunches.specId, specId),
+          inArray(buildLaunches.state, ['waiting', 'starting']),
+        ),
+      )
+      .pipe(Effect.mapError(failed('reading the launches of the Spec')))
+    const launch = launches[0]
+    if (launch === undefined) return null
+    return launch.state === 'waiting' ? 'it waits for its Workspace' : 'it is starting'
+  })
 }

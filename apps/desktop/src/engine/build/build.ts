@@ -52,7 +52,6 @@ import {
   buildAttempts,
   buildBlockers,
   buildCheckResults,
-  buildLaunches,
   buildTasks,
   sessionEntries,
   sessions,
@@ -82,6 +81,7 @@ import {
   phaseOf,
   readBuild,
   resultOf,
+  slotHolder,
   scopeOf,
   specTaskOf,
   stateOf,
@@ -1366,17 +1366,13 @@ export const buildsLayer = Layer.effect(
             )
             .orderBy(asc(sessions.createdAt))
             .pipe(Effect.mapError(failed('reading the builds of the Spec')))
-          let holding: (typeof builds)[number] | null = null
           for (const build of builds) {
             const phase = phaseOf(build)
             const obsolete =
               phase !== null &&
               ACTIVE.includes(phase) &&
               build.revisionId !== (spec[0]?.currentRevisionId ?? build.revisionId)
-            if (!obsolete) {
-              holding ??= build
-              continue
-            }
+            if (!obsolete) continue
             // A build whose revision the Spec left can never begin (L3): stopped, it frees the
             // slot, and it stays readable.
             yield* withDatabase(
@@ -1397,27 +1393,7 @@ export const buildsLayer = Layer.effect(
             yield* stopTurn(build.id)
             yield* told(build.id)
           }
-          if (holding !== null) {
-            const phase = phaseOf(holding)
-            if (holding.buildPausedAt !== null) return 'it is paused'
-            if (phase === 'prepare') return 'it is getting ready'
-            if (phase === 'execute') return 'it is building'
-            if (phase === 'verify') return 'it is in its final checks'
-            return 'it was accepted'
-          }
-          const launches = yield* database
-            .select({ state: buildLaunches.state })
-            .from(buildLaunches)
-            .where(
-              and(
-                eq(buildLaunches.specId, specId),
-                inArray(buildLaunches.state, ['waiting', 'starting']),
-              ),
-            )
-            .pipe(Effect.mapError(failed('reading the launches of the Spec')))
-          const launch = launches[0]
-          if (launch === undefined) return null
-          return launch.state === 'waiting' ? 'it waits for its Workspace' : 'it is starting'
+          return yield* slotHolder(database, specId)
         }),
 
       wake,

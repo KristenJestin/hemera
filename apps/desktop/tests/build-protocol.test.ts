@@ -413,6 +413,28 @@ describe('One build per Spec', () => {
     expect(seen.paused.message).toBe(`“${seen.key}” already has a build: it is paused.`)
   })
 
+  test('two builds of the same Spec asked for at once: one is started, the other refused', async () => {
+    const { agent } = buildAgent({ execute: () => [] })
+    opened = await openWindow(dataFolder, agent, buildAgent().agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const launches = yield* Launches
+        const asked = yield* Effect.all(
+          [
+            Effect.result(launches.request(spec.specId, spec.workspaceId)),
+            Effect.result(launches.request(spec.specId, spec.workspaceId)),
+          ],
+          { concurrency: 'unbounded' },
+        )
+        return { key: spec.key, asked }
+      }),
+    )
+    expect(seen.asked.filter(Result.isSuccess)).toHaveLength(1)
+    const [refused] = seen.asked.filter(Result.isFailure)
+    expect(refused?.failure.message).toMatch(new RegExp(`^“${seen.key}” already has a build: it`))
+  })
+
   test('the obsolete build — reworked before its first task — is stopped and stays readable', async () => {
     const { agent } = buildAgent({ execute: () => [] })
     opened = await openWindow(dataFolder, agent)
