@@ -62,6 +62,7 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { Launches } from './launches.ts'
 import { Variables } from './variables.ts'
 import { UnknownWorkspaceError } from './described.ts'
 import {
@@ -280,11 +281,12 @@ function replaced(steps: readonly WorkspaceStep[], changed: WorkspaceStep): Work
 /**
  * What the engine does once at its start, the database open and nothing yet running: the runs an
  * engine that stopped left `running` are ended, then its steps left `running` wait for a resume
- * (D8-05, D6-12).
+ * (D8-05, D6-12), and the launches it left part-way are ended or started (D8-13).
  */
 export const recovered = Effect.gen(function* () {
   yield* (yield* Commands).recover()
   yield* (yield* Preparation).recover()
+  yield* (yield* Launches).recover()
 })
 
 export const preparationLayer = Layer.effect(
@@ -295,6 +297,7 @@ export const preparationLayer = Layer.effect(
     const links = yield* Links
     const variables = yield* Variables
     const workspacesService = yield* Workspaces
+    const launches = yield* Launches
     const commands = yield* Commands
     /** The engine's diagnostic log: where a preparation begun in the background says it failed. */
     const diagnostic = yield* StderrSink
@@ -598,7 +601,27 @@ export const preparationLayer = Layer.effect(
             return { result: state, events: [...events, ...ready] }
           }),
         ),
-      ).pipe(Effect.tap(() => told(place.workspace)))
+      ).pipe(
+        Effect.tap(() => told(place.workspace)),
+        // A Workspace that has just become ready is what a launch was waiting for: the build
+        // starts from there (D8-13 of #20). Nobody waits on it — the launch says on itself what
+        // refused it — so it is forked, and this one failure goes to the diagnostic.
+        Effect.tap((state) =>
+          state === 'ready' && stored !== 'ready'
+            ? Effect.forkIn(scope)(
+                launches
+                  .workspaceReady(place.workspace.id)
+                  .pipe(
+                    Effect.catch((refused) =>
+                      diagnostic.write(
+                        `starting what waited on the Workspace ${place.workspace.id} failed: ${refused.message}`,
+                      ),
+                    ),
+                  ),
+              )
+            : Effect.void,
+        ),
+      )
 
     /**
      * Runs the pending steps in order until none is left or one fails. `again` names the steps

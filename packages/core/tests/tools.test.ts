@@ -28,11 +28,13 @@ describe('Every tool has a label and a mark', () => {
 })
 
 describe('A mission is offered its own tools', () => {
-  test('a free Session is offered the code tools and spec_propose alone, a build one none', () => {
+  test('a free Session is offered the code tools and spec_propose alone, a build one the same', () => {
     expect(offeredTools('free')).toEqual(
       TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write'].includes(tool)),
     )
-    expect(offeredTools('build')).toEqual([])
+    // A build Session is offered what a `free` one is, until its own set is written: an agent
+    // with no tool at all is not a build.
+    expect(offeredTools('build')).toEqual(offeredTools('free'))
   })
 })
 

@@ -25,6 +25,7 @@ import { Commands, commandsLayer } from '#engine/commands/service.ts'
 import { type Git, gitLayer } from '#engine/git.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
+import { Launches } from '#engine/workspaces/launches.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { type Database, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
@@ -72,6 +73,18 @@ export function workspaceEngine(
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
+  /**
+   * The launches, left out of this harness: a Workspace that becomes ready hands a build over to
+   * them, and nothing in this folder's suites asks for one.
+   */
+  const launches = Layer.succeed(Launches, {
+    one: () => Effect.die('this harness has no launch to read'),
+    request: () => Effect.die('this harness starts no build'),
+    retry: () => Effect.die('this harness starts no build'),
+    workspaceReady: () => Effect.void,
+    // Nothing here ever asked for a build, so there is nothing to come back to.
+    recover: () => Effect.void,
+  })
   const services: Layer.Layer<WorkspaceEngine> = preparationLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
     Layer.provide(links),
@@ -86,6 +99,7 @@ export function workspaceEngine(
     ),
     Layer.provide(processes),
     Layer.provide(sink),
+    Layer.provide(launches),
     Layer.provide(heldWordsLayer),
     Layer.provide(notices),
   )
@@ -101,7 +115,8 @@ export function workspaceEngine(
             return yield* program
           }),
         ),
-        services,
+        // The launches answer nothing here, but the engine's recovery pass asks them too (D8-13).
+        Layer.mergeAll(services, launches),
       ),
     )
 }
