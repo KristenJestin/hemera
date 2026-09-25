@@ -3,6 +3,7 @@
 import type { DisplayPreferences, EngineEvent } from '@hemera/ipc'
 import { ENGINE_EVENT_CHANNEL } from '@hemera/ipc'
 import { type BrowserWindow, dialog } from 'electron/main'
+import type { OpenDialogOptions } from 'electron'
 import { shell } from 'electron/common'
 import { join } from 'node:path'
 
@@ -105,14 +106,20 @@ export function registerChannels(
    * is picking, and a window that says File while greying out every file is a window the user
    * reads twice. `createDirectory` because the folder of a Workspace is often one that does not
    * exist yet — which is the whole reason the field accepts a path nothing is at.
+   *
+   * It opens on the folder the page says the user is working in, when it says one: a command's
+   * picker starts where that command runs from. A page that says nothing gets the system's own
+   * last place, which is where a picker left to itself opens.
    */
-  handle('dialog.pickFolder', () =>
+  handle('dialog.pickFolder', ({ start }) =>
     Effect.promise(async () => {
-      const chosen = await dialog.showOpenDialog(window, {
+      const options: OpenDialogOptions = {
         title: 'Choose a folder',
         buttonLabel: 'Choose',
         properties: ['openDirectory', 'createDirectory'],
-      })
+      }
+      if (start !== undefined) options.defaultPath = start
+      const chosen = await dialog.showOpenDialog(window, options)
       return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
     }),
   )

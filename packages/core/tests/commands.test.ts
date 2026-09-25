@@ -138,28 +138,19 @@ describe("A command's folder resolves under its base", () => {
   })
 })
 
-describe('A Portless command is named by its Project, suffixed in a dedicated Workspace', () => {
-  const named = (name: string | null, workspaceName: string, dedicated: boolean) =>
-    portlessNameFor({ name, projectName: 'Atlas Café', workspaceName, dedicated })
+describe('A Portless command is named by its Project, or by its own name', () => {
+  const named = (name: string | null) => portlessNameFor({ name, projectName: 'Atlas Café' })
 
-  test("main and a folder the user picked run under the Project's name as a slug", () => {
-    expect(named(null, 'main', false)).toBe('atlas-cafe')
-    expect(named(null, 'spike', false)).toBe('atlas-cafe')
+  test("a command with no name of its own runs under the Project's name as a slug", () => {
+    expect(named(null)).toBe('atlas-cafe')
   })
 
-  test('a dedicated Workspace adds its own name, so two instances never clash', () => {
-    expect(named(null, 'Login Form', true)).toBe('atlas-cafe-login-form')
-  })
-
-  test("a name of the command's own takes the Project's place, and keeps the suffix", () => {
-    expect(named('api', 'main', false)).toBe('api')
-    expect(named('api', 'login-form', true)).toBe('api-login-form')
+  test("a name of the command's own takes the Project's place", () => {
+    expect(named('api')).toBe('api')
   })
 
   test('a Project whose name makes no slug still has a name', () => {
-    expect(
-      portlessNameFor({ name: null, projectName: '日本', workspaceName: 'main', dedicated: false }),
-    ).toBe('hemera')
+    expect(portlessNameFor({ name: null, projectName: '日本' })).toBe('hemera')
   })
 
   test('a name of its own is one word, and a blank one is none', () => {

@@ -462,32 +462,68 @@ export const preparationLayer = Layer.effect(
       })
 
     /**
-     * A command of the catalogue, run in the Workspace until it ends (D8-05).
+     * A command of the catalogue, or the line the step carries itself (recette 2), run in the
+     * Workspace until it ends (D8-05).
      *
      * A real run with no Session (Decided 11): the Commands service runs the machine's line of
-     * the command in its folder under the Workspace, with the variables Hemera gives there
+     * the command — or the step's own line, on the machine it was prepared for — in its folder
+     * under the Workspace, with the variables Hemera gives there
      * (D8-06, D8-07), and keeps its output and exit code on its row. The step writes the run's
      * identifier as soon as it has one, so the step running points at the run printing, then
      * waits for it however long it takes: a step waits for its command.
      */
     const run = (place: Place, step: WorkspaceStep) =>
       Effect.gen(function* () {
-        const rows = yield* database
-          .select()
-          .from(projectCommands)
-          .where(eq(projectCommands.id, step.commandId ?? ''))
-          .pipe(Effect.mapError(failed('reading the commands')))
+        const rows =
+          step.commandId === null
+            ? []
+            : yield* database
+                .select()
+                .from(projectCommands)
+                .where(eq(projectCommands.id, step.commandId))
+                .pipe(Effect.mapError(failed('reading the commands')))
         const command = rows[0]
-        if (command === undefined) {
+        if (step.commandId !== null && command === undefined) {
           return {
             state: 'failed',
             message: `the command ${step.target} is no longer in the catalogue`,
           } satisfies Outcome
         }
+        // What it runs: a command of the catalogue, or the line the step carries itself (recette 2)
+        // — which is not in the catalogue and that no agent reads. A line of its own is named after
+        // its first word, as an ad-hoc line run by an agent is, and is a script.
+        const runs =
+          command === undefined
+            ? {
+                commandId: null,
+                name: step.target.split(/\s+/)[0] ?? 'command',
+                line: step.target,
+                lineWindows: null,
+                lineLinux: null,
+                type: 'script' as const,
+                scope: 'workspace' as const,
+                portless: false,
+                portlessName: null,
+                folderBase: step.base,
+                folder: step.path,
+              }
+            : {
+                commandId: command.id,
+                name: command.name,
+                line: command.line,
+                lineWindows: command.lineWindows,
+                lineLinux: command.lineLinux,
+                type: commandType(command.type),
+                scope: commandScope(command.scope),
+                portless: command.portless === 1,
+                portlessName: command.portlessName,
+                folderBase: command.folderBase,
+                folder: command.folder,
+              }
         const { projectId, id: workspaceId } = place.workspace
         // Its folder under its base, under this Workspace (D8-07 as amended by recette 1); one
         // that climbs out fails the step, naming it, and nothing runs.
-        const where = yield* commandCwd(place.workspace.path, command).pipe(Effect.result)
+        const where = yield* commandCwd(place.workspace.path, runs).pipe(Effect.result)
         if (Result.isFailure(where)) {
           return { state: 'failed', message: where.failure.message } satisfies Outcome
         }
@@ -495,15 +531,15 @@ export const preparationLayer = Layer.effect(
         const started = yield* commands.run({
           sessionId: null,
           projectId,
-          commandId: command.id,
-          name: command.name,
-          line: command.line,
-          lineWindows: command.lineWindows,
-          lineLinux: command.lineLinux,
-          type: commandType(command.type),
-          scope: commandScope(command.scope),
-          portless: command.portless === 1,
-          portlessName: command.portlessName,
+          commandId: runs.commandId,
+          name: runs.name,
+          line: runs.line,
+          lineWindows: runs.lineWindows,
+          lineLinux: runs.lineLinux,
+          type: runs.type,
+          scope: runs.scope,
+          portless: runs.portless,
+          portlessName: runs.portlessName,
           folder,
           cwd,
           workspaceId,

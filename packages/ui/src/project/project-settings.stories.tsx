@@ -250,9 +250,36 @@ const WORKSPACES = <HeldWorkspaces />
 
 /** The recipe of Atlas: the api's `.env` copied, `CLAUDE.md` linked at the root, `env` run. */
 const RECIPE: RecipeStepLine[] = [
-  { id: 'copy-env', kind: 'copy', base: './sources/api', path: '.env', commandId: null },
-  { id: 'link-claude', kind: 'link', base: null, path: 'CLAUDE.md', commandId: null },
-  { id: 'run-env', kind: 'run', base: null, path: null, commandId: 'env' },
+  {
+    id: 'copy-env',
+    kind: 'copy',
+    base: './sources/api',
+    path: '.env',
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
+  {
+    id: 'link-claude',
+    kind: 'link',
+    base: null,
+    path: 'CLAUDE.md',
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
+  {
+    id: 'run-env',
+    kind: 'run',
+    base: null,
+    path: null,
+    commandId: 'env',
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
 ]
 
 /**
@@ -765,8 +792,9 @@ export const NoRepositoryDeclared: Story = {
 }
 
 /**
- * Commands: each row its name, its line, and its badges together at its end (scenario
- * « Catalogue du projet » of `specs/agent-tools/spec.md`); the pencil opens its dialog.
+ * Commands: each row the icon of its type, its name and its line, and its address when it goes
+ * through Portless — nothing else (recette 2 of lot 20; scenario « Catalogue du projet » of
+ * `specs/agent-tools/spec.md`); the pencil opens its dialog.
  */
 export const Commands: Story = {
   args: { defaultSection: 'commands' },
@@ -774,17 +802,25 @@ export const Commands: Story = {
     args.onUpdateCommand?.mockClear()
     const panel = panelOf(canvasElement)
     const auth = rowOf(canvasElement, 'pnpm auth:serve')
-    await expect(auth.getByText('Serve')).toBeVisible()
-    await expect(auth.getByText('Project, in main')).toBeVisible()
-    await expect(auth.getByText('Portless')).toBeVisible()
-    await expect(auth.getByText('api')).toBeVisible()
-    await expect(rowOf(canvasElement, 'pnpm check').getByText('Workspace root')).toBeVisible()
+    await expect(auth.getByText('auth')).toBeVisible()
+    await expect(auth.getByText('https://atlas.localhost')).toBeVisible()
+    // Seven commands, and each row its mark: its own type, then the two buttons it carries.
+    const rows = canvasElement.querySelectorAll('ul[aria-label="Commands"] > li')
+    await expect(rows).toHaveLength(COMMANDS.length)
+    const authRow = panel.getByText('pnpm auth:serve').closest('li')!
+    await expect(authRow.querySelectorAll('svg')).toHaveLength(3)
+    // The scope, the folder and the four badges the row used to carry are the dialog's now.
+    await expect(panel.queryByText('Serve')).toBeNull()
+    await expect(panel.queryByText('Project, in main')).toBeNull()
+    await expect(panel.queryByText('Portless')).toBeNull()
+    await expect(panel.queryByText('api')).toBeNull()
+    await expect(panel.queryByText('Workspace root')).toBeNull()
     // The line of another system is the dialog's, not the row's.
     await expect(panel.queryByText('scripts\\seed.cmd')).toBeNull()
 
     await userEvent.click(panel.getByRole('button', { name: 'Edit dev' }))
     const inside = dialog()
-    const line = inside.getByRole('textbox', { name: 'Default line' })
+    const line = inside.getByRole('textbox', { name: 'Line' })
     await userEvent.clear(line)
     await userEvent.type(line, 'pnpm dev --host')
     await userEvent.click(inside.getByRole('button', { name: 'Save' }))
@@ -813,12 +849,12 @@ export const ACommandIsAdded: Story = {
     await userEvent.click(panelOf(canvasElement).getByRole('button', { name: 'Add command' }))
     const inside = dialog()
     await userEvent.type(inside.getByRole('textbox', { name: 'Name' }), 'check')
-    await userEvent.type(inside.getByRole('textbox', { name: 'Default line' }), 'pnpm check')
+    await userEvent.type(inside.getByRole('textbox', { name: 'Line' }), 'pnpm check')
     await userEvent.click(inside.getByRole('button', { name: 'Add command' }))
     await waitFor(() => {
       expect(inside.getByRole('alert')).toHaveTextContent('already declared')
     })
-    await expect(inside.getByRole('textbox', { name: 'Default line' })).toHaveValue('pnpm check')
+    await expect(inside.getByRole('textbox', { name: 'Line' })).toHaveValue('pnpm check')
     await waitFor(() => {
       expect(inside.getByRole('button', { name: 'Add command' })).toHaveStyle({ opacity: '1' })
     })

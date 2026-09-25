@@ -13,6 +13,7 @@
  * before it carries on, and never reruns a command that already ran.
  */
 
+import { lineFor } from './lines.ts'
 import { MAIN_WORKSPACE } from './project.ts'
 
 /** Where a Workspace stands: being prepared, ready to work in, stopped by a step, or cleaned. */
@@ -44,13 +45,16 @@ export const RECIPE_KINDS = ['copy', 'link', 'run'] as const
 export type RecipeKind = (typeof RECIPE_KINDS)[number]
 
 /**
- * One step of a Project's recipe (D8-05 as amended by recette 1).
+ * One step of a Project's recipe (D8-05 as amended by recette 1 and by recette 2).
  *
- * `base` is where a copy or a link applies: one of the Project's repositories as the Project
- * declares it, or null for the Workspace root — several repositories are several steps. `path` is
- * relative to that base, a file or a folder, for a copy and a link, and null for a run;
- * `commandId` is the catalogue command a run starts, and null otherwise. `rank` orders the recipe
- * as a repository's rank orders the repositories.
+ * `base` is where a copy or a link applies, and where a run of a line of its own runs from: one of
+ * the Project's repositories as the Project declares it, or null for the Workspace root — several
+ * repositories are several steps. `path` is relative to that base: a file or a folder for a copy
+ * and a link, the folder a run of a line of its own starts in for such a run, and null otherwise.
+ * `commandId` is the catalogue command a run starts, and null for a copy, a link, and a run of a
+ * line of its own — which carries `line`, `lineWindows` and `lineLinux` instead, written exactly
+ * as a catalogue command's are (recette 2). `rank` orders the recipe as a repository's rank orders
+ * the repositories.
  */
 export interface RecipeStep {
   readonly id: string
@@ -58,6 +62,12 @@ export interface RecipeStep {
   readonly base: string | null
   readonly path: string | null
   readonly commandId: string | null
+  /** The line a run of a line of its own runs on every system, without a variant of its own. */
+  readonly line: string | null
+  /** The line Windows runs instead, when the step says one; null when it carries one line. */
+  readonly lineWindows: string | null
+  /** The line Linux runs instead, macOS running `line` with every other system (D8-07). */
+  readonly lineLinux: string | null
   readonly rank: string
 }
 
@@ -71,12 +81,20 @@ export interface WorkspaceStep {
   readonly position: number
   readonly kind: StepKind
   /**
-   * The relative path of the worktree, the recipe's path relative to its base, or the name of the
-   * command it runs.
+   * The relative path of the worktree, the recipe's path relative to its base, the name of the
+   * command it runs, or the line a run of a line of its own runs on this system.
    */
   readonly target: string
-  /** The repository a copy or a link applies under, and null for the root, a worktree or a run. */
+  /**
+   * The repository a copy, a link or a run of a line of its own applies under, and null for the
+   * root and a worktree.
+   */
   readonly base: string | null
+  /**
+   * The folder a run of a line of its own starts in, relative to its base, and null for every
+   * other step — a copy's and a link's path is read from their `target` (recette 2).
+   */
+  readonly path: string | null
   readonly commandId: string | null
   readonly state: StepState
   /** What refused it, as it was said — Git's own words, the system's — and null otherwise. */
@@ -152,27 +170,46 @@ export function branchNameFor(prefix: string, key: string | null, slug: string):
  * The steps a Workspace is prepared with (D8-05): one worktree per included repository, in the
  * repositories' order, then the Project's recipe in its order, every one of them `pending`.
  *
- * A run step's target is the name of its command, so the list reads as the user wrote it; a
- * command gone from the catalogue since leaves its step with an empty name, and the engine is
- * the one that refuses to run it.
+ * A run step's target is the name of its command, so the list reads as the user wrote it; a run of
+ * a line of its own targets the line this system runs, which is what it will run. A command gone
+ * from the catalogue since leaves its step with an empty name, and the engine is the one that
+ * refuses to run it.
  */
 export function stepsFor(
   worktrees: readonly string[],
   recipe: readonly RecipeStep[],
   commandNames: ReadonlyMap<string, string>,
+  platform: string,
 ): Omit<WorkspaceStep, 'id'>[] {
-  const targets: Pick<WorkspaceStep, 'kind' | 'target' | 'base' | 'commandId'>[] = [
+  const targets: Pick<WorkspaceStep, 'kind' | 'target' | 'base' | 'path' | 'commandId'>[] = [
     ...worktrees.map((path) => ({
       kind: 'worktree' as const,
       target: path,
       base: null,
+      path: null,
       commandId: null,
     })),
     ...recipe.map((step) => ({
       kind: step.kind,
       target:
-        step.kind === 'run' ? (commandNames.get(step.commandId ?? '') ?? '') : (step.path ?? ''),
-      base: step.kind === 'run' ? null : step.base,
+        step.kind === 'run'
+          ? step.commandId === null
+            ? // A run carries a line of its own or names a command, never neither: a row without a
+              // line is one the checks closed, and its step targets nothing.
+              lineFor(
+                {
+                  line: step.line ?? '',
+                  lineWindows: step.lineWindows,
+                  lineLinux: step.lineLinux,
+                },
+                platform,
+              )
+            : (commandNames.get(step.commandId) ?? '')
+          : (step.path ?? ''),
+      base: step.base,
+      // Only a run of a line of its own keeps its folder apart from its target, which is that
+      // line; a copy's and a link's path is its target (recette 2).
+      path: step.kind === 'run' && step.commandId === null ? step.path : null,
       commandId: step.commandId,
     })),
   ]
@@ -181,6 +218,7 @@ export function stepsFor(
     kind: step.kind,
     target: step.target,
     base: step.base,
+    path: step.path,
     commandId: step.commandId,
     state: 'pending',
     message: null,

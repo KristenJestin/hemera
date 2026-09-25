@@ -77,16 +77,22 @@ const PLAN: PlanRepositoryLine[] = [
   {
     path: './sources/api',
     holdsRepository: true,
-    base: '4f2c9a1',
+    branches: ['main', 'dev'],
+    base: 'main',
+    detachedCommit: null,
     branch: 'atlas/',
     included: true,
+    reason: null,
   },
   {
     path: './sources/web',
     holdsRepository: true,
-    base: '9b8a7c6',
+    branches: ['main'],
+    base: 'main',
+    detachedCommit: null,
     branch: 'atlas/',
     included: true,
+    reason: null,
   },
 ]
 
@@ -221,7 +227,7 @@ function Held({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/WorkspaceList',
   component: WorkspaceList,
   render: (args) => <Held {...args} />,

@@ -24,6 +24,8 @@ import { Effect } from 'effect'
 
 import { InvalidRepositoryPathError } from '@hemera/core'
 import { Commands } from '#engine/commands/service.ts'
+import { GitError, gitLayer, spawnGit } from '#engine/git.ts'
+import type { GitSpawn } from '#engine/git.ts'
 import { Projects } from '#engine/projects.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Preparation } from '#engine/workspaces/preparation.ts'
@@ -45,11 +47,16 @@ beforeEach(() => {
   // of a short name under a Windows runner — so the fixture is settled the same way before use.
   folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-workspaces-')))
   main = atlasMain(folder)
-})
+  // Two repositories are four `git` processes, and a Windows runner that has just been created
+  // starts each one in seconds where a warm machine takes one. The timeout is this suite's own
+  // rather than the ten a hook is given by default, and nothing here spends it (#99).
+}, 60_000)
 
 afterEach(() => {
-  rmSync(folder, { recursive: true, force: true })
-})
+  // A worktree and a service stopped by tree are handed back a beat late on Windows, which
+  // refuses the first attempt with EPERM, as agent-tools.test.ts says.
+  rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 const API = './sources/api'
 const FRONT = './sources/front'
@@ -100,7 +107,7 @@ const prepared = (projectId: string) =>
   })
 
 describe('A dedicated Workspace assembles one worktree per repository', () => {
-  it('proposes each local HEAD and the branch of the prefix, and writes the Workspace preparing', async () => {
+  it('proposes the branches of each repository and the branch of the prefix, and writes the Workspace preparing', async () => {
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
         const projects = yield* Projects
@@ -121,16 +128,24 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
       {
         relativePath: API,
         holdsRepository: true,
-        base: git(join(main, 'sources', 'api'), 'rev-parse', 'HEAD'),
+        // The branch it is checked out on, out of the branches it has here: a branch name as the
+        // base, and never the sha it points at (D8-04).
+        branches: ['main'],
+        base: 'main',
+        detachedCommit: null,
         branch: 'atlas/HEM-7-login-form',
         included: true,
+        reason: null,
       },
       {
         relativePath: FRONT,
         holdsRepository: true,
-        base: git(join(main, 'sources', 'front'), 'rev-parse', 'HEAD'),
+        branches: ['main'],
+        base: 'main',
+        detachedCommit: null,
         branch: 'atlas/HEM-7-login-form',
         included: true,
+        reason: null,
       },
     ])
     expect(seen.plan.path).toBe(join(seen.plan.root, 'login-form'))
@@ -191,6 +206,9 @@ describe('A dedicated Workspace is made from the Project settings, with no Spec'
           base: API,
           path: '.env',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const plan = yield* workspaces.plan(project.id, null, 'spike')
         const workspace = yield* workspaces.create(project.id, {
@@ -223,6 +241,146 @@ describe('A dedicated Workspace is made from the Project settings, with no Spec'
     expect(readFileSync(join(seen.ready.path, 'sources', 'api', '.env'), 'utf8')).toBe(
       'PORT=3000\n',
     )
+  })
+})
+
+describe('A repository on no branch proposes the commit it is on', () => {
+  it('names the commit as the base, beside its short hash, and lists the branches it has', async () => {
+    const api = join(main, 'sources', 'api')
+    git(api, 'branch', 'release')
+    git(api, 'checkout', '--detach')
+    const plan = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API])
+        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+      }),
+    )
+
+    // A hash is read where no branch name can stand for it: the commit it is on, said as such,
+    // its short form as the hint the dialog shows, and the branches still there to choose instead.
+    expect(plan.repositories[0]).toMatchObject({
+      relativePath: API,
+      holdsRepository: true,
+      branches: ['main', 'release'],
+      base: git(api, 'rev-parse', 'HEAD'),
+      detachedCommit: git(api, 'rev-parse', '--short', 'HEAD'),
+      included: true,
+    })
+  })
+
+  it('proposes nothing to start from in a repository with no commit yet', async () => {
+    const tools = join(main, 'sources', 'tools')
+    mkdirSync(tools, { recursive: true })
+    git(tools, 'init', '-q', '-b', 'main')
+    const plan = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, './sources/tools'])
+        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+      }),
+    )
+
+    expect(plan.repositories[1]).toMatchObject({
+      relativePath: './sources/tools',
+      holdsRepository: true,
+      branches: [],
+      base: null,
+      detachedCommit: null,
+      included: false,
+      // Nothing was refused: a repository with no commit yet is not a repository to report.
+      reason: null,
+    })
+  })
+})
+
+describe('A repository whose head fails once is still in the plan', () => {
+  it('reads it again, and proposes it as it is, with nothing to report', async () => {
+    // A machine at work: the first read of one repository's head fails, and the second answers.
+    // The repositories are Git's own and the read that fails is a read of Git itself, so the plan
+    // survives the whole of the service, nothing of it taken on trust (D8-04, #102).
+    let reads = 0
+    const once: GitSpawn = (program, cwd, args, limit) => {
+      if (!cwd.endsWith(join('sources', 'api')) || !args.includes('--abbrev-ref')) {
+        return spawnGit(program, cwd, args, limit)
+      }
+      reads += 1
+      return reads === 1
+        ? Effect.fail(
+            new GitError({
+              args,
+              cwd,
+              stderr: 'fatal: a moment of it, and no more',
+            }),
+          )
+        : spawnGit(program, cwd, args, limit)
+    }
+
+    const plan = await workspaceEngine(
+      folder,
+      undefined,
+      undefined,
+      undefined,
+      gitLayer('git', once),
+    )(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+      }),
+    )
+
+    // It was read twice — the refusal, then the answer — and proposed as it is.
+    expect(reads).toBe(2)
+    expect(plan.repositories[0]).toMatchObject({
+      relativePath: API,
+      holdsRepository: true,
+      branches: ['main'],
+      base: 'main',
+      detachedCommit: null,
+      included: true,
+      reason: null,
+    })
+  })
+})
+
+describe('A repository Git keeps refusing is shown with its reason, not ticked', () => {
+  it('keeps it in the plan with the words Git wrote, and makes no worktree of it', async () => {
+    const billing = join(main, 'sources', 'billing')
+    mkdirSync(billing, { recursive: true })
+    // A `.git` Git cannot make anything of, refused every time it is asked.
+    writeFileSync(join(billing, '.git'), 'gitdir: /nowhere/billing\n')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, './sources/billing'])
+        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const workspace = yield* created(project.id)
+        return { plan, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    const billingRow = seen.plan.repositories[1]!
+    expect(billingRow).toMatchObject({
+      relativePath: './sources/billing',
+      holdsRepository: false,
+      branches: [],
+      base: null,
+      detachedCommit: null,
+      included: false,
+    })
+    // What Git said, in the plan's own words, where a location without a repository says nothing.
+    expect(billingRow.reason).toMatch(/^Git could not read this repository: fatal: /)
+    expect(seen.steps).toEqual([
+      { kind: 'worktree', target: API, state: 'pending', message: null },
+      {
+        kind: 'worktree',
+        target: './sources/billing',
+        state: 'skipped',
+        message: './sources/billing holds no repository in main',
+      },
+    ])
   })
 })
 
@@ -476,9 +634,14 @@ describe('A missing git is a named refusal', () => {
       }),
     )
 
-    // The plan still answers, with nothing to start from.
+    // The plan still answers, with nothing to start from, and says why for each repository.
     expect(seen.plan.gitAvailable).toBe(false)
     expect(seen.plan.repositories.every((one) => one.base === null && !one.included)).toBe(true)
+    expect(
+      seen.plan.repositories.every((one) =>
+        (one.reason ?? '').endsWith('git-that-does-not-exist-hemera was not found on the PATH'),
+      ),
+    ).toBe(true)
     expect(seen.refused).toMatchObject({ check: 'git' })
     expect(seen.refused.message).toBe('git-that-does-not-exist-hemera was not found on the PATH')
     expect(seen.after).toEqual(seen.before)
@@ -621,6 +784,51 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
   })
 })
 
+describe('A Workspace with a running build Session is not cleaned up', () => {
+  it('names the build, removes nothing, and lets it go once the Session is archived', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        const sql = yield* SqliteClient
+        // The build Session a launch writes when it starts the build, and has not archived
+        // (D8-13): the folder is where that build works.
+        const at = '2026-09-25T08:00:00.000Z'
+        yield* sql`INSERT INTO sessions
+          (id, project_id, title, title_source, mission, spec_id, workspace_id, created_at,
+           last_written_at)
+          VALUES ('build-of-HEM-7', ${project.id}, 'Build the login form', 'derived', 'build',
+            'HEM-7', ${workspace.id}, ${at}, ${at})`
+        const running = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        const events = yield* sql<{ payload: string }>`
+          SELECT payload FROM domain_events WHERE type = 'workspace.cleanup_refused'`
+        // Nothing was removed while it was refused: both worktrees are there, the folder is
+        // there, and the Workspace is still ready.
+        const kept = {
+          api: existsSync(join(workspace.path, 'sources', 'api', '.git')),
+          folder: existsSync(workspace.path),
+          front: existsSync(join(workspace.path, 'sources', 'front', '.git')),
+          state: (yield* workspaces.one(workspace.id)).state,
+        }
+        // Archived, the build no longer works there: the cleanup goes through.
+        yield* sql`UPDATE sessions SET archived_at = ${at} WHERE id = 'build-of-HEM-7'`
+        const cleaned = yield* workspaces.cleanup(workspace.id)
+        return { cleaned, events, kept, running, workspace }
+      }),
+    )
+
+    expect(seen.running).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.running.message).toBe('the build of login-form is still open')
+    expect(seen.kept).toEqual({ api: true, folder: true, front: true, state: 'ready' })
+    expect(seen.events).toEqual([
+      { payload: JSON.stringify({ reason: 'the build of login-form is still open' }) },
+    ])
+    expect(seen.cleaned.state).toBe('cleaned')
+    expect(existsSync(seen.workspace.path)).toBe(false)
+  })
+})
+
 describe('main cannot be cleaned up', () => {
   it('is refused, the refusal is in the Journal, and main is unchanged', async () => {
     const seen = await workspaceEngine(folder)(
@@ -658,7 +866,15 @@ describe('A run step never starts a service', () => {
         const project = yield* atlas(main, [API])
         const dev = yield* saved(project.id, 'dev', 'pnpm dev', 'serve')
         const refused = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'run', base: null, path: null, commandId: dev.id }),
+          recipe.add(project.id, {
+            kind: 'run',
+            base: null,
+            path: null,
+            commandId: dev.id,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         return { refused, left: yield* recipe.list(project.id) }
       }),
@@ -686,27 +902,52 @@ describe('The recipe of a Project is kept in the order the user sets', () => {
           base: API,
           path: '.env',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         yield* recipe.add(project.id, {
           kind: 'link',
           base: null,
           path: 'CLAUDE.md',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const three = yield* recipe.add(project.id, {
           kind: 'run',
           base: null,
           path: null,
           commandId: install.id,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const moved = yield* recipe.move(project.id, three[2]!.id, 'up')
         const first = yield* recipe.move(project.id, moved[0]!.id, 'up')
         const removed = yield* recipe.remove(project.id, moved[0]!.id)
         const outside = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'copy', base: null, path: '../x', commandId: null }),
+          recipe.add(project.id, {
+            kind: 'copy',
+            base: null,
+            path: '../x',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         const stranger = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'run', base: null, path: null, commandId: 'nobody' }),
+          recipe.add(project.id, {
+            kind: 'run',
+            base: null,
+            path: null,
+            commandId: 'nobody',
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         const sql = yield* SqliteClient
         const events = yield* sql<{ type: string }>`
@@ -760,6 +1001,9 @@ describe('A repository is rewritten with its icon, and what named it follows', (
           base: API,
           path: 'CLAUDE.md',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const moved = yield* projects.updateRepository({
           id: project.id,

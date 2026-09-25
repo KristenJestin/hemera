@@ -795,7 +795,9 @@ export const ENGINE_REQUESTS = {
   // answers the recipe as it now is. A copy or a link names a file or a folder by its `path`
   // under its `base` — a repository the Project declares, null for the Workspace root — and is
   // refused, naming it, when that source is not in `main` (D8-05 as amended by recette 1).
-  // `update` rewrites a step in its place.
+  // A `run` starts a command of the catalogue by its `commandId`, or a line of its own in `line`,
+  // `lineWindows` and `lineLinux` — which the catalogue never sees and the agent never reads — and
+  // `path` is then the folder it runs in (recette 2). `update` rewrites a step in its place.
   'recipe.list': {
     arguments: z.object({ projectId: z.string() }),
     response: z.array(recipeStepSchema),
@@ -807,6 +809,9 @@ export const ENGINE_REQUESTS = {
       base: z.string().nullable(),
       path: z.string().nullable(),
       commandId: z.string().nullable(),
+      line: z.string().nullable(),
+      lineWindows: z.string().nullable(),
+      lineLinux: z.string().nullable(),
     }),
     response: z.array(recipeStepSchema),
   },
@@ -818,6 +823,9 @@ export const ENGINE_REQUESTS = {
       base: z.string().nullable(),
       path: z.string().nullable(),
       commandId: z.string().nullable(),
+      line: z.string().nullable(),
+      lineWindows: z.string().nullable(),
+      lineLinux: z.string().nullable(),
     }),
     response: z.array(recipeStepSchema),
   },

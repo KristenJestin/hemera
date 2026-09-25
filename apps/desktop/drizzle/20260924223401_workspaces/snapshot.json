@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "af6b9af5-29c4-4a53-a74f-2ecd286e1525",
+  "id": "ef936879-45ef-4dc6-aa15-3f153f6b632b",
   "prevIds": ["584c3df8-84a3-46a5-b8ed-861e5f6d2c30"],
   "ddl": [
     {
@@ -973,6 +973,36 @@
       "default": null,
       "generated": null,
       "name": "command_id",
+      "entityType": "columns",
+      "table": "project_preparation_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line",
+      "entityType": "columns",
+      "table": "project_preparation_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line_windows",
+      "entityType": "columns",
+      "table": "project_preparation_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line_linux",
       "entityType": "columns",
       "table": "project_preparation_steps"
     },
@@ -2323,6 +2353,16 @@
       "default": null,
       "generated": null,
       "name": "base",
+      "entityType": "columns",
+      "table": "workspace_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path",
       "entityType": "columns",
       "table": "workspace_steps"
     },

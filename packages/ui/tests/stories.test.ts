@@ -192,6 +192,7 @@ const NAMED_STATES = new Map([
     'workspace/create-workspace-dialog',
     [
       'Proposed',
+      'DetachedHead',
       'RepositoryLeftOut',
       'Refused',
       'GitMissing',
@@ -223,10 +224,20 @@ const NAMED_STATES = new Map([
     ['Confirm', 'RefusedRunningService', 'RefusedGit', 'RefusedBuildSession', 'Keyboard'],
   ],
   // Lot 20: the recipe of a Project, with nothing in it, in order, being added to and edited, a
-  // source main does not hold, and walked.
+  // source main does not hold, walked, and — recette 2 — a run carrying its own line and a copy's
+  // path picked outside its base.
   [
     'project/preparation-editor',
-    ['Empty', 'Filled', 'Adding', 'Editing', 'SourceMissing', 'Keyboard'],
+    [
+      'Empty',
+      'Filled',
+      'Adding',
+      'Editing',
+      'SourceMissing',
+      'OwnLine',
+      'PickedOutside',
+      'Keyboard',
+    ],
   ],
   // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
   [
@@ -574,6 +585,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'MissionBrief',
       'SpecQuestion',
       'CreateSpecProposal',
+      // The build of a frozen Spec: what it is launched in, and where that launch stands
+      // (D8-12, D8-13).
+      'WorkspaceActions',
       // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
       // and the rail it is fed with.
       'MissionPanel',

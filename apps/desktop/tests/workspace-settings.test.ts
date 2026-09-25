@@ -82,9 +82,12 @@ afterEach(async () => {
   await showWorkspace(null)
   await opened?.close()
   opened = null
+  // A window closed at the end of a test may still hold its engine and the repositories under
+  // main, and a Windows runner runs the ten seconds a hook is given out: this suite's own timeout,
+  // and the retry agent-tools.test.ts uses.
   for (const folder of [dataFolder, main, elsewhere])
-    rmSync(folder, { recursive: true, force: true })
-})
+    rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 /** A window on a Project `Atlas` whose `main` holds the repository `api`. */
 async function atlas() {
@@ -431,14 +434,38 @@ describe('The steps follow the recipe in order', () => {
     await readRecipe(project.id)
     expect(recipeOf(project.id)).toEqual([])
 
-    const run = recipeAddOf({ kind: 'run', base: null, path: null, commandId: installing.id })
+    const run = recipeAddOf({
+      kind: 'run',
+      base: null,
+      path: null,
+      commandId: installing.id,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
+    })
     expect(await addRecipeStep(project.id, run)).toBeNull()
     // The source is in main: the engine accepts a copy only then.
     writeFileSync(join(main, '.env'), 'PORT=3000\n')
-    const copy = recipeAddOf({ kind: 'copy', base: null, path: '.env', commandId: null })
+    const copy = recipeAddOf({
+      kind: 'copy',
+      base: null,
+      path: '.env',
+      commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
+    })
     expect(await addRecipeStep(project.id, copy)).toBeNull()
     // A path that leaves the Workspace is the engine's refusal, in its words.
-    const outside = recipeAddOf({ kind: 'link', base: null, path: '../elsewhere', commandId: null })
+    const outside = recipeAddOf({
+      kind: 'link',
+      base: null,
+      path: '../elsewhere',
+      commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
+    })
     expect(await addRecipeStep(project.id, outside)).not.toBeNull()
     const [first, second] = recipeOf(project.id)
     await moveRecipeStep(project.id, second!.id, 'up')
@@ -484,7 +511,15 @@ describe('A run step fails on a non-zero exit', () => {
     expect(
       await addRecipeStep(
         project.id,
-        recipeAddOf({ kind: 'run', base: null, path: null, commandId: failing.id }),
+        recipeAddOf({
+          kind: 'run',
+          base: null,
+          path: null,
+          commandId: failing.id,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
+        }),
       ),
     ).toBeNull()
 
@@ -562,17 +597,41 @@ describe('A recipe step is edited where it stands', () => {
     const project = await atlas()
     writeFileSync(join(main, '.env'), 'PORT=3000\n')
     writeFileSync(join(main, '.env.local'), 'PORT=3001\n')
-    const copy = recipeAddOf({ kind: 'copy', base: null, path: '.env', commandId: null })
+    const copy = recipeAddOf({
+      kind: 'copy',
+      base: null,
+      path: '.env',
+      commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
+    })
     expect(await addRecipeStep(project.id, copy)).toBeNull()
     const [step] = recipeOf(project.id)
 
-    const local = recipeAddOf({ kind: 'copy', base: null, path: '.env.local', commandId: null })
+    const local = recipeAddOf({
+      kind: 'copy',
+      base: null,
+      path: '.env.local',
+      commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
+    })
     expect(await updateRecipeStep(project.id, step!.id, local)).toBeNull()
     expect(recipeOf(project.id)).toMatchObject([
       { id: step!.id, path: expect.stringContaining('.env.local') },
     ])
 
-    const absent = recipeAddOf({ kind: 'copy', base: null, path: '.env.prod', commandId: null })
+    const absent = recipeAddOf({
+      kind: 'copy',
+      base: null,
+      path: '.env.prod',
+      commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
+    })
     expect(await updateRecipeStep(project.id, step!.id, absent)).toMatch(/\.env\.prod/)
     expect(recipeOf(project.id)).toMatchObject([{ path: expect.stringContaining('.env.local') }])
   })

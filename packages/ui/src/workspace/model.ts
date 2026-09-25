@@ -55,12 +55,24 @@ export interface PlanRepositoryLine {
   readonly path: string
   /** Whether `main` holds a repository there; one that does not gets no worktree. */
   readonly holdsRepository: boolean
-  /** The short sha of that repository's local HEAD in `main`, null when there is none. */
+  /** The repository's local branches in `main`, in Git's own order: what its base is chosen from. */
+  readonly branches: readonly string[]
+  /**
+   * What the new branch starts from: the branch `main` is checked out on, or the commit it is on
+   * when it is on none of them; null when there is nothing to start from.
+   */
   readonly base: string | null
+  /** The short hash of that commit, only when `main` is on none of its branches (D8-04). */
+  readonly detachedCommit: string | null
   /** The branch the worktree is created on: `<branch_prefix>/<key>-<slug>`. */
   readonly branch: string
   /** Whether the repository is in the Workspace unless the user leaves it out. */
   readonly included: boolean
+  /**
+   * What Git said when it would not read the location, and null when it answered: the dialog
+   * shows it in place of `no repository in main` (D8-04).
+   */
+  readonly reason: string | null
 }
 
 /** What the creation dialog hands over: the name, and the included repositories only. */

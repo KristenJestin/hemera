@@ -24,10 +24,12 @@ import {
  * worktrees are made (D8-05).
  *
  * Three kinds of step and nothing else: `copy` a file or a folder of `main` to the same place,
- * `link` it instead, and `run` a command of the catalogue. A step is read as the sentence it is —
- * `copy .env from api`, `link node_modules in web`, `run install` — because the order is the
- * point, and a sentence per line is what makes an order readable. The engine keeps the state of
- * each step per Workspace; this card only says what the recipe is.
+ * `link` it instead, and `run` a command of the catalogue — or a line the step carries on its own,
+ * which belongs to that step and is never added to the catalogue (recette 2). A step is read as
+ * the sentence it is — `copy .env from api`, `link node_modules in web`, `run install`,
+ * `run bun run lint` — because the order is the point, and a sentence per line is what makes an
+ * order readable. The engine keeps the state of each step per Workspace; this card only says what
+ * the recipe is.
  *
  * A copy or a link works from a base — the Workspace root, or one of the Project's repositories,
  * named by the last segment of its path — and a path relative to that base. Two repositories are
@@ -47,14 +49,27 @@ export interface RecipeStepLine {
   id: string
   kind: RecipeKind
   /**
-   * Where a `copy` or a `link` works: the path of one of the Project's repositories, or null for
-   * the Workspace root. Null for a `run`.
+   * Where a `copy` or a `link` works, and where a `run` of a line of its own runs from: the path
+   * of one of the Project's repositories, or null for the Workspace root. Null for a `run` of a
+   * command, which runs where its own command says.
    */
   base: string | null
-  /** The file or the folder a `copy` or a `link` takes, relative to its base; null for a `run`. */
+  /**
+   * The file or the folder a `copy` or a `link` takes, relative to its base; for a `run` of a line
+   * of its own, the folder that line runs in, relative to its base, or null for the base itself.
+   * Null for a `run` of a command.
+   */
   path: string | null
-  /** The command of the catalogue a `run` starts; null for a `copy` and a `link`. */
+  /**
+   * The command of the catalogue a `run` starts; null for a `copy`, a `link` and a line of its own.
+   */
   commandId: string | null
+  /** The line a `run` carries on its own; null for a `copy`, a `link` and a command. */
+  line: string | null
+  /** The line Windows runs instead, when the step says a line per system (D8-07); null otherwise. */
+  lineWindows: string | null
+  /** The line Linux runs instead, `line` being what every other system runs (D8-07). */
+  lineLinux: string | null
 }
 
 /** A step the dialog hands over: the line without its id, which the engine gives. */
@@ -83,6 +98,12 @@ export interface PreparationEditorProps {
   onRemove: (id: string) => void
   /** Moves a step one place up or down the recipe. */
   onMove: (id: string, direction: 'up' | 'down') => void
+  /**
+   * The system's picker, asked for a base and answered with a path relative to it, or null when
+   * nothing was picked. A copy's and a link's path is picked among what `main` holds under its
+   * base, and a step's own line picks the folder it runs in (recette 2).
+   */
+  onBrowse?: ((base: string | null) => Promise<string | null>) | undefined
   /** Where the card sits; never how it looks. */
   className?: string | undefined
 }
@@ -125,6 +146,19 @@ const KIND_ITEMS: { value: RecipeKind; label: string; icon: ReactNode }[] = [
  */
 const ROOT = '/'
 
+/**
+ * The value the command select gives a line of the step's own. A select holds strings, and a
+ * command's id is a slug of its name: an asterisk is what no name and no id can hold, so no
+ * command of a catalogue is ever mistaken for a step's own line.
+ */
+const OWN = '*own*'
+
+/** What a step's own line is written as, one line or a line per system (D8-07). */
+const LINE_MODE_ITEMS: { value: 'same' | 'system'; label: string }[] = [
+  { value: 'same', label: 'Same line on every system' },
+  { value: 'system', label: 'A line per system' },
+]
+
 /** The one thing said about a path that is not relative, whatever is wrong with it. */
 const NOT_RELATIVE = 'A path is relative to its base.'
 
@@ -155,6 +189,9 @@ function sentenceOf(
   commands: readonly RecipeCommand[],
 ): string {
   if (step.kind === 'run') {
+    // A line of its own is what the step says it runs; a command is named, and one that left the
+    // catalogue is said to be gone.
+    if (step.line !== null) return `run ${step.line}`
     const command = commands.find((one) => one.id === step.commandId)
     return `run ${command?.name ?? 'a command no longer in the catalogue'}`
   }
@@ -171,11 +208,44 @@ interface Editing {
   kind: RecipeKind
   /** The base as the select holds it: a repository's path, or `ROOT`. */
   base: string
+  /** The path of a copy or a link, or the folder a step's own line runs in. */
   path: string
+  /**
+   * The command of the catalogue a `run` starts, `OWN` for a line of its own, and undefined for a
+   * `copy` and a `link`.
+   */
   commandId: string | undefined
+  /** The line the step carries on its own, as the one field holds it. */
+  line: string
+  /** The line Windows runs instead, in the fields of a line per system. */
+  lineWindows: string
+  /** The line Linux and macOS run instead, which is the line every other system runs too. */
+  lineLinux: string
+  /** Whether the step says a line per system rather than one line for all of them. */
+  linesPerSystem: boolean
 }
 
-const EMPTY: Editing = { id: null, kind: 'copy', base: ROOT, path: '', commandId: undefined }
+const EMPTY: Editing = {
+  id: null,
+  kind: 'copy',
+  base: ROOT,
+  path: '',
+  commandId: undefined,
+  line: '',
+  lineWindows: '',
+  lineLinux: '',
+  linesPerSystem: false,
+}
+
+/** The step's own line as the engine writes it: one line, or a line per system and no third (D8-07). */
+function linesOf(editing: Editing): Pick<RecipeStepDraft, 'line' | 'lineWindows' | 'lineLinux'> {
+  const written = editing.linesPerSystem ? editing.lineLinux.trim() : editing.line.trim()
+  return {
+    line: written,
+    lineWindows: editing.linesPerSystem ? editing.lineWindows.trim() : null,
+    lineLinux: editing.linesPerSystem ? written : null,
+  }
+}
 
 function editingOf(step: RecipeStepLine): Editing {
   return {
@@ -183,7 +253,13 @@ function editingOf(step: RecipeStepLine): Editing {
     kind: step.kind,
     base: step.base ?? ROOT,
     path: step.path ?? '',
-    commandId: step.commandId ?? undefined,
+    commandId: step.kind === 'run' && step.commandId === null ? OWN : (step.commandId ?? undefined),
+    line: step.line ?? '',
+    lineWindows: step.lineWindows ?? '',
+    lineLinux: step.lineLinux ?? '',
+    // A step that runs a line of its own on a system is a line per system: the two fields, where a
+    // step with one line opens on the one field, as the command dialog does (recette 2).
+    linesPerSystem: step.lineWindows !== null || step.lineLinux !== null,
   }
 }
 
@@ -195,6 +271,7 @@ export function PreparationEditor({
   onUpdate,
   onRemove,
   onMove,
+  onBrowse,
   className,
 }: PreparationEditorProps): ReactNode {
   /** What the dialog holds; kept while it closes, so it does not empty on its way out. */
@@ -206,7 +283,12 @@ export function PreparationEditor({
 
   const names = repositoryNamesOf(repositories)
   const running = editing.kind === 'run'
-  const ready = running ? editing.commandId !== undefined : editing.path.trim() !== ''
+  /** A run of a line of its own, which the Project's catalogue never holds (recette 2). */
+  const own = running && editing.commandId === OWN
+  const carried = editing.linesPerSystem ? editing.lineLinux : editing.line
+  const ready = running
+    ? editing.commandId !== undefined && (!own || carried.trim() !== '')
+    : editing.path.trim() !== ''
 
   const show = (next: Editing) => {
     setEditing(next)
@@ -221,11 +303,68 @@ export function PreparationEditor({
     setRefusal(null)
   }
 
+  /**
+   * The mode changed: one line or a line per system. A field left empty takes the line the other
+   * mode was holding, so that switching neither loses what was typed nor opens on an empty field,
+   * as the command dialog does (recette 2).
+   */
+  const chooseLines = (perSystem: boolean) => {
+    if (perSystem === editing.linesPerSystem) return
+    change({
+      linesPerSystem: perSystem,
+      lineLinux: perSystem && editing.lineLinux.trim() === '' ? editing.line : editing.lineLinux,
+      line: !perSystem && editing.line.trim() === '' ? editing.lineLinux : editing.line,
+    })
+  }
+
+  /**
+   * The system's picker, asked for the base the step works in and answered with a path relative to
+   * it. What it answers outside that base climbs out, which is a path no step may take: the field
+   * refuses it there and then, in the words of the schema the engine shares (recette 2).
+   */
+  const browse = (base: string) => {
+    if (onBrowse === undefined) return
+    void onBrowse(base === ROOT ? null : base).then((chosen) => {
+      if (chosen === null) return
+      const read = relativePathSchema.safeParse(chosen)
+      if (!read.success) {
+        setPathError(read.error.issues[0]?.message ?? NOT_RELATIVE)
+        return
+      }
+      change({ path: chosen })
+    })
+  }
+
+  const browseButton =
+    onBrowse === undefined ? undefined : (
+      <Button variant="ghost" size="sm" onClick={() => browse(editing.base)}>
+        Browse…
+      </Button>
+    )
+
   const save = async () => {
     let step: RecipeStepDraft
     if (running) {
       if (editing.commandId === undefined) return
-      step = { kind: 'run', base: null, path: null, commandId: editing.commandId }
+      // A line of its own belongs to the step and to it alone (recette 2): it is never written in
+      // the catalogue, which is what keeps every agent from seeing it.
+      step = own
+        ? {
+            kind: 'run',
+            base: editing.base === ROOT ? null : editing.base,
+            path: editing.path.trim() === '' ? null : editing.path.trim(),
+            commandId: null,
+            ...linesOf(editing),
+          }
+        : {
+            kind: 'run',
+            base: null,
+            path: null,
+            commandId: editing.commandId ?? null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }
     } else {
       // Refused here, before anybody is asked: a path that is absolute or climbs out of its
       // base is not a place a Workspace has (D8-05).
@@ -238,6 +377,9 @@ export function PreparationEditor({
         base: editing.base === ROOT ? null : editing.base,
         path: editing.path.trim(),
         commandId: null,
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
       }
     }
     setSaving(true)
@@ -341,20 +483,83 @@ export function PreparationEditor({
             items={KIND_ITEMS}
           />
           {running ? (
-            commands.length === 0 ? (
-              <p className={NOTE}>The catalogue holds no command yet.</p>
-            ) : (
+            <>
               <Select
                 label="Command"
                 placeholder="Choose a command"
-                value={editing.commandId}
+                value={editing.commandId ?? ''}
                 onValueChange={(commandId) => change({ commandId })}
-                items={commands.map((one) => {
-                  const Icon = COMMAND_TYPE_ICONS[one.type]
-                  return { value: one.id, label: one.name, icon: <Icon size="sm" /> }
-                })}
+                items={[
+                  ...commands.map((one) => {
+                    const Icon = COMMAND_TYPE_ICONS[one.type]
+                    return { value: one.id, label: one.name, icon: <Icon size="sm" /> }
+                  }),
+                  { value: OWN, label: 'A line of its own' },
+                ]}
               />
-            )
+              {own && (
+                <>
+                  <p className={NOTE}>
+                    A line of its own stays with this step: it is never written in the catalogue,
+                    and no agent ever sees it.
+                  </p>
+                  <Select
+                    label="Lines"
+                    value={editing.linesPerSystem ? 'system' : 'same'}
+                    onValueChange={(mode) => chooseLines(mode === 'system')}
+                    items={LINE_MODE_ITEMS}
+                  />
+                  {editing.linesPerSystem ? (
+                    <div className={WHERE}>
+                      <Input
+                        label="Windows line"
+                        className={PATH_FIELD}
+                        placeholder="bun run lint:win"
+                        value={editing.lineWindows}
+                        onValueChange={(lineWindows) => change({ lineWindows })}
+                      />
+                      <Input
+                        label="Linux and macOS line"
+                        className={PATH_FIELD}
+                        placeholder="bun run lint"
+                        value={editing.lineLinux}
+                        onValueChange={(lineLinux) => change({ lineLinux })}
+                      />
+                    </div>
+                  ) : (
+                    <Input
+                      label="Line"
+                      placeholder="bun run lint"
+                      value={editing.line}
+                      onValueChange={(line) => change({ line })}
+                    />
+                  )}
+                  <div className={WHERE}>
+                    <Select
+                      label="Runs from"
+                      value={editing.base}
+                      onValueChange={(base) => change({ base })}
+                      items={[
+                        { value: ROOT, label: 'Workspace root' },
+                        ...repositories.map((path) => ({
+                          value: path,
+                          label: names.get(path) ?? path,
+                        })),
+                      ]}
+                    />
+                    <Input
+                      label="Folder"
+                      className={PATH_FIELD}
+                      placeholder="./tools"
+                      value={editing.path}
+                      error={pathError}
+                      onValueChange={(path) => change({ path })}
+                      action={browseButton}
+                    />
+                  </div>
+                </>
+              )}
+            </>
           ) : (
             <div className={WHERE}>
               <Select
@@ -373,6 +578,7 @@ export function PreparationEditor({
                 value={editing.path}
                 error={pathError}
                 onValueChange={(path) => change({ path })}
+                action={browseButton}
               />
             </div>
           )}

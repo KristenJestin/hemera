@@ -184,8 +184,13 @@ export const CHANNELS = {
    * right now, and the files of a Workspace. None of them is a row, so none of them crosses to
    * the engine: asking a database where a Git branch is would be asking it to guess.
    */
+  /**
+   * A folder the system asks for, opened where the page says the user is working when it says:
+   * a command's picker starts at the folder the command runs from, and the Project's dialog
+   * starts nowhere in particular, on the system's own last place.
+   */
   'dialog.pickFolder': {
-    arguments: nothingSchema,
+    arguments: z.object({ start: z.string().optional() }),
     response: z.string().nullable(),
   },
   /**

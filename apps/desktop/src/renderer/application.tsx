@@ -271,9 +271,15 @@ function unanswered(channel: string) {
   }
 }
 
-/** The system's own folder picker, which belongs to the main process. */
-async function pickFolder(): Promise<string | null> {
-  return await window.hemera.invoke('dialog.pickFolder', {})
+/**
+ * The system's own folder picker, which belongs to the main process.
+ *
+ * Opened on the folder the caller says the user is working in, when it says one: a command's
+ * picker starts where that command runs from. The pages that have nowhere in mind ask for no
+ * start, and the system's own last place is what they get.
+ */
+async function pickFolder(start?: string): Promise<string | null> {
+  return await window.hemera.invoke('dialog.pickFolder', start === undefined ? {} : { start })
 }
 
 /**

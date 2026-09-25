@@ -19,7 +19,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Effect } from 'effect'
 
-import { Git, GitError, GitUnavailableError, gitLayer } from '#engine/git.ts'
+import { Git, GitError, GitUnavailableError, gitLayer, spawnGit } from '#engine/git.ts'
+import type { GitSpawn } from '#engine/git.ts'
 
 import { git, repository } from './repositories.ts'
 
@@ -30,12 +31,17 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(folder, { recursive: true, force: true })
-})
+  // Every test here writes a repository with the machine's `git`, and Windows hands a folder it
+  // has just written back a beat late: the retry agent-tools.test.ts uses.
+  rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
-/** A program of the Git service, over the machine's `git` or the program named. */
-function asked<A, E>(program: Effect.Effect<A, E, Git>, named?: string) {
-  return Effect.runPromise(Effect.provide(program, gitLayer(named)))
+/**
+ * A program of the Git service, over the machine's `git`, the program named, or the spawn a suite
+ * hands in when one read of it has to fail.
+ */
+function asked<A, E>(program: Effect.Effect<A, E, Git>, named?: string, spawn?: GitSpawn) {
+  return Effect.runPromise(Effect.provide(program, gitLayer(named, spawn)))
 }
 
 describe('Each repository shows its branch, commit and changes', () => {
@@ -162,5 +168,59 @@ describe('A branch name is one Git takes', () => {
     )
 
     expect(seen).toEqual([true, false, false, false])
+  })
+})
+
+describe('A refused read of HEAD is not a repository without a commit', () => {
+  it('keeps Git’s refusal when the first read of a repository with commits fails, once', async () => {
+    const api = repository(join(folder, 'api'))
+    writeFileSync(join(api, 'tracked.txt'), 'one\n')
+    git(api, 'add', 'tracked.txt')
+    git(api, 'commit', '-q', '-m', 'tracked')
+    // A machine at work: the first read of `HEAD` fails and every read after it answers. The
+    // repository has a commit, so a branch stands for it and the failure is a refusal to keep —
+    // what the plan reads again and then reports, not a repository to lose (#102).
+    let reads = 0
+    const once: GitSpawn = (program, cwd, args, limit) => {
+      if (!args.includes('--abbrev-ref')) return spawnGit(program, cwd, args, limit)
+      reads += 1
+      return reads === 1
+        ? Effect.fail(new GitError({ args, cwd, stderr: 'fatal: a moment of it, and no more' }))
+        : spawnGit(program, cwd, args, limit)
+    }
+
+    const refused = await asked(Effect.flip(Git.use((one) => one.head(api))), undefined, once)
+
+    expect(refused).toBeInstanceOf(GitError)
+    expect(refused.message).toBe('fatal: a moment of it, and no more')
+    // And the read that follows answers what the repository is on: nothing was swallowed.
+    const head = await asked(
+      Git.use((one) => one.head(api)),
+      undefined,
+      once,
+    )
+
+    expect(head).toEqual({ branch: 'main', commit: git(api, 'rev-parse', 'HEAD'), short: null })
+    expect(reads).toBe(2)
+  })
+
+  it('answers nothing to start from only where HEAD is on a branch with no ref', async () => {
+    const tools = join(folder, 'sources', 'tools')
+    mkdirSync(tools, { recursive: true })
+    git(tools, 'init', '-q', '-b', 'main')
+    const broken = join(folder, 'broken')
+    mkdirSync(broken)
+    writeFileSync(join(broken, '.git'), 'gitdir: /nowhere/hemera\n')
+
+    const seen = await asked(
+      Effect.gen(function* () {
+        const one = yield* Git
+        return { unborn: yield* one.head(tools), refused: yield* Effect.flip(one.head(broken)) }
+      }),
+    )
+
+    expect(seen.unborn).toBeNull()
+    expect(seen.refused).toBeInstanceOf(GitError)
+    expect(seen.refused.message).toMatch(/^fatal: /)
   })
 })

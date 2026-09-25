@@ -78,6 +78,7 @@ export function step(position: number, change: Partial<WorkspaceStep> = {}): Wor
     kind: 'worktree',
     target: 'sources/api',
     base: null,
+    path: null,
     commandId: null,
     state: 'done',
     message: null,

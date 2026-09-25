@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Effect, Fiber, Layer, Result } from 'effect'
 
 import { runsOf } from '#engine/commands/panel.ts'
+import { Commands } from '#engine/commands/service.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { AgentNotices } from '#engine/agents/notices.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
@@ -54,11 +55,17 @@ beforeEach(() => {
   // of a short name under a Windows runner — so the fixture is settled the same way before use.
   folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-preparation-')))
   main = atlasMain(folder)
-})
+  // Two repositories are four `git` processes, and the preparation that follows runs more of
+  // them: a Windows runner that has just been created starts each one in seconds where a warm
+  // machine takes one. The timeout is this suite's own rather than the ten a hook is given by
+  // default, and nothing here spends it (#99).
+}, 60_000)
 
 afterEach(() => {
-  rmSync(folder, { recursive: true, force: true })
-})
+  // A command run for real may still be closing, and a folder of worktrees is handed back a beat
+  // late on Windows, which refuses the first attempt with EPERM, as agent-tools.test.ts says.
+  rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 const API = './sources/api'
 const FRONT = './sources/front'
@@ -71,8 +78,24 @@ const node = (code: string) => `"${process.execPath}" -e "${code}"`
 const quoted = (path: string) => path.replaceAll('\\', '\\\\')
 
 /** The api's `.env`, copied under that repository (D8-05 as amended by recette 1). */
-const COPY_ENV: RecipeEdit = { kind: 'copy', base: API, path: '.env', commandId: null }
-const LINK_CLAUDE: RecipeEdit = { kind: 'link', base: null, path: 'CLAUDE.md', commandId: null }
+const COPY_ENV: RecipeEdit = {
+  kind: 'copy',
+  base: API,
+  path: '.env',
+  commandId: null,
+  line: null,
+  lineWindows: null,
+  lineLinux: null,
+}
+const LINK_CLAUDE: RecipeEdit = {
+  kind: 'link',
+  base: null,
+  path: 'CLAUDE.md',
+  commandId: null,
+  line: null,
+  lineWindows: null,
+  lineLinux: null,
+}
 
 /**
  * `Atlas` with its two repositories, the recipe given — a `run` names the line of its `install`
@@ -91,6 +114,9 @@ const createdWith = (recipe: readonly (RecipeEdit | { run: string })[]) =>
           base: null,
           path: null,
           commandId: install.id,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
       } else {
         yield* edits.add(project.id, step)
@@ -209,8 +235,24 @@ describe('A copy never overwrites and skips a missing source', () => {
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([
-          { kind: 'copy', base: null, path: '.env.local', commandId: null },
-          { kind: 'copy', base: FRONT, path: '.env.gone', commandId: null },
+          {
+            kind: 'copy',
+            base: null,
+            path: '.env.local',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          },
+          {
+            kind: 'copy',
+            base: FRONT,
+            path: '.env.gone',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          },
         ])
         // Accepted while it was there; removed from main before the Workspace is prepared.
         rmSync(join(main, 'sources', 'front', '.env.gone'))
@@ -245,7 +287,15 @@ describe('A folder is copied whole, and never over what is there', () => {
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([
-          { kind: 'copy', base: API, path: 'config', commandId: null },
+          {
+            kind: 'copy',
+            base: API,
+            path: 'config',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          },
         ])
         const prepared = yield* preparation.prepare(workspace.id)
         return { prepared, steps: yield* stepsOf(workspace.id) }
@@ -275,7 +325,15 @@ describe('A folder is copied whole, and never over what is there', () => {
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([
-          { kind: 'copy', base: API, path: 'config', commandId: null },
+          {
+            kind: 'copy',
+            base: API,
+            path: 'config',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          },
         ])
         yield* preparation.prepare(workspace.id)
         return yield* stepsOf(workspace.id)
@@ -296,7 +354,15 @@ describe('A folder is linked under its repository', () => {
       Effect.gen(function* () {
         const preparation = yield* Preparation
         const workspace = yield* createdWith([
-          { kind: 'link', base: API, path: 'node_modules', commandId: null },
+          {
+            kind: 'link',
+            base: API,
+            path: 'node_modules',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          },
         ])
         return yield* preparation.prepare(workspace.id)
       }),
@@ -331,15 +397,42 @@ describe('The step dialog checks the source exists in main before it accepts', (
           base: null,
           path: 'shared',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const missing = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'copy', base: FRONT, path: '.env', commandId: null }),
+          recipe.add(project.id, {
+            kind: 'copy',
+            base: FRONT,
+            path: '.env',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         const stray = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'copy', base: './web', path: '.env', commandId: null }),
+          recipe.add(project.id, {
+            kind: 'copy',
+            base: './web',
+            path: '.env',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         const climbing = yield* Effect.flip(
-          recipe.add(project.id, { kind: 'copy', base: API, path: '../../..', commandId: null }),
+          recipe.add(project.id, {
+            kind: 'copy',
+            base: API,
+            path: '../../..',
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          }),
         )
         return { file, directory, missing, stray, climbing, after: yield* recipe.list(project.id) }
       }),
@@ -378,12 +471,18 @@ describe('A step of the recipe is rewritten in its place', () => {
           base: null,
           path: null,
           commandId: install.id,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const updated = yield* recipe.update(project.id, second?.id ?? '', {
           kind: 'copy',
           base: FRONT,
           path: '.env',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const refused = yield* Effect.flip(
           recipe.update(project.id, second?.id ?? '', {
@@ -391,6 +490,9 @@ describe('A step of the recipe is rewritten in its place', () => {
             base: FRONT,
             path: 'absent',
             commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
           }),
         )
         const unknown = yield* Effect.flip(recipe.update(project.id, 'nothing', LINK_CLAUDE))
@@ -591,7 +693,15 @@ describe('A link is a junction for a folder and a symbolic link for a file on Wi
           const preparation = yield* Preparation
           const workspace = yield* createdWith([
             LINK_CLAUDE,
-            { kind: 'link', base: null, path: 'shared', commandId: null },
+            {
+              kind: 'link',
+              base: null,
+              path: 'shared',
+              commandId: null,
+              line: null,
+              lineWindows: null,
+              lineLinux: null,
+            },
           ])
           return yield* preparation.prepare(workspace.id)
         }),
@@ -606,6 +716,51 @@ describe('A link is a junction for a folder and a symbolic link for a file on Wi
       expect(readFileSync(join(shared, 'notes.md'), 'utf8')).toBe('shared\n')
     },
   )
+})
+
+describe('A step’s own line runs in the preparation and is not in the catalogue', () => {
+  it('runs the line the step carries, in its folder under the Workspace, and writes no command', async () => {
+    writeFileSync(join(main, 'CLAUDE.md'), '# Atlas\n')
+    // What the step's own line leaves behind: the folder it ran in.
+    const where = join(folder, 'ran-in.txt')
+    const own: RecipeEdit = {
+      kind: 'run',
+      base: API,
+      path: null,
+      commandId: null,
+      line: node(`require('fs').writeFileSync('${quoted(where)}', process.cwd())`),
+      lineWindows: null,
+      lineLinux: null,
+    }
+
+    const [steps, commands] = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspace = yield* createdWith([LINK_CLAUDE, own])
+        const preparation = yield* Preparation
+        yield* preparation.prepare(workspace.id)
+        const catalogue = yield* Commands
+        return [yield* stepsOf(workspace.id), yield* catalogue.list(workspace.projectId)] as const
+      }),
+    )
+
+    // The line the step carries is the target the preparation runs, and the step is done.
+    expect(shown(steps)).toEqual([
+      ['worktree', API, 'done'],
+      ['worktree', FRONT, 'done'],
+      ['link', './CLAUDE.md', 'done'],
+      ['run', own.line, 'done'],
+    ])
+
+    // It ran in the Workspace's own api — its base, and the folder it names under it — and not in
+    // the repository main holds, where a command of the catalogue would have run (recette 2).
+    const ranIn = readFileSync(where, 'utf8').trim()
+    expect(ranIn.endsWith(join('sources', 'api'))).toBe(true)
+    expect(existsSync(join(ranIn, '.git'))).toBe(true)
+    expect(ranIn).not.toBe(join(main, 'sources', 'api'))
+
+    // And nothing of it is in the catalogue: what an agent reads holds no command from a step.
+    expect(commands).toEqual([])
+  })
 })
 
 describe('A run step fails on a non-zero exit', () => {

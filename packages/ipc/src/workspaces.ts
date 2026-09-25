@@ -52,9 +52,10 @@ export type Workspace = z.infer<typeof workspaceSchema>
 
 /**
  * What a dedicated Workspace would be made of, proposed and editable before anything is written
- * (D8-04): per repository of the Project, whether `main` holds one there, the base (its local
- * HEAD) and the branch that would be created. `gitAvailable` false is a plan with nothing to start
- * from, whose creation is refused by name.
+ * (D8-04): per repository of the Project, whether `main` holds one there, the local branches that
+ * repository has and the base chosen from them, then the branch that would be created.
+ * A location Git would not read carries its refusal in `reason`, and nothing else.
+ * `gitAvailable` false is a plan with nothing to start from, whose creation is refused by name.
  */
 export const workspacePlanSchema = z.object({
   name: z.string(),
@@ -66,9 +67,12 @@ export const workspacePlanSchema = z.object({
       z.object({
         relativePath: z.string(),
         holdsRepository: z.boolean(),
+        branches: z.readonly(z.array(z.string())),
         base: z.string().nullable(),
+        detachedCommit: z.string().nullable(),
         branch: z.string(),
         included: z.boolean(),
+        reason: z.string().nullable(),
       }),
     ),
   ),
@@ -103,10 +107,11 @@ export const recipeKindSchema = z.enum(['copy', 'link', 'run'])
 
 /**
  * One step of a Workspace's preparation (D8-05): a worktree, then the recipe's copies, links and
- * runs, in order. `target` is the worktree's path, a copy's or a link's path under its `base` —
- * a repository, null for the root — or the name of the command a run starts. `message` is what
- * refused it, in the words of whatever did, or what a `copy` kept; `runId` the run a `run` step
- * started.
+ * runs, in order. `target` is the worktree's path, a copy's or a link's path under its `base` — a
+ * repository, null for the root — the name of the command a run starts, or the line a run of a
+ * line of its own runs on this system, whose `path` is the folder it starts in (recette 2).
+ * `message` is what refused it, in the words of whatever did, or what a `copy` kept; `runId` the
+ * run a `run` step started.
  */
 export const workspaceStepSchema = z.object({
   id: z.string(),
@@ -114,6 +119,7 @@ export const workspaceStepSchema = z.object({
   kind: z.enum(['worktree', 'copy', 'link', 'run']),
   target: z.string(),
   base: z.string().nullable(),
+  path: z.string().nullable(),
   commandId: z.string().nullable(),
   state: z.enum(['pending', 'running', 'done', 'failed', 'skipped']),
   message: z.string().nullable(),
@@ -123,10 +129,13 @@ export const workspaceStepSchema = z.object({
 export type WorkspaceStep = z.infer<typeof workspaceStepSchema>
 
 /**
- * One step of a Project's recipe (D8-05 as amended by recette 1): `base` one of the Project's
- * repositories as it declares it, null for the Workspace root; `path` a file or a folder relative
- * to that base for a copy and a link, null for a run; `commandId` the catalogue command a run
- * starts. `rank` is its order.
+ * One step of a Project's recipe (D8-05 as amended by recette 1 and by recette 2): `base` one of
+ * the Project's repositories as it declares it, null for the Workspace root; `path` a file or a
+ * folder relative to that base for a copy and a link, the folder a run of a line of its own starts
+ * in for such a run, null otherwise; `commandId` the catalogue command a run starts, null for a
+ * copy, a link and a run of a line of its own. `line`, `lineWindows` and `lineLinux` are that
+ * run's own lines, written the way a command's are (D8-07): one line for every system, or one per
+ * system with null where it has none. `rank` is its order.
  */
 export const recipeStepSchema = z.object({
   id: z.string(),
@@ -134,6 +143,9 @@ export const recipeStepSchema = z.object({
   base: z.string().nullable(),
   path: z.string().nullable(),
   commandId: z.string().nullable(),
+  line: z.string().nullable(),
+  lineWindows: z.string().nullable(),
+  lineLinux: z.string().nullable(),
   rank: z.string(),
 })
 

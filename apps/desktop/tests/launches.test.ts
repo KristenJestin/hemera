@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
+import { ReopenRefusedError } from '#engine/specs/revisions.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Launches } from '#engine/workspaces/launches.ts'
@@ -36,8 +37,10 @@ beforeEach(() => {
 afterEach(async () => {
   await opened?.close()
   opened = undefined
-  rmSync(dataFolder, { recursive: true, force: true })
-})
+  // A build stopped by tree may still be closing, and a Windows runner runs the ten seconds a
+  // hook is given out: this suite's own timeout, and the retry agent-tools.test.ts uses.
+  rmSync(dataFolder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 /** The launches as their rows stand, oldest first. */
 const launches = Effect.gen(function* () {
@@ -437,5 +440,154 @@ describe('The engine comes back to what a stopped engine left', () => {
         workspace_id: left.workspace.id,
       },
     ])
+  })
+})
+
+describe('A Rework cancels a launch that has not started', () => {
+  test('A Rework during the preparation cancels the launch and keeps the environment', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId, session } = yield* atlas()
+        const launched = yield* Launches
+        const preparation = yield* Preparation
+        const workspaces = yield* Workspaces
+        const sql = yield* SqliteClient
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        const [spec] = yield* sql<{ current_revision_id: string }>`
+          SELECT current_revision_id FROM specs WHERE id = ${specId}`
+        const revisionId = spec?.current_revision_id
+        if (revisionId === undefined) {
+          return yield* Effect.fail(new Error('the Spec has no current revision'))
+        }
+        const kept = yield* workspaces.one(workspace.id)
+        // The user reworks the Spec while the launch waits for its environment (D7-05).
+        yield* (yield* Specs).reopen({
+          specId,
+          expectedRevisionId: revisionId,
+          reason: 'Another shape.',
+          sessionId: session.id,
+        })
+        const cancelled = yield* launched.one(asked.id)
+        // The preparation is not interrupted by it: its steps go on, and the Workspace is ready.
+        yield* preparation.prepare(workspace.id)
+        const settled = yield* until(launches, (all) =>
+          all.every((row) => row.state !== 'waiting' && row.state !== 'starting'),
+        )
+        return {
+          after: yield* workspaces.one(workspace.id),
+          asked,
+          builds: yield* builds,
+          cancelled,
+          events: yield* sql<{ type: string; payload: string }>`
+            SELECT type, payload FROM domain_events WHERE type = 'launch.cancelled'`,
+          kept,
+          settled,
+          steps: yield* preparation.steps(workspace.id),
+        }
+      }),
+    )
+
+    // Cancelled, saying what cancelled it (D8-13), and the Journal holds the line.
+    expect(seen.cancelled.state).toBe('cancelled')
+    expect(seen.cancelled.detail).toBe('reworked')
+    expect(seen.settled).toEqual([{ state: 'cancelled', session_id: null, detail: 'reworked' }])
+    expect(seen.events).toEqual([
+      {
+        type: 'launch.cancelled',
+        payload: JSON.stringify({
+          specId: seen.asked.specId,
+          revisionId: seen.asked.revisionId,
+          reason: 'reworked',
+        }),
+      },
+    ])
+    // The environment is kept as it was — the same Workspace, its worktrees untouched — and its
+    // steps go on to ready, which starts nothing: the launch they were prepared for is cancelled.
+    expect(seen.after.path).toBe(seen.kept.path)
+    expect(seen.after.repositories).toEqual(seen.kept.repositories)
+    expect(seen.after.state).toBe('ready')
+    expect(seen.steps.length).toBeGreaterThan(0)
+    expect(seen.steps.every((step) => step.state === 'done')).toBe(true)
+    expect(seen.builds).toEqual([])
+  })
+
+  test('A started launch is not cancelled by a Rework', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId, session } = yield* atlas()
+        const specs = yield* Specs
+        const launched = yield* Launches
+        const workspaces = yield* Workspaces
+        const sql = yield* SqliteClient
+        // A Workspace that is already ready: the launch starts at once, and its build Session is
+        // there (D8-13).
+        const workspace = yield* picked(project.id)
+        const launch = yield* launched.request(specId, workspace.id)
+        const [spec] = yield* sql<{ current_revision_id: string }>`
+          SELECT current_revision_id FROM specs WHERE id = ${specId}`
+        const revisionId = spec?.current_revision_id
+        if (revisionId === undefined) {
+          return yield* Effect.fail(new Error('the Spec has no current revision'))
+        }
+        // The build has started and the Spec is still `ready`: it only moves to `in_progress`
+        // when the build's first task runs (core.md, "The build mission protocol"). A Rework is
+        // allowed there, and it cancels nothing — what has started keeps running (D8-13).
+        const reworked = yield* specs.reopen({
+          specId,
+          expectedRevisionId: revisionId,
+          reason: 'Another shape.',
+          sessionId: session.id,
+        })
+        const kept = yield* launched.one(launch.id)
+        // Once that first task has moved the Spec on, the Rework cannot reach the launch at all:
+        // it is refused, as it is for any Spec that is not `ready` (D7-05).
+        yield* sql`UPDATE specs SET status = 'in_progress' WHERE id = ${specId}`
+        const refused = yield* Effect.flip(
+          specs.reopen({
+            specId,
+            expectedRevisionId: reworked.revision.id,
+            sessionId: session.id,
+          }),
+        )
+        return {
+          after: yield* launched.one(launch.id),
+          builds: yield* builds,
+          cancelled: yield* sql<{ count: number }>`
+            SELECT count(*) AS count FROM domain_events WHERE type = 'launch.cancelled'`,
+          kept,
+          launch,
+          refused,
+          reworked,
+          rows: yield* launches,
+          workspace: yield* workspaces.one(workspace.id),
+        }
+      }),
+    )
+
+    expect(seen.refused).toBeInstanceOf(ReopenRefusedError)
+    expect(seen.refused.message).toContain('in_progress')
+    // The build that started is untouched: the same launch, the same Session, and no launch was
+    // cancelled.
+    expect(seen.reworked.revision.number).toBe(2)
+    expect(seen.kept.state).toBe('started')
+    expect(seen.kept.sessionId).toBe(seen.launch.sessionId)
+    expect(seen.after.state).toBe('started')
+    expect(Number(seen.cancelled[0]?.count)).toBe(0)
+    expect(seen.rows).toEqual([
+      { state: 'started', session_id: seen.launch.sessionId, detail: null },
+    ])
+    expect(seen.builds).toEqual([
+      {
+        id: seen.launch.sessionId,
+        spec_id: seen.launch.specId,
+        revision_id: seen.launch.revisionId,
+        workspace_id: seen.workspace.id,
+      },
+    ])
+    // And the Workspace the build works in is still there.
+    expect(seen.workspace.state).toBe('ready')
   })
 })

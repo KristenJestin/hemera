@@ -32,11 +32,11 @@ import {
   stepsFor,
   workspaceName,
 } from '@hemera/core'
-import { and, asc, eq, inArray, ne } from 'drizzle-orm'
-import { Context, Data, Effect, Layer } from 'effect'
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { Context, Data, Duration, Effect, Layer, Schedule } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
-import { Git, type GitStatus } from '../git.ts'
+import { Git, type GitHead, type GitStatus } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
 import { Database, DatabaseError, type EngineTransaction } from '../storage/database.ts'
@@ -45,6 +45,7 @@ import {
   projectCommands,
   projectRepositories,
   projects,
+  sessions,
   workspaceRepositories,
   workspaceSteps,
   workspaces,
@@ -112,10 +113,55 @@ export interface PlanRepository {
   readonly relativePath: string
   /** Whether the location holds a repository in `main`: one that does not gets no worktree. */
   readonly holdsRepository: boolean
-  /** The local HEAD of that repository in `main`, and null when there is none to start from. */
+  /** The repository's local branches, in Git's own order: what its base is chosen from (D8-04). */
+  readonly branches: readonly string[]
+  /**
+   * What the new branch starts from: the branch `main` is checked out on, or the commit it is on
+   * when it is on none of them, and null when there is nothing to start from (D8-04).
+   */
   readonly base: string | null
+  /** The short hash of that commit, only when `main` is on none of its branches: a quiet hint. */
+  readonly detachedCommit: string | null
   readonly branch: string
   readonly included: boolean
+  /**
+   * What Git said when it would not read the location, and null when it answered: the plan shows
+   * it in the dialog's own words, and nothing here is a repository to the user (D8-04).
+   */
+  readonly reason: string | null
+}
+
+/**
+ * How long the plan waits before trying a refused read once more: a machine at work, not a
+ * machine that is gone (D8-04).
+ */
+const READ_AGAIN = Duration.millis(250)
+
+/** One location of `main` as the plan read it, Git's refusal kept as its own words (D8-04). */
+interface LocationRead {
+  readonly holdsRepository: boolean
+  readonly head: GitHead | null
+  readonly branches: readonly string[]
+  /** What Git said when it refused to read the location, and null when it answered. */
+  readonly reason: string | null
+}
+
+/** A location with no repository in `main`: nothing to propose, and nothing to say (D8-04). */
+const noRepository: LocationRead = {
+  holdsRepository: false,
+  head: null,
+  branches: [],
+  reason: null,
+}
+
+/** A location Git would not read: nothing to propose, and its own words to show (D8-04). */
+function unread(message: string): LocationRead {
+  return {
+    holdsRepository: false,
+    head: null,
+    branches: [],
+    reason: `Git could not read this repository: ${message}`,
+  }
 }
 
 export interface WorkspacePlan {
@@ -202,6 +248,7 @@ export function stepOf(row: typeof workspaceSteps.$inferSelect): WorkspaceStep {
     kind: STEP_KINDS.find((kind) => kind === row.kind) ?? 'run',
     target: row.target,
     base: row.base,
+    path: row.path,
     commandId: row.commandId,
     state: STEP_STATES.find((state) => state === row.state) ?? 'failed',
     message: row.message,
@@ -458,9 +505,23 @@ export const workspacesLayer = Layer.effect(
             `the service ${running[0].name} of ${row.name} is running`,
           )
         }
-        // D8-14, D8-13: a Workspace whose build Session is not archived is refused too. No
-        // Session has a mission yet — the build Session is the lot that launches builds — so
-        // there is nothing to look for until then.
+        // A build that has not ended works in this folder, and a cleanup would delete it from
+        // under that Session: the cleanup waits until it is archived (D8-14, D8-13).
+        const building = yield* database
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(
+            and(
+              eq(sessions.workspaceId, row.id),
+              eq(sessions.mission, 'build'),
+              isNull(sessions.archivedAt),
+            ),
+          )
+          .limit(1)
+          .pipe(Effect.mapError(failed('reading the builds')))
+        if (building[0] !== undefined) {
+          return yield* refuseCleanup(row, `the build of ${row.name} is still open`)
+        }
 
         const main = yield* mainPathOf(row.projectId)
         const records = yield* database
@@ -578,23 +639,45 @@ export const workspacesLayer = Layer.effect(
           const repositories = yield* Effect.forEach(declared, (location) =>
             Effect.gen(function* () {
               const folder = join(main, location.relativePath)
-              const holdsRepository = gitAvailable
-                ? yield* git.isRepository(folder).pipe(Effect.orElseSucceed(() => false))
-                : false
-              // The local HEAD and nothing fetched (D8-04); a repository with no commit yet has
-              // nothing to start a branch from, and is left out.
-              const base = holdsRepository
-                ? yield* git.revParse(folder, 'HEAD').pipe(
-                    Effect.map((commit): string | null => commit),
-                    Effect.orElseSucceed(() => null),
-                  )
-                : null
+              // Read once, and once more when Git refuses: what fails under a machine at work is
+              // a moment, and a repository the plan used to lose without a word is the one a
+              // person is left wondering about (D8-04).
+              const read = yield* Effect.gen(function* () {
+                const holdsRepository = gitAvailable ? yield* git.isRepository(folder) : false
+                if (!holdsRepository) {
+                  // A `.git` Git will not read is not a folder without one: where one is there,
+                  // the plan asks Git what it says of the place and keeps its refusal (D8-04).
+                  return existsSync(join(folder, '.git'))
+                    ? yield* git.head(folder).pipe(Effect.as(noRepository))
+                    : noRepository
+                }
+                // What the new branch would start from, read locally and nothing fetched
+                // (D8-04). A repository with no commit yet has nothing to start from, and is
+                // left out — which Git answers, and does not refuse.
+                const head = yield* git.head(folder)
+                // What the dialog offers as bases: the branches this repository has here, and the
+                // commit when `main` is on none of them.
+                const branches: readonly string[] =
+                  head === null ? [] : yield* git.localBranches(folder)
+                return { holdsRepository, head, branches, reason: null }
+              }).pipe(
+                Effect.retry({ times: 1, schedule: Schedule.spaced(READ_AGAIN) }),
+                Effect.catchTags({
+                  GitError: (refusal) => Effect.succeed(unread(refusal.message)),
+                  GitUnavailableError: (refusal) => Effect.succeed(unread(refusal.message)),
+                }),
+              )
               return {
                 relativePath: location.relativePath,
-                holdsRepository,
-                base,
+                holdsRepository: read.holdsRepository,
+                branches: read.branches,
+                base: read.head === null ? null : (read.head.branch ?? read.head.commit),
+                // The one hash the dialog shows, and only where no branch name can stand for it.
+                detachedCommit:
+                  read.head !== null && read.head.branch === null ? read.head.short : null,
                 branch,
-                included: location.included && base !== null,
+                included: location.included && read.head !== null,
+                reason: read.reason,
               } satisfies PlanRepository
             }),
           )
@@ -697,6 +780,7 @@ export const workspacesLayer = Layer.effect(
                   targets,
                   recipe,
                   new Map(commands.map((command) => [command.id, command.name])),
+                  process.platform,
                 )
 
                 const row = {
@@ -737,6 +821,7 @@ export const workspacesLayer = Layer.effect(
                           kind: step.kind,
                           target: step.target,
                           base: step.base,
+                          path: step.path,
                           commandId: step.commandId,
                           state: bareLocation ? 'skipped' : step.state,
                           message: bareLocation

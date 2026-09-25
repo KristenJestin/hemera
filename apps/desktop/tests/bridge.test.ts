@@ -67,3 +67,24 @@ describe('Émetteur inconnu', () => {
     expect(isOwnFrame({ url: 'not a url' }, ORIGIN)).toBe(false)
   })
 })
+
+describe('Le dossier choisi par le système', () => {
+  test('the picker is opened where the page works, and on nothing when it names nothing', () => {
+    const working = decide(
+      'dialog.pickFolder',
+      ownFrame,
+      { start: '/work/atlas/sources/api' },
+      ORIGIN,
+    )
+    expect(working.accepted && working.argument).toEqual({ start: '/work/atlas/sources/api' })
+    // The Project's dialog asks for no start at all: the call it always made still is one.
+    expect(decide('dialog.pickFolder', ownFrame, {}, ORIGIN).accepted).toBe(true)
+  })
+
+  test('a start folder that is not one is refused, naming the channel and the field', () => {
+    const decision = decide('dialog.pickFolder', ownFrame, { start: 12 }, ORIGIN)
+    expect(decision.accepted).toBe(false)
+    expect(decision.accepted || decision.reason).toContain('dialog.pickFolder')
+    expect(decision.accepted || decision.reason).toContain('start')
+  })
+})

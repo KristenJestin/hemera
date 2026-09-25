@@ -164,26 +164,69 @@ describe('The cards say the engine views in their own words', () => {
 
   test('a recipe step is added as the engine takes it, with the base it names', () => {
     expect(
-      recipeAddOf({ kind: 'copy', base: './sources/api', path: '.env', commandId: null }),
+      recipeAddOf({
+        kind: 'copy',
+        base: './sources/api',
+        path: '.env',
+        commandId: null,
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
+      }),
     ).toEqual({
       kind: 'copy',
       base: './sources/api',
       path: '.env',
       commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
     })
     expect(
-      recipeAddOf({ kind: 'run', base: null, path: null, commandId: 'command-install' }),
+      recipeAddOf({
+        kind: 'run',
+        base: null,
+        path: null,
+        commandId: 'command-install',
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
+      }),
     ).toEqual({
       kind: 'run',
       base: null,
       path: null,
       commandId: 'command-install',
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
     })
     expect(
       recipeLinesOf([
-        { id: 'r1', kind: 'run', base: null, path: null, commandId: 'command-dev', rank: 'a' },
+        {
+          id: 'r1',
+          kind: 'run',
+          base: null,
+          path: null,
+          commandId: 'command-dev',
+          rank: 'a',
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
+        },
       ]),
-    ).toEqual([{ id: 'r1', kind: 'run', base: null, path: null, commandId: 'command-dev' }])
+    ).toEqual([
+      {
+        id: 'r1',
+        kind: 'run',
+        base: null,
+        path: null,
+        commandId: 'command-dev',
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
+      },
+    ])
   })
 
   // Scenario: "A preparation interrupted by a quit can be resumed".
@@ -249,16 +292,22 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
       {
         relativePath: 'sources/api',
         holdsRepository: true,
-        base: 'a'.repeat(40),
+        branches: ['main', 'dev'],
+        base: 'main',
+        detachedCommit: null,
         branch: 'atlas/',
         included: true,
+        reason: null,
       },
       {
         relativePath: 'docs',
         holdsRepository: false,
+        branches: [],
         base: null,
+        detachedCommit: null,
         branch: 'atlas/',
         included: false,
+        reason: null,
       },
     ],
     gitAvailable: true,
@@ -269,11 +318,23 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
       {
         path: 'sources/api',
         holdsRepository: true,
-        base: 'a'.repeat(40),
+        branches: ['main', 'dev'],
+        base: 'main',
+        detachedCommit: null,
         branch: 'atlas/',
         included: true,
+        reason: null,
       },
-      { path: 'docs', holdsRepository: false, base: null, branch: 'atlas/', included: false },
+      {
+        path: 'docs',
+        holdsRepository: false,
+        branches: [],
+        base: null,
+        detachedCommit: null,
+        branch: 'atlas/',
+        included: false,
+        reason: null,
+      },
     ])
   })
 

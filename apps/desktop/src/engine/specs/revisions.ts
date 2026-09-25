@@ -30,6 +30,7 @@ import {
   taskStories,
   userStories,
 } from '../storage/schema.ts'
+import { cancelForRework } from '../workspaces/launch-journal.ts'
 import { insertPhases } from './protocol.ts'
 import { failed, now, specEvent } from './snapshot.ts'
 import { type Written, appendEntry, askedIn } from './thread.ts'
@@ -280,6 +281,9 @@ export function reopen(
       .set({ status: 'draft', currentRevisionId: revisionId, updatedAt: at })
       .where(eq(specs.id, spec.id))
       .pipe(Effect.mapError(failed('reopening the Spec')))
+    // The Spec is back in draft: what waited on the revision it has just left is cancelled,
+    // and what has started keeps running in its Workspace (D8-13).
+    const cancelled = yield* cancelForRework(transaction, spec)
     const asked = yield* askAgain(transaction, snapshot, questionIds)
     return {
       events: [
@@ -292,6 +296,7 @@ export function reopen(
             previousRevisionId: revision.id,
           },
         }),
+        ...cancelled,
         ...asked.events,
       ],
       wrote: asked.wrote,
