@@ -32,7 +32,7 @@ import {
   stepsFor,
   workspaceName,
 } from '@hemera/core'
-import { and, asc, eq, inArray, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
@@ -45,6 +45,7 @@ import {
   projectCommands,
   projectRepositories,
   projects,
+  sessions,
   workspaceRepositories,
   workspaceSteps,
   workspaces,
@@ -465,9 +466,23 @@ export const workspacesLayer = Layer.effect(
             `the service ${running[0].name} of ${row.name} is running`,
           )
         }
-        // D8-14, D8-13: a Workspace whose build Session is not archived is refused too. No
-        // Session has a mission yet — the build Session is the lot that launches builds — so
-        // there is nothing to look for until then.
+        // A build that has not ended works in this folder, and a cleanup would delete it from
+        // under that Session: the cleanup waits until it is archived (D8-14, D8-13).
+        const building = yield* database
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(
+            and(
+              eq(sessions.workspaceId, row.id),
+              eq(sessions.mission, 'build'),
+              isNull(sessions.archivedAt),
+            ),
+          )
+          .limit(1)
+          .pipe(Effect.mapError(failed('reading the builds')))
+        if (building[0] !== undefined) {
+          return yield* refuseCleanup(row, `the build of ${row.name} is still open`)
+        }
 
         const main = yield* mainPathOf(row.projectId)
         const records = yield* database
