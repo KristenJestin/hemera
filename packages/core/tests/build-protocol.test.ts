@@ -42,6 +42,7 @@ function briefTask(label: string, more: Partial<BriefTask> = {}): BriefTask {
 
 const RED: BriefAttempt = {
   number: 1,
+  ended: true,
   result: 'red',
   files: [{ repository: './api', path: 'src/a.ts', status: 'M', added: 3, removed: 1 }],
   checks: [
@@ -132,7 +133,7 @@ describe('Every ready task is handed at once', () => {
         briefTask('T3', {
           state: 'in_progress',
           dependsOn: ['T1', 'T2'],
-          attempts: [RED, { number: 2, result: null, files: [], checks: [] }],
+          attempts: [RED, { number: 2, ended: false, result: null, files: [], checks: [] }],
         }),
       ],
       failures: [],
@@ -184,11 +185,11 @@ describe('A restart resumes the build where it stood', () => {
   })
   const unverified = briefTask('T2', {
     state: 'done',
-    attempts: [{ number: 1, result: 'unverified', files: [], checks: [] }],
+    attempts: [{ number: 1, ended: true, result: 'unverified', files: [], checks: [] }],
   })
   const working = briefTask('T3', {
     state: 'in_progress',
-    attempts: [RED, { number: 2, result: null, files: [], checks: [] }],
+    attempts: [RED, { number: 2, ended: false, result: null, files: [], checks: [] }],
     snapshots: [{ repository: './api', tree: 'abc123' }],
   })
   const brief = composeBuildBrief({
@@ -204,6 +205,10 @@ describe('A restart resumes the build where it stood', () => {
       briefTask('T5', { state: 'blocked', reason: 'contradicts the scope' }),
       briefTask('T6', { state: 'skipped', reason: 'not needed' }),
       briefTask('T7', { state: 'ready' }),
+      briefTask('T8', {
+        state: 'checking',
+        attempts: [{ number: 1, ended: true, result: null, files: [], checks: [] }],
+      }),
     ],
     ready: [working, briefTask('T7')],
     failures: [],
@@ -225,6 +230,11 @@ describe('A restart resumes the build where it stood', () => {
     expect(brief).toContain('- T3 · Title of T3\n  Attempt 1: red')
     expect(brief).toContain('  Attempt 2: running')
     expect(brief).toContain('./api at the start of the attempt in progress: tree abc123')
+  })
+
+  test('a task the agent finished is being checked, not running', () => {
+    expect(brief).toContain('  Attempt 1: finished, being checked by Hemera')
+    expect(brief).not.toContain('  Attempt 1: running')
   })
 
   test('the user’s, blocked and skipped tasks are said with why', () => {

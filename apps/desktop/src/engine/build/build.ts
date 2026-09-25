@@ -549,11 +549,22 @@ export function viewOf(rows: BuildRows): BuildView {
   }
 }
 
+/**
+ * Where a try of a task stands, in the agent's words: its result once judged; before that, being
+ * checked once the agent finished it, stopped while a blocker holds the task, running otherwise.
+ */
+function tryWord(state: TaskState, attempt: { ended: boolean; result: AttemptResult | null }) {
+  if (attempt.result !== null) return attempt.result
+  if (attempt.ended) return 'finished, being checked by Hemera'
+  return state === 'blocked' ? 'stopped by the blocker' : 'running'
+}
+
 /** Where a build stands, for its agent: each task, its state and its attempts (D10-13). */
 function standing(rows: BuildRows): string {
   const lines = rows.tasks.map((task) => {
     const attempts = attemptsOf(rows, task).map(
-      (attempt) => `attempt ${attempt.number} ${resultOf(attempt) ?? 'running'}`,
+      (attempt) =>
+        `attempt ${attempt.number} ${tryWord(stateOf(task), { ended: attempt.endedAt !== null, result: resultOf(attempt) })}`,
     )
     const spec = specTaskOf(rows, task)
     return `- ${task.label} · ${spec?.title ?? ''}: ${stateOf(task)}${attempts.length === 0 ? '' : `; ${attempts.join(', ')}`}`
@@ -580,7 +591,7 @@ function oneTask(rows: BuildRows, task: TaskRow): string {
   ]
   const tries = told.attempts.map((attempt) =>
     [
-      `## Attempt ${attempt.number}: ${attempt.result ?? 'running'}`,
+      `## Attempt ${attempt.number}: ${tryWord(told.state, attempt)}`,
       attempt.files.length === 0
         ? 'Files changed: none recorded'
         : `Files changed:\n${attempt.files
@@ -787,9 +798,10 @@ export const buildsLayer = Layer.effect(
               // Read in the very transaction: a Stop or an Accept that came first leaves the build
               // as it closed it, no try judged, none opened.
               if (current === null || !working(current)) return { result: [], events: [] }
+              // A task's try ended when the agent finished it; a story's or the build's ends here.
               yield* transaction
                 .update(buildAttempts)
-                .set({ result, endedAt: at })
+                .set(judged.scope === 'task' ? { result } : { result, endedAt: at })
                 .where(eq(buildAttempts.id, judged.id))
                 .pipe(Effect.mapError(failed('writing the verdict')))
               const rows = yield* readBuild(transaction, sessionId)
@@ -1094,6 +1106,12 @@ export const buildsLayer = Layer.effect(
                   .values(files.map((file) => ({ attemptId: attempt.id, ...file })))
                   .pipe(Effect.mapError(failed('recording the files changed')))
               }
+              // The try is over when the agent says so; the verdict gives it its result (D10-07).
+              yield* transaction
+                .update(buildAttempts)
+                .set({ endedAt: at })
+                .where(eq(buildAttempts.id, attempt.id))
+                .pipe(Effect.mapError(failed('ending the try')))
               yield* moveTask(transaction, task, 'checking', at, { finishedAt: at })
               const summary = call.arguments.summary?.slice(0, 400) ?? null
               return {
@@ -1791,10 +1809,12 @@ export const buildsLayer = Layer.effect(
             // The checks a stopped engine left running never said anything: what they wrote is
             // dropped, and they run again (L9).
             const left = rows.attempts.filter((attempt) => {
-              if (attempt.endedAt !== null) return false
-              if (attempt.scope !== 'task') return true
+              if (attempt.result !== null) return false
+              // A story's or the build's try runs its checks until it ends; a task's is being
+              // checked once it ended, while its task is.
+              if (attempt.scope !== 'task') return attempt.endedAt === null
               const task = rows.tasks.find((one) => one.id === attempt.buildTaskId)
-              return task !== undefined && stateOf(task) === 'checking'
+              return attempt.endedAt !== null && task !== undefined && stateOf(task) === 'checking'
             })
             if (left.length > 0) {
               yield* withDatabase(

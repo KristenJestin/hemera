@@ -55,7 +55,12 @@ export interface BriefFile extends ChangedFile {
 export interface BriefAttempt {
   /** 1-based, per task, per story or for the build. */
   readonly number: number
-  /** Null while it runs. */
+  /**
+   * Whether its work is over: a task's try ends when the agent says it finished it, and is then
+   * being checked until its result comes; a try not ended is running.
+   */
+  readonly ended: boolean
+  /** Null until it is judged. */
   readonly result: AttemptResult | null
   readonly files: readonly BriefFile[]
   readonly checks: readonly BriefCheck[]
@@ -262,7 +267,7 @@ function standingText(tasks: readonly BriefTask[]): string {
         ...working.map((task) => {
           const tries = task.attempts.map((attempt) =>
             attempt.result === null
-              ? `  Attempt ${attempt.number}: running`
+              ? `  Attempt ${attempt.number}: ${attempt.ended ? 'finished, being checked by Hemera' : 'running'}`
               : `  Attempt ${attempt.number}: ${attempt.result}; files changed: ${filesChanged(attempt)}; checks: ${verdicts(attempt)}`,
           )
           const trees = task.snapshots.map(

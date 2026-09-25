@@ -70,6 +70,7 @@ export interface BuildDelivery {
 function briefAttempt(rows: BuildRows, attempt: AttemptRow): BriefAttempt {
   return {
     number: attempt.number,
+    ended: attempt.endedAt !== null,
     result: resultOf(attempt),
     files: rows.files
       .filter((file) => file.attemptId === attempt.id)

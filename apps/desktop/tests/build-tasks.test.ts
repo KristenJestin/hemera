@@ -102,6 +102,11 @@ describe("The agent's signal is not a verdict", () => {
       }),
     )
     expect(seen.checking.tasks[0]?.state).toBe('checking')
+    // The try ended when the agent said it finished; the verdict only gives it its result.
+    const finishedAt = seen.checking.tasks[0]?.attempts[0]?.endedAt ?? null
+    expect(finishedAt).not.toBeNull()
+    expect(seen.checking.tasks[0]?.attempts[0]?.result).toBeNull()
+    expect(seen.judged.tasks[0]?.attempts[0]?.endedAt).toBe(finishedAt)
     const t1 = seen.judged.tasks[0]
     expect(t1?.state).toBe('in_progress')
     expect(t1?.attempts.map((attempt) => [attempt.number, attempt.result])).toEqual([
@@ -304,6 +309,7 @@ describe('A dismissed blocker costs no try', () => {
                 call: 'task_blocked',
                 arguments: { task: 'T1', reason: 'The Spec asks for CSV and for JSON at once' },
               },
+              { does: 'uses' as const, call: 'build_read', arguments: { task: 'T1' } },
             ]
           : []
       },
@@ -316,6 +322,11 @@ describe('A dismissed blocker costs no try', () => {
         const blocked = yield* eventually(
           buildOf(sessionId),
           (view) => view.tasks[0]?.state === 'blocked',
+        )
+        // The agent reads the task while it is blocked, then the user dismisses the blocker.
+        yield* eventually(
+          Effect.sync(() => agent.answers.used.length),
+          (used) => used === 2,
         )
         yield* (yield* Builds).dismissBlocker(blocked.blockers[0]?.id ?? '')
         const done = yield* eventually(
@@ -336,6 +347,9 @@ describe('A dismissed blocker costs no try', () => {
     expect(seen.done.tasks[0]?.attempts.map((attempt) => [attempt.number, attempt.result])).toEqual(
       [[1, 'unverified']],
     )
+    // Read while blocked, the try is said as it is: stopped, not running.
+    const read = agent.answers.used.find((used) => used.tool === 'build_read')
+    expect(read?.text).toContain('## Attempt 1: stopped by the blocker')
   })
 })
 
