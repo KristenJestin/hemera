@@ -568,7 +568,9 @@ describe('A Rework cancels a launch that has not started', () => {
     )
 
     expect(seen.refused).toBeInstanceOf(ReopenRefusedError)
-    expect(seen.refused.message).toContain('in_progress')
+    // Once a build's first task has run, the refusal names the frozen contract rather than the
+    // bare status (D10-10, "The build mission protocol").
+    expect(seen.refused.message).toContain('The build has started')
     // The build that started is untouched: the same launch, the same Session, and no launch was
     // cancelled.
     expect(seen.reworked.revision.number).toBe(2)
