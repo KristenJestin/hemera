@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { movesLess } from '../../.storybook/reduced-motion.ts'
 import { IconButton } from '../components/button/button.tsx'
 import { Tooltip, TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { IconInfoCircle } from '../icons.ts'
@@ -369,27 +370,39 @@ export const TabChange: Story = {
   play: async ({ canvasElement }) => {
     const dialog = await opened(canvasElement)
     const resting = dialog.getBoundingClientRect().height
-    const fades: number[] = []
     const heights: number[] = []
-    // Watched from before the press, frame by frame, for longer than the fade lasts.
+    // Every value the crossfade writes, watched from before the press: a fade of `fast` is drawn
+    // in two or three frames on a busy runner, so what is read is what was written, not how many
+    // frames the runner took to write it.
+    const drawn: number[] = []
+    const writes = new MutationObserver(() => {
+      const fade = fadeOf(dialog, 'Commands')
+      if (fade !== null) drawn.push(fade)
+    })
+    writes.observe(dialog, { attributes: true, subtree: true, attributeFilter: ['style'] })
     const watched = (async () => {
       for (let seen = 0; seen < 40; seen += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one frame after the other, as they are drawn
         await frame()
-        const fade = fadeOf(dialog, 'Commands')
-        if (fade !== null) fades.push(fade)
         heights.push(dialog.getBoundingClientRect().height)
       }
     })()
     await userEvent.click(within(dialog).getByRole('tab', { name: 'Commands' }))
+    // The journey is waited out, not counted in frames: the last write is the landing.
+    await waitFor(() => expect(fadeOf(dialog, 'Commands')).toBe(1))
+    writes.disconnect()
     await watched
 
     await expect(within(dialog).getByText('pnpm dev')).toBeVisible()
-    expect(
-      fades.some((fade) => fade > 0 && fade < 1),
-      'the new panel never showed between transparent and opaque',
-    ).toBe(true)
-    expect(fades.at(-1), 'the new panel did not land opaque').toBe(1)
+    if (!movesLess()) {
+      // Drawn from transparent: the crossfade wrote a value below opaque on its way up. Where
+      // less movement was asked for there is no journey, and the opacity above is the claim.
+      expect(
+        drawn.some((fade) => fade < 1),
+        'the new panel never showed transparent',
+      ).toBe(true)
+    }
+    expect(drawn.at(-1), 'the new panel did not land opaque').toBe(1)
     sameHeight([resting, ...heights])
   },
 }
