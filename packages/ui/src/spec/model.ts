@@ -11,8 +11,11 @@
 /** The three contracts a Spec can be written under (core.md, "Spec types"). */
 export type SpecType = 'feature' | 'bug' | 'maintenance'
 
-/** The two statuses this lot writes; the others are declared by the domain and never drawn yet. */
-export type SpecStatus = 'draft' | 'ready'
+/**
+ * The statuses a Spec is drawn with: core's own, all four (D8-13 draws the two a build makes of a
+ * frozen Spec — `in_progress` once its build has started, `cancelled` when one was taken back).
+ */
+export type SpecStatus = 'draft' | 'ready' | 'in_progress' | 'cancelled'
 
 /** The four phases of the `define` protocol, in their order; `prototype` is not drawn in v1. */
 export type PhaseName = 'shape' | 'plan' | 'decompose' | 'prototype'
