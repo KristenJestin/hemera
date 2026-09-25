@@ -90,9 +90,6 @@ export class LaunchRefusedError extends Data.TaggedError('LaunchRefusedError')<{
   }
 }
 
-/** What a launch a stopped engine left `starting` says of itself once the engine comes back. */
-const INTERRUPTED = 'interrupted'
-
 /** Everything reading, asking for or retrying a launch can be answered with. */
 export type LaunchRefusal =
   | DatabaseError
@@ -532,56 +529,38 @@ export const launchesLayer = Layer.effect(
 
     /**
      * The launches an engine that stopped left behind (D8-05, D8-13): one it left `starting` is
-     * `failed`, saying `interrupted` — its Session, its revision and its Workspace stand, so
-     * `retry` starts that Session again — and one it left `waiting` on a Workspace that is
-     * already ready starts now.
+     * started again on its Session — the agent of that Session, no new one, as the builds that
+     * were running are resumed — and one it left `waiting` on a Workspace that is already ready
+     * starts now.
      */
     const recover = () =>
       Effect.gen(function* () {
         const left = yield* withDatabase(
           reading('reading the launches a stopped engine left', (transaction) =>
             transaction
-              .select({
-                id: buildLaunches.id,
-                specId: buildLaunches.specId,
-                revisionId: buildLaunches.revisionId,
-                sessionId: buildLaunches.sessionId,
-                projectId: specs.projectId,
-              })
+              .select({ launch: buildLaunches, projectId: specs.projectId })
               .from(buildLaunches)
               .innerJoin(specs, eq(specs.id, buildLaunches.specId))
               .where(eq(buildLaunches.state, 'starting'))
+              .orderBy(buildLaunches.createdAt)
               .pipe(Effect.mapError(failed('reading the launches a stopped engine left'))),
           ),
         )
-        if (left.length > 0) {
-          const at = now()
-          yield* withDatabase(
-            mutate('ending the builds a stopped engine left', (transaction) =>
-              Effect.gen(function* () {
-                for (const each of left) {
-                  yield* transaction
-                    .update(buildLaunches)
-                    .set({ state: 'failed', detail: INTERRUPTED, updatedAt: at })
-                    .where(eq(buildLaunches.id, each.id))
-                    .pipe(Effect.mapError(failed('writing the launch')))
-                }
-                return {
-                  result: undefined,
-                  events: left.map((each) =>
-                    launchEvent(
-                      each,
-                      each.projectId,
-                      'launch.failed',
-                      { sessionId: each.sessionId, reason: INTERRUPTED },
-                      'hemera',
-                    ),
-                  ),
-                } satisfies Mutation<undefined>
-              }),
+        // Its Session, its revision and its Workspace stand, and so does the brief it was given:
+        // the agent of that Session is asked for it again, and nothing is written for a launch
+        // that never got that far (D8-13).
+        yield* Effect.forEach(
+          left,
+          ({ launch, projectId }) =>
+            settled(
+              viewOf(launch),
+              // SAFETY: the claim writes the Session in the very transaction that says
+              // `starting`, so a launch a stopped engine left there holds one.
+              launch.sessionId as string,
+              projectId,
             ),
-          )
-        }
+          { discard: true },
+        )
         // A Workspace that was made ready by an engine that stopped before its ready step: what
         // waited on it has nothing left to wait for.
         const waiting = yield* withDatabase(

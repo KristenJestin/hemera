@@ -541,7 +541,7 @@ describe('One build left on nothing holds back nothing beside it', () => {
 })
 
 describe('The engine comes back to what a stopped engine left', () => {
-  test('A launch left starting is failed as interrupted, and its Session starts again', async () => {
+  test('A launch left starting is started again on its Session', async () => {
     // A machine that holds none of the agents' bare means: the agent cannot be started (D6-02),
     // and that is where the first engine is closed on the launch.
     opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
@@ -566,23 +566,23 @@ describe('The engine comes back to what a stopped engine left', () => {
     const seen = await opened.running(
       Effect.gen(function* () {
         const launched = yield* Launches
-        yield* recovered
-        const back = yield* launched.one(left.id)
+        const sql = yield* SqliteClient
         const before = yield* builds
-        const again = yield* launched.retry(left.id)
-        return { after: yield* builds, again, back, before }
+        yield* recovered
+        const interrupted = yield* sql<{ count: number }>`
+          SELECT count(*) AS count FROM domain_events
+          WHERE type = 'launch.failed' AND payload LIKE '%interrupted%'`
+        return { after: yield* builds, back: yield* launched.one(left.id), before, interrupted }
       }),
     )
-    expect(seen.back.state).toBe('failed')
-    expect(seen.back.detail).toBe('interrupted')
-    // Its Session and its Workspace stand, and the build is not started again on its own: Retry
-    // is what starts that same Session again (D8-13).
+    // The Session, the revision, the Workspace and the brief of that build stand: the engine
+    // asks the agent of that Session for it again, and no new Session is written (D8-13).
+    expect(seen.back.state).toBe('started')
+    expect(seen.back.detail).toBeNull()
     expect(seen.back.sessionId).toBe(left.sessionId)
-    expect(seen.again.state).toBe('started')
-    expect(seen.again.sessionId).toBe(left.sessionId)
-    // One build, before and after: Retry starts the Session the launch already had.
     expect(seen.before).toHaveLength(1)
     expect(seen.after).toEqual(seen.before)
+    expect(seen.interrupted).toEqual([{ count: 0 }])
   })
 
   test('A launch left waiting on a Workspace that is ready starts on the way back', async () => {
