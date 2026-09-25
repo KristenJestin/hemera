@@ -58,12 +58,16 @@ export function V6Layout({ session }: { session: SessionFixture }): ReactNode {
     // With the chat minimised the panel is the page: it cannot be folded as well.
     setFolded(false)
     setChatOpen(false)
-    requestAnimationFrame(() => page.current?.querySelector<HTMLElement>('[data-restore]')?.focus())
+    requestAnimationFrame(() =>
+      page.current?.querySelector<HTMLElement>('[data-restore]')?.focus({ preventScroll: true }),
+    )
   }
   const open = () => {
     setChatOpen(true)
     requestAnimationFrame(() =>
-      page.current?.querySelector<HTMLElement>('[aria-label="Chat"] [contenteditable]')?.focus(),
+      page.current
+        ?.querySelector<HTMLElement>('[aria-label="Chat"] [contenteditable]')
+        ?.focus({ preventScroll: true }),
     )
   }
 
@@ -77,7 +81,7 @@ export function V6Layout({ session }: { session: SessionFixture }): ReactNode {
       />
       <div className={ROW}>
         <motion.div
-          className="flex min-w-0 basis-0 overflow-hidden"
+          className="flex min-w-0 basis-0 overflow-clip"
           initial={false}
           animate={{ flexGrow: chatOpen ? 1 : 0 }}
           transition={moving}
