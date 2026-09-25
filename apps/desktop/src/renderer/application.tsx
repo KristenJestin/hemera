@@ -1286,7 +1286,6 @@ export function Application() {
           onRename={(title) => void renameTo(open, title)}
           onStartEditing={() => setNaming(open.id)}
           onCancelEditing={() => setNaming(null)}
-          onArchive={() => void archive(open)}
           onSearchFiles={async (query: string) => await searchIn(open.workspaceId, query)}
           onPickFiles={async () => await pickIn(open.workspaceId)}
           commandRuns={tools.runs.get(open.id) ?? []}

@@ -16,6 +16,7 @@ import {
   ActivityRow,
   AgentModelMenu,
   BlockedBanner,
+  BuildBanner,
   BuildSession,
   CommandsPanel,
   Composer,
@@ -28,13 +29,17 @@ import {
   CreateWorkspaceDialog,
   SessionDetails,
   SessionHeader,
+  SessionLayout,
   SpecPanel,
   UsageMeter,
+  type ChatState,
+  type BuildViewProps,
   type MessageLine,
   type MessageState,
   type OfferedAgent,
   type PermissionOption,
   type ScrollerEntry,
+  waitsOf,
 } from '@hemera/ui'
 
 import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
@@ -126,7 +131,6 @@ const FOOT = 'mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4'
 const FOOT_NARROW = 'flex w-full flex-col gap-2 px-4 pb-4'
 
 /** The head of a build Session, drawn across the top of the page. */
-const BUILD_HEAD = 'border-b border-border px-6 pt-4 pb-3'
 
 /** What a turn that has just been asked for is doing, before anything of it has arrived. */
 const THINKING: Activity = { state: 'thinking' }
@@ -229,7 +233,6 @@ export interface SessionPageProps {
   onRename: (title: string) => void
   onStartEditing: () => void
   onCancelEditing: () => void
-  onArchive: () => void
   onSearchFiles: (query: string) => Promise<string[]>
   onPickFiles: () => Promise<string[]>
   /** Opens one of the files the turn touched, when the page around this one can open one. */
@@ -258,6 +261,27 @@ export interface SessionPageProps {
   onAddToCatalogue: (run: CommandRun) => Promise<string | null>
 }
 
+/**
+ * What the chat's button wears (lot 5c, issue #115): the turn's own state, said in the chat's five
+ * words. A turn thinking, running or streaming is one the ring turns for; a stopped turn is red.
+ */
+function chatStateOf(activity: Activity | null): ChatState {
+  if (activity === null) return 'idle'
+  switch (activity.state) {
+    case 'thinking':
+    case 'running':
+    case 'streaming':
+      return 'working'
+    case 'waiting':
+      return 'waiting'
+    case 'done':
+      return 'done'
+    case 'stopped':
+    case 'failed':
+      return 'failed'
+  }
+}
+
 export function SessionPage({
   projectName,
   session,
@@ -279,7 +303,6 @@ export function SessionPage({
   onRename,
   onStartEditing,
   onCancelEditing,
-  onArchive,
   onSearchFiles,
   onPickFiles,
   onOpenFile,
@@ -297,6 +320,16 @@ export function SessionPage({
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
+  /*
+    Whether the chat is minimised, which is the page's to hold and not the panel's (lot 5c, issue
+    #115): the page is keyed on the Session, so a Session remembers it while it is open, and the
+    mission it opens on is the one that decides — a build opens with the build view as its page
+    and its chat a button, every other mission opens with the chat at the centre.
+  */
+  const [chatMinimised, setChatMinimised] = useState(session.mission === 'build')
+  // Which task the banner above the composer opened, on the build view's stage: the banner and
+  // the view are two readings of one build, and the head's own choice answers to the same state.
+  const [openBuildTask, setOpenBuildTask] = useState<string | undefined>(undefined)
   const [writes, setWrites] = useState<MessageState>('saved')
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /** What was last handed to the engine, so `Retry` has something to send again. */
@@ -574,12 +607,13 @@ export function SessionPage({
    * with the agent's proposal in the thread (D7-07). `build` plugs in here, with the panel of its
    * tasks, workers and evidence standing in the same `MissionPanel` the Spec stands in.
    */
-  function missionPanel(): ReactNode {
+  function missionPanel(page: boolean): ReactNode {
     if (session.mission !== 'define' || spec === null || defined === null) return null
     return (
       <SpecPanel
         spec={spec}
         reader={readerOf(defined, session.id, sessions, running)}
+        page={page}
         // Checked against the version the edit was opened on, which the panel hands back:
         // an agent may have written the section meanwhile (D7-12).
         onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
@@ -620,11 +654,6 @@ export function SessionPage({
       editing={editing}
       onStartEditing={onStartEditing}
       onCancelEditing={onCancelEditing}
-      onArchive={onArchive}
-      // A Session nothing was ever written in is one the user made by mistake far more often
-      // than one they are done with, and putting it away is a press they would come to
-      // regret: the archive is where threads go.
-      archiveDisabled={thread.length === 0}
       // The one way to the Session details: nothing the agent does opens them.
       onOpenDetails={() => setDetailsOpen(true)}
     />
@@ -790,10 +819,12 @@ export function SessionPage({
   )
 
   /**
-   * A `build` Session inverts the layout (D10-12): the build view at the centre, the chat narrow
-   * and foldable beside it, with what waits for the user in the build as the banner above its
-   * composer — before a permission, which the thread shows as well — and "Spec" opening the frozen
-   * revision read only. Until the build and its revision are read, the head alone.
+   * A `build` Session in the layout every Session has (lot 5c, issue #115): the chat at the
+   * centre, the panel on its right, and the build standing in the panel — its view, and the frozen
+   * revision read only beside it when "Spec" opens it. Its own default is its own alone: a build
+   * opens with the chat minimised, so the build view is the page and the chat is the button at the
+   * end of the head, wearing the ring of what waits for the hand in the build. Until the build and
+   * its revision are read, the head alone.
    */
   if (session.mission === 'build') {
     if (build === null || frozen === null) {
@@ -808,27 +839,48 @@ export function SessionPage({
         </div>
       )
     }
+    // The data and the handlers both readings of the build need: the panel's view, and the banner
+    // above the composer, which opens a task on the view's stage.
+    const view: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> = {
+      build: buildViewDataOf(build),
+      now: new Date(now).toISOString(),
+      onPause: () => void pauseBuild(),
+      onResume: () => void resumeBuild(),
+      onAccept: () => void acceptBuild(),
+      onStop: () => void stopBuild(),
+      onTaskDone: (taskId) => void doneTask(taskId),
+      onTaskSkip: (taskId, reason, unblock) => void skipTask(taskId, reason, unblock),
+      onDismissBlocker: (blockerId) => void dismissBlocker(blockerId),
+    }
     return (
       <>
         <BuildSession
-          header={<div className={BUILD_HEAD}>{head}</div>}
-          build={buildViewDataOf(build)}
-          now={new Date(now).toISOString()}
+          {...view}
+          head={head}
           spec={frozen}
-          chat={(banner) => (
+          selected={openBuildTask}
+          onSelect={setOpenBuildTask}
+          chat={
             <>
               {threadNode}
-              {foot(banner ?? permission, true)}
+              {
+                // What waits for the user in the build comes before a permission, which the
+                // thread shows as well: one banner above the box, and it is the build's.
+                foot(
+                  waitsOf(view.build) ? (
+                    <BuildBanner view={view} onOpen={setOpenBuildTask} />
+                  ) : (
+                    permission
+                  ),
+                  true,
+                )
+              }
             </>
-          )}
-          chatWaiting={waiting === null ? undefined : 'The agent is asking to go on.'}
-          onPause={() => void pauseBuild()}
-          onResume={() => void resumeBuild()}
-          onAccept={() => void acceptBuild()}
-          onStop={() => void stopBuild()}
-          onTaskDone={(taskId) => void doneTask(taskId)}
-          onTaskSkip={(taskId, reason, unblock) => void skipTask(taskId, reason, unblock)}
-          onDismissBlocker={(blockerId) => void dismissBlocker(blockerId)}
+          }
+          chatOpen={!chatMinimised}
+          onChatOpenChange={(open) => setChatMinimised(!open)}
+          chatState={chatStateOf(activity)}
+          chatDetail={activity?.detail}
         />
         {details}
       </>
@@ -837,23 +889,27 @@ export function SessionPage({
 
   return (
     /*
-      One column (review of #40, defect 2): the header, the thread and the composer share one
-      width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
-      the Session details are a dialog the reader opens from the head (second review of #18). The
+      One column (review of #40, defect 2): the header, the thread and the composer share one width
+      and one left edge, and nothing stands beside them but the panel of the Session's mission,
+      which lot 5c (issue #115) took into the layout every Session has — the chat at the centre,
+      the panel on its right, and the button that minimises the chat at the end of the head. The
+      Session details are a dialog the reader opens from the head (second review of #18). The
       screen runs under the frame all the same, and the page's own scroll is the thread's. The row
-      is the container the unfolded Spec panel's width is a share of.
+      is the container the panel's width is a share of.
     */
-    <div className="@container flex h-full min-h-0">
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">{head}</div>
-        {/*
+    <>
+      <SessionLayout
+        head={head}
+        chat={
+          <>
+            {/*
           The thread is given the whole width under the head, and lays its own column on the one
           the head and the composer are laid on: a wheel anywhere beside the thread scrolls it
           (trial of 22 September 2026, evening). An empty Session has nothing to scroll, and its
           sentence stands in the column like everything else.
         */}
-        {threadNode}
-        {/*
+            {threadNode}
+            {/*
           What the turn has spent stands above the box rather than in its foot: the foot is the
           Workspace and the send alone, and a figure read at a glance is a figure that must not be
           what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
@@ -864,21 +920,21 @@ export function SessionPage({
           a row the other would have asked for anyway. The row is drawn as soon as either has
           something to say, and the meter keeps its end of it whether or not a turn is running.
         */}
-        {foot(permission, false)}
-      </div>
+            {foot(permission, false)}
+          </>
+        }
+        panel={missionPanel}
+        chatOpen={!chatMinimised}
+        onChatOpenChange={(open) => setChatMinimised(!open)}
+        chatState={chatStateOf(activity)}
+        chatDetail={activity?.detail}
+      />
       {/*
         The Session details: a centred dialog the reader opens from the head, and nothing else
         opens (second review of #18). A permission, a run or a plan that arrives updates the thread
         and, while the dialog is open, the tab it concerns — never which tab is shown.
       */}
       {details}
-      {/*
-        The panel of the Session's mission, beside the chat: the working surface the thread gave
-        up width for, where the side column stood before the Session details took its plan and its
-        files into a dialog. It opens folded to a band beside the chat, and unfolds pushing it
-        aside when the hand or the agent asks (brief revisions 4, 4b).
-      */}
-      {missionPanel()}
       {workspacePlan !== null && (
         <CreateWorkspaceDialog
           open={intent !== null}
@@ -909,6 +965,6 @@ export function SessionPage({
           }}
         />
       )}
-    </div>
+    </>
   )
 }
