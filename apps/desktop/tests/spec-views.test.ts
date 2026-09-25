@@ -11,22 +11,26 @@ import { describe, expect, test } from 'vite-plus/test'
 import type { GateFailure } from '@hemera/core'
 import type {
   JournalEntry,
+  Launch,
   PhaseId,
   PhaseState,
   SectionName,
   Session,
   SpecQuestion,
+  SpecLaunches,
   SpecSection,
   SpecSnapshot,
 } from '@hemera/ipc'
 import {
   dayOf,
+  launchOf,
   nowOf,
   readerOf,
   readinessOf,
   revisionsOf,
   sectionsOf,
   specViewOf,
+  specWorkspacesOf,
   storiesWith,
   tasksOf,
 } from '#renderer/spec-views.ts'
@@ -699,5 +703,91 @@ describe('Take over is refused while the writer runs a turn, and on a Spec that 
     expect(readerOf(snapshot(), 'reader', listed, (id) => id === 'reader')).toMatchObject({
       takeOverRefused: null,
     })
+  })
+})
+
+/** One launch of `spec-7`, as the engine writes it (D8-13). */
+function launched(change: Partial<Launch> = {}): Launch {
+  return {
+    id: 'l-1',
+    specId: 'spec-7',
+    revisionId: 'rev-1',
+    workspaceId: 'w-1',
+    state: 'waiting',
+    sessionId: null,
+    detail: null,
+    createdAt: '2026-09-25T09:00:00.000Z',
+    updatedAt: '2026-09-25T09:00:00.000Z',
+    ...change,
+  }
+}
+
+/** The panel of a Spec as it was read (D8-12), with nothing asked for until a test asks. */
+function panel(change: Partial<SpecLaunches> = {}): SpecLaunches {
+  return {
+    launch: null,
+    workspace: null,
+    workspaces: [],
+    step: null,
+    ...change,
+  }
+}
+
+describe('The launch of a Spec as the panel draws it', () => {
+  test('nothing is drawn while nothing was asked for', () => {
+    expect(launchOf(null)).toBeNull()
+    expect(launchOf(panel())).toBeNull()
+  })
+
+  test('a launch waiting says the step its Workspace is on, when one is running', () => {
+    expect(launchOf(panel({ launch: launched(), step: 'install' }))).toEqual({
+      state: 'waiting',
+      step: 'install',
+    })
+    // The step belongs to the Workspace, so a launch waiting on nothing waits on nothing.
+    expect(launchOf(panel({ launch: launched() }))).toEqual({ state: 'waiting' })
+  })
+
+  test('a build starting, started or taken back is said in one word', () => {
+    expect(launchOf(panel({ launch: launched({ state: 'starting' }) }))).toEqual({
+      state: 'starting',
+    })
+    expect(launchOf(panel({ launch: launched({ state: 'started' }) }))).toEqual({
+      state: 'started',
+    })
+    expect(launchOf(panel({ launch: launched({ state: 'cancelled' }) }))).toEqual({
+      state: 'cancelled',
+    })
+  })
+
+  test('a refused start keeps the words it was refused with', () => {
+    expect(
+      launchOf(panel({ launch: launched({ state: 'failed', detail: 'no such agent' }) })),
+    ).toEqual({ state: 'failed', cause: 'no such agent' })
+    expect(launchOf(panel({ launch: launched({ state: 'failed' }) }))).toEqual({
+      state: 'failed',
+      cause: 'the agent did not start',
+    })
+  })
+})
+
+describe('The Workspaces a build of a Spec may be started in', () => {
+  test('a panel never read offers nothing', () => {
+    expect(specWorkspacesOf(null)).toEqual({ workspace: undefined, workspaces: [] })
+  })
+
+  test('the Workspace the Spec is set on comes beside the ones a build may use', () => {
+    const read = panel({
+      workspace: { id: 'w-1', name: 'csv-invoice' },
+      workspaces: [
+        { id: 'main', name: 'main' },
+        { id: 'w-1', name: 'csv-invoice' },
+      ],
+    })
+
+    expect(specWorkspacesOf(read).workspace?.name).toBe('csv-invoice')
+    expect(specWorkspacesOf(read).workspaces.map((one) => one.id)).toEqual(['main', 'w-1'])
+    // A Spec set on no Workspace has none to name: absent, and not a Workspace of no name.
+    expect(specWorkspacesOf(panel()).workspace).toBeUndefined()
   })
 })

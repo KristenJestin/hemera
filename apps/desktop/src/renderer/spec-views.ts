@@ -15,12 +15,14 @@ import type {
   SectionName,
   Session,
   SpecAnswer as WireAnswer,
+  SpecLaunches,
   SpecQuestion,
   SpecRevision,
   SpecSnapshot,
 } from '@hemera/ipc'
 import type {
   GateCheck,
+  LaunchView,
   Mark,
   PhaseView,
   ReaderView,
@@ -441,8 +443,10 @@ export function specViewOf({
     key: snapshot.spec.key,
     title: snapshot.revision.title,
     type: snapshot.revision.type,
-    // A revision other than the current one is frozen, whatever the Spec is now (D7-05).
-    status: isEditable(snapshot) ? 'draft' : 'ready',
+    // The revision shown speaks for itself: the current one carries the Spec's own status, which a
+    // build makes `in_progress` (D8-13), and an older one reads as frozen, whatever the Spec is
+    // now (D7-05).
+    status: isCurrent(snapshot) ? snapshot.spec.status : 'ready',
     revision: snapshot.revision.number,
     revisions: revisionsOf(snapshot, revisions, journal),
     phases: phasesOf(snapshot),
@@ -467,6 +471,41 @@ export function specViewOf({
     replacedBy: isCurrent(snapshot)
       ? undefined
       : revisions.find((one) => one.id === snapshot.spec.currentRevisionId)?.number,
+  }
+}
+
+/**
+ * The launch of the Spec's build as the panel's head reads it (D8-13): where it stands, the step
+ * its Workspace is preparing while it waits, and — refused — the engine's own words for it, which
+ * are the only thing that says what to do about it. `null` while no launch has been asked for.
+ *
+ * The step belongs to the Workspace (D8-05) and is read beside the launch, not inside it: what a
+ * preparation is doing is what the launch is waiting for, and it is named where it stands.
+ */
+export function launchOf(launches: SpecLaunches | null): LaunchView | null {
+  if (launches === null || launches.launch === null) return null
+  const { state, detail } = launches.launch
+  switch (state) {
+    case 'waiting':
+      return launches.step === null ? { state } : { state, step: launches.step }
+    case 'starting':
+    case 'started':
+    case 'cancelled':
+      return { state }
+    case 'failed':
+      return { state, cause: detail ?? 'the agent did not start' }
+  }
+}
+
+/**
+ * The Workspaces a build may be started in, and the one the Spec is set on (D8-12): `main` first,
+ * as the engine orders them, then the ones made by hand. Absent while no Workspace is ready.
+ */
+export function specWorkspacesOf(launches: SpecLaunches | null) {
+  if (launches === null) return { workspace: undefined, workspaces: [] }
+  return {
+    workspace: launches.workspace ?? undefined,
+    workspaces: launches.workspaces,
   }
 }
 

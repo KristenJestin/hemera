@@ -256,6 +256,8 @@ describe('The Spec use cases are declared and relayed', () => {
       'specs.buffers.read',
       'specs.buffers.save',
       'specs.buffers.discard',
+      // The Workspace a Spec's build runs in, written on the Spec when it is made ready (D8-12).
+      'specs.useWorkspace',
     ]
     const declared = Object.keys(ENGINE_REQUESTS).filter((name) => name.startsWith('specs.'))
     const relayed = Object.keys(CHANNELS).filter((name) => name.startsWith('specs.'))

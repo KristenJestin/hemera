@@ -266,6 +266,12 @@ const RELAYED = [
   'specs.buffers.read',
   'specs.buffers.save',
   'specs.buffers.discard',
+  // The Workspace a Spec is set on, and the launch of its build (D8-12, D8-13).
+  'specs.useWorkspace',
+  'launches.forSpec',
+  'launches.request',
+  'launches.start',
+  'launches.retry',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

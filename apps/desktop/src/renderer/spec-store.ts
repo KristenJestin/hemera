@@ -3,6 +3,7 @@ import type {
   EngineEvent,
   JournalEntry,
   SectionName,
+  SpecLaunches,
   SpecRevision,
   SpecSnapshot,
   SpecType,
@@ -37,6 +38,11 @@ export interface SpecState {
   buffers: EditBuffer[]
   /** The Spec's lines of the Journal, newest first: `spec.ready` says when a revision froze. */
   journal: JournalEntry[]
+  /**
+   * The Workspace the Spec is set on, the ones its build may be started in and the launch of that
+   * build, read whole (D8-12, D8-13). Null until the Spec is open.
+   */
+  launches: SpecLaunches | null
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
   /**
@@ -53,6 +59,7 @@ const EMPTY: SpecState = {
   revisions: [],
   buffers: [],
   journal: [],
+  launches: null,
   refusal: null,
   readyRefused: null,
 }
@@ -100,10 +107,11 @@ async function reload(specId: string): Promise<void> {
   started += 1
   const ticket = started
   const picked = state.revision
-  const [current, revisions, buffers] = await Promise.all([
+  const [current, revisions, buffers, launches] = await Promise.all([
     window.hemera.invoke('specs.read', { specId }),
     window.hemera.invoke('specs.revisions', { specId }),
     window.hemera.invoke('specs.buffers.read', { specId }),
+    window.hemera.invoke('launches.forSpec', { specId }),
   ])
   const snapshot =
     picked === null || picked === current.revision.number
@@ -115,7 +123,17 @@ async function reload(specId: string): Promise<void> {
     limit: JOURNAL_PAGE,
   })
   if (shown !== specId || ticket !== started) return
-  replace({ ...state, snapshot, current, revisions, buffers, journal: journal.entries })
+  replace({
+    ...state,
+    snapshot,
+    current,
+    revisions,
+    buffers,
+    // The read may answer nothing at all where nothing has been asked for: absent and null are
+    // the same thing to the panel.
+    launches: launches ?? null,
+    journal: journal.entries,
+  })
 }
 
 /** Reads the open Spec again, keeping a failed read as the refusal on screen. */
@@ -315,6 +333,36 @@ export async function takeOver(sessionId: string): Promise<boolean> {
   })
 }
 
+/**
+ * Asks for a build in a Workspace the Project already has (D8-12): `main`, which every Project
+ * has, or one made by hand. The launch waits for the Workspace to be ready, then starts the
+ * agent in it (D8-13).
+ */
+export async function askForBuild(workspaceId: string): Promise<boolean> {
+  return await acting(async (specId) => {
+    await window.hemera.invoke('launches.request', { specId, workspaceId })
+  })
+}
+
+/**
+ * Starts the build in the Workspace the Spec is set on (D8-12): the one thing left to press once
+ * a preparation was made and no build was asked for.
+ */
+export async function startBuild(): Promise<boolean> {
+  return await acting(async (specId) => {
+    await window.hemera.invoke('launches.start', { specId })
+  })
+}
+
+/** Starts the agent again, after it refused to (D8-13). The launch is the one on screen. */
+export async function retryBuild(): Promise<boolean> {
+  const launchId = state.launches?.launch?.id
+  if (launchId === undefined) return false
+  return await acting(async () => {
+    await window.hemera.invoke('launches.retry', { launchId })
+  })
+}
+
 export function forgetSpecRefusal(): void {
   if (state.refusal === null) return
   replace({ ...state, refusal: null })
@@ -331,6 +379,9 @@ export function forgetSpecRefusal(): void {
 export function listenToSpecs(changed: (projectId: string) => void): () => void {
   return window.hemera.on((event: EngineEvent) => {
     if (event.event === 'turn' && shown !== null) void refresh(shown)
+    // The launch of the Spec on screen moved on: asked for, started, refused or taken back
+    // (D8-13). Nothing else crosses — the panel reads the whole of it again, as it stands.
+    if (event.event === 'launch.changed' && event.specId === shown) void refresh(event.specId)
     if (event.event !== 'spec.changed') return
     changed(event.projectId)
     if (event.specId === shown) void refresh(event.specId)
