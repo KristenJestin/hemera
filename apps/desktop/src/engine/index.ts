@@ -34,6 +34,7 @@ import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
+import { BuildNotices, type Builds, buildsLayer } from './build/build.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
 import { type Context, contextLayer } from './context/service.ts'
@@ -166,6 +167,25 @@ function specNoticesTo(
 }
 
 /**
+ * The window, as the builds' notices: a build changed, and the view open on it reads it again
+ * (D10-12). Its own shape, as the Specs' is.
+ */
+function buildNoticesTo(
+  port: MessagePortMain,
+  log: (line: string) => void,
+): Layer.Layer<BuildNotices> {
+  return Layer.succeed(BuildNotices, {
+    changed: (sessionId) => {
+      try {
+        port.postMessage({ event: 'build.changed', sessionId })
+      } catch (died) {
+        log(`pushing build.changed failed: ${named(died)}`)
+      }
+    },
+  })
+}
+
+/**
  * Everything this process is, built once.
  *
  * The database layer is underneath the two services, so both stand on the same open file, and
@@ -194,6 +214,7 @@ export type EngineServices =
   | Launches
   | ProjectChecks
   | BuildChecks
+  | Builds
   | Database
   | SqliteClient
 
@@ -233,11 +254,19 @@ function servicesOf(
   // The Specs, and the window that hears of them: one service, which the Spec tools write through
   // as the window's own requests do.
   const specs = specsLayer.pipe(Layer.provide(specNoticesTo(port, log)))
+  // The builds (D10-01): one service, which the catalogue asks before a call and the runtime
+  // drives, over the machine's `git` for their snapshots.
+  const builds = buildsLayer.pipe(
+    Layer.provide(gitLayer()),
+    Layer.provide(buildNoticesTo(port, log)),
+    Layer.provide(diagnostic),
+  )
   // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
   // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
   // rather than minting a second one, and a token of one book means nothing to the other.
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),

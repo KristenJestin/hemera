@@ -9,7 +9,7 @@
  *
  * The Workspace becomes ready when its preparation writes its last step, and that is what starts
  * a launch waiting on it: the build Session is created on the launch's revision, in that
- * Workspace, with the Spec of that revision rendered as its brief in its thread, and the agent
+ * Workspace, its build begun (D10-02), and the agent
  * the Spec's writer Session runs is started in the Workspace's folder (D8-09: started is what the
  * agent's own handshake answered). A start that fails says `failed` with what the agent answered
  * and stays on screen, and `retry` starts that same Session's agent again without touching the
@@ -28,13 +28,12 @@ import {
   NEW_SESSION_TITLE,
   type Spec,
   WORKSPACE_STATES,
-  focusOf,
-  renderSpecMarkdown,
 } from '@hemera/core'
 import { type SQL, and, eq } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, Result } from 'effect'
 
 import { AgentRuntime } from '../agents/runtime.ts'
+import { Builds } from '../build/build.ts'
 import { type InvalidCursorError, type NewEvent } from '../journal.ts'
 import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
@@ -154,6 +153,7 @@ export const launchesLayer = Layer.effect(
     const sessions = yield* Sessions
     const preferences = yield* Preferences
     const runtime = yield* AgentRuntime
+    const builds = yield* Builds
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -252,6 +252,8 @@ export const launchesLayer = Layer.effect(
     const settled = (launch: LaunchView, sessionId: string, projectId: string) =>
       Effect.gen(function* () {
         const handshake = yield* Effect.result(runtime.start(sessionId))
+        // No message of the user's starts a build: its agent is handed its brief at once (D10-02).
+        if (Result.isSuccess(handshake)) yield* builds.wake(sessionId)
         const at = now()
         const answered: LaunchView = Result.isSuccess(handshake)
           ? { ...launch, state: 'started', sessionId, detail: null, updatedAt: at }
@@ -378,16 +380,9 @@ export const launchesLayer = Layer.effect(
         // Another starter — a request and the Workspace becoming ready at once — took the launch
         // between the two reads: what it said of the build is not this caller's to say again.
         if (starting.state !== 'starting') return starting
-        // What the build is given: the Spec as it stood on the revision the launch names, folded
-        // in its thread as the brief the window reads (3a's renderer, D7-09).
-        yield* sessions
-          .write(sessionId, {
-            role: 'hemera',
-            kind: 'mission_brief',
-            body: renderSpecMarkdown(snapshot),
-            payload: JSON.stringify({ phase: focusOf(snapshot.phases) }),
-          })
-          .pipe(Effect.asVoid)
+        // The build begins on the revision the launch names, before its agent starts: `prepare`,
+        // its tasks and the first ones ready (D10-01, D10-02).
+        yield* builds.begin(sessionId, snapshot)
         return yield* settled(starting, sessionId, projectId)
       })
 
@@ -541,6 +536,15 @@ export const launchesLayer = Layer.effect(
       request: (specId, workspaceId) =>
         Effect.gen(function* () {
           const snapshot = yield* readSpec(specId)
+          // One build of a Spec at a time: a paused, verifying or accepted one keeps the slot (L10).
+          const holding = yield* builds.holder(specId)
+          if (holding !== null) {
+            return yield* Effect.fail(
+              new LaunchRefusedError({
+                reason: `“${snapshot.spec.key}” already has a build: ${holding}.`,
+              }),
+            )
+          }
           if (snapshot.spec.status !== 'ready') {
             return yield* Effect.fail(
               new LaunchRefusedError({

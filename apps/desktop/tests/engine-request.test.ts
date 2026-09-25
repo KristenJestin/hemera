@@ -49,6 +49,7 @@ import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { threadOf, until } from './application.ts'
+import { idleBuilds } from './build-harness.ts'
 import { repository } from './repositories.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
@@ -157,6 +158,8 @@ function running<A, E>(
     // Handed up, as the engine hands them up: the settings and the Commands panel ask for the
     // very catalogue and runs the runtime lends.
     Layer.provideMerge(lent),
+    // The builds, which the launches begin and the runtime drives: one service for both.
+    Layer.provideMerge(idleBuilds),
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provide(agents),
     Layer.provide(heldWordsLayer),

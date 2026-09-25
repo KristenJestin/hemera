@@ -1,0 +1,164 @@
+/**
+ * The builds a suite runs on (design D10-01 to D10-14).
+ *
+ * `idleBuilds` is the build service of a suite that runs none: the catalogue and the runtime stand
+ * on it, and a Session that is no build passes through it untouched.
+ */
+
+import { join } from 'node:path'
+
+import { Effect, Layer } from 'effect'
+
+import { type BuildView, Builds, NoBuildNotices, buildsLayer } from '#engine/build/build.ts'
+import { gitLayer } from '#engine/git.ts'
+import { Projects } from '#engine/projects.ts'
+import { Sessions } from '#engine/sessions.ts'
+import { Specs } from '#engine/specs/specs.ts'
+import { SqliteClient } from '#engine/storage/database.ts'
+import { Launches } from '#engine/workspaces/launches.ts'
+
+import { repository } from './repositories.ts'
+import { agentOf, shaped, write } from './specs-harness.ts'
+
+/** The builds of a suite that runs none, over the database and the diagnostic it provides. */
+export const idleBuilds = buildsLayer.pipe(Layer.provide(gitLayer()), Layer.provide(NoBuildNotices))
+
+/** A contractual task of a Spec a build suite freezes, named by its title. */
+export interface TaskDraft {
+  readonly title: string
+  readonly executor?: 'agent' | 'human'
+  readonly dependsOn?: readonly string[]
+  /** The stories it covers, by title; the first story when it names none. */
+  readonly stories?: readonly string[]
+}
+
+/** Two tasks with no dependency and a third depending on both (D10-03): T1, T2, then T3. */
+export const THREE: readonly TaskDraft[] = [
+  { title: 'Write the exporter' },
+  { title: 'Write the reader' },
+  { title: 'Wire them', dependsOn: ['Write the exporter', 'Write the reader'] },
+]
+
+/**
+ * A `ready` Spec of a Project on a real `main` — `sources/api`, one repository with one commit —
+ * with the tasks given, in that order: labelled `T1…Tn` by it (L1). Written the way the product
+ * writes one: its writer's agent shapes, plans, decomposes and attests, and the human freezes it.
+ */
+export const aReadySpec = (
+  dataFolder: string,
+  tasks: readonly TaskDraft[],
+  stories: readonly string[] = ['Export'],
+) =>
+  Effect.gen(function* () {
+    const main = join(dataFolder, 'main')
+    repository(join(main, 'sources', 'api'))
+    const projects = yield* Projects
+    const created = yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: main })
+    const project = yield* projects.addRepository(created.id, created.version, './sources/api')
+    const sessions = yield* Sessions
+    const writer = yield* sessions.create(project.id, 'claude')
+    const specs = yield* Specs
+    const { session, snapshot } = yield* specs.create({
+      sessionId: writer.id,
+      type: 'feature',
+      title: 'Export the journal',
+    })
+    const specId = snapshot.spec.id
+    const agent = agentOf(session.id)
+    yield* shaped(specId, session.id)
+    yield* specs.declarePhase(specId, session.id, 'shape', { summary: 'Shaped.', assumptions: [] })
+    yield* write(agent, specId, 'plan', 'Stream the rows into a file.')
+    yield* specs.declarePhase(specId, session.id, 'plan', { summary: 'Planned.', assumptions: [] })
+    yield* specs.writeStories(agent, {
+      specId,
+      stories: stories.map((title) => ({
+        title,
+        narrative: `As a user, I ${title.toLowerCase()}.`,
+        priority: null,
+        criteria: [`${title} works`],
+      })),
+    })
+    yield* specs.writeTasks(agent, {
+      specId,
+      tasks: tasks.map((task) => ({
+        title: task.title,
+        result: `${task.title}, done`,
+        type: 'code',
+        executor: task.executor ?? 'agent',
+        criteria: 'Its tests pass',
+        dependsOn: [...(task.dependsOn ?? [])],
+        stories: [...(task.stories ?? stories.slice(0, 1))],
+      })),
+    })
+    yield* specs.declarePhase(specId, session.id, 'decompose', {
+      summary: 'Decomposed.',
+      assumptions: [],
+    })
+    const attested = yield* specs.attest(specId, session.id)
+    const frozen = yield* specs.markReady({
+      specId,
+      expectedRevisionId: attested.revision.id,
+      expectedContentVersion: attested.spec.contentVersion,
+      sessionId: session.id,
+    })
+    const workspace = yield* sessions.mainOf(project.id)
+    return {
+      projectId: project.id,
+      specId,
+      key: frozen.spec.key,
+      revisionId: frozen.revision.id,
+      writerId: session.id,
+      workspaceId: workspace.id,
+      main,
+      repository: join(main, 'sources', 'api'),
+    }
+  })
+
+/** A build of that Spec asked for in `main`, which is ready: started at once (D8-13). */
+export const launched = (specId: string, workspaceId: string) =>
+  Effect.gen(function* () {
+    const launch = yield* (yield* Launches).request(specId, workspaceId)
+    if (launch.sessionId === null) return yield* Effect.die('the build did not start')
+    return launch.sessionId
+  })
+
+/** The build as the window reads it. */
+export const buildOf = (sessionId: string) =>
+  Effect.gen(function* () {
+    return yield* (yield* Builds).view(sessionId)
+  })
+
+/** Where each task stands, by label. */
+export const statesOf = (view: BuildView) =>
+  Object.fromEntries(view.tasks.map((task) => [task.label, task.state]))
+
+/**
+ * Reads until what is waited for is true, in real time, and answers the last thing it read: a
+ * build moves through deliveries, tool calls over HTTP and checks in the background.
+ */
+export const eventually = <A, E, R>(read: Effect.Effect<A, E, R>, ready: (seen: A) => boolean) =>
+  Effect.gen(function* () {
+    let seen = yield* read
+    for (let tries = 0; tries < 400 && !ready(seen); tries += 1) {
+      yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 25)))
+      seen = yield* read
+    }
+    if (!ready(seen)) return yield* Effect.die(`never came: ${JSON.stringify(seen)}`)
+    return seen
+  })
+
+/** The Journal lines of a build Session, in order. */
+export const journalOf = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqliteClient
+    return yield* sql<{
+      type: string
+      entity_kind: string
+      entity_id: string
+      session_id: string | null
+      spec_id: string | null
+      revision_id: string | null
+      payload: string
+    }>`SELECT type, entity_kind, entity_id, session_id, spec_id, revision_id, payload
+      FROM domain_events WHERE session_id = ${sessionId} ORDER BY sequence`
+  })

@@ -34,6 +34,7 @@ import { AgentNotices } from '#engine/agents/notices.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
 import { Agents } from '#engine/agents/service.ts'
+import { BuildNotices, buildsLayer } from '#engine/build/build.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
@@ -69,6 +70,8 @@ export interface OpenWindow {
   readonly pushed: readonly EngineEvent[]
   /** What the engine wrote to its diagnostic, which is where a refused access is told. */
   readonly written: readonly string[]
+  /** The build Sessions the engine said changed (`build.changed`), in the order it said it. */
+  readonly built: readonly string[]
   /**
    * Runs a program against this window's engine.
    *
@@ -115,6 +118,7 @@ async function openOver(
 ): Promise<OpenWindow> {
   const pushed: EngineEvent[] = []
   const written: string[] = []
+  const built: string[] = []
   const listeners = new Set<(event: EngineEvent) => void>()
   const push = (event: EngineEvent) => {
     pushed.push(event)
@@ -141,8 +145,21 @@ async function openOver(
   })
   const database = databaseLayer(join(dataFolder, 'hemera.sqlite'))
 
+  // The builds, and the window hearing that one changed: one service, the launches', the
+  // catalogue's and the runtime's, as the engine builds it.
+  const builds = buildsLayer.pipe(
+    Layer.provide(gitLayer()),
+    Layer.provide(
+      Layer.succeed(BuildNotices, {
+        changed: (sessionId) => {
+          built.push(sessionId)
+        },
+      }),
+    ),
+  )
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
@@ -236,6 +253,7 @@ async function openOver(
     bridge,
     pushed,
     written,
+    built,
     running,
     close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
   }
