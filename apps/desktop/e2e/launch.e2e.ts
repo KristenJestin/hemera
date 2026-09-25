@@ -37,10 +37,12 @@ import {
   choose,
   control,
   fill,
+  leave,
   press,
   pressIn,
   pressTab,
   region,
+  showPart,
   unfoldSpec,
   write,
 } from './hand.ts'
@@ -69,6 +71,10 @@ const THREAD = '[aria-label="The thread of this Session"]'
 const PROPOSAL_CARD = '[role="group"][aria-label="Create a Spec"]'
 const BUILD_GROUP = '[role="group"][aria-label="The build of this Spec"]'
 const DIALOG = '[role="dialog"]'
+
+/** The two sections this fake agent never writes, and the human does. */
+const PROBLEM = 'The export leaves the invoice date column empty.'
+const SCOPE = 'The export, and the invoice date column, and nothing else of the file.'
 
 /**
  * The line of the recipe's step: it holds the preparation of its Workspace open until `GO` exists,
@@ -195,12 +201,87 @@ async function writeSpec(asked: string, key: string): Promise<void> {
   await awaits(`Created ${key}`)
 
   await unfoldSpec(key)
+  // The `shape` phase cannot finish without these two, and this fake agent writes neither: they
+  // are the human's, written in the panel as a human writes them.
+  await writeSection(key, 'Problem', PROBLEM)
+  await showPart(key, 'Scope')
+  await writeSection(key, 'Scope', SCOPE)
+
   await write(COMPLETE)
   await press('Send')
   await awaits(COMPLETED, 60_000)
   await browser.pause(1500)
+  await readyOffered(key)
   await pressIn(panelOf(key), 'Mark ready')
   await browser.pause(1500)
+}
+
+/**
+ * Writes a section of the Spec from the panel, as the human's own edit. `typeIn` wants the field
+ * focused afterwards, and the answer of the thread takes the caret back: here the text is set and
+ * the blur commits it, which is what the panel listens to.
+ */
+async function writeSection(key: string, title: string, body: string): Promise<void> {
+  const written = await browser.execute(
+    (label: string, said: string) => {
+      const field = document.querySelector(`textarea[aria-label="${label}"]`)
+      if (!(field instanceof HTMLTextAreaElement)) return 'no field'
+      field.focus()
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+        field,
+        said,
+      )
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+      return 'written'
+    },
+    title,
+    body,
+  )
+  if (written !== 'written') {
+    throw new Error(`wrote ${title}: ${written}. Panel: ${await region(panelOf(key))}`)
+  }
+  await leave(title)
+}
+
+/**
+ * Waits for the panel's `Mark ready`, and says what the panel and the thread hold when it never
+ * comes: the gate is the engine's, and a write it refused is read in the thread.
+ */
+async function readyOffered(key: string): Promise<void> {
+  const until = Date.now() + 30_000
+  while (Date.now() < until) {
+    // oxlint-disable-next-line no-await-in-loop -- the panel is asked again until it offers the press
+    if ((await control('Mark ready')) !== null) return
+    // oxlint-disable-next-line no-await-in-loop -- the pause between two asks
+    await browser.pause(500)
+  }
+  throw new Error(
+    `no Mark ready for ${key}. Panel: ${await region(panelOf(key))} || Thread: ${await region(THREAD)}`,
+  )
+}
+
+/**
+ * Chooses a value in a `Select` of the dialog. `choose` looks a trigger up on the whole page, and
+ * the page behind the dialog holds a `Select` of the same name: the click would land on the
+ * backdrop and never reach the trigger.
+ */
+async function pick(label: string, value: string): Promise<void> {
+  const dialog = await $(DIALOG)
+  await dialog.$(`button[aria-label="${label}"]`).click()
+  await browser.pause(300)
+  const options = await $$('[role="option"]')
+  let chosen = false
+  for (const one of options) {
+    // oxlint-disable-next-line no-await-in-loop -- the options are read one after the other, in order
+    if ((await one.getText()).trim() === value) {
+      // oxlint-disable-next-line no-await-in-loop -- the one found is chosen, then the loop ends
+      await one.click()
+      chosen = true
+      break
+    }
+  }
+  expect(chosen).toBe(true)
+  await browser.pause(300)
 }
 
 before(async () => {
@@ -233,13 +314,13 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
     await fill('Path', 'acp')
     await pressIn(DIALOG, 'Add')
     await browser.pause(600)
-    await awaits('copy acp at the root')
+    await awaits('copy ./acp at the root')
 
     await press('Add step')
-    await choose('Step kind', 'Run a command')
-    await choose('Command', 'A line of its own')
+    await pick('Step kind', 'Run a command')
+    await pick('Command', 'A line of its own')
     await fill('Line', HOLD)
-    await choose('Runs from', 'Workspace root')
+    await pick('Runs from', 'Workspace root')
     await pressIn(DIALOG, 'Add')
     await browser.pause(600)
     await awaits(`run ${HOLD}`)
@@ -276,7 +357,9 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
     await awaits('Build started', 60_000)
 
     const built = await stateOf(BUILT)
-    expect(built.status).toBe('in_progress')
+    // The launch creates the build Session and leaves the Spec where it was: it is the first task
+    // begun in `build` that moves the Spec to `in_progress` (core.md, "Build sessions").
+    expect(built.status).toBe('ready')
     expect(built.launch?.state).toBe('started')
     expect(built.launch?.sessionId).not.toBeNull()
     // The revision the launch names is the one the Spec was on when the build was asked for, and
@@ -313,9 +396,11 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
   })
 
   it('keeps Open once a Rework takes the Spec on', async () => {
-    // Back to the Session that defines it, where the panel is.
+    // Back to the Session that defines it, where the panel is: it opens folded, as a Session's
+    // panel does, so it is unfolded before anything in its head is pressed.
     await press(ASKED_BUILT)
     await browser.pause(800)
+    await unfoldSpec(BUILT)
     await pressIn(panelOf(BUILT), 'Rework')
     await fill('Reason', 'The export drops the credit note date too.')
     await pressIn(DIALOG, 'Rework')
@@ -346,10 +431,12 @@ describe('A Rework takes a launch back where it waits', () => {
     rmSync(GO, { force: true })
     await press('Prepare and start the build')
     await awaits('Nothing is fetched.')
+    // The agent the suite drives proposes one title for every Spec, so the second Workspace
+    // would carry the first one's name: the name is typed here, which is what the field is for.
+    await fill('Name', 'invoice-export')
     await pressIn(DIALOG, 'Create')
     await browser.pause(1200)
-
-    await awaits(`Preparing the Workspace · ${HOLD}`, 60_000)
+    await awaits(`Preparing the Workspace · ${HOLD}`, 30_000)
     const asked = await stateOf(TAKEN)
     expect(asked.launch?.state).toBe('waiting')
     expect(asked.step).toBe(HOLD)
