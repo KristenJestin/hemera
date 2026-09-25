@@ -47,6 +47,7 @@ import { Context, Data, Effect, Layer } from 'effect'
 
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
+import { UnknownWorkspaceError } from '../workspaces/described.ts'
 import type { Session, UnknownSessionError } from '../sessions.ts'
 import { Database, type DatabaseError, type EngineTransaction } from '../storage/database.ts'
 import {
@@ -62,6 +63,7 @@ import {
   taskSets,
   taskStories,
   userStories,
+  workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { type Gate, type ReadyRefusedError, type ReadyRequest, gateOf, markReady } from './gate.ts'
@@ -222,6 +224,7 @@ export type SpecRefusal =
   | PhaseRefusedError
   | ReadyRefusedError
   | ReopenRefusedError
+  | UnknownWorkspaceError
 
 type Answer<A> = Effect.Effect<A, SpecRefusal>
 
@@ -266,6 +269,12 @@ export interface SpecsService {
   readonly markReady: (request: ReadyRequest) => Answer<SpecSnapshot>
   /** Human only: Rework (D7-05). */
   readonly reopen: (request: ReopenRequest) => Answer<SpecSnapshot>
+  /**
+   * Human only (D8-12): the Workspace the Spec's build will run in, given without asking for a
+   * build — what "Prepare a Workspace only" writes. The launch proposes itself from the panel
+   * once the Workspace is ready.
+   */
+  readonly useWorkspace: (specId: string, workspaceId: string) => Answer<SpecSnapshot>
   /**
    * Human only: "Take the write right" (D7-11). `running` says whether a Session has a turn
    * running, which the agents know and the Spec does not (Decided 14).
@@ -1077,6 +1086,40 @@ export const specsLayer = Layer.effect(
       reopen: (request) =>
         onSpec('reworking the Spec', request.specId, (transaction, snapshot) =>
           reopen(transaction, snapshot, request),
+        ),
+
+      useWorkspace: (specId, workspaceId) =>
+        onSpec('giving the Spec a Workspace', specId, (transaction, snapshot) =>
+          Effect.gen(function* () {
+            const found = yield* transaction
+              .select({ id: workspaces.id, name: workspaces.name })
+              .from(workspaces)
+              .where(
+                and(
+                  eq(workspaces.id, workspaceId),
+                  eq(workspaces.projectId, snapshot.spec.projectId),
+                ),
+              )
+              .limit(1)
+              .pipe(Effect.mapError(failed('reading the Workspace')))
+            const workspace = found[0]
+            if (workspace === undefined) {
+              return yield* Effect.fail(new UnknownWorkspaceError(workspaceId))
+            }
+            const at = now()
+            yield* transaction
+              .update(specs)
+              .set({ workspaceId: workspace.id, updatedAt: at })
+              .where(eq(specs.id, specId))
+              .pipe(Effect.mapError(failed('giving the Spec a Workspace')))
+            return only([
+              specEvent(snapshot.spec, snapshot.revision.id, 'spec.workspace_used', {
+                author: 'human',
+                sessionId: null,
+                payload: { workspaceId: workspace.id, name: workspace.name },
+              }),
+            ])
+          }),
         ),
 
       transferWrite: (input, running) =>
