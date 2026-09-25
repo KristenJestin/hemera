@@ -10,27 +10,68 @@ import {
 } from './preparation-editor.tsx'
 
 /**
- * The preparation of a Project, on fixtures (D8-05).
+ * The preparation of a Project, on fixtures (D8-05, recette 2).
  *
  * A Project of two repositories, `./sources/api` and `./sources/web`, whose recipe copies the
- * api's `.env`, links the web's `node_modules`, links `CLAUDE.md` at the root, and runs
- * `install`. The story holds the recipe the way the application will — a move, a removal, an
- * addition and an edit change the list it hands back — so the order can be tried by hand, with
- * the keyboard, in both themes.
+ * api's `.env`, links the web's `node_modules`, links `CLAUDE.md` at the root, runs `install` —
+ * a command of the catalogue — and runs `bun run lint`, a line the step carries on its own. The
+ * story holds the recipe the way the application will — a move, a removal, an addition and an
+ * edit change the list it hands back — so the order can be tried by hand, with the keyboard, in
+ * both themes.
  */
 const REPOSITORIES = ['./sources/api', './sources/web']
 
 const STEPS: RecipeStepLine[] = [
-  { id: 'copy-env', kind: 'copy', base: './sources/api', path: '.env', commandId: null },
+  {
+    id: 'copy-env',
+    kind: 'copy',
+    base: './sources/api',
+    path: '.env',
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
   {
     id: 'link-modules',
     kind: 'link',
     base: './sources/web',
     path: 'node_modules',
     commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
   },
-  { id: 'link-claude', kind: 'link', base: null, path: 'CLAUDE.md', commandId: null },
-  { id: 'run-install', kind: 'run', base: null, path: null, commandId: 'install' },
+  {
+    id: 'link-claude',
+    kind: 'link',
+    base: null,
+    path: 'CLAUDE.md',
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
+  {
+    id: 'run-install',
+    kind: 'run',
+    base: null,
+    path: null,
+    commandId: 'install',
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
+  {
+    id: 'run-lint',
+    kind: 'run',
+    base: './sources/api',
+    path: './tools',
+    commandId: null,
+    line: 'bun run lint',
+    lineWindows: null,
+    lineLinux: null,
+  },
 ]
 
 /** The Project's catalogue, which is what a `run` step may start. */
@@ -82,7 +123,7 @@ function Controlled({ steps, onAdd, onUpdate, onRemove, onMove, ...rest }: Prepa
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/PreparationEditor',
   component: PreparationEditor,
   render: (args) => <Controlled {...args} />,
@@ -116,6 +157,10 @@ const meta = {
     },
     onRemove: { action: 'step removed', description: 'Takes a step out of the recipe.' },
     onMove: { action: 'step moved', description: 'Moves a step one place up or down.' },
+    onBrowse: {
+      action: 'folder picked',
+      description: "The system's picker, asked for a base; answers a path relative to it, or null.",
+    },
     className: { control: false, description: 'Where the card sits; never how it looks.' },
   },
 } satisfies Meta<typeof PreparationEditor>
@@ -169,7 +214,7 @@ export const Empty: Story = {
   },
 }
 
-/** The four steps, read as sentences in the order they run, and one moved down. */
+/** The five steps, read as sentences in the order they run, and one moved down. */
 async function theStepsFollowTheRecipeInOrder({ canvasElement, args }: StoryContext) {
   // "The steps follow the recipe in order"
   args.onMove.mockClear()
@@ -179,10 +224,11 @@ async function theStepsFollowTheRecipeInOrder({ canvasElement, args }: StoryCont
     'link node_modules in web',
     'link CLAUDE.md at the root',
     'run install',
+    'run bun run lint',
   ])
   // The first cannot go further up, the last further down.
   await expect(canvas.getByRole('button', { name: 'Move up: copy .env from api' })).toBeDisabled()
-  await expect(canvas.getByRole('button', { name: 'Move down: run install' })).toBeDisabled()
+  await expect(canvas.getByRole('button', { name: 'Move down: run bun run lint' })).toBeDisabled()
 
   await userEvent.click(canvas.getByRole('button', { name: 'Move down: copy .env from api' }))
   await expect(args.onMove).toHaveBeenCalledWith('copy-env', 'down')
@@ -192,6 +238,7 @@ async function theStepsFollowTheRecipeInOrder({ canvasElement, args }: StoryCont
       'copy .env from api',
       'link CLAUDE.md at the root',
       'run install',
+      'run bun run lint',
     ])
   })
 }
@@ -231,6 +278,9 @@ export const Adding: Story = {
         base: null,
         path: null,
         commandId: 'install',
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
       })
     })
     await dialogGone()
@@ -266,6 +316,9 @@ export const Editing: Story = {
         base: './sources/web',
         path: '.env.local',
         commandId: null,
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
       })
     })
     await dialogGone()
@@ -290,6 +343,9 @@ async function aSourceMissingInMainIsRefused({ canvasElement, args }: StoryConte
       base: './sources/api',
       path: '.env.local',
       commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
     })
   })
   // The refusal is the engine's sentence, and the dialog stays open on what was typed.
@@ -351,6 +407,9 @@ export const Keyboard: Story = {
     await expect(dialog.getByRole('textbox', { name: 'Path' })).toHaveFocus()
     await userEvent.keyboard('CLAUDE.md')
     await userEvent.tab()
+    // The field's own picker sits between the box and the dialog's Add (recette 2).
+    await expect(dialog.getByRole('button', { name: 'Browse…' })).toHaveFocus()
+    await userEvent.tab()
     await expect(dialog.getByRole('button', { name: 'Add' })).toHaveFocus()
     await userEvent.keyboard('{Enter}')
     await waitFor(() => {
@@ -359,11 +418,92 @@ export const Keyboard: Story = {
         base: null,
         path: 'CLAUDE.md',
         commandId: null,
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
       })
     })
     await dialogGone()
     await waitFor(() => {
       expect(add).toHaveFocus()
     })
+  },
+}
+
+/**
+ * A run that carries its own line (recette 2): the step's fields are the command dialog's — one
+ * line or a line per system, where it runs from, and the folder it runs in — and nothing of it is
+ * written in the catalogue, so no agent ever sees it.
+ */
+export const OwnLine: Story = {
+  args: { steps: STEPS },
+  play: async ({ canvasElement, args }) => {
+    args.onUpdate.mockClear()
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Edit: run bun run lint' }))
+    const shown = await dialogShown()
+    const dialog = within(shown)
+    // The line the step carries, where it runs from, and the folder it runs in.
+    await expect(dialog.getByLabelText('Command')).toHaveTextContent('A line of its own')
+    await expect(dialog.getByRole('textbox', { name: 'Line' })).toHaveValue('bun run lint')
+    await expect(dialog.getByLabelText('Runs from')).toHaveTextContent('api')
+    await expect(dialog.getByRole('textbox', { name: 'Folder' })).toHaveValue('./tools')
+
+    // A line per system, from the one line the step was holding.
+    await choose(shown, 'Lines', /^A line per system/)
+    const windows = dialog.getByRole('textbox', { name: 'Windows line' })
+    await expect(dialog.getByRole('textbox', { name: 'Linux and macOS line' })).toHaveValue(
+      'bun run lint',
+    )
+    await userEvent.clear(windows)
+    await userEvent.type(windows, 'bun run lint:win')
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(args.onUpdate).toHaveBeenCalledWith('run-lint', {
+        kind: 'run',
+        base: './sources/api',
+        path: './tools',
+        commandId: null,
+        line: 'bun run lint',
+        lineWindows: 'bun run lint:win',
+        lineLinux: 'bun run lint',
+      })
+    })
+    await dialogGone()
+    await expect(sentencesIn(canvasElement)[4]).toBe('run bun run lint')
+  },
+}
+
+/**
+ * The picker of a copy's path (recette 2): what it answers is written relative to the base the
+ * step works in, and a folder outside that base climbs out — the field refuses it with the reason
+ * the schema the engine shares gives.
+ */
+export const PickedOutside: Story = {
+  args: {
+    steps: [],
+    // What the page's picker answers for a base: the `..` that would reach a folder beside it,
+    // because `folderUnderBase` writes what was picked relative to the base it was opened on.
+    onBrowse: fn(async () => await Promise.resolve('../web')),
+  },
+  play: async ({ canvasElement, args }) => {
+    args.onAdd.mockClear()
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Add step' }))
+    const shown = await dialogShown()
+    const dialog = within(shown)
+    await choose(shown, 'Base', /^api$/)
+    const path = dialog.getByRole('textbox', { name: 'Path' })
+
+    // A folder beside the base is no path under it: the pick is refused with the reason the schema
+    // gives, and nothing of it is written in the field — a path is typed, or picked under its base.
+    await userEvent.click(dialog.getByRole('button', { name: 'Browse…' }))
+    await waitFor(() => {
+      expect(dialog.getByText('That path climbs out of the Workspace.')).toHaveStyle({
+        opacity: '1',
+      })
+    })
+    await expect(path).toHaveValue('')
+    await expect(args.onAdd).not.toHaveBeenCalled()
   },
 }

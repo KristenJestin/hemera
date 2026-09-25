@@ -244,9 +244,36 @@ const WORKSPACES = <HeldWorkspaces />
 
 /** The recipe of Atlas: the api's `.env` copied, `CLAUDE.md` linked at the root, `env` run. */
 const RECIPE: RecipeStepLine[] = [
-  { id: 'copy-env', kind: 'copy', base: './sources/api', path: '.env', commandId: null },
-  { id: 'link-claude', kind: 'link', base: null, path: 'CLAUDE.md', commandId: null },
-  { id: 'run-env', kind: 'run', base: null, path: null, commandId: 'env' },
+  {
+    id: 'copy-env',
+    kind: 'copy',
+    base: './sources/api',
+    path: '.env',
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
+  {
+    id: 'link-claude',
+    kind: 'link',
+    base: null,
+    path: 'CLAUDE.md',
+    commandId: null,
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
+  {
+    id: 'run-env',
+    kind: 'run',
+    base: null,
+    path: null,
+    commandId: 'env',
+    line: null,
+    lineWindows: null,
+    lineLinux: null,
+  },
 ]
 
 /**
