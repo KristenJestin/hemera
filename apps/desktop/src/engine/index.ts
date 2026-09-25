@@ -19,7 +19,12 @@ import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
 import { QUALIFIED_VARIABLE, agentDirectoriesLayer, qualifiedBySuite } from './agents/bare.ts'
 import { heldWordsLayer } from './agents/held.ts'
-import { type ProjectChecks, projectChecksLayer } from './build/checks.ts'
+import {
+  type BuildChecks,
+  type ProjectChecks,
+  buildChecksLayer,
+  projectChecksLayer,
+} from './build/checks.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
 import { clockLayer, poolLayer } from './agents/pool.ts'
@@ -188,6 +193,7 @@ export type EngineServices =
   | Preparation
   | Launches
   | ProjectChecks
+  | BuildChecks
   | Database
   | SqliteClient
 
@@ -299,8 +305,13 @@ function servicesOf(
     Layer.provideMerge(launches),
   )
 
-  // The Project's checks, proposed from the very catalogue the tools run (D10-06).
-  const checks = projectChecksLayer.pipe(Layer.provide(tools))
+  // The Project's checks, proposed from the very catalogue the tools run, and run for a build as
+  // runs of those very commands, in the build Session's activity (D10-06, L12).
+  const checks = buildChecksLayer.pipe(
+    Layer.provideMerge(projectChecksLayer),
+    Layer.provide(variablesLayer),
+    Layer.provide(tools),
+  )
 
   return Layer.mergeAll(
     preferencesLayer,

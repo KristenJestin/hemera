@@ -16,14 +16,25 @@ import {
   type CheckWhen,
   type CheckWhere,
   type ProjectCheck,
+  checkPlaces,
   checkProblem,
+  evaluateExpect,
+  expandFiles,
+  lineFor,
   proposeChecks,
   rankBetween,
 } from '@hemera/core'
 import { and, asc, eq } from 'drizzle-orm'
-import { Context, Data, Effect, Layer } from 'effect'
+import { Context, Data, Effect, Layer, Result } from 'effect'
+import { join } from 'node:path'
 
-import { Commands } from '../commands/service.ts'
+import {
+  Commands,
+  Platform,
+  type RunView,
+  UnknownRunError,
+  commandCwd,
+} from '../commands/service.ts'
 import type { NewEvent } from '../journal.ts'
 import {
   Database,
@@ -31,8 +42,10 @@ import {
   type EngineDatabase,
   type EngineTransaction,
 } from '../storage/database.ts'
-import { projectChecks, projectCommands } from '../storage/schema.ts'
+import { buildCheckResults, projectChecks, projectCommands, sessions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
+import { describedWorkspace } from '../workspaces/described.ts'
+import { Variables } from '../workspaces/variables.ts'
 
 /** What one run of the checks is asked for: an attempt, the moment, and what the work changed. */
 export interface CheckRunRequest {
@@ -375,6 +388,283 @@ export const projectChecksLayer = Layer.effect(
             }),
           ),
         ),
+    }
+    return service
+  }),
+)
+
+/**
+ * How long one wait on a check's run lasts before it is asked again. Not a limit: a check is
+ * waited for until it ends, however long a test suite takes; the wait is only cut in pieces.
+ */
+const WAIT_MS = 60_000
+
+/** How many of the last lines of a check's output its result keeps: what the agent is shown. */
+const TAIL_LINES = 60
+
+/** And at most this many characters of them, a line being as long as a program cares to print. */
+const TAIL_CHARACTERS = 8 * 1024
+
+/** The last lines of an output, bounded; its whole stays on the run (L12). */
+function tailOf(output: string): string {
+  const lines = output.replace(/\n$/, '').split('\n').slice(-TAIL_LINES).join('\n')
+  return lines.length > TAIL_CHARACTERS ? lines.slice(-TAIL_CHARACTERS) : lines
+}
+
+/**
+ * A repository's path as a place: `''` for the Workspace root, and no leading `./`, so the
+ * Project's `./sources/api` and a change's `sources/api` are one place.
+ */
+function placeOf(path: string): string {
+  const bare = path.replace(/^(?:\.\/)+/, '').replace(/\/+$/, '')
+  return bare === '.' ? '' : bare
+}
+
+/**
+ * The files the work changed, relative to the folder a line runs in (D10-06): what `{files}` is
+ * expanded with and what the filter matches. A file outside that folder is not one of its own.
+ */
+function filesUnder(folder: string, changes: CheckRunRequest['changes']) {
+  return changes.flatMap((change) => {
+    const repository = placeOf(change.repository)
+    return change.files.flatMap((file) => {
+      const path = repository === '' ? file.path : `${repository}/${file.path}`
+      if (folder === '') return [{ path, status: file.status }]
+      return path.startsWith(`${folder}/`)
+        ? [{ path: path.slice(folder.length + 1), status: file.status }]
+        : []
+    })
+  })
+}
+
+/**
+ * Why a run that has no exit code is red, in the words of what happened: stopped before it
+ * ended, or the first line of what the run says of itself — it could not be started.
+ */
+function unfinished(run: RunView): string {
+  if (run.state === 'stopped') return 'stopped before it ended'
+  return run.output.split('\n')[0] || run.state
+}
+
+/** One check's result before it is written: everything but its identifier and its time. */
+type Judged = Omit<CheckOutcome, 'id' | 'ranAt'>
+
+/** The result of a check that did not run: skipped, or refused before it started. */
+function unrun(
+  check: ProjectCheck,
+  place: string,
+  line: string,
+  verdict: 'red' | 'skipped',
+  detail: string,
+): Judged {
+  return {
+    checkId: check.id,
+    name: check.name,
+    place,
+    line,
+    verdict,
+    exitCode: null,
+    value: null,
+    detail,
+    outputTail: '',
+    runId: null,
+  }
+}
+
+/**
+ * The Project's checks run for a build (D10-06, D10-07).
+ *
+ * The checks of the moment asked, in the Project's order, each in every place it runs in:
+ * the Workspace root, its one repository, or each repository the work changed. A catalogue
+ * command at the root runs where the catalogue puts it — its own base and folder under the
+ * Workspace — and anything else runs in its place under the Workspace (L5). Each is a run of the
+ * Commands service started by the user for the build Session (L12), so it shows in the Session's
+ * activity like any run and keeps its whole output there; it is waited for until it ends, judged
+ * by its exit code and the number its expected result reads (L4), and its result is written under
+ * the attempt with its `check.ran` Journal line, one transaction per result. The runs themselves
+ * are never inside a transaction.
+ */
+export const buildChecksLayer = Layer.effect(
+  BuildChecks,
+  Effect.gen(function* () {
+    const database = yield* Database
+    const commands = yield* Commands
+    const variables = yield* Variables
+    const checks = yield* ProjectChecks
+    const platform = yield* Platform
+
+    const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
+      effect.pipe(Effect.provideService(Database, database))
+
+    /** A run of the Commands service, waited for until it ends, and stopped if the wait is cut. */
+    const ended = (sessionId: string, started: RunView) =>
+      Effect.gen(function* () {
+        let run = started
+        while (run.state === 'running') {
+          run = yield* commands.awaited(sessionId, started.id, WAIT_MS)
+        }
+        return run
+      }).pipe(
+        // Started for this check and waited for by it: a build that stops waiting leaves nobody
+        // to judge it, and it is stopped rather than left behind.
+        Effect.onInterrupt(() => commands.stop(sessionId, started.id).pipe(Effect.ignore)),
+      )
+
+    const service: BuildChecksService = {
+      run: (request) =>
+        Effect.gen(function* () {
+          const due = (yield* checks.list(request.projectId)).filter(
+            (check) => check.when === request.when,
+          )
+          if (due.length === 0) return []
+          const workspace = yield* describedWorkspace(
+            database,
+            request.projectId,
+            request.workspaceId,
+          )
+          const environment = yield* variables.givenFor(request.projectId, workspace.id)
+          const catalogue = yield* commands.list(request.projectId)
+          const [build] = yield* database
+            .select({ specId: sessions.specId, revisionId: sessions.revisionId })
+            .from(sessions)
+            .where(eq(sessions.id, request.sessionId))
+            .pipe(Effect.mapError(failed('reading the build Session')))
+          const changed = request.changes
+            .filter((change) => change.files.length > 0)
+            .map((change) => placeOf(change.repository))
+
+          /** Writes one result and its Journal line, in one transaction (D10-14). */
+          const recorded = (judged: Judged) =>
+            withDatabase(
+              mutate('recording a check', (transaction) =>
+                Effect.gen(function* () {
+                  const outcome: CheckOutcome = {
+                    id: crypto.randomUUID(),
+                    ...judged,
+                    ranAt: new Date().toISOString(),
+                  }
+                  yield* transaction
+                    .insert(buildCheckResults)
+                    .values({ ...outcome, attemptId: request.attemptId })
+                    .pipe(Effect.mapError(failed('writing a check result')))
+                  return {
+                    result: outcome,
+                    events: [
+                      {
+                        type: 'check.ran',
+                        entityKind: 'session' as const,
+                        entityId: request.sessionId,
+                        source: 'system' as const,
+                        author: 'hemera' as const,
+                        projectId: request.projectId,
+                        sessionId: request.sessionId,
+                        specId: build?.specId ?? null,
+                        revisionId: build?.revisionId ?? null,
+                        payload: {
+                          checkId: outcome.checkId,
+                          name: outcome.name,
+                          place: outcome.place,
+                          verdict: outcome.verdict,
+                          detail: outcome.detail,
+                        },
+                      },
+                    ],
+                  }
+                }),
+              ),
+            )
+
+          /** One check in one place: skipped, refused its folder, or run and judged. */
+          const judged = (check: ProjectCheck, place: string) =>
+            Effect.gen(function* () {
+              const command =
+                check.commandId === null
+                  ? null
+                  : (catalogue.find((one) => one.id === check.commandId) ?? null)
+              // Where it runs (L5): a catalogue command at the root in its own folder, anything
+              // else in its place, under the Workspace.
+              const where =
+                command !== null && check.where === 'root'
+                  ? yield* commandCwd(workspace.path, command).pipe(Effect.result)
+                  : Result.succeed({
+                      folder: place === '' ? null : `./${place}`,
+                      cwd: join(workspace.path, place),
+                    })
+              const line = command === null ? (check.line ?? '') : lineFor(command, platform)
+              if (Result.isFailure(where)) {
+                return unrun(check, place, line, 'red', where.failure.message)
+              }
+              const { folder, cwd } = where.success
+              const expanded = expandFiles(
+                line,
+                filesUnder(placeOf(folder ?? ''), request.changes),
+                check.files,
+              )
+              if (expanded === null) {
+                const detail =
+                  check.files === null
+                    ? 'no file changed here'
+                    : `no changed file matched ${check.files}`
+                return unrun(check, place, line, 'skipped', detail)
+              }
+              const started = yield* commands.run({
+                sessionId: request.sessionId,
+                projectId: request.projectId,
+                commandId: command?.id ?? null,
+                name: check.name,
+                line: expanded,
+                lineWindows: null,
+                lineLinux: null,
+                type: command?.type ?? 'test',
+                scope: 'workspace',
+                portless: false,
+                portlessName: null,
+                folder,
+                cwd,
+                workspaceId: workspace.id,
+                workspaceName: workspace.name,
+                environment,
+                // Hemera runs it, on the user's behalf, never through the agent (L12).
+                startedBy: 'user',
+              })
+              const run = yield* ended(request.sessionId, started)
+              const judgement = evaluateExpect(run.output, run.exitCode, check.expect)
+              return {
+                checkId: check.id,
+                name: check.name,
+                place,
+                line: run.line,
+                verdict: judgement.verdict,
+                exitCode: run.exitCode,
+                value: judgement.value,
+                detail: run.exitCode === null ? unfinished(run) : judgement.detail,
+                outputTail: tailOf(run.output),
+                runId: run.id,
+              } satisfies Judged
+            }).pipe(
+              // The run it started is gone from memory and from its row: said as what happened.
+              Effect.catchIf(
+                (lost): lost is UnknownRunError => lost instanceof UnknownRunError,
+                (lost) =>
+                  Effect.succeed(unrun(check, place, check.line ?? '', 'red', lost.message)),
+              ),
+            )
+
+          const outcomes: CheckOutcome[] = []
+          for (const check of due) {
+            const places = checkPlaces(
+              {
+                where: check.where,
+                repository: check.repository === null ? null : placeOf(check.repository),
+              },
+              changed,
+            )
+            for (const place of places) {
+              outcomes.push(yield* recorded(yield* judged(check, place)))
+            }
+          }
+          return outcomes
+        }),
     }
     return service
   }),
