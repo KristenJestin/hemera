@@ -224,6 +224,22 @@ export function taskStateLabel(task: BuildTaskView): string {
 }
 
 /** The blocker still standing on a task, if the agent raised one and nobody dismissed it. */
+/**
+ * The task that waits for the hand in the build, if there is one: the one a blocker stands on, or
+ * the one that is the user's (lot 22). The band of a folded panel, the chat's button and the
+ * banner above the composer are three readings of this one answer.
+ */
+export function waitingOf(build: BuildViewData): BuildTaskView | undefined {
+  return build.tasks.find(
+    (task) => task.state === 'yours' || openBlockerOf(task, build.blockers) !== undefined,
+  )
+}
+
+/** Whether anything in the build waits for the hand at all. */
+export function waitsOf(build: BuildViewData): boolean {
+  return waitingOf(build) !== undefined
+}
+
 export function openBlockerOf(
   task: BuildTaskView,
   blockers: readonly BuildBlockerView[],
