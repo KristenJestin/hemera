@@ -43,6 +43,7 @@ import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
 import { type Preparation, hostLinks, preparationLayer } from '#engine/workspaces/preparation.ts'
+import { type Launches, launchesLayer } from '#engine/workspaces/launches.ts'
 import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
@@ -96,6 +97,7 @@ function running<A, E>(
     | Preparation
     | Recipe
     | Proposals
+    | Launches
   >,
   agent: FakeAgent = fakeAgent(),
 ) {
@@ -148,6 +150,26 @@ function running<A, E>(
     update: () => Effect.die('nothing in this file updates an agent'),
   })
   const lent = tools.pipe(Layer.provide(rows), Layer.provide(agents), Layer.provide(heldWordsLayer))
+  const runtime = runtimeLayer.pipe(
+    Layer.provideMerge(discoveryLayer),
+    Layer.provide(rows),
+    Layer.provide(preferencesLayer),
+    // Handed up, as the engine hands them up: the settings and the Commands panel ask for the
+    // very catalogue and runs the runtime lends.
+    Layer.provideMerge(lent),
+    Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+    Layer.provide(agentDirectoriesLayer(dataFolder)),
+  )
+
+  // The launches, which start the builds a ready Workspace was waited for (D8-13).
+  const launches = launchesLayer.pipe(
+    Layer.provide(runtime),
+    Layer.provide(rows),
+    Layer.provide(preferencesLayer),
+  )
+
   const services: Layer.Layer<
     | Preferences
     | EngineStatus
@@ -165,6 +187,7 @@ function running<A, E>(
     | Preparation
     | Recipe
     | Proposals
+    | Launches
     | Database
     | SqliteClient
   > = Layer.mergeAll(
@@ -174,18 +197,7 @@ function running<A, E>(
     rows,
     specsLayer.pipe(Layer.provide(NoSpecNotices)),
     listed,
-    runtimeLayer.pipe(
-      Layer.provideMerge(discoveryLayer),
-      Layer.provide(rows),
-      Layer.provide(preferencesLayer),
-      // Handed up, as the engine hands them up: the settings and the Commands panel ask for the
-      // very catalogue and runs the runtime lends.
-      Layer.provideMerge(lent),
-      Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
-      Layer.provide(agents),
-      Layer.provide(heldWordsLayer),
-      Layer.provide(agentDirectoriesLayer(dataFolder)),
-    ),
+    runtime,
     // What a human decides of the commands the agent proposed, on the very catalogue (D8-11).
     proposalsLayer.pipe(Layer.provide(lent), Layer.provide(rows), Layer.provide(agents)),
     // The Workspaces of the Projects, made under the data folder over the machine's `git`, and
@@ -199,6 +211,7 @@ function running<A, E>(
       // A `run` step is a run of the very commands the tools run (Decided 11).
       Layer.provide(lent),
       Layer.provide(agents),
+      Layer.provideMerge(launches),
     ),
   ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
 

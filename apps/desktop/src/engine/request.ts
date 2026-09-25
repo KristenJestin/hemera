@@ -74,6 +74,7 @@ import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
 import type { UnknownWorkspaceError } from './workspaces/described.ts'
 import { Preparation, type PreparationRunningError } from './workspaces/preparation.ts'
+import type { Launches } from './workspaces/launches.ts'
 import { Recipe, type RecipeRefusedError } from './workspaces/recipe.ts'
 import { Variables } from './workspaces/variables.ts'
 import {
@@ -188,6 +189,7 @@ export function answer(
   | Variables
   | Workspaces
   | Preparation
+  | Launches
   | Recipe
   | Proposals
   | Specs

@@ -70,6 +70,21 @@ export const VERSION = '0.4.0'
  * from a `node_modules` this machine pretends to have, which is where a real one would find them
  * — never the `PATH`.
  */
+/**
+ * The same machine, holding none of the agents' bare means: a start that cannot happen, as it
+ * cannot on a machine where the agent was never installed (D6-02).
+ */
+export const bareMachine = Layer.succeed(MachineEnvironment, {
+  home: '/home/ana',
+  env: {},
+  locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
+  bundled: (packageName: string) =>
+    Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
+  readVersion: () => Effect.succeed('1.0.0'),
+  holds: () => Effect.succeed(false),
+  read: () => Effect.succeed(undefined),
+})
+
 export const machine = Layer.succeed(MachineEnvironment, {
   home: '/home/ana',
   env: {},
