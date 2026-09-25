@@ -5,15 +5,17 @@ import { Button } from '../components/button/button.tsx'
 import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
+import { Select, type SelectItem } from '../components/select/select.tsx'
 import type { PlanRepositoryLine, WorkspaceDraft } from './model.ts'
 
 /**
  * Where a dedicated Workspace is created, from the plan the engine proposed (D8-04).
  *
  * Everything the creation will do is on screen before it is done: the folder it makes, and for
- * each repository whether it gets a worktree, from which base and on which branch. The base and
- * the branch are proposals the user may rewrite; a location of the Project that holds no
- * repository in `main` is shown and cannot be ticked, because it gets no worktree.
+ * each repository whether it gets a worktree, from which base and on which branch. The base is
+ * chosen from the branches the repository has here, and the branch is a proposal the user may
+ * rewrite; a location of the Project that holds no repository in `main` is shown and cannot be
+ * ticked, because it gets no worktree.
  *
  * The dialog checks nothing that needs Git: the engine checks every base, every branch and the
  * folder before it writes anything, and one failed check refuses the whole creation. What it
@@ -41,16 +43,39 @@ const INCLUDE = 'flex min-w-0 flex-1 basis-full items-center gap-2'
 
 const PATH = 'min-w-0 truncate font-mono'
 
-/** The base is a short sha; the branch is the longer of the two, and gets the room. */
-const BASE_FIELD = 'min-w-0 flex-1'
+/**
+ * The base is a branch of the repository, read as it is; the branch of the Workspace is the
+ * longer of the two, and gets the room.
+ */
+const BASE_FIELD = 'flex min-w-0 flex-1 flex-col gap-1'
+
+const BASE_LABEL = 'text-sm font-medium text-foreground'
+
+/** The commit `main` is on, when it is on no branch: said quietly beside the base it stands for. */
+const HINT = 'text-xs text-muted-foreground'
+
+/** A message under a field, at the size of the messages the fields themselves show. */
+const FIELD_ERROR = 'text-xs text-destructive-muted-foreground'
 
 const BRANCH_FIELD = 'min-w-0 flex-2'
+
+/** The commit a repository is on when it is on none of its branches (D8-04). */
+interface Commit {
+  /** The commit itself: what the base is set to when it is chosen back. */
+  readonly commit: string
+  /** The hash as Git abbreviates it, which is all the dialog shows of it. */
+  readonly short: string
+}
 
 /** What the dialog keeps of a row while it is edited: the plan's line, with text to type in. */
 interface Row {
   path: string
   holdsRepository: boolean
+  /** The branches the base may be chosen from: this repository's own, in Git's order. */
+  branches: readonly string[]
   base: string
+  /** The commit `main` is on when it is on none of its branches, and null when it is on one. */
+  detached: Commit | null
   branch: string
   included: boolean
   /** Whether the user wrote this branch by hand, after which it stops following the name. */
@@ -61,12 +86,30 @@ function rowsOf(plan: readonly PlanRepositoryLine[]): Row[] {
   return plan.map((line) => ({
     path: line.path,
     holdsRepository: line.holdsRepository,
+    branches: line.branches,
     base: line.base ?? '',
+    // A plan names a commit as the base and says so in the same breath: the two go together, and
+    // the commit is kept so that choosing a branch afterwards leaves it something to choose back.
+    detached:
+      line.detachedCommit !== null && line.base !== null
+        ? { commit: line.base, short: line.detachedCommit }
+        : null,
     branch: line.branch,
     // A location without a repository cannot be included, whatever the plan says (D8-04).
     included: line.holdsRepository && line.included,
     written: false,
   }))
+}
+
+/**
+ * What a base may be chosen from: everything this repository has here, and the commit `main` is on
+ * when it is on none of its branches — the one place a hash is read, because there is no branch
+ * name to read in its place (D8-04).
+ */
+function baseItemsOf(row: Row): SelectItem<string>[] {
+  const branches = row.branches.map((branch) => ({ value: branch, label: branch }))
+  if (row.detached === null) return branches
+  return [...branches, { value: row.detached.commit, label: 'The current commit' }]
 }
 
 /**
@@ -176,7 +219,7 @@ export function CreateWorkspaceDialog({
   return (
     <Dialog
       title="New Workspace"
-      description="Each ticked repository gets a worktree on its branch, from its base. Nothing is fetched."
+      description="Each ticked repository gets a new branch, started from its base, in a folder of its own. Nothing is fetched."
       size="wide"
       open={open}
       onOpenChange={onOpenChange}
@@ -206,9 +249,13 @@ export function CreateWorkspaceDialog({
           </p>
         )}
         <Input label="Name" value={name} onValueChange={rename} error={nameShown} />
-        <p className={NOTE}>
-          Folder <span className={FOLDER}>{folderOf(root, name)}</span>
-        </p>
+        {/* The folder is the Workspace's own, so it is shown once the name makes one: before
+            that the line reads as the Project's folder, which is Hemera's own id for it. */}
+        {name.trim() !== '' && (
+          <p className={NOTE}>
+            Folder <span className={FOLDER}>{folderOf(root, name)}</span>
+          </p>
+        )}
         <ul className={ROWS} aria-label="Repositories">
           {rows.map((row) => (
             <li key={row.path} className={ROW}>
@@ -224,18 +271,22 @@ export function CreateWorkspaceDialog({
               </span>
               {row.holdsRepository && (
                 <>
-                  <Input
-                    label="Base"
-                    className={BASE_FIELD}
-                    value={row.base}
-                    disabled={!row.included}
-                    error={
-                      row.included && row.base.trim() === ''
-                        ? 'An included repository needs a base.'
-                        : undefined
-                    }
-                    onValueChange={(base) => change(row.path, { base })}
-                  />
+                  <div className={BASE_FIELD}>
+                    <span className={BASE_LABEL}>
+                      Base
+                      {row.detached !== null && <span className={HINT}> {row.detached.short}</span>}
+                    </span>
+                    <Select
+                      label="Base"
+                      value={row.base}
+                      disabled={!row.included}
+                      items={baseItemsOf(row)}
+                      onValueChange={(base) => change(row.path, { base })}
+                    />
+                    {row.included && row.base.trim() === '' && (
+                      <p className={FIELD_ERROR}>An included repository needs a base.</p>
+                    )}
+                  </div>
                   <Input
                     label="Branch"
                     className={BRANCH_FIELD}

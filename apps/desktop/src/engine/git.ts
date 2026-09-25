@@ -52,6 +52,20 @@ export interface GitStatus {
   readonly untracked: number
 }
 
+/**
+ * What `HEAD` is on, for the base a creation proposes (D8-04): the branch checked out, or the
+ * commit it is on when it is on none of its own, with that commit shortened the way Git
+ * abbreviates it.
+ */
+export interface GitHead {
+  /** The branch checked out, or null when `HEAD` is on no branch at all (D8-04). */
+  readonly branch: string | null
+  /** The commit `HEAD` is on. */
+  readonly commit: string
+  /** That commit as Git abbreviates it: the one hash the creation dialog ever shows. */
+  readonly short: string
+}
+
 type Refusal = GitError | GitUnavailableError
 
 export interface GitService {
@@ -97,6 +111,13 @@ export interface GitService {
     branch: string,
   ) => Effect.Effect<boolean, GitUnavailableError>
   readonly status: (cwd: string) => Effect.Effect<GitStatus, Refusal>
+  /**
+   * What `HEAD` is on, read for the base the creation dialog proposes: the branch it is on, or
+   * the commit it is on when it is on none (D8-04).
+   */
+  readonly head: (cwd: string) => Effect.Effect<GitHead, Refusal>
+  /** The repository's local branches, in Git's own order: what a base is chosen from (D8-04). */
+  readonly localBranches: (cwd: string) => Effect.Effect<readonly string[], Refusal>
   /**
    * Whether a folder is the top of a repository: a folder inside another repository — `./docs`
    * in a `main` that is one — holds none of its own.
@@ -179,6 +200,39 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
     status: (cwd) =>
       run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch']).pipe(
         Effect.map(statusOf),
+      ),
+    // `--abbrev-ref` answers `HEAD` itself when it is on no branch: a detached commit, which is
+    // an answer here and not a refusal. A repository with no commit yet refuses both reads, and
+    // the plan takes that for what it is: nothing to start a base from.
+    head: (cwd) =>
+      Effect.gen(function* () {
+        const named = yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--abbrev-ref', 'HEAD'])
+        const commit = yield* run(cwd, ['--no-optional-locks', 'rev-parse', 'HEAD'])
+        // Git's own abbreviation, asked of Git: the length depends on the repository, and a
+        // prefix cut by hand would be a hash that reads like a name (D8-04).
+        const short = yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--short', 'HEAD'])
+        const branch = named.trim()
+        return {
+          branch: branch === '' || branch === 'HEAD' ? null : branch,
+          commit: commit.trim(),
+          short: short.trim(),
+        } satisfies GitHead
+      }),
+    // The refs as they are stored: `branch --list` prints a line naming a detached commit, which
+    // Git writes in the machine's language, and nothing in Hemera reads a sentence Git translates.
+    localBranches: (cwd) =>
+      run(cwd, [
+        '--no-optional-locks',
+        'for-each-ref',
+        '--format=%(refname:short)',
+        'refs/heads',
+      ]).pipe(
+        Effect.map((printed) =>
+          printed
+            .split('\n')
+            .map((branch) => branch.trim())
+            .filter((branch) => branch !== ''),
+        ),
       ),
     // At the top of a repository the prefix is empty; inside one it is the path down to here,
     // and outside any Git refuses — which is an answer here, not a failure.

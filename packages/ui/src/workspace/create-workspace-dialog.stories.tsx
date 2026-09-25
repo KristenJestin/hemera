@@ -18,7 +18,9 @@ import type { PlanRepositoryLine } from './model.ts'
 const API: PlanRepositoryLine = {
   path: './sources/api',
   holdsRepository: true,
-  base: '4f2c9a1',
+  branches: ['main', 'dev'],
+  base: 'main',
+  detachedCommit: null,
   branch: 'hemera/HEM-7-login-form',
   included: true,
 }
@@ -26,7 +28,9 @@ const API: PlanRepositoryLine = {
 const FRONT: PlanRepositoryLine = {
   path: './sources/front',
   holdsRepository: true,
-  base: '9b8a7c6',
+  branches: ['main', 'dev', 'release'],
+  base: 'dev',
+  detachedCommit: null,
   branch: 'hemera/HEM-7-login-form',
   included: true,
 }
@@ -35,7 +39,34 @@ const FRONT: PlanRepositoryLine = {
 const DOCS: PlanRepositoryLine = {
   path: './docs',
   holdsRepository: false,
+  branches: [],
   base: null,
+  detachedCommit: null,
+  branch: 'hemera/HEM-7-login-form',
+  included: false,
+}
+
+/**
+ * A repository whose `main` is on no branch at all: the base is the commit it is on, and there is
+ * no branch name to show in its place (D8-04).
+ */
+const DETACHED: PlanRepositoryLine = {
+  path: './sources/reports',
+  holdsRepository: true,
+  branches: ['main', 'release'],
+  base: '4f2c9a1f0a1e4f4f8a1c2f5b7d9e0a3b6c8d1e2f',
+  detachedCommit: '4f2c9a1',
+  branch: 'hemera/HEM-7-login-form',
+  included: true,
+}
+
+/** A repository with nothing committed yet: it is in `main`, and has no base to start from. */
+const EMPTY: PlanRepositoryLine = {
+  path: './sources/tools',
+  holdsRepository: true,
+  branches: [],
+  base: null,
+  detachedCommit: null,
   branch: 'hemera/HEM-7-login-form',
   included: false,
 }
@@ -75,7 +106,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/CreateWorkspaceDialog',
   component: CreateWorkspaceDialog,
   render: (args) => <Controlled {...args} />,
@@ -96,7 +127,8 @@ const meta = {
     defaultName: { control: 'text', description: 'The name proposed: the Spec’s slug.' },
     repositories: {
       control: 'object',
-      description: 'The plan: each repository with its base, its branch and whether it is in.',
+      description:
+        'The plan: each repository with its branches, its base, its branch and whether it is in.',
     },
     branchOf: { control: false, description: 'The branch a name makes, while it follows it.' },
     gitMissing: { control: 'boolean', description: 'Whether git is missing on this machine.' },
@@ -115,7 +147,20 @@ function rowOf(dialog: HTMLElement, path: string) {
   return within(within(dialog).getByRole('checkbox', { name: path }).closest('li')!)
 }
 
-/** The plan as proposed: the Spec's slug, both repositories in, on the Spec's branch. */
+/**
+ * Choosing a base, the way a hand does: the trigger, then the option. The list is waited out — a
+ * popup still leaving carries focus guards the accessibility pass reads as an error.
+ */
+async function chooseBase(row: ReturnType<typeof rowOf>, option: RegExp | string): Promise<void> {
+  await userEvent.click(row.getByRole('combobox', { name: 'Base' }))
+  const list = await waitFor(() => within(document.body).getByRole('listbox'))
+  await userEvent.click(within(list).getByRole('option', { name: option }))
+  await waitFor(() => {
+    expect(within(document.body).queryByRole('listbox')).toBeNull()
+  })
+}
+
+/** The plan as proposed: the Spec's slug, both repositories in, each on its own branch. */
 export const Proposed: Story = {
   play: async () => {
     const dialog = within(document.body).getByRole('dialog')
@@ -123,10 +168,45 @@ export const Proposed: Story = {
     await expect(
       within(dialog).getByText('/home/kris/.local/share/hemera/workspaces/atlas/login-form'),
     ).toBeVisible()
-    await expect(rowOf(dialog, './sources/api').getByRole('textbox', { name: 'Base' })).toHaveValue(
-      '4f2c9a1',
-    )
+    // The base proposed is the branch each repository's `main` is checked out on, read as it is:
+    // a branch name, never the sha it points at (D8-04).
+    await expect(
+      rowOf(dialog, './sources/api').getByRole('combobox', { name: 'Base' }),
+    ).toHaveTextContent('main')
+    await expect(
+      rowOf(dialog, './sources/front').getByRole('combobox', { name: 'Base' }),
+    ).toHaveTextContent('dev')
     await expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled()
+  },
+}
+
+/**
+ * A repository whose `main` is on no branch: its base is the commit it is on, said as such beside
+ * its short hash, and the branches it has are still there to choose instead (D8-04).
+ */
+export const DetachedHead: Story = {
+  args: { repositories: [DETACHED, FRONT] },
+  play: async () => {
+    const dialog = within(document.body).getByRole('dialog')
+    const reports = rowOf(dialog, './sources/reports')
+    await expect(reports.getByRole('combobox', { name: 'Base' })).toHaveTextContent(
+      'The current commit',
+    )
+    await expect(reports.getByText('4f2c9a1')).toBeVisible()
+    // The list holds the commit it is on and the branches it has here, and one of them is chosen:
+    // a repository on a branch is the ordinary case, and this one can become it.
+    await userEvent.click(reports.getByRole('combobox', { name: 'Base' }))
+    const list = await waitFor(() => within(document.body).getByRole('listbox'))
+    await expect(within(list).getAllByRole('option')).toHaveLength(3)
+    await expect(
+      within(list).getByRole('option', { name: 'The current commit' }),
+    ).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('listbox')).toBeNull()
+    })
+    await chooseBase(reports, 'release')
+    await expect(reports.getByRole('combobox', { name: 'Base' })).toHaveTextContent('release')
   },
 }
 
@@ -150,7 +230,7 @@ async function aLocationWithoutARepositoryGetsNoWorktree({ args }: Context) {
   await waitFor(() => {
     expect(args.onCreate).toHaveBeenCalledWith({
       name: 'login-form',
-      repositories: [{ path: './sources/api', base: '4f2c9a1', branch: 'hemera/HEM-7-login-form' }],
+      repositories: [{ path: './sources/api', base: 'main', branch: 'hemera/HEM-7-login-form' }],
     })
   })
 }
@@ -170,8 +250,8 @@ async function aFailedCheckRefusesTheWholeCreation({ args }: Context) {
     expect(args.onCreate).toHaveBeenCalledWith({
       name: 'login-form',
       repositories: [
-        { path: './sources/api', base: '4f2c9a1', branch: 'hemera/HEM-7-login-form' },
-        { path: './sources/front', base: '9b8a7c6', branch: 'hemera/HEM-7-login-form' },
+        { path: './sources/api', base: 'main', branch: 'hemera/HEM-7-login-form' },
+        { path: './sources/front', base: 'dev', branch: 'hemera/HEM-7-login-form' },
       ],
     })
   })
@@ -229,16 +309,22 @@ async function theDialogRefusesWhatCannotBeCreated({ args }: Context) {
   await userEvent.clear(name)
   await userEvent.type(name, 'login-form')
 
-  await userEvent.clear(api.getByRole('textbox', { name: 'Base' }))
   await userEvent.clear(api.getByRole('textbox', { name: 'Branch' }))
   await waitFor(() => {
-    expect(api.getByText('An included repository needs a base.')).toHaveStyle({ opacity: '1' })
+    expect(api.getByText('An included repository needs a branch.')).toHaveStyle({ opacity: '1' })
   })
-  await expect(api.getByText('An included repository needs a branch.')).toBeInTheDocument()
+  await expect(create).toBeDisabled()
+
+  // A base is chosen from the branches the repository has, so a repository with nothing committed
+  // yet is one that is in with no base to start on — and Create waits for it all the same.
+  const tools = rowOf(dialog, './sources/tools')
+  await userEvent.click(tools.getByRole('checkbox'))
+  await expect(tools.getByText('An included repository needs a base.')).toBeVisible()
   await expect(create).toBeDisabled()
 
   await userEvent.click(api.getByRole('checkbox'))
   await userEvent.click(rowOf(dialog, './sources/front').getByRole('checkbox'))
+  await userEvent.click(tools.getByRole('checkbox'))
   await expect(inside.getByRole('alert')).toHaveTextContent('Include at least one repository.')
   await expect(create).toBeDisabled()
   await expect(args.onCreate).not.toHaveBeenCalled()
@@ -250,6 +336,7 @@ async function theDialogRefusesWhatCannotBeCreated({ args }: Context) {
 
 /** What cannot be created is refused before the engine is asked, and Create waits. */
 export const Invalid: Story = {
+  args: { repositories: [API, FRONT, EMPTY] },
   play: theDialogRefusesWhatCannotBeCreated,
 }
 
@@ -276,8 +363,14 @@ export const FromSettings: Story = {
     // Nothing is proposed, and nothing is said wrong before anything was typed.
     await expect(name).toHaveValue('')
     await expect(inside.queryByText('A Workspace needs a name.')).toBeNull()
+    // No name, no Workspace: the folder it will be is shown once the name makes one, and not
+    // before, when the line would read as the Project's own folder (D8-04).
+    await expect(inside.queryByText(/Folder/)).toBeNull()
     await expect(inside.getByRole('button', { name: 'Create' })).toBeDisabled()
     await userEvent.type(name, 'spike')
+    await expect(
+      inside.getByText('/home/kris/.local/share/hemera/workspaces/atlas/spike'),
+    ).toBeVisible()
     await expect(api.getByRole('textbox', { name: 'Branch' })).toHaveValue('atlas/spike')
     await expect(front.getByRole('textbox', { name: 'Branch' })).toHaveValue('atlas/spike')
     // The front's branch written by hand stops following the name; the api's goes on.
@@ -292,8 +385,8 @@ export const FromSettings: Story = {
       expect(args.onCreate).toHaveBeenCalledWith({
         name: 'spike-auth',
         repositories: [
-          { path: './sources/api', base: '4f2c9a1', branch: 'atlas/spike-auth' },
-          { path: './sources/front', base: '9b8a7c6', branch: 'kris/front-spike' },
+          { path: './sources/api', base: 'main', branch: 'atlas/spike-auth' },
+          { path: './sources/front', base: 'dev', branch: 'kris/front-spike' },
         ],
       })
     })
@@ -305,12 +398,12 @@ async function walkRow(row: ReturnType<typeof rowOf>) {
   await userEvent.tab()
   await expect(row.getByRole('checkbox')).toHaveFocus()
   await userEvent.tab()
-  await expect(row.getByRole('textbox', { name: 'Base' })).toHaveFocus()
+  await expect(row.getByRole('combobox', { name: 'Base' })).toHaveFocus()
   await userEvent.tab()
   await expect(row.getByRole('textbox', { name: 'Branch' })).toHaveFocus()
 }
 
-/** The name, then each repository's box, base and branch, then Create, then Cancel. */
+/** The name, then each repository's box, its base, its branch, then Create, then Cancel. */
 export const Keyboard: Story = {
   play: async ({ args }) => {
     const dialog = within(document.body).getByRole('dialog')

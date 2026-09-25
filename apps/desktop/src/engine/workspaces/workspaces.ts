@@ -112,8 +112,15 @@ export interface PlanRepository {
   readonly relativePath: string
   /** Whether the location holds a repository in `main`: one that does not gets no worktree. */
   readonly holdsRepository: boolean
-  /** The local HEAD of that repository in `main`, and null when there is none to start from. */
+  /** The repository's local branches, in Git's own order: what its base is chosen from (D8-04). */
+  readonly branches: readonly string[]
+  /**
+   * What the new branch starts from: the branch `main` is checked out on, or the commit it is on
+   * when it is on none of them, and null when there is nothing to start from (D8-04).
+   */
   readonly base: string | null
+  /** The short hash of that commit, only when `main` is on none of its branches: a quiet hint. */
+  readonly detachedCommit: string | null
   readonly branch: string
   readonly included: boolean
 }
@@ -581,20 +588,26 @@ export const workspacesLayer = Layer.effect(
               const holdsRepository = gitAvailable
                 ? yield* git.isRepository(folder).pipe(Effect.orElseSucceed(() => false))
                 : false
-              // The local HEAD and nothing fetched (D8-04); a repository with no commit yet has
-              // nothing to start a branch from, and is left out.
-              const base = holdsRepository
-                ? yield* git.revParse(folder, 'HEAD').pipe(
-                    Effect.map((commit): string | null => commit),
-                    Effect.orElseSucceed(() => null),
-                  )
+              // What the new branch would start from, read locally and nothing fetched (D8-04).
+              // A repository with no commit yet has nothing to start from, and is left out.
+              const head = holdsRepository
+                ? yield* git.head(folder).pipe(Effect.orElseSucceed(() => null))
                 : null
+              // What the dialog offers as bases: the branches this repository has here, and the
+              // commit when `main` is on none of them.
+              const branches: readonly string[] =
+                head === null
+                  ? []
+                  : yield* git.localBranches(folder).pipe(Effect.orElseSucceed(() => []))
               return {
                 relativePath: location.relativePath,
                 holdsRepository,
-                base,
+                branches,
+                base: head === null ? null : (head.branch ?? head.commit),
+                // The one hash the dialog shows, and only where no branch name can stand for it.
+                detachedCommit: head !== null && head.branch === null ? head.short : null,
                 branch,
-                included: location.included && base !== null,
+                included: location.included && head !== null,
               } satisfies PlanRepository
             }),
           )
