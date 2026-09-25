@@ -82,9 +82,12 @@ afterEach(async () => {
   await showWorkspace(null)
   await opened?.close()
   opened = null
+  // A window closed at the end of a test may still hold its engine and the repositories under
+  // main, and a Windows runner runs the ten seconds a hook is given out: this suite's own timeout,
+  // and the retry agent-tools.test.ts uses.
   for (const folder of [dataFolder, main, elsewhere])
-    rmSync(folder, { recursive: true, force: true })
-})
+    rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 /** A window on a Project `Atlas` whose `main` holds the repository `api`. */
 async function atlas() {

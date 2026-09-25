@@ -28,11 +28,16 @@ let main: string
 beforeEach(() => {
   folder = mkdtempSync(join(tmpdir(), 'hemera-variables-'))
   main = atlasMain(folder)
-})
+  // Two repositories are four `git` processes, and a Windows runner that has just been created
+  // starts each one in seconds where a warm machine takes one. The timeout is this suite's own
+  // rather than the ten a hook is given by default, and nothing here spends it (#99).
+}, 60_000)
 
 afterEach(() => {
-  rmSync(folder, { recursive: true, force: true })
-})
+  // A run stopped by tree and a folder of repositories are handed back a beat late on Windows,
+  // which refuses the first attempt with EPERM, as agent-tools.test.ts says.
+  rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 /** A Project, and a Workspace of it that is `ready` on a folder of the suite's. */
 const inAWorkspace = Effect.gen(function* () {
