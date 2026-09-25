@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { Builds } from '#engine/build/build.ts'
+import { Builds, UnknownBuildError } from '#engine/build/build.ts'
 import { TOOL_ARGUMENTS } from '#engine/tools/arguments.ts'
 
 import { held } from './application.ts'
@@ -143,16 +143,30 @@ describe('A human task waits for the user', () => {
           (view) => view.tasks[0]?.state === 'done',
         )
         const builds = yield* Builds
-        const refused = yield* Effect.flip(builds.taskDone(waiting.tasks[0]?.id ?? ''))
-        yield* builds.taskDone(waiting.tasks[1]?.id ?? '')
+        const refused = yield* Effect.flip(
+          builds.taskDone(waiting.sessionId, waiting.tasks[0]?.id ?? ''),
+        )
+        // Named from another build, the user's task is none of that build's.
+        const elsewhere = yield* Effect.flip(
+          builds.taskDone('another-build', waiting.tasks[1]?.id ?? ''),
+        )
+        yield* builds.taskDone(waiting.sessionId, waiting.tasks[1]?.id ?? '')
         const after = yield* eventually(
           buildOf(sessionId),
           (view) => view.tasks[2]?.state === 'done',
         )
-        return { sessionId, waiting, refused, after, journal: yield* journalOf(sessionId) }
+        return {
+          sessionId,
+          waiting,
+          refused,
+          elsewhere,
+          after,
+          journal: yield* journalOf(sessionId),
+        }
       }),
     )
     expect(statesOf(seen.waiting)).toEqual({ T1: 'done', T2: 'yours', T3: 'waiting' })
+    expect(seen.elsewhere).toBeInstanceOf(UnknownBuildError)
     // The window is told, and draws the banner from the view (D10-08).
     expect(opened.built).toContain(seen.sessionId)
     // Never handed to the agent, never acknowledged by Hemera.
@@ -178,8 +192,15 @@ describe('A human task waits for the user', () => {
           (view) => view.tasks[0]?.state === 'done',
         )
         const builds = yield* Builds
-        const refused = yield* Effect.flip(builds.taskSkip(waiting.tasks[1]?.id ?? '', ' ', true))
-        yield* builds.taskSkip(waiting.tasks[1]?.id ?? '', 'The format is the old one', true)
+        const refused = yield* Effect.flip(
+          builds.taskSkip(waiting.sessionId, waiting.tasks[1]?.id ?? '', ' ', true),
+        )
+        yield* builds.taskSkip(
+          waiting.sessionId,
+          waiting.tasks[1]?.id ?? '',
+          'The format is the old one',
+          true,
+        )
         const after = yield* eventually(
           buildOf(sessionId),
           (view) => view.tasks[2]?.state === 'done',
@@ -220,7 +241,12 @@ describe('A task skipped without its dependants', () => {
           buildOf(sessionId),
           (view) => view.tasks[0]?.state === 'done',
         )
-        yield* (yield* Builds).taskSkip(waiting.tasks[1]?.id ?? '', 'Not signed this year', false)
+        yield* (yield* Builds).taskSkip(
+          waiting.sessionId,
+          waiting.tasks[1]?.id ?? '',
+          'Not signed this year',
+          false,
+        )
         const after = yield* eventually(buildOf(sessionId), (view) => view.phase === 'verify')
         return { after, journal: yield* journalOf(sessionId) }
       }),
@@ -277,7 +303,10 @@ describe('A blocker suspends the task and its dependants only', () => {
           buildOf(sessionId),
           (view) => view.tasks[1]?.state === 'done' && view.tasks[0]?.state === 'blocked',
         )
-        const dismissed = yield* (yield* Builds).dismissBlocker(blocked.blockers[0]?.id ?? '')
+        const dismissed = yield* (yield* Builds).dismissBlocker(
+          blocked.sessionId,
+          blocked.blockers[0]?.id ?? '',
+        )
         const after = yield* eventually(buildOf(sessionId), (view) => view.phase === 'verify')
         return { blocked, dismissed, after, journal: yield* journalOf(sessionId) }
       }),
@@ -332,7 +361,7 @@ describe('A dismissed blocker costs no try', () => {
           Effect.sync(() => agent.answers.used.length),
           (used) => used === 2,
         )
-        yield* (yield* Builds).dismissBlocker(blocked.blockers[0]?.id ?? '')
+        yield* (yield* Builds).dismissBlocker(blocked.sessionId, blocked.blockers[0]?.id ?? '')
         const done = yield* eventually(
           buildOf(sessionId),
           (view) => view.tasks[0]?.state === 'done',

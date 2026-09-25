@@ -581,13 +581,14 @@ export function answer(
     if (decision.name === 'build.resume') return yield* builds.resume(sessionId)
     if (decision.name === 'build.accept') return yield* builds.accept(sessionId)
     if (decision.name === 'build.stop') return yield* builds.stop(sessionId)
-    if (decision.name === 'build.taskDone') return yield* builds.taskDone(decision.argument.taskId)
+    if (decision.name === 'build.taskDone')
+      return yield* builds.taskDone(sessionId, decision.argument.taskId)
     if (decision.name === 'build.taskSkip') {
       const { taskId, reason, unblock } = decision.argument
-      return yield* builds.taskSkip(taskId, reason, unblock)
+      return yield* builds.taskSkip(sessionId, taskId, reason, unblock)
     }
     if (decision.name === 'build.dismissBlocker') {
-      return yield* builds.dismissBlocker(decision.argument.blockerId)
+      return yield* builds.dismissBlocker(sessionId, decision.argument.blockerId)
     }
     return yield* builds.view(sessionId)
   })

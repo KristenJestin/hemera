@@ -373,19 +373,26 @@ export interface BuildsService {
   readonly accept: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** The build is closed and stays readable. */
   readonly stop: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
-  /** A task waiting for the user, done by them (D10-08). */
-  readonly taskDone: (buildTaskId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /** A task of this build waiting for the user, done by them (D10-08). */
+  readonly taskDone: (
+    sessionId: string,
+    buildTaskId: string,
+  ) => Effect.Effect<BuildView, BuildRefusal>
   /**
    * A task waiting for the user, skipped with its reason; its dependants let go on, or skipped with
    * it (D10-03).
    */
   readonly taskSkip: (
+    sessionId: string,
     buildTaskId: string,
     reason: string,
     unblocks: boolean,
   ) => Effect.Effect<BuildView, BuildRefusal>
-  /** A blocker dismissed: its task is ready again, its dependants wait again (D10-08). */
-  readonly dismissBlocker: (blockerId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /** A blocker of this build dismissed: its task is ready again, its dependants wait again (D10-08). */
+  readonly dismissBlocker: (
+    sessionId: string,
+    blockerId: string,
+  ) => Effect.Effect<BuildView, BuildRefusal>
   /**
    * At the engine's start (D10-09): the checks a stopped engine left running run again, and every
    * build that is not paused has its agent started and handed the resume brief.
@@ -1370,6 +1377,16 @@ export const buildsLayer = Layer.effect(
         ),
       )
 
+    /** A task of this build, by its identifier: one of another build is none of this one's. */
+    const taskOf = (sessionId: string, buildTaskId: string) =>
+      taskNamed(buildTaskId).pipe(
+        Effect.flatMap((owner) =>
+          owner === sessionId
+            ? Effect.void
+            : Effect.fail(new UnknownBuildError({ id: buildTaskId })),
+        ),
+      )
+
     /** A task of the rows, which must be waiting for the user. */
     const yoursIn = (rows: BuildRows, buildTaskId: string) => {
       const task = rows.tasks.find((one) => one.id === buildTaskId)
@@ -1750,9 +1767,9 @@ export const buildsLayer = Layer.effect(
           return stopped
         }),
 
-      taskDone: (buildTaskId) =>
+      taskDone: (sessionId, buildTaskId) =>
         Effect.gen(function* () {
-          const sessionId = yield* taskNamed(buildTaskId)
+          yield* taskOf(sessionId, buildTaskId)
           yield* open(sessionId)
           return yield* acted(sessionId, 'marking a task done', (transaction, rows, at) =>
             Effect.gen(function* () {
@@ -1763,7 +1780,7 @@ export const buildsLayer = Layer.effect(
           )
         }),
 
-      taskSkip: (buildTaskId, reason, unblocks) =>
+      taskSkip: (sessionId, buildTaskId, reason, unblocks) =>
         Effect.gen(function* () {
           const why = reason.trim()
           if (why === '') {
@@ -1771,7 +1788,7 @@ export const buildsLayer = Layer.effect(
               new BuildRefusedError({ reason: 'Say why the task is skipped.' }),
             )
           }
-          const sessionId = yield* taskNamed(buildTaskId)
+          yield* taskOf(sessionId, buildTaskId)
           yield* open(sessionId)
           return yield* acted(sessionId, 'skipping a task', (transaction, rows, at) =>
             Effect.gen(function* () {
@@ -1824,15 +1841,15 @@ export const buildsLayer = Layer.effect(
           )
         }),
 
-      dismissBlocker: (blockerId) =>
+      dismissBlocker: (sessionId, blockerId) =>
         Effect.gen(function* () {
           const found = yield* database
             .select({ sessionId: buildBlockers.sessionId })
             .from(buildBlockers)
             .where(eq(buildBlockers.id, blockerId))
             .pipe(Effect.mapError(failed('reading the blocker')))
-          const sessionId = found[0]?.sessionId
-          if (sessionId === undefined) {
+          // A blocker of another build is none of this one's, whatever its identifier.
+          if (found[0]?.sessionId !== sessionId) {
             return yield* Effect.fail(new UnknownBuildError({ id: blockerId }))
           }
           yield* open(sessionId)
