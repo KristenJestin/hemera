@@ -154,6 +154,7 @@ import {
   writeMessage,
 } from './sessions-store.ts'
 import { closeSpec, forgetSpecRefusal, listenToSpecs, openSpec } from './spec-store.ts'
+import { closeBuild, listenToBuilds, openBuild } from './build-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -558,6 +559,21 @@ export function Application() {
   useEffect(() => {
     forgetSpecRefusal()
   }, [openId])
+
+  // Every build, heard for as long as the window is open: the one on screen is read again as it
+  // moves, and any of them tells the OS when a task becomes the user's or a blocker is raised,
+  // wherever the user is (D10-08).
+  useEffect(() => listenToBuilds(), [])
+
+  // The build of the Session on screen, opened when that Session is a `build` one (D10-12).
+  const openBuildId = open?.mission === 'build' ? open.id : null
+  useEffect(() => {
+    if (openBuildId === null) {
+      closeBuild()
+      return
+    }
+    void openBuild(openBuildId)
+  }, [openBuildId])
 
   // The Spec of the Session on screen, opened when that Session defines one (D7-07).
   useEffect(() => {
