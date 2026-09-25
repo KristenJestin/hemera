@@ -21,7 +21,7 @@ import { TaskStage } from './task-stage.tsx'
 const meta = {
   title: 'Blocks/Build/TaskStage',
   component: TaskStage,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { task: T2_WORKING, now: NOW },
   argTypes: {

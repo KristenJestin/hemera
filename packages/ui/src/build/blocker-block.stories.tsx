@@ -13,7 +13,7 @@ import { BLOCKER, NOW } from './build-fixtures.ts'
 const meta = {
   title: 'Blocks/Build/BlockerBlock',
   component: BlockerBlock,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     blocker: BLOCKER,
