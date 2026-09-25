@@ -144,6 +144,27 @@ export type {
   WorkspaceStep,
 } from './domain/workspace.ts'
 export {
+  ATTEMPTS_BEFORE_YOURS,
+  ATTEMPT_RESULTS,
+  ATTEMPT_SCOPES,
+  BUILD_PHASES,
+  CHECK_VERDICTS,
+  CHECK_WHEN,
+  CHECK_WHERE,
+  TASK_STATES,
+} from './domain/build.ts'
+export type {
+  AttemptResult,
+  AttemptScope,
+  BuildPhase,
+  CheckExpect,
+  CheckVerdict,
+  CheckWhen,
+  CheckWhere,
+  ProjectCheck,
+  TaskState,
+} from './domain/build.ts'
+export {
   BASE_SECTIONS,
   DEFAULT_SPEC_PREFIX,
   DEFINE_PROTOCOL,
