@@ -5,7 +5,7 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
 import { SESSIONS, SESSIONS_V6, type SessionName } from './fixtures.tsx'
 import { Variant } from './layouts.tsx'
-import { V6Layout } from './v6.tsx'
+import { ChatChip, type ChatState, V6Layout } from './v6.tsx'
 
 /**
  * Where the chat stands in a Session, and how it gives a build its room (design exploration of
@@ -428,5 +428,28 @@ export const V6Restated: Story = {
     await confirmAll(within(review))
     await expect(canvas.getByRole('status')).toHaveTextContent('All confirmed')
     await expect(canvas.queryByRole('button', { name: 'Accept' })).toBeNull()
+  },
+}
+
+/** Every state a minimised chat can say. */
+const CHAT_STATES: readonly ChatState[] = ['working', 'waiting', 'done', 'failed', 'idle']
+
+/** The minimised chat's button in each state, side by side: the ring says it, not a dot. */
+export const V6ChatStates: Story = {
+  name: 'V6 · 0 The minimised chat, state by state',
+  args: { variant: 'v6', session: 'building' },
+  render: () => (
+    <div className="flex flex-wrap gap-10 bg-background p-10 text-foreground">
+      {CHAT_STATES.map((state) => (
+        <div key={state} className="flex flex-col items-center gap-3">
+          <ChatChip state={state} onOpen={() => {}} />
+          <span className="text-sm text-muted-foreground">{state}</span>
+        </div>
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('button', { name: /Open the chat/ })).toHaveLength(5)
   },
 }

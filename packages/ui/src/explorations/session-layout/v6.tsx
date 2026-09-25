@@ -403,7 +403,12 @@ function V6Head({
               />
             </Tooltip>
           ) : (
-            <ChatChip agent={agent} attention={attention} onOpen={onOpen} />
+            <ChatChip
+              state={chatStateOf(session)}
+              words={attention?.title ?? (agent.tone === 'running' ? agent.says : undefined)}
+              detail={attention?.preview}
+              onOpen={onOpen}
+            />
           )}
         </span>
       )}
@@ -411,55 +416,78 @@ function V6Head({
   )
 }
 
+/** What happens in a chat, as its minimised button says it. */
+export type ChatState = 'working' | 'waiting' | 'done' | 'failed' | 'idle'
+
+/** Each state's ring around the button: none for idle, the same ring in every other. */
+const RING: Record<Exclude<ChatState, 'idle'>, string> = {
+  // Something happens and nothing is asked: the arc turns.
+  working: 'border-primary border-r-transparent border-b-transparent motion-safe:animate-turn',
+  // The agent waits for an answer: the one state that asks the hand, and it breathes.
+  waiting: 'border-warning motion-safe:animate-breathe',
+  done: 'border-success',
+  failed: 'border-destructive',
+}
+
+const CHAT_WORDS: Record<ChatState, string> = {
+  working: 'Working',
+  waiting: 'Waits for you',
+  done: 'Done',
+  failed: 'Stopped on an error',
+  idle: 'Chat',
+}
+
+/** The state of a fixture's chat: what it waits for first, then what its agent does. */
+export function chatStateOf(session: SessionFixture): ChatState {
+  if (session.attention !== undefined) return 'waiting'
+  switch (session.agent.tone) {
+    case 'running':
+      return 'working'
+    case 'success':
+      return 'done'
+    case 'failure':
+      return 'failed'
+    default:
+      return 'idle'
+  }
+}
+
 /**
  * The minimised chat: one round button at the head's right end, the robot of the chat — never the
- * provider's mark, which says who answers and not that a chat is there — and what happens in the
- * chat said by the button itself, not by a dot beside it.
- *
- * - The agent works: an arc turns around the button.
- * - It waits for the user: the button takes the accent and a halo holds around it — the one state
- *   that asks the hand, so the one that stands out.
- * - Nothing going on: the button alone.
- *
- * The words are the tooltip's and the label's: `Blocker on S2`, `Working on S1 · the column
- * order`. A press opens the chat.
+ * provider's mark — and what happens in the chat said by a ring around it, not by a dot: an arc
+ * that turns while the agent works, a ring that breathes while it waits for an answer, a still
+ * ring once it is done or stopped on an error, nothing when nothing goes on. The button itself
+ * stays the same button in every state. The words are the tooltip's and the label's.
  */
-function ChatChip({
-  agent,
-  attention,
+export function ChatChip({
+  state,
+  words,
+  detail,
   onOpen,
 }: {
-  agent: SessionFixture['agent']
-  attention: SessionFixture['attention']
+  state: ChatState
+  /** What it is, in a few words: `Blocker on S2`, `Working on S1 · the column order`. */
+  words?: string | undefined
+  /** The first line of it, in the tooltip. */
+  detail?: string | undefined
   onOpen: () => void
 }): ReactNode {
-  const asks = attention !== undefined
-  const works = !asks && agent.tone === 'running'
-  const words = asks ? attention.title : works ? agent.says : 'Chat'
+  const said = words ?? CHAT_WORDS[state]
   return (
-    <span className="relative flex" data-state={asks ? 'asks' : works ? 'works' : 'idle'}>
-      {works && (
+    <span className="relative flex" data-state={state}>
+      {state !== 'idle' && (
         <span
           aria-hidden
-          className="pointer-events-none absolute -inset-1 rounded-full border-2 border-primary border-r-transparent border-b-transparent motion-safe:animate-turn"
+          className={cn('pointer-events-none absolute -inset-1 rounded-full border-2', RING[state])}
         />
       )}
-      {asks && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute -inset-1 rounded-full border-2 border-primary-muted"
-        />
-      )}
-      <Tooltip
-        label={asks ? `${attention.title} · ${attention.preview}` : `${agent.name} · ${words}`}
-        side="bottom"
-      >
+      <Tooltip label={detail === undefined ? said : `${said} · ${detail}`} side="bottom">
         <IconButton
-          variant={asks ? 'primary' : 'secondary'}
+          variant="secondary"
           shape="pill"
           size="md"
           icon={<IconRobot size="sm" />}
-          aria-label={`Open the chat · ${words}`}
+          aria-label={`Open the chat · ${said}`}
           data-restore
           onClick={onOpen}
         />
