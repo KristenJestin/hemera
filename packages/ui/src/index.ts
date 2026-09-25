@@ -475,6 +475,7 @@ export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
 export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
 export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
 export { SpecQuestion, type SpecQuestionProps } from './spec/spec-question.tsx'
+export { WorkspaceActions, type WorkspaceActionsProps } from './spec/workspace-actions.tsx'
 export {
   CreateSpecProposal,
   type CreateSpecProposalProps,
@@ -486,6 +487,9 @@ export type {
   Executor,
   GateCheck,
   GateCheckView,
+  LaunchState,
+  LaunchView,
+  LaunchWorkspace,
   Mark,
   PhaseName,
   PhaseState,
