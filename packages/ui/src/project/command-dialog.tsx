@@ -17,16 +17,25 @@ import type { CommandLine, RepositoryLine } from './model.ts'
 import { repositoryNamesOf, slugOf } from './naming.ts'
 
 /**
- * The dialog a command of the catalogue is added or edited in (recette 1 of lot 20, D8-07).
+ * The dialog a command of the catalogue is added or edited in (recette 1 of lot 20, D8-07, as
+ * amended by recette 2).
  *
- * The row of a command says its name, its line and a few badges; everything else — the line of
- * each system, the scope of a server, the folder it runs in, Portless — is written here. The
- * name is what the agent asks for, so it is fixed once the command exists: a new name is a new
- * command.
+ * The row of a command says its type, its name, its line and the address it is served under;
+ * everything else — a line per system, the scope of a server, the folder it runs in, Portless —
+ * is written here. The name is what the agent asks for, so it is fixed once the command exists:
+ * a new name is a new command.
+ *
+ * The lines are one or two and never three (recette 2): either the same line runs on every
+ * system, or there is a line per system, asked for Windows and for Linux and macOS. There is no
+ * third field to ask what a system with none of its own runs: what Linux and macOS run is what
+ * every other system runs, and a field saying it a second time would only be the same line
+ * written twice.
  *
  * The folder is a base and a path under it. The base is the Workspace root or one of the
  * Project's repositories, named as a reader names them, and it follows the Workspace the run is
  * in: the same command runs in the `api` of `main` and in the `api` worktree of a dedicated one.
+ * The folder is typed or picked, and what the picker answers is written relative to the folder
+ * the command runs from.
  *
  * Portless is offered on a server alone, and only where it can run (D8-10): not installed, the
  * option is not drawn at all; a line that already calls `portless` runs as it is written, and
@@ -57,10 +66,11 @@ const SCOPE_ITEMS: { value: CommandScope; label: string }[] = [
   { value: 'project', label: 'One instance, run in main' },
 ]
 
-/** A line of a system, typed or left empty: empty is the default line (D8-07). */
-function lineOrNull(typed: string): string | null {
-  return typed.trim() === '' ? null : typed.trim()
-}
+/** The two ways a command says what it runs, and there is no third (recette 2). */
+const LINE_MODE_ITEMS: { value: 'same' | 'system'; label: string }[] = [
+  { value: 'same', label: 'Same line on every system' },
+  { value: 'system', label: 'A line per system' },
+]
 
 /** Whether a line already goes through Portless, in which case it runs as it is written. */
 export function callsPortless(line: string): boolean {
@@ -77,7 +87,7 @@ function portlessNameRefusal(name: string): string | undefined {
 }
 
 /** The fixed icon of a command's type, in the muted colour of a mark (D8-07). */
-function TypeMark({ type }: { type: CommandType }): ReactNode {
+export function TypeMark({ type }: { type: CommandType }): ReactNode {
   const Icon = COMMAND_TYPE_ICONS[type]
   return (
     <span className="flex shrink-0 text-muted-foreground">
@@ -113,6 +123,12 @@ export interface CommandDialogProps {
   portlessInstalled: boolean
   /** The Project's name, whose slug is the name Portless is offered first. */
   projectName: string
+  /**
+   * Asks for a folder, handed the base the command runs from — null for the Workspace root — and
+   * answers what the field holds, relative to that base, or null when the picker was dismissed.
+   * No button is drawn without it.
+   */
+  onBrowse?: ((base: string | null) => Promise<string | null>) | undefined
   /** Writes the command; answers the refusal to show, or null once it is written. */
   onSubmit: (command: CommandLine) => Promise<string | null>
 }
@@ -124,10 +140,12 @@ export function CommandDialog({
   repositories,
   portlessInstalled,
   projectName,
+  onBrowse,
   onSubmit,
 }: CommandDialogProps): ReactNode {
   const [name, setName] = useState('')
   const [line, setLine] = useState('')
+  const [linesPerSystem, setLinesPerSystem] = useState(false)
   const [type, setType] = useState<CommandType>('script')
   const [lineWindows, setLineWindows] = useState('')
   const [lineLinux, setLineLinux] = useState('')
@@ -143,6 +161,11 @@ export function CommandDialog({
   useEffect(() => {
     if (!open) return
     setName(command?.name ?? '')
+    // A command that runs a line of its own on a system is a line per system: the two fields,
+    // where a command with one line opens on the one field (recette 2).
+    setLinesPerSystem(
+      command !== null && (command.lineWindows !== null || command.lineLinux !== null),
+    )
     setLine(command?.command ?? '')
     setType(command?.type ?? 'script')
     setLineWindows(command?.lineWindows ?? '')
@@ -157,7 +180,9 @@ export function CommandDialog({
 
   const adding = command === null
   const serve = type === 'serve'
-  const offersPortless = serve && portlessInstalled && !callsPortless(line)
+  /** Every line this command runs, whichever of its fields holds it (recette 2). */
+  const lines = linesPerSystem ? [lineWindows, lineLinux] : [line]
+  const offersPortless = serve && portlessInstalled && !lines.some(callsPortless)
 
   const names = repositoryNamesOf(repositories.map((one) => one.path))
   const baseItems = [
@@ -174,7 +199,9 @@ export function CommandDialog({
       ? undefined
       : (folderRead.error.issues[0]?.message ?? 'That folder cannot be used.')
   const nameError = offersPortless && portless ? portlessNameRefusal(portlessName) : undefined
-  const incomplete = name.trim() === '' || line.trim() === ''
+  const incomplete =
+    name.trim() === '' ||
+    (linesPerSystem ? lineWindows.trim() === '' || lineLinux.trim() === '' : line.trim() === '')
   const slug = portlessName.trim()
 
   /**
@@ -183,7 +210,7 @@ export function CommandDialog({
    * what the command already said: a machine without the tool does not rewrite the catalogue.
    */
   const portlessOf = (): Pick<CommandLine, 'portless' | 'portlessName'> => {
-    if (!serve || callsPortless(line)) return { portless: false, portlessName: null }
+    if (!serve || lines.some(callsPortless)) return { portless: false, portlessName: null }
     if (offersPortless) {
       return portless
         ? { portless: true, portlessName: slug }
@@ -192,15 +219,29 @@ export function CommandDialog({
     return { portless: command?.portless ?? false, portlessName: command?.portlessName ?? null }
   }
 
+  /**
+   * The mode changed: one line or two. A field left empty takes the line the other mode was
+   * holding, so that switching neither loses what was typed nor opens on an empty field.
+   */
+  const chooseLines = (perSystem: boolean) => {
+    if (perSystem === linesPerSystem) return
+    if (perSystem && lineLinux.trim() === '') setLineLinux(line)
+    if (!perSystem && line.trim() === '') setLine(lineLinux)
+    setLinesPerSystem(perSystem)
+  }
+
   const submit = async () => {
     setSaving(true)
     const typedFolder = folder.trim()
+    // One line, it is `line` and no system has one of its own; a line per system, `line` is what
+    // Linux and macOS run — and with them every system that has no line of its own (recette 2).
+    const written = linesPerSystem ? lineLinux.trim() : line.trim()
     const said = await onSubmit({
       id: command?.id ?? name.trim(),
       name: command?.name ?? name.trim(),
-      command: line.trim(),
-      lineWindows: lineOrNull(lineWindows),
-      lineLinux: lineOrNull(lineLinux),
+      command: written,
+      lineWindows: linesPerSystem ? lineWindows.trim() : null,
+      lineLinux: linesPerSystem ? written : null,
       type,
       // Meaningful for a `serve` only (D8-07): anything else is one run per call.
       scope: serve ? scope : 'workspace',
@@ -263,31 +304,44 @@ export function CommandDialog({
             />
           </Labelled>
         </div>
-        <Input
-          label="Default line"
-          placeholder="pnpm check"
-          description="Run on a system that has no line of its own below."
-          value={line}
-          onValueChange={setLine}
-        />
-        <div className={ROW}>
-          <Input
-            label="Windows line"
-            className={FIELD}
-            placeholder="scripts\check.cmd"
-            description="Leave empty to run the default line."
-            value={lineWindows}
-            onValueChange={setLineWindows}
+        <Labelled label="Lines">
+          <Select
+            label="Lines"
+            value={linesPerSystem ? 'system' : 'same'}
+            onValueChange={(mode) => {
+              chooseLines(mode === 'system')
+            }}
+            items={LINE_MODE_ITEMS}
           />
+        </Labelled>
+        {linesPerSystem ? (
+          <div className={ROW}>
+            <Input
+              label="Windows line"
+              className={FIELD}
+              placeholder="scripts\check.cmd"
+              description="Run on Windows."
+              value={lineWindows}
+              onValueChange={setLineWindows}
+            />
+            <Input
+              label="Linux and macOS line"
+              className={FIELD}
+              placeholder="./scripts/check.sh"
+              description="Run on Linux and macOS, and on any other system."
+              value={lineLinux}
+              onValueChange={setLineLinux}
+            />
+          </div>
+        ) : (
           <Input
-            label="Linux line"
-            className={FIELD}
-            placeholder="./scripts/check.sh"
-            description="Leave empty to run the default line."
-            value={lineLinux}
-            onValueChange={setLineLinux}
+            label="Line"
+            placeholder="pnpm check"
+            description="Run on every system."
+            value={line}
+            onValueChange={setLine}
           />
-        </div>
+        )}
         {serve && (
           <Labelled label="Scope">
             <Select label="Scope" value={scope} onValueChange={setScope} items={SCOPE_ITEMS} />
@@ -305,6 +359,21 @@ export function CommandDialog({
             value={folder}
             onValueChange={setFolder}
             error={folderError}
+            action={
+              onBrowse === undefined ? undefined : (
+                <Button
+                  variant="secondary"
+                  className="shrink-0"
+                  onClick={() => {
+                    void onBrowse(base === ROOT ? null : base).then((chosen) => {
+                      if (chosen !== null) setFolder(chosen)
+                    })
+                  }}
+                >
+                  {folder === '' ? 'Browse…' : 'Change…'}
+                </Button>
+              )
+            }
           />
         </div>
         {offersPortless && (
@@ -325,9 +394,9 @@ export function CommandDialog({
                 />
                 {nameError === undefined && (
                   <p className={NOTE}>
-                    Served at <span className={URL}>https://{slug}.localhost</span> in main, and at{' '}
-                    <span className={URL}>https://{slug}-&lt;workspace&gt;.localhost</span> in a
-                    dedicated Workspace.
+                    Served at <span className={URL}>https://{slug}.localhost</span>, and at{' '}
+                    <span className={URL}>https://&lt;branch&gt;.{slug}.localhost</span> in a
+                    Workspace's worktree.
                   </p>
                 )}
               </>
