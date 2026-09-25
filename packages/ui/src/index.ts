@@ -509,10 +509,13 @@ export type {
 
 /**
  * The build view of a `build` Session (lot 22, D10-12): the stage of one task with its tries,
- * their checks and the files they changed. View types only, close to the engine's `BuildView`: the
+ * their checks and the files they changed, and the blocks that hand a task to the user — a task
+ * that is theirs, a blocker the agent raised — in the view and as a banner above the composer. View types only, close to the engine's `BuildView`: the
  * renderer maps one onto the other.
  */
 export { TaskStage, type TaskStageProps } from './build/task-stage.tsx'
+export { YoursBlock, type YoursBlockProps } from './build/yours-block.tsx'
+export { BlockerBlock, type BlockerBlockProps } from './build/blocker-block.tsx'
 export type {
   BuildAttemptResult,
   BuildAttemptScope,
