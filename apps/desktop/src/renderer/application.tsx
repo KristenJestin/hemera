@@ -100,6 +100,17 @@ import {
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import { repositoryLinesOf } from './project-lines.ts'
 import {
+  acceptProposed,
+  checksOf,
+  checksSnapshot,
+  discardProposed,
+  proposedOf,
+  readChecks,
+  removeCheck,
+  saveCheck,
+  subscribeToChecks,
+} from './checks-store.ts'
+import {
   addRecipeStep,
   cleanUp,
   createDedicated,
@@ -320,6 +331,8 @@ export function Application() {
   const tools = useSyncExternalStore(subscribeToTools, toolsSnapshot, toolsSnapshot)
   // The Workspaces of the Project whose settings are open, and the one shown under them (D8-02).
   const places = useSyncExternalStore(subscribeToWorkspaces, workspacesSnapshot, workspacesSnapshot)
+  // And the checks its build is judged by, with those proposed while it has none (D10-06).
+  const checked = useSyncExternalStore(subscribeToChecks, checksSnapshot, checksSnapshot)
   // What a page holds is a name, and what the channels take is one of the agents the engine
   // knows: resolved among them here rather than asserted at each call, so a name that answers to
   // none of them asks for nothing at all.
@@ -614,6 +627,9 @@ export function Application() {
     void readProjectVariables(settingsOf)
     // And the recipe each dedicated Workspace is prepared with (D8-05).
     void readRecipe(settingsOf)
+    // And the checks of its build, with what the catalogue proposes while there are none: a
+    // proposal put away last time is proposed again (D10-06).
+    void readChecks(settingsOf)
     // The Workspace shown is the page's: leaving it puts the Workspace away.
     return () => void showWorkspace(null)
   }, [settingsOf])
@@ -1200,7 +1216,15 @@ export function Application() {
             await setVariable(current.id, null, key, value)
           }
           onRemoveProjectVariable={(key) => void removeVariable(current.id, null, key)}
-          workspacesRefusal={places.refusal}
+          checks={checksOf(current.id)}
+          proposedChecks={proposedOf(current.id)}
+          checkActions={{
+            onSave: async (id, draft) => await saveCheck(current.id, id, draft),
+            onRemove: (id) => void removeCheck(current.id, id),
+            onAcceptProposed: async (drafts) => await acceptProposed(current.id, drafts),
+            onDiscardProposed: () => discardProposed(current.id),
+          }}
+          workspacesRefusal={places.refusal ?? checked.refusal}
         />
       )
     }
