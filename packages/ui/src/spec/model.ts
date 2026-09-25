@@ -264,6 +264,37 @@ export interface SpecView {
   replacedBy?: number | undefined
 }
 
+/**
+ * Where a launch of this Spec stands, in the words the domain uses for it (D8-13): its Workspace
+ * still being prepared, the agent being started, started, refused with the cause it gave, or
+ * cancelled by the Rework that took the Spec back. These are the names of `LAUNCH_STATES`, read
+ * here as the panel says them: the design system imports nothing of Hemera, and the application
+ * turns the one into the other.
+ */
+export type LaunchState = 'waiting' | 'starting' | 'started' | 'failed' | 'cancelled'
+
+/** A Workspace a build may be started in: the `main` one, or one of the Project's own (D8-12). */
+export interface LaunchWorkspace {
+  id: string
+  name: string
+}
+
+/** What a launch says of itself, and the one thing it offers from where it stands (D8-13). */
+export type LaunchView =
+  | {
+      state: 'waiting'
+      /** The preparation step running, as the Workspace names it (D8-05). */
+      step?: string | undefined
+    }
+  | { state: 'starting' }
+  | { state: 'started' }
+  | {
+      state: 'failed'
+      /** What the start was refused with, in the engine's own words. */
+      cause: string
+    }
+  | { state: 'cancelled' }
+
 /** How each section is named in the document. */
 export const SECTION_TITLES: Record<SectionName, string> = {
   problem: 'Problem',

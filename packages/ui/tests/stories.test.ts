@@ -516,6 +516,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'MissionBrief',
       'SpecQuestion',
       'CreateSpecProposal',
+      // The build of a frozen Spec: what it is launched in, and where that launch stands
+      // (D8-12, D8-13).
+      'WorkspaceActions',
       // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
       // and the rail it is fed with.
       'MissionPanel',
