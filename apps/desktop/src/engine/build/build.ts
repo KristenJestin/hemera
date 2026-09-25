@@ -751,6 +751,8 @@ export const buildsLayer = Layer.effect(
             workspaceId: rows.session.workspaceId,
             when: job.when,
             attemptId: attempt.id,
+            scope: scopeOf(attempt),
+            label: rows.tasks.find((task) => task.id === attempt.buildTaskId)?.label ?? null,
             changes: changesFor(rows, attempt),
           })
           .pipe(

@@ -143,14 +143,23 @@ const anAttempt = (sessionId: string, number: number) =>
     return id
   })
 
-/** The checks of `when` asked for one attempt, in `main`, for the changes given. */
+/** The checks of `when` asked for one try at T1, in `main`, for the changes given. */
 const asked = (
   projectId: string,
   sessionId: string,
   attemptId: string,
   when: CheckWhen,
   changes: CheckRunRequest['changes'] = [],
-): CheckRunRequest => ({ sessionId, projectId, workspaceId: null, when, attemptId, changes })
+): CheckRunRequest => ({
+  sessionId,
+  projectId,
+  workspaceId: null,
+  when,
+  attemptId,
+  scope: 'task',
+  label: 'T1',
+  changes,
+})
 
 /** The results written under an attempt, as their rows hold them. */
 const resultRows = (attemptId: string) =>
@@ -575,6 +584,9 @@ test('The results survive a restart, each with its Journal line', async () => {
         place: '',
         verdict: outcome.verdict,
         detail: outcome.detail,
+        // The try it judged: the task by its label (D10-14).
+        scope: 'task',
+        label: 'T1',
       }),
     ),
   )

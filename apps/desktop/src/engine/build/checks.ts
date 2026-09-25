@@ -8,6 +8,7 @@
  */
 
 import {
+  type AttemptScope,
   CHECK_WHEN,
   CHECK_WHERE,
   type ChangedFile,
@@ -58,6 +59,10 @@ export interface CheckRunRequest {
   readonly when: CheckWhen
   /** The attempt the results are written under. */
   readonly attemptId: string
+  /** What the attempt is about — a task, a story, the build — as its `check.ran` lines say. */
+  readonly scope: AttemptScope
+  /** The label of the task it tries, `T2`; null for a story's or the build's. */
+  readonly label: string | null
   /**
    * What the work changed, per repository: its path relative to the Workspace root (`''` for a
    * repository at the root) and the files changed in it, relative to that repository, each with
@@ -566,6 +571,8 @@ export const buildChecksLayer = Layer.effect(
                           place: outcome.place,
                           verdict: outcome.verdict,
                           detail: outcome.detail,
+                          scope: request.scope,
+                          label: request.label,
                         },
                       },
                     ],
