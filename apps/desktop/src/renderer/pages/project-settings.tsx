@@ -30,6 +30,7 @@ import {
   type CommandWrite,
   commandLineOf,
   commandWriteOf,
+  folderBasePath,
   folderUnderBase,
 } from '../project-lines.ts'
 import {
@@ -283,7 +284,12 @@ export function ProjectSettingsPage({
   repositories: RepositoryLine[]
   folders: RepositoryLine[]
   onSave: (draft: ProjectSettingsDraft) => Promise<string | null>
-  onBrowse: () => Promise<string | null>
+  /**
+   * Asks the system for a folder, opened on the one given when there is one: the Commands
+   * section asks from the folder a command runs from, and the rest of the page asks for no start
+   * at all.
+   */
+  onBrowse: (start?: string) => Promise<string | null>
   onCheckFolder: (path: string) => Promise<string | null>
   onMainPathChange: (path: string) => void
   onAddRepository: (path: string) => Promise<string | null>
@@ -358,10 +364,10 @@ export function ProjectSettingsPage({
         onAddCommand={async (line) => await onSaveCommand(commandWriteOf(line), false)}
         onUpdateCommand={async (line) => await onSaveCommand(commandWriteOf(line), true)}
         onRemoveCommand={onRemoveCommand}
-        // The picker of the system, answered from where the command runs: what comes back is the
-        // folder of the field, relative to that base (recette 2).
+        // The picker of the system, opened where the command runs and answered from there: what
+        // comes back is the folder of the field, relative to that base (recette 2).
         onBrowseCommandFolder={async (base) => {
-          const chosen = await onBrowse()
+          const chosen = await onBrowse(folderBasePath(project.mainPath, base))
           return chosen === null ? null : folderUnderBase(project.mainPath, base, chosen)
         }}
         portlessInstalled={portlessInstalled}

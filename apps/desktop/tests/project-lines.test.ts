@@ -10,6 +10,7 @@ import type { Command } from '@hemera/ipc'
 import {
   commandLineOf,
   commandWriteOf,
+  folderBasePath,
   folderUnderBase,
   repositoryLinesOf,
 } from '#renderer/project-lines.ts'
@@ -93,6 +94,19 @@ describe('A folder the picker answered is written relative to where a command ru
     expect(folderUnderBase('D:\\Projects\\atlas', null, 'd:\\projects\\atlas\\apps')).toBe('apps')
     expect(folderUnderBase('D:\\Projects\\atlas', './sources/api', 'D:\\Projects\\atlas')).toBe(
       '../..',
+    )
+  })
+})
+
+describe('The folder picker opens where a command runs', () => {
+  test("the Workspace root is the Project's own folder, a base is the repository under it", () => {
+    expect(folderBasePath('/work/atlas', null)).toBe('/work/atlas')
+    expect(folderBasePath('/work/atlas', './sources/api')).toBe('/work/atlas/sources/api')
+  })
+
+  test('a base is joined the way its own system writes a path', () => {
+    expect(folderBasePath('D:\\Projects\\atlas', './sources/api')).toBe(
+      'D:\\Projects\\atlas\\sources\\api',
     )
   })
 })

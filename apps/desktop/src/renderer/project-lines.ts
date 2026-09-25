@@ -110,6 +110,22 @@ export function folderUnderBase(mainPath: string, base: string | null, chosen: s
   return joined === '' ? '.' : joined
 }
 
+/**
+ * The folder a command runs from, as its own system writes it: the folder of the main Workspace,
+ * or one of the Project's repositories under it (recette 2).
+ *
+ * `mainPath` is the folder of the main Workspace, which a base is relative to; `base` is null for
+ * the Workspace root and one of the Project's repositories otherwise, as the dialog names it. It
+ * is the folder the field's own answer is relative to, and the one the system's picker opens on,
+ * joined the way the main folder is written: a Windows path keeps its backslashes, a POSIX one
+ * its slash.
+ */
+export function folderBasePath(mainPath: string, base: string | null): string {
+  const under = segmentsOf(base ?? '')
+  if (under.length === 0) return mainPath
+  return [mainPath, ...under].join(windowsPath(mainPath) ? '\\' : '/')
+}
+
 /** What the disk says of one declared location, as `repositories.status` answers it. */
 export interface LocationFound {
   readonly path: string
