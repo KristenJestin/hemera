@@ -187,6 +187,45 @@ describe('A build waits for its environment', () => {
     ])
     expect(seen.builtIn).toBe(seen.workspace.id)
   })
+
+  test('A request and the Workspace becoming ready at once start the build once', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const preparation = yield* Preparation
+        const workspace = yield* making(project.id, specId, key)
+        // The two arrive together: the request that writes the launch and the preparation whose
+        // last step makes the Workspace ready. Either may read what the other wrote first, and
+        // the launch is started by whoever finds it `waiting` — once (D8-13).
+        const [asked] = yield* Effect.all(
+          [launched.request(specId, workspace.id), preparation.prepare(workspace.id)],
+          { concurrency: 'unbounded' },
+        )
+        const settled = yield* until(
+          launched.one(asked.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        return { asked, builds: yield* builds, rows: yield* launches, settled }
+      }),
+    )
+    // Whoever arrived second found the launch and started it: never left waiting for an
+    // environment that is already there.
+    expect(seen.settled.state).toBe('started')
+    expect(seen.rows).toEqual([
+      { state: 'started', session_id: seen.settled.sessionId, detail: null },
+    ])
+    // And once: two starters, one build Session.
+    expect(seen.builds).toEqual([
+      {
+        id: seen.settled.sessionId,
+        spec_id: seen.asked.specId,
+        revision_id: seen.asked.revisionId,
+        workspace_id: seen.asked.workspaceId,
+      },
+    ])
+  })
 })
 
 describe('A launch refuses what cannot be built', () => {

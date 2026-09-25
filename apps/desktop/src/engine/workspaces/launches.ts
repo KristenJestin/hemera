@@ -406,36 +406,33 @@ export const launchesLayer = Layer.effect(
               }),
             )
           }
-          // The Workspace is read as its row stands, as a Session's own check reads it (D8-08):
-          // what this lot decides on is existence and state, and a Workspace being prepared is
-          // exactly what a launch waits for.
-          const found = yield* withDatabase(
-            reading('reading the Workspace', (transaction) =>
-              transaction
-                .select({ name: workspaces.name, state: workspaces.state })
-                .from(workspaces)
-                .where(
-                  and(
-                    eq(workspaces.id, workspaceId),
-                    eq(workspaces.projectId, snapshot.spec.projectId),
-                  ),
-                )
-                .pipe(Effect.mapError(failed('reading the Workspace'))),
-            ),
-          )
-          const chosen = found[0]
-          if (chosen === undefined) {
-            return yield* Effect.fail(new UnknownWorkspaceError(workspaceId))
-          }
-          const state = WORKSPACE_STATES.find((known) => known === chosen.state)
-          // Nothing will make a cleaned up or failed Workspace ready: a launch on one would wait
-          // for nothing, so it is refused as a Session's own check refuses it.
-          if (state === undefined || state === 'cleaned' || state === 'failed') {
-            return yield* Effect.fail(new WorkspaceNotReadyError(chosen.name, chosen.state))
-          }
-          const launch = yield* withDatabase(
+          // The Workspace is read in the very transaction that writes the launch (D8-13), as a
+          // Session's own check reads it (D8-08): read outside it, the preparation may make the
+          // Workspace ready in between, and the ready step would then read no launch at all —
+          // leaving one that waits for an environment already there, forever.
+          const asked = yield* withDatabase(
             mutate('asking for a build', (transaction) =>
               Effect.gen(function* () {
+                const found = yield* transaction
+                  .select({ name: workspaces.name, state: workspaces.state })
+                  .from(workspaces)
+                  .where(
+                    and(
+                      eq(workspaces.id, workspaceId),
+                      eq(workspaces.projectId, snapshot.spec.projectId),
+                    ),
+                  )
+                  .pipe(Effect.mapError(failed('reading the Workspace')))
+                const chosen = found[0]
+                if (chosen === undefined) {
+                  return yield* Effect.fail(new UnknownWorkspaceError(workspaceId))
+                }
+                const state = WORKSPACE_STATES.find((known) => known === chosen.state)
+                // Nothing will make a cleaned up or failed Workspace ready: a launch on one would
+                // wait for nothing, so it is refused as a Session's own check refuses it.
+                if (state === undefined || state === 'cleaned' || state === 'failed') {
+                  return yield* Effect.fail(new WorkspaceNotReadyError(chosen.name, chosen.state))
+                }
                 const id = crypto.randomUUID()
                 const at = now()
                 yield* transaction
@@ -459,15 +456,20 @@ export const launchesLayer = Layer.effect(
                   .pipe(Effect.mapError(failed('writing the Workspace of the Spec')))
                 return {
                   result: {
-                    id,
-                    specId,
-                    revisionId: snapshot.revision.id,
-                    workspaceId,
-                    state: 'waiting' as const,
-                    sessionId: null,
-                    detail: null,
-                    createdAt: at,
-                    updatedAt: at,
+                    launch: {
+                      id,
+                      specId,
+                      revisionId: snapshot.revision.id,
+                      workspaceId,
+                      state: 'waiting' as const,
+                      sessionId: null,
+                      detail: null,
+                      createdAt: at,
+                      updatedAt: at,
+                    },
+                    // Whether the Workspace is ready is decided on the very row the launch is
+                    // written against, in that transaction: the start reads it from here (D8-13).
+                    ready: state === 'ready',
                   },
                   events: [
                     launchEvent(
@@ -478,13 +480,14 @@ export const launchesLayer = Layer.effect(
                       'human',
                     ),
                   ],
-                } satisfies Mutation<LaunchView>
+                } satisfies Mutation<{ launch: LaunchView; ready: boolean }>
               }),
             ),
           )
-          // A Workspace already ready has nothing to wait for: the build starts now.
-          if (state !== 'ready') return launch
-          return yield* start(launch)
+          // A Workspace already ready has nothing to wait for: the build starts now, and it starts
+          // once — whoever finds the launch `waiting` starts it, here or in the ready step (D8-13).
+          if (!asked.ready) return asked.launch
+          return yield* start(asked.launch)
         }),
 
       retry: (id) =>
