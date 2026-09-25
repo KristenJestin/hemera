@@ -19,7 +19,7 @@ import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
  */
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/HemeraToolCall',
   component: HemeraToolCall,
   parameters: { layout: 'padded' },
@@ -486,12 +486,16 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
   ['spec_read', 'Read Spec', 'read-spec', 'HEM-7', 'Reading HEM-7'],
   ['spec_write', 'Write Spec', 'write-spec', 'scope', 'Writing the scope'],
   ['spec_propose', 'Propose', 'propose-spec', 'shape', 'Declaring shape finished'],
+  ['build_read', 'Read build', 'read-build', null, 'Reading the build of ATL-7'],
+  ['task_finished', 'Task finished', 'finish-task', 'T2', 'T2 handed to its checks'],
+  ['task_blocked', 'Task blocked', 'block-task', 'T3', 'T3 contradicts the Spec'],
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): fifteen tools, fifteen
- * marks and fifteen labels, and what each call is about where it is about something. A mark per
- * kind of tool drew `fs_list` as `fs_read` and the four commands as one.
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): eighteen tools since
+ * the three of a build (D10-13), eighteen marks and eighteen labels, and what each call is about
+ * where it is about something. A mark per kind of tool drew `fs_list` as `fs_read` and the four
+ * commands as one.
  */
 export const EveryTool: Story = {
   args: { status: 'completed' },

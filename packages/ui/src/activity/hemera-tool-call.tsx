@@ -2,16 +2,16 @@ import type { ReactNode } from 'react'
 
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import {
-  IconAlertTriangle,
   IconBookmarkPlus,
   IconCircleCheck,
+  IconClipboardList,
   IconFileDescription,
   IconFilePlus,
   IconFileText,
   IconFlag,
   IconFolder,
   IconFolders,
-  IconListCheck,
+  IconHandStop,
   IconListDetails,
   IconMessages,
   IconPencil,
@@ -116,9 +116,11 @@ const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'read-spec': <IconFileDescription size="sm" aria-hidden="true" />,
   'write-spec': <IconWriting size="sm" aria-hidden="true" />,
   'propose-spec': <IconFlag size="sm" aria-hidden="true" />,
-  'read-build': <IconListCheck size="sm" aria-hidden="true" />,
+  // The three tools of a build (D10-13): the build read, a task said finished, a task said to
+  // contradict the Spec.
+  'read-build': <IconClipboardList size="sm" aria-hidden="true" />,
   'finish-task': <IconCircleCheck size="sm" aria-hidden="true" />,
-  'block-task': <IconAlertTriangle size="sm" aria-hidden="true" />,
+  'block-task': <IconHandStop size="sm" aria-hidden="true" />,
 }
 
 /** Where the mark sits on the line, in the tone a native call's mark is drawn in. */
