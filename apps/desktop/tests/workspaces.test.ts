@@ -675,6 +675,51 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
   })
 })
 
+describe('A Workspace with a running build Session is not cleaned up', () => {
+  it('names the build, removes nothing, and lets it go once the Session is archived', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        const sql = yield* SqliteClient
+        // The build Session a launch writes when it starts the build, and has not archived
+        // (D8-13): the folder is where that build works.
+        const at = '2026-09-25T08:00:00.000Z'
+        yield* sql`INSERT INTO sessions
+          (id, project_id, title, title_source, mission, spec_id, workspace_id, created_at,
+           last_written_at)
+          VALUES ('build-of-HEM-7', ${project.id}, 'Build the login form', 'derived', 'build',
+            'HEM-7', ${workspace.id}, ${at}, ${at})`
+        const running = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        const events = yield* sql<{ payload: string }>`
+          SELECT payload FROM domain_events WHERE type = 'workspace.cleanup_refused'`
+        // Nothing was removed while it was refused: both worktrees are there, the folder is
+        // there, and the Workspace is still ready.
+        const kept = {
+          api: existsSync(join(workspace.path, 'sources', 'api', '.git')),
+          folder: existsSync(workspace.path),
+          front: existsSync(join(workspace.path, 'sources', 'front', '.git')),
+          state: (yield* workspaces.one(workspace.id)).state,
+        }
+        // Archived, the build no longer works there: the cleanup goes through.
+        yield* sql`UPDATE sessions SET archived_at = ${at} WHERE id = 'build-of-HEM-7'`
+        const cleaned = yield* workspaces.cleanup(workspace.id)
+        return { cleaned, events, kept, running, workspace }
+      }),
+    )
+
+    expect(seen.running).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.running.message).toBe('the build of login-form is still open')
+    expect(seen.kept).toEqual({ api: true, folder: true, front: true, state: 'ready' })
+    expect(seen.events).toEqual([
+      { payload: JSON.stringify({ reason: 'the build of login-form is still open' }) },
+    ])
+    expect(seen.cleaned.state).toBe('cleaned')
+    expect(existsSync(seen.workspace.path)).toBe(false)
+  })
+})
+
 describe('main cannot be cleaned up', () => {
   it('is refused, the refusal is in the Journal, and main is unchanged', async () => {
     const seen = await workspaceEngine(folder)(
