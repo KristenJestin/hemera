@@ -334,6 +334,39 @@ describe('A human task waits for the user', () => {
     expect(notified.map((one) => one.title)).toEqual(['T3 is yours · ATL-7'])
     expect(buildSnapshot().view).toBeNull()
   })
+
+  test('a read overtaken by a later one tells the OS nothing again', async () => {
+    const before = build('elsewhere', { tasks: [task('T1', 'done'), task('T2', 'waiting')] })
+    const after = build('elsewhere', {
+      tasks: [task('T1', 'done'), task('T2', 'yours', { endedAt: LATER, updatedAt: LATER })],
+    })
+    // The reads of this build come back when the test says, not in the order they were asked.
+    const held: ((view: BuildView) => void)[] = []
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        hemera: {
+          invoke: async () =>
+            await new Promise<BuildView>((resolve) => {
+              held.push(resolve)
+            }),
+          on: () => () => undefined,
+        },
+      },
+    })
+
+    push({ event: 'build.changed', sessionId: 'elsewhere' })
+    push({ event: 'build.changed', sessionId: 'elsewhere' })
+    held[1]?.(after)
+    await settled()
+    held[0]?.(before)
+    await settled()
+    push({ event: 'build.changed', sessionId: 'elsewhere' })
+    held[2]?.(after)
+    await settled()
+
+    expect(notified.map((one) => one.title)).toEqual(['T2 is yours · ATL-7'])
+  })
 })
 
 describe('A blocker suspends the task and its dependants only', () => {

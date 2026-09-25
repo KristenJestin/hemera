@@ -90,9 +90,10 @@ async function show(view: BuildView, ticket: number): Promise<void> {
 async function refresh(sessionId: string): Promise<void> {
   started += 1
   const ticket = started
+  const reading = readOf(sessionId)
   try {
     const view = await window.hemera.invoke('build.read', { sessionId })
-    noticed(view)
+    noticedIfLatest(view, reading)
     await show(view, ticket)
   } catch (cause) {
     if (shown === sessionId) replace({ ...state, refusal: message(cause) })
@@ -133,13 +134,14 @@ async function acting<K extends BuildAction>(
   if (sessionId === null) return false
   started += 1
   const ticket = started
+  const reading = readOf(sessionId)
   try {
     // SAFETY: `more` is the argument of `name` without its `sessionId`, which is put back here;
     // TypeScript cannot rebuild the argument of a generic channel from its two halves.
     const argument = { ...more, sessionId } as ChannelArguments<K>
     const view = await window.hemera.invoke(name, argument)
     replace({ ...state, refusal: null })
-    noticed(view)
+    noticedIfLatest(view, reading)
     await show(view, ticket)
     return true
   } catch (cause) {
@@ -212,10 +214,28 @@ function noticed(view: BuildView): void {
   told.set(view.sessionId, new Set(waiting.map((one) => one.key)))
 }
 
+/**
+ * How many reads of each build were started, for what it tells the OS: the reads answer in no set
+ * order, and one overtaken by a later read of the same build tells nothing, or an older answer
+ * would forget what the newer one told and tell it again.
+ */
+const readsOf = new Map<string, number>()
+
+function readOf(sessionId: string): number {
+  const ticket = (readsOf.get(sessionId) ?? 0) + 1
+  readsOf.set(sessionId, ticket)
+  return ticket
+}
+
+function noticedIfLatest(view: BuildView, ticket: number): void {
+  if (readsOf.get(view.sessionId) === ticket) noticed(view)
+}
+
 /** Reads a build that is not on screen, for what it may have to tell the OS. */
 async function heard(sessionId: string): Promise<void> {
+  const reading = readOf(sessionId)
   try {
-    noticed(await window.hemera.invoke('build.read', { sessionId }))
+    noticedIfLatest(await window.hemera.invoke('build.read', { sessionId }), reading)
   } catch {
     // A build that cannot be read now tells nothing now; its next change reads it again.
   }
