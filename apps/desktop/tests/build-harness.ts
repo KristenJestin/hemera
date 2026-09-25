@@ -2,27 +2,91 @@
  * The builds a suite runs on (design D10-01 to D10-14).
  *
  * `idleBuilds` is the build service of a suite that runs none: the catalogue and the runtime stand
- * on it, and a Session that is no build passes through it untouched.
+ * on it, and a Session that is no build passes through it untouched. The checks a build runs are
+ * the Project's, and a suite scripts them here: `noChecks` has none configured, which makes every
+ * task done, not verified (D10-07); `scriptedChecks` answers what the suite decides, and writes
+ * each result under its attempt as the checks' own layer does, so the view and the briefs read
+ * them.
  */
 
 import { join } from 'node:path'
 
 import { Effect, Layer } from 'effect'
 
+import type { CheckVerdict } from '@hemera/core'
 import { type FakeScript, type FakeStep, fakeAgent } from '#engine/agents/fake.ts'
 import { type BuildView, Builds, NoBuildNotices, buildsLayer } from '#engine/build/build.ts'
+import { BuildChecks, type CheckOutcome, type CheckRunRequest } from '#engine/build/checks.ts'
 import { gitLayer } from '#engine/git.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { Specs } from '#engine/specs/specs.ts'
-import { SqliteClient } from '#engine/storage/database.ts'
+import { Database, SqliteClient } from '#engine/storage/database.ts'
+import { buildCheckResults } from '#engine/storage/schema.ts'
 import { Launches } from '#engine/workspaces/launches.ts'
 
 import { repository } from './repositories.ts'
 import { agentOf, shaped, write } from './specs-harness.ts'
 
+/** No check configured: every task is done, not verified. */
+export const noChecks = Layer.succeed(BuildChecks, { run: () => Effect.succeed([]) })
+
 /** The builds of a suite that runs none, over the database and the diagnostic it provides. */
-export const idleBuilds = buildsLayer.pipe(Layer.provide(gitLayer()), Layer.provide(NoBuildNotices))
+export const idleBuilds = buildsLayer.pipe(
+  Layer.provide(gitLayer()),
+  Layer.provide(noChecks),
+  Layer.provide(NoBuildNotices),
+)
+
+/** One check a script answers: its name, its verdict and why. */
+export interface Scripted {
+  readonly name: string
+  readonly verdict: CheckVerdict
+  readonly detail?: string
+  readonly output?: string
+}
+
+/**
+ * The Project's checks as a suite decides them: `answer` is asked for each run, and what it answers
+ * is written under the attempt, in the Project's order, as the checks' own layer writes it. An
+ * empty answer is no check configured for that moment.
+ */
+export const scriptedChecks = (
+  answer: (request: CheckRunRequest) => readonly Scripted[] | Promise<readonly Scripted[]>,
+) =>
+  Layer.effect(
+    BuildChecks,
+    Effect.gen(function* () {
+      const database = yield* Database
+      return {
+        run: (request) =>
+          Effect.gen(function* () {
+            const scripted = yield* Effect.promise(async () => answer(request))
+            const outcomes: CheckOutcome[] = scripted.map((one) => ({
+              id: crypto.randomUUID(),
+              checkId: null,
+              name: one.name,
+              place: '',
+              line: one.name,
+              verdict: one.verdict,
+              exitCode: one.verdict === 'red' ? 1 : 0,
+              value: null,
+              detail: one.detail ?? (one.verdict === 'red' ? 'exited with 1' : null),
+              outputTail: one.output ?? '',
+              runId: null,
+              ranAt: new Date().toISOString(),
+            }))
+            if (outcomes.length > 0) {
+              yield* database
+                .insert(buildCheckResults)
+                .values(outcomes.map((outcome) => ({ ...outcome, attemptId: request.attemptId })))
+                .pipe(Effect.orDie)
+            }
+            return outcomes
+          }),
+      }
+    }),
+  )
 
 /** A contractual task of a Spec a build suite freezes, named by its title. */
 export interface TaskDraft {

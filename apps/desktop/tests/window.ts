@@ -35,6 +35,7 @@ import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { BuildNotices, buildsLayer } from '#engine/build/build.ts'
+import type { BuildChecks } from '#engine/build/checks.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
@@ -49,7 +50,7 @@ import { sessionsLayer } from '#engine/sessions.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { specsLayer } from '#engine/specs/specs.ts'
 import { engineStatusLayer } from '#engine/status.ts'
-import { databaseLayer } from '#engine/storage/database.ts'
+import { type Database, databaseLayer } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
@@ -62,6 +63,7 @@ import { variablesLayer } from '#engine/workspaces/variables.ts'
 import { WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { SHIPPED, VERSION, besideTheAgent, machine } from './application.ts'
+import { noChecks } from './build-harness.ts'
 
 /** A window over one engine: the bridge the stores talk through, and the way to close it. */
 export interface OpenWindow {
@@ -94,7 +96,17 @@ export async function openWindow(
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {
-  return openOver(dataFolder, machine, agent, ...others)
+  return openOver(dataFolder, machine, noChecks, agent, ...others)
+}
+
+/** The same window, over the Project's checks a build suite scripts (D10-07). */
+export async function openWindowChecked(
+  dataFolder: string,
+  checks: Layer.Layer<BuildChecks, never, Database>,
+  agent: FakeAgent,
+  ...others: readonly FakeAgent[]
+): Promise<OpenWindow> {
+  return openOver(dataFolder, machine, checks, agent, ...others)
 }
 
 /**
@@ -107,12 +119,13 @@ export async function openWindowOn(
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {
-  return openOver(dataFolder, over, agent, ...others)
+  return openOver(dataFolder, over, noChecks, agent, ...others)
 }
 
 async function openOver(
   dataFolder: string,
   over: typeof machine,
+  checks: Layer.Layer<BuildChecks, never, Database>,
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {
@@ -145,10 +158,11 @@ async function openOver(
   })
   const database = databaseLayer(join(dataFolder, 'hemera.sqlite'))
 
-  // The builds, and the window hearing that one changed: one service, the launches', the
-  // catalogue's and the runtime's, as the engine builds it.
+  // The builds, on the checks the suite scripts, and the window hearing that one changed: one
+  // service, the catalogue's and the runtime's, as the engine builds it.
   const builds = buildsLayer.pipe(
     Layer.provide(gitLayer()),
+    Layer.provide(checks),
     Layer.provide(
       Layer.succeed(BuildNotices, {
         changed: (sessionId) => {

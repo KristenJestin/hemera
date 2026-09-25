@@ -35,6 +35,7 @@ import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
 import { BuildNotices, type Builds, buildsLayer } from './build/build.ts'
+import { BuildChecks } from './build/checks.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
 import { type Context, contextLayer } from './context/service.ts'
@@ -255,9 +256,11 @@ function servicesOf(
   // as the window's own requests do.
   const specs = specsLayer.pipe(Layer.provide(specNoticesTo(port, log)))
   // The builds (D10-01): one service, which the catalogue asks before a call and the runtime
-  // drives, over the machine's `git` for their snapshots.
+  // drives, over the machine's `git` for their snapshots. Until the Project's checks are composed
+  // here, a build runs none, and every task is done, not verified (D10-07).
   const builds = buildsLayer.pipe(
     Layer.provide(gitLayer()),
+    Layer.provide(Layer.succeed(BuildChecks, { run: () => Effect.succeed([]) })),
     Layer.provide(buildNoticesTo(port, log)),
     Layer.provide(diagnostic),
   )

@@ -22,14 +22,20 @@
 import { join } from 'node:path'
 
 import {
+  ATTEMPTS_BEFORE_YOURS,
   type AttemptResult,
   type AttemptScope,
   type BuildPhase,
   type CheckVerdict,
+  type CheckWhen,
+  SPEC_PAGE_CHARACTERS,
   type SpecSnapshot,
   type TaskExecutor,
   type TaskState,
   type ToolName,
+  attemptResult,
+  renderSpecMarkdown,
+  stateAfterAttempt,
   taskLabels,
 } from '@hemera/core'
 import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
@@ -38,20 +44,34 @@ import { Context, Data, Effect, Layer, Result } from 'effect'
 import { StderrSink } from '../agents/supervisor.ts'
 import { Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
-import { Database, type DatabaseError } from '../storage/database.ts'
-import { buildLaunches, buildTasks, sessionEntries, sessions, specs } from '../storage/schema.ts'
+import { Database, type DatabaseError, type EngineTransaction } from '../storage/database.ts'
+import {
+  buildAttemptFiles,
+  buildAttemptTrees,
+  buildAttempts,
+  buildLaunches,
+  buildTasks,
+  sessionEntries,
+  sessions,
+  specs,
+} from '../storage/schema.ts'
 import { failed, now, reading, specRow } from '../specs/snapshot.ts'
+import type { ParsedCall } from '../tools/arguments.ts'
 import { mutate } from '../transaction.ts'
 import { describedWorkspace } from '../workspaces/described.ts'
-import { type BuildDelivery, deliveryFor, handing, missed, taken } from './brief.ts'
-import { snapshotTree } from './snapshots.ts'
+import { type BuildDelivery, briefTask, deliveryFor, handing, missed, taken } from './brief.ts'
+import { BuildChecks, type CheckOutcome } from './checks.ts'
+import { changedFiles, snapshotTree } from './snapshots.ts'
 import {
   type AttemptRow,
   type BuildRows,
+  type CheckJob,
   OBSOLETE,
   type TaskRow,
   attemptsOf,
+  attemptsOn,
   buildEvent,
+  changesFor,
   follow,
   moveTask,
   movePhase,
@@ -216,7 +236,26 @@ export class UnknownBuildError extends Data.TaggedError('UnknownBuildError')<{
 /** Everything a user's action on a build can be answered with. */
 export type BuildRefusal = DatabaseError | UnknownBuildError
 
+/** A call to one of the build tools, as `parseCall` read it. */
+export type BuildCall = Extract<ParsedCall, { tool: 'build_read' | 'task_finished' }>
+
+/** What a build tool answers: the catalogue's `Answer`, which it writes down like any other. */
+export interface BuildAnswer {
+  readonly ok: boolean
+  readonly refused?: boolean
+  readonly summary: string
+  readonly text: string
+  readonly paths: readonly string[]
+}
+
 const BUILD_TOOLS: readonly ToolName[] = ['build_read', 'task_finished', 'task_blocked']
+
+/** Which of the Project's checks judge an attempt, by what it is about (D10-06). */
+const WHEN: Readonly<Record<AttemptScope, CheckWhen>> = {
+  task: 'task',
+  story: 'story',
+  build: 'end',
+}
 
 /** The phases a build works through; the other two close it. */
 const ACTIVE: readonly BuildPhase[] = ['prepare', 'execute', 'verify']
@@ -254,7 +293,8 @@ export interface BuildsService {
   /** The agent did not take it: it waits for the next safe point. */
   readonly missed: (delivery: BuildDelivery) => Effect.Effect<void, DatabaseError>
   /**
-   * The turn a delivery was handed in ended (L2): the answer to `prepare` is the approach note.
+   * The turn a delivery was handed in ended (L2, L7): the answer to `prepare` is the approach note,
+   * and the checks whose failures it carried run again.
    */
   readonly turnEnded: (
     delivery: BuildDelivery,
@@ -271,6 +311,8 @@ export interface BuildsService {
     run: Effect.Effect<A>,
     refuse: (reason: string) => Effect.Effect<A>,
   ) => Effect.Effect<A>
+  /** `build_read`, `task_finished` (D10-04, D10-13). */
+  readonly tool: (sessionId: string, call: BuildCall) => Effect.Effect<BuildAnswer>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
 }
 
@@ -279,6 +321,34 @@ export class Builds extends Context.Service<Builds, BuildsService>()('Builds') {
 /** A repository as the Project declares it (`./sources/api`, `.`), as the build names it. */
 function repositoryOf(declared: string): string {
   return declared === '.' ? '' : declared.replace(/^\.\//, '')
+}
+
+/** One page of a text, ending on a whole line when it does not reach the end. */
+function pageOf(text: string, offset: number) {
+  const start = Math.min(offset, text.length)
+  const cut = Math.min(start + SPEC_PAGE_CHARACTERS, text.length)
+  const line = text.lastIndexOf('\n', cut - 1)
+  const end = cut < text.length && line >= start ? line + 1 : cut
+  const truncated = end < text.length
+  return {
+    page: text.slice(start, end),
+    range: { offset: start, end, size: text.length, truncated, next: truncated ? end : null },
+  }
+}
+
+function completed(summary: string, text: string): BuildAnswer {
+  return { ok: true, summary, text, paths: [] }
+}
+
+/** A rule of the build said no: refused with its sentence, and nothing was changed. */
+function refusedAnswer(reason: string): BuildAnswer {
+  return {
+    ok: false,
+    refused: true,
+    summary: reason,
+    text: `${reason}; nothing was changed.`,
+    paths: [],
+  }
 }
 
 /** Why Accept is not offered, or null when it is (D10-11). */
@@ -419,13 +489,65 @@ export function viewOf(rows: BuildRows): BuildView {
   }
 }
 
+/** Where a build stands, for its agent: each task, its state and its attempts (D10-13). */
+function standing(rows: BuildRows): string {
+  const lines = rows.tasks.map((task) => {
+    const attempts = attemptsOf(rows, task).map(
+      (attempt) => `attempt ${attempt.number} ${resultOf(attempt) ?? 'running'}`,
+    )
+    const spec = specTaskOf(rows, task)
+    return `- ${task.label} · ${spec?.title ?? ''}: ${stateOf(task)}${attempts.length === 0 ? '' : `; ${attempts.join(', ')}`}`
+  })
+  const note = rows.session.approachNote
+  return [
+    `# Where the build stands\n\nPhase: ${rows.phase ?? 'prepare'}${rows.session.buildPausedAt === null ? '' : ' (paused)'}`,
+    ...(note === null ? [] : [`Approach note:\n${note}`]),
+    lines.join('\n'),
+  ].join('\n\n')
+}
+
+/** One task for its agent: its definition, and each attempt with its files and checks. */
+function oneTask(rows: BuildRows, task: TaskRow): string {
+  const told = briefTask(rows, task)
+  const head = [
+    `# ${told.label} · ${told.title}`,
+    `State: ${told.state} · Type: ${told.type} · Carried out by: ${told.executor}`,
+    ...(told.dependsOn.length === 0 ? [] : [`Depends on: ${told.dependsOn.join(', ')}`]),
+    ...(told.covers.length === 0 ? [] : [`Covers: ${told.covers.join(', ')}`]),
+    `Result: ${told.result}`,
+    `Criteria: ${told.criteria}`,
+    ...(told.reason === null ? [] : [`Reason: ${told.reason}`]),
+  ]
+  const tries = told.attempts.map((attempt) =>
+    [
+      `## Attempt ${attempt.number}: ${attempt.result ?? 'running'}`,
+      attempt.files.length === 0
+        ? 'Files changed: none recorded'
+        : `Files changed:\n${attempt.files
+            .map(
+              (file) =>
+                `- ${file.repository === '' ? '' : `${file.repository}/`}${file.path} (${file.status}${file.added === null ? ', binary' : ` +${file.added} -${file.removed ?? 0}`})`,
+            )
+            .join('\n')}`,
+      ...attempt.checks.map(
+        (check) =>
+          `Check ${check.name} in ${check.place === '' ? 'the Workspace root' : check.place}: ${check.verdict}${check.detail === null ? '' : ` (${check.detail})`}\n${check.outputTail}`,
+      ),
+    ].join('\n'),
+  )
+  return [head.join('\n'), ...tries].join('\n\n')
+}
+
 export const buildsLayer = Layer.effect(
   Builds,
   Effect.gen(function* () {
     const database = yield* Database
     const git = yield* Git
+    const checks = yield* BuildChecks
     const notices = yield* BuildNotices
     const diagnostic = yield* StderrSink
+    /** The engine's own scope: the checks run in the background end when the engine does. */
+    const scope = yield* Effect.scope
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -434,6 +556,10 @@ export const buildsLayer = Layer.effect(
     let agent: BuildAgent | null = null
 
     const told = (sessionId: string) => Effect.sync(() => notices.changed(sessionId))
+
+    /** What a background step of the build says when it fails: nobody else is there to hear it. */
+    const logged = <E extends { readonly message: string }>(what: string) =>
+      Effect.catch((cause: E) => diagnostic.write(`builds: ${what}: ${cause.message}`))
 
     const read = (sessionId: string) =>
       withDatabase(reading('reading the build', (transaction) => readBuild(transaction, sessionId)))
@@ -497,6 +623,97 @@ export const buildsLayer = Layer.effect(
           else yield* diagnostic.write(`builds: no snapshot of ${path}: ${tree.failure.message}`)
         }
         return snapped
+      })
+
+    /** Runs the checks of one attempt, then writes their verdict (D10-07). */
+    const runJob = (sessionId: string, job: CheckJob): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const rows = yield* read(sessionId)
+        const attempt = rows?.attempts.find((one) => one.id === job.attemptId)
+        if (rows === null || attempt === undefined) return
+        const outcomes = yield* checks.run({
+          sessionId,
+          projectId: rows.session.projectId,
+          workspaceId: rows.session.workspaceId,
+          when: job.when,
+          attemptId: attempt.id,
+          changes: changesFor(rows, attempt),
+        })
+        yield* verdict(sessionId, attempt, outcomes)
+      }).pipe(logged(`checking an attempt of ${sessionId}`))
+
+    /** Starts the check runs a committed change asked for, each in the background. */
+    const runJobs = (sessionId: string, jobs: readonly CheckJob[]) =>
+      Effect.forEach(jobs, (job) => Effect.forkIn(scope)(runJob(sessionId, job)), {
+        discard: true,
+      })
+
+    /**
+     * What an attempt's checks said (D10-07). A task's: all green, or none, is done; red goes back
+     * in progress as a new attempt, whose failures the agent is told at its next safe point; the
+     * third red comes back to the user. A story's or the build's: the attempt is recorded, and a
+     * red one is told to the agent, no task changing state (L7).
+     */
+    const verdict = (sessionId: string, judged: AttemptRow, outcomes: readonly CheckOutcome[]) =>
+      Effect.gen(function* () {
+        const result = attemptResult(outcomes.map((outcome) => outcome.verdict))
+        const next = stateAfterAttempt(result, judged.number)
+        const before = yield* read(sessionId)
+        if (before === null) return
+        const trees =
+          judged.scope === 'task' && next === 'in_progress' ? yield* snapshotsOf(before) : []
+        const at = now()
+        const jobs = yield* withDatabase(
+          mutate('judging an attempt', (transaction) =>
+            Effect.gen(function* () {
+              yield* transaction
+                .update(buildAttempts)
+                .set({ result, endedAt: at })
+                .where(eq(buildAttempts.id, judged.id))
+                .pipe(Effect.mapError(failed('writing the verdict')))
+              const rows = yield* readBuild(transaction, sessionId)
+              const task = rows?.tasks.find((one) => one.id === judged.buildTaskId)
+              if (rows === null || task === undefined || stateOf(task) !== 'checking') {
+                return { result: [], events: [] }
+              }
+              const events: NewEvent[] = [
+                taskEvent(rows, task, 'task.checked', 'hemera', {
+                  attempt: judged.number,
+                  result,
+                }),
+              ]
+              if (next === 'in_progress') {
+                yield* moveTask(transaction, task, 'in_progress', at)
+                yield* openAttempt(transaction, {
+                  sessionId,
+                  scope: 'task',
+                  buildTaskId: task.id,
+                  storyId: null,
+                  number: judged.number + 1,
+                  at,
+                  trees,
+                })
+                return { result: [], events }
+              }
+              if (next === 'yours') {
+                yield* moveTask(transaction, task, 'yours', at, { endedAt: at })
+                events.push(
+                  taskEvent(rows, task, 'task.yours', 'hemera', {
+                    reason: `${ATTEMPTS_BEFORE_YOURS} red attempts`,
+                  }),
+                )
+                return { result: [], events }
+              }
+              yield* moveTask(transaction, task, 'done', at, { endedAt: at })
+              events.push(taskEvent(rows, task, 'task.done', 'hemera', { result }))
+              const followed = yield* follow(transaction, sessionId, at)
+              return { result: followed.jobs, events: [...events, ...followed.events] }
+            }),
+          ),
+        )
+        yield* runJobs(sessionId, jobs)
+        yield* told(sessionId)
+        yield* wake(sessionId)
       })
 
     /** The first Hemera call after a delivery handed tasks starts them (L3, D10-10). */
@@ -594,7 +811,199 @@ export const buildsLayer = Layer.effect(
         })
       })
 
+    /** Reads a task by the label the agent named, or answers why it cannot act on it. */
+    const labelled = (rows: BuildRows, label: string) => {
+      const named = label.trim().toUpperCase()
+      const task = rows.tasks.find((one) => one.label === named)
+      if (task === undefined) {
+        const last = rows.tasks.at(-1)?.label
+        return {
+          task: null,
+          refusal: `there is no task ${label} in this build${last === undefined ? '' : `: its tasks are T1 to ${last}`}`,
+        }
+      }
+      return { task, refusal: null }
+    }
+
+    /** Why the agent cannot signal about a task, or null when it can. */
+    const signalRefusal = (task: TaskRow) => {
+      const state = stateOf(task)
+      if (state === 'done') return `${task.label} is already done`
+      if (state === 'checking') return `${task.label} is already being checked by Hemera`
+      if (state === 'yours') return `${task.label} is the user's now: leave it to them`
+      if (state === 'skipped') return `${task.label} was skipped by the user`
+      if (state === 'blocked') return `${task.label} is blocked until the user decides`
+      if (task.handedAt === null) {
+        return `${task.label} was not handed to you: work only on the tasks Hemera hands you`
+      }
+      return null
+    }
+
+    const buildRead = (sessionId: string, call: Extract<BuildCall, { tool: 'build_read' }>) =>
+      Effect.gen(function* () {
+        const rows = yield* read(sessionId)
+        if (rows === null) return refusedAnswer('this Session runs no build')
+        const labels = taskLabels(rows.snapshot.tasks)
+        let text: string
+        let what: string
+        if (call.arguments.task === undefined) {
+          text = `${renderSpecMarkdown(rows.snapshot, labels)}\n\n${standing(rows)}`
+          what = `the build of ${rows.snapshot.spec.key}`
+        } else {
+          const { task, refusal } = labelled(rows, call.arguments.task)
+          if (task === null) return refusedAnswer(refusal)
+          text = oneTask(rows, task)
+          what = task.label
+        }
+        const { page, range } = pageOf(text, call.arguments.offset ?? 0)
+        const more = range.truncated
+          ? `(that is characters ${range.offset}-${range.end} of ${range.size}; the next page starts at offset ${range.end})`
+          : `(that is characters ${range.offset}-${range.end} of ${range.size}, the end)`
+        return completed(
+          `read ${what} (characters ${range.offset}-${range.end} of ${range.size})`,
+          [page, more, JSON.stringify(range)].join('\n'),
+        )
+      })
+
+    /**
+     * `task_finished` (D10-04, D10-05, D10-07): the end snapshots and the files the attempt
+     * changed are recorded, the task goes `checking`, and the answer comes at once; its `task`
+     * checks run in the background and decide.
+     */
+    const finish = (sessionId: string, call: Extract<BuildCall, { tool: 'task_finished' }>) =>
+      Effect.gen(function* () {
+        const rows = yield* read(sessionId)
+        if (rows === null) return refusedAnswer('this Session runs no build')
+        const { task, refusal } = labelled(rows, call.arguments.task)
+        if (task === null) return refusedAnswer(refusal)
+        const refused = signalRefusal(task)
+        if (refused !== null) return refusedAnswer(refused)
+        const attempt = attemptsOf(rows, task).findLast((one) => one.endedAt === null)
+        if (attempt === undefined) return refusedAnswer(`${task.label} has not started`)
+        const starts = rows.trees.filter((tree) => tree.attemptId === attempt.id)
+        const ends = yield* snapshotsOf(rows)
+        const files: {
+          repository: string
+          path: string
+          status: string
+          added: number | null
+          removed: number | null
+        }[] = []
+        const repositories = yield* repositoriesOf(rows)
+        for (const begun of starts) {
+          const end = ends.find((one) => one.repository === begun.repository)
+          const place = repositories.find((one) => one.repository === begun.repository)
+          if (end === undefined || place === undefined) continue
+          const changed = yield* Effect.result(
+            changedFiles(place.path, begun.startTree, end.tree).pipe(
+              Effect.provideService(Git, git),
+            ),
+          )
+          if (Result.isFailure(changed)) {
+            yield* diagnostic.write(`builds: no diff of ${place.path}: ${changed.failure.message}`)
+            continue
+          }
+          for (const file of changed.success) {
+            files.push({
+              repository: begun.repository,
+              path: file.path,
+              status: file.status,
+              added: file.added,
+              removed: file.removed,
+            })
+          }
+        }
+        const at = now()
+        const accepted = yield* withDatabase(
+          mutate('recording a task finished', (transaction) =>
+            Effect.gen(function* () {
+              const fresh = yield* readBuild(transaction, sessionId)
+              const current = fresh?.tasks.find((one) => one.id === task.id)
+              if (fresh === null || current === undefined || stateOf(current) !== 'in_progress') {
+                return { result: false, events: [] }
+              }
+              for (const end of ends) {
+                yield* transaction
+                  .update(buildAttemptTrees)
+                  .set({ endTree: end.tree })
+                  .where(
+                    and(
+                      eq(buildAttemptTrees.attemptId, attempt.id),
+                      eq(buildAttemptTrees.repository, end.repository),
+                    ),
+                  )
+                  .pipe(Effect.mapError(failed('recording the end snapshots')))
+              }
+              // Copied now, so the evidence outlives the trees Git may prune (L11).
+              if (files.length > 0) {
+                yield* transaction
+                  .insert(buildAttemptFiles)
+                  .values(files.map((file) => ({ attemptId: attempt.id, ...file })))
+                  .pipe(Effect.mapError(failed('recording the files changed')))
+              }
+              yield* moveTask(transaction, task, 'checking', at, { finishedAt: at })
+              const summary = call.arguments.summary?.slice(0, 400) ?? null
+              return {
+                result: true,
+                events: [
+                  taskEvent(fresh, task, 'task.finished', 'agent', {
+                    attempt: attempt.number,
+                    summary,
+                    files: files.length,
+                  }),
+                ],
+              }
+            }),
+          ),
+        )
+        if (!accepted) return refusedAnswer(`${task.label} is no longer in progress`)
+        yield* runJobs(sessionId, [{ attemptId: attempt.id, when: 'task' }])
+        yield* told(sessionId)
+        return completed(
+          `${task.label} finished: Hemera is checking it`,
+          `${task.label} is being checked by Hemera; carry on`,
+        )
+      })
+
+    /** The use case of one build tool. */
+    const used = (sessionId: string, call: BuildCall) => {
+      switch (call.tool) {
+        case 'build_read':
+          return buildRead(sessionId, call)
+        case 'task_finished':
+          return finish(sessionId, call)
+      }
+    }
+
+    const tool = (sessionId: string, call: BuildCall): Effect.Effect<BuildAnswer> =>
+      used(sessionId, call).pipe(
+        Effect.catch((cause) =>
+          Effect.succeed({
+            ok: false,
+            summary: 'the build could not be read',
+            text: cause.message,
+            paths: [],
+          } satisfies BuildAnswer),
+        ),
+      )
+
     const view = (sessionId: string) => must(sessionId).pipe(Effect.map(viewOf))
+
+    /** A new attempt on the same subject as one that was red, and its checks to run. */
+    const again = (transaction: EngineTransaction, attempt: AttemptRow, at: string) =>
+      Effect.gen(function* () {
+        const attemptId = yield* openAttempt(transaction, {
+          sessionId: attempt.sessionId,
+          scope: scopeOf(attempt),
+          buildTaskId: null,
+          storyId: attempt.storyId,
+          number: attempt.number + 1,
+          at,
+          trees: [],
+        })
+        const job: CheckJob = { attemptId, when: WHEN[scopeOf(attempt)] }
+        return job
+      })
 
     const service: BuildsService = {
       begin: (sessionId, snapshot) =>
@@ -766,7 +1175,7 @@ export const buildsLayer = Layer.effect(
               .join('\n\n')
             if (note !== '') {
               const at = now()
-              yield* withDatabase(
+              const jobs = yield* withDatabase(
                 mutate('keeping the approach note', (transaction) =>
                   Effect.gen(function* () {
                     const rows = yield* readBuild(transaction, sessionId)
@@ -785,13 +1194,40 @@ export const buildsLayer = Layer.effect(
                   }),
                 ),
               )
+              yield* runJobs(sessionId, jobs)
               yield* told(sessionId)
               yield* wake(sessionId)
             }
           }
+          if (delivery.retold.length === 0) return
+          // The turn that carried a story's or the end checks' failures is over: they run again
+          // (L7), each as a new attempt, unless a later one already runs.
+          const at = now()
+          const jobs = yield* withDatabase(
+            mutate('checking the failures again', (transaction) =>
+              Effect.gen(function* () {
+                const rows = yield* readBuild(transaction, sessionId)
+                if (rows === null || rows.phase === null || !ACTIVE.includes(rows.phase)) {
+                  return { result: [], events: [] }
+                }
+                if (rows.session.buildPausedAt !== null) return { result: [], events: [] }
+                const asked: CheckJob[] = []
+                for (const attemptId of delivery.retold) {
+                  const attempt = rows.attempts.find((one) => one.id === attemptId)
+                  if (attempt === undefined || resultOf(attempt) !== 'red') continue
+                  if (attemptsOn(rows, attempt).at(-1)?.id !== attempt.id) continue
+                  asked.push(yield* again(transaction, attempt, at))
+                }
+                return { result: asked, events: [] }
+              }),
+            ),
+          )
+          yield* runJobs(sessionId, jobs)
+          yield* told(sessionId)
         }),
 
       admitted,
+      tool,
       view,
     }
     return service
