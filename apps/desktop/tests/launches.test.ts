@@ -540,6 +540,54 @@ describe('One build left on nothing holds back nothing beside it', () => {
   })
 })
 
+describe('A launch a Rework cancelled is not failed by a start racing it', () => {
+  test('A launch cancelled while the one beside it starts is left cancelled', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        const nothing = yield* unwrittenSpec(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const raced = yield* launched.request(nothing.id, workspace.id)
+        const sql = yield* SqliteClient
+        // The order the two are started in is the order they were written in: the build that
+        // starts comes first, and the one left on nothing is started after it.
+        yield* sql`UPDATE build_launches SET created_at = '2026-09-25T08:00:00.000Z'
+          WHERE id = ${asked.id}`
+        yield* sql`UPDATE build_launches SET created_at = '2026-09-25T08:00:01.000Z'
+          WHERE id = ${raced.id}`
+        // A Rework cancels the launch that still waits while the one beside it is being started
+        // (D8-13): the brief of that build is written between the two starts, and the Rework is
+        // written there.
+        yield* sql`CREATE TRIGGER rework BEFORE INSERT ON session_entries
+          WHEN NEW.kind = 'mission_brief'
+          BEGIN UPDATE build_launches SET state = 'cancelled', detail = 'reworked'
+          WHERE state = 'waiting'; END`
+        yield* (yield* Preparation).prepare(workspace.id)
+        const settled = yield* until(launches, (all) =>
+          all.every((row) => row.state !== 'waiting' && row.state !== 'starting'),
+        )
+        return {
+          again: yield* Effect.flip(launched.retry(raced.id)),
+          builds: yield* builds,
+          lines: yield* sql<{ payload: string }>`
+            SELECT payload FROM domain_events WHERE type = 'launch.failed'`,
+          settled,
+        }
+      }),
+    )
+    // What the Rework decided stands: the start that raced it says nothing of that launch, and
+    // nothing starts it again.
+    expect(seen.settled.map((row) => row.state)).toEqual(['started', 'cancelled'])
+    expect(seen.settled[1]?.detail).toBe('reworked')
+    expect(seen.lines).toEqual([])
+    expect(seen.builds).toHaveLength(1)
+    expect(seen.again.message).toContain('only a build whose agent failed is started again')
+  })
+})
+
 describe('The engine comes back to what a stopped engine left', () => {
   test('A launch left starting is started again on its Session', async () => {
     // A machine that holds none of the agents' bare means: the agent cannot be started (D6-02),

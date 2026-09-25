@@ -444,7 +444,8 @@ export const launchesLayer = Layer.effect(
     /**
      * A launch nothing could start: `failed`, with what refused it said of it (D8-13), which is
      * what the caller is answered with. Its Session, when the start got that far, stands for a
-     * `retry` to start again.
+     * `retry` to start again. A launch this start no longer holds — a Rework cancelled it,
+     * another starter took it — is left where it stands, and the caller is answered with it.
      */
     const refused = (launch: LaunchView, projectId: string, refusal: LaunchRefusal) =>
       Effect.gen(function* () {
@@ -464,6 +465,13 @@ export const launchesLayer = Layer.effect(
               const row = rows[0]
               if (row === undefined) {
                 return yield* Effect.fail(new UnknownLaunchError({ id: launch.id }))
+              }
+              // A launch that is no longer this refusal's to write is left where it stands, and
+              // nothing is said of it (D8-13): a Rework that cancelled it, or another starter
+              // that took it, is not undone by the start that lost it.
+              const held = LAUNCH_STATES.find((known) => known === row.state)
+              if (held !== 'waiting' && held !== 'starting') {
+                return { result: viewOf(row), events: [] } satisfies Mutation<LaunchView>
               }
               yield* transaction
                 .update(buildLaunches)
