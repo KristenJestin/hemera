@@ -632,6 +632,50 @@ describe('The engine comes back to what a stopped engine left', () => {
     expect(seen.after).toEqual(seen.before)
     expect(seen.interrupted).toEqual([{ count: 0 }])
   })
+  test('A launch left starting is given the brief it never got before its agent is asked', async () => {
+    // A machine that holds none of the agents' bare means: the agent cannot be started (D6-02),
+    // and that is where the first engine is closed on the launch.
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        yield* (yield* Preparation).prepare(workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        const sql = yield* SqliteClient
+        // The engine stops between the claim's transaction and the brief written after it
+        // (D8-13): what it leaves is a launch `starting`, its Session written, and no brief in it.
+        yield* sql`UPDATE build_launches SET state = 'starting', detail = NULL
+          WHERE id = ${failed.id}`
+        yield* sql`DELETE FROM session_entries WHERE session_id = ${failed.sessionId}`
+        return failed
+      }),
+    )
+    await opened.close()
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const launched = yield* Launches
+        const sql = yield* SqliteClient
+        yield* recovered
+        return {
+          back: yield* launched.one(left.id),
+          briefs: yield* sql<{ count: number }>`
+            SELECT count(*) AS count FROM session_entries
+            WHERE session_id = ${left.sessionId} AND kind = 'mission_brief'`,
+          builds: yield* builds,
+        }
+      }),
+    )
+    // The brief that build was never given is written again, from the revision the launch names,
+    // before its agent is asked: a build is never resumed blind (D8-13).
+    expect(seen.briefs).toEqual([{ count: 1 }])
+    expect(seen.back.state).toBe('started')
+    expect(seen.back.sessionId).toBe(left.sessionId)
+    expect(seen.builds).toHaveLength(1)
+  })
 
   test('A launch left waiting on a Workspace that is ready starts on the way back', async () => {
     opened = await openWindow(dataFolder, fakeAgent())

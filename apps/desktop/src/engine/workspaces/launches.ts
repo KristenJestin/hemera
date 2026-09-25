@@ -27,6 +27,7 @@ import {
   type LaunchState,
   NEW_SESSION_TITLE,
   type Spec,
+  type SpecSnapshot,
   WORKSPACE_STATES,
   focusOf,
   renderSpecMarkdown,
@@ -49,6 +50,7 @@ import {
 import { Database, type DatabaseError, type EngineTransaction } from '../storage/database.ts'
 import {
   buildLaunches,
+  sessionEntries,
   sessions as sessionRows,
   specRevisions,
   specs,
@@ -281,9 +283,19 @@ export const launchesLayer = Layer.effect(
      * What the agent answered, and what the launch says of it (D8-09): `started`, or `failed`
      * with what it said. The Session and the Workspace it was given stay either way, which is
      * what `retry` starts again.
+     *
+     * The brief is written again here for a Session that holds none: an engine can stop between
+     * the claim that wrote the Session and the brief written after it, and an agent asked for a
+     * build whose Session holds no brief is asked to run it blind (D8-13).
      */
     const settled = (launch: LaunchView, sessionId: string, projectId: string) =>
       Effect.gen(function* () {
+        // The brief is written after the claim's transaction, so an engine stopped between the two
+        // left a launch `starting` whose Session holds none: written here again, before its agent
+        // is asked, so a build is never resumed blind (D8-13).
+        if ((yield* briefs(sessionId)).length === 0) {
+          yield* writeBrief(sessionId, yield* readLaunched(launch.specId, launch.revisionId))
+        }
         const handshake = yield* Effect.result(runtime.start(sessionId))
         const at = now()
         const answered: LaunchView = Result.isSuccess(handshake)
@@ -323,6 +335,42 @@ export const launchesLayer = Layer.effect(
           ),
         )
       })
+
+    /**
+     * The briefs a Session's thread holds: one is written again only when the thread holds none.
+     */
+    const briefs = (sessionId: string) =>
+      withDatabase(
+        reading('reading the brief of the build', (transaction) =>
+          transaction
+            .select({ id: sessionEntries.id })
+            .from(sessionEntries)
+            .where(
+              and(
+                eq(sessionEntries.sessionId, sessionId),
+                eq(sessionEntries.kind, 'mission_brief'),
+              ),
+            )
+            .limit(1)
+            .pipe(Effect.mapError(failed('reading the brief of the build'))),
+        ),
+      )
+
+    /**
+     * The brief of a build: the Spec as it stood on the revision the launch names, folded in the
+     * Session's thread as the brief the window reads (3a's renderer, D7-09). Written by the
+     * start, and again by `settled` for a Session that holds none: an agent asked for a build
+     * whose Session holds no brief is asked to run it blind (D8-13).
+     */
+    const writeBrief = (sessionId: string, snapshot: SpecSnapshot) =>
+      sessions
+        .write(sessionId, {
+          role: 'hemera',
+          kind: 'mission_brief',
+          body: renderSpecMarkdown(snapshot),
+          payload: JSON.stringify({ phase: focusOf(snapshot.phases) }),
+        })
+        .pipe(Effect.asVoid)
 
     /**
      * The build itself: the Session on the launch's revision, its brief, then the agent.
@@ -428,16 +476,7 @@ export const launchesLayer = Layer.effect(
         // Another starter — a request and the Workspace becoming ready at once — took the launch
         // between the two reads: what it said of the build is not this caller's to say again.
         if (starting.state !== 'starting') return starting
-        // What the build is given: the Spec as it stood on the revision the launch names, folded
-        // in its thread as the brief the window reads (3a's renderer, D7-09).
-        yield* sessions
-          .write(sessionId, {
-            role: 'hemera',
-            kind: 'mission_brief',
-            body: renderSpecMarkdown(snapshot),
-            payload: JSON.stringify({ phase: focusOf(snapshot.phases) }),
-          })
-          .pipe(Effect.asVoid)
+        yield* writeBrief(sessionId, snapshot)
         return yield* settled(starting, sessionId, projectId)
       })
 
