@@ -25,8 +25,8 @@ import { V6Layout } from './v6.tsx'
  *   written in place.
  * - V5 · V2 whose bar holds the answer: what the agent asks — a blocker, points to confirm — is
  *   answered from the bar, without opening the chat.
- * - V6 (second round) · V2's layout without the strip: the chat minimised to a bubble at the
- *   bottom left, the side it opens from; V1's display of the build at full page; decisions in the
+ * - V6 (second round) · V2's layout without the strip: the chat minimised to its control at the
+ *   top right of the head, where the Session's "…" stood, the content never moving for it; V1's display of the build at full page; decisions in the
  *   panel (Accept and the review restated, the answer to a blocker), words in the chat; the
  *   Workspace a label in define and build; the Spec's fold moving both ways.
  *
@@ -317,44 +317,20 @@ export const V5Restated: Story = {
 }
 
 // ---------------------------------------------------------------------------------------------
-// V6 · V2 without the strip, a bubble on the left, decisions in the panel
-
-/** Whether two boxes share any point. */
-function overlap(one: DOMRect, other: DOMRect): boolean {
-  return (
-    one.left < other.right &&
-    other.left < one.right &&
-    one.top < other.bottom &&
-    other.top < one.bottom
-  )
-}
-
-/** The controls of the panel the minimised chat stands over, by name: none, or it hides them. */
-function covered(canvasElement: HTMLElement): string[] {
-  const bubble = canvasElement.querySelector<HTMLElement>('[data-bubble]')
-  const panel = canvasElement.querySelector<HTMLElement>('[data-panel]')
-  if (bubble === null || panel === null) throw new Error('no bubble or no panel on the page')
-  const zones = [...bubble.children].map((part) => part.getBoundingClientRect())
-  const controls = [
-    ...panel.querySelectorAll<HTMLElement>('button, input, textarea, a[href], [role="combobox"]'),
-  ]
-  return controls
-    .filter((control) => zones.some((zone) => overlap(zone, control.getBoundingClientRect())))
-    .map((control) => control.getAttribute('aria-label') ?? control.textContent ?? '')
-}
+// V6 · V2 without the strip, the chat's control in the head, decisions in the panel
 
 /**
- * The bubble and its preview hide nothing of the build: not at the top of the panel, and not
- * once it is scrolled to its end, where the last controls of a long build stand.
+ * The chat's control and the line that says the agent needs the user stand in the head and
+ * nowhere else: nothing of the minimised chat is drawn over the page, so it hides none of it.
  */
 async function hidesNothing(canvasElement: HTMLElement): Promise<void> {
-  await expect(covered(canvasElement)).toEqual([])
-  for (const region of canvasElement.querySelectorAll<HTMLElement>(
-    '[data-panel] [role="region"]',
-  )) {
-    region.scrollTop = region.scrollHeight
-  }
-  await expect(covered(canvasElement)).toEqual([])
+  const head = canvasElement.querySelector<HTMLElement>('[data-head]')
+  if (head === null) throw new Error('no head on the page')
+  const parts = [
+    ...canvasElement.querySelectorAll<HTMLElement>('[data-chat-control], [data-chat-attention]'),
+  ]
+  await expect(parts.length).toBeGreaterThan(0)
+  await expect(parts.filter((part) => !head.contains(part))).toEqual([])
 }
 
 /** No footer strip: the page is the head and the row, and nothing under them. */

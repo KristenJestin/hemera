@@ -9,29 +9,29 @@ import { Button, IconButton } from '../../components/button/button.tsx'
 import { Card } from '../../components/card/card.tsx'
 import { StatusDot } from '../../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import { IconCheck, IconCircleCheck, IconHandStop, IconPlayerPause } from '../../icons.ts'
+import {
+  IconCheck,
+  IconChevronDown,
+  IconCircleCheck,
+  IconHandStop,
+  IconPlayerPause,
+} from '../../icons.ts'
 import { CROSSFADE, crossfade, morph, useTransition } from '../../motion.ts'
 import { ProgressStory, storiesDone } from './build-progress.tsx'
 import type { SessionFixture } from './fixtures.tsx'
-import type {
-  AgentState,
-  Attention,
-  BlockerProgress,
-  BuildProgressView,
-  Restatement,
-  RestatementAnswer,
-} from './model.ts'
+import type { BlockerProgress, BuildProgressView, Restatement, RestatementAnswer } from './model.ts'
 import { RestatementPoint } from './restatements.tsx'
-import { ChatPane, MissionContent, PageHead, PanelBand } from './session-parts.tsx'
+import { SessionHeader } from '../../session/session.tsx'
+import { ChatPane, MissionContent, PanelBand } from './session-parts.tsx'
 
 /**
  * V6 (second round of the Session layout exploration): V2's layout without its footer strip, the
- * chat minimised to a bubble on the side it opens from, and the decisions in the panel.
+ * chat minimised to its control in the head, and the decisions in the panel.
  *
  * The chat stands at the centre and the mission panel on its right, foldable, the fold moving the
- * same way both ways. Minimised — by default in build — the chat is a bubble at the bottom left
- * and the panel takes the page. The panel keeps the room the bubble and its preview take on its
- * left while the chat is minimised, so neither ever stands over anything of the build.
+ * same way both ways. Minimised — by default in build — the chat is its control at the top right
+ * of the head, where the Session's "…" stood, and the panel takes the page. The content stays
+ * centred and never moves for it: nothing of the chat stands over the page.
  *
  * Decisions live in the panel and words in the chat: Accept and the user's review restated point
  * by point, and the ways out of a blocker, are answered in the build panel; the review itself is
@@ -67,7 +67,12 @@ export function V6Layout({ session }: { session: SessionFixture }): ReactNode {
 
   return (
     <div ref={page} className={PAGE}>
-      <PageHead session={session} />
+      <V6Head
+        session={session}
+        chatOpen={chatOpen}
+        onMinimise={hasPanel ? minimise : undefined}
+        onOpen={open}
+      />
       <div className={ROW}>
         <motion.div
           className="flex min-w-0 basis-0 overflow-hidden"
@@ -80,7 +85,6 @@ export function V6Layout({ session }: { session: SessionFixture }): ReactNode {
           <ChatPane
             thread={session.thread}
             running={session.running}
-            onMinimise={hasPanel ? minimise : undefined}
             workspaces={session.workspaces}
             workspaceBound={session.mission !== 'free'}
           />
@@ -89,9 +93,6 @@ export function V6Layout({ session }: { session: SessionFixture }): ReactNode {
           <PanelSlot
             folded={folded}
             page={!chatOpen}
-            // The Spec's rail stands at the panel's left edge, so the room is kept around the whole
-            // panel; the build keeps it inside, under a head whose rule still crosses the page.
-            room={!chatOpen && session.build === undefined}
             band={<PanelBand session={session} onUnfold={() => setFolded(false)} />}
           >
             {session.build === undefined ? (
@@ -100,20 +101,10 @@ export function V6Layout({ session }: { session: SessionFixture }): ReactNode {
                 onFold={chatOpen ? () => setFolded(true) : undefined}
               />
             ) : (
-              <BuildPanel build={session.build} room={!chatOpen} />
+              <BuildPanel build={session.build} />
             )}
           </PanelSlot>
         )}
-        <AnimatePresence initial={false}>
-          {!chatOpen && (
-            <Bubble
-              key="bubble"
-              agent={session.agent}
-              attention={session.attention}
-              onOpen={open}
-            />
-          )}
-        </AnimatePresence>
       </div>
     </div>
   )
@@ -131,15 +122,12 @@ export function V6Layout({ session }: { session: SessionFixture }): ReactNode {
 function PanelSlot({
   folded,
   page,
-  room,
   band,
   children,
 }: {
   folded: boolean
   /** Whether the chat is minimised: the panel is the page. */
   page: boolean
-  /** Whether the slot keeps the bubble's room on its left, for a panel that cannot keep it inside. */
-  room: boolean
   band: ReactNode
   children: ReactNode
 }): ReactNode {
@@ -156,8 +144,7 @@ function PanelSlot({
       <div
         inert={folded}
         aria-hidden={folded ? true : undefined}
-        // The bubble's room, kept while the chat is minimised, so it never stands over the panel.
-        className={cn('flex min-w-mission-panel flex-1 bg-surface-content', room && 'pl-chat-room')}
+        className="flex min-w-mission-panel flex-1 bg-surface-content"
       >
         {children}
       </div>
@@ -189,21 +176,14 @@ const STATE_WORDS = {
   review: { word: 'Waiting for your review', tone: 'pending' },
 } as const
 
-function BuildPanel({
-  build,
-  room,
-}: {
-  build: BuildProgressView
-  /** Whether the chat is minimised: the bubble's room is kept on the left of the head and body. */
-  room: boolean
-}): ReactNode {
+function BuildPanel({ build }: { build: BuildProgressView }): ReactNode {
   const stage = STATE_WORDS[build.stage]
   return (
     <section
       aria-label={`Build of ${build.specKey}`}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <header className={cn('border-b border-border', room && 'pl-chat-room')}>
+      <header className="border-b border-border">
         <div className={cn(COLUMN, 'gap-2 px-8 pt-5 pb-4')}>
           <div className="flex min-w-0 items-center gap-3">
             <span className="shrink-0 font-mono text-xs text-muted-foreground">
@@ -236,10 +216,7 @@ function BuildPanel({
         role="region"
         aria-label={`Progress of ${build.specKey}`}
         tabIndex={0}
-        className={cn(
-          'min-h-0 flex-1 overflow-y-auto outline-none focus-ring',
-          room && 'pl-chat-room',
-        )}
+        className="min-h-0 flex-1 overflow-y-auto outline-none focus-ring"
       >
         <div className={cn(COLUMN, 'gap-8 px-8 py-6')}>
           {build.stage === 'review' && <ReviewCard review={build.review ?? []} />}
@@ -363,60 +340,100 @@ function BlockerDecision({ blocker }: { blocker: BlockerProgress }): ReactNode {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The minimised chat: a bubble at the bottom left, the side the chat opens from
+// The chat's control: at the top right of the head, where the Session's "…" stood
 
 /**
- * The bubble, at the bottom left of the row: the agent's mark and the dot of its state. When the
- * agent needs the user, a small preview stands beside it with "Open"; nothing unfolds by itself.
- * Both stand in the room the panel keeps on its left while the chat is minimised.
+ * The Session's head, with the chat's control at its right end, in place of the "…" menu: the
+ * title renames on a click, and archiving is the sidebar's (its Session row), so the head's right
+ * end is free for the one control a mission Session needs there.
+ *
+ * Open, the control minimises the chat. Minimised, it is the agent's mark and the dot of its
+ * state, and brings the chat back. When the agent needs the user, a line in the head beside it says
+ * so, with "Open": it stands in the head and never over the page, so it hides none of the build's
+ * own controls under the head. Nothing unfolds by itself, and the content never moves.
  */
-function Bubble({
-  agent,
-  attention,
+function V6Head({
+  session,
+  chatOpen,
+  onMinimise,
   onOpen,
 }: {
-  agent: AgentState
-  attention: Attention | undefined
+  session: SessionFixture
+  chatOpen: boolean
+  /** Minimises the chat; left out in a free Session, where the chat is the page. */
+  onMinimise: (() => void) | undefined
   onOpen: () => void
 }): ReactNode {
   const fade = useTransition(crossfade)
+  const agent = session.agent
+  const attention = chatOpen ? undefined : session.attention
   return (
-    <motion.div
-      data-bubble
-      className="absolute bottom-6 left-6 z-10 flex items-end gap-3"
-      initial={CROSSFADE.from}
-      animate={CROSSFADE.to}
-      exit={CROSSFADE.from}
-      transition={fade}
+    <div
+      data-head
+      className="flex shrink-0 items-start gap-3 border-b border-border px-6 pt-4 pb-3"
     >
-      <span className="relative flex rounded-full shadow-lg">
-        <Tooltip label={`${agent.name} · ${agent.says}`} side="right">
-          <IconButton
-            variant="secondary"
-            shape="pill"
-            size="lg"
-            icon={<AgentMark agent={agent.name} agentId={agent.agentId} />}
-            aria-label={`Open the chat · ${agent.name} · ${agent.says}`}
-            data-restore
-            onClick={onOpen}
-          />
-        </Tooltip>
-        <StatusDot status={agent.tone} size="md" className="absolute top-0 right-0" />
-      </span>
-      {attention !== undefined && (
-        <section
-          aria-label="The agent needs you"
-          className="flex w-chat-preview flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-lg"
-        >
-          <p className="text-sm font-medium">{attention.title}</p>
-          <p className="line-clamp-2 text-sm">{attention.preview}</p>
-          <span className="flex justify-end">
+      <div className="min-w-0 flex-1">
+        <SessionHeader
+          title={session.title}
+          projectName="Atlas"
+          meta={session.meta}
+          onRename={nothing}
+          onStartEditing={undefined}
+        />
+      </div>
+      <AnimatePresence initial={false}>
+        {attention !== undefined && (
+          <motion.section
+            key="attention"
+            aria-label="The agent needs you"
+            data-chat-attention
+            className="flex min-w-0 max-w-chat-preview shrink items-center gap-2 self-center rounded-lg border border-border bg-card py-1 pr-1 pl-3"
+            initial={CROSSFADE.from}
+            animate={CROSSFADE.to}
+            exit={CROSSFADE.from}
+            transition={fade}
+          >
+            <p className="min-w-0 truncate text-sm" title={attention.preview}>
+              <span className="font-medium">{attention.title}</span>
+              <span className="text-muted-foreground">{` · ${attention.preview}`}</span>
+            </p>
             <Button variant="primary" size="sm" onClick={onOpen}>
               Open
             </Button>
-          </span>
-        </section>
+          </motion.section>
+        )}
+      </AnimatePresence>
+      {onMinimise !== undefined && (
+        <span data-chat-control className="relative flex shrink-0 self-center">
+          {chatOpen ? (
+            <Tooltip label="Minimise the chat">
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={<IconChevronDown size="sm" />}
+                aria-label="Minimise the chat"
+                data-minimise
+                onClick={onMinimise}
+              />
+            </Tooltip>
+          ) : (
+            <span className="relative flex">
+              <Tooltip label={`${agent.name} · ${agent.says}`} side="bottom">
+                <IconButton
+                  variant="secondary"
+                  shape="pill"
+                  size="sm"
+                  icon={<AgentMark agent={agent.name} agentId={agent.agentId} />}
+                  aria-label={`Open the chat · ${agent.name} · ${agent.says}`}
+                  data-restore
+                  onClick={onOpen}
+                />
+              </Tooltip>
+              <StatusDot status={agent.tone} size="md" className="absolute -top-0.5 -right-0.5" />
+            </span>
+          )}
+        </span>
       )}
-    </motion.div>
+    </div>
   )
 }
