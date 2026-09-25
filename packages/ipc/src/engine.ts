@@ -182,6 +182,7 @@ export const entityKindSchema = z.enum([
   'workspace',
   'command',
   'launch',
+  'task',
 ])
 
 export const eventAuthorSchema = z.enum(['human', 'hemera', 'agent', 'mcp', 'system'])
