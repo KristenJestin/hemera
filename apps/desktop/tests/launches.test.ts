@@ -323,6 +323,36 @@ describe('A launch is claimed only in a Workspace that is ready', () => {
   })
 })
 
+describe('A retry reads its launch where it writes', () => {
+  test('A launch a Rework cancelled is not started again', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        // The brief of the Session cannot be written, so the start leaves a build whose agent
+        // failed, holding the Session it wrote.
+        const sql = yield* SqliteClient
+        yield* sql`CREATE TRIGGER no_brief BEFORE INSERT ON session_entries BEGIN SELECT RAISE(ABORT, 'refused'); END`
+        yield* (yield* Preparation).prepare(workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        // A Rework cancels it — the row is where the Rework left it — and the start again reads it
+        // in the very transaction that writes it: nothing is started for a build nothing asks for
+        // (D8-13).
+        yield* sql`UPDATE build_launches SET state = 'cancelled' WHERE id = ${asked.id}`
+        const refused = yield* Effect.flip(launched.retry(asked.id))
+        return { failed, refused, rows: yield* launches, builds: yield* builds }
+      }),
+    )
+    expect(seen.failed.sessionId).not.toBeNull()
+    expect(seen.refused.message).toContain('only a build whose agent failed is started again')
+    expect(seen.rows.map((row) => row.state)).toEqual(['cancelled'])
+    expect(seen.builds).toHaveLength(1)
+  })
+})
+
 describe('The Spec of a request is read where the launch is written', () => {
   test('A request reads the Spec’s status alone, and asks in that transaction', async () => {
     opened = await openWindow(dataFolder, fakeAgent())

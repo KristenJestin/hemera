@@ -734,6 +734,26 @@ export const launchesLayer = Layer.effect(
           const starting = yield* withDatabase(
             mutate('starting the build again', (transaction) =>
               Effect.gen(function* () {
+                // The launch is re-read in the very transaction that writes it (D8-13): a Rework
+                // may have cancelled it since it was read above, and writing `starting` over a
+                // cancelled launch starts a build nobody asked for.
+                const held = yield* transaction
+                  .select({ state: buildLaunches.state, sessionId: buildLaunches.sessionId })
+                  .from(buildLaunches)
+                  .where(eq(buildLaunches.id, launch.id))
+                  .pipe(Effect.mapError(failed('reading the launch')))
+                const claimed = held[0]
+                if (
+                  claimed === undefined ||
+                  claimed.state !== 'failed' ||
+                  claimed.sessionId === null
+                ) {
+                  return yield* Effect.fail(
+                    new LaunchRefusedError({
+                      reason: 'only a build whose agent failed is started again.',
+                    }),
+                  )
+                }
                 const at = now()
                 yield* transaction
                   .update(buildLaunches)
