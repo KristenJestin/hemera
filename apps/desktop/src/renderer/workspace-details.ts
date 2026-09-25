@@ -264,7 +264,9 @@ export function planLinesOf(plan: WorkspacePlan): PlanRepositoryLine[] {
   return plan.repositories.map((one) => ({
     path: one.relativePath,
     holdsRepository: one.holdsRepository,
+    branches: one.branches,
     base: one.base,
+    detachedCommit: one.detachedCommit,
     branch: one.branch,
     included: one.included,
   }))

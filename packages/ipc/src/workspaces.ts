@@ -52,9 +52,9 @@ export type Workspace = z.infer<typeof workspaceSchema>
 
 /**
  * What a dedicated Workspace would be made of, proposed and editable before anything is written
- * (D8-04): per repository of the Project, whether `main` holds one there, the base (its local
- * HEAD) and the branch that would be created. `gitAvailable` false is a plan with nothing to start
- * from, whose creation is refused by name.
+ * (D8-04): per repository of the Project, whether `main` holds one there, the local branches that
+ * repository has and the base chosen from them, then the branch that would be created.
+ * `gitAvailable` false is a plan with nothing to start from, whose creation is refused by name.
  */
 export const workspacePlanSchema = z.object({
   name: z.string(),
@@ -66,7 +66,9 @@ export const workspacePlanSchema = z.object({
       z.object({
         relativePath: z.string(),
         holdsRepository: z.boolean(),
+        branches: z.readonly(z.array(z.string())),
         base: z.string().nullable(),
+        detachedCommit: z.string().nullable(),
         branch: z.string(),
         included: z.boolean(),
       }),

@@ -121,14 +121,20 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
       {
         relativePath: API,
         holdsRepository: true,
-        base: git(join(main, 'sources', 'api'), 'rev-parse', 'HEAD'),
+        // The branch it is checked out on, out of the branches it has here: a branch name as the
+        // base, and never the sha it points at (D8-04).
+        branches: ['main'],
+        base: 'main',
+        detachedCommit: null,
         branch: 'atlas/HEM-7-login-form',
         included: true,
       },
       {
         relativePath: FRONT,
         holdsRepository: true,
-        base: git(join(main, 'sources', 'front'), 'rev-parse', 'HEAD'),
+        branches: ['main'],
+        base: 'main',
+        detachedCommit: null,
         branch: 'atlas/HEM-7-login-form',
         included: true,
       },
@@ -223,6 +229,54 @@ describe('A dedicated Workspace is made from the Project settings, with no Spec'
     expect(readFileSync(join(seen.ready.path, 'sources', 'api', '.env'), 'utf8')).toBe(
       'PORT=3000\n',
     )
+  })
+})
+
+describe('A repository on no branch proposes the commit it is on', () => {
+  it('names the commit as the base, beside its short hash, and lists the branches it has', async () => {
+    const api = join(main, 'sources', 'api')
+    git(api, 'branch', 'release')
+    git(api, 'checkout', '--detach')
+    const plan = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API])
+        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+      }),
+    )
+
+    // A hash is read where no branch name can stand for it: the commit it is on, said as such,
+    // its short form as the hint the dialog shows, and the branches still there to choose instead.
+    expect(plan.repositories[0]).toMatchObject({
+      relativePath: API,
+      holdsRepository: true,
+      branches: ['main', 'release'],
+      base: git(api, 'rev-parse', 'HEAD'),
+      detachedCommit: git(api, 'rev-parse', '--short', 'HEAD'),
+      included: true,
+    })
+  })
+
+  it('proposes nothing to start from in a repository with no commit yet', async () => {
+    const tools = join(main, 'sources', 'tools')
+    mkdirSync(tools, { recursive: true })
+    git(tools, 'init', '-q', '-b', 'main')
+    const plan = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, './sources/tools'])
+        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+      }),
+    )
+
+    expect(plan.repositories[1]).toMatchObject({
+      relativePath: './sources/tools',
+      holdsRepository: true,
+      branches: [],
+      base: null,
+      detachedCommit: null,
+      included: false,
+    })
   })
 })
 

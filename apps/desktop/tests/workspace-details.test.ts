@@ -249,14 +249,18 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
       {
         relativePath: 'sources/api',
         holdsRepository: true,
-        base: 'a'.repeat(40),
+        branches: ['main', 'dev'],
+        base: 'main',
+        detachedCommit: null,
         branch: 'atlas/',
         included: true,
       },
       {
         relativePath: 'docs',
         holdsRepository: false,
+        branches: [],
         base: null,
+        detachedCommit: null,
         branch: 'atlas/',
         included: false,
       },
@@ -269,11 +273,21 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
       {
         path: 'sources/api',
         holdsRepository: true,
-        base: 'a'.repeat(40),
+        branches: ['main', 'dev'],
+        base: 'main',
+        detachedCommit: null,
         branch: 'atlas/',
         included: true,
       },
-      { path: 'docs', holdsRepository: false, base: null, branch: 'atlas/', included: false },
+      {
+        path: 'docs',
+        holdsRepository: false,
+        branches: [],
+        base: null,
+        detachedCommit: null,
+        branch: 'atlas/',
+        included: false,
+      },
     ])
   })
 
