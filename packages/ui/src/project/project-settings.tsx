@@ -2,7 +2,6 @@ import { Tabs as BaseTabs } from '@base-ui/react/tabs'
 import { LayoutGroup, motion } from 'motion/react'
 import { type FunctionComponent, type ReactNode, useId, useState } from 'react'
 
-import { COMMAND_TYPE_ICONS, COMMAND_TYPE_LABELS } from '../activity/command-type.ts'
 import { AlertDialog } from '../components/alert-dialog/alert-dialog.tsx'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
@@ -25,9 +24,9 @@ import {
   IconX,
 } from '../icons.ts'
 import { arrival, useTransition } from '../motion.ts'
-import { CommandDialog } from './command-dialog.tsx'
+import { CommandDialog, TypeMark } from './command-dialog.tsx'
 import type { CommandLine, ProjectSettingsDraft, RepositoryDraft, RepositoryLine } from './model.ts'
-import { repositoryNamesOf, slugOf } from './naming.ts'
+import { slugOf } from './naming.ts'
 import { causeOf } from './project-dialog.tsx'
 import { RepositoryDialog, RepositoryMark } from './repository-dialog.tsx'
 
@@ -69,8 +68,8 @@ const COMMAND_NAME = 'shrink-0 text-sm font-medium text-foreground'
 /** A command's line on its row, which gives way before its name does. */
 const LINE = 'min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground'
 
-/** The badges of a command, together at the end of its row. */
-const CLUSTER = 'flex shrink-0 items-center gap-1'
+/** The address a Portless command answers at, which is what its row says of Portless. */
+const ADDRESS = 'shrink-0 font-mono text-xs text-foreground'
 
 /** The mark of a repository a new Workspace takes, or the room it would take. */
 const INCLUDED = 'flex shrink-0 rounded-sm text-muted-foreground focus-ring'
@@ -155,6 +154,8 @@ export interface ProjectSettingsProps {
   /** Rewrites a command the catalogue holds, found by its name; answers like `onAddCommand`. */
   onUpdateCommand?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemoveCommand?: ((id: string) => void) | undefined
+  /** Asks for a folder a command runs in, handed the base it runs from (recette 2). */
+  onBrowseCommandFolder?: ((base: string | null) => Promise<string | null>) | undefined
   /** Whether `portless` is on this machine, which is what offers it on a server (D8-10). */
   portlessInstalled: boolean
   onArchive: () => void
@@ -192,6 +193,7 @@ export function ProjectSettings({
   onAddCommand,
   onUpdateCommand,
   onRemoveCommand,
+  onBrowseCommandFolder,
   portlessInstalled,
   onArchive,
   workspaces,
@@ -348,6 +350,7 @@ export function ProjectSettings({
         onAdd={onAddCommand}
         onUpdate={onUpdateCommand}
         onRemove={onRemoveCommand}
+        onBrowse={onBrowseCommandFolder}
       />
     ),
     preparation: slot(preparation, 'The preparation of this Project cannot be read yet.'),
@@ -591,9 +594,11 @@ export function RepositoryList({
  * catalogue is the reader's, the agent cannot invent a line, and what a Session may run is what
  * this list holds and nothing else.
  *
- * A row says the name, the default line and, gathered at its end, the type with its fixed icon,
- * the scope of a server, Portless when it is on, and where it runs from. The lines of each
- * system and the rest are in the dialog its pencil opens.
+ * A row says the type of a command with its fixed icon, its name, its line and, for a Portless
+ * server, the address it answers at. The scope, where it runs from and the line of each system
+ * are in the dialog its pencil opens: a badge saying `Workspace root` told the reader where a
+ * command ran and never what it ran, and four badges on every row said the same thing four times
+ * (recette 2).
  *
  * An empty catalogue is a Project whose Sessions run no command, and the card says that rather
  * than showing an empty box: a reader who sees "no command" knows why the agent's `commands_run`
@@ -607,6 +612,7 @@ export function CommandList({
   onAdd,
   onUpdate,
   onRemove,
+  onBrowse,
 }: {
   commands: readonly CommandLine[]
   /** The repositories of the Project, which a command's folder may start from. */
@@ -619,6 +625,8 @@ export function CommandList({
   /** Rewrites the command of the same name. */
   onUpdate?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemove?: ((id: string) => void) | undefined
+  /** Asks for a folder, handed the base a command runs from; null for the Workspace root. */
+  onBrowse?: ((base: string | null) => Promise<string | null>) | undefined
 }): ReactNode {
   /**
    * The command the dialog edits, or null when it adds one. Kept while the dialog closes, so it
@@ -630,8 +638,6 @@ export function CommandList({
     setEditing(command)
     setOpen(true)
   }
-  const names = repositoryNamesOf(repositories.map((one) => one.path))
-
   const submit = async (command: CommandLine): Promise<string | null> => {
     const write = editing === null ? onAdd : onUpdate
     return (await write?.(command)) ?? null
@@ -657,51 +663,38 @@ export function CommandList({
         </p>
       ) : (
         <ul className="flex flex-col gap-2" aria-label="Commands">
-          {commands.map((one) => {
-            const TypeIcon = COMMAND_TYPE_ICONS[one.type]
-            return (
-              <li key={one.id}>
-                <CardRow>
-                  <span className={COMMAND_NAME}>{one.name}</span>
-                  <span className={LINE}>{one.command}</span>
-                  <span className={CLUSTER}>
-                    <Badge tone="neutral" icon={<TypeIcon size="sm" aria-hidden="true" />}>
-                      {COMMAND_TYPE_LABELS[one.type]}
-                    </Badge>
-                    {one.type === 'serve' && (
-                      <Badge tone="neutral">
-                        {one.scope === 'project' ? 'Project, in main' : 'Per Workspace'}
-                      </Badge>
-                    )}
-                    {one.type === 'serve' && one.portless && <Badge tone="info">Portless</Badge>}
-                    <Badge tone="neutral">
-                      {one.folderBase === null
-                        ? 'Workspace root'
-                        : (names.get(one.folderBase) ?? one.folderBase)}
-                    </Badge>
+          {commands.map((one) => (
+            <li key={one.id}>
+              <CardRow>
+                <TypeMark type={one.type} />
+                <span className={COMMAND_NAME}>{one.name}</span>
+                <span className={LINE}>{one.command}</span>
+                {one.type === 'serve' && one.portless && (
+                  <span className={ADDRESS}>
+                    https://{one.portlessName ?? slugOf(projectName)}.localhost
                   </span>
-                  {onUpdate === undefined ? null : (
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      icon={<IconPencil size="sm" />}
-                      aria-label={`Edit ${one.name}`}
-                      onClick={() => openOn(one)}
-                    />
-                  )}
-                  {onRemove === undefined ? null : (
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      icon={<IconX size="sm" />}
-                      aria-label={`Remove ${one.name}`}
-                      onClick={() => onRemove(one.id)}
-                    />
-                  )}
-                </CardRow>
-              </li>
-            )
-          })}
+                )}
+                {onUpdate === undefined ? null : (
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<IconPencil size="sm" />}
+                    aria-label={`Edit ${one.name}`}
+                    onClick={() => openOn(one)}
+                  />
+                )}
+                {onRemove === undefined ? null : (
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<IconX size="sm" />}
+                    aria-label={`Remove ${one.name}`}
+                    onClick={() => onRemove(one.id)}
+                  />
+                )}
+              </CardRow>
+            </li>
+          ))}
         </ul>
       )}
 
@@ -712,6 +705,7 @@ export function CommandList({
         repositories={repositories}
         portlessInstalled={portlessInstalled}
         projectName={projectName}
+        onBrowse={onBrowse}
         onSubmit={submit}
       />
     </Card>
