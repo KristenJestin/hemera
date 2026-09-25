@@ -424,6 +424,13 @@ export const NewAndEmpty: Story = {
   },
 }
 
+/** The press waits for the pointer Base UI holds off what is inside a popup while it enters. */
+async function readyFor(element: HTMLElement): Promise<void> {
+  await waitFor(() => {
+    expect(getComputedStyle(element).pointerEvents).not.toBe('none')
+  })
+}
+
 /**
  * The head's two commands, behind one menu at the end of its line (review of #40, defect 4).
  *
@@ -448,8 +455,10 @@ export const TheHeadCommands: Story = {
     expect(document.activeElement).toBe(trigger)
     await userEvent.keyboard('{ArrowDown}')
     const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    const rename = within(menu).getByRole('menuitem', { name: /Rename/ })
+    await readyFor(rename)
 
-    await userEvent.click(within(menu).getByRole('menuitem', { name: /Rename/ }))
+    await userEvent.click(rename)
     const field = canvas.getByRole('textbox', { name: 'Title of the Session' })
     expect(field).toHaveValue('CSV invoice export')
     await userEvent.keyboard('{Escape}')
@@ -461,7 +470,9 @@ export const TheHeadCommands: Story = {
     // Archive is the command that acts, once.
     await userEvent.click(trigger)
     const again = await waitFor(() => within(document.body).getByRole('menu'))
-    await userEvent.click(within(again).getByRole('menuitem', { name: /Archive/ }))
+    const archive = within(again).getByRole('menuitem', { name: /Archive/ })
+    await readyFor(archive)
+    await userEvent.click(archive)
     expect(args.onArchive).toHaveBeenCalledTimes(1)
     await waitFor(() => {
       expect(within(document.body).queryByRole('menu')).toBeNull()
