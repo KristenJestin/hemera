@@ -193,6 +193,49 @@ describe('A human task waits for the user', () => {
   })
 })
 
+describe('A task skipped without its dependants', () => {
+  test('skips them too, each with its reason, and the build reaches verify', async () => {
+    const TASKS = [
+      { title: 'Write the exporter' },
+      { title: 'Sign the export format', executor: 'human' as const },
+      { title: 'Publish it', dependsOn: ['Sign the export format'] },
+      { title: 'Announce it', dependsOn: ['Publish it'] },
+    ]
+    const { agent } = buildAgent()
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, TASKS)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const waiting = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[0]?.state === 'done',
+        )
+        yield* (yield* Builds).taskSkip(waiting.tasks[1]?.id ?? '', 'Not signed this year', false)
+        const after = yield* eventually(buildOf(sessionId), (view) => view.phase === 'verify')
+        return { after, journal: yield* journalOf(sessionId) }
+      }),
+    )
+    expect(statesOf(seen.after)).toEqual({
+      T1: 'done',
+      T2: 'skipped',
+      T3: 'skipped',
+      T4: 'skipped',
+    })
+    expect(seen.after.tasks.map((task) => task.skipReason)).toEqual([
+      null,
+      'Not signed this year',
+      'T2, which it depends on, was skipped',
+      'T3, which it depends on, was skipped',
+    ])
+    expect(
+      seen.journal
+        .filter((line) => line.type === 'task.skipped')
+        .map((line) => JSON.parse(line.payload).label),
+    ).toEqual(['T2', 'T3', 'T4'])
+  })
+})
+
 describe('A blocker suspends the task and its dependants only', () => {
   test('T1 and T3 are blocked, T2 goes on, and dismissing it makes T1 ready again', async () => {
     const TASKS = [

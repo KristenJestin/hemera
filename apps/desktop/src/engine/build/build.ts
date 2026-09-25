@@ -358,7 +358,10 @@ export interface BuildsService {
   readonly stop: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** A task waiting for the user, done by them (D10-08). */
   readonly taskDone: (buildTaskId: string) => Effect.Effect<BuildView, BuildRefusal>
-  /** A task waiting for the user, skipped with its reason, its dependants let go on or not (L6). */
+  /**
+   * A task waiting for the user, skipped with its reason; its dependants let go on, or skipped with
+   * it (L6).
+   */
   readonly taskSkip: (
     buildTaskId: string,
     reason: string,
@@ -1667,21 +1670,50 @@ export const buildsLayer = Layer.effect(
           return yield* acted(sessionId, 'skipping a task', (transaction, rows, at) =>
             Effect.gen(function* () {
               const task = yield* yoursIn(rows, buildTaskId)
-              yield* transaction
-                .update(buildTasks)
-                .set({
-                  state: 'skipped',
-                  skipReason: why,
-                  skipUnblocks: unblocks,
-                  endedAt: at,
-                  updatedAt: at,
-                })
-                .where(eq(buildTasks.id, task.id))
-                .pipe(Effect.mapError(failed('skipping the task')))
-              return {
-                events: [taskEvent(rows, task, 'task.skipped', 'human', { reason: why, unblocks })],
-                follows: true,
+              const skip = (one: TaskRow, because: string, lets: boolean) =>
+                transaction
+                  .update(buildTasks)
+                  .set({
+                    state: 'skipped',
+                    skipReason: because,
+                    skipUnblocks: lets,
+                    endedAt: at,
+                    updatedAt: at,
+                  })
+                  .where(eq(buildTasks.id, one.id))
+                  .pipe(Effect.mapError(failed('skipping the task')))
+              yield* skip(task, why, unblocks)
+              const events: NewEvent[] = [
+                taskEvent(rows, task, 'task.skipped', 'human', { reason: why, unblocks }),
+              ]
+              if (!unblocks) {
+                // The user did not let its dependants go on: nothing is left for them to wait on,
+                // so they are skipped with it, each saying which of its dependencies was, and the
+                // build can still reach `verify` (D10-03).
+                const { dependencies } = rows.snapshot
+                const skipped = new Map([[task.taskId, task.label]])
+                for (const taskId of dependantsOf(task.taskId, dependencies)) {
+                  const dependant = rows.tasks.find((one) => one.taskId === taskId)
+                  if (dependant === undefined) continue
+                  const state = stateOf(dependant)
+                  if (state === 'done' || state === 'skipped') continue
+                  const cause = dependencies.find(
+                    (dependency) =>
+                      dependency.taskId === taskId && skipped.has(dependency.dependsOnId),
+                  )
+                  const label = skipped.get(cause?.dependsOnId ?? '') ?? task.label
+                  const because = `${label}, which it depends on, was skipped`
+                  yield* skip(dependant, because, false)
+                  skipped.set(taskId, dependant.label)
+                  events.push(
+                    taskEvent(rows, dependant, 'task.skipped', 'hemera', {
+                      reason: because,
+                      unblocks: false,
+                    }),
+                  )
+                }
               }
+              return { events, follows: true }
             }),
           )
         }),
