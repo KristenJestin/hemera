@@ -159,6 +159,7 @@ export const CHANNELS = {
   'variables.list': ENGINE_REQUESTS['variables.list'],
   'variables.set': ENGINE_REQUESTS['variables.set'],
   'variables.remove': ENGINE_REQUESTS['variables.remove'],
+  'launches.request': ENGINE_REQUESTS['launches.request'],
 
   // The build of a `build` Session and the checks of a Project, relayed the same way: a task's
   // state, an attempt and a check are the engine's, and the window only says what the user did

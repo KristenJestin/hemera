@@ -242,6 +242,8 @@ const RELAYED = [
   'variables.list',
   'variables.set',
   'variables.remove',
+  // A build asked for on a ready Spec (D8-13).
+  'launches.request',
   // The Specs, all of them the engine's to answer (D7-01).
   'specs.list',
   'specs.read',

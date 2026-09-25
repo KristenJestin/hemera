@@ -139,6 +139,27 @@ export const recipeStepSchema = z.object({
 
 export type RecipeStep = z.infer<typeof recipeStepSchema>
 
+/** Where a build asked for stands (D8-13): waiting for its Workspace, starting, started, or not. */
+export const launchStateSchema = z.enum(['waiting', 'starting', 'started', 'failed', 'cancelled'])
+
+/**
+ * A build asked for on a ready Spec in a Workspace (D8-13): the revision it was asked on, the
+ * build Session once it started, and what refused it, as it was said. The dates are ISO strings.
+ */
+export const launchViewSchema = z.object({
+  id: z.string(),
+  specId: z.string(),
+  revisionId: z.string(),
+  workspaceId: z.string().nullable(),
+  state: launchStateSchema,
+  sessionId: z.string().nullable(),
+  detail: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+export type LaunchView = z.infer<typeof launchViewSchema>
+
 /** One variable (D8-06): the Project's when `workspaceId` is null, that Workspace's otherwise. */
 export const variableSchema = z.object({
   key: z.string(),

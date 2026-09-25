@@ -15,8 +15,8 @@
  * and stays on screen, and `retry` starts that same Session's agent again without touching the
  * Workspace or its steps.
  *
- * The window asks for none of it yet: this lot names no channel — no ipc — so what answers a
- * `request` today is the preparation's last step alone.
+ * The window asks for a build through `launches.request`; the preparation's last step starts what
+ * waited on its Workspace.
  */
 
 import {

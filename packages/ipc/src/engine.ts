@@ -31,6 +31,7 @@ import {
   contextViewSchema,
 } from './tools.ts'
 import {
+  launchViewSchema,
   recipeKindSchema,
   recipeStepSchema,
   repositoryStateSchema,
@@ -855,6 +856,13 @@ export const ENGINE_REQUESTS = {
       key: z.string(),
     }),
     response: z.void(),
+  },
+
+  // A build of a ready Spec asked for in one of its Project's Workspaces (D8-13): started at once
+  // in a ready Workspace, waiting for one still being prepared.
+  'launches.request': {
+    arguments: z.object({ specId: z.string(), workspaceId: z.string() }),
+    response: launchViewSchema,
   },
 
   // The Specs a `define` Session writes and a human freezes (D7-01).

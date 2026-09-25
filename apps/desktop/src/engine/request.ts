@@ -76,7 +76,7 @@ import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
 import type { UnknownWorkspaceError } from './workspaces/described.ts'
 import { Preparation, type PreparationRunningError } from './workspaces/preparation.ts'
-import type { Launches } from './workspaces/launches.ts'
+import { Launches, type LaunchRefusal } from './workspaces/launches.ts'
 import { Recipe, type RecipeRefusedError } from './workspaces/recipe.ts'
 import { Variables } from './workspaces/variables.ts'
 import {
@@ -477,6 +477,12 @@ export function answer(
       return yield* variables.remove(projectId, workspaceId, key)
     }
 
+    // A build of a ready Spec, asked for in a Workspace: started at once in a ready one (D8-13).
+    if (decision.name === 'launches.request') {
+      const { specId, workspaceId } = decision.argument
+      return yield* (yield* Launches).request(specId, workspaceId)
+    }
+
     // The Spec use cases (D7-03). The renderer is the human actor: whatever it writes carries
     // human provenance and the Session whose panel it came from (D7-04, D7-11).
     const specs = yield* Specs
@@ -636,3 +642,4 @@ export type Refusal =
   | UnknownCheckError
   | BuildRefusedError
   | UnknownBuildError
+  | LaunchRefusal
