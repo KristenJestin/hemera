@@ -56,11 +56,15 @@ export interface Command {
   readonly id: string
   readonly projectId: string
   readonly name: string
-  /** The line that runs, as the user typed it: the default, for a machine with none of its own. */
+  /**
+   * The line that runs, as the user typed it: the one line when the command has the same on every
+   * system, and — beside the two below — the one a system with no line of its own runs, macOS
+   * among them (recette 2).
+   */
   readonly line: string
-  /** The line Windows runs instead of the default one, null when it runs the default (D8-07). */
+  /** The line Windows runs, null when it runs `line` instead (D8-07 as amended by recette 2). */
   readonly lineWindows: string | null
-  /** The line Linux runs instead of the default one, and null when it runs the default (D8-07). */
+  /** The line Linux runs, null when it runs `line` instead (D8-07 as amended by recette 2). */
   readonly lineLinux: string | null
   readonly type: CommandType
   /** The repository it runs under, as the Project declares it, and null for the Workspace root. */
@@ -73,7 +77,8 @@ export interface Command {
   readonly portless: boolean
   /**
    * The name Portless serves it under, and null for the Project's name as a slug (D8-10 as
-   * amended by recette 1); a dedicated Workspace suffixes it with its own.
+   * amended by recette 1). `portless` itself puts the Workspace's branch in front in a worktree
+   * (recette 2), so one name reads the same run everywhere.
    */
   readonly portlessName: string | null
   readonly createdAt: number
@@ -114,19 +119,16 @@ export function runsPortless(line: string): boolean {
 }
 
 /**
- * The name a Portless command runs under (D8-10 as amended): its own name when it has one, the
- * Project's name as a slug otherwise; in a dedicated Workspace — neither `main` nor a folder the
- * user picked — followed by `-<Workspace name as a slug>`, so two instances never share one.
+ * The name a Portless command runs under (D8-10 as amended by recette 2): its own name when it
+ * has one, the Project's name as a slug otherwise. The Workspace is never in it: `portless`
+ * itself puts the branch in front in a worktree (D8-04), so one name reads the same run in
+ * `main` and in every dedicated Workspace, and an address written down once stays true.
  */
 export function portlessNameFor(asked: {
   readonly name: string | null
   readonly projectName: string
-  readonly workspaceName: string
-  readonly dedicated: boolean
 }): string {
-  const base = asked.name ?? (slugify(asked.projectName) || 'hemera')
-  const suffix = slugify(asked.workspaceName)
-  return asked.dedicated && suffix !== '' ? `${base}-${suffix}` : base
+  return asked.name ?? (slugify(asked.projectName) || 'hemera')
 }
 
 /** A folder of a command that is absolute, or leaves the base it is relative to. */
@@ -248,8 +250,9 @@ export function commandPlace(command: Pick<Command, 'folderBase' | 'folder'>): s
 }
 
 /**
- * The line this machine runs (D8-07): its own variant when the command has one, the default
- * line otherwise. `platform` is Node's own word for the system — `win32`, `linux`, `darwin`.
+ * The line this machine runs (D8-07): its own variant when the command has one, the line every
+ * system runs otherwise — which is the one a system with no variant of its own runs, macOS among
+ * them (recette 2). `platform` is Node's own word for the system — `win32`, `linux`, `darwin`.
  */
 export function lineFor(
   command: Pick<Command, 'line' | 'lineWindows' | 'lineLinux'>,

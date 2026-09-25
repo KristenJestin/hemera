@@ -72,8 +72,6 @@ import {
   projectCommands,
   projects,
   sessions,
-  workspaceRepositories,
-  workspaceSteps,
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
@@ -895,42 +893,22 @@ export const commandsLayer = Layer.effect(
             )
 
     /**
-     * The name a Portless run serves under (D8-10 as amended by recette 1): the command's own, or
-     * its Project's as a slug, followed by its Workspace's when that one is dedicated — made by
-     * Hemera, with worktrees or steps, as against `main` or a folder the user picked.
+     * The name a Portless run serves under (D8-10 as amended by recette 2): the command's own, or
+     * its Project's as a slug. The Workspace is not in it: `portless` itself puts the branch in
+     * front in a worktree (D8-04), so one name reads the same run in `main` and in every
+     * dedicated Workspace.
      */
     const portlessNameOf = (asked: RunRequest) =>
-      Effect.gen(function* () {
-        const project = yield* database
-          .select({ name: projects.name })
-          .from(projects)
-          .where(eq(projects.id, asked.projectId))
-          .pipe(Effect.mapError(failed('reading the Project of a run')))
-        const workspaceId = asked.workspaceId
-        const made =
-          workspaceId === null || asked.workspaceName === MAIN_WORKSPACE
-            ? []
-            : [
-                ...(yield* database
-                  .select({ id: workspaceRepositories.id })
-                  .from(workspaceRepositories)
-                  .where(eq(workspaceRepositories.workspaceId, workspaceId))
-                  .limit(1)
-                  .pipe(Effect.mapError(failed('reading the worktrees of a run')))),
-                ...(yield* database
-                  .select({ id: workspaceSteps.id })
-                  .from(workspaceSteps)
-                  .where(eq(workspaceSteps.workspaceId, workspaceId))
-                  .limit(1)
-                  .pipe(Effect.mapError(failed('reading the steps of a run')))),
-              ]
-        return portlessNameFor({
-          name: asked.portlessName,
-          projectName: project[0]?.name ?? '',
-          workspaceName: asked.workspaceName,
-          dedicated: made.length > 0,
-        })
-      })
+      database
+        .select({ name: projects.name })
+        .from(projects)
+        .where(eq(projects.id, asked.projectId))
+        .pipe(
+          Effect.mapError(failed('reading the Project of a run')),
+          Effect.map((rows) =>
+            portlessNameFor({ name: asked.portlessName, projectName: rows[0]?.name ?? '' }),
+          ),
+        )
 
     /** The Project a Session belongs to, and null for a Session this database does not hold. */
     const projectOf = (sessionId: string) =>

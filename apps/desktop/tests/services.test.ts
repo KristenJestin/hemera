@@ -572,11 +572,11 @@ describe('A line that already runs portless runs as written', () => {
   })
 })
 
-describe('A Portless command runs under its Project name, suffixed in a dedicated Workspace', () => {
+describe('A Portless command runs under one name, in main and in a dedicated Workspace', () => {
   /** What the stand-in is given to run after the name: a line that prints its words and stays up. */
   const line = `"${process.execPath}" -e "console.log(process.argv.slice(1).join('|'));setInterval(()=>{},1000)" two words`
 
-  it('runs portless atlas in main, atlas-login-form in login-form, and api-login-form by name', async () => {
+  it('runs portless atlas in main and in a dedicated Workspace, and api by its own name', async () => {
     const bin = join(scratch.folder, 'bin')
     standIn(bin)
     const seen = await engine(onlyIn(bin))(
@@ -621,17 +621,18 @@ describe('A Portless command runs under its Project name, suffixed in a dedicate
       }),
     )
 
-    // `main` is not dedicated: the Project's name as a slug, and nothing after it.
+    // The Project's name as a slug, and nothing after it: `portless` itself puts the branch in
+    // front of the name in a worktree (D8-04, recette 2), so one name reads the same run in
+    // `main` and in a dedicated Workspace.
     expect(seen.inMain.line).toBe(`portless atlas ${line}`)
     expect(seen.inMain.url).toBe('https://atlas.localhost')
-    // A dedicated Workspace suffixes it with its own, so two instances never clash.
-    expect(seen.dedicated.line).toBe(`portless atlas-login-form ${line}`)
-    expect(seen.dedicated.url).toBe('https://atlas-login-form.localhost')
+    expect(seen.dedicated.line).toBe(`portless atlas ${line}`)
+    expect(seen.dedicated.url).toBe('https://atlas.localhost')
     expect(seen.dedicated.state).toBe('running')
     expect(seen.dedicated.output).toContain('two|words')
     expect(seen.dedicated.portConflict).toBeNull()
-    // A name of the command's own takes the Project's place, and keeps the suffix.
-    expect(seen.named.line).toBe(`portless api-login-form ${line}`)
-    expect(seen.named.url).toBe('https://api-login-form.localhost')
+    // A name of the command's own takes the Project's place, in every Workspace.
+    expect(seen.named.line).toBe(`portless api ${line}`)
+    expect(seen.named.url).toBe('https://api.localhost')
   })
 })

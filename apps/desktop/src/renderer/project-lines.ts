@@ -3,7 +3,7 @@ import type { CommandLine, RepositoryLine } from '@hemera/ui'
 
 /**
  * What the Commands and Repositories sections of a Project's settings draw from the engine's
- * views, and what they hand back to it (D6-12, D8-04, D8-07, D8-10, recette 1).
+ * views, and what they hand back to it (D6-12, D8-04, D8-07, D8-10, recette 1 and 2).
  *
  * Both ways, and nothing lost on the way: a command read and saved unchanged is written as it was
  * read. Kept apart from the page, which imports the components, so a test reads it without a DOM.
@@ -58,6 +58,72 @@ export function commandWriteOf(line: CommandLine): CommandWrite {
     portless: line.portless,
     portlessName: line.portlessName,
   }
+}
+
+/**
+ * The segments of a path, whichever separator its system writes and whatever `.` it carries.
+ *
+ * The engine compares paths with the tools of the system; the renderer has no disk to ask, and a
+ * command's folder is written by hand here. Segments are all it needs, and pure string work is
+ * what it can do.
+ */
+function segmentsOf(path: string): string[] {
+  return path
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((segment) => segment !== '' && segment !== '.')
+}
+
+/** Whether a path is one Windows writes: a drive letter, or the two backslashes a share starts with. */
+function windowsPath(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith('\\\\')
+}
+
+/**
+ * What the folder picker answered, written relative to the folder a command runs from (recette 2
+ * of lot 20): `src` under a base of `./sources/web`, `.` for that folder itself.
+ *
+ * `main` is the folder of the main Workspace, which is what a base is relative to; `base` is null
+ * for the Workspace root and one of the Project's repositories otherwise, as the dialog names it.
+ * Both sides are read the way their system writes them: on Windows a path is compared without its
+ * case, where `D:` and `d:` are one drive and a capital does not make two folders of one.
+ *
+ * A folder outside the base answers the `..` that would reach it, which is not a folder a command
+ * may run in: the field refuses it, in the words of the schema the engine shares.
+ */
+export function folderUnderBase(mainPath: string, base: string | null, chosen: string): string {
+  const under = segmentsOf(base === null ? mainPath : `${mainPath}/${base}`)
+  const picked = segmentsOf(chosen)
+  const folded = windowsPath(mainPath) || windowsPath(chosen)
+  const same = (one: string, other: string): boolean =>
+    folded ? one.toLowerCase() === other.toLowerCase() : one === other
+  let shared = 0
+  while (
+    shared < under.length &&
+    shared < picked.length &&
+    same(under[shared] ?? '', picked[shared] ?? '')
+  ) {
+    shared += 1
+  }
+  const up = under.slice(shared).map(() => '..')
+  const joined = [...up, ...picked.slice(shared)].join('/')
+  return joined === '' ? '.' : joined
+}
+
+/**
+ * The folder a command runs from, as its own system writes it: the folder of the main Workspace,
+ * or one of the Project's repositories under it (recette 2).
+ *
+ * `mainPath` is the folder of the main Workspace, which a base is relative to; `base` is null for
+ * the Workspace root and one of the Project's repositories otherwise, as the dialog names it. It
+ * is the folder the field's own answer is relative to, and the one the system's picker opens on,
+ * joined the way the main folder is written: a Windows path keeps its backslashes, a POSIX one
+ * its slash.
+ */
+export function folderBasePath(mainPath: string, base: string | null): string {
+  const under = segmentsOf(base ?? '')
+  if (under.length === 0) return mainPath
+  return [mainPath, ...under].join(windowsPath(mainPath) ? '\\' : '/')
 }
 
 /** What the disk says of one declared location, as `repositories.status` answers it. */
