@@ -78,6 +78,8 @@ interface Row {
   detached: Commit | null
   branch: string
   included: boolean
+  /** What Git said when it would not read the location, and null when it answered (D8-04). */
+  reason: string | null
   /** Whether the user wrote this branch by hand, after which it stops following the name. */
   written: boolean
 }
@@ -97,6 +99,7 @@ function rowsOf(plan: readonly PlanRepositoryLine[]): Row[] {
     branch: line.branch,
     // A location without a repository cannot be included, whatever the plan says (D8-04).
     included: line.holdsRepository && line.included,
+    reason: line.reason,
     written: false,
   }))
 }
@@ -267,7 +270,13 @@ export function CreateWorkspaceDialog({
                   disabled={!row.holdsRepository}
                   onCheckedChange={(checked) => change(row.path, { included: checked })}
                 />
-                {!row.holdsRepository && <Badge tone="neutral">no repository in main</Badge>}
+                {/* A repository Git would not read says so in Git's own words, where a location
+                    that simply holds none is not the user's problem (D8-04). */}
+                {!row.holdsRepository && (
+                  <Badge tone={row.reason === null ? 'neutral' : 'destructive'}>
+                    {row.reason ?? 'no repository in main'}
+                  </Badge>
+                )}
               </span>
               {row.holdsRepository && (
                 <>

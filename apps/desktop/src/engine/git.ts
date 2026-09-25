@@ -20,6 +20,21 @@ import { Context, Data, Effect, Layer } from 'effect'
 /** What a command may print before it is cut: a status of a large tree is long, not endless. */
 const OUTPUT_LIMIT = 32 * 1024 * 1024
 
+/**
+ * How long a read may take before Git is taken as refusing it: `rev-parse`, a ref listing and a
+ * branch test answer in milliseconds, and a plan waits for several of them per repository. A
+ * Windows runner held `workspaces.plan` past a test's half-minute (#101, #102) because nothing
+ * bounded a child that never exited: a plan now ends, or fails in Git's words, within seconds.
+ */
+const READ_LIMIT = 10_000
+
+/**
+ * How long a command that writes may take: a `worktree add` checks out a whole tree, which is
+ * slow on a large repository and must not be cut short. It is a bound against a child that never
+ * exits, not a deadline.
+ */
+const WORK_LIMIT = 30 * 60 * 1000
+
 /** The program named is not on the `PATH`: shown by name where a Workspace is created (D8-03). */
 export class GitUnavailableError extends Data.TaggedError('GitUnavailableError')<{
   readonly program: string
@@ -62,8 +77,11 @@ export interface GitHead {
   readonly branch: string | null
   /** The commit `HEAD` is on. */
   readonly commit: string
-  /** That commit as Git abbreviates it: the one hash the creation dialog ever shows. */
-  readonly short: string
+  /**
+   * That commit as Git abbreviates it: the one hash the creation dialog ever shows, and null
+   * where the branch it is on names it already and no hash is read at all.
+   */
+  readonly short: string | null
 }
 
 type Refusal = GitError | GitUnavailableError
@@ -113,9 +131,11 @@ export interface GitService {
   readonly status: (cwd: string) => Effect.Effect<GitStatus, Refusal>
   /**
    * What `HEAD` is on, read for the base the creation dialog proposes: the branch it is on, or
-   * the commit it is on when it is on none (D8-04).
+   * the commit it is on when it is on none (D8-04). A repository with no commit yet answers
+   * null, which is an answer and not a refusal: Git refusing to read `HEAD` at all stays one,
+   * and the plan shows it.
    */
-  readonly head: (cwd: string) => Effect.Effect<GitHead, Refusal>
+  readonly head: (cwd: string) => Effect.Effect<GitHead | null, Refusal>
   /** The repository's local branches, in Git's own order: what a base is chosen from (D8-04). */
   readonly localBranches: (cwd: string) => Effect.Effect<readonly string[], Refusal>
   /**
@@ -153,28 +173,100 @@ export function statusOf(printed: string): GitStatus {
   return { branch, commit, staged, unstaged, untracked }
 }
 
+/**
+ * How a command is started and what it answered: the machine's own `git`, spawned with its
+ * arguments and no shell. A suite names its own only to make one read of it fail once — a machine
+ * at work — and never to replace what the service makes of the answer.
+ */
+export type GitSpawn = (
+  program: string,
+  cwd: string,
+  args: readonly string[],
+  limit: number,
+) => Effect.Effect<string, Refusal>
+
+/** The machine's own spawn: a child with its arguments, no shell, killed when it is abandoned. */
+export const spawnGit: GitSpawn = (program, cwd, args, limit) =>
+  Effect.callback<string, Refusal>((resume, signal) => {
+    const child = execFile(
+      program,
+      ['-C', cwd, ...args],
+      {
+        // Nothing may wait on a prompt, and no network is ever asked for: a credential
+        // helper that would prompt fails instead (D8-04).
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        maxBuffer: OUTPUT_LIMIT,
+        timeout: limit,
+        killSignal: 'SIGKILL',
+        windowsHide: true,
+      },
+      (failure, stdout, stderr) => {
+        if (failure === null) return resume(Effect.succeed(stdout))
+        if (failure.code === 'ENOENT') {
+          return resume(Effect.fail(new GitUnavailableError({ program })))
+        }
+        resume(
+          Effect.fail(
+            new GitError({
+              args,
+              cwd,
+              // A child cut for taking too long said nothing: its refusal is the limit.
+              stderr:
+                failure.killed === true
+                  ? `Git did not answer within ${limit / 1000} seconds`
+                  : stderr,
+            }),
+          ),
+        )
+      },
+    )
+    // A read that is abandoned — an interrupted plan, a test that ended — may not leave the
+    // child behind: it holds the folder its `-C` names, and a cleanup then fails with EPERM.
+    signal.addEventListener('abort', () => child.kill('SIGKILL'))
+  })
+
 /** Git's own `git`, or the program named: a test names one that is not on the `PATH`. */
-export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
-  const run = (cwd: string, args: readonly string[]) =>
-    Effect.callback<string, Refusal>((resume) => {
-      execFile(
-        program,
-        ['-C', cwd, ...args],
-        {
-          // Nothing may wait on a prompt, and no network is ever asked for: a credential
-          // helper that would prompt fails instead (D8-04).
-          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-          maxBuffer: OUTPUT_LIMIT,
-          windowsHide: true,
-        },
-        (failure, stdout, stderr) => {
-          if (failure === null) return resume(Effect.succeed(stdout))
-          if (failure.code === 'ENOENT') {
-            return resume(Effect.fail(new GitUnavailableError({ program })))
-          }
-          resume(Effect.fail(new GitError({ args, cwd, stderr })))
-        },
+export const gitLayer = (program = 'git', spawn: GitSpawn = spawnGit): Layer.Layer<Git> => {
+  const run = (cwd: string, args: readonly string[], limit = READ_LIMIT) =>
+    spawn(program, cwd, args, limit)
+
+  /**
+   * Whether `HEAD` is on a branch that has no ref yet: what a repository with no commit yet is, and
+   * the only thing it is. `rev-parse --verify --quiet HEAD` fails, `symbolic-ref --short HEAD` names
+   * a branch, and that branch is not stored — a read that fails for any other reason fails one of
+   * the three, and is a refusal the plan keeps and retries (#102).
+   */
+  const unbornHead = (cwd: string) =>
+    Effect.gen(function* () {
+      const resolves = yield* run(cwd, [
+        '--no-optional-locks',
+        'rev-parse',
+        '--verify',
+        '--quiet',
+        'HEAD',
+      ]).pipe(
+        Effect.as(true),
+        Effect.catchTag('GitError', () => Effect.succeed(false)),
       )
+      if (resolves) return false
+      const named = yield* run(cwd, [
+        '--no-optional-locks',
+        'symbolic-ref',
+        '--short',
+        'HEAD',
+      ]).pipe(Effect.catchTag('GitError', () => Effect.succeed(null)))
+      if (named === null || named.trim() === '') return false
+      const stored = yield* run(cwd, [
+        '--no-optional-locks',
+        'show-ref',
+        '--verify',
+        '--quiet',
+        `refs/heads/${named.trim()}`,
+      ]).pipe(
+        Effect.as(true),
+        Effect.catchTag('GitError', () => Effect.succeed(false)),
+      )
+      return !stored
     })
 
   return Layer.succeed(Git, {
@@ -183,11 +275,14 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
         Effect.map((printed) => printed.trim()),
       ),
     worktreeAdd: (cwd, branch, path, base) =>
-      run(cwd, ['worktree', 'add', '--quiet', '-b', branch, path, base]).pipe(Effect.asVoid),
+      run(cwd, ['worktree', 'add', '--quiet', '-b', branch, path, base], WORK_LIMIT).pipe(
+        Effect.asVoid,
+      ),
     worktreeAttach: (cwd, branch, path) =>
-      run(cwd, ['worktree', 'add', '--quiet', path, branch]).pipe(Effect.asVoid),
-    worktreeRemove: (cwd, path) => run(cwd, ['worktree', 'remove', path]).pipe(Effect.asVoid),
-    worktreePrune: (cwd) => run(cwd, ['worktree', 'prune']).pipe(Effect.asVoid),
+      run(cwd, ['worktree', 'add', '--quiet', path, branch], WORK_LIMIT).pipe(Effect.asVoid),
+    worktreeRemove: (cwd, path) =>
+      run(cwd, ['worktree', 'remove', path], WORK_LIMIT).pipe(Effect.asVoid),
+    worktreePrune: (cwd) => run(cwd, ['worktree', 'prune'], WORK_LIMIT).pipe(Effect.asVoid),
     branchExists: (cwd, branch) =>
       run(cwd, ['branch', '--list', branch]).pipe(Effect.map((printed) => printed.trim() !== '')),
     checkRefFormat: (cwd, branch) =>
@@ -198,26 +293,43 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
     // An observation writes nothing (D8-15): without `--no-optional-locks` a status refreshes the
     // index and takes its lock, and a `worktree add` under way in that folder is refused for it.
     status: (cwd) =>
-      run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch']).pipe(
+      run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch'], WORK_LIMIT).pipe(
         Effect.map(statusOf),
       ),
     // `--abbrev-ref` answers `HEAD` itself when it is on no branch: a detached commit, which is
-    // an answer here and not a refusal. A repository with no commit yet refuses both reads, and
-    // the plan takes that for what it is: nothing to start a base from.
+    // an answer here and not a refusal. A repository with no commit yet refuses every read of
+    // `HEAD`, and only the branch a commit will land on is left to name: nothing to start a base
+    // from is an answer, where Git refusing to read `HEAD` at all is a refusal (D8-04).
     head: (cwd) =>
       Effect.gen(function* () {
         const named = yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--abbrev-ref', 'HEAD'])
         const commit = yield* run(cwd, ['--no-optional-locks', 'rev-parse', 'HEAD'])
-        // Git's own abbreviation, asked of Git: the length depends on the repository, and a
-        // prefix cut by hand would be a hash that reads like a name (D8-04).
-        const short = yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--short', 'HEAD'])
         const branch = named.trim()
+        const detached = branch === '' || branch === 'HEAD'
+        // Git's own abbreviation, asked of Git, and only where a hash is shown at all: the length
+        // depends on the repository, and a prefix cut by hand would be a hash that reads like a
+        // name (D8-04).
+        const short = detached
+          ? yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--short', 'HEAD'])
+          : null
         return {
-          branch: branch === '' || branch === 'HEAD' ? null : branch,
+          branch: detached ? null : branch,
           commit: commit.trim(),
-          short: short.trim(),
+          short: short === null ? null : short.trim(),
         } satisfies GitHead
-      }),
+      }).pipe(
+        // A repository with no commit yet is the one read that fails and is still an answer, and it
+        // is told apart from a refusal by asking Git: a `symbolic-ref` that answers used to be
+        // enough, and it swallowed every other failure of the reads above — a Git at work for a
+        // moment lost the repository from the plan without a word (#102).
+        Effect.catchTag('GitError', (refusal) =>
+          unbornHead(cwd).pipe(
+            Effect.flatMap((unborn): Effect.Effect<GitHead | null, Refusal> =>
+              unborn ? Effect.succeed(null) : Effect.fail(refusal),
+            ),
+          ),
+        ),
+      ),
     // The refs as they are stored: `branch --list` prints a line naming a detached commit, which
     // Git writes in the machine's language, and nothing in Hemera reads a sentence Git translates.
     localBranches: (cwd) =>

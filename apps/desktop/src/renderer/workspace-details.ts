@@ -274,6 +274,7 @@ export function planLinesOf(plan: WorkspacePlan): PlanRepositoryLine[] {
     detachedCommit: one.detachedCommit,
     branch: one.branch,
     included: one.included,
+    reason: one.reason,
   }))
 }
 

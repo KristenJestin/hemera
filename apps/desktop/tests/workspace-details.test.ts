@@ -297,6 +297,7 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
         detachedCommit: null,
         branch: 'atlas/',
         included: true,
+        reason: null,
       },
       {
         relativePath: 'docs',
@@ -306,6 +307,7 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
         detachedCommit: null,
         branch: 'atlas/',
         included: false,
+        reason: null,
       },
     ],
     gitAvailable: true,
@@ -321,6 +323,7 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
         detachedCommit: null,
         branch: 'atlas/',
         included: true,
+        reason: null,
       },
       {
         path: 'docs',
@@ -330,6 +333,7 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
         detachedCommit: null,
         branch: 'atlas/',
         included: false,
+        reason: null,
       },
     ])
   })
