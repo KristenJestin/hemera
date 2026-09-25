@@ -451,6 +451,10 @@
      so nothing inside it reflows on the way. */
   --spacing-mission-panel: 45cqw;
 
+  /* The list of a build's tasks beside the stage of the one chosen (lot 22, D10-12): wide enough
+     for a label, a title of a few words and the time at the end of a row, on one line. */
+  --spacing-build-list: 20rem;
+
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);

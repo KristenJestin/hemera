@@ -135,7 +135,7 @@ const SURFACES = {
     'service-list',
   ],
   // Lot 22: the build view, the stage of a task, and the blocks that hand a task to the user.
-  build: ['task-stage', 'yours-block', 'blocker-block'],
+  build: ['build-view', 'task-stage', 'yours-block', 'blocker-block'],
 }
 
 /**
@@ -235,6 +235,23 @@ const NAMED_STATES = new Map([
   ],
   // Lot 22: a task of a build in each of the states its stage draws, and the two blocks that hand
   // a task to the user, in the view and as a banner, answered and walked.
+  [
+    'build/build-view',
+    [
+      'GettingReady',
+      'Building',
+      'Yours',
+      'ThreeRedTries',
+      'Blocked',
+      'Paused',
+      'FinalChecks',
+      'FinalChecksRed',
+      'ReadyToAccept',
+      'Accepted',
+      'Stopped',
+      'Keyboard',
+    ],
+  ],
   ['build/task-stage', ['Working', 'Checking', 'Done', 'DoneNotVerified', 'Waiting', 'Skipped']],
   [
     'build/yours-block',
@@ -523,6 +540,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'CommandDialog',
       'RepositoryDialog',
       // Lot 22: the build view of a `build` Session and its blocks.
+      'BuildView',
       'TaskStage',
       'YoursBlock',
       'BlockerBlock',
@@ -558,6 +576,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'COMMAND_TYPE_LABELS',
       'EMPTY_DRAFT',
       'EVERYWHERE_PREFIX',
+      // Lot 22: the entry of the build view's list that puts the final checks on its stage.
+      'FINAL_CHECKS_ENTRY',
       'HOME_ENTRY',
       'JOURNAL_ENTRY',
       'NESTED_RADIUS',

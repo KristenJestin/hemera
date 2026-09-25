@@ -337,6 +337,9 @@ export interface TaskStageProps {
 export function TaskStage({ task, now, attention }: TaskStageProps): ReactNode {
   const heading = useId()
   const human = task.executor === 'human'
+  // A human task that is the user's now is said whole by the block on top of it — what it
+  // delivers, how it is checked, and that the agent does not do it — so the stage says it once.
+  const saidOnTop = human && task.state === 'yours' && attention !== undefined
   return (
     <section aria-labelledby={heading} className={STAGE}>
       <header className={HEAD}>
@@ -367,35 +370,39 @@ export function TaskStage({ task, now, attention }: TaskStageProps): ReactNode {
         </div>
       )}
 
-      <div className={SECTION}>
-        <h3 className={SECTION_TITLE}>What the Spec asks</h3>
-        <dl className={DEFINITION}>
-          {[
-            ['Result', task.result],
-            ['Criteria', task.criteria],
-            ['Depends on', task.dependsOn.length === 0 ? 'Nothing' : task.dependsOn.join(', ')],
-            ['Done by', human ? 'You' : 'The agent'],
-          ].map(([term, value]) => (
-            <div key={term} className={PAIR}>
-              <dt className={TERM}>{term}</dt>
-              <dd className={VALUE}>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
+      {!saidOnTop && (
+        <>
+          <div className={SECTION}>
+            <h3 className={SECTION_TITLE}>What the Spec asks</h3>
+            <dl className={DEFINITION}>
+              {[
+                ['Result', task.result],
+                ['Criteria', task.criteria],
+                ['Depends on', task.dependsOn.length === 0 ? 'Nothing' : task.dependsOn.join(', ')],
+                ['Done by', human ? 'You' : 'The agent'],
+              ].map(([term, value]) => (
+                <div key={term} className={PAIR}>
+                  <dt className={TERM}>{term}</dt>
+                  <dd className={VALUE}>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
 
-      <div className={SECTION}>
-        <h3 className={SECTION_TITLE}>Tries</h3>
-        {task.attempts.length === 0 ? (
-          <p className={NOTE}>
-            {human
-              ? 'Yours to do: the agent does not work on it and no check runs.'
-              : 'Not started yet.'}
-          </p>
-        ) : (
-          <BuildTries attempts={task.attempts} now={now} of={task.label} />
-        )}
-      </div>
+          <div className={SECTION}>
+            <h3 className={SECTION_TITLE}>Tries</h3>
+            {task.attempts.length === 0 ? (
+              <p className={NOTE}>
+                {human
+                  ? 'Yours to do: the agent does not work on it and no check runs.'
+                  : 'Not started yet.'}
+              </p>
+            ) : (
+              <BuildTries attempts={task.attempts} now={now} of={task.label} />
+            )}
+          </div>
+        </>
+      )}
     </section>
   )
 }
