@@ -29,6 +29,7 @@ import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { discoveryLayer } from '#engine/agents/discovery.ts'
 import type { FakeAgent } from '#engine/agents/fake.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { projectChecksLayer } from '#engine/build/checks.ts'
 import { AgentNotices } from '#engine/agents/notices.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
@@ -190,7 +191,10 @@ async function openOver(
     Layer.provide(runtime),
   )
 
-  const services = Layer.mergeAll(runtime, workspaces)
+  // The Project's checks, over the very catalogue the tools run (D10-06).
+  const checks = projectChecksLayer.pipe(Layer.provide(runtime))
+
+  const services = Layer.mergeAll(runtime, workspaces, checks)
 
   mkdirSync(dataFolder, { recursive: true })
   const scope = Effect.runSync(Scope.make())
