@@ -82,6 +82,7 @@ const PLAN: PlanRepositoryLine[] = [
     detachedCommit: null,
     branch: 'atlas/',
     included: true,
+    reason: null,
   },
   {
     path: './sources/web',
@@ -91,6 +92,7 @@ const PLAN: PlanRepositoryLine[] = [
     detachedCommit: null,
     branch: 'atlas/',
     included: true,
+    reason: null,
   },
 ]
 

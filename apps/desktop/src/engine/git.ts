@@ -62,8 +62,11 @@ export interface GitHead {
   readonly branch: string | null
   /** The commit `HEAD` is on. */
   readonly commit: string
-  /** That commit as Git abbreviates it: the one hash the creation dialog ever shows. */
-  readonly short: string
+  /**
+   * That commit as Git abbreviates it: the one hash the creation dialog ever shows, and null
+   * where the branch it is on names it already and no hash is read at all.
+   */
+  readonly short: string | null
 }
 
 type Refusal = GitError | GitUnavailableError
@@ -113,9 +116,11 @@ export interface GitService {
   readonly status: (cwd: string) => Effect.Effect<GitStatus, Refusal>
   /**
    * What `HEAD` is on, read for the base the creation dialog proposes: the branch it is on, or
-   * the commit it is on when it is on none (D8-04).
+   * the commit it is on when it is on none (D8-04). A repository with no commit yet answers
+   * null, which is an answer and not a refusal: Git refusing to read `HEAD` at all stays one,
+   * and the plan shows it.
    */
-  readonly head: (cwd: string) => Effect.Effect<GitHead, Refusal>
+  readonly head: (cwd: string) => Effect.Effect<GitHead | null, Refusal>
   /** The repository's local branches, in Git's own order: what a base is chosen from (D8-04). */
   readonly localBranches: (cwd: string) => Effect.Effect<readonly string[], Refusal>
   /**
@@ -202,22 +207,37 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
         Effect.map(statusOf),
       ),
     // `--abbrev-ref` answers `HEAD` itself when it is on no branch: a detached commit, which is
-    // an answer here and not a refusal. A repository with no commit yet refuses both reads, and
-    // the plan takes that for what it is: nothing to start a base from.
+    // an answer here and not a refusal. A repository with no commit yet refuses every read of
+    // `HEAD`, and only the branch a commit will land on is left to name: nothing to start a base
+    // from is an answer, where Git refusing to read `HEAD` at all is a refusal (D8-04).
     head: (cwd) =>
       Effect.gen(function* () {
         const named = yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--abbrev-ref', 'HEAD'])
         const commit = yield* run(cwd, ['--no-optional-locks', 'rev-parse', 'HEAD'])
-        // Git's own abbreviation, asked of Git: the length depends on the repository, and a
-        // prefix cut by hand would be a hash that reads like a name (D8-04).
-        const short = yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--short', 'HEAD'])
         const branch = named.trim()
+        const detached = branch === '' || branch === 'HEAD'
+        // Git's own abbreviation, asked of Git, and only where a hash is shown at all: the length
+        // depends on the repository, and a prefix cut by hand would be a hash that reads like a
+        // name (D8-04).
+        const short = detached
+          ? yield* run(cwd, ['--no-optional-locks', 'rev-parse', '--short', 'HEAD'])
+          : null
         return {
-          branch: branch === '' || branch === 'HEAD' ? null : branch,
+          branch: detached ? null : branch,
           commit: commit.trim(),
-          short: short.trim(),
+          short: short === null ? null : short.trim(),
         } satisfies GitHead
-      }),
+      }).pipe(
+        // The branch `HEAD` names is what a repository with no commit yet has to show, and it is
+        // the only read such a repository answers: a `symbolic-ref` that fails is Git refusing
+        // the read, and its own refusal is the one the plan keeps.
+        Effect.catchTag('GitError', (refusal) =>
+          run(cwd, ['--no-optional-locks', 'symbolic-ref', '--short', 'HEAD']).pipe(
+            Effect.as(null),
+            Effect.catchTag('GitError', () => Effect.fail(refusal)),
+          ),
+        ),
+      ),
     // The refs as they are stored: `branch --list` prints a line naming a detached commit, which
     // Git writes in the machine's language, and nothing in Hemera reads a sentence Git translates.
     localBranches: (cwd) =>

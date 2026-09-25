@@ -23,6 +23,7 @@ const API: PlanRepositoryLine = {
   detachedCommit: null,
   branch: 'hemera/HEM-7-login-form',
   included: true,
+  reason: null,
 }
 
 const FRONT: PlanRepositoryLine = {
@@ -33,6 +34,7 @@ const FRONT: PlanRepositoryLine = {
   detachedCommit: null,
   branch: 'hemera/HEM-7-login-form',
   included: true,
+  reason: null,
 }
 
 /** A location the Project declares where `main` holds no repository. */
@@ -44,6 +46,7 @@ const DOCS: PlanRepositoryLine = {
   detachedCommit: null,
   branch: 'hemera/HEM-7-login-form',
   included: false,
+  reason: null,
 }
 
 /**
@@ -58,6 +61,7 @@ const DETACHED: PlanRepositoryLine = {
   detachedCommit: '4f2c9a1',
   branch: 'hemera/HEM-7-login-form',
   included: true,
+  reason: null,
 }
 
 /** A repository with nothing committed yet: it is in `main`, and has no base to start from. */
@@ -69,6 +73,22 @@ const EMPTY: PlanRepositoryLine = {
   detachedCommit: null,
   branch: 'hemera/HEM-7-login-form',
   included: false,
+  reason: null,
+}
+
+/**
+ * A repository Git refused to read: the plan keeps it, not ticked, and says what Git said where a
+ * location that simply holds no repository says nothing of the sort (D8-04).
+ */
+const UNREAD: PlanRepositoryLine = {
+  path: './sources/billing',
+  holdsRepository: false,
+  branches: [],
+  base: null,
+  detachedCommit: null,
+  branch: 'hemera/HEM-7-login-form',
+  included: false,
+  reason: 'Git could not read this repository: fatal: not a git repository: /nowhere/billing',
 }
 
 const TAKEN = 'a branch named hemera/HEM-7-login-form already exists in ./sources/api'
@@ -424,4 +444,23 @@ export const Keyboard: Story = {
       expect(args.onOpenChange).toHaveBeenCalledWith(false)
     })
   },
+}
+
+// Scenario "A repository Git keeps refusing is shown with its reason, not ticked".
+async function aRepositoryGitKeepsRefusingIsShownWithItsReason() {
+  const dialog = within(document.body).getByRole('dialog')
+  // What Git said is what the row says, where a location that holds no repository says so: the two
+  // are read differently, and neither can be ticked (D8-04).
+  const row = rowOf(dialog, './sources/billing')
+  await expect(row.getByText(/Git could not read this repository/)).toBeVisible()
+  await expect(row.queryByText('no repository in main')).toBeNull()
+  await expect(row.getByRole('checkbox')).toHaveAttribute('aria-disabled', 'true')
+  await expect(row.getByRole('checkbox')).not.toBeChecked()
+  await expect(row.queryByRole('textbox')).toBeNull()
+}
+
+/** A repository Git would not read: its refusal is shown, and it is not ticked. */
+export const Unread: Story = {
+  args: { repositories: [API, UNREAD] },
+  play: aRepositoryGitKeepsRefusingIsShownWithItsReason,
 }

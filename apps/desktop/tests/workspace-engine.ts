@@ -60,14 +60,16 @@ export type WorkspaceEngine =
 /**
  * One run of the engine over the suite's folder: its database, and its Workspaces made under
  * `<folder>/workspaces`, as the data folder's own are. `gitProgram` is the `git` asked, which a
- * suite names when it is about a machine that has none, `links` the system a link is made by,
- * which a suite has refuse one, and `notices` the window, which a suite listens as.
+ * suite names when it is about a machine that has none, `git` the machine's own Git — which a
+ * suite replaces only where it needs one read of it to fail — `links` the system a link is made
+ * by, which a suite has refuse one, and `notices` the window, which a suite listens as.
  */
 export function workspaceEngine(
   folder: string,
   gitProgram?: string,
   links: Layer.Layer<Links> = hostLinks,
   notices: Layer.Layer<AgentNotices> = NoNotices,
+  git: Layer.Layer<Git> = gitLayer(gitProgram),
 ) {
   const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
   const processes = processSupervisorLayer.pipe(
@@ -91,7 +93,7 @@ export function workspaceEngine(
     Layer.provide(Layer.succeed(WorkspacesRoot, join(folder, 'workspaces'))),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(journalLayer),
-    Layer.provideMerge(gitLayer(gitProgram)),
+    Layer.provideMerge(git),
     Layer.provideMerge(
       Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
         Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite'))),

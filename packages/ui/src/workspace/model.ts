@@ -68,6 +68,11 @@ export interface PlanRepositoryLine {
   readonly branch: string
   /** Whether the repository is in the Workspace unless the user leaves it out. */
   readonly included: boolean
+  /**
+   * What Git said when it would not read the location, and null when it answered: the dialog
+   * shows it in place of `no repository in main` (D8-04).
+   */
+  readonly reason: string | null
 }
 
 /** What the creation dialog hands over: the name, and the included repositories only. */

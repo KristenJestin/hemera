@@ -33,10 +33,10 @@ import {
   workspaceName,
 } from '@hemera/core'
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
-import { Context, Data, Effect, Layer } from 'effect'
+import { Context, Data, Duration, Effect, Layer, Schedule } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
-import { Git, type GitStatus } from '../git.ts'
+import { Git, type GitHead, type GitStatus } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
 import { Database, DatabaseError, type EngineTransaction } from '../storage/database.ts'
@@ -124,6 +124,44 @@ export interface PlanRepository {
   readonly detachedCommit: string | null
   readonly branch: string
   readonly included: boolean
+  /**
+   * What Git said when it would not read the location, and null when it answered: the plan shows
+   * it in the dialog's own words, and nothing here is a repository to the user (D8-04).
+   */
+  readonly reason: string | null
+}
+
+/**
+ * How long the plan waits before trying a refused read once more: a machine at work, not a
+ * machine that is gone (D8-04).
+ */
+const READ_AGAIN = Duration.millis(250)
+
+/** One location of `main` as the plan read it, Git's refusal kept as its own words (D8-04). */
+interface LocationRead {
+  readonly holdsRepository: boolean
+  readonly head: GitHead | null
+  readonly branches: readonly string[]
+  /** What Git said when it refused to read the location, and null when it answered. */
+  readonly reason: string | null
+}
+
+/** A location with no repository in `main`: nothing to propose, and nothing to say (D8-04). */
+const noRepository: LocationRead = {
+  holdsRepository: false,
+  head: null,
+  branches: [],
+  reason: null,
+}
+
+/** A location Git would not read: nothing to propose, and its own words to show (D8-04). */
+function unread(message: string): LocationRead {
+  return {
+    holdsRepository: false,
+    head: null,
+    branches: [],
+    reason: `Git could not read this repository: ${message}`,
+  }
 }
 
 export interface WorkspacePlan {
@@ -601,29 +639,45 @@ export const workspacesLayer = Layer.effect(
           const repositories = yield* Effect.forEach(declared, (location) =>
             Effect.gen(function* () {
               const folder = join(main, location.relativePath)
-              const holdsRepository = gitAvailable
-                ? yield* git.isRepository(folder).pipe(Effect.orElseSucceed(() => false))
-                : false
-              // What the new branch would start from, read locally and nothing fetched (D8-04).
-              // A repository with no commit yet has nothing to start from, and is left out.
-              const head = holdsRepository
-                ? yield* git.head(folder).pipe(Effect.orElseSucceed(() => null))
-                : null
-              // What the dialog offers as bases: the branches this repository has here, and the
-              // commit when `main` is on none of them.
-              const branches: readonly string[] =
-                head === null
-                  ? []
-                  : yield* git.localBranches(folder).pipe(Effect.orElseSucceed(() => []))
+              // Read once, and once more when Git refuses: what fails under a machine at work is
+              // a moment, and a repository the plan used to lose without a word is the one a
+              // person is left wondering about (D8-04).
+              const read = yield* Effect.gen(function* () {
+                const holdsRepository = gitAvailable ? yield* git.isRepository(folder) : false
+                if (!holdsRepository) {
+                  // A `.git` Git will not read is not a folder without one: where one is there,
+                  // the plan asks Git what it says of the place and keeps its refusal (D8-04).
+                  return existsSync(join(folder, '.git'))
+                    ? yield* git.head(folder).pipe(Effect.as(noRepository))
+                    : noRepository
+                }
+                // What the new branch would start from, read locally and nothing fetched
+                // (D8-04). A repository with no commit yet has nothing to start from, and is
+                // left out — which Git answers, and does not refuse.
+                const head = yield* git.head(folder)
+                // What the dialog offers as bases: the branches this repository has here, and the
+                // commit when `main` is on none of them.
+                const branches: readonly string[] =
+                  head === null ? [] : yield* git.localBranches(folder)
+                return { holdsRepository, head, branches, reason: null }
+              }).pipe(
+                Effect.retry({ times: 1, schedule: Schedule.spaced(READ_AGAIN) }),
+                Effect.catchTags({
+                  GitError: (refusal) => Effect.succeed(unread(refusal.message)),
+                  GitUnavailableError: (refusal) => Effect.succeed(unread(refusal.message)),
+                }),
+              )
               return {
                 relativePath: location.relativePath,
-                holdsRepository,
-                branches,
-                base: head === null ? null : (head.branch ?? head.commit),
+                holdsRepository: read.holdsRepository,
+                branches: read.branches,
+                base: read.head === null ? null : (read.head.branch ?? read.head.commit),
                 // The one hash the dialog shows, and only where no branch name can stand for it.
-                detachedCommit: head !== null && head.branch === null ? head.short : null,
+                detachedCommit:
+                  read.head !== null && read.head.branch === null ? read.head.short : null,
                 branch,
-                included: location.included && head !== null,
+                included: location.included && read.head !== null,
+                reason: read.reason,
               } satisfies PlanRepository
             }),
           )

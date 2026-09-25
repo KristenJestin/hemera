@@ -20,10 +20,11 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 
 import { InvalidRepositoryPathError } from '@hemera/core'
 import { Commands } from '#engine/commands/service.ts'
+import { Git, GitError, gitLayer } from '#engine/git.ts'
 import { Projects } from '#engine/projects.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Preparation } from '#engine/workspaces/preparation.ts'
@@ -133,6 +134,7 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
         detachedCommit: null,
         branch: 'atlas/HEM-7-login-form',
         included: true,
+        reason: null,
       },
       {
         relativePath: FRONT,
@@ -142,6 +144,7 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
         detachedCommit: null,
         branch: 'atlas/HEM-7-login-form',
         included: true,
+        reason: null,
       },
     ])
     expect(seen.plan.path).toBe(join(seen.plan.root, 'login-form'))
@@ -284,7 +287,103 @@ describe('A repository on no branch proposes the commit it is on', () => {
       base: null,
       detachedCommit: null,
       included: false,
+      // Nothing was refused: a repository with no commit yet is not a repository to report.
+      reason: null,
     })
+  })
+})
+
+describe('A repository whose head fails once is still in the plan', () => {
+  it('reads it again, and proposes it as it is, with nothing to report', async () => {
+    // A machine at work: the first read of one repository's head fails, and the second answers.
+    // The repositories are Git's own, and the one read the harness fails is the read the plan has
+    // to survive (D8-04).
+    let reads = 0
+    const flaky = Layer.effect(
+      Git,
+      Effect.map(Git, (real) => ({
+        ...real,
+        head: (cwd: string) => {
+          if (!cwd.endsWith('sources/api')) return real.head(cwd)
+          reads += 1
+          return reads === 1
+            ? Effect.fail(
+                new GitError({
+                  args: ['rev-parse', '--abbrev-ref', 'HEAD'],
+                  cwd,
+                  stderr: 'fatal: a moment of it, and no more',
+                }),
+              )
+            : real.head(cwd)
+        },
+      })),
+    ).pipe(Layer.provide(gitLayer()))
+
+    const plan = await workspaceEngine(
+      folder,
+      undefined,
+      undefined,
+      undefined,
+      flaky,
+    )(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+      }),
+    )
+
+    // It was read twice — the refusal, then the answer — and proposed as it is.
+    expect(reads).toBe(2)
+    expect(plan.repositories[0]).toMatchObject({
+      relativePath: API,
+      holdsRepository: true,
+      branches: ['main'],
+      base: 'main',
+      detachedCommit: null,
+      included: true,
+      reason: null,
+    })
+  })
+})
+
+describe('A repository Git keeps refusing is shown with its reason, not ticked', () => {
+  it('keeps it in the plan with the words Git wrote, and makes no worktree of it', async () => {
+    const billing = join(main, 'sources', 'billing')
+    mkdirSync(billing, { recursive: true })
+    // A `.git` Git cannot make anything of, refused every time it is asked.
+    writeFileSync(join(billing, '.git'), 'gitdir: /nowhere/billing\n')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, './sources/billing'])
+        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const workspace = yield* created(project.id)
+        return { plan, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    const billingRow = seen.plan.repositories[1]!
+    expect(billingRow).toMatchObject({
+      relativePath: './sources/billing',
+      holdsRepository: false,
+      branches: [],
+      base: null,
+      detachedCommit: null,
+      included: false,
+    })
+    // What Git said, in the plan's own words, where a location without a repository says nothing.
+    expect(billingRow.reason).toMatch(/^Git could not read this repository: fatal: /)
+    expect(seen.steps).toEqual([
+      { kind: 'worktree', target: API, state: 'pending', message: null },
+      {
+        kind: 'worktree',
+        target: './sources/billing',
+        state: 'skipped',
+        message: './sources/billing holds no repository in main',
+      },
+    ])
   })
 })
 
@@ -538,9 +637,14 @@ describe('A missing git is a named refusal', () => {
       }),
     )
 
-    // The plan still answers, with nothing to start from.
+    // The plan still answers, with nothing to start from, and says why for each repository.
     expect(seen.plan.gitAvailable).toBe(false)
     expect(seen.plan.repositories.every((one) => one.base === null && !one.included)).toBe(true)
+    expect(
+      seen.plan.repositories.every((one) =>
+        (one.reason ?? '').endsWith('git-that-does-not-exist-hemera was not found on the PATH'),
+      ),
+    ).toBe(true)
     expect(seen.refused).toMatchObject({ check: 'git' })
     expect(seen.refused.message).toBe('git-that-does-not-exist-hemera was not found on the PATH')
     expect(seen.after).toEqual(seen.before)

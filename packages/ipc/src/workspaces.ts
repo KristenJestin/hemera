@@ -54,6 +54,7 @@ export type Workspace = z.infer<typeof workspaceSchema>
  * What a dedicated Workspace would be made of, proposed and editable before anything is written
  * (D8-04): per repository of the Project, whether `main` holds one there, the local branches that
  * repository has and the base chosen from them, then the branch that would be created.
+ * A location Git would not read carries its refusal in `reason`, and nothing else.
  * `gitAvailable` false is a plan with nothing to start from, whose creation is refused by name.
  */
 export const workspacePlanSchema = z.object({
@@ -71,6 +72,7 @@ export const workspacePlanSchema = z.object({
         detachedCommit: z.string().nullable(),
         branch: z.string(),
         included: z.boolean(),
+        reason: z.string().nullable(),
       }),
     ),
   ),
