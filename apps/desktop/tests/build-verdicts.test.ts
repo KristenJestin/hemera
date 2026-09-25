@@ -1,6 +1,6 @@
 /**
  * The build's part of the checks: when a story's checks run, and a task no check judges (design
- * D10-06, D10-07; L7).
+ * D10-06, D10-07).
  *
  * Every suite is named after the scenario of `Spec · build-checks` it covers — the part the loop
  * owns; running a check is the checks' own layer's, scripted here — and runs the whole engine on the
@@ -94,7 +94,7 @@ describe("A story's checks run once its tasks are done", () => {
     const told = handed.find((text) => text.includes('The checks of the story "Export"'))
     expect(told).toContain('attempt 1 was red')
     expect(told).toContain('export.e2e.ts: 1 failed')
-    // The turn that carried them over, they ran again (L7).
+    // The turn that carried them over, they ran again (D10-07).
     const [exportStory, report] = seen.after.stories
     expect(exportStory?.attempts.map((attempt) => attempt.result)).toEqual(['red', 'green'])
     expect(report?.attempts.map((attempt) => attempt.result)).toEqual(['green'])

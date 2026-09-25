@@ -1,6 +1,6 @@
 /**
  * Hemera owns the tasks' states and hands the agent the whole ready set (design D10-03, D10-04,
- * D10-07, D10-08; L1, L6).
+ * D10-07, D10-08).
  *
  * Every suite is named after the scenario of `Spec · build-tasks` it covers, and runs the whole
  * engine on the fake agent, driven by deliveries, with the Project's checks scripted where a

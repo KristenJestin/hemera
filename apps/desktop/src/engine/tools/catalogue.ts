@@ -1222,7 +1222,7 @@ export const toolCatalogueLayer: Layer.Layer<
         // Measured around the tool itself, question to the human included: what the Journal
         // says a call took is how long the agent waited for it. A build's own rule comes first: a
         // paused build starts nothing new, and the first call after a delivery handed tasks is
-        // what starts them (L3, L8).
+        // what starts them (D10-04, D10-09).
         const measured = Effect.gen(function* () {
           // A monotonic clock, to the microsecond: a read inside the root takes less than a
           // millisecond, and a call recorded as taking none is a call that says nothing of itself.

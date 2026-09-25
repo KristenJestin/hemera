@@ -5,7 +5,7 @@ import { T2_THREE_RED, T4_YOURS } from './build-fixtures.ts'
 import { YoursBlock } from './yours-block.tsx'
 
 /**
- * A task that is the user's (D10-08, L6): the human task of the build, or the agent's task that
+ * A task that is the user's (D10-08, D10-03): the human task of the build, or the agent's task that
  * came back after three red tries. In the build view it says what is asked, or the three
  * failures; above the chat's composer it says it on one line. Both answer the same way: Done, or
  * Skip with a reason — and, when tasks depend on it, whether they go on without it.
@@ -98,7 +98,7 @@ export const BannerThreeRedTries: Story = {
 
 /**
  * Skip asked: a reason is required, and the tasks that depend on it wait unless the box is
- * ticked (L6). Skipped with both, the answer carries both.
+ * ticked (D10-03). Skipped with both, the answer carries both.
  */
 export const Skipping: Story = {
   args: { task: T2_THREE_RED, dependants: ['T4'] },

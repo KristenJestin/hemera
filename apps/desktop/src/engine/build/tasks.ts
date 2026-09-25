@@ -56,7 +56,7 @@ export type FileRow = typeof buildAttemptFiles.$inferSelect
 export type ResultRow = typeof buildCheckResults.$inferSelect
 export type BlockerRow = typeof buildBlockers.$inferSelect
 
-/** Why a build is stopped when its revision was replaced before its first task started (L3). */
+/** Why a build is stopped when its revision was replaced before its first task started (D10-04). */
 export const OBSOLETE = 'The Spec was reworked before the build started.'
 
 /**
@@ -234,16 +234,17 @@ export function attemptsOn(rows: BuildRows, attempt: AttemptRow): AttemptRow[] {
 }
 
 /**
- * Whether a red story or build attempt waits for the user (L7): every third red one in a row, as a
- * task's third red attempt comes back to them. Resume runs its checks again.
+ * Whether a red story or build attempt waits for the user (D10-07): every third red one in a row,
+ * as a task's third red attempt comes back to them. Resume runs its checks again.
  */
 export function waitsForUser(attempt: AttemptRow): boolean {
   return resultOf(attempt) === 'red' && attempt.number % 3 === 0
 }
 
 /**
- * The red story and build attempts still to address (L7): the last attempt on each subject, when it
- * ended red and does not wait for the user. A later attempt running on the same subject replaces it.
+ * The red story and build attempts still to address (D10-07): the last attempt on each subject,
+ * when it ended red and does not wait for the user. A later attempt running on the same subject
+ * replaces it.
  */
 export function pendingFailures(rows: BuildRows): AttemptRow[] {
   const lasts = new Map<string, AttemptRow>()
@@ -482,8 +483,8 @@ export function changesFor(rows: BuildRows, attempt: AttemptRow) {
 }
 
 /**
- * Why a Spec already has its one build, in words a refusal ends with, or null when it has none
- * (L10): a build that is not stopped — paused, verifying or accepted included — or a launch that
+ * Why a Spec already has its one build, in words a refusal ends with, or null when it has none:
+ * a build that is not stopped — paused, verifying or accepted included — or a launch that
  * waits or starts. Read where the caller reads, so a launch reads it in the transaction that writes
  * it: two requests at once never both find the slot free.
  */

@@ -10,14 +10,14 @@ import { type BuildTaskView, TRIES, placeLabel } from './model.ts'
 import { tryLabel } from './times.ts'
 
 /**
- * A task that is the user's (D10-08, L6): a human task that became ready, or an agent's task
+ * A task that is the user's (D10-08, D10-03): a human task that became ready, or an agent's task
  * whose checks were red three times (D10-07). The build does not wait on it — the other ready
  * tasks go on — but the task and what depends on it do, until the user answers.
  *
  * Two answers. "Done" says the user did it: a human task done by hand, or the agent's task the
  * user finished in the Workspace. "Skip" asks why, and — when other tasks depend on it — whether
  * they may go on without it; left unticked, they wait, and the build cannot finish without them
- * (L6). The reason is kept with the build: a skipped task is never hidden.
+ * (D10-03). The reason is kept with the build: a skipped task is never hidden.
  *
  * Drawn two ways. In the build view, the block says what is asked — the result and how it is
  * checked, or the three failures — and offers both answers. Above the composer of the chat, the
@@ -57,7 +57,7 @@ export interface YoursBlockProps {
   dependants: readonly string[]
   /** The user did it. */
   onDone: () => void
-  /** The user skips it, saying why, and whether its dependants go on (L6). */
+  /** The user skips it, saying why, and whether its dependants go on (D10-03). */
   onSkip: (reason: string, unblock: boolean) => void
   /** Shows the task in the build view; the banner offers it when given. */
   onOpen?: (() => void) | undefined
@@ -185,7 +185,7 @@ interface SkipDialogProps {
   onSkip: (reason: string, unblock: boolean) => void
 }
 
-/** Why a task is skipped, and whether what depends on it goes on (L6). */
+/** Why a task is skipped, and whether what depends on it goes on (D10-03). */
 function SkipDialog({ open, onOpenChange, label, dependants, onSkip }: SkipDialogProps): ReactNode {
   const [reason, setReason] = useState('')
   const [unblock, setUnblock] = useState(false)

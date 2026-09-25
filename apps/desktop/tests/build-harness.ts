@@ -116,7 +116,7 @@ export const THREE: readonly TaskDraft[] = [
 /**
  * A `ready` Spec of a Project on a real `main` — `sources/api` unless other locations are named,
  * each a repository with one commit —
- * with the tasks given, in that order: labelled `T1…Tn` by it (L1). Written the way the product
+ * with the tasks given, in that order: labelled `T1…Tn` by it. Written the way the product
  * writes one: its writer's agent shapes, plans, decomposes and attests, and the human freezes it.
  */
 export const aReadySpec = (

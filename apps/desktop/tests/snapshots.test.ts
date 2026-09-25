@@ -1,5 +1,5 @@
 /**
- * The snapshots of a build, taken with the machine's own `git` (design D10-05, L11).
+ * The snapshots of a build, taken with the machine's own `git` (design D10-05).
  *
  * Each suite is named after the scenario of the Spec it covers, or after what it proves. Every
  * repository is made for the suite under the temporary directory, and removed after it.

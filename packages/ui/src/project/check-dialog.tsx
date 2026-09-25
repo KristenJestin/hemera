@@ -10,20 +10,20 @@ import type { CheckLine, CheckWhen, CommandLine, RepositoryLine } from './model.
 import { repositoryNamesOf } from './naming.ts'
 
 /**
- * The dialog a check of the build is added or edited in (D10-06, L4, L5).
+ * The dialog a check of the build is added or edited in (D10-06).
  *
  * What it runs: a command of the catalogue, picked from the list — its line, its folder and its
  * systems are the catalogue's — or a line of the user's. Where: "Where the command runs" for a
- * command, which is the catalogue's own folder, or "Workspace root" for a line (L5); one of the
+ * command, which is the catalogue's own folder, or "Workspace root" for a line (D10-06); one of the
  * Project's repositories; or each repository the task changed. When: after each task, after each
  * story once its tasks are done, or once at the end.
  *
  * Two things are optional and each says how it is read. An expected result is a pattern and a
  * minimum: the first number the pattern captures is compared, and the check is green only when it
- * exited 0 and the number is at least the minimum (L4). A files filter makes the line's `{files}`
- * the files the task changed that match it, so only the tests the agent wrote run; when none
- * match, the check is skipped. Every refusal is said under the field it is about, and nothing is
- * written until Save.
+ * exited 0 and the number is at least the minimum (D10-06). A files filter makes the line's
+ * `{files}` the files the task changed that match it, so only the tests the agent wrote run; when
+ * none match, the check is skipped. Every refusal is said under the field it is about, and nothing
+ * is written until Save.
  */
 
 const FORM = 'flex flex-col gap-4'
@@ -65,7 +65,7 @@ function baseOf(check: CheckLine | null): string {
   return check.repository ?? ROOT
 }
 
-/** Where a check runs, in words (L5): the root is the command's own place for a command. */
+/** Where a check runs, in words (D10-06): the root is the command's own place for a command. */
 export function whereLabel(
   check: Pick<CheckLine, 'where' | 'repository' | 'commandId'>,
   repositories: readonly RepositoryLine[],

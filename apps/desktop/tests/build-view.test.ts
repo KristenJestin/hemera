@@ -112,7 +112,7 @@ describe('Accept ends the build', () => {
     expect(seen.after).toEqual(seen.before)
     expect(seen.before.status).toBe('?? export.ts')
     expect(seen.file).toBe('export {}\n')
-    // The evidence of T1 is its diff, copied from its two snapshots (L11).
+    // The evidence of T1 is its diff, copied from its two snapshots (D10-05).
     expect(seen.accepted.tasks[0]?.attempts[0]?.files).toEqual([
       { repository: 'sources/api', path: 'export.ts', status: 'A', added: 1, removed: 0 },
     ])

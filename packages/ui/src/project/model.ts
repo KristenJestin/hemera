@@ -126,7 +126,7 @@ export type CheckWhere = 'root' | 'repository' | 'changed'
 export type CheckWhen = 'task' | 'story' | 'end'
 
 /**
- * A number a check's output has to show (D10-06, L4): the first capture of `pattern`, read as a
+ * A number a check's output has to show (D10-06): the first capture of `pattern`, read as a
  * number, must be at least `minimum` — and the check must still exit 0.
  */
 export interface CheckExpect {

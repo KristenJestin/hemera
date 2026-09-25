@@ -1070,10 +1070,10 @@ export const buildLaunches = sqliteTable(
  * `repository` as the Project declares it, set then and only then — or each repository whose
  * task diff is not empty; `when` is after each task, after each story, or at the end.
  *
- * The expected result is `expect_pattern` and `expect_minimum`, both or neither: the first
- * capture of the pattern in the output, read as a number, must be at least the minimum, on top of
- * a zero exit code (L4). `files` is the glob `{files}` is expanded with, null when the line takes
- * no files. `where` and `when` are words SQL reserves: a raw query quotes them.
+ * The expected result is `expect_pattern` and `expect_minimum`, both or neither: the first capture
+ * of the pattern in the output, read as a number, must be at least the minimum, on top of a zero
+ * exit code (D10-06). `files` is the glob `{files}` is expanded with, null when the line takes no
+ * files. `where` and `when` are words SQL reserves: a raw query quotes them.
  */
 export const projectChecks = sqliteTable(
   'project_checks',
@@ -1123,12 +1123,12 @@ export const projectChecks = sqliteTable(
  * is an update of this row with its time, which is how a new agent after a crash knows what is
  * done. `task_id` is the `spec_tasks` row it builds and has no foreign key: the revision is
  * frozen, and a Spec edited or reworked later must never cascade into a build's evidence. `label`
- * is `T1…Tn` by rank in the revision (L1), the name the agent and the user call it by, so it is
+ * is `T1…Tn` by rank in the revision, the name the agent and the user call it by, so it is
  * unique in its Session; `rank` is the task's own, copied.
  *
  * `handed_at` is when a delivery first handed it to the agent, `started_at` when it went
- * `in_progress` (L3), `finished_at` the last `task_finished`, `ended_at` when it was done,
- * skipped or given to the user. `skip_reason` and `skip_unblocks` are the user's skip (L6): its
+ * `in_progress` (D10-04), `finished_at` the last `task_finished`, `ended_at` when it was done,
+ * skipped or given to the user. `skip_reason` and `skip_unblocks` are the user's skip (D10-03): its
  * reason, and whether its dependants may go on as if it were done (D10-03).
  */
 export const buildTasks = sqliteTable(
@@ -1170,7 +1170,7 @@ export const buildTasks = sqliteTable(
  *
  * `result` is null while the attempt runs, then green, red, or unverified when there was no check
  * to run. `told_at` is when its failures were handed to the agent, so that a red attempt is told
- * once and its checks run again after the turn that carried them (L7).
+ * once and its checks run again after the turn that carried them (D10-07).
  */
 export const buildAttempts = sqliteTable(
   'build_attempts',
@@ -1214,7 +1214,7 @@ export const buildAttempts = sqliteTable(
 /**
  * The snapshot of each repository of the Workspace at an attempt's start and end (D10-05).
  *
- * A tree written by Git with no commit and no ref (L11): `start_tree` when the attempt started,
+ * A tree written by Git with no commit and no ref (D10-05): `start_tree` when the attempt started,
  * `end_tree` at `task_finished`, null until then. `repository` is the repository's path relative
  * to the Workspace root, `''` for one at the root itself.
  */
@@ -1232,7 +1232,7 @@ export const buildAttemptTrees = sqliteTable(
 )
 
 /**
- * The files an attempt changed, per repository, copied from Git when the attempt ends (L11).
+ * The files an attempt changed, per repository, copied from Git when the attempt ends (D10-05).
  *
  * Copied rather than read from the two trees each time, because a tree nothing refers to is one
  * Git's garbage collection may prune: the evidence has to stay readable after that. `status` is
@@ -1260,9 +1260,9 @@ export const buildAttemptFiles = sqliteTable(
  * What ran is copied — the check's name, where it ran (`''` for the Workspace root, or the
  * repository's path), the line as run once `{files}` was expanded — so a check edited or removed
  * later leaves the evidence as it was: `check_id` is then set to null. `run_id` is the command's
- * run in the Session's activity (L12), whose whole output stays there; `output_tail` is its last
+ * run in the Session's activity (D10-06), whose whole output stays there; `output_tail` is its last
  * lines, what the agent and the view are shown. `value` is the number the expected result read,
- * `detail` why a red one is red (`64.2 < 70`, `exited with 1`, L4).
+ * `detail` why a red one is red (`64.2 < 70`, `exited with 1`, D10-06).
  */
 export const buildCheckResults = sqliteTable(
   'build_check_results',

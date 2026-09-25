@@ -80,7 +80,9 @@ const TESTS_RED = check('c-tests-2', 'unit tests', 'red', {
   ].join('\n'),
 })
 
-/** A coverage under its minimum: the check exits 0, and the number it printed is too low (L4). */
+/**
+ * A coverage under its minimum: the check exits 0, and the number it printed is too low (D10-06).
+ */
 const COVERAGE_RED = check('c-coverage-2', 'coverage', 'red', {
   place: FRONT,
   line: 'pnpm vitest run --coverage',

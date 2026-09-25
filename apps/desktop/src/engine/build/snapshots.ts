@@ -1,6 +1,6 @@
 /**
  * The snapshots a build keeps of each repository, and the files changed between two of them
- * (design D10-05, L11).
+ * (design D10-05).
  *
  * A snapshot is a Git tree and nothing more: the working tree added whole to an index of
  * Hemera's own, then written. No commit, no ref, no change of branch, and the user's index is
@@ -11,7 +11,7 @@
  * snapshot ends.
  *
  * The tree has no ref, so Git's garbage collection may prune it one day: that is why the files an
- * attempt changed are copied into the database when it ends (L11), from `changedFiles`.
+ * attempt changed are copied into the database when it ends (D10-05), from `changedFiles`.
  *
  * Through `engine/git.ts`, never inside a transaction (AGENTS.md, "Data and migrations"): a use
  * case takes its snapshot, then writes the row that names it.
@@ -35,7 +35,7 @@ export class SnapshotFolderError extends Data.TaggedError('SnapshotFolderError')
 }
 
 /**
- * One file changed between two snapshots, as the evidence keeps it (D10-05, L11).
+ * One file changed between two snapshots, as the evidence keeps it (D10-05).
  *
  * `status` is Git's letter — `A` added, `M` modified, `D` deleted, `R` renamed, `T` its type
  * changed — and a renamed file is named by its new path. `added` and `removed` count lines, and

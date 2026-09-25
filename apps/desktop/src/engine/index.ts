@@ -424,7 +424,7 @@ if (process.parentPort !== undefined) {
           // What the last engine left going is not going any more: its runs are ended and its
           // steps wait for a resume (D8-05, D6-12).
           yield* Effect.provide(recovered, context)
-          // The builds a stopped engine left: their checks run again, their agents resume (L9).
+          // The builds a stopped engine left: their checks run again, their agents resume (D10-09).
           yield* Effect.provide(recoveredBuilds, context)
 
           port.on('message', (event) => {

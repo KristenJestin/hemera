@@ -10,7 +10,7 @@
  * a brief folded in the thread; the others are a line of Hemera's.
  *
  * What a delivery hands is marked as it goes out (`handing`): the agent's first tool call inside
- * that very delivery starts the tasks it holds (L3). It counts as given once the agent took it
+ * that very delivery starts the tasks it holds (D10-04). It counts as given once the agent took it
  * (`taken`), and a delivery the agent did not take is unmarked again (`missed`) for the next safe
  * point.
  */
@@ -61,7 +61,9 @@ export interface BuildDelivery {
   readonly handed: readonly string[]
   /** The attempts whose failures it tells. */
   readonly told: readonly string[]
-  /** The story and build attempts whose checks run again once the turn carrying them ends (L7). */
+  /**
+   * The story and build attempts whose checks run again once the turn carrying them ends (D10-07).
+   */
   readonly retold: readonly string[]
   /** When it was composed: the mark `handing` writes, which `missed` takes back. */
   readonly stamp: string
@@ -157,7 +159,7 @@ function listed(words: readonly string[]): string {
 /**
  * What waits for a build Session's agent, or null when nothing does: a build that is closed,
  * paused, or has nothing new to hand. `resumeDue` says the agent is to be handed the resume brief —
- * after a Resume or a restart, or because its own session holds no brief (L9).
+ * after a Resume or a restart, or because its own session holds no brief (D10-09).
  */
 export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery | null {
   const { phase } = rows
@@ -170,7 +172,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
 
   if (phase === 'prepare') {
     // Until the note exists, the `prepare` brief is what an agent starting over is handed again:
-    // it is the whole of what a resume in `prepare` has to say (L2).
+    // it is the whole of what a resume in `prepare` has to say (D10-02).
     if (!resumeDue && rows.briefed.has(briefPath('prepare'))) return null
     return {
       ...base,
@@ -288,7 +290,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
 /**
  * Marks what a delivery hands as it goes out: the tasks handed for the first time, and the attempts
  * whose failures it tells. Written before the agent reads it, because its first tool call inside
- * this very delivery is what starts those tasks (L3).
+ * this very delivery is what starts those tasks (D10-04).
  */
 export function handing(transaction: EngineTransaction, delivery: BuildDelivery) {
   return Effect.gen(function* () {

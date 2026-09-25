@@ -410,7 +410,7 @@ const TAIL_LINES = 60
 /** And at most this many characters of them, a line being as long as a program cares to print. */
 const TAIL_CHARACTERS = 8 * 1024
 
-/** The last lines of an output, bounded; its whole stays on the run (L12). */
+/** The last lines of an output, bounded; its whole stays on the run (D10-06). */
 function tailOf(output: string): string {
   const lines = output.replace(/\n$/, '').split('\n').slice(-TAIL_LINES).join('\n')
   return lines.length > TAIL_CHARACTERS ? lines.slice(-TAIL_CHARACTERS) : lines
@@ -479,15 +479,15 @@ function unrun(
 /**
  * The Project's checks run for a build (D10-06, D10-07).
  *
- * The checks of the moment asked, in the Project's order, each in every place it runs in:
- * the Workspace root, its one repository, or each repository the work changed. A catalogue
- * command at the root runs where the catalogue puts it — its own base and folder under the
- * Workspace — and anything else runs in its place under the Workspace (L5). Each is a run of the
- * Commands service started by the user for the build Session (L12), so it shows in the Session's
- * activity like any run and keeps its whole output there; it is waited for until it ends, judged
- * by its exit code and the number its expected result reads (L4), and its result is written under
- * the attempt with its `check.ran` Journal line, one transaction per result. The runs themselves
- * are never inside a transaction.
+ * The checks of the moment asked, in the Project's order, each in every place it runs in: the
+ * Workspace root, its one repository, or each repository the work changed. A catalogue command at
+ * the root runs where the catalogue puts it — its own base and folder under the Workspace — and
+ * anything else runs in its place under the Workspace (D10-06). Each is a run of the Commands
+ * service started by the user for the build Session (D10-06), so it shows in the Session's activity
+ * like any run and keeps its whole output there; it is waited for until it ends, judged by its exit
+ * code and the number its expected result reads (D10-06), and its result is written under the
+ * attempt with its `check.ran` Journal line, one transaction per result. The runs themselves are
+ * never inside a transaction.
  */
 export const buildChecksLayer = Layer.effect(
   BuildChecks,
@@ -588,7 +588,7 @@ export const buildChecksLayer = Layer.effect(
                 check.commandId === null
                   ? null
                   : (catalogue.find((one) => one.id === check.commandId) ?? null)
-              // Where it runs (L5): a catalogue command at the root in its own folder, anything
+              // Where it runs (D10-06): a catalogue command at the root in its own folder, anything
               // else in its place, under the Workspace.
               const where =
                 command !== null && check.where === 'root'
@@ -631,7 +631,7 @@ export const buildChecksLayer = Layer.effect(
                 workspaceId: workspace.id,
                 workspaceName: workspace.name,
                 environment,
-                // Hemera runs it, on the user's behalf, never through the agent (L12).
+                // Hemera runs it, on the user's behalf, never through the agent (D10-06).
                 startedBy: 'user',
               })
               const run = yield* ended(request.sessionId, started)

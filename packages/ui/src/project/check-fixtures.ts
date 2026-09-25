@@ -69,7 +69,7 @@ export const PROPOSED: CheckLine[] = [
 /** A type check, after each task, in each repository the task changed. */
 export const TYPECHECK = check('typecheck', {})
 
-/** A coverage minimum on the front, after each story (L4). */
+/** A coverage minimum on the front, after each story (D10-06). */
 export const COVERAGE = check('coverage', {
   commandId: null,
   line: 'pnpm vitest run --coverage',

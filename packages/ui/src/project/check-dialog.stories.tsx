@@ -14,7 +14,7 @@ import {
 } from './check-fixtures.ts'
 
 /**
- * The dialog a check of the build is added or edited in (D10-06, L4, L5), on fixtures: what it
+ * The dialog a check of the build is added or edited in (D10-06), on fixtures: what it
  * runs — a command of the catalogue or a line of the user's — where and when, and the two optional
  * readings, a number its output has to show and the files its `{files}` stands for. The story
  * opens it at once, as a row's pencil or "Add check" would, and holds what the engine answers in
@@ -141,7 +141,7 @@ export const Edit: Story = {
 
 /**
  * A line of the user's that runs only the tests the task wrote: at the Workspace root — a line has
- * no place of its own (L5) — with `{files}` and its filter.
+ * no place of its own (D10-06) — with `{files}` and its filter.
  */
 export const LineWithFiles: Story = {
   args: { check: E2E_WRITTEN },
@@ -153,7 +153,7 @@ export const LineWithFiles: Story = {
   },
 }
 
-/** An expected result asked for: the pattern and the minimum, and how they are read (L4). */
+/** An expected result asked for: the pattern and the minimum, and how they are read (D10-06). */
 export const ExpectedResult: Story = {
   play: async ({ args }) => {
     const inside = await dialog()

@@ -133,7 +133,7 @@ export interface AttemptView {
   readonly files: readonly ChangedFileView[]
 }
 
-/** One contractual task of the build, its definition beside where it stands (D10-04, L1). */
+/** One contractual task of the build, its definition beside where it stands (D10-04). */
 export interface BuildTaskView {
   /** The `build_tasks` row, which the user's actions name. */
   readonly id: string
@@ -267,7 +267,7 @@ export interface BuildAnswer {
   readonly paths: readonly string[]
 }
 
-/** What a paused build answers every new call with (L8). */
+/** What a paused build answers every new call with (D10-09). */
 export const PAUSED = 'the build is paused: nothing new starts until the user resumes it'
 
 /** Why the user stopped a build, as its view says. */
@@ -303,15 +303,15 @@ function working(rows: BuildRows): boolean {
 export interface BuildsService {
   /**
    * Begins a build on the Session a launch just wrote (D10-01, D10-02): `prepare`, one task row per
-   * contractual task of the revision — labelled `T1…Tn` by rank (L1), `waiting` then the first ones
+   * contractual task of the revision — labelled `T1…Tn` by rank, `waiting` then the first ones
    * `ready` or `yours` — and their Journal lines.
    */
   readonly begin: (sessionId: string, snapshot: SpecSnapshot) => Effect.Effect<void, DatabaseError>
   /**
-   * Why a Spec already has its one build (L10), in words a refusal ends with, or null when it has
+   * Why a Spec already has its one build, in words a refusal ends with, or null when it has
    * none: a build that is not stopped — paused, verifying or accepted included — or a launch that
    * waits or starts. A build whose revision the Spec left before its first task started is obsolete
-   * and holds nothing: it is stopped on the way (L3).
+   * and holds nothing: it is stopped on the way (D10-04).
    */
   readonly holder: (specId: string) => Effect.Effect<string | null, DatabaseError>
   /** Hands the build's agent what waits for it, at its next safe point; nothing when paused. */
@@ -331,26 +331,26 @@ export interface BuildsService {
     sessionId: string,
     holdsNone: boolean,
   ) => Effect.Effect<BuildDelivery | null, DatabaseError>
-  /** The delivery goes out: what it hands is marked, before the agent reads it (L3). */
+  /** The delivery goes out: what it hands is marked, before the agent reads it (D10-04). */
   readonly handing: (delivery: BuildDelivery) => Effect.Effect<void, DatabaseError>
   /** The agent took it. */
   readonly taken: (delivery: BuildDelivery) => Effect.Effect<void, DatabaseError>
   /** The agent did not take it: it waits for the next safe point. */
   readonly missed: (delivery: BuildDelivery) => Effect.Effect<void, DatabaseError>
   /**
-   * The turn a delivery was handed in ended (L2, L7): the answer to `prepare` is the approach note,
-   * the end checks run once the `verify` brief was handed, and the checks whose failures it
-   * carried run again.
+   * The turn a delivery was handed in ended (D10-02, D10-07): the answer to `prepare` is the
+   * approach note, the end checks run once the `verify` brief was handed, and the checks whose
+   * failures it carried run again.
    */
   readonly turnEnded: (
     delivery: BuildDelivery,
     turnId: string,
   ) => Effect.Effect<void, DatabaseError>
   /**
-   * One Hemera tool call of a Session, before it runs (L3, L8): a paused build refuses it, a
-   * closed one refuses its build tools, and the first call after a delivery handed tasks starts
-   * them — or finds the build obsolete, and refuses. Any other Session's call runs as it is.
-   * While it runs it is counted, so a Pause stops the turn only once it ended.
+   * One Hemera tool call of a Session, before it runs (D10-04, D10-09): a paused build refuses it,
+   * a closed one refuses its build tools, and the first call after a delivery handed tasks starts
+   * them — or finds the build obsolete, and refuses. Any other Session's call runs as it is. While
+   * it runs it is counted, so a Pause stops the turn only once it ended.
    */
   readonly admitted: <A>(
     sessionId: string,
@@ -361,9 +361,9 @@ export interface BuildsService {
   /** `build_read`, `task_finished`, `task_blocked` (D10-04, D10-13). */
   readonly tool: (sessionId: string, call: BuildCall) => Effect.Effect<BuildAnswer>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
-  /** L8: nothing new starts; the running Hemera call ends, then the turn stops. */
+  /** D10-09: nothing new starts; the running Hemera call ends, then the turn stops. */
   readonly pause: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
-  /** L8, D10-09: the agent is handed the resume brief at once. */
+  /** D10-09: the agent is handed the resume brief at once. */
   readonly resume: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** D10-11: only when `verify` is green and nothing waits for the user. */
   readonly accept: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
@@ -373,7 +373,7 @@ export interface BuildsService {
   readonly taskDone: (buildTaskId: string) => Effect.Effect<BuildView, BuildRefusal>
   /**
    * A task waiting for the user, skipped with its reason; its dependants let go on, or skipped with
-   * it (L6).
+   * it (D10-03).
    */
   readonly taskSkip: (
     buildTaskId: string,
@@ -383,7 +383,7 @@ export interface BuildsService {
   /** A blocker dismissed: its task is ready again, its dependants wait again (D10-08). */
   readonly dismissBlocker: (blockerId: string) => Effect.Effect<BuildView, BuildRefusal>
   /**
-   * At the engine's start (L9): the checks a stopped engine left running run again, and every
+   * At the engine's start (D10-09): the checks a stopped engine left running run again, and every
    * build that is not paused has its agent started and handed the resume brief.
    */
   readonly recover: () => Effect.Effect<void, DatabaseError>
@@ -638,11 +638,11 @@ export const buildsLayer = Layer.effect(
 
     /** The runtime, once it handed itself over. */
     let agent: BuildAgent | null = null
-    /** The builds whose agent is due the resume brief: after a Resume or a restart (L9). */
+    /** The builds whose agent is due the resume brief: after a Resume or a restart (D10-09). */
     const resumeDue = new Set<string>()
     /**
      * The builds paused in this run, as the Pause wrote it: read with the call count in one step,
-     * so a call is either counted before the Pause or refused by it — never neither (L8).
+     * so a call is either counted before the Pause or refused by it — never neither (D10-09).
      */
     const pausedNow = new Set<string>()
     /** The Hemera calls running, per Session, and who waits for them to be over. */
@@ -817,7 +817,7 @@ export const buildsLayer = Layer.effect(
      * What an attempt's checks said (D10-07). A task's: all green, or none, is done; red goes back
      * in progress as a new attempt, whose failures the agent is told at its next safe point; the
      * third red comes back to the user. A story's or the build's: the attempt is recorded, and a
-     * red one is told to the agent, no task changing state (L7).
+     * red one is told to the agent, no task changing state (D10-07).
      */
     const verdict = (sessionId: string, judged: AttemptRow, outcomes: readonly CheckOutcome[]) =>
       Effect.gen(function* () {
@@ -905,7 +905,7 @@ export const buildsLayer = Layer.effect(
         yield* wake(sessionId)
       })
 
-    /** The first Hemera call after a delivery handed tasks starts them (L3, D10-10). */
+    /** The first Hemera call after a delivery handed tasks starts them (D10-04, D10-10). */
     const start = (sessionId: string) =>
       Effect.gen(function* () {
         const before = yield* read(sessionId)
@@ -1027,7 +1027,7 @@ export const buildsLayer = Layer.effect(
           )
         }
         // Read and counted in one step, with nothing yielded in between: a Pause either sees this
-        // call running and waits for it, or this call sees the Pause and is refused (L8).
+        // call running and waits for it, or this call sees the Pause and is refused (D10-09).
         if (row.buildPausedAt !== null || pausedNow.has(sessionId)) return yield* refuse(PAUSED)
         running.set(sessionId, (running.get(sessionId) ?? 0) + 1)
         return yield* Effect.gen(function* () {
@@ -1175,7 +1175,7 @@ export const buildsLayer = Layer.effect(
                   )
                   .pipe(Effect.mapError(failed('recording the end snapshots')))
               }
-              // Copied now, so the evidence outlives the trees Git may prune (L11).
+              // Copied now, so the evidence outlives the trees Git may prune (D10-05).
               if (files.length > 0) {
                 yield* transaction
                   .insert(buildAttemptFiles)
@@ -1375,7 +1375,9 @@ export const buildsLayer = Layer.effect(
       return Effect.succeed(task)
     }
 
-    /** New attempts at the story and end checks that wait for the user: Resume tries again (L7). */
+    /**
+     * New attempts at the story and end checks that wait for the user: Resume tries again (D10-07).
+     */
     const retried = (transaction: EngineTransaction, rows: BuildRows, at: string) =>
       Effect.gen(function* () {
         const jobs: CheckJob[] = []
@@ -1474,7 +1476,7 @@ export const buildsLayer = Layer.effect(
               ACTIVE.includes(phase) &&
               build.revisionId !== (spec[0]?.currentRevisionId ?? build.revisionId)
             if (!obsolete) continue
-            // A build whose revision the Spec left can never begin (L3): stopped, it frees the
+            // A build whose revision the Spec left can never begin (D10-04): stopped, it frees the
             // slot, and it stays readable.
             yield* withDatabase(
               mutate('stopping an obsolete build', (transaction) =>
@@ -1545,8 +1547,8 @@ export const buildsLayer = Layer.effect(
         Effect.gen(function* () {
           const { sessionId } = delivery
           if (delivery.kind === 'prepare') {
-            // The approach note is the agent's answer to the `prepare` brief (L2): what it said in
-            // that turn. An empty answer leaves the build in `prepare`, and Resume asks again.
+            // The approach note is the agent's answer to the `prepare` brief (D10-02): what it said
+            // in that turn. An empty answer leaves the build in `prepare`, and Resume asks again.
             const said = yield* database
               .select({ body: sessionEntries.body })
               .from(sessionEntries)
@@ -1621,7 +1623,7 @@ export const buildsLayer = Layer.effect(
           }
           if (delivery.retold.length === 0) return
           // The turn that carried a story's or the end checks' failures is over: they run again
-          // (L7), each as a new attempt, unless a later one already runs.
+          // (D10-07), each as a new attempt, unless a later one already runs.
           const at = now()
           const jobs = yield* withDatabase(
             mutate('checking the failures again', (transaction) =>
@@ -1672,7 +1674,7 @@ export const buildsLayer = Layer.effect(
               ),
             )
             // The call running now ends as it would have; then the turn stops, unless the build
-            // was resumed meanwhile — the turn going then is the resumed one (L8, D10-09).
+            // was resumed meanwhile — the turn going then is the resumed one (D10-09).
             yield* Effect.forkIn(scope)(
               idle(sessionId).pipe(
                 Effect.andThen(
@@ -1877,7 +1879,7 @@ export const buildsLayer = Layer.effect(
             const rows = yield* read(build.id)
             if (rows === null) continue
             // The checks a stopped engine left running never said anything: what they wrote is
-            // dropped, and they run again (L9).
+            // dropped, and they run again (D10-09).
             const left = rows.attempts.filter((attempt) => {
               if (attempt.result !== null) return false
               // A story's or the build's try runs its checks until it ends; a task's is being
@@ -1925,7 +1927,7 @@ export const buildsLayer = Layer.effect(
   }),
 )
 
-/** What the engine does once at its start, after the launches came back (L9). */
+/** What the engine does once at its start, after the launches came back (D10-09). */
 export const recoveredBuilds = Effect.gen(function* () {
   yield* (yield* Builds).recover()
 })

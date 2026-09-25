@@ -537,7 +537,7 @@ export const launchesLayer = Layer.effect(
       request: (specId, workspaceId) =>
         Effect.gen(function* () {
           const snapshot = yield* readSpec(specId)
-          // One build of a Spec at a time: a paused, verifying or accepted one keeps the slot (L10).
+          // One build of a Spec at a time: a paused, verifying or accepted one keeps the slot.
           const holding = yield* builds.holder(specId)
           if (holding !== null) {
             return yield* Effect.fail(
@@ -581,7 +581,7 @@ export const launchesLayer = Layer.effect(
                   return yield* Effect.fail(new WorkspaceNotReadyError(chosen.name, chosen.state))
                 }
                 // Read again in the transaction that writes the launch: two requests at once never
-                // both find the Spec's one build free (L10).
+                // both find the Spec's one build free.
                 const held = yield* slotHolder(transaction, specId)
                 if (held !== null) {
                   return yield* Effect.fail(

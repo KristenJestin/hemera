@@ -1935,7 +1935,10 @@ export const runtimeLayer = Layer.effect(
       readonly announce: (turnId: string | null) => Effect.Effect<void, AgentRuntimeError>
       readonly taken: Effect.Effect<void, AgentRuntimeError>
       readonly missed: (turnId: string | null) => Effect.Effect<void, AgentRuntimeError>
-      /** What follows once the delivery turn it went out in ended, for the build's parcel (L2, L7). */
+      /**
+       * What follows once the delivery turn it went out in ended, for the build's parcel (D10-02,
+       * D10-07).
+       */
       readonly ended?: (turnId: string) => Effect.Effect<void>
     }
 
@@ -2160,9 +2163,9 @@ export const runtimeLayer = Layer.effect(
      * What a `build` Session's agent is handed (D10-02, D10-03, D10-09): a phase's first brief, and
      * the resume brief, folded in the thread as the `mission_brief` entry; what follows inside a
      * phase — the next ready tasks, the failures to address — a line of Hemera's. What it hands is
-     * marked as it goes out, since the agent's first call inside it is what starts those tasks (L3);
-     * it counts as given once the agent took it. The end of the turn it went out in is what the
-     * build waits for: the approach note, the checks to run again (L2, L7).
+     * marked as it goes out, since the agent's first call inside it is what starts those tasks
+     * (D10-04); it counts as given once the agent took it. The end of the turn it went out in is
+     * what the build waits for: the approach note, the checks to run again (D10-02, D10-07).
      */
     const buildParcel = (sessionId: string, held: Live, delivery: BuildDelivery): Parcel => {
       const correlation = crypto.randomUUID()
@@ -2858,7 +2861,7 @@ export const runtimeLayer = Layer.effect(
 
     // A build is driven by Hemera, never by a message of the user's (D10-02): what waits for its
     // agent is handed at the next safe point, and an agent the pool let go of is started again to
-    // be handed it. A Pause and a Stop stop its turn as the user's Stop does (L8).
+    // be handed it. A Pause and a Stop stop its turn as the user's Stop does (D10-09).
     builds.drivenBy({
       wake: (sessionId) =>
         Effect.sync(() => {

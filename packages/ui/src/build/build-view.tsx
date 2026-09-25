@@ -254,7 +254,7 @@ function Band({ build }: { build: BuildViewData }): ReactNode {
   return null
 }
 
-/** The agent's approach, or the line that waits for it (D10-02, L2). */
+/** The agent's approach, or the line that waits for it (D10-02). */
 function Approach({ build }: { build: BuildViewData }): ReactNode {
   if (build.note === null) {
     return (
@@ -544,7 +544,7 @@ export function BuildView({
   )
 }
 
-/** The final checks of the whole Spec (D10-07, L7): their tries, as a task's are drawn. */
+/** The final checks of the whole Spec (D10-07): their tries, as a task's are drawn. */
 function FinalChecks({ build, now }: { build: BuildViewData; now: string }): ReactNode {
   return (
     <section aria-label="Final checks" className="flex flex-col gap-6">

@@ -114,7 +114,7 @@ export interface GitService {
    *
    * The index is the caller's and never the repository's own: `GIT_INDEX_FILE` points both
    * commands at it. Nothing but objects is written — no commit, no ref, no change of branch
-   * (L11).
+   * (D10-05).
    */
   readonly writeTree: (cwd: string, indexFile: string) => Effect.Effect<string, Refusal>
   /**

@@ -1,6 +1,6 @@
 /**
  * The `build` protocol: `prepare`, `execute` and `verify`, the Spec's status, a pause and a restart
- * (design D10-01, D10-02, D10-09, D10-10; L2, L3, L8, L9, L10).
+ * (design D10-01, D10-02, D10-09, D10-10).
  *
  * Every suite is named after the scenario of `Spec · build-protocol` it covers, and runs the whole
  * engine on the fake agent, which a build drives through deliveries alone: a `ready` Spec of three
@@ -83,12 +83,12 @@ describe('A build prepares before it executes', () => {
       ['T2', 'Write the reader', 'ready'],
       ['T3', 'Wire them', 'waiting'],
     ])
-    // A Hemera call in `prepare` starts nothing: no task was handed yet (L3).
+    // A Hemera call in `prepare` starts nothing: no task was handed yet (D10-04).
     expect(agent.answers.used[0]?.isError).toBe(false)
     expect(seen.before.tasks.every((task) => task.attempts.length === 0)).toBe(true)
     expect(handed[0]).toContain('# Phase: prepare')
     expect(handed[0]).toContain('### T3 · Wire them')
-    // The note is the agent's answer to the `prepare` brief, and `execute` follows (L2).
+    // The note is the agent's answer to the `prepare` brief, and `execute` follows (D10-02).
     expect(seen.after.note).toBe(NOTE)
     expect(seen.spec.spec.status).toBe('ready')
   })
@@ -205,7 +205,7 @@ describe('A restart resumes the build where it stood', () => {
     opened = await openWindow(dataFolder, second.agent)
     const back = await opened.running(
       Effect.gen(function* () {
-        // What the engine does at its start: the launches, then the builds (L9).
+        // What the engine does at its start: the launches, then the builds (D10-09).
         yield* recovered
         yield* recoveredBuilds
         yield* eventually(Effect.succeed(second.handed), (handed) => handed.length > 0)

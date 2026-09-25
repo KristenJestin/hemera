@@ -1,5 +1,5 @@
 /**
- * The Project's checks, and how a build runs them (design D10-06, D10-07, L4, L5, L12).
+ * The Project's checks, and how a build runs them (design D10-06, D10-07).
  *
  * Every suite is named after the scenario of `Spec · build-checks` it covers, or after what it
  * proves, and runs over the whole engine on the fake agent `window.ts` composes: the checks are
@@ -343,7 +343,7 @@ test('A check runs in each repository the task changed', async () => {
     join(main, 'sources', 'api'),
     join(main, 'sources', 'front'),
   ])
-  // Runs of the build Session, started by the user and never by the agent (L12).
+  // Runs of the build Session, started by the user and never by the agent (D10-06).
   expect(seen.runs.map(({ sessionId, startedBy }) => ({ sessionId, startedBy }))).toEqual([
     { sessionId: seen.sessionId, startedBy: 'user' },
     { sessionId: seen.sessionId, startedBy: 'user' },
@@ -502,7 +502,8 @@ test('A catalogue command runs its own line in its own folder', async () => {
     }),
   )
 
-  // At the root, a command runs where the catalogue puts it: its base, under the Workspace (L5).
+  // At the root, a command runs where the catalogue puts it: its base, under the Workspace
+  // (D10-06).
   const api = join(mainOf(), 'sources', 'api')
   expect(
     seen.outcomes.map(({ place, line, verdict, outputTail }) => ({

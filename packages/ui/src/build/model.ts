@@ -38,7 +38,7 @@ export type BuildAttemptResult = 'green' | 'red' | 'unverified'
 /** What one check said: green, red, or skipped when its files filter matched nothing. */
 export type BuildCheckVerdict = 'green' | 'red' | 'skipped'
 
-/** One check run of a try (D10-06, L4). */
+/** One check run of a try (D10-06). */
 export interface BuildCheckView {
   id: string
   /** The check's name, as the Project's settings call it. */
@@ -60,7 +60,7 @@ export interface BuildCheckView {
   ranAt: string
 }
 
-/** One file a try changed, in one repository (D10-05, L11). */
+/** One file a try changed, in one repository (D10-05). */
 export interface BuildFileView {
   /** The repository's path under the Workspace, `''` for a repository at its root. */
   repository: string
@@ -91,7 +91,7 @@ export interface BuildTaskView {
   id: string
   /** The contractual task of the Spec it stands for. */
   taskId: string
-  /** `T1`…`Tn`, by the task's rank in the Spec (L1). */
+  /** `T1`…`Tn`, by the task's rank in the Spec. */
   label: string
   title: string
   /** What is true once it is done. */
@@ -113,7 +113,7 @@ export interface BuildTaskView {
   updatedAt: string
   /** Why the user skipped it. */
   skipReason: string | null
-  /** Whether its dependants were let go on when it was skipped (L6). */
+  /** Whether its dependants were let go on when it was skipped (D10-03). */
   skipUnblocks?: boolean | undefined
   attempts: BuildAttemptView[]
 }
