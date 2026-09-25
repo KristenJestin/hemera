@@ -283,8 +283,10 @@ writes at start-up.
   (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`, `Blocks/Spec`,
   `Blocks/Workspace`, `Blocks/Build`);
   **Surfaces**, one entry per screen (`Surfaces/Session`, `Surfaces/Project/Dialog` when a
-  screen has several parts), never one entry per variant; **Shell**, the window frame. The
-  order of the roots and the alphabetical order inside are forced by `storySort` in
+  screen has several parts), never one entry per variant; **Shell**, the window frame; and,
+  last, **Explorations**, a design question under way drawn in several variants
+  (`Explorations/Session layout`), under `src/explorations/`, exported by nothing, and deleted
+  once the variant chosen is built. The order of the roots and the alphabetical order inside are forced by `storySort` in
   `.storybook/preview`. A story file sits next to its component, `<name>.stories.tsx`; one
   story per state, named after the state (`Empty`, `Loading`, `Error`, `Filled`, `Dense`);
   a surface's first story is `Complete`, everything in place, because it is what the UI gate

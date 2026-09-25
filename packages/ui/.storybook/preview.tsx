@@ -87,7 +87,8 @@ const preview: Preview = {
       context: { include: [['body']], exclude: [['[data-base-ui-focus-guard]']] },
     },
     /**
-     * The sidebar is five roots and nothing else (`AGENTS.md`, "Storybook sidebar, five roots"):
+     * The sidebar is five roots, and a sixth for design explorations under way (`AGENTS.md`,
+     * "Storybook sidebar, five roots"):
      * the roots in the order written here, and the alphabetical order inside them, which
      * `method: 'alphabetical'` is what asks for — without it Storybook keeps whatever order the
      * index was built in for every name this list does not mention.
@@ -108,6 +109,7 @@ const preview: Preview = {
           'Surfaces',
           ['Session', ['Complete']],
           'Shell',
+          'Explorations',
         ],
       },
     },
