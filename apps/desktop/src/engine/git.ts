@@ -1,5 +1,5 @@
 /**
- * The machine's `git`, and the few things Hemera asks of it (design D8-03, D8-15, D8-17).
+ * The machine's `git`, and the few things Hemera asks of it (design D8-03, D8-15, D8-17, D10-05).
  *
  * No library: a JavaScript Git cannot make a worktree, and the user's own `git` is the one whose
  * configuration, hooks and credentials they already trust. It is spawned with its arguments and
@@ -15,6 +15,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { resolve } from 'node:path'
 import { Context, Data, Effect, Layer } from 'effect'
 
 /** What a command may print before it is cut: a status of a large tree is long, not endless. */
@@ -102,6 +103,29 @@ export interface GitService {
    * in a `main` that is one — holds none of its own.
    */
   readonly isRepository: (path: string) => Effect.Effect<boolean, GitUnavailableError>
+  /**
+   * The absolute path of a file of the repository's Git folder, as `rev-parse --git-path` names
+   * it: a linked worktree's `index` is its own, not the main repository's (D10-05).
+   */
+  readonly gitPath: (cwd: string, name: string) => Effect.Effect<string, Refusal>
+  /**
+   * The working tree added whole — what `.gitignore` leaves out left out — to the index file
+   * named, then the tree that index holds written, and its id (D10-05).
+   *
+   * The index is the caller's and never the repository's own: `GIT_INDEX_FILE` points both
+   * commands at it. Nothing but objects is written — no commit, no ref, no change of branch
+   * (L11).
+   */
+  readonly writeTree: (cwd: string, indexFile: string) => Effect.Effect<string, Refusal>
+  /**
+   * What changed between two trees, as `diff-tree -z` prints it with `--numstat` and with
+   * `--name-status`, renames detected in both (D10-05).
+   */
+  readonly diffTrees: (
+    cwd: string,
+    from: string,
+    to: string,
+  ) => Effect.Effect<{ readonly numstat: string; readonly nameStatus: string }, Refusal>
 }
 
 export class Git extends Context.Service<Git, GitService>()('Git') {}
@@ -134,7 +158,9 @@ export function statusOf(printed: string): GitStatus {
 
 /** Git's own `git`, or the program named: a test names one that is not on the `PATH`. */
 export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
-  const run = (cwd: string, args: readonly string[]) =>
+  // `environment` is what a command is given on top of the process's own: the index a snapshot
+  // is written through (D10-05), and nothing else.
+  const run = (cwd: string, args: readonly string[], environment: Record<string, string> = {}) =>
     Effect.callback<string, Refusal>((resume) => {
       execFile(
         program,
@@ -142,7 +168,7 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
         {
           // Nothing may wait on a prompt, and no network is ever asked for: a credential
           // helper that would prompt fails instead (D8-04).
-          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...environment },
           maxBuffer: OUTPUT_LIMIT,
           windowsHide: true,
         },
@@ -187,5 +213,25 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
         Effect.map((printed) => printed.trim() === ''),
         Effect.catchTag('GitError', () => Effect.succeed(false)),
       ),
+    // Relative to the folder asked about in a main repository, absolute in a linked worktree.
+    gitPath: (cwd, name) =>
+      run(cwd, ['rev-parse', '--git-path', name]).pipe(
+        Effect.map((printed) => resolve(cwd, printed.replace(/\r?\n$/, ''))),
+      ),
+    writeTree: (cwd, indexFile) =>
+      Effect.gen(function* () {
+        const through = { GIT_INDEX_FILE: indexFile }
+        yield* run(cwd, ['add', '--all'], through)
+        const printed = yield* run(cwd, ['write-tree'], through)
+        return printed.trim()
+      }),
+    // `diff-tree` rather than `diff`: plumbing, which no diff setting of the user's reshapes.
+    diffTrees: (cwd, from, to) =>
+      Effect.gen(function* () {
+        const between = ['-r', '-z', '-M', '--end-of-options', from, to]
+        const numstat = yield* run(cwd, ['diff-tree', '--numstat', ...between])
+        const nameStatus = yield* run(cwd, ['diff-tree', '--name-status', ...between])
+        return { numstat, nameStatus }
+      }),
   })
 }
