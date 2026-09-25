@@ -40,6 +40,7 @@ import {
   workspaceStepSchema,
   worktreeSchema,
 } from './workspaces.ts'
+import { LAUNCH_REQUESTS } from './launches.ts'
 import { SPEC_REQUESTS, missionSchema, specSnapshotSchema, specTypeSchema } from './specs.ts'
 
 /**
@@ -865,6 +866,9 @@ export const ENGINE_REQUESTS = {
 
   // The Specs a `define` Session writes and a human freezes (D7-01).
   ...SPEC_REQUESTS,
+  // The build of a ready Spec: asking for one, reading where it stands, starting a refused one
+  // again (D8-12, D8-13).
+  ...LAUNCH_REQUESTS,
   // The two that make a Session `define` answer the Session as well as the Spec: its mission,
   // its Spec and its version changed with them (D7-07).
   'specs.create': {
@@ -961,11 +965,21 @@ export const ENGINE_EVENTS = {
     specId: z.string(),
     projectId: z.string(),
   }),
+  /**
+   * The launch of a Spec changed (D8-13): asked for, started, refused, started again, or taken
+   * back by a Rework. Only the names cross — the panel open on that Spec reads it again, as it
+   * stands — and it is about a Spec rather than a Session, like the change above it.
+   */
+  launch_changed: z.object({
+    event: z.literal('launch.changed'),
+    specId: z.string(),
+    projectId: z.string(),
+  }),
 } as const
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the eight names it carries. */
+/** One pushed message, of whichever of the ten names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

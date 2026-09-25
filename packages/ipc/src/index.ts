@@ -138,6 +138,14 @@ export type {
   Worktree,
 } from './workspaces.ts'
 export {
+  LAUNCH_REQUESTS,
+  launchSchema,
+  launchStateSchema,
+  launchWorkspaceSchema,
+  specLaunchesSchema,
+} from './launches.ts'
+export type { Launch, LaunchState, LaunchWorkspace, SpecLaunches } from './launches.ts'
+export {
   SPEC_REQUESTS,
   acceptanceCriterionSchema,
   editBufferSchema,
