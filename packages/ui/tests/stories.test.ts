@@ -180,6 +180,7 @@ const NAMED_STATES = new Map([
     'workspace/create-workspace-dialog',
     [
       'Proposed',
+      'DetachedHead',
       'RepositoryLeftOut',
       'Refused',
       'GitMissing',
