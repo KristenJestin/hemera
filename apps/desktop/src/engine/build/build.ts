@@ -39,7 +39,7 @@ import {
   stateAfterAttempt,
   taskLabels,
 } from '@hemera/core'
-import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import { Context, Data, Deferred, Effect, FiberSet, Layer, Result, Scope } from 'effect'
 
 import { StderrSink } from '../agents/supervisor.ts'
@@ -68,6 +68,7 @@ import {
   type AttemptRow,
   type BuildRows,
   type CheckJob,
+  type Failure,
   OBSOLETE,
   type TaskRow,
   attemptsOf,
@@ -79,7 +80,9 @@ import {
   movePhase,
   openAttempt,
   phaseOf,
+  placeWords,
   readBuild,
+  recordFailures,
   resultOf,
   slotHolder,
   scopeOf,
@@ -710,21 +713,28 @@ export const buildsLayer = Layer.effect(
 
     /**
      * A snapshot of each repository of the Workspace as it stands now (D10-05), taken before the
-     * transaction that names it. One that cannot be taken is said to the diagnostic and left out:
-     * the evidence is short of one repository, and the build goes on.
+     * transaction that names it. One that cannot be taken is a failure the caller writes on the
+     * try, red: the evidence is short of one repository, and says so.
      */
     const snapshotsOf = (rows: BuildRows) =>
       Effect.gen(function* () {
         const repositories = yield* repositoriesOf(rows)
-        const snapped: { repository: string; tree: string }[] = []
+        const trees: { repository: string; tree: string }[] = []
+        const failures: Failure[] = []
         for (const { repository, path } of repositories) {
           const tree = yield* Effect.result(
             snapshotTree(path).pipe(Effect.provideService(Git, git)),
           )
-          if (Result.isSuccess(tree)) snapped.push({ repository, tree: tree.success })
-          else yield* diagnostic.write(`builds: no snapshot of ${path}: ${tree.failure.message}`)
+          if (Result.isSuccess(tree)) trees.push({ repository, tree: tree.success })
+          else {
+            failures.push({
+              name: `Snapshot of ${placeWords(repository)}`,
+              place: repository,
+              detail: `the snapshot could not be taken: ${tree.failure.message}`,
+            })
+          }
         }
-        return snapped
+        return { trees, failures }
       })
 
     /** Runs the checks of one attempt, then writes their verdict (D10-07). */
@@ -734,15 +744,38 @@ export const buildsLayer = Layer.effect(
         const attempt = rows?.attempts.find((one) => one.id === job.attemptId)
         // A build stopped or accepted meanwhile is judged no more.
         if (rows === null || attempt === undefined || !working(rows)) return
-        const outcomes = yield* checks.run({
-          sessionId,
-          projectId: rows.session.projectId,
-          workspaceId: rows.session.workspaceId,
-          when: job.when,
-          attemptId: attempt.id,
-          changes: changesFor(rows, attempt),
-        })
-        yield* verdict(sessionId, attempt, outcomes)
+        yield* checks
+          .run({
+            sessionId,
+            projectId: rows.session.projectId,
+            workspaceId: rows.session.workspaceId,
+            when: job.when,
+            attemptId: attempt.id,
+            changes: changesFor(rows, attempt),
+          })
+          .pipe(
+            Effect.flatMap((outcomes) => verdict(sessionId, attempt, outcomes)),
+            // Checks that could not run are red, said on the try, and the try is judged all the
+            // same: its task never stays checking for ever.
+            Effect.catch((cause) =>
+              withDatabase(
+                mutate('recording checks that could not run', (transaction) =>
+                  recordFailures(
+                    transaction,
+                    attempt.id,
+                    [
+                      {
+                        name: 'Checks',
+                        place: '',
+                        detail: `the checks could not run: ${cause.message}`,
+                      },
+                    ],
+                    now(),
+                  ).pipe(Effect.as({ result: undefined, events: [] })),
+                ),
+              ).pipe(Effect.andThen(verdict(sessionId, attempt, []))),
+            ),
+          )
       }).pipe(logged(`checking an attempt of ${sessionId}`))
 
     /** Starts the check runs a committed change asked for, each in the background. */
@@ -776,9 +809,17 @@ export const buildsLayer = Layer.effect(
      */
     const verdict = (sessionId: string, judged: AttemptRow, outcomes: readonly CheckOutcome[]) =>
       Effect.gen(function* () {
-        const result = attemptResult(outcomes.map((outcome) => outcome.verdict))
         const before = yield* read(sessionId)
         if (before === null || !working(before)) return
+        // What the checks answered, and what else is written on the try: a failure of its
+        // evidence is red like a check (D10-07).
+        const answered = new Set(outcomes.map((outcome) => outcome.id))
+        const result = attemptResult([
+          ...outcomes.map((outcome) => outcome.verdict),
+          ...before.results
+            .filter((one) => one.attemptId === judged.id && !answered.has(one.id))
+            .map(verdictOf),
+        ])
         // The three tries are three red ones (D10-07): the task's red tries, this one included.
         const reds =
           before.attempts.filter(
@@ -788,8 +829,10 @@ export const buildsLayer = Layer.effect(
               resultOf(attempt) === 'red',
           ).length + (result === 'red' ? 1 : 0)
         const next = stateAfterAttempt(result, reds)
-        const trees =
-          judged.scope === 'task' && next === 'in_progress' ? yield* snapshotsOf(before) : []
+        const snapped =
+          judged.scope === 'task' && next === 'in_progress'
+            ? yield* snapshotsOf(before)
+            : { trees: [], failures: [] }
         const at = now()
         const jobs = yield* withDatabase(
           mutate('judging an attempt', (transaction) =>
@@ -817,15 +860,16 @@ export const buildsLayer = Layer.effect(
               ]
               if (next === 'in_progress') {
                 yield* moveTask(transaction, task, 'in_progress', at)
-                yield* openAttempt(transaction, {
+                const retry = yield* openAttempt(transaction, {
                   sessionId,
                   scope: 'task',
                   buildTaskId: task.id,
                   storyId: null,
                   number: judged.number + 1,
                   at,
-                  trees,
+                  trees: snapped.trees,
                 })
+                yield* recordFailures(transaction, retry, snapped.failures, at)
                 return { result: [], events }
               }
               if (next === 'yours') {
@@ -855,7 +899,7 @@ export const buildsLayer = Layer.effect(
         const before = yield* read(sessionId)
         const handed = (task: TaskRow) => stateOf(task) === 'ready' && task.handedAt !== null
         if (before === null || !before.tasks.some(handed)) return null
-        const trees = yield* snapshotsOf(before)
+        const snapped = yield* snapshotsOf(before)
         const at = now()
         const refusal = yield* withDatabase(
           mutate('starting the tasks handed', (transaction) =>
@@ -895,15 +939,16 @@ export const buildsLayer = Layer.effect(
                 const interrupted = tries.findLast((attempt) => attempt.endedAt === null)
                 const number = interrupted?.number ?? tries.length + 1
                 if (interrupted === undefined) {
-                  yield* openAttempt(transaction, {
+                  const opened = yield* openAttempt(transaction, {
                     sessionId,
                     scope: 'task',
                     buildTaskId: task.id,
                     storyId: null,
                     number,
                     at,
-                    trees,
+                    trees: snapped.trees,
                   })
+                  yield* recordFailures(transaction, opened, snapped.failures, at)
                 }
                 yield* moveTask(transaction, task, 'in_progress', at, {
                   startedAt: task.startedAt ?? at,
@@ -949,7 +994,17 @@ export const buildsLayer = Layer.effect(
       refuse: (reason: string) => Effect.Effect<A>,
     ): Effect.Effect<A> =>
       Effect.gen(function* () {
-        const row = yield* sessionRowOf(sessionId)
+        // A Session that cannot be read is no Session to run a call for: refused, never taken
+        // for one that is no build.
+        const found = yield* database
+          .select()
+          .from(sessions)
+          .where(eq(sessions.id, sessionId))
+          .pipe(Effect.result)
+        if (Result.isFailure(found)) {
+          return yield* refuse(`the build could not be read: ${found.failure.message}`)
+        }
+        const row = found.success[0] ?? null
         if (row === null || row.mission !== 'build') return yield* run
         const phase = phaseOf(row)
         if (BUILD_TOOLS.includes(tool) && (phase === 'accepted' || phase === 'stopped')) {
@@ -1046,7 +1101,7 @@ export const buildsLayer = Layer.effect(
         const attempt = attemptsOf(rows, task).findLast((one) => one.endedAt === null)
         if (attempt === undefined) return refusedAnswer(`${task.label} has not started`)
         const starts = rows.trees.filter((tree) => tree.attemptId === attempt.id)
-        const ends = yield* snapshotsOf(rows)
+        const { trees: ends, failures } = yield* snapshotsOf(rows)
         const files: {
           repository: string
           path: string
@@ -1057,15 +1112,24 @@ export const buildsLayer = Layer.effect(
         const repositories = yield* repositoriesOf(rows)
         for (const begun of starts) {
           const end = ends.find((one) => one.repository === begun.repository)
+          // An end the snapshots did not take is already a failure of its own.
+          if (end === undefined) continue
           const place = repositories.find((one) => one.repository === begun.repository)
-          if (end === undefined || place === undefined) continue
-          const changed = yield* Effect.result(
-            changedFiles(place.path, begun.startTree, end.tree).pipe(
-              Effect.provideService(Git, git),
-            ),
-          )
+          const changed =
+            place === undefined
+              ? Result.fail(`${placeWords(begun.repository)} is no longer in the Workspace`)
+              : yield* Effect.result(
+                  changedFiles(place.path, begun.startTree, end.tree).pipe(
+                    Effect.provideService(Git, git),
+                    Effect.mapError((cause) => cause.message),
+                  ),
+                )
           if (Result.isFailure(changed)) {
-            yield* diagnostic.write(`builds: no diff of ${place.path}: ${changed.failure.message}`)
+            failures.push({
+              name: `Files changed in ${placeWords(begun.repository)}`,
+              place: begun.repository,
+              detail: `the files changed could not be read: ${changed.failure}`,
+            })
             continue
           }
           for (const file of changed.success) {
@@ -1106,6 +1170,7 @@ export const buildsLayer = Layer.effect(
                   .values(files.map((file) => ({ attemptId: attempt.id, ...file })))
                   .pipe(Effect.mapError(failed('recording the files changed')))
               }
+              yield* recordFailures(transaction, attempt.id, failures, at)
               // The try is over when the agent says so; the verdict gives it its result (D10-07).
               yield* transaction
                 .update(buildAttempts)
@@ -1821,10 +1886,17 @@ export const buildsLayer = Layer.effect(
                 mutate('dropping the checks a stopped engine left', (transaction) =>
                   transaction
                     .delete(buildCheckResults)
+                    // A failure Hemera wrote on the try is kept: it is evidence, not a check.
                     .where(
-                      inArray(
-                        buildCheckResults.attemptId,
-                        left.map((attempt) => attempt.id),
+                      and(
+                        inArray(
+                          buildCheckResults.attemptId,
+                          left.map((attempt) => attempt.id),
+                        ),
+                        or(
+                          isNotNull(buildCheckResults.checkId),
+                          isNotNull(buildCheckResults.runId),
+                        ),
                       ),
                     )
                     .pipe(

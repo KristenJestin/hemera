@@ -2208,7 +2208,16 @@ export const runtimeLayer = Layer.effect(
             if (!delivery.opens) yield* line(turnId, false)
             yield* attempt('taking the delivery back', builds.missed(delivery))
           }),
-        ended: (turnId) => builds.turnEnded(delivery, turnId).pipe(Effect.ignore),
+        ended: (turnId) =>
+          builds
+            .turnEnded(delivery, turnId)
+            .pipe(
+              Effect.catch((cause) =>
+                diagnostic.write(
+                  `agents: what the build of Session ${sessionId} does after its turn failed: ${cause.message}`,
+                ),
+              ),
+            ),
       }
     }
 

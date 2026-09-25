@@ -11,13 +11,14 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { Builds } from '#engine/build/build.ts'
-import { ProjectChecks } from '#engine/build/checks.ts'
+import { BuildChecks, ProjectChecks } from '#engine/build/checks.ts'
 import { Commands } from '#engine/commands/service.ts'
+import { DatabaseError } from '#engine/storage/database.ts'
 
 import {
   THREE,
@@ -215,5 +216,56 @@ describe('Stop ends what the build was checking', () => {
       [[1, null]],
     )
     expect(seen.lines.filter((line) => line.type === 'task.checked')).toEqual([])
+  })
+})
+
+describe('An error is never masked in the evidence', () => {
+  test('a repository whose snapshot fails is a red result on the try, naming it', async () => {
+    const { agent } = buildAgent({
+      execute: (labels, text) =>
+        text.includes('was red') ? [] : labels.filter((label) => label === 'T1').map(finished),
+    })
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        // The repository is no repository any more: nothing can snapshot it.
+        rmSync(join(spec.repository, '.git'), { recursive: true, force: true })
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        return yield* eventually(buildOf(sessionId), (view) => view.tasks[0]?.attempts.length === 2)
+      }),
+    )
+    const [first] = seen.tasks[0]?.attempts ?? []
+    expect(first?.result).toBe('red')
+    expect(first?.checks.map((check) => [check.name, check.place, check.verdict])).toContainEqual([
+      'Snapshot of sources/api',
+      'sources/api',
+      'red',
+    ])
+    expect(first?.checks.every((check) => check.detail !== null)).toBe(true)
+  })
+
+  test('checks that cannot run are a red result on the try, and the task is not left checking', async () => {
+    const broken = Layer.succeed(BuildChecks, {
+      run: () =>
+        Effect.fail(new DatabaseError({ doing: 'reading the checks', cause: 'disk I/O error' })),
+    })
+    const { agent } = buildAgent({
+      execute: (labels, text) =>
+        text.includes('was red') ? [] : labels.filter((label) => label === 'T1').map(finished),
+    })
+    opened = await openWindowChecked(dataFolder, broken, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        return yield* eventually(buildOf(sessionId), (view) => view.tasks[0]?.attempts.length === 2)
+      }),
+    )
+    const [first] = seen.tasks[0]?.attempts ?? []
+    expect(seen.tasks[0]?.state).toBe('in_progress')
+    expect(first?.result).toBe('red')
+    expect(first?.checks.map((check) => [check.name, check.verdict])).toEqual([['Checks', 'red']])
+    expect(first?.checks[0]?.detail).toContain('disk I/O error')
   })
 })

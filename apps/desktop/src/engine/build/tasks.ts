@@ -526,3 +526,54 @@ export function slotHolder(reader: EngineDatabase | EngineTransaction, specId: s
     return launch.state === 'waiting' ? 'it waits for its Workspace' : 'it is starting'
   })
 }
+
+/**
+ * What went wrong in taking a try's evidence or running its checks, said where the evidence is:
+ * a snapshot not taken, a diff not read, checks that could not run.
+ */
+export interface Failure {
+  /** What failed, as the try lists it beside its checks: `Snapshot of sources/api`. */
+  readonly name: string
+  /** Where: `''` for the Workspace root, or the repository's path. */
+  readonly place: string
+  /** Why, in plain words, as the failing step said it. */
+  readonly detail: string
+}
+
+/** Where a place is, in words: its path, or the Workspace root. */
+export function placeWords(place: string): string {
+  return place === '' ? 'the Workspace root' : place
+}
+
+/**
+ * Writes failures on a try as red results beside its checks: an error in the evidence is never
+ * masked, and the verdict counts it like a red check (D10-07).
+ */
+export function recordFailures(
+  transaction: EngineTransaction,
+  attemptId: string,
+  failures: readonly Failure[],
+  at: string,
+) {
+  if (failures.length === 0) return Effect.void
+  return transaction
+    .insert(buildCheckResults)
+    .values(
+      failures.map((failure) => ({
+        id: crypto.randomUUID(),
+        attemptId,
+        checkId: null,
+        name: failure.name,
+        place: failure.place,
+        line: '',
+        runId: null,
+        verdict: 'red',
+        exitCode: null,
+        value: null,
+        detail: failure.detail,
+        outputTail: '',
+        ranAt: at,
+      })),
+    )
+    .pipe(Effect.mapError(failed('recording what failed')), Effect.asVoid)
+}
