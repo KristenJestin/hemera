@@ -170,6 +170,7 @@ async function openOver(
       Layer.succeed(BuildNotices, {
         changed: (sessionId) => {
           built.push(sessionId)
+          push({ event: 'build.changed', sessionId })
         },
       }),
     ),
