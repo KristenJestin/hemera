@@ -114,7 +114,8 @@ export const THREE: readonly TaskDraft[] = [
 ]
 
 /**
- * A `ready` Spec of a Project on a real `main` — `sources/api`, one repository with one commit —
+ * A `ready` Spec of a Project on a real `main` — `sources/api` unless other locations are named,
+ * each a repository with one commit —
  * with the tasks given, in that order: labelled `T1…Tn` by it (L1). Written the way the product
  * writes one: its writer's agent shapes, plans, decomposes and attests, and the human freezes it.
  */
@@ -122,13 +123,16 @@ export const aReadySpec = (
   dataFolder: string,
   tasks: readonly TaskDraft[],
   stories: readonly string[] = ['Export'],
+  locations: readonly string[] = ['sources/api'],
 ) =>
   Effect.gen(function* () {
     const main = join(dataFolder, 'main')
-    repository(join(main, 'sources', 'api'))
+    for (const location of locations) repository(join(main, location))
     const projects = yield* Projects
-    const created = yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: main })
-    const project = yield* projects.addRepository(created.id, created.version, './sources/api')
+    let project = yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: main })
+    for (const location of locations) {
+      project = yield* projects.addRepository(project.id, project.version, `./${location}`)
+    }
     const sessions = yield* Sessions
     const writer = yield* sessions.create(project.id, 'claude')
     const specs = yield* Specs
