@@ -46,7 +46,7 @@ function Harness(props: Omit<SessionDetailsProps, 'open' | 'onOpenChange'>): Rea
 const meta = {
   title: 'Blocks/Session/SessionDetails',
   component: Harness,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     plan: [
@@ -165,14 +165,26 @@ function fadeOf(dialog: HTMLElement, tab: string): number | null {
 }
 
 /**
- * Walks the three tabs the way `choose` picks one and answers the dialog's height on each, once
- * the tab's panel has faded all the way in.
+ * The most room the dialog may leave under what it shows, in pixels: its own border and padding
+ * under its last part, and the hair the body pulls back out of them.
  */
-async function heightsOnEveryTab(
+const SPARE = 24
+
+/** How much room the dialog leaves under the last thing it shows. */
+function spare(dialog: HTMLElement): number {
+  const box = dialog.getBoundingClientRect()
+  return box.bottom - dialog.lastElementChild!.getBoundingClientRect().bottom
+}
+
+/**
+ * Walks the three tabs the way `choose` picks one, and checks the dialog on every one of them: it
+ * is as tall as the tab it shows, with nothing left to spare under it. A tab that holds more makes
+ * a taller dialog — the size decides the width, and never the height.
+ */
+async function hugsTheTab(
   dialog: HTMLElement,
   choose: (tab: string) => Promise<void>,
-): Promise<number[]> {
-  const heights: number[] = []
+): Promise<void> {
   for (const tab of ['Activity', 'Commands', 'Context']) {
     // oxlint-disable-next-line no-await-in-loop -- one tab after the other, as a reader walks them
     await choose(tab)
@@ -180,15 +192,8 @@ async function heightsOnEveryTab(
     await waitFor(() => {
       expect(fadeOf(dialog, tab)).toBe(1)
     })
-    heights.push(dialog.getBoundingClientRect().height)
-  }
-  return heights
-}
-
-/** The same height on every tab, to the pixel: switching them never resizes the dialog. */
-function sameHeight(heights: number[]): void {
-  for (const height of heights) {
-    expect(height, 'a tab resized the dialog').toBeCloseTo(heights[0]!, 1)
+    // oxlint-disable-next-line no-await-in-loop -- the dialog is read once the tab has landed
+    expect(spare(dialog), `the dialog has room to spare under the ${tab} tab`).toBeLessThan(SPARE)
   }
 }
 
@@ -257,8 +262,8 @@ export const Activity: Story = {
       inside.getByRole('button', { name: 'packages/ui/src/session/plan-panel.tsx' }),
     )
     await expect(args.onSelectFile).toHaveBeenCalledWith('packages/ui/src/session/plan-panel.tsx')
-    // Whatever a tab holds — an open list of files included — the dialog keeps its height.
-    sameHeight(await heightsOnEveryTab(dialog, clicking(dialog)))
+    // Whatever a tab holds — an open list of files included — the dialog is as tall as it is.
+    await hugsTheTab(dialog, clicking(dialog))
   },
 }
 
@@ -275,8 +280,8 @@ export const Commands: Story = {
     await expect(inside.getByText('pnpm dev')).toBeVisible()
     await expect(inside.getByText('1 running')).toBeVisible()
     await expect(inside.getByRole('button', { name: 'http://localhost:5173/' })).toBeVisible()
-    // A list of runs and their output is no reason for the dialog to be taller than the others.
-    sameHeight(await heightsOnEveryTab(dialog, clicking(dialog)))
+    // A list of runs and their output makes a taller dialog, with nothing to spare under it.
+    await hugsTheTab(dialog, clicking(dialog))
   },
 }
 
@@ -293,8 +298,8 @@ export const Context: Story = {
     await expect(inside.getByText('Instructions')).toBeVisible()
     await expect(inside.getByText('· 21 Sep 23:02')).toBeVisible()
     await expect(inside.getByRole('button', { name: 'Tools · 1' })).toBeVisible()
-    // Nor is a short one a reason for it to be smaller.
-    sameHeight(await heightsOnEveryTab(dialog, clicking(dialog)))
+    // A short one makes a shorter dialog, with nothing to spare under it either.
+    await hugsTheTab(dialog, clicking(dialog))
   },
 }
 
@@ -325,13 +330,12 @@ export const Keyboard: Story = {
         expect(dialog.contains(document.activeElement), 'Tab left the dialog').toBe(true)
       })
     }
-    // The arrows walk the strip of tabs, and the dialog keeps its height on every one of them.
+    // The arrows walk the strip of tabs, and the dialog is as tall as each one it lands on.
     await risen(dialog)
     within(dialog).getByRole('tab', { name: 'Activity' }).focus()
-    const heights = await heightsOnEveryTab(dialog, async (tab) => {
+    await hugsTheTab(dialog, async (tab) => {
       if (tab !== 'Activity') await userEvent.keyboard('{ArrowRight}')
     })
-    sameHeight(heights)
     await expect(within(dialog).getByRole('tab', { name: 'Context' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -368,14 +372,14 @@ export const Keyboard: Story = {
 
 /**
  * Changing tab: the panel that was left goes, the one that was chosen comes up from transparent
- * on the `crossfade` kind, and the dialog does not change height at any frame of it.
+ * on the `crossfade` kind, and the dialog is never taller than the tab it shows — not at a frame
+ * of it.
  */
 export const TabChange: Story = {
   args: { defaultTab: 'activity' },
   play: async ({ canvasElement }) => {
     const dialog = await opened(canvasElement)
-    const resting = dialog.getBoundingClientRect().height
-    const heights: number[] = []
+    const room: number[] = []
     // Every value the crossfade writes, watched from before the press: a fade of `fast` is drawn
     // in two or three frames on a busy runner, so what is read is what was written, not how many
     // frames the runner took to write it.
@@ -389,7 +393,7 @@ export const TabChange: Story = {
       for (let seen = 0; seen < 40; seen += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one frame after the other, as they are drawn
         await frame()
-        heights.push(dialog.getBoundingClientRect().height)
+        room.push(spare(dialog))
       }
     })()
     await userEvent.click(within(dialog).getByRole('tab', { name: 'Commands' }))
@@ -408,6 +412,6 @@ export const TabChange: Story = {
       ).toBe(true)
     }
     expect(drawn.at(-1), 'the new panel did not land opaque').toBe(1)
-    sameHeight([resting, ...heights])
+    expect(Math.max(...room), 'the dialog grew away from the tab it shows').toBeLessThan(SPARE)
   },
 }
