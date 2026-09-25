@@ -350,7 +350,12 @@ export const Keyboard: Story = {
     })
     // And a click outside closes it too, with the same room for the leave to be played out.
     await userEvent.click(button)
-    await waitFor(() => within(document.body).getByRole('dialog'))
+    const arrived = await waitFor(() => within(document.body).getByRole('dialog'))
+    // The press is honoured once the popup has arrived: Base UI ignores a hand outside while it is
+    // still entering, which is the state a loaded runner catches it in.
+    await waitFor(() => {
+      expect(arrived).not.toHaveAttribute('data-starting-style')
+    })
     await userEvent.click(document.body)
     await waitFor(
       () => {
