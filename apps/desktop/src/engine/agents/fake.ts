@@ -258,6 +258,13 @@ export interface FakeScript {
    * change in; a real agent may answer it, and that answer belongs to a turn of its own.
    */
   readonly answersDelivery?: readonly FakeStep[]
+  /**
+   * What it does in answer to a delivery, chosen from what it was handed — the text of the
+   * delivery's resources, joined. Run as a turn's steps are, its tools called over MCP and
+   * `between` awaited before each step, where `answersDelivery` only says things: a build's agent
+   * is driven by deliveries alone (D10-02, D10-03), and this is how a suite scripts one.
+   */
+  readonly answersDeliveryWith?: (handed: string) => readonly FakeStep[]
 }
 
 /**
@@ -669,6 +676,15 @@ function provisionOnly(request: PromptRequest): boolean {
   )
 }
 
+/** The texts of a prompt's resources, joined: what a delivery handed the agent. */
+function resourcesOf(request: PromptRequest): string {
+  return request.prompt
+    .map((block) =>
+      block.type === 'resource' && 'text' in block.resource ? block.resource.text : '',
+    )
+    .join('\n\n')
+}
+
 /** The text of a prompt as it was sent: a scripted agent reads text and ignores the rest. */
 function promptTextOf(request: PromptRequest): string {
   return request.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
@@ -738,6 +754,8 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   // The server the agent was handed, once it was handed one and the script reaches for tools.
   const reachesTools =
     script.listsTools === true ||
+    // What a delivery is answered with is only known once it is handed: it may reach for them.
+    script.answersDeliveryWith !== undefined ||
     [...(script.steps ?? []), ...(script.history ?? []), ...(script.turns ?? []).flat()].some(
       (step) => step.does === 'uses' || step.does === 'usesTogether',
     )
@@ -835,6 +853,53 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     })
   }
 
+  /**
+   * The steps of one turn, in order, and what the turn ends with: what a prompt is answered by, and
+   * a delivery a script answers with steps of its own.
+   */
+  const perform = async (scripted: readonly FakeStep[]): Promise<PromptResponse> => {
+    for (const step of scripted) {
+      if (cancelled) break
+      // oxlint-disable-next-line no-await-in-loop -- the script is a sequence, and a test holds a turn open here
+      await script.between?.()
+      if (cancelled) break
+      if (step.does === 'uses') {
+        // oxlint-disable-next-line no-await-in-loop -- a tool is answered before the agent does anything with the answer
+        await use(step)
+        continue
+      }
+      if (step.does === 'usesTogether') {
+        // oxlint-disable-next-line no-await-in-loop -- the calls of one step run together, and the next step waits for all of them
+        await Promise.all(step.calls.map(use))
+        continue
+      }
+      if (step.does !== 'asks') {
+        // oxlint-disable-next-line no-await-in-loop -- what it says is sent before what it says next, and there is nothing to run in parallel
+        await notify(step)
+        continue
+      }
+      const held = connection
+      if (held === null) return { stopReason: 'end_turn' }
+      // oxlint-disable-next-line no-await-in-loop -- a question is answered before the next step happens: the protocol has no second question in flight
+      const answered: RequestPermissionResponse = await held.requestPermission({
+        sessionId,
+        toolCall: { toolCallId: step.call.id, title: step.call.title },
+        options: step.call.options.map((option) => ({
+          optionId: option.id,
+          name: option.name,
+          kind: option.kind,
+        })),
+      })
+      if (answered.outcome.outcome === 'cancelled') answers.cancelled += 1
+      else answers.optionIds.push(answered.outcome.optionId)
+    }
+    if (cancelled) return { stopReason: 'cancelled' }
+    if (script.failsPrompt !== undefined) throw new RequestError(-32_603, script.failsPrompt)
+    const answer: PromptResponse = { stopReason: script.stopReason ?? 'end_turn' }
+    if (script.usage !== undefined) answer.usage = script.usage
+    return answer
+  }
+
   const agent: AcpAgent = {
     initialize: (request) => {
       // What the client said about itself, kept as it arrived: this is how a suite proves that
@@ -909,6 +974,9 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       if (provisionOnly(request)) {
         await script.holdsDelivery?.()
         if (cancelled) return { stopReason: 'cancelled' }
+        if (script.answersDeliveryWith !== undefined) {
+          return perform(script.answersDeliveryWith(resourcesOf(request)))
+        }
         for (const step of script.answersDelivery ?? []) {
           // oxlint-disable-next-line no-await-in-loop -- what it says is sent in order
           await notify(step)
@@ -917,46 +985,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       }
       const scripted = script.turns?.[turnsTaken] ?? script.steps ?? []
       turnsTaken += 1
-      for (const step of scripted) {
-        if (cancelled) break
-        // oxlint-disable-next-line no-await-in-loop -- the script is a sequence, and a test holds a turn open here
-        await script.between?.()
-        if (cancelled) break
-        if (step.does === 'uses') {
-          // oxlint-disable-next-line no-await-in-loop -- a tool is answered before the agent does anything with the answer
-          await use(step)
-          continue
-        }
-        if (step.does === 'usesTogether') {
-          // oxlint-disable-next-line no-await-in-loop -- the calls of one step run together, and the next step waits for all of them
-          await Promise.all(step.calls.map(use))
-          continue
-        }
-        if (step.does !== 'asks') {
-          // oxlint-disable-next-line no-await-in-loop -- what it says is sent before what it says next, and there is nothing to run in parallel
-          await notify(step)
-          continue
-        }
-        const held = connection
-        if (held === null) return { stopReason: 'end_turn' }
-        // oxlint-disable-next-line no-await-in-loop -- a question is answered before the next step happens: the protocol has no second question in flight
-        const answered: RequestPermissionResponse = await held.requestPermission({
-          sessionId,
-          toolCall: { toolCallId: step.call.id, title: step.call.title },
-          options: step.call.options.map((option) => ({
-            optionId: option.id,
-            name: option.name,
-            kind: option.kind,
-          })),
-        })
-        if (answered.outcome.outcome === 'cancelled') answers.cancelled += 1
-        else answers.optionIds.push(answered.outcome.optionId)
-      }
-      if (cancelled) return { stopReason: 'cancelled' }
-      if (script.failsPrompt !== undefined) throw new RequestError(-32_603, script.failsPrompt)
-      const answer: PromptResponse = { stopReason: script.stopReason ?? 'end_turn' }
-      if (script.usage !== undefined) answer.usage = script.usage
-      return answer
+      return perform(scripted)
     },
   }
 
