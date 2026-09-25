@@ -100,7 +100,7 @@ const prepared = (projectId: string) =>
   })
 
 describe('A dedicated Workspace assembles one worktree per repository', () => {
-  it('proposes each local HEAD and the branch of the prefix, and writes the Workspace preparing', async () => {
+  it('proposes the branches of each repository and the branch of the prefix, and writes the Workspace preparing', async () => {
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
         const projects = yield* Projects
