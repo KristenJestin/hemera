@@ -443,8 +443,10 @@ export function specViewOf({
     key: snapshot.spec.key,
     title: snapshot.revision.title,
     type: snapshot.revision.type,
-    // A revision other than the current one is frozen, whatever the Spec is now (D7-05).
-    status: isEditable(snapshot) ? 'draft' : 'ready',
+    // The revision shown speaks for itself: the current one carries the Spec's own status, which a
+    // build makes `in_progress` (D8-13), and an older one reads as frozen, whatever the Spec is
+    // now (D7-05).
+    status: isCurrent(snapshot) ? snapshot.spec.status : 'ready',
     revision: snapshot.revision.number,
     revisions: revisionsOf(snapshot, revisions, journal),
     phases: phasesOf(snapshot),
