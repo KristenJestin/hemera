@@ -344,6 +344,7 @@ describe('Text arrives as a stream', () => {
   test('the eight things the engine pushes are the ones declared', () => {
     expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
       'agent',
+      'build_changed',
       'delivery',
       'entry',
       'permission',

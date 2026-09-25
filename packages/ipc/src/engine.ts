@@ -41,6 +41,7 @@ import {
   worktreeSchema,
 } from './workspaces.ts'
 import { SPEC_REQUESTS, missionSchema, specSnapshotSchema, specTypeSchema } from './specs.ts'
+import { BUILD_REQUESTS } from './build.ts'
 
 /**
  * Which build this is, and therefore which data folder it opens.
@@ -872,6 +873,9 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ specId: z.string(), provider: agentProviderSchema }),
     response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
   },
+
+  // The build of a `build` Session and the Project's checks it is judged by (D10-04 to D10-12).
+  ...BUILD_REQUESTS,
 } as const
 
 export type EngineRequests = typeof ENGINE_REQUESTS
@@ -953,6 +957,15 @@ export const ENGINE_EVENTS = {
     event: z.literal('spec.changed'),
     specId: z.string(),
     projectId: z.string(),
+  }),
+  /**
+   * A build changed (D10-04): a task moved, a check ran, a blocker was raised or dismissed, the
+   * build was paused, resumed, accepted or stopped. Only its Session crosses: the page that shows
+   * that build reads it again, as it stands.
+   */
+  build_changed: z.object({
+    event: z.literal('build.changed'),
+    sessionId: z.string(),
   }),
 } as const
 
