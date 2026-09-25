@@ -658,6 +658,9 @@ describe('A recipe step is rewritten where it stands', () => {
       base: null,
       path: '.env',
       commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
       rank: 'a',
     }
     answers.set('recipe.update', [rewritten])
@@ -668,6 +671,9 @@ describe('A recipe step is rewritten where it stands', () => {
         base: null,
         path: '.env',
         commandId: null,
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
       }),
     ).toBeNull()
 
@@ -678,6 +684,9 @@ describe('A recipe step is rewritten where it stands', () => {
       base: null,
       path: '.env',
       commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
     })
     expect(recipeOf('atlas')).toEqual([rewritten])
   })
@@ -691,6 +700,9 @@ describe('A recipe step is rewritten where it stands', () => {
         base: null,
         path: '.env.local',
         commandId: null,
+        line: null,
+        lineWindows: null,
+        lineLinux: null,
       }),
     ).toBe('.env.local is not in main')
   })

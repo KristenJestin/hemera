@@ -412,6 +412,9 @@ describe('Every Workspace channel reaches its use case', () => {
           base: null,
           path: '.env',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const added = yield* asked('recipe.add', {
           projectId,
@@ -419,6 +422,9 @@ describe('Every Workspace channel reaches its use case', () => {
           base: null,
           path: 'docs',
           commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
         })
         const moved = yield* asked('recipe.move', {
           projectId,

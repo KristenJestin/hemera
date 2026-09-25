@@ -552,11 +552,16 @@ export const commandRuns = sqliteTable(
  * The recipe a Project prepares each dedicated Workspace with (D8-05), in `rank` order.
  *
  * `copy` puts a file or a folder of `main` at the same relative place, `link` makes a link to
- * it, `run` starts a command of the catalogue. `base` is where a copy or a link applies (D8-05 as
- * amended by recette 1): one of the Project's repositories as the Project declares it, null for the
- * Workspace root, several repositories being several steps; `path` is relative to that base. A
- * command taken out of the catalogue leaves its step without one rather than taking the step with
- * it: the recipe is the user's, and a step that cannot run is one they are shown.
+ * it, `run` starts a command of the catalogue or a line of its own (recette 2). `base` is where a
+ * copy or a link applies, and where a run of a line of its own runs from (D8-05 as amended by
+ * recette 1): one of the Project's repositories as the Project declares it, null for the Workspace
+ * root, several repositories being several steps; `path` is relative to that base — the file or
+ * the folder of a copy and a link, the folder a run of a line of its own starts in, or null.
+ * `command_id` is the catalogue command a `run` starts; a line of its own belongs to the step and
+ * never reaches the catalogue, so it carries `line`, `line_windows` and `line_linux` the way a
+ * command carries its own, and the agent never sees it. A command taken out of the catalogue
+ * leaves its step without one rather than taking the step with it: the recipe is the user's, and a
+ * step that cannot run is one they are shown.
  */
 export const projectPreparationSteps = sqliteTable(
   'project_preparation_steps',
@@ -569,6 +574,11 @@ export const projectPreparationSteps = sqliteTable(
     base: text('base'),
     path: text('path'),
     commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
+    /** The line a run of a line of its own runs where it has no variant of its own. */
+    line: text('line'),
+    /** The lines a run of a line of its own runs on Windows and on Linux, when it has one each. */
+    lineWindows: text('line_windows'),
+    lineLinux: text('line_linux'),
     rank: text('rank').notNull(),
   },
   (table) => [
@@ -583,8 +593,10 @@ export const projectPreparationSteps = sqliteTable(
  * and written as each step changes, outside any transaction that would hold a process or Git:
  * a failure stops the list and keeps what was done, and a resume reads this table to know what
  * to re-check and what to retry. `base` and `target` are a copy's or a link's repository and its
- * path under it, the recipe's own. `message` is what refused a step, as it was said; `run_id` the
- * run a `run` step started, whose output is where its failure is read.
+ * path under it, the recipe's own; a run of a line of its own (recette 2) keeps that line as its
+ * `target` and the folder it starts in as `path`, its `base` being where it runs from. `message`
+ * is what refused a step, as it was said; `run_id` the run a `run` step started, whose output is
+ * where its failure is read.
  */
 export const workspaceSteps = sqliteTable(
   'workspace_steps',
@@ -597,6 +609,8 @@ export const workspaceSteps = sqliteTable(
     kind: text('kind').notNull(),
     target: text('target').notNull(),
     base: text('base'),
+    /** The folder a run of a line of its own starts in, relative to `base`; null otherwise. */
+    path: text('path'),
     commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
     state: text('state').notNull(),
     message: text('message'),

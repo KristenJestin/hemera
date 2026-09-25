@@ -210,6 +210,7 @@ export function stepOf(row: typeof workspaceSteps.$inferSelect): WorkspaceStep {
     kind: STEP_KINDS.find((kind) => kind === row.kind) ?? 'run',
     target: row.target,
     base: row.base,
+    path: row.path,
     commandId: row.commandId,
     state: STEP_STATES.find((state) => state === row.state) ?? 'failed',
     message: row.message,
@@ -725,6 +726,7 @@ export const workspacesLayer = Layer.effect(
                   targets,
                   recipe,
                   new Map(commands.map((command) => [command.id, command.name])),
+                  process.platform,
                 )
 
                 const row = {
@@ -765,6 +767,7 @@ export const workspacesLayer = Layer.effect(
                           kind: step.kind,
                           target: step.target,
                           base: step.base,
+                          path: step.path,
                           commandId: step.commandId,
                           state: bareLocation ? 'skipped' : step.state,
                           message: bareLocation
