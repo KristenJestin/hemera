@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect } from 'effect'
+import { Effect, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeStep } from '#engine/agents/fake.ts'
@@ -220,6 +220,26 @@ describe('A build writes its Journal lines', () => {
 })
 
 describe('Stop closes the build', () => {
+  test('Stops asked at once close it once', async () => {
+    const { agent } = buildAgent({ execute: () => [] })
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(sessionId), (view) => view.phase === 'execute')
+        const builds = yield* Builds
+        const stops = yield* Effect.all(
+          Array.from({ length: 20 }, () => Effect.result(builds.stop(sessionId))),
+          { concurrency: 'unbounded' },
+        )
+        return { stops, lines: yield* journalOf(sessionId) }
+      }),
+    )
+    expect(seen.stops.filter(Result.isSuccess)).toHaveLength(1)
+    expect(seen.lines.filter((line) => line.type === 'build.stopped')).toHaveLength(1)
+  })
+
   test('a stopped build stays readable, and frees the Spec for another build', async () => {
     // The second build is a second agent: a fake that was stopped does not speak again.
     const { agent } = buildAgent({ execute: () => [] })

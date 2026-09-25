@@ -285,6 +285,16 @@ const WHEN: Readonly<Record<AttemptScope, CheckWhen>> = {
 /** The phases a build works through; the other two close it. */
 const ACTIVE: readonly BuildPhase[] = ['prepare', 'execute', 'verify']
 
+/** The rows of a build the user acts on, or the refusal of a build that is closed. */
+function stillOpen(rows: BuildRows) {
+  if (working(rows)) return Effect.succeed(rows)
+  return Effect.fail(
+    new BuildRefusedError({
+      reason: rows.phase === 'accepted' ? 'This build was accepted.' : 'This build is stopped.',
+    }),
+  )
+}
+
 /** Whether a build is still at work: neither accepted nor stopped. */
 function working(rows: BuildRows): boolean {
   return rows.phase !== null && ACTIVE.includes(rows.phase)
@@ -1290,18 +1300,7 @@ export const buildsLayer = Layer.effect(
 
     /** The rows of a build a user acts on, refused when it is closed. */
     const open = (sessionId: string) =>
-      Effect.gen(function* () {
-        const rows = yield* must(sessionId)
-        if (rows.phase === 'accepted' || rows.phase === 'stopped' || rows.phase === null) {
-          return yield* Effect.fail(
-            new BuildRefusedError({
-              reason:
-                rows.phase === 'accepted' ? 'This build was accepted.' : 'This build is stopped.',
-            }),
-          )
-        }
-        return rows
-      })
+      must(sessionId).pipe(Effect.flatMap((rows) => stillOpen(rows)))
 
     const view = (sessionId: string) => must(sessionId).pipe(Effect.map(viewOf))
 
@@ -1323,8 +1322,12 @@ export const buildsLayer = Layer.effect(
         const jobs = yield* withDatabase(
           mutate(doing, (transaction) =>
             Effect.gen(function* () {
-              const rows = yield* readBuild(transaction, sessionId)
-              if (rows === null) return yield* Effect.fail(new UnknownBuildError({ id: sessionId }))
+              const fresh = yield* readBuild(transaction, sessionId)
+              if (fresh === null)
+                return yield* Effect.fail(new UnknownBuildError({ id: sessionId }))
+              // Read again where the change is written: a build closed since the user asked is
+              // refused, never closed or moved twice.
+              const rows = yield* stillOpen(fresh)
               const done = yield* body(transaction, rows, at)
               const asked = done.jobs ?? []
               if (!done.follows) return { result: asked, events: done.events }
