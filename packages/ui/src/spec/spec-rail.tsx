@@ -188,6 +188,11 @@ export interface SpecRailProps {
   frozenOn?: string | undefined
   /** An older revision says which one replaced it. */
   replacedBy?: number | undefined
+  /**
+   * The frozen Spec a build works from (D10-12): the foot says so, rather than that a rework
+   * would change it — once a build started, nothing reworks it.
+   */
+  building?: boolean | undefined
   /** The human click that freezes the Spec. */
   onMarkReady: () => void
   /** The band of glyphs the panel folds to, rather than the rail of words. */
@@ -208,6 +213,7 @@ export function SpecRail({
   readiness,
   frozenOn,
   replacedBy,
+  building = false,
   onMarkReady,
   folded = false,
 }: SpecRailProps): ReactNode {
@@ -236,6 +242,7 @@ export function SpecRail({
           readiness={readiness}
           frozenOn={frozenOn}
           replacedBy={replacedBy}
+          building={building}
           onGoTo={onSelect}
           onMarkReady={onMarkReady}
         />
@@ -291,6 +298,7 @@ interface ReadinessFootProps {
   readiness: ReadinessView
   frozenOn?: string | undefined
   replacedBy?: number | undefined
+  building: boolean
   onGoTo: (target: SpecTarget) => void
   onMarkReady: () => void
 }
@@ -345,6 +353,7 @@ function ReadinessFoot({
   readiness,
   frozenOn,
   replacedBy,
+  building,
   onGoTo,
   onMarkReady,
 }: ReadinessFootProps): ReactNode {
@@ -360,7 +369,9 @@ function ReadinessFoot({
       </div>
       <p className={SAY}>
         {frozenOn !== undefined ? (
-          replacedBy === undefined ? (
+          building ? (
+            `Frozen on ${frozenOn} · the build works from it`
+          ) : replacedBy === undefined ? (
             `Frozen on ${frozenOn} · nothing changes until you rework it`
           ) : (
             `Frozen on ${frozenOn} · read only, a newer version replaced it`

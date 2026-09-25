@@ -67,6 +67,7 @@ function Held({
   readiness,
   frozenOn,
   replacedBy,
+  building,
   onSelect,
   onSelectGroup,
   onMarkReady,
@@ -80,6 +81,8 @@ function Held({
   readiness: ReadinessView
   frozenOn?: string | undefined
   replacedBy?: number | undefined
+  /** Whether a build works from the frozen Spec. */
+  building?: boolean | undefined
   onSelect: (target: SpecTarget) => void
   onSelectGroup: (phase: PhaseName) => void
   onMarkReady: () => void
@@ -106,6 +109,7 @@ function Held({
           readiness={readiness}
           frozenOn={frozenOn}
           replacedBy={replacedBy}
+          building={building}
           onMarkReady={onMarkReady}
           folded={folded}
         />
@@ -117,7 +121,7 @@ function Held({
 const meta = {
   title: 'Blocks/Spec/SpecRail',
   component: Held,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'fullscreen' },
   args: {
     groups: EVERY_MARK,
@@ -134,6 +138,7 @@ const meta = {
     readiness: { control: 'object', description: 'The seven checks and what is left.' },
     frozenOn: { control: 'text', description: 'When a `ready` Spec was frozen.' },
     replacedBy: { control: 'number', description: 'The revision that replaced this one.' },
+    building: { control: 'boolean', description: 'Whether a build works from the frozen Spec.' },
     folded: { control: 'boolean', description: 'The band the panel folds to.' },
     onSelect: { description: 'Puts a part on the stage.' },
     onSelectGroup: { description: 'Puts every part of a phase on the stage.' },
@@ -699,5 +704,15 @@ export const FootReplaced: Story = {
       canvas.getByText('Frozen on 22 Sep · read only, a newer version replaced it'),
     ).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+  },
+}
+
+/** Frozen, and a build works from it: the line says so, and no rework is promised. */
+export const FootBuilding: Story = {
+  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE, frozenOn: '23 Sep', building: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Frozen on 23 Sep · the build works from it')).toBeVisible()
+    await expect(canvas.queryByText(/rework/)).toBeNull()
   },
 }
