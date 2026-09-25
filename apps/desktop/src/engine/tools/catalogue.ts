@@ -1133,6 +1133,14 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'spec_write':
           case 'spec_propose':
             return yield* spec(asked.sessionId, call)
+
+          case 'build_read':
+          case 'task_finished':
+          case 'task_blocked':
+            return failed(
+              'the build tools are not wired yet',
+              'the build tools are not wired yet: nothing was read or recorded',
+            )
         }
       })
 
