@@ -19,8 +19,14 @@ function byRank<T extends { rank: string }>(items: readonly T[]): T[] {
  * One revision of a Spec as Markdown: its key, type, status and revision, each section with its
  * `<!-- version: n -->`, the stories with their ordered criteria, the tasks with their
  * dependencies and covered stories, the phases and the open questions.
+ *
+ * A build names its tasks by label (D10-04): given `labels`, each task is headed `T2 · <title>`
+ * and its dependencies are named by label.
  */
-export function renderSpecMarkdown(snapshot: SpecSnapshot): string {
+export function renderSpecMarkdown(
+  snapshot: SpecSnapshot,
+  labels?: ReadonlyMap<string, string>,
+): string {
   const { spec, revision } = snapshot
   const lines = [
     `# ${spec.key} · ${revision.title}`,
@@ -46,7 +52,9 @@ export function renderSpecMarkdown(snapshot: SpecSnapshot): string {
   }
 
   if (snapshot.tasks.length > 0) {
-    const titles = new Map(snapshot.tasks.map((task) => [task.id, task.title]))
+    const titles = new Map(
+      snapshot.tasks.map((task) => [task.id, labels?.get(task.id) ?? task.title]),
+    )
     const stories = new Map(snapshot.stories.map((story) => [story.id, story.title]))
     lines.push('', '## Tasks')
     for (const task of byRank(snapshot.tasks)) {
@@ -56,7 +64,9 @@ export function renderSpecMarkdown(snapshot: SpecSnapshot): string {
       const covers = snapshot.taskStories
         .filter((link) => link.taskId === task.id)
         .map((link) => stories.get(link.storyId) ?? link.storyId)
-      lines.push('', `### ${task.title}`, `Type: ${task.type} · Executor: ${task.executor}`)
+      const label = labels?.get(task.id)
+      const heading = label === undefined ? task.title : `${label} · ${task.title}`
+      lines.push('', `### ${heading}`, `Type: ${task.type} · Executor: ${task.executor}`)
       lines.push(`Result: ${task.result}`, `Criteria: ${task.criteria}`)
       if (dependsOn.length > 0) lines.push(`Depends on: ${dependsOn.join(', ')}`)
       if (covers.length > 0) lines.push(`Covers: ${covers.join(', ')}`)

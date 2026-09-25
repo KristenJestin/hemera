@@ -260,3 +260,19 @@ export {
   renderSpecMarkdown,
 } from './protocols/define/index.ts'
 export type { BriefInput } from './protocols/define/index.ts'
+export {
+  BUILD_MISSION_BRIEF,
+  BUILD_PHASE_BRIEFS,
+  BUILD_PROTOCOL,
+  composeBuildBrief,
+} from './protocols/build/index.ts'
+export type {
+  BriefAttempt,
+  BriefBlocker,
+  BriefCheck,
+  BriefFailure,
+  BriefFile,
+  BriefSnapshot,
+  BriefTask,
+  BuildBriefInput,
+} from './protocols/build/index.ts'

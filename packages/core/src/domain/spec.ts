@@ -525,16 +525,16 @@ export function readyGate(snapshot: SpecSnapshot): GateFailure[] {
 }
 
 /** One phase of a protocol: what it waits for, and whether this version can run it. */
-export interface ProtocolPhase {
-  id: PhaseId
-  dependsOn: readonly PhaseId[]
+export interface ProtocolPhase<Id extends string = PhaseId> {
+  id: Id
+  dependsOn: readonly Id[]
   available: boolean
 }
 
 /** A mission's protocol: its version and its phases in presentation order (D7-08). */
-export interface MissionProtocol {
+export interface MissionProtocol<Id extends string = PhaseId> {
   version: number
-  phases: readonly ProtocolPhase[]
+  phases: readonly ProtocolPhase<Id>[]
 }
 
 /**
