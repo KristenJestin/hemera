@@ -28,6 +28,9 @@ const POINT = 'flex flex-col gap-2 rounded-lg border border-border bg-card px-4 
 
 const POINT_DONE = 'border-success/40'
 
+/** A point as a row of the build panel's review list (V6), rather than a card of the thread. */
+const ROW = 'flex flex-col gap-2 py-3'
+
 const THEIRS = 'text-xs text-muted-foreground'
 
 const UNDERSTOOD = 'text-sm text-foreground'
@@ -75,7 +78,7 @@ export function Restatements({
       )}
       <ol className={LIST}>
         {shown.map((one) => (
-          <Point
+          <RestatementPoint
             key={one.id}
             restatement={one}
             answer={answers[one.id]}
@@ -97,14 +100,17 @@ export function Restatements({
   )
 }
 
-function Point({
+/** One restated point, answered OK or corrected: a card of the thread, or a row of a list. */
+export function RestatementPoint({
   restatement,
   answer,
   onAnswer,
+  row = false,
 }: {
   restatement: Restatement
   answer: RestatementAnswer | undefined
   onAnswer: (answer: RestatementAnswer) => void
+  row?: boolean | undefined
 }): ReactNode {
   const named = useId()
   const [correcting, setCorrecting] = useState(false)
@@ -112,7 +118,7 @@ function Point({
   const opening = useTransition(fold)
   const ok = answer?.ok === true
   return (
-    <li aria-labelledby={named} className={cn(POINT, ok && POINT_DONE)}>
+    <li aria-labelledby={named} className={row ? ROW : cn(POINT, ok && POINT_DONE)}>
       <p className={THEIRS}>{`You wrote: « ${restatement.point} »`}</p>
       <p id={named} className={UNDERSTOOD}>
         <span className="font-medium">I understood: </span>

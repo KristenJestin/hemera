@@ -15,6 +15,7 @@ import {
   IconPlayerPause,
 } from '../../icons.ts'
 import {
+  type BlockerProgress,
   type BuildProgressView,
   type CriterionProgress,
   PROGRESS_LABELS,
@@ -115,7 +116,7 @@ function storyProgress(story: StoryProgress): Progress {
 }
 
 /** "0 of 2 stories done". */
-function storiesDone(build: BuildProgressView): string {
+export function storiesDone(build: BuildProgressView): string {
   const done = build.stories.filter((story) => storyProgress(story) === 'done').length
   return `${String(done)} of ${String(build.stories.length)} stories done`
 }
@@ -198,13 +199,20 @@ export function BuildProgress({
             </div>
           )}
           {build.stories.map((story) => (
-            <Story
+            <ProgressStory
               key={story.id}
               story={story}
-              build={build}
-              inPlace={inPlace}
-              onDismissBlocker={onDismissBlocker}
-              onReply={onReply}
+              blocked={build.blocker?.criterionId}
+              blocker={
+                build.blocker !== undefined && (
+                  <Blocker
+                    blocker={build.blocker}
+                    inPlace={inPlace}
+                    onDismissBlocker={onDismissBlocker}
+                    onReply={onReply}
+                  />
+                )
+              }
             />
           ))}
         </div>
@@ -236,22 +244,66 @@ export function BuildProgress({
   )
 }
 
-function Story({
-  story,
-  build,
+/** The blocker under the criterion it stands on: the agent's reason, and "The Spec stands". */
+function Blocker({
+  blocker,
   inPlace,
   onDismissBlocker,
   onReply,
 }: {
-  story: StoryProgress
-  build: BuildProgressView
+  blocker: BlockerProgress
   inPlace: boolean
   onDismissBlocker: () => void
   onReply: ((text: string) => void) | undefined
 }): ReactNode {
+  const [reply, setReply] = useState('')
+  return (
+    <div role="group" aria-label="Blocker" className={BLOCKER}>
+      <p className={BLOCKER_LEAD}>
+        <IconHandStop size="sm" aria-hidden="true" />
+        The agent says the Spec cannot be met here
+        <span className="font-normal text-muted-foreground">{blocker.raised}</span>
+      </p>
+      <blockquote className={BLOCKER_REASON}>{blocker.reason}</blockquote>
+      {inPlace && (
+        <Input
+          label="Reply"
+          placeholder="Which one, or something else…"
+          value={reply}
+          onValueChange={setReply}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => onReply?.(reply)}>
+              Reply
+            </Button>
+          }
+        />
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="secondary" size="sm" onClick={onDismissBlocker}>
+          The Spec stands
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One story of the Spec with its progress: its criteria, each marked, what stands on the blocked
+ * one, and its tasks folded under it.
+ */
+export function ProgressStory({
+  story,
+  blocked,
+  blocker,
+}: {
+  story: StoryProgress
+  /** The criterion a blocker stands on, if any. */
+  blocked: string | undefined
+  /** What is drawn under that criterion. */
+  blocker: ReactNode
+}): ReactNode {
   const named = useId()
   const progress = storyProgress(story)
-  const [reply, setReply] = useState('')
   return (
     <article aria-labelledby={named} className={STORY}>
       <header className={STORY_HEAD}>
@@ -267,34 +319,7 @@ function Story({
         {story.criteria.map((criterion) => (
           <li key={criterion.id} className="flex flex-col gap-2">
             <Criterion criterion={criterion} />
-            {build.blocker?.criterionId === criterion.id && (
-              <div role="group" aria-label="Blocker" className={BLOCKER}>
-                <p className={BLOCKER_LEAD}>
-                  <IconHandStop size="sm" aria-hidden="true" />
-                  The agent says the Spec cannot be met here
-                  <span className="font-normal text-muted-foreground">{build.blocker.raised}</span>
-                </p>
-                <blockquote className={BLOCKER_REASON}>{build.blocker.reason}</blockquote>
-                {inPlace && (
-                  <Input
-                    label="Reply"
-                    placeholder="Which one, or something else…"
-                    value={reply}
-                    onValueChange={setReply}
-                    action={
-                      <Button variant="secondary" size="sm" onClick={() => onReply?.(reply)}>
-                        Reply
-                      </Button>
-                    }
-                  />
-                )}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="secondary" size="sm" onClick={onDismissBlocker}>
-                    The Spec stands
-                  </Button>
-                </div>
-              </div>
-            )}
+            {blocked === criterion.id && blocker}
           </li>
         ))}
       </ul>
