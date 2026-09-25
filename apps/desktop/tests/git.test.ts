@@ -30,8 +30,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(folder, { recursive: true, force: true })
-})
+  // Every test here writes a repository with the machine's `git`, and Windows hands a folder it
+  // has just written back a beat late: the retry agent-tools.test.ts uses.
+  rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 /** A program of the Git service, over the machine's `git` or the program named. */
 function asked<A, E>(program: Effect.Effect<A, E, Git>, named?: string) {

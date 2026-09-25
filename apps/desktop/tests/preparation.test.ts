@@ -54,11 +54,17 @@ beforeEach(() => {
   // of a short name under a Windows runner — so the fixture is settled the same way before use.
   folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-preparation-')))
   main = atlasMain(folder)
-})
+  // Two repositories are four `git` processes, and the preparation that follows runs more of
+  // them: a Windows runner that has just been created starts each one in seconds where a warm
+  // machine takes one. The timeout is this suite's own rather than the ten a hook is given by
+  // default, and nothing here spends it (#99).
+}, 60_000)
 
 afterEach(() => {
-  rmSync(folder, { recursive: true, force: true })
-})
+  // A command run for real may still be closing, and a folder of worktrees is handed back a beat
+  // late on Windows, which refuses the first attempt with EPERM, as agent-tools.test.ts says.
+  rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 const API = './sources/api'
 const FRONT = './sources/front'

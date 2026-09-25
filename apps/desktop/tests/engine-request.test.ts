@@ -72,8 +72,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dataFolder, { recursive: true, force: true })
-})
+  // The folder holds the repositories a test made and the workspaces prepared out of them:
+  // Windows hands it back a beat late, as agent-tools.test.ts says.
+  rmSync(dataFolder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 /** Runs one accepted message against a data folder of this test's own. */
 function running<A, E>(
@@ -388,7 +390,9 @@ describe('Every Workspace channel reaches its use case', () => {
     writeFileSync(join(main, '.env'), 'PORT=3000\n')
     mkdirSync(join(main, 'docs'))
     mkdirSync(join(dataFolder, 'spike'))
-  })
+    // Two `git` processes in a fixture, and a Windows runner that has just been created starts
+    // each one in seconds: the timeout is this suite's own, not the ten a hook is given (#99).
+  }, 60_000)
 
   test('a dedicated Workspace is planned, created, prepared, observed and cleaned up', async () => {
     const seen = await running(

@@ -37,8 +37,10 @@ beforeEach(() => {
 afterEach(async () => {
   await opened?.close()
   opened = undefined
-  rmSync(dataFolder, { recursive: true, force: true })
-})
+  // A build stopped by tree may still be closing, and a Windows runner runs the ten seconds a
+  // hook is given out: this suite's own timeout, and the retry agent-tools.test.ts uses.
+  rmSync(dataFolder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 /** The launches as their rows stand, oldest first. */
 const launches = Effect.gen(function* () {
