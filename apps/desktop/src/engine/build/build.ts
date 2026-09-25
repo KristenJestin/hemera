@@ -40,7 +40,7 @@ import {
   taskLabels,
 } from '@hemera/core'
 import { and, asc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
-import { Context, Data, Deferred, Effect, Layer, Result } from 'effect'
+import { Context, Data, Deferred, Effect, FiberSet, Layer, Result, Scope } from 'effect'
 
 import { StderrSink } from '../agents/supervisor.ts'
 import { Git } from '../git.ts'
@@ -281,6 +281,11 @@ const WHEN: Readonly<Record<AttemptScope, CheckWhen>> = {
 
 /** The phases a build works through; the other two close it. */
 const ACTIVE: readonly BuildPhase[] = ['prepare', 'execute', 'verify']
+
+/** Whether a build is still at work: neither accepted nor stopped. */
+function working(rows: BuildRows): boolean {
+  return rows.phase !== null && ACTIVE.includes(rows.phase)
+}
 
 export interface BuildsService {
   /**
@@ -618,6 +623,24 @@ export const buildsLayer = Layer.effect(
 
     /** How many check jobs of each Session are running. */
     const checkingNow = new Map<string, number>()
+    /** And the fibers running them, which a Stop or an Accept interrupts: its runs stop with them. */
+    const jobFibers = new Map<string, FiberSet.FiberSet<void, never>>()
+
+    const jobsOf = (sessionId: string) =>
+      Effect.gen(function* () {
+        const held = jobFibers.get(sessionId)
+        if (held !== undefined) return held
+        const made = yield* FiberSet.make<void, never>().pipe(Scope.provide(scope))
+        jobFibers.set(sessionId, made)
+        return made
+      })
+
+    /** Stops the checks a build was running: it closed, and nothing judges it any more. */
+    const stopChecks = (sessionId: string) =>
+      Effect.suspend(() => {
+        const held = jobFibers.get(sessionId)
+        return held === undefined ? Effect.void : FiberSet.clear(held)
+      })
 
     const told = (sessionId: string) => Effect.sync(() => notices.changed(sessionId))
 
@@ -694,7 +717,8 @@ export const buildsLayer = Layer.effect(
       Effect.gen(function* () {
         const rows = yield* read(sessionId)
         const attempt = rows?.attempts.find((one) => one.id === job.attemptId)
-        if (rows === null || attempt === undefined) return
+        // A build stopped or accepted meanwhile is judged no more.
+        if (rows === null || attempt === undefined || !working(rows)) return
         const outcomes = yield* checks.run({
           sessionId,
           projectId: rows.session.projectId,
@@ -713,7 +737,8 @@ export const buildsLayer = Layer.effect(
         (job) =>
           Effect.gen(function* () {
             checkingNow.set(sessionId, (checkingNow.get(sessionId) ?? 0) + 1)
-            yield* Effect.forkIn(scope)(
+            yield* FiberSet.run(
+              yield* jobsOf(sessionId),
               runJob(sessionId, job).pipe(
                 Effect.ensuring(
                   Effect.sync(() => {
@@ -739,13 +764,17 @@ export const buildsLayer = Layer.effect(
         const result = attemptResult(outcomes.map((outcome) => outcome.verdict))
         const next = stateAfterAttempt(result, judged.number)
         const before = yield* read(sessionId)
-        if (before === null) return
+        if (before === null || !working(before)) return
         const trees =
           judged.scope === 'task' && next === 'in_progress' ? yield* snapshotsOf(before) : []
         const at = now()
         const jobs = yield* withDatabase(
           mutate('judging an attempt', (transaction) =>
             Effect.gen(function* () {
+              const current = yield* readBuild(transaction, sessionId)
+              // Read in the very transaction: a Stop or an Accept that came first leaves the build
+              // as it closed it, no try judged, none opened.
+              if (current === null || !working(current)) return { result: [], events: [] }
               yield* transaction
                 .update(buildAttempts)
                 .set({ result, endedAt: at })
@@ -1587,7 +1616,7 @@ export const buildsLayer = Layer.effect(
               yield* movePhase(transaction, sessionId, 'accepted')
               return { events: [buildEvent(rows, 'build.accepted', 'human')], follows: false }
             }),
-          )
+          ).pipe(Effect.tap(() => stopChecks(sessionId)))
         }),
 
       stop: (sessionId) =>
@@ -1601,6 +1630,7 @@ export const buildsLayer = Layer.effect(
               }),
             ),
           )
+          yield* stopChecks(sessionId)
           yield* stopTurn(sessionId)
           return stopped
         }),

@@ -15,7 +15,9 @@ import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { Builds } from '#engine/build/build.ts'
 import { ProjectChecks } from '#engine/build/checks.ts'
+import { Commands } from '#engine/commands/service.ts'
 
 import {
   THREE,
@@ -24,6 +26,7 @@ import {
   buildOf,
   eventually,
   finished,
+  journalOf,
   launched,
   projectChecks,
   scriptedChecks,
@@ -181,5 +184,36 @@ describe("A build's checks outlive its agent", () => {
     )
     expect(seen.tasks[0]?.state).toBe('done')
     expect(seen.tasks[0]?.attempts[0]?.checks.map((check) => check.verdict)).toEqual(['green'])
+  })
+})
+
+describe('Stop ends what the build was checking', () => {
+  test('a Stop while a task is checked stops its check, and nothing moves after it', async () => {
+    const { agent } = buildAgent({
+      execute: (labels) => labels.filter((label) => label === 'T1').map(finished),
+    })
+    opened = await openWindowChecked(dataFolder, projectChecks, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        yield* slow(spec.projectId)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const commands = yield* Commands
+        yield* eventually(commands.running(sessionId), (runs) => runs.length === 1)
+        yield* (yield* Builds).stop(sessionId)
+        const runs = yield* eventually(commands.recent(sessionId), (all) =>
+          all.every((run) => run.state !== 'running'),
+        )
+        // Longer than the check would have taken: had it gone on, its verdict would be in.
+        yield* Effect.sleep('2 seconds')
+        return { runs, view: yield* buildOf(sessionId), lines: yield* journalOf(sessionId) }
+      }),
+    )
+    expect(seen.runs.map((run) => [run.name, run.state])).toEqual([['slow', 'stopped']])
+    expect(seen.view.phase).toBe('stopped')
+    expect(seen.view.tasks[0]?.attempts.map((attempt) => [attempt.number, attempt.result])).toEqual(
+      [[1, null]],
+    )
+    expect(seen.lines.filter((line) => line.type === 'task.checked')).toEqual([])
   })
 })
