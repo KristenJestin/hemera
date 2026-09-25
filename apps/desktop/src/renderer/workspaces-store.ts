@@ -300,6 +300,69 @@ export async function createDedicated(
 }
 
 /**
+ * The plan of a Workspace made for a Spec (D8-04): the same as the settings', except that the
+ * branches are named after the Spec's key and slug rather than after the name typed.
+ */
+export async function planForSpec(
+  projectId: string,
+  key: string,
+  slug: string,
+): Promise<WorkspacePlan | null> {
+  forgetWorkspacesRefusal()
+  try {
+    return await window.hemera.invoke('workspaces.plan', { projectId, key, slug })
+  } catch (cause) {
+    refused(cause)
+    return null
+  }
+}
+
+/**
+ * Creates the Workspace a Spec's build runs in (D8-12), then starts its preparation (D8-05) and
+ * gives the Spec that Workspace: the panel of the Spec follows the launch from there, and a build
+ * asked for while the preparation runs waits for it (D8-13).
+ *
+ * Answers the engine's sentence when it refuses — a name taken, a base Git does not know, a branch
+ * that exists — with nothing written, and the Workspace once it exists.
+ */
+export async function createForSpec(
+  projectId: string,
+  specId: string,
+  name: string,
+  repositories: readonly Worktree[],
+): Promise<{ workspace: Workspace; refusal: null } | { workspace: null; refusal: string }> {
+  forgetWorkspacesRefusal()
+  let made: Workspace
+  try {
+    made = await window.hemera.invoke('workspaces.create', {
+      projectId,
+      specId,
+      name,
+      repositories: [...repositories],
+    })
+  } catch (cause) {
+    return { workspace: null, refusal: message(cause) }
+  }
+  // Written before the preparation is asked for: the Spec is set on its Workspace from the moment
+  // the Workspace exists, so a launch asked for now is a launch on that one.
+  try {
+    await window.hemera.invoke('specs.useWorkspace', { specId, workspaceId: made.id })
+  } catch (cause) {
+    refused(cause)
+  }
+  // Created is created: a preparation the engine refuses to start is said on the page, and the
+  // Workspace is there all the same, to be resumed.
+  try {
+    await window.hemera.invoke('preparation.prepare', { workspaceId: made.id })
+  } catch (cause) {
+    refused(cause)
+  }
+  await readWorkspaces(projectId)
+  await showWorkspace(workspacesOf(projectId).find((one) => one.id === made.id) ?? made)
+  return { workspace: made, refusal: null }
+}
+
+/**
  * Creates a Workspace on a folder the user picked, `ready` at once (D8-02), named after the
  * folder unless it is given a name.
  *

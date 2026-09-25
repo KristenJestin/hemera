@@ -82,6 +82,7 @@ export function workspaceEngine(
     request: () => Effect.die('this harness starts no build'),
     retry: () => Effect.die('this harness starts no build'),
     workspaceReady: () => Effect.void,
+    forSpec: () => Effect.die('this harness reads no panel'),
     // Nothing here ever asked for a build, so there is nothing to come back to.
     recover: () => Effect.void,
   })

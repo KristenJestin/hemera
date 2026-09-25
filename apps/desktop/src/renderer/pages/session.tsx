@@ -10,6 +10,7 @@ import type {
   SessionEntry,
   SpecRevision,
   SpecSnapshot,
+  WorkspacePlan,
 } from '@hemera/ipc'
 import {
   ActivityRow,
@@ -23,6 +24,7 @@ import {
   MessageScroller,
   MessageText,
   SessionEmpty,
+  CreateWorkspaceDialog,
   SessionDetails,
   SessionHeader,
   SpecPanel,
@@ -40,22 +42,32 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
-import { type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
+import {
+  openSession,
+  openSessions,
+  type OfferedWorkspace,
+  workspaceFixedOf,
+} from '../sessions-store.ts'
 import { type DefinedSpec, questionAnchor } from '../spec-entries.ts'
 import {
   answerQuestion,
+  askForBuild,
   createSpec,
   discardMine,
   markReady,
+  retryBuild,
   rework,
   saveSection,
   saveStory,
   selectRevision,
   specSnapshot,
+  startBuild,
   subscribeToSpec,
   takeOver,
 } from '../spec-store.ts'
-import { readerOf, specViewOf } from '../spec-views.ts'
+import { launchOf, readerOf, specViewOf, specWorkspacesOf } from '../spec-views.ts'
+import { createForSpec, planForSpec } from '../workspaces-store.ts'
+import { planLinesOf, worktreesOf } from '../workspace-details.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -299,6 +311,36 @@ export function SessionPage({
         })
   const versionOf = (name: SectionName): number =>
     spec?.sections.find((one) => one.name === name)?.version ?? 0
+  /** The plan the Workspace dialog is open on, and what it is to leave behind. */
+  const [workspacePlan, setWorkspacePlan] = useState<WorkspacePlan | null>(null)
+  const [intent, setIntent] = useState<'start' | 'only' | null>(null)
+
+  /**
+   * Prepares a Workspace for this Spec (D8-12): the plan is asked for first — its branches are
+   * named after the Spec (D8-04) — and the dialog opens on it, because it takes its rows as it
+   * opens. Both ways in go through it: the Workspace is named and its branches chosen by the hand
+   * either way, and `start` is the only thing that differs afterwards.
+   */
+  const prepareWorkspace = (start: boolean): void => {
+    const held = defined
+    if (held === null) return
+    void planForSpec(session.projectId, held.spec.key, held.spec.slug).then((planned) => {
+      if (planned === null) return
+      setWorkspacePlan(planned)
+      setIntent(start ? 'start' : 'only')
+    })
+  }
+
+  /**
+   * Opens the build Session the launch started. The list is read again first: the engine made
+   * that Session on its own, and the page it opens is a page this window knows.
+   */
+  const openBuild = (): void => {
+    const launched = stored.launches?.launch
+    if (launched === null || launched === undefined || launched.sessionId === null) return
+    const id = launched.sessionId
+    void openSessions(session.projectId).then(() => openSession(id))
+  }
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -520,6 +562,19 @@ export function SessionPage({
           void selectRevision(revision === current?.number ? null : revision)
         }}
         onTakeOver={() => void takeOver(session.id)}
+        // Where the build of this frozen Spec stands, and what is to be pressed next (D8-12,
+        // D8-13): the panel's head holds it, and the whole journey it opens — the plan, the
+        // Workspace, the launch — belongs here.
+        build={{
+          launch: launchOf(stored.launches),
+          ...specWorkspacesOf(stored.launches),
+          onPrepareAndStart: () => prepareWorkspace(true),
+          onPrepareOnly: () => prepareWorkspace(false),
+          onUseWorkspace: (id) => void askForBuild(id),
+          onStart: () => void startBuild(),
+          onRetry: () => void retryBuild(),
+          onOpen: openBuild,
+        }}
       />
     )
   }
@@ -731,6 +786,36 @@ export function SessionPage({
         aside when the hand or the agent asks (brief revisions 4, 4b).
       */}
       {missionPanel()}
+      {workspacePlan !== null && (
+        <CreateWorkspaceDialog
+          open={intent !== null}
+          onOpenChange={(open) => {
+            if (!open) setIntent(null)
+          }}
+          root={workspacePlan.root}
+          defaultName={workspacePlan.name}
+          repositories={planLinesOf(workspacePlan)}
+          gitMissing={!workspacePlan.gitAvailable}
+          // No `branchOf`: the branches follow the Spec, which the plan they came with already
+          // names (D8-04), and a name typed here does not rename the Spec.
+          onCreate={async (draft) => {
+            const held = defined
+            if (held === null) return null
+            const made = await createForSpec(
+              session.projectId,
+              held.spec.id,
+              draft.name,
+              worktreesOf(draft),
+            )
+            if (made.workspace === null) return made.refusal
+            // A build asked for while the preparation runs waits for it, then starts (D8-13):
+            // asking now is asking for the build this Workspace was made for.
+            if (intent === 'start') await askForBuild(made.workspace.id)
+            setIntent(null)
+            return null
+          }}
+        />
+      )}
     </div>
   )
 }

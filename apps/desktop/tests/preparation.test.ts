@@ -1065,6 +1065,7 @@ describe('A preparation that fails in the background is told as no longer live',
       wrote: () => undefined,
       changed: () => undefined,
       ran: () => undefined,
+      launched: () => undefined,
       workspace: (_projectId, workspaceId) => {
         if (workspaces === null) return
         const free = Effect.runSync(workspaces.hold(workspaceId))
