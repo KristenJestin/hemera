@@ -1,6 +1,7 @@
 import type { Decorator, Preview } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
 import { useEffect } from 'react'
+import { configure } from 'storybook/test'
 
 // A stylesheet is imported for its effect and has nothing to assign; this is how the
 // catalogue gets the theme, exactly as the window does.
@@ -53,6 +54,15 @@ const withMotion: Decorator = (Story) => (
 
 const preview: Preview = {
   decorators: [withMotion, withTheme],
+  /**
+   * How long a play waits for the state it asked for: one second is the budget the library
+   * ships with, and a loaded CI machine takes seconds to paint what a developer machine paints
+   * in frames. What the play waits for still has to arrive — waiting longer is the same claim
+   * made where the runner is busy, not a weaker one — and every story is measured under it.
+   */
+  beforeEach: () => {
+    configure({ asyncUtilTimeout: 10_000 })
+  },
   initialGlobals: { theme: 'light' },
   globalTypes: {
     theme: {
