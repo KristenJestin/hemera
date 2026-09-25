@@ -512,7 +512,8 @@ export type {
  * actions, the approach, the tasks by state — the stage of one task with its tries,
  * their checks and the files they changed, and the blocks that hand a task to the user — a task
  * that is theirs, a blocker the agent raised — in the view and as a banner above the composer;
- * and the frozen Spec, opened beside the view read only. View types only, close to the engine's `BuildView`: the
+ * the frozen Spec, opened beside the view read only; and the page of a `build` Session, the view at
+ * the centre and the chat narrow beside it. View types only, close to the engine's `BuildView`: the
  * renderer maps one onto the other.
  */
 export { BuildView, FINAL_CHECKS_ENTRY, type BuildViewProps } from './build/build-view.tsx'
@@ -520,6 +521,7 @@ export { TaskStage, type TaskStageProps } from './build/task-stage.tsx'
 export { YoursBlock, type YoursBlockProps } from './build/yours-block.tsx'
 export { BlockerBlock, type BlockerBlockProps } from './build/blocker-block.tsx'
 export { BuildSpecPanel, type BuildSpecPanelProps } from './build/build-spec-panel.tsx'
+export { BuildSession, type BuildSessionProps } from './build/build-session.tsx'
 export type {
   BuildAttemptResult,
   BuildAttemptScope,

@@ -433,7 +433,14 @@ export function BuildView({
           <span className={KEY}>{build.specKey}</span>
           <h1 className={TITLE}>{build.specTitle}</h1>
           <div className={ACTIONS}>
-            <Button variant="ghost" size="sm" aria-pressed={specOpen} onClick={onToggleSpec}>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={specOpen}
+              // What the page gives the keyboard back to once the Spec it opened is closed.
+              data-spec-toggle
+              onClick={onToggleSpec}
+            >
               <IconFileDescription size="sm" />
               Spec
             </Button>

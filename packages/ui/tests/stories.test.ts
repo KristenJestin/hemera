@@ -135,7 +135,14 @@ const SURFACES = {
     'service-list',
   ],
   // Lot 22: the build view, the stage of a task, and the blocks that hand a task to the user.
-  build: ['build-view', 'task-stage', 'yours-block', 'blocker-block', 'build-spec-panel'],
+  build: [
+    'build-view',
+    'task-stage',
+    'yours-block',
+    'blocker-block',
+    'build-spec-panel',
+    'build-session',
+  ],
 }
 
 /**
@@ -259,6 +266,26 @@ const NAMED_STATES = new Map([
   ],
   ['build/blocker-block', ['InTheView', 'Banner', 'Dismissed', 'Keyboard']],
   ['build/build-spec-panel', ['ReadOnly', 'Tasks', 'Keyboard']],
+  // Lot 22: the page of a `build` Session, `Complete` first for the UI gate, then one screen per
+  // moment of the build, then the paths through it.
+  [
+    'build/build-session',
+    [
+      'Complete',
+      'GettingReady',
+      'Building',
+      'Yours',
+      'Blocked',
+      'Paused',
+      'FinalChecks',
+      'Accepted',
+      'ChatFolded',
+      'SpecOpen',
+      'SpecAndChatTakeTurns',
+      'BannerOpensTheTask',
+      'Keyboard',
+    ],
+  ],
   ['project/repository-dialog', ['Add', 'Edit', 'Invalid', 'Refused', 'Keyboard']],
   [
     'project/command-dialog',
@@ -546,6 +573,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'YoursBlock',
       'BlockerBlock',
       'BuildSpecPanel',
+      'BuildSession',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
