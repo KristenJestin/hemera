@@ -382,16 +382,76 @@ export const launchesLayer = Layer.effect(
         return yield* settled(starting, sessionId, projectId)
       })
 
+    /**
+     * A launch nothing could start: `failed`, with what refused it said of it (D8-13). Its
+     * Session, when the start got that far, stands for a `retry` to start again.
+     */
+    const refused = (launch: LaunchView, projectId: string, refusal: LaunchRefusal) =>
+      Effect.gen(function* () {
+        const at = now()
+        const detail = refusal.message
+        yield* withDatabase(
+          mutate('saying what refused the build', (transaction) =>
+            Effect.gen(function* () {
+              yield* transaction
+                .update(buildLaunches)
+                .set({ state: 'failed', detail, updatedAt: at })
+                .where(eq(buildLaunches.id, launch.id))
+                .pipe(Effect.mapError(failed('writing the launch')))
+              return {
+                result: undefined,
+                events: [
+                  launchEvent(
+                    launch,
+                    projectId,
+                    'launch.failed',
+                    { sessionId: launch.sessionId, reason: detail },
+                    'hemera',
+                  ),
+                ],
+              } satisfies Mutation<undefined>
+            }),
+          ),
+        )
+      })
+
+    /**
+     * Starts each of them on its own (D8-13): one that is refused is `failed` with what refused
+     * it, and the next ones still start — one Project left on nothing holds back nothing beside
+     * it.
+     */
+    const startEach = (
+      waiting: readonly { readonly launch: LaunchView; readonly projectId: string }[],
+    ) =>
+      Effect.forEach(
+        waiting,
+        ({ launch, projectId }) =>
+          start(launch).pipe(
+            Effect.catch((refusal) => refused(launch, projectId, refusal)),
+            Effect.asVoid,
+          ),
+        { discard: true },
+      )
+
     /** A Workspace that just became ready: every launch that waited on it starts, oldest first. */
     const workspaceReady = (workspaceId: string) =>
       Effect.gen(function* () {
-        const waiting = yield* read(
-          'reading the launches that wait',
-          and(eq(buildLaunches.workspaceId, workspaceId), eq(buildLaunches.state, 'waiting')),
+        const waiting = yield* withDatabase(
+          reading('reading the launches that wait', (transaction) =>
+            transaction
+              .select({ launch: buildLaunches, projectId: specs.projectId })
+              .from(buildLaunches)
+              .innerJoin(specs, eq(specs.id, buildLaunches.specId))
+              .where(
+                and(eq(buildLaunches.workspaceId, workspaceId), eq(buildLaunches.state, 'waiting')),
+              )
+              .orderBy(buildLaunches.createdAt)
+              .pipe(Effect.mapError(failed('reading the launches that wait'))),
+          ),
         )
-        yield* Effect.forEach(waiting, (row) => start(viewOf(row)).pipe(Effect.asVoid), {
-          discard: true,
-        })
+        yield* startEach(
+          waiting.map(({ launch, projectId }) => ({ launch: viewOf(launch), projectId })),
+        )
       })
 
     return {

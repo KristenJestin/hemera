@@ -112,6 +112,27 @@ const picked = (projectId: string) =>
     return yield* (yield* Workspaces).createOnFolder(projectId, folder, 'spike')
   })
 
+/**
+ * A ready Spec of that Project that nothing is writing: the agent of a build of it would be the
+ * one the Project was left on, and this Project was left on nothing — so the build is refused
+ * rather than guessed at (D8-13). The Specs are written by their own lot, which is why the row is
+ * written here.
+ */
+const unwrittenSpec = (projectId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqliteClient
+    const id = 'spec-left-on-nothing'
+    const revisionId = 'revision-of-the-spec-left-on-nothing'
+    const at = '2026-09-25T08:00:00.000Z'
+    yield* sql`INSERT INTO specs
+      (id, project_id, key, slug, status, current_revision_id, created_at, updated_at)
+      VALUES (${id}, ${projectId}, 'HEM-9', 'left-on-nothing', 'ready', ${revisionId}, ${at}, ${at})`
+    yield* sql`INSERT INTO spec_revisions
+      (id, spec_id, number, title, type, created_by, created_at)
+      VALUES (${revisionId}, ${id}, 1, 'Left on nothing', 'feature', 'human', ${at})`
+    return { id, revisionId }
+  })
+
 describe('A build waits for its environment', () => {
   test('Moving a Spec to ready starts nothing', async () => {
     opened = await openWindow(dataFolder, fakeAgent())
@@ -282,5 +303,43 @@ describe('A failed start is retried on its own', () => {
     expect(seen.after).toEqual(seen.before)
     expect(seen.workspace.state).toBe('ready')
     expect(seen.builds).toHaveLength(1)
+  })
+})
+
+describe('One build left on nothing holds back nothing beside it', () => {
+  test('A launch refused at its start fails on its own, and the next one still starts', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const preparation = yield* Preparation
+        const workspace = yield* making(project.id, specId, key)
+        const nothing = yield* unwrittenSpec(project.id)
+        // Two launches wait on the one Workspace: the one that will be refused is asked for
+        // first, so it is the one started first.
+        yield* launched.request(nothing.id, workspace.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        yield* preparation.prepare(workspace.id)
+        const settled = yield* until(launches, (all) =>
+          all.every((row) => row.state !== 'waiting' && row.state !== 'starting'),
+        )
+        return { asked, builds: yield* builds, settled }
+      }),
+    )
+    expect(seen.settled).toHaveLength(2)
+    expect(seen.settled[0]?.state).toBe('failed')
+    expect(seen.settled[0]?.detail).toContain('no agent has been chosen')
+    expect(seen.settled[0]?.session_id).toBeNull()
+    // The one beside it starts, and one build Session is what came of the two launches.
+    expect(seen.settled[1]?.state).toBe('started')
+    expect(seen.builds).toEqual([
+      {
+        id: seen.settled[1]?.session_id,
+        spec_id: seen.asked.specId,
+        revision_id: seen.asked.revisionId,
+        workspace_id: seen.asked.workspaceId,
+      },
+    ])
   })
 })
