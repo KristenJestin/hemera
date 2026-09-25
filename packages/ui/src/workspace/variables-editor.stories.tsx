@@ -93,11 +93,17 @@ async function dialogShown() {
   return await waitFor(() => within(document.body).getByRole('dialog'))
 }
 
-/** Waits the dialog out: a popup still leaving is a popup the accessibility pass still reads. */
+/**
+ * Waits the dialog out: a popup still leaving is a popup the accessibility pass still reads, and
+ * a loaded runner plays the leave slowly: the second it gives can end while it is in flight.
+ */
 async function dialogGone() {
-  await waitFor(() => {
-    expect(within(document.body).queryByRole('dialog')).toBeNull()
-  })
+  await waitFor(
+    () => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    },
+    { timeout: 10_000 },
+  )
 }
 
 /** The Project's own variables: every line is its own, so every line is edited and removed. */
@@ -179,11 +185,15 @@ export const Adding: Story = {
     await userEvent.type(key, 'api-url')
     // The message arrives from under the field; a colour read halfway through the fade is a
     // contrast the accessibility pass is right to refuse, so the story waits for it to land.
-    await waitFor(() => {
-      expect(
-        dialog.getByText('A variable key is upper-case letters, digits and underscores.'),
-      ).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the fade slowly: the second it gives can end while it is in flight.
+    await waitFor(
+      () => {
+        expect(
+          dialog.getByText('A variable key is upper-case letters, digits and underscores.'),
+        ).toHaveStyle({ opacity: '1' })
+      },
+      { timeout: 10_000 },
+    )
     await expect(dialog.getByRole('button', { name: 'Add' })).toBeDisabled()
     await userEvent.clear(key)
     await userEvent.type(key, 'API_URL')

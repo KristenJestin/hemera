@@ -8,7 +8,7 @@
  * the recipe and the variables — and that a refusal comes back in the engine's own words.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -69,9 +69,13 @@ let elsewhere: string
 let opened: OpenWindow | null = null
 
 beforeEach(() => {
-  dataFolder = mkdtempSync(join(tmpdir(), 'hemera-workspace-settings-'))
-  main = mkdtempSync(join(tmpdir(), 'hemera-workspace-settings-main-'))
-  elsewhere = mkdtempSync(join(tmpdir(), 'hemera-workspace-settings-elsewhere-'))
+  // The engine spells a path the way the filesystem does — `realpathSync.native`, the long form
+  // of a short name under a Windows runner — so the fixture is settled the same way before use.
+  dataFolder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-workspace-settings-')))
+  main = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-workspace-settings-main-')))
+  elsewhere = realpathSync.native(
+    mkdtempSync(join(tmpdir(), 'hemera-workspace-settings-elsewhere-')),
+  )
 })
 
 afterEach(async () => {

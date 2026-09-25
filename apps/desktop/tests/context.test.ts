@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -33,7 +33,9 @@ let folder = ''
 let root = ''
 
 beforeEach(() => {
-  folder = mkdtempSync(join(tmpdir(), 'hemera-context-'))
+  // The engine spells a path the way the filesystem does — `realpathSync.native`, the long form
+  // of a short name under a Windows runner — so the fixture is settled the same way before use.
+  folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-context-')))
   root = join(folder, 'workspace')
   mkdirSync(root, { recursive: true })
 })
