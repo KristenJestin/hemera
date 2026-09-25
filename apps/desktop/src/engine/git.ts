@@ -20,6 +20,21 @@ import { Context, Data, Effect, Layer } from 'effect'
 /** What a command may print before it is cut: a status of a large tree is long, not endless. */
 const OUTPUT_LIMIT = 32 * 1024 * 1024
 
+/**
+ * How long a read may take before Git is taken as refusing it: `rev-parse`, a ref listing and a
+ * branch test answer in milliseconds, and a plan waits for several of them per repository. A
+ * Windows runner held `workspaces.plan` past a test's half-minute (#101, #102) because nothing
+ * bounded a child that never exited: a plan now ends, or fails in Git's words, within seconds.
+ */
+const READ_LIMIT = 10_000
+
+/**
+ * How long a command that writes may take: a `worktree add` checks out a whole tree, which is
+ * slow on a large repository and must not be cut short. It is a bound against a child that never
+ * exits, not a deadline.
+ */
+const WORK_LIMIT = 30 * 60 * 1000
+
 /** The program named is not on the `PATH`: shown by name where a Workspace is created (D8-03). */
 export class GitUnavailableError extends Data.TaggedError('GitUnavailableError')<{
   readonly program: string
@@ -160,9 +175,9 @@ export function statusOf(printed: string): GitStatus {
 
 /** Git's own `git`, or the program named: a test names one that is not on the `PATH`. */
 export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
-  const run = (cwd: string, args: readonly string[]) =>
-    Effect.callback<string, Refusal>((resume) => {
-      execFile(
+  const run = (cwd: string, args: readonly string[], limit = READ_LIMIT) =>
+    Effect.callback<string, Refusal>((resume, signal) => {
+      const child = execFile(
         program,
         ['-C', cwd, ...args],
         {
@@ -170,6 +185,8 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
           // helper that would prompt fails instead (D8-04).
           env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
           maxBuffer: OUTPUT_LIMIT,
+          timeout: limit,
+          killSignal: 'SIGKILL',
           windowsHide: true,
         },
         (failure, stdout, stderr) => {
@@ -177,9 +194,24 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
           if (failure.code === 'ENOENT') {
             return resume(Effect.fail(new GitUnavailableError({ program })))
           }
-          resume(Effect.fail(new GitError({ args, cwd, stderr })))
+          resume(
+            Effect.fail(
+              new GitError({
+                args,
+                cwd,
+                // A child cut for taking too long said nothing: its refusal is the limit.
+                stderr:
+                  failure.killed === true
+                    ? `Git did not answer within ${limit / 1000} seconds`
+                    : stderr,
+              }),
+            ),
+          )
         },
       )
+      // A read that is abandoned — an interrupted plan, a test that ended — may not leave the
+      // child behind: it holds the folder its `-C` names, and a cleanup then fails with EPERM.
+      signal.addEventListener('abort', () => child.kill('SIGKILL'))
     })
 
   return Layer.succeed(Git, {
@@ -188,11 +220,14 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
         Effect.map((printed) => printed.trim()),
       ),
     worktreeAdd: (cwd, branch, path, base) =>
-      run(cwd, ['worktree', 'add', '--quiet', '-b', branch, path, base]).pipe(Effect.asVoid),
+      run(cwd, ['worktree', 'add', '--quiet', '-b', branch, path, base], WORK_LIMIT).pipe(
+        Effect.asVoid,
+      ),
     worktreeAttach: (cwd, branch, path) =>
-      run(cwd, ['worktree', 'add', '--quiet', path, branch]).pipe(Effect.asVoid),
-    worktreeRemove: (cwd, path) => run(cwd, ['worktree', 'remove', path]).pipe(Effect.asVoid),
-    worktreePrune: (cwd) => run(cwd, ['worktree', 'prune']).pipe(Effect.asVoid),
+      run(cwd, ['worktree', 'add', '--quiet', path, branch], WORK_LIMIT).pipe(Effect.asVoid),
+    worktreeRemove: (cwd, path) =>
+      run(cwd, ['worktree', 'remove', path], WORK_LIMIT).pipe(Effect.asVoid),
+    worktreePrune: (cwd) => run(cwd, ['worktree', 'prune'], WORK_LIMIT).pipe(Effect.asVoid),
     branchExists: (cwd, branch) =>
       run(cwd, ['branch', '--list', branch]).pipe(Effect.map((printed) => printed.trim() !== '')),
     checkRefFormat: (cwd, branch) =>
@@ -203,7 +238,7 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
     // An observation writes nothing (D8-15): without `--no-optional-locks` a status refreshes the
     // index and takes its lock, and a `worktree add` under way in that folder is refused for it.
     status: (cwd) =>
-      run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch']).pipe(
+      run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '--branch'], WORK_LIMIT).pipe(
         Effect.map(statusOf),
       ),
     // `--abbrev-ref` answers `HEAD` itself when it is on no branch: a detached commit, which is
