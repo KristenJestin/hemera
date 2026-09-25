@@ -43,6 +43,8 @@ export interface SessionFixture {
   attention?: Attention | undefined
   /** What the chat asks, answerable without opening it (V5). */
   asks?: 'blocker' | 'restatements' | undefined
+  /** The Workspaces the composer offers, or the one the Session is bound to (V6). */
+  workspaces: string[]
 }
 
 const AT = 'Today at'
@@ -82,6 +84,7 @@ const FREE: SessionFixture = {
   meta: 'FREE · Claude Code · Sonnet 5',
   mission: 'free',
   running: false,
+  workspaces: ['main', 'login-form'],
   agent: { ...CLAUDE, tone: 'success', says: 'Answered' },
   thread: [
     yours(
@@ -112,6 +115,7 @@ const DEFINE: SessionFixture = {
   meta: 'DEFINE · Claude Code · Sonnet 5 · ATL-7',
   mission: 'define',
   running: true,
+  workspaces: ['main'],
   spec: MID_PLAN,
   agent: { ...CLAUDE, tone: 'running', says: 'Writing the plan of ATL-7' },
   attention: { title: 'A question', preview: CREDIT_NOTES.body },
@@ -213,7 +217,15 @@ const PROGRESS_BLOCKED: BuildProgressView = {
       ],
     ),
   ],
-  blocker: { criterionId: 'S2-1', reason: BLOCKER_REASON, raised: '6 min ago' },
+  blocker: {
+    criterionId: 'S2-1',
+    reason: BLOCKER_REASON,
+    raised: '6 min ago',
+    options: [
+      { id: 'renumber', label: 'Give credit notes a number of their own', changesSpec: true },
+      { id: 'own-file', label: 'Put credit notes in a file of their own', changesSpec: true },
+    ],
+  },
 }
 
 const PROGRESS_REVIEW: BuildProgressView = {
@@ -272,6 +284,7 @@ const BUILDING: SessionFixture = {
   meta: BUILD_META,
   mission: 'build',
   running: true,
+  workspaces: ['atl-7-csv-export'],
   build: PROGRESS_BUILDING,
   agent: { ...CLAUDE, tone: 'running', says: 'Working on S1 · the column order' },
   thread: BUILD_THREAD,
@@ -371,6 +384,48 @@ const RESTATED: SessionFixture = {
     },
   ],
 }
+
+// ---------------------------------------------------------------------------------------------
+// V6: decisions in the panel, words in the chat
+
+/** The blocker in V6: the agent says it in a line and points at the panel, where it is answered. */
+const BLOCKED_V6: SessionFixture = {
+  ...BLOCKED,
+  attention: { title: 'Blocker on S2', preview: 'Answer it in the panel; S1 goes on meanwhile.' },
+  thread: [
+    ...BUILD_THREAD,
+    agents(
+      'blocker',
+      'I stopped on **S2 · Credit notes in the same file**: the Spec and the ledger disagree on the number of a credit note. Answer it in the panel; S1 goes on meanwhile.',
+    ),
+  ],
+}
+
+/** The review in V6: written in the chat, restated in one line there, confirmed in the panel. */
+const RESTATED_V6: SessionFixture = {
+  ...REVIEW,
+  build: { ...PROGRESS_REVIEW, review: RESTATEMENTS },
+  agent: { ...CLAUDE, tone: 'pending', says: 'Waits for you' },
+  attention: {
+    title: '3 points to confirm',
+    preview: 'I restated your 3 points, confirm them in the panel.',
+  },
+  thread: [
+    ...DONE_THREAD,
+    yours('review', '11:52', THE_REVIEW, 'Review'),
+    agents('restated', 'I restated your 3 points, confirm them in the panel.'),
+  ],
+}
+
+/** The six Sessions as V6 draws them: the same, but for what the chat says and the panel asks. */
+export const SESSIONS_V6 = {
+  free: FREE,
+  define: DEFINE,
+  building: BUILDING,
+  blocked: BLOCKED_V6,
+  review: REVIEW,
+  restated: RESTATED_V6,
+} as const
 
 /** Every Session of the exploration, by the name its stories use. */
 export const SESSIONS = {

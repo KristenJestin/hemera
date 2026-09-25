@@ -39,12 +39,21 @@ export interface StoryProgress {
   tasks: TaskProgress[]
 }
 
+/** One way out of a blocker the agent offers, and whether taking it changes the Spec. */
+export interface BlockerOption {
+  id: string
+  label: string
+  changesSpec?: boolean | undefined
+}
+
 /** The agent saying a criterion cannot be met as the Spec writes it. */
 export interface BlockerProgress {
   criterionId: string
   reason: string
   /** When it was raised, already written: `6 min ago`. */
   raised: string
+  /** The ways out the agent offers, answered in the panel (V6). */
+  options?: BlockerOption[] | undefined
 }
 
 /** Building, or done and waiting for the user's review. */
@@ -56,6 +65,8 @@ export interface BuildProgressView {
   stage: BuildStage
   stories: StoryProgress[]
   blocker?: BlockerProgress | undefined
+  /** The user's review as the agent restated it, confirmed in the panel (V6). */
+  review?: Restatement[] | undefined
 }
 
 /** The agent of a Session, as the minimised chat says it. */

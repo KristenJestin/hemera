@@ -459,6 +459,13 @@
      for a label, a title of a few words and the time at the end of a row, on one line. */
   --spacing-build-list: 20rem;
 
+  /* The minimised chat of a Session (exploration V6, 25 September 2026): the preview that stands
+     beside its bubble when the agent needs the user, and the room the two take at the bottom
+     left — the bubble, the preview and their margins — which the mission panel keeps on its left
+     while the chat is minimised, so neither ever stands over the build. */
+  --spacing-chat-preview: 15rem;
+  --spacing-chat-room: 21rem;
+
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);

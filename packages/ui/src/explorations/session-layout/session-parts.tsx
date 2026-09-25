@@ -46,10 +46,20 @@ export interface ChatPaneProps {
   running: boolean
   /** Minimises the chat; the control is drawn only when this is given. */
   onMinimise?: (() => void) | undefined
+  /** The Workspaces the composer offers; left out, the composer's own default (V1–V5). */
+  workspaces?: string[] | undefined
+  /** Whether the Session is bound to its Workspace, which the composer then says as a label. */
+  workspaceBound?: boolean | undefined
 }
 
 /** The chat: its thread and its composer, and the control that minimises it when it can be. */
-export function ChatPane({ thread, running, onMinimise }: ChatPaneProps): ReactNode {
+export function ChatPane({
+  thread,
+  running,
+  onMinimise,
+  workspaces,
+  workspaceBound = false,
+}: ChatPaneProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   return (
@@ -82,6 +92,8 @@ export function ChatPane({ thread, running, onMinimise }: ChatPaneProps): ReactN
           onSend={() => Promise.resolve(null)}
           running={running}
           onStop={nothing}
+          workspaces={workspaces?.map((name) => ({ name }))}
+          workspaceBound={workspaceBound}
         />
       </div>
     </section>
