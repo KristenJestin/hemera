@@ -323,6 +323,49 @@ describe('A launch is claimed only in a Workspace that is ready', () => {
   })
 })
 
+describe('A refusal says the Session the start had written', () => {
+  test('A start refused after its claim is failed, naming the Session it wrote', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        // The thread's table is taken away, the way a database that refuses a write is: the
+        // start gets as far as writing its Session, and the mission brief that follows is the
+        // write it cannot do (D8-13).
+        const sql = yield* SqliteClient
+        yield* sql`CREATE TRIGGER no_brief BEFORE INSERT ON session_entries BEGIN SELECT RAISE(ABORT, 'refused'); END`
+        yield* (yield* Preparation).prepare(workspace.id)
+        const launch = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        return {
+          asked,
+          builds: yield* builds,
+          launch,
+          lines: yield* sql<{ payload: string }>`
+            SELECT payload FROM domain_events WHERE type = 'launch.failed'`,
+        }
+      }),
+    )
+    // Failed, holding the Session it had written — and the Journal line names it, never that
+    // there is none: it is the Session a retry starts again.
+    expect(seen.launch.state).toBe('failed')
+    expect(seen.launch.sessionId).not.toBeNull()
+    expect(seen.builds).toHaveLength(1)
+    expect(seen.lines).toEqual([
+      {
+        payload: JSON.stringify({
+          specId: seen.asked.specId,
+          revisionId: seen.asked.revisionId,
+          sessionId: seen.launch.sessionId,
+          reason: seen.launch.detail,
+        }),
+      },
+    ])
+  })
+})
+
 describe('A launch waiting on a Workspace that will never be ready ends', () => {
   test('A preparation that fails fails the launches that waited on it', async () => {
     opened = await openWindow(dataFolder, fakeAgent())

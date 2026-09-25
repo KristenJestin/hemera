@@ -456,27 +456,38 @@ export const launchesLayer = Layer.effect(
       Effect.gen(function* () {
         const at = now()
         const detail = refusal.message
-        const answer: LaunchView = { ...launch, state: 'failed', detail, updatedAt: at }
-        yield* withDatabase(
+        const answer = yield* withDatabase(
           mutate('saying what refused the build', (transaction) =>
             Effect.gen(function* () {
+              // The launch is read again here, in the very transaction that says what refused
+              // it (D8-13): a start that failed after its claim wrote its Session, and the
+              // line names the Session a retry starts again, never that there is none.
+              const rows = yield* transaction
+                .select()
+                .from(buildLaunches)
+                .where(eq(buildLaunches.id, launch.id))
+                .pipe(Effect.mapError(failed('reading the launch')))
+              const row = rows[0]
+              if (row === undefined) {
+                return yield* Effect.fail(new UnknownLaunchError({ id: launch.id }))
+              }
               yield* transaction
                 .update(buildLaunches)
                 .set({ state: 'failed', detail, updatedAt: at })
-                .where(eq(buildLaunches.id, launch.id))
+                .where(eq(buildLaunches.id, row.id))
                 .pipe(Effect.mapError(failed('writing the launch')))
               return {
-                result: undefined,
+                result: { ...viewOf(row), state: 'failed' as const, detail, updatedAt: at },
                 events: [
                   launchEvent(
-                    launch,
+                    row,
                     projectId,
                     'launch.failed',
-                    { sessionId: launch.sessionId, reason: detail },
+                    { sessionId: row.sessionId, reason: detail },
                     'hemera',
                   ),
                 ],
-              } satisfies Mutation<undefined>
+              } satisfies Mutation<LaunchView>
             }),
           ),
         )
