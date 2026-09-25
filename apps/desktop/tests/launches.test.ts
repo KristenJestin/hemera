@@ -18,7 +18,7 @@ import { Sessions } from '#engine/sessions.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Launches } from '#engine/workspaces/launches.ts'
-import { Preparation } from '#engine/workspaces/preparation.ts'
+import { Preparation, recovered } from '#engine/workspaces/preparation.ts'
 import { Workspaces } from '#engine/workspaces/workspaces.ts'
 
 import { bareMachine, until } from './application.ts'
@@ -66,6 +66,12 @@ const builtIn = (specId: string) =>
       SELECT workspace_id FROM specs WHERE id = ${specId}`
     return row?.workspace_id ?? null
   })
+
+/**
+ * The launch an engine that stopped is made to have left `waiting`: the identifier `request`
+ * writes for a row no start ever reached.
+ */
+const LEFT_WAITING = 'launch-left-waiting'
 
 /** A Project on a real `main`, one repository of its own, and a `ready` Spec with a writer. */
 const atlas = (ready = true) =>
@@ -339,6 +345,96 @@ describe('One build left on nothing holds back nothing beside it', () => {
         spec_id: seen.asked.specId,
         revision_id: seen.asked.revisionId,
         workspace_id: seen.asked.workspaceId,
+      },
+    ])
+  })
+})
+
+describe('The engine comes back to what a stopped engine left', () => {
+  test('A launch left starting is failed as interrupted, and its Session starts again', async () => {
+    // A machine that holds none of the agents' bare means: the agent cannot be started (D6-02),
+    // and that is where the first engine is closed on the launch.
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        yield* (yield* Preparation).prepare(workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        // The engine stops while that build was being started: what it leaves behind is a launch
+        // `starting`, with the Session it had already written (D8-13).
+        const sql = yield* SqliteClient
+        yield* sql`UPDATE build_launches SET state = 'starting', detail = NULL
+          WHERE id = ${failed.id}`
+        return failed
+      }),
+    )
+    await opened.close()
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const launched = yield* Launches
+        yield* recovered
+        const back = yield* launched.one(left.id)
+        const before = yield* builds
+        const again = yield* launched.retry(left.id)
+        return { after: yield* builds, again, back, before }
+      }),
+    )
+    expect(seen.back.state).toBe('failed')
+    expect(seen.back.detail).toBe('interrupted')
+    // Its Session and its Workspace stand, and the build is not started again on its own: Retry
+    // is what starts that same Session again (D8-13).
+    expect(seen.back.sessionId).toBe(left.sessionId)
+    expect(seen.again.state).toBe('started')
+    expect(seen.again.sessionId).toBe(left.sessionId)
+    // One build, before and after: Retry starts the Session the launch already had.
+    expect(seen.before).toHaveLength(1)
+    expect(seen.after).toEqual(seen.before)
+  })
+
+  test('A launch left waiting on a Workspace that is ready starts on the way back', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const sql = yield* SqliteClient
+        const workspace = yield* picked(project.id)
+        const [spec] = yield* sql<{ current_revision_id: string }>`
+          SELECT current_revision_id FROM specs WHERE id = ${specId}`
+        const revisionId = spec?.current_revision_id
+        if (revisionId === undefined) {
+          return yield* Effect.fail(new Error('the Spec has no current revision'))
+        }
+        // The launch the last engine wrote before it stopped, on a Workspace that was ready all
+        // along (D8-02): the row `request` writes, which no start ever reached (D8-13).
+        const at = '2026-09-25T08:00:00.000Z'
+        yield* sql`INSERT INTO build_launches
+          (id, spec_id, revision_id, workspace_id, state, created_at, updated_at)
+          VALUES (${LEFT_WAITING}, ${specId}, ${revisionId}, ${workspace.id}, 'waiting', ${at}, ${at})`
+        return { revisionId, specId, workspace }
+      }),
+    )
+    await opened.close()
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const launched = yield* Launches
+        yield* recovered
+        return { builds: yield* builds, launch: yield* launched.one(LEFT_WAITING) }
+      }),
+    )
+    // What it waited for is there: the build starts, on the revision and in the Workspace the
+    // launch was written with.
+    expect(seen.launch.state).toBe('started')
+    expect(seen.builds).toEqual([
+      {
+        id: seen.launch.sessionId,
+        spec_id: left.specId,
+        revision_id: left.revisionId,
+        workspace_id: left.workspace.id,
       },
     ])
   })

@@ -82,6 +82,8 @@ export function workspaceEngine(
     request: () => Effect.die('this harness starts no build'),
     retry: () => Effect.die('this harness starts no build'),
     workspaceReady: () => Effect.void,
+    // Nothing here ever asked for a build, so there is nothing to come back to.
+    recover: () => Effect.void,
   })
   const services: Layer.Layer<WorkspaceEngine> = preparationLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
@@ -113,7 +115,8 @@ export function workspaceEngine(
             return yield* program
           }),
         ),
-        services,
+        // The launches answer nothing here, but the engine's recovery pass asks them too (D8-13).
+        Layer.mergeAll(services, launches),
       ),
     )
 }

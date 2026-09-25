@@ -281,11 +281,12 @@ function replaced(steps: readonly WorkspaceStep[], changed: WorkspaceStep): Work
 /**
  * What the engine does once at its start, the database open and nothing yet running: the runs an
  * engine that stopped left `running` are ended, then its steps left `running` wait for a resume
- * (D8-05, D6-12).
+ * (D8-05, D6-12), and the launches it left part-way are ended or started (D8-13).
  */
 export const recovered = Effect.gen(function* () {
   yield* (yield* Commands).recover()
   yield* (yield* Preparation).recover()
+  yield* (yield* Launches).recover()
 })
 
 export const preparationLayer = Layer.effect(

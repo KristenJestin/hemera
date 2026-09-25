@@ -89,6 +89,9 @@ export class LaunchRefusedError extends Data.TaggedError('LaunchRefusedError')<{
   }
 }
 
+/** What a launch a stopped engine left `starting` says of itself once the engine comes back. */
+const INTERRUPTED = 'interrupted'
+
 /** Everything reading, asking for or retrying a launch can be answered with. */
 export type LaunchRefusal =
   | DatabaseError
@@ -113,6 +116,12 @@ export interface LaunchesService {
   ) => Effect.Effect<LaunchView, LaunchRefusal>
   /** A Workspace that just became ready: what was waiting on it starts there (D8-13). */
   readonly workspaceReady: (workspaceId: string) => Effect.Effect<void, LaunchRefusal>
+  /**
+   * What the engine does once, at its own start (D8-05, D8-13): the launches an engine that
+   * stopped left `starting` are `failed`, and the ones it left `waiting` on a Workspace that is
+   * already ready start now.
+   */
+  readonly recover: () => Effect.Effect<void, LaunchRefusal>
   /** Starts a build that failed, again: its Session, its revision and its Workspace stand. */
   readonly retry: (id: string) => Effect.Effect<LaunchView, LaunchRefusal>
 }
@@ -454,6 +463,79 @@ export const launchesLayer = Layer.effect(
         )
       })
 
+    /**
+     * The launches an engine that stopped left behind (D8-05, D8-13): one it left `starting` is
+     * `failed`, saying `interrupted` — its Session, its revision and its Workspace stand, so
+     * `retry` starts that Session again — and one it left `waiting` on a Workspace that is
+     * already ready starts now.
+     */
+    const recover = () =>
+      Effect.gen(function* () {
+        const left = yield* withDatabase(
+          reading('reading the launches a stopped engine left', (transaction) =>
+            transaction
+              .select({
+                id: buildLaunches.id,
+                specId: buildLaunches.specId,
+                revisionId: buildLaunches.revisionId,
+                sessionId: buildLaunches.sessionId,
+                projectId: specs.projectId,
+              })
+              .from(buildLaunches)
+              .innerJoin(specs, eq(specs.id, buildLaunches.specId))
+              .where(eq(buildLaunches.state, 'starting'))
+              .pipe(Effect.mapError(failed('reading the launches a stopped engine left'))),
+          ),
+        )
+        if (left.length > 0) {
+          const at = now()
+          yield* withDatabase(
+            mutate('ending the builds a stopped engine left', (transaction) =>
+              Effect.gen(function* () {
+                for (const each of left) {
+                  yield* transaction
+                    .update(buildLaunches)
+                    .set({ state: 'failed', detail: INTERRUPTED, updatedAt: at })
+                    .where(eq(buildLaunches.id, each.id))
+                    .pipe(Effect.mapError(failed('writing the launch')))
+                }
+                return {
+                  result: undefined,
+                  events: left.map((each) =>
+                    launchEvent(
+                      each,
+                      each.projectId,
+                      'launch.failed',
+                      { sessionId: each.sessionId, reason: INTERRUPTED },
+                      'hemera',
+                    ),
+                  ),
+                } satisfies Mutation<undefined>
+              }),
+            ),
+          )
+        }
+        // A Workspace that was made ready by an engine that stopped before its ready step: what
+        // waited on it has nothing left to wait for.
+        const waiting = yield* withDatabase(
+          reading('reading the launches that wait for a ready Workspace', (transaction) =>
+            transaction
+              .select({ launch: buildLaunches, projectId: specs.projectId })
+              .from(buildLaunches)
+              .innerJoin(specs, eq(specs.id, buildLaunches.specId))
+              .innerJoin(workspaces, eq(workspaces.id, buildLaunches.workspaceId))
+              .where(and(eq(buildLaunches.state, 'waiting'), eq(workspaces.state, 'ready')))
+              .orderBy(buildLaunches.createdAt)
+              .pipe(
+                Effect.mapError(failed('reading the launches that wait for a ready Workspace')),
+              ),
+          ),
+        )
+        yield* startEach(
+          waiting.map(({ launch, projectId }) => ({ launch: viewOf(launch), projectId })),
+        )
+      })
+
     return {
       one,
       request: (specId, workspaceId) =>
@@ -581,6 +663,7 @@ export const launchesLayer = Layer.effect(
         }),
 
       workspaceReady,
+      recover,
     } satisfies LaunchesService
   }),
 )
