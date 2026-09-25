@@ -173,45 +173,100 @@ export function statusOf(printed: string): GitStatus {
   return { branch, commit, staged, unstaged, untracked }
 }
 
+/**
+ * How a command is started and what it answered: the machine's own `git`, spawned with its
+ * arguments and no shell. A suite names its own only to make one read of it fail once — a machine
+ * at work — and never to replace what the service makes of the answer.
+ */
+export type GitSpawn = (
+  program: string,
+  cwd: string,
+  args: readonly string[],
+  limit: number,
+) => Effect.Effect<string, Refusal>
+
+/** The machine's own spawn: a child with its arguments, no shell, killed when it is abandoned. */
+export const spawnGit: GitSpawn = (program, cwd, args, limit) =>
+  Effect.callback<string, Refusal>((resume, signal) => {
+    const child = execFile(
+      program,
+      ['-C', cwd, ...args],
+      {
+        // Nothing may wait on a prompt, and no network is ever asked for: a credential
+        // helper that would prompt fails instead (D8-04).
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        maxBuffer: OUTPUT_LIMIT,
+        timeout: limit,
+        killSignal: 'SIGKILL',
+        windowsHide: true,
+      },
+      (failure, stdout, stderr) => {
+        if (failure === null) return resume(Effect.succeed(stdout))
+        if (failure.code === 'ENOENT') {
+          return resume(Effect.fail(new GitUnavailableError({ program })))
+        }
+        resume(
+          Effect.fail(
+            new GitError({
+              args,
+              cwd,
+              // A child cut for taking too long said nothing: its refusal is the limit.
+              stderr:
+                failure.killed === true
+                  ? `Git did not answer within ${limit / 1000} seconds`
+                  : stderr,
+            }),
+          ),
+        )
+      },
+    )
+    // A read that is abandoned — an interrupted plan, a test that ended — may not leave the
+    // child behind: it holds the folder its `-C` names, and a cleanup then fails with EPERM.
+    signal.addEventListener('abort', () => child.kill('SIGKILL'))
+  })
+
 /** Git's own `git`, or the program named: a test names one that is not on the `PATH`. */
-export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
+export const gitLayer = (program = 'git', spawn: GitSpawn = spawnGit): Layer.Layer<Git> => {
   const run = (cwd: string, args: readonly string[], limit = READ_LIMIT) =>
-    Effect.callback<string, Refusal>((resume, signal) => {
-      const child = execFile(
-        program,
-        ['-C', cwd, ...args],
-        {
-          // Nothing may wait on a prompt, and no network is ever asked for: a credential
-          // helper that would prompt fails instead (D8-04).
-          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-          maxBuffer: OUTPUT_LIMIT,
-          timeout: limit,
-          killSignal: 'SIGKILL',
-          windowsHide: true,
-        },
-        (failure, stdout, stderr) => {
-          if (failure === null) return resume(Effect.succeed(stdout))
-          if (failure.code === 'ENOENT') {
-            return resume(Effect.fail(new GitUnavailableError({ program })))
-          }
-          resume(
-            Effect.fail(
-              new GitError({
-                args,
-                cwd,
-                // A child cut for taking too long said nothing: its refusal is the limit.
-                stderr:
-                  failure.killed === true
-                    ? `Git did not answer within ${limit / 1000} seconds`
-                    : stderr,
-              }),
-            ),
-          )
-        },
+    spawn(program, cwd, args, limit)
+
+  /**
+   * Whether `HEAD` is on a branch that has no ref yet: what a repository with no commit yet is, and
+   * the only thing it is. `rev-parse --verify --quiet HEAD` fails, `symbolic-ref --short HEAD` names
+   * a branch, and that branch is not stored — a read that fails for any other reason fails one of
+   * the three, and is a refusal the plan keeps and retries (#102).
+   */
+  const unbornHead = (cwd: string) =>
+    Effect.gen(function* () {
+      const resolves = yield* run(cwd, [
+        '--no-optional-locks',
+        'rev-parse',
+        '--verify',
+        '--quiet',
+        'HEAD',
+      ]).pipe(
+        Effect.as(true),
+        Effect.catchTag('GitError', () => Effect.succeed(false)),
       )
-      // A read that is abandoned — an interrupted plan, a test that ended — may not leave the
-      // child behind: it holds the folder its `-C` names, and a cleanup then fails with EPERM.
-      signal.addEventListener('abort', () => child.kill('SIGKILL'))
+      if (resolves) return false
+      const named = yield* run(cwd, [
+        '--no-optional-locks',
+        'symbolic-ref',
+        '--short',
+        'HEAD',
+      ]).pipe(Effect.catchTag('GitError', () => Effect.succeed(null)))
+      if (named === null || named.trim() === '') return false
+      const stored = yield* run(cwd, [
+        '--no-optional-locks',
+        'show-ref',
+        '--verify',
+        '--quiet',
+        `refs/heads/${named.trim()}`,
+      ]).pipe(
+        Effect.as(true),
+        Effect.catchTag('GitError', () => Effect.succeed(false)),
+      )
+      return !stored
     })
 
   return Layer.succeed(Git, {
@@ -263,13 +318,15 @@ export const gitLayer = (program = 'git'): Layer.Layer<Git> => {
           short: short === null ? null : short.trim(),
         } satisfies GitHead
       }).pipe(
-        // The branch `HEAD` names is what a repository with no commit yet has to show, and it is
-        // the only read such a repository answers: a `symbolic-ref` that fails is Git refusing
-        // the read, and its own refusal is the one the plan keeps.
+        // A repository with no commit yet is the one read that fails and is still an answer, and it
+        // is told apart from a refusal by asking Git: a `symbolic-ref` that answers used to be
+        // enough, and it swallowed every other failure of the reads above — a Git at work for a
+        // moment lost the repository from the plan without a word (#102).
         Effect.catchTag('GitError', (refusal) =>
-          run(cwd, ['--no-optional-locks', 'symbolic-ref', '--short', 'HEAD']).pipe(
-            Effect.as(null),
-            Effect.catchTag('GitError', () => Effect.fail(refusal)),
+          unbornHead(cwd).pipe(
+            Effect.flatMap((unborn): Effect.Effect<GitHead | null, Refusal> =>
+              unborn ? Effect.succeed(null) : Effect.fail(refusal),
+            ),
           ),
         ),
       ),

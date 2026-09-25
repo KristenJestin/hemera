@@ -20,11 +20,12 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Effect } from 'effect'
 
 import { InvalidRepositoryPathError } from '@hemera/core'
 import { Commands } from '#engine/commands/service.ts'
-import { Git, GitError, gitLayer } from '#engine/git.ts'
+import { GitError, gitLayer, spawnGit } from '#engine/git.ts'
+import type { GitSpawn } from '#engine/git.ts'
 import { Projects } from '#engine/projects.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 import { Preparation } from '#engine/workspaces/preparation.ts'
@@ -296,35 +297,31 @@ describe('A repository on no branch proposes the commit it is on', () => {
 describe('A repository whose head fails once is still in the plan', () => {
   it('reads it again, and proposes it as it is, with nothing to report', async () => {
     // A machine at work: the first read of one repository's head fails, and the second answers.
-    // The repositories are Git's own, and the one read the harness fails is the read the plan has
-    // to survive (D8-04).
+    // The repositories are Git's own and the read that fails is a read of Git itself, so the plan
+    // survives the whole of the service, nothing of it taken on trust (D8-04, #102).
     let reads = 0
-    const flaky = Layer.effect(
-      Git,
-      Effect.map(Git, (real) => ({
-        ...real,
-        head: (cwd: string) => {
-          if (!cwd.endsWith(join('sources', 'api'))) return real.head(cwd)
-          reads += 1
-          return reads === 1
-            ? Effect.fail(
-                new GitError({
-                  args: ['rev-parse', '--abbrev-ref', 'HEAD'],
-                  cwd,
-                  stderr: 'fatal: a moment of it, and no more',
-                }),
-              )
-            : real.head(cwd)
-        },
-      })),
-    ).pipe(Layer.provide(gitLayer()))
+    const once: GitSpawn = (program, cwd, args, limit) => {
+      if (!cwd.endsWith(join('sources', 'api')) || !args.includes('--abbrev-ref')) {
+        return spawnGit(program, cwd, args, limit)
+      }
+      reads += 1
+      return reads === 1
+        ? Effect.fail(
+            new GitError({
+              args,
+              cwd,
+              stderr: 'fatal: a moment of it, and no more',
+            }),
+          )
+        : spawnGit(program, cwd, args, limit)
+    }
 
     const plan = await workspaceEngine(
       folder,
       undefined,
       undefined,
       undefined,
-      flaky,
+      gitLayer('git', once),
     )(
       Effect.gen(function* () {
         const workspaces = yield* Workspaces
