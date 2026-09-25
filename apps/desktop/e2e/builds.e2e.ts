@@ -171,12 +171,21 @@ describe('The build view shows the tasks by state', () => {
         (row) => row.getAttribute('aria-label') ?? '',
       ),
     )
-    expect(rows.find((row) => row.startsWith('T1 Write the exporter, '))).toMatch(/, \S/)
+    // Each row says its time: how long a done task took, how long a task has been the user's.
+    expect(rows.find((row) => row.startsWith('T1 Write the exporter, '))).toMatch(/, took \S/)
+    expect(rows.find((row) => row.startsWith('T2 '))).toMatch(/, for \S/)
 
-    // Its evidence is on its stage: the red try said in plain words, and the file it changed.
+    // Its evidence is on its stage, read there and not in the thread beside it: the red try said
+    // in plain words, and the file it changed.
     await pressIn('[aria-label="Tasks"]', 'T1')
-    await awaits('exited with 1')
-    await awaits('src/export.ts')
+    await browser.waitUntil(
+      async () => (await region('ol[aria-label="Tries of T1"]')).includes('exited with 1'),
+      { timeout: 20_000, timeoutMsg: 'the red try of T1 was never said on its stage' },
+    )
+    await browser.waitUntil(
+      async () => (await region('ul[aria-label^="Files changed in"]')).includes('src/export.ts'),
+      { timeout: 20_000, timeoutMsg: 'the file T1 changed was never shown on its stage' },
+    )
   })
 })
 
@@ -231,6 +240,8 @@ describe('Pause stops at the next safe point', () => {
     })
     expect((await buildNow(KEY)).states).toEqual({ T1: 'done', T2: 'yours', T3: 'waiting' })
     // Left here: the next file starts the application again, mid-build.
-    expect(await region('[aria-label="Tasks"]')).toContain('T3')
+    expect(await region('[aria-label="Tasks"] [role="group"][aria-label^="Waiting"]')).toContain(
+      'T3',
+    )
   })
 })

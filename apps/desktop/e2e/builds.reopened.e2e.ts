@@ -56,6 +56,6 @@ describe('Accept ends the build', () => {
     // The Spec stays in progress: delivery is a later lot's (D10-11).
     expect((await buildNow(KEY)).specStatus).toBe('in_progress')
     await awaits('Accepted')
-    expect(await region('[aria-label="Tasks"]')).toContain('T3')
+    expect(await region('[aria-label="Tasks"] [role="group"][aria-label^="Done"]')).toContain('T3')
   })
 })
