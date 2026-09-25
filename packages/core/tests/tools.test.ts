@@ -7,6 +7,9 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import { TOOL_LABELS, TOOL_NAMES, offeredTools } from '#index.ts'
 
+/** The build's own tools (D10-13). */
+const BUILD_TOOLS = ['build_read', 'task_finished', 'task_blocked']
+
 describe('Every tool has a label and a mark', () => {
   test('one of each per tool, and no two tools share either', () => {
     const labels = TOOL_NAMES.map((tool) => TOOL_LABELS[tool].label)
@@ -24,17 +27,29 @@ describe('Every tool has a label and a mark', () => {
     expect(TOOL_LABELS.commands_output.label).toBe('Command output')
     expect(TOOL_LABELS.commands_propose.label).toBe('Propose command')
     expect(TOOL_LABELS.session_get.label).toBe('Session')
+    expect(TOOL_LABELS.build_read).toEqual({ label: 'Read build', mark: 'read-build' })
+    expect(TOOL_LABELS.task_finished).toEqual({ label: 'Task finished', mark: 'finish-task' })
+    expect(TOOL_LABELS.task_blocked).toEqual({ label: 'Task blocked', mark: 'block-task' })
   })
 })
 
 describe('A mission is offered its own tools', () => {
-  test('a free Session is offered the code tools and spec_propose alone, a build one the same', () => {
+  test('a free Session is offered the code tools and spec_propose alone', () => {
     expect(offeredTools('free')).toEqual(
-      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write'].includes(tool)),
+      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write', ...BUILD_TOOLS].includes(tool)),
     )
-    // A build Session is offered what a `free` one is, until its own set is written: an agent
-    // with no tool at all is not a build.
-    expect(offeredTools('build')).toEqual(offeredTools('free'))
+  })
+
+  test('a build Session is offered the code tools and the build tools, and no Spec tool', () => {
+    expect(offeredTools('build')).toEqual(
+      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write', 'spec_propose'].includes(tool)),
+    )
+  })
+
+  test('no other mission is offered a build tool', () => {
+    for (const mission of ['free', 'define'] as const) {
+      for (const tool of BUILD_TOOLS) expect(offeredTools(mission)).not.toContain(tool)
+    }
   })
 })
 
