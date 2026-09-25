@@ -347,6 +347,51 @@ describe('Pause stops at the next safe point', () => {
     expect(handed[2]).toContain('# Before you continue')
     expect(handed[2]).toContain('- T1 · Write the exporter')
   })
+
+  test('a Resume before the running call ended leaves the turn going', async () => {
+    // The write is held on the user's answer while the build is paused and resumed.
+    const { agent } = buildAgent({
+      execute: (labels) =>
+        labels.includes('T1')
+          ? [
+              {
+                does: 'uses',
+                call: 'fs_write',
+                arguments: { path: '../outside.txt', content: 'x', key: 'outside' },
+              },
+              { does: 'uses', call: 'fs_list', arguments: { path: 'sources/api' } },
+            ]
+          : [],
+    })
+    opened = await openWindow(dataFolder, agent)
+    await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const entries = yield* eventually(threadOf(sessionId), (thread) =>
+          thread.some((entry) => entry.kind === 'permission_request' && entry.state === 'pending'),
+        )
+        const builds = yield* Builds
+        yield* builds.pause(sessionId)
+        yield* builds.resume(sessionId)
+        const question = entries.find(
+          (entry) => entry.kind === 'permission_request' && entry.state === 'pending',
+        )
+        const toolCallId = JSON.parse(question?.payload ?? '{}').toolCallId
+        yield* (yield* AgentRuntime).decide(sessionId, toolCallId, 'allowed')
+        yield* eventually(
+          Effect.sync(() => agent.answers.used.length),
+          (used) => used === 2,
+        )
+        // Long enough for a stop the Pause left behind to reach the agent.
+        yield* Effect.sleep('300 millis')
+      }),
+    )
+    const [write, listed] = agent.answers.used
+    expect(write?.isError).toBe(false)
+    expect(listed?.isError).toBe(false)
+    expect(agent.answers.cancels).toBe(0)
+  })
 })
 
 describe('One build per Spec', () => {

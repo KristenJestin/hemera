@@ -1536,8 +1536,17 @@ export const buildsLayer = Layer.effect(
                   ),
               ),
             )
-            // The call running now ends as it would have; then the turn stops (L8, D10-09).
-            yield* Effect.forkIn(scope)(idle(sessionId).pipe(Effect.andThen(stopTurn(sessionId))))
+            // The call running now ends as it would have; then the turn stops, unless the build
+            // was resumed meanwhile — the turn going then is the resumed one (L8, D10-09).
+            yield* Effect.forkIn(scope)(
+              idle(sessionId).pipe(
+                Effect.andThen(
+                  Effect.suspend(() =>
+                    pausedNow.has(sessionId) ? stopTurn(sessionId) : Effect.void,
+                  ),
+                ),
+              ),
+            )
             yield* told(sessionId)
           }
           return yield* view(sessionId)
