@@ -39,7 +39,7 @@ import {
   stateAfterAttempt,
   taskLabels,
 } from '@hemera/core'
-import { and, asc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
 import { Context, Data, Deferred, Effect, FiberSet, Layer, Result, Scope } from 'effect'
 
 import { StderrSink } from '../agents/supervisor.ts'
@@ -766,9 +766,17 @@ export const buildsLayer = Layer.effect(
     const verdict = (sessionId: string, judged: AttemptRow, outcomes: readonly CheckOutcome[]) =>
       Effect.gen(function* () {
         const result = attemptResult(outcomes.map((outcome) => outcome.verdict))
-        const next = stateAfterAttempt(result, judged.number)
         const before = yield* read(sessionId)
         if (before === null || !working(before)) return
+        // The three tries are three red ones (D10-07): the task's red tries, this one included.
+        const reds =
+          before.attempts.filter(
+            (attempt) =>
+              attempt.buildTaskId === judged.buildTaskId &&
+              attempt.id !== judged.id &&
+              resultOf(attempt) === 'red',
+          ).length + (result === 'red' ? 1 : 0)
+        const next = stateAfterAttempt(result, reds)
         const trees =
           judged.scope === 'task' && next === 'in_progress' ? yield* snapshotsOf(before) : []
         const at = now()
@@ -870,16 +878,21 @@ export const buildsLayer = Layer.effect(
                 })
               }
               for (const task of starting) {
-                const number = attemptsOf(rows, task).length + 1
-                yield* openAttempt(transaction, {
-                  sessionId,
-                  scope: 'task',
-                  buildTaskId: task.id,
-                  storyId: null,
-                  number,
-                  at,
-                  trees,
-                })
+                const tries = attemptsOf(rows, task)
+                // A try a blocker interrupted goes on where it stood, its snapshots kept.
+                const interrupted = tries.findLast((attempt) => attempt.endedAt === null)
+                const number = interrupted?.number ?? tries.length + 1
+                if (interrupted === undefined) {
+                  yield* openAttempt(transaction, {
+                    sessionId,
+                    scope: 'task',
+                    buildTaskId: task.id,
+                    storyId: null,
+                    number,
+                    at,
+                    trees,
+                  })
+                }
                 yield* moveTask(transaction, task, 'in_progress', at, {
                   startedAt: task.startedAt ?? at,
                 })
@@ -1137,12 +1150,8 @@ export const buildsLayer = Layer.effect(
                   raisedAt: at,
                 })
                 .pipe(Effect.mapError(failed('writing the blocker')))
-              // The attempt running on it ends here, judged by nothing: the task is suspended.
-              yield* transaction
-                .update(buildAttempts)
-                .set({ endedAt: at })
-                .where(and(eq(buildAttempts.buildTaskId, task.id), isNull(buildAttempts.endedAt)))
-                .pipe(Effect.mapError(failed('ending the attempt')))
+              // The try running on it is interrupted, not ended: a dismissed blocker hands the task
+              // back to it, and costs no try (D10-08).
               yield* moveTask(transaction, task, 'blocked', at)
               const events = [
                 taskEvent(fresh, task, 'task.blocked', 'agent', { reason: call.arguments.reason }),

@@ -292,6 +292,53 @@ describe('A blocker suspends the task and its dependants only', () => {
   })
 })
 
+describe('A dismissed blocker costs no try', () => {
+  test('the task goes on with the try the blocker interrupted', async () => {
+    const { agent } = buildAgent({
+      execute: (labels, text) => {
+        if (text.includes('The user dismissed it')) return labels.map(finished)
+        return labels.includes('T1')
+          ? [
+              {
+                does: 'uses' as const,
+                call: 'task_blocked',
+                arguments: { task: 'T1', reason: 'The Spec asks for CSV and for JSON at once' },
+              },
+            ]
+          : []
+      },
+    })
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, [{ title: 'Write the exporter' }])
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const blocked = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[0]?.state === 'blocked',
+        )
+        yield* (yield* Builds).dismissBlocker(blocked.blockers[0]?.id ?? '')
+        const done = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[0]?.state === 'done',
+        )
+        return { blocked, done }
+      }),
+    )
+    // Interrupted, not ended: the try is still the task's own.
+    expect(
+      seen.blocked.tasks[0]?.attempts.map((attempt) => [
+        attempt.number,
+        attempt.endedAt,
+        attempt.result,
+      ]),
+    ).toEqual([[1, null, null]])
+    expect(seen.done.tasks[0]?.attempts.map((attempt) => [attempt.number, attempt.result])).toEqual(
+      [[1, 'unverified']],
+    )
+  })
+})
+
 describe('Three red attempts come back to the user', () => {
   test('the third red attempt makes the task yours, with the three failures shown', async () => {
     let run = 0
