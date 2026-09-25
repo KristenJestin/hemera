@@ -275,6 +275,30 @@ describe('A launch refuses what cannot be built', () => {
   })
 })
 
+describe('A request whose start is refused says so on its launch', () => {
+  test('A request on a ready Workspace whose start is refused fails on its own', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project } = yield* atlas()
+        const launched = yield* Launches
+        // A Workspace already ready and a Spec nothing is writing: the request starts the build
+        // at once, and the Project was left on no agent, so nothing can answer it (D8-13).
+        const workspace = yield* picked(project.id)
+        const nothing = yield* unwrittenSpec(project.id)
+        const asked = yield* launched.request(nothing.id, workspace.id)
+        return { asked, builds: yield* builds, rows: yield* launches }
+      }),
+    )
+    // Refused, and the launch says it: left `waiting`, the user asks again and the engine would
+    // start the first one on the way back — two build Sessions for one request (D8-13).
+    expect(seen.asked.state).toBe('failed')
+    expect(seen.asked.detail).toContain('no agent has been chosen')
+    expect(seen.rows).toEqual([{ state: 'failed', session_id: null, detail: seen.asked.detail }])
+    expect(seen.builds).toEqual([])
+  })
+})
+
 describe('A failed start is retried on its own', () => {
   test('A failed agent launch is retried without redoing the preparation', async () => {
     // A machine that holds none of the agents' bare means: the agent cannot be started (D6-02).

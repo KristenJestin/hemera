@@ -374,13 +374,15 @@ export const launchesLayer = Layer.effect(
       })
 
     /**
-     * A launch nothing could start: `failed`, with what refused it said of it (D8-13). Its
-     * Session, when the start got that far, stands for a `retry` to start again.
+     * A launch nothing could start: `failed`, with what refused it said of it (D8-13), which is
+     * what the caller is answered with. Its Session, when the start got that far, stands for a
+     * `retry` to start again.
      */
     const refused = (launch: LaunchView, projectId: string, refusal: LaunchRefusal) =>
       Effect.gen(function* () {
         const at = now()
         const detail = refusal.message
+        const answer: LaunchView = { ...launch, state: 'failed', detail, updatedAt: at }
         yield* withDatabase(
           mutate('saying what refused the build', (transaction) =>
             Effect.gen(function* () {
@@ -404,6 +406,7 @@ export const launchesLayer = Layer.effect(
             }),
           ),
         )
+        return answer
       })
 
     /**
@@ -593,6 +596,7 @@ export const launchesLayer = Layer.effect(
                     },
                     // Whether the Workspace is ready is decided on the very row the launch is
                     // written against, in that transaction: the start reads it from here (D8-13).
+                    projectId: snapshot.spec.projectId,
                     ready: state === 'ready',
                   },
                   events: [
@@ -604,14 +608,19 @@ export const launchesLayer = Layer.effect(
                       'human',
                     ),
                   ],
-                } satisfies Mutation<{ launch: LaunchView; ready: boolean }>
+                } satisfies Mutation<{ launch: LaunchView; projectId: string; ready: boolean }>
               }),
             ),
           )
           // A Workspace already ready has nothing to wait for: the build starts now, and it starts
           // once — whoever finds the launch `waiting` starts it, here or in the ready step (D8-13).
+          // What refuses it is said on the launch, as it is for every other starter: left `waiting`
+          // (or `starting`), a start that failed is one the user waits on for ever, asks again for,
+          // and the engine starts on the way back — two Sessions for one request (D8-13).
           if (!asked.ready) return asked.launch
-          return yield* start(asked.launch)
+          return yield* start(asked.launch).pipe(
+            Effect.catch((refusal) => refused(asked.launch, asked.projectId, refusal)),
+          )
         }),
 
       retry: (id) =>
