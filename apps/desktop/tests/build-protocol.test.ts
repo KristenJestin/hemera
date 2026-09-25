@@ -169,6 +169,39 @@ describe('The first task started moves the Spec to in progress', () => {
       expect(statesOf(seen.view)).toMatchObject({ T1: 'in_progress', T2: 'in_progress' })
     }
   })
+
+  test('a call in a stopped build starts none of its tasks, and the Spec stays ready', async () => {
+    const { agent } = buildAgent({ execute: () => [] })
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        // T1 and T2 handed, and nothing called yet: the user stops the build first.
+        yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks.filter((task) => task.handedAt !== null).length === 2,
+        )
+        const builds = yield* Builds
+        yield* builds.stop(sessionId)
+        const called = yield* builds.admitted(
+          sessionId,
+          'fs_read',
+          Effect.succeed('ran'),
+          (reason) => Effect.succeed(reason),
+        )
+        return {
+          called,
+          view: yield* buildOf(sessionId),
+          status: (yield* (yield* Specs).read(spec.specId)).spec.status,
+        }
+      }),
+    )
+    expect(seen.called).toBe('ran')
+    expect(seen.view.phase).toBe('stopped')
+    expect(statesOf(seen.view)).toEqual({ T1: 'ready', T2: 'ready', T3: 'waiting' })
+    expect(seen.status).toBe('ready')
+  })
 })
 
 /** The file an agent writes for a task, relative to the Workspace root. */
@@ -451,18 +484,27 @@ describe('One build per Spec', () => {
           expectedRevisionId: spec.revisionId,
           sessionId: spec.writerId,
         })
-        const called = yield* (yield* Builds).admitted(
+        const call = (yield* Builds).admitted(
           sessionId,
           'fs_list',
           Effect.succeed('ran'),
           (reason) => Effect.succeed(reason),
         )
-        return { called, view: yield* buildOf(sessionId), journal: yield* journalOf(sessionId) }
+        const called = yield* call
+        // A later call finds the build stopped already, and leaves it as it is.
+        const again = yield* call
+        return {
+          called,
+          again,
+          view: yield* buildOf(sessionId),
+          journal: yield* journalOf(sessionId),
+        }
       }),
     )
     expect(seen.called).toBe(OBSOLETE)
-    const stopped = seen.journal.find((line) => line.type === 'build.stopped')
-    expect(JSON.parse(stopped?.payload ?? '{}')).toEqual({ reason: OBSOLETE })
+    expect(seen.again).toBe('ran')
+    const stopped = seen.journal.filter((line) => line.type === 'build.stopped')
+    expect(stopped.map((line) => JSON.parse(line.payload))).toEqual([{ reason: OBSOLETE }])
     expect(seen.view.phase).toBe('stopped')
     expect(seen.view.detail).toBe(OBSOLETE)
     expect(statesOf(seen.view)).toEqual({ T1: 'ready', T2: 'ready', T3: 'waiting' })
