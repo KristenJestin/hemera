@@ -451,6 +451,10 @@
      so nothing inside it reflows on the way. */
   --spacing-mission-panel: 45cqw;
 
+  /* The chat beside a build (lot 22, D10-12): the same fold, narrower, so the build at the centre
+     keeps the larger part of the row. A share of the row, for the reason the panel's is. */
+  --spacing-mission-chat: 30cqw;
+
   /* The list of a build's tasks beside the stage of the one chosen (lot 22, D10-12): wide enough
      for a label, a title of a few words and the time at the end of a row, on one line. */
   --spacing-build-list: 20rem;
@@ -578,6 +582,14 @@
 @utility mission-panel-slot {
   width: calc(
     var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
+      var(--mission-panel-open, 0)
+  );
+}
+
+/* The same slot for the chat beside a build (lot 22, D10-12), which unfolds to its narrower share. */
+@utility mission-panel-slot-narrow {
+  width: calc(
+    var(--spacing-mission-band) + (var(--spacing-mission-chat) - var(--spacing-mission-band)) *
       var(--mission-panel-open, 0)
   );
 }
