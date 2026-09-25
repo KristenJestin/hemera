@@ -222,13 +222,14 @@ async function openOver(
     Layer.provide(runtime),
   )
 
-  // The Project's checks, over the very catalogue the tools run, and run through it (D10-06).
-  const checks = buildChecksLayer.pipe(
+  // The Project's checks, over the very catalogue the tools run, and run through it (D10-06): what
+  // the settings and the checks' own suites reach. The builds above run the ones a suite scripts.
+  const projectCheckServices = buildChecksLayer.pipe(
     Layer.provideMerge(projectChecksLayer),
     Layer.provide(runtime),
   )
 
-  const services = Layer.mergeAll(runtime, workspaces, checks)
+  const services = Layer.mergeAll(runtime, workspaces, projectCheckServices)
 
   mkdirSync(dataFolder, { recursive: true })
   const scope = Effect.runSync(Scope.make())

@@ -35,7 +35,6 @@ import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
 import { BuildNotices, type Builds, buildsLayer, recoveredBuilds } from './build/build.ts'
-import { BuildChecks } from './build/checks.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
 import { type Context, contextLayer } from './context/service.ts'
@@ -255,12 +254,26 @@ function servicesOf(
   // The Specs, and the window that hears of them: one service, which the Spec tools write through
   // as the window's own requests do.
   const specs = specsLayer.pipe(Layer.provide(specNoticesTo(port, log)))
+  // The managed commands, built once: the tools run them, and a build's checks run as runs of
+  // those very commands, in the build Session's activity (D10-06). What an agent holds in memory
+  // is the same instance the tools and the runtime are handed.
+  const commands = commandsLayer.pipe(
+    Layer.provide(rows),
+    Layer.provide(processes),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+  )
+  // The Project's checks, proposed from the catalogue and run for a build (D10-06).
+  const checks = buildChecksLayer.pipe(
+    Layer.provideMerge(projectChecksLayer),
+    Layer.provide(variablesLayer),
+    Layer.provide(commands),
+  )
   // The builds (D10-01): one service, which the catalogue asks before a call and the runtime
-  // drives, over the machine's `git` for their snapshots. Until the Project's checks are composed
-  // here, a build runs none, and every task is done, not verified (D10-07).
+  // drives, over the machine's `git` for their snapshots and the Project's checks for verdicts.
   const builds = buildsLayer.pipe(
     Layer.provide(gitLayer()),
-    Layer.provide(Layer.succeed(BuildChecks, { run: () => Effect.succeed([]) })),
+    Layer.provide(checks),
     Layer.provide(buildNoticesTo(port, log)),
     Layer.provide(diagnostic),
   )
@@ -272,7 +285,7 @@ function servicesOf(
     Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
-    Layer.provideMerge(commandsLayer),
+    Layer.provideMerge(commands),
     // The variables a run is given are the Project's overridden by the Workspace's (D8-06).
     Layer.provide(variablesLayer),
     Layer.provide(rows),
@@ -335,14 +348,6 @@ function servicesOf(
     Layer.provide(agents),
     // The launches, which start the builds a ready Workspace was waited for.
     Layer.provideMerge(launches),
-  )
-
-  // The Project's checks, proposed from the very catalogue the tools run, and run for a build as
-  // runs of those very commands, in the build Session's activity (D10-06, L12).
-  const checks = buildChecksLayer.pipe(
-    Layer.provideMerge(projectChecksLayer),
-    Layer.provide(variablesLayer),
-    Layer.provide(tools),
   )
 
   return Layer.mergeAll(
