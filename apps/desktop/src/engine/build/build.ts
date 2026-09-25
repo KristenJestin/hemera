@@ -267,6 +267,9 @@ export interface BuildAnswer {
 /** What a paused build answers every new call with (L8). */
 export const PAUSED = 'the build is paused: nothing new starts until the user resumes it'
 
+/** Why the user stopped a build, as its view says. */
+const STOPPED = 'Stopped by the user.'
+
 const BUILD_TOOLS: readonly ToolName[] = ['build_read', 'task_finished', 'task_blocked']
 
 /** Which of the Project's checks judge an attempt, by what it is about (D10-06). */
@@ -338,6 +341,10 @@ export interface BuildsService {
   readonly pause: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** L8, D10-09: the agent is handed the resume brief at once. */
   readonly resume: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /** D10-11: only when `verify` is green and nothing waits for the user. */
+  readonly accept: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /** The build is closed and stays readable. */
+  readonly stop: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** A task waiting for the user, done by them (D10-08). */
   readonly taskDone: (buildTaskId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** A task waiting for the user, skipped with its reason, its dependants let go on or not (L6). */
@@ -1529,6 +1536,38 @@ export const buildsLayer = Layer.effect(
               }
             }),
           )
+        }),
+
+      accept: (sessionId) =>
+        Effect.gen(function* () {
+          yield* open(sessionId)
+          return yield* acted(sessionId, 'accepting the build', (transaction, rows) =>
+            Effect.gen(function* () {
+              const refusal = acceptRefusal(rows)
+              if (refusal !== null) {
+                return yield* Effect.fail(new BuildRefusedError({ reason: refusal }))
+              }
+              // The Spec stays in progress, and nothing touches the branch or the files: delivery
+              // is a later lot's (D10-11).
+              yield* movePhase(transaction, sessionId, 'accepted')
+              return { events: [buildEvent(rows, 'build.accepted', 'human')], follows: false }
+            }),
+          )
+        }),
+
+      stop: (sessionId) =>
+        Effect.gen(function* () {
+          yield* open(sessionId)
+          const stopped = yield* acted(sessionId, 'stopping the build', (transaction, rows) =>
+            movePhase(transaction, sessionId, 'stopped', { buildDetail: STOPPED }).pipe(
+              Effect.as({
+                events: [buildEvent(rows, 'build.stopped', 'human', { reason: STOPPED })],
+                follows: false,
+              }),
+            ),
+          )
+          yield* stopTurn(sessionId)
+          return stopped
         }),
 
       taskDone: (buildTaskId) =>
