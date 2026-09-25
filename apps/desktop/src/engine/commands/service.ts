@@ -450,8 +450,15 @@ export interface CommandsService {
     runId: string,
     milliseconds: number,
   ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
-  /** Stops everything of a Session, or everything at all when no Session is named. */
-  readonly stopped: (sessionId?: string | undefined) => Effect.Effect<void, DatabaseError>
+  /**
+   * Stops everything of a Session, or everything at all when no Session is named; only what the
+   * agent started when `startedBy` says so — what an agent let go of takes with it, never a run
+   * the user or Hemera started for the Session, a build's check among them (D10-06).
+   */
+  readonly stopped: (
+    sessionId?: string | undefined,
+    startedBy?: 'agent' | undefined,
+  ) => Effect.Effect<void, DatabaseError>
   /**
    * Writes every run an engine that stopped left `running` as `stopped`, with its end, through
    * the same write as any end — its row, its thread entry, its Journal line (D6-12). Called once
@@ -1511,10 +1518,11 @@ export const commandsLayer = Layer.effect(
             Effect.map((rows) => rows.map(rowOf)),
           ),
 
-      stopped: (sessionId) =>
+      stopped: (sessionId, startedBy) =>
         Effect.gen(function* () {
           for (const [id, record] of [...live.entries()]) {
             if (sessionId !== undefined && record.sessionId !== sessionId) continue
+            if (startedBy !== undefined && record.startedBy !== startedBy) continue
             yield* stopRun(record)
             live.delete(id)
           }

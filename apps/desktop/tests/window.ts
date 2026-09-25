@@ -38,7 +38,7 @@ import { BuildNotices, buildsLayer } from '#engine/build/build.ts'
 import type { BuildChecks } from '#engine/build/checks.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
-import { commandsLayer } from '#engine/commands/service.ts'
+import { type Commands, commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
 import { type EngineServices, PUSHED, named } from '#engine/index.ts'
 import { journalLayer } from '#engine/journal.ts'
@@ -59,7 +59,7 @@ import { gitLayer } from '#engine/git.ts'
 import { hostLinks, preparationLayer } from '#engine/workspaces/preparation.ts'
 import { launchesLayer } from '#engine/workspaces/launches.ts'
 import { recipeLayer } from '#engine/workspaces/recipe.ts'
-import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { SHIPPED, VERSION, besideTheAgent, machine } from './application.ts'
@@ -99,10 +99,13 @@ export async function openWindow(
   return openOver(dataFolder, machine, noChecks, agent, ...others)
 }
 
-/** The same window, over the Project's checks a build suite scripts (D10-07). */
+/**
+ * The same window, over the Project's checks a build suite scripts (D10-07), or the checks' own
+ * layer, run through the very commands the tools run.
+ */
 export async function openWindowChecked(
   dataFolder: string,
-  checks: Layer.Layer<BuildChecks, never, Database>,
+  checks: Layer.Layer<BuildChecks, never, Database | Commands | Variables>,
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {
@@ -125,7 +128,7 @@ export async function openWindowOn(
 async function openOver(
   dataFolder: string,
   over: typeof machine,
-  checks: Layer.Layer<BuildChecks, never, Database>,
+  checks: Layer.Layer<BuildChecks, never, Database | Commands | Variables>,
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {

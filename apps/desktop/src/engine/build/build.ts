@@ -301,6 +301,11 @@ export interface BuildsService {
   /** The runtime, once it is built: how the build reaches its agent. */
   readonly drivenBy: (agent: BuildAgent) => void
   /**
+   * Whether the Session's checks are running: its agent is not idle then, and the pool keeps it
+   * (D10-07) — the checks are Hemera's, and what an agent let go of takes with it is its own.
+   */
+  readonly checking: (sessionId: string) => boolean
+  /**
    * What waits for a build Session's agent at a safe point, or null (D10-02, D10-03, D10-09).
    * `holdsNone` says the agent's own session holds no brief: it is handed the resume brief.
    */
@@ -611,6 +616,9 @@ export const buildsLayer = Layer.effect(
     const running = new Map<string, number>()
     const over = new Map<string, Deferred.Deferred<void>>()
 
+    /** How many check jobs of each Session are running. */
+    const checkingNow = new Map<string, number>()
+
     const told = (sessionId: string) => Effect.sync(() => notices.changed(sessionId))
 
     /** What a background step of the build says when it fails: nobody else is there to hear it. */
@@ -700,9 +708,25 @@ export const buildsLayer = Layer.effect(
 
     /** Starts the check runs a committed change asked for, each in the background. */
     const runJobs = (sessionId: string, jobs: readonly CheckJob[]) =>
-      Effect.forEach(jobs, (job) => Effect.forkIn(scope)(runJob(sessionId, job)), {
-        discard: true,
-      })
+      Effect.forEach(
+        jobs,
+        (job) =>
+          Effect.gen(function* () {
+            checkingNow.set(sessionId, (checkingNow.get(sessionId) ?? 0) + 1)
+            yield* Effect.forkIn(scope)(
+              runJob(sessionId, job).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    const left = (checkingNow.get(sessionId) ?? 1) - 1
+                    if (left > 0) checkingNow.set(sessionId, left)
+                    else checkingNow.delete(sessionId)
+                  }),
+                ),
+              ),
+            )
+          }),
+        { discard: true },
+      )
 
     /**
      * What an attempt's checks said (D10-07). A task's: all green, or none, is done; red goes back
@@ -1372,6 +1396,8 @@ export const buildsLayer = Layer.effect(
       drivenBy: (driven) => {
         agent = driven
       },
+
+      checking: (sessionId) => checkingNow.has(sessionId),
 
       waiting: (sessionId, holdsNone) =>
         read(sessionId).pipe(

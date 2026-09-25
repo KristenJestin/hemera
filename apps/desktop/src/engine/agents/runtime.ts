@@ -1383,7 +1383,7 @@ export const runtimeLayer = Layer.effect(
         yield* permissions.withdrawn(sessionId)
         unwatched(sessionId)
         yield* access.revoked(sessionId)
-        yield* commands.stopped(sessionId).pipe(Effect.ignore)
+        yield* commands.stopped(sessionId, 'agent').pipe(Effect.ignore)
         yield* pool.forgotten(sessionId)
       })
 
@@ -2797,6 +2797,9 @@ export const runtimeLayer = Layer.effect(
         if (turn !== undefined || starting.has(sessionId)) return
         const held = live.get(sessionId)
         if (held === undefined) return
+        // Nor is the agent of a build whose checks are running (D10-07): it is kept, as used now,
+        // and handed the verdict when it comes.
+        if (builds.checking(sessionId)) return yield* kept(sessionId)
         // The last words of a turn are written before the connection is let go: the queue ending
         // is what ends the fiber that would have written them.
         yield* flush(sessionId, held, true).pipe(Effect.ignore)

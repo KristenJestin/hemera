@@ -14,13 +14,18 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { ProjectChecks } from '#engine/build/checks.ts'
+
 import {
   THREE,
   aReadySpec,
   buildAgent,
   buildOf,
   eventually,
+  finished,
   launched,
+  projectChecks,
   scriptedChecks,
   statesOf,
 } from './build-harness.ts'
@@ -109,5 +114,72 @@ describe('A task with no check is done unverified', () => {
     expect(t1?.attempts.map((attempt) => [attempt.result, attempt.checks.length])).toEqual([
       ['unverified', 0],
     ])
+  })
+})
+
+/** A check of the Project's that takes its time: `node` waiting, then exiting 0. */
+const slow = (projectId: string) =>
+  Effect.gen(function* () {
+    yield* (yield* ProjectChecks).save(
+      projectId,
+      {
+        name: 'slow',
+        commandId: null,
+        line: `"${process.execPath}" -e "setTimeout(() => {}, 1500)"`,
+        where: 'root',
+        repository: null,
+        when: 'task',
+        expect: null,
+        files: null,
+      },
+      null,
+    )
+  })
+
+describe("A build's checks outlive its agent", () => {
+  test('an agent let go of while a task is checked leaves its check running, and is kept', async () => {
+    const { agent } = buildAgent({
+      execute: (labels) => labels.filter((label) => label === 'T1').map(finished),
+    })
+    opened = await openWindowChecked(dataFolder, projectChecks, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        yield* slow(spec.projectId)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(sessionId), (view) => view.tasks[0]?.state === 'checking')
+        // What the pool does to an agent it finds idle: its checks are running, so it is not.
+        const runtime = yield* AgentRuntime
+        yield* runtime.release(sessionId)
+        const alive = yield* runtime.alive
+        const done = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.tasks[0]?.state !== 'checking',
+        )
+        return { alive: alive.includes(sessionId), done }
+      }),
+    )
+    expect(seen.alive).toBe(true)
+    expect(seen.done.tasks[0]?.state).toBe('done')
+    expect(seen.done.tasks[0]?.attempts[0]?.checks.map((check) => check.verdict)).toEqual(['green'])
+  })
+
+  test('an agent that dies while a task is checked leaves its check running', async () => {
+    const { agent } = buildAgent({
+      execute: (labels) => labels.filter((label) => label === 'T1').map(finished),
+    })
+    opened = await openWindowChecked(dataFolder, projectChecks, agent, buildAgent().agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        yield* slow(spec.projectId)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(sessionId), (view) => view.tasks[0]?.state === 'checking')
+        agent.die()
+        return yield* eventually(buildOf(sessionId), (view) => view.tasks[0]?.state !== 'checking')
+      }),
+    )
+    expect(seen.tasks[0]?.state).toBe('done')
+    expect(seen.tasks[0]?.attempts[0]?.checks.map((check) => check.verdict)).toEqual(['green'])
   })
 })

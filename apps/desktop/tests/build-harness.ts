@@ -16,7 +16,13 @@ import { Effect, Layer } from 'effect'
 import type { CheckVerdict } from '@hemera/core'
 import { type FakeScript, type FakeStep, fakeAgent } from '#engine/agents/fake.ts'
 import { type BuildView, Builds, NoBuildNotices, buildsLayer } from '#engine/build/build.ts'
-import { BuildChecks, type CheckOutcome, type CheckRunRequest } from '#engine/build/checks.ts'
+import {
+  BuildChecks,
+  type CheckOutcome,
+  type CheckRunRequest,
+  buildChecksLayer,
+  projectChecksLayer,
+} from '#engine/build/checks.ts'
 import { gitLayer } from '#engine/git.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
@@ -30,6 +36,9 @@ import { agentOf, shaped, write } from './specs-harness.ts'
 
 /** No check configured: every task is done, not verified. */
 export const noChecks = Layer.succeed(BuildChecks, { run: () => Effect.succeed([]) })
+
+/** The Project's checks as the engine runs them: real runs of its commands (D10-06). */
+export const projectChecks = buildChecksLayer.pipe(Layer.provideMerge(projectChecksLayer))
 
 /** The builds of a suite that runs none, over the database and the diagnostic it provides. */
 export const idleBuilds = buildsLayer.pipe(
