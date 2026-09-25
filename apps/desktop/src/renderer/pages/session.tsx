@@ -42,12 +42,8 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
-import {
-  openSession,
-  openSessions,
-  type OfferedWorkspace,
-  workspaceFixedOf,
-} from '../sessions-store.ts'
+import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
+import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionAnchor } from '../spec-entries.ts'
 import {
   answerQuestion,
@@ -333,13 +329,15 @@ export function SessionPage({
 
   /**
    * Opens the build Session the launch started. The list is read again first: the engine made
-   * that Session on its own, and the page it opens is a page this window knows.
+   * that Session on its own, and the page it opens is a page this window knows. What the window
+   * shows is the shell's own entry, which is why going there is `selectEntry` — the thread
+   * follows, read by the window when its entry becomes the one on screen.
    */
   const openBuild = (): void => {
     const launched = stored.launches?.launch
     if (launched === null || launched === undefined || launched.sessionId === null) return
     const id = launched.sessionId
-    void openSessions(session.projectId).then(() => openSession(id))
+    void openSessions(session.projectId).then(() => selectEntry(id))
   }
 
   const write = async (body: string): Promise<string | null> => {
