@@ -91,9 +91,16 @@ export {
 /** The dialogs a repository and a command of the Project are added and edited in. */
 export { CommandDialog, type CommandDialogProps } from './project/command-dialog.tsx'
 export { RepositoryDialog, type RepositoryDialogProps } from './project/repository-dialog.tsx'
+/** The Build section of the Project settings: the checks a build is judged by (lot 22, D10-06). */
+export { BuildChecks, type BuildChecksProps } from './project/build-checks.tsx'
+export { CheckDialog, type CheckDialogProps } from './project/check-dialog.tsx'
 
 export {
   REPOSITORY_ICONS,
+  type CheckExpect,
+  type CheckLine,
+  type CheckWhen,
+  type CheckWhere,
   type CommandLine,
   type ProjectDraft,
   type ProjectSettingsDraft,

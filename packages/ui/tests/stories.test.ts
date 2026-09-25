@@ -110,6 +110,9 @@ const SURFACES = {
     'preparation-editor',
     'repository-dialog',
     'command-dialog',
+    // Lot 22: the Build section, the checks a build is judged by, and the dialog of a check.
+    'build-checks',
+    'check-dialog',
   ],
   journal: ['journal'],
   composer: ['composer', 'prompt-input'],
@@ -285,6 +288,16 @@ const NAMED_STATES = new Map([
       'BannerOpensTheTask',
       'Keyboard',
     ],
+  ],
+  // Lot 22: the checks of a Project's build, filled, empty, proposed and used or discarded, added
+  // to, and walked; and the dialog of a check in each of its shapes, refused, and walked.
+  [
+    'project/build-checks',
+    ['Filled', 'Empty', 'Proposed', 'ProposalsUsed', 'ProposalsDiscarded', 'Adding', 'Keyboard'],
+  ],
+  [
+    'project/check-dialog',
+    ['Add', 'Edit', 'LineWithFiles', 'ExpectedResult', 'Invalid', 'Refused', 'Keyboard'],
   ],
   ['project/repository-dialog', ['Add', 'Edit', 'Invalid', 'Refused', 'Keyboard']],
   [
@@ -574,6 +587,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'BlockerBlock',
       'BuildSpecPanel',
       'BuildSession',
+      'BuildChecks',
+      'CheckDialog',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
