@@ -304,7 +304,7 @@ describe('A repository whose head fails once is still in the plan', () => {
       Effect.map(Git, (real) => ({
         ...real,
         head: (cwd: string) => {
-          if (!cwd.endsWith('sources/api')) return real.head(cwd)
+          if (!cwd.endsWith(join('sources', 'api'))) return real.head(cwd)
           reads += 1
           return reads === 1
             ? Effect.fail(
