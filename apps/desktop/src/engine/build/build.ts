@@ -768,7 +768,7 @@ export const buildsLayer = Layer.effect(
         const attempt = rows?.attempts.find((one) => one.id === job.attemptId)
         // A build stopped or accepted meanwhile is judged no more.
         if (rows === null || attempt === undefined || !working(rows)) return
-        yield* checks
+        const outcomes = yield* checks
           .run({
             sessionId,
             projectId: rows.session.projectId,
@@ -780,9 +780,9 @@ export const buildsLayer = Layer.effect(
             changes: changesFor(rows, attempt),
           })
           .pipe(
-            Effect.flatMap((outcomes) => verdict(sessionId, attempt, outcomes)),
             // Checks that could not run are red, said on the try, and the try is judged all the
-            // same: its task never stays checking for ever.
+            // same: its task never stays checking for ever. A verdict that cannot be written is
+            // no check that failed: the try stays checking, and a restart judges it again.
             Effect.catch((cause) =>
               withDatabase(
                 mutate('recording checks that could not run', (transaction) =>
@@ -799,9 +799,10 @@ export const buildsLayer = Layer.effect(
                     now(),
                   ).pipe(Effect.as({ result: undefined, events: [] })),
                 ),
-              ).pipe(Effect.andThen(verdict(sessionId, attempt, []))),
+              ).pipe(Effect.as([])),
             ),
           )
+        yield* verdict(sessionId, attempt, outcomes)
       }).pipe(logged(`checking an attempt of ${sessionId}`))
 
     /** Starts the check runs a committed change asked for, each in the background. */
@@ -924,7 +925,8 @@ export const buildsLayer = Layer.effect(
       Effect.gen(function* () {
         const before = yield* read(sessionId)
         const handed = (task: TaskRow) => stateOf(task) === 'ready' && task.handedAt !== null
-        if (before === null || !before.tasks.some(handed)) return null
+        // A stopped or accepted build starts nothing: its Spec and its tasks stay as it left them.
+        if (before === null || !working(before) || !before.tasks.some(handed)) return null
         const snapped = yield* snapshotsOf(before)
         const at = now()
         const refusal = yield* withDatabase(
@@ -932,7 +934,9 @@ export const buildsLayer = Layer.effect(
             Effect.gen(function* () {
               const rows = yield* readBuild(transaction, sessionId)
               const starting = rows?.tasks.filter(handed) ?? []
-              if (rows === null || starting.length === 0) return { result: null, events: [] }
+              if (rows === null || !working(rows) || starting.length === 0) {
+                return { result: null, events: [] }
+              }
               // The Spec is read in this very transaction: a Rework and the first task started are
               // serialised by it, and never both accepted on a stale state (D10-10).
               const spec = yield* specRow(transaction, rows.specId)
