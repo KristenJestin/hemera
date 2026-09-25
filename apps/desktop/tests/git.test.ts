@@ -5,7 +5,15 @@
  * suite under the temporary directory by the machine's own `git`, and removed after it.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -73,12 +81,10 @@ describe('Git state is observed when shown', () => {
 
 describe('A Git error is surfaced as is', () => {
   it("answers Git's own message for a worktree whose .git file is broken", async () => {
-    // A worktree is the fixture, because a worktree is where .git is a file: the break is written
-    // over that file. A repository folder removed to put a file in its place leaves the write
-    // racing the removal, and a loaded runner loses that race.
-    const source = repository(join(folder, 'source'))
+    // The folder is written by hand rather than taken from a worktree the machine's Git made: Git
+    // is still holding the .git file it wrote there, and writing over it is refused on Windows.
     const broken = join(folder, 'broken')
-    git(source, 'worktree', 'add', '-q', '-b', 'slice', broken)
+    mkdirSync(broken)
     writeFileSync(join(broken, '.git'), 'gitdir: /nowhere/hemera\n')
 
     const refused = await asked(Effect.flip(Git.use((one) => one.status(broken))))
