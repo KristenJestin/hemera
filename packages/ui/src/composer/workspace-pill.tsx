@@ -14,6 +14,9 @@ import { IconGitBranch } from '../icons.ts'
  * The choice is made before the first message and fixed once the agent has started, because the
  * agent's own session was opened in that folder (D8-08). Fixed, the select is disabled and says
  * why beside it, in words rather than in a tooltip a disabled control could never show.
+ *
+ * A Session bound to a Spec — `define` and `build` — never had a choice to make: its Workspace
+ * came with the Spec. Bound, the pill is a label, the Workspace's name and nothing to press.
  */
 
 /** A Workspace on offer: the name it is chosen by, and where it is on disk. */
@@ -29,16 +32,30 @@ export interface WorkspacePillProps {
   onWorkspaceChange: (workspace: string) => void
   /** Whether the agent has started, which fixes the choice (D8-08). */
   fixed?: boolean | undefined
+  /** Whether the Session is bound to its Spec's Workspace, which is then a label, not a choice. */
+  bound?: boolean | undefined
 }
 
 const NOTE = 'text-xs text-muted-foreground'
+
+const LABEL = 'flex h-control-sm items-center gap-1.5 px-1 text-sm text-muted-foreground'
 
 export function WorkspacePill({
   workspaces,
   workspace,
   onWorkspaceChange,
   fixed = false,
+  bound = false,
 }: WorkspacePillProps): ReactNode {
+  if (bound) {
+    return (
+      <span className={LABEL}>
+        <IconGitBranch size="sm" aria-hidden="true" />
+        <span className="sr-only">Workspace</span>
+        {workspace}
+      </span>
+    )
+  }
   return (
     <>
       <Select
