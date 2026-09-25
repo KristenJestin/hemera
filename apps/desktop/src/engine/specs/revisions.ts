@@ -57,6 +57,10 @@ function refusal(snapshot: SpecSnapshot, request: ReopenRequest): string | null 
   if (spec.currentRevisionId !== request.expectedRevisionId) {
     return `A stale reopening is refused: ${spec.key} is no longer on the revision it was asked on.`
   }
+  // Once its first task started, a Spec's contract no longer moves (D10-10): said plainly.
+  if (spec.status === 'in_progress') {
+    return `The build has started: ${spec.key} keeps the contract it was frozen with, and is no longer reworked.`
+  }
   if (spec.status !== 'ready')
     return `${spec.key} is ${spec.status}: only a ready Spec is reworked.`
   return null

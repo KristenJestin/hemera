@@ -38,6 +38,8 @@ import { ToolPermissions, type ToolPermissionsService } from '#engine/tools/perm
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
 
+import { idleBuilds } from './build-harness.ts'
+
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 const VERSION = '0.4.0'
 
@@ -141,6 +143,8 @@ function engine(
   )
   const services: Layer.Layer<Engine> = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    // No build runs here: a Session that is none passes through the builds untouched.
+    Layer.provide(idleBuilds),
     Layer.provideMerge(offered === null ? toolAccessLayer : offering(offered)),
     Layer.provideMerge(Layer.succeed(ToolPermissions, permissions)),
     Layer.provideMerge(commandsLayer),

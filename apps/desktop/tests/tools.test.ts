@@ -55,6 +55,8 @@ import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
 
+import { idleBuilds } from './build-harness.ts'
+
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
 /** The version the shipped migrations are opened with, as the engine opens them. */
@@ -137,6 +139,8 @@ function engine(human: Human) {
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
   const services: Layer.Layer<Engine> = toolCatalogueLayer.pipe(
+    // No build runs here: a Session that is none passes through the builds untouched.
+    Layer.provide(idleBuilds),
     Layer.provideMerge(journalLayer),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),

@@ -19,6 +19,8 @@
  * call, check or agent runs inside one.
  */
 
+import { join } from 'node:path'
+
 import {
   type AttemptResult,
   type AttemptScope,
@@ -27,29 +29,40 @@ import {
   type SpecSnapshot,
   type TaskExecutor,
   type TaskState,
+  type ToolName,
   taskLabels,
 } from '@hemera/core'
 import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
-import { Context, Data, Effect, Layer } from 'effect'
+import { Context, Data, Effect, Layer, Result } from 'effect'
 
+import { StderrSink } from '../agents/supervisor.ts'
+import { Git } from '../git.ts'
+import type { NewEvent } from '../journal.ts'
 import { Database, type DatabaseError } from '../storage/database.ts'
-import { buildLaunches, buildTasks, sessionEntries, sessions } from '../storage/schema.ts'
-import { failed, now, reading } from '../specs/snapshot.ts'
+import { buildLaunches, buildTasks, sessionEntries, sessions, specs } from '../storage/schema.ts'
+import { failed, now, reading, specRow } from '../specs/snapshot.ts'
 import { mutate } from '../transaction.ts'
+import { describedWorkspace } from '../workspaces/described.ts'
 import { type BuildDelivery, deliveryFor, handing, missed, taken } from './brief.ts'
+import { snapshotTree } from './snapshots.ts'
 import {
   type AttemptRow,
   type BuildRows,
+  OBSOLETE,
+  type TaskRow,
   attemptsOf,
   buildEvent,
   follow,
+  moveTask,
   movePhase,
+  openAttempt,
   phaseOf,
   readBuild,
   resultOf,
   scopeOf,
   specTaskOf,
   stateOf,
+  taskEvent,
   verdictOf,
 } from './tasks.ts'
 
@@ -203,6 +216,8 @@ export class UnknownBuildError extends Data.TaggedError('UnknownBuildError')<{
 /** Everything a user's action on a build can be answered with. */
 export type BuildRefusal = DatabaseError | UnknownBuildError
 
+const BUILD_TOOLS: readonly ToolName[] = ['build_read', 'task_finished', 'task_blocked']
+
 /** The phases a build works through; the other two close it. */
 const ACTIVE: readonly BuildPhase[] = ['prepare', 'execute', 'verify']
 
@@ -216,7 +231,8 @@ export interface BuildsService {
   /**
    * Why a Spec already has its one build (L10), in words a refusal ends with, or null when it has
    * none: a build that is not stopped — paused, verifying or accepted included — or a launch that
-   * waits or starts.
+   * waits or starts. A build whose revision the Spec left before its first task started is obsolete
+   * and holds nothing: it is stopped on the way (L3).
    */
   readonly holder: (specId: string) => Effect.Effect<string | null, DatabaseError>
   /** Hands the build's agent what waits for it, at its next safe point; nothing when paused. */
@@ -244,10 +260,26 @@ export interface BuildsService {
     delivery: BuildDelivery,
     turnId: string,
   ) => Effect.Effect<void, DatabaseError>
+  /**
+   * One Hemera tool call of a Session, before it runs (L3): a closed build refuses its build tools,
+   * and the first call after a delivery handed tasks starts them — or finds the build obsolete, and
+   * refuses. Any other Session's call runs as it is.
+   */
+  readonly admitted: <A>(
+    sessionId: string,
+    tool: ToolName,
+    run: Effect.Effect<A>,
+    refuse: (reason: string) => Effect.Effect<A>,
+  ) => Effect.Effect<A>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
 }
 
 export class Builds extends Context.Service<Builds, BuildsService>()('Builds') {}
+
+/** A repository as the Project declares it (`./sources/api`, `.`), as the build names it. */
+function repositoryOf(declared: string): string {
+  return declared === '.' ? '' : declared.replace(/^\.\//, '')
+}
 
 /** Why Accept is not offered, or null when it is (D10-11). */
 function acceptRefusal(rows: BuildRows): string | null {
@@ -391,7 +423,9 @@ export const buildsLayer = Layer.effect(
   Builds,
   Effect.gen(function* () {
     const database = yield* Database
+    const git = yield* Git
     const notices = yield* BuildNotices
+    const diagnostic = yield* StderrSink
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -430,6 +464,134 @@ export const buildsLayer = Layer.effect(
         if (row === null || phase === null || !ACTIVE.includes(phase)) return
         if (row.buildPausedAt !== null || agent === null) return
         yield* agent.wake(sessionId)
+      })
+
+    const stopTurn = (sessionId: string) =>
+      agent === null ? Effect.void : agent.stopTurn(sessionId)
+
+    /** The repositories of the build's Workspace, where it is on disk. */
+    const repositoriesOf = (rows: BuildRows) =>
+      describedWorkspace(database, rows.session.projectId, rows.session.workspaceId).pipe(
+        Effect.map((workspace) =>
+          workspace.repositories.map((declared) => ({
+            repository: repositoryOf(declared),
+            path: join(workspace.path, repositoryOf(declared)),
+          })),
+        ),
+      )
+
+    /**
+     * A snapshot of each repository of the Workspace as it stands now (D10-05), taken before the
+     * transaction that names it. One that cannot be taken is said to the diagnostic and left out:
+     * the evidence is short of one repository, and the build goes on.
+     */
+    const snapshotsOf = (rows: BuildRows) =>
+      Effect.gen(function* () {
+        const repositories = yield* repositoriesOf(rows)
+        const snapped: { repository: string; tree: string }[] = []
+        for (const { repository, path } of repositories) {
+          const tree = yield* Effect.result(
+            snapshotTree(path).pipe(Effect.provideService(Git, git)),
+          )
+          if (Result.isSuccess(tree)) snapped.push({ repository, tree: tree.success })
+          else yield* diagnostic.write(`builds: no snapshot of ${path}: ${tree.failure.message}`)
+        }
+        return snapped
+      })
+
+    /** The first Hemera call after a delivery handed tasks starts them (L3, D10-10). */
+    const start = (sessionId: string) =>
+      Effect.gen(function* () {
+        const before = yield* read(sessionId)
+        const handed = (task: TaskRow) => stateOf(task) === 'ready' && task.handedAt !== null
+        if (before === null || !before.tasks.some(handed)) return null
+        const trees = yield* snapshotsOf(before)
+        const at = now()
+        const refusal = yield* withDatabase(
+          mutate('starting the tasks handed', (transaction) =>
+            Effect.gen(function* () {
+              const rows = yield* readBuild(transaction, sessionId)
+              const starting = rows?.tasks.filter(handed) ?? []
+              if (rows === null || starting.length === 0) return { result: null, events: [] }
+              // The Spec is read in this very transaction: a Rework and the first task started are
+              // serialised by it, and never both accepted on a stale state (D10-10).
+              const spec = yield* specRow(transaction, rows.specId)
+              const current =
+                spec.currentRevisionId === rows.revisionId &&
+                (spec.status === 'ready' || spec.status === 'in_progress')
+              if (!current) {
+                yield* movePhase(transaction, sessionId, 'stopped', { buildDetail: OBSOLETE })
+                return {
+                  result: OBSOLETE,
+                  events: [buildEvent(rows, 'build.stopped', 'hemera', { reason: OBSOLETE })],
+                }
+              }
+              const events: NewEvent[] = []
+              if (spec.status === 'ready') {
+                yield* transaction
+                  .update(specs)
+                  .set({ status: 'in_progress', updatedAt: at })
+                  .where(eq(specs.id, spec.id))
+                  .pipe(Effect.mapError(failed('moving the Spec in progress')))
+                events.push({
+                  ...buildEvent(rows, 'spec.in_progress', 'hemera'),
+                  entityKind: 'spec',
+                  entityId: spec.id,
+                })
+              }
+              for (const task of starting) {
+                const number = attemptsOf(rows, task).length + 1
+                yield* openAttempt(transaction, {
+                  sessionId,
+                  scope: 'task',
+                  buildTaskId: task.id,
+                  storyId: null,
+                  number,
+                  at,
+                  trees,
+                })
+                yield* moveTask(transaction, task, 'in_progress', at, {
+                  startedAt: task.startedAt ?? at,
+                })
+                events.push(taskEvent(rows, task, 'task.started', 'hemera', { attempt: number }))
+              }
+              return { result: null, events }
+            }),
+          ),
+        )
+        if (refusal !== null) yield* stopTurn(sessionId)
+        yield* told(sessionId)
+        return refusal
+      })
+
+    const admitted = <A>(
+      sessionId: string,
+      tool: ToolName,
+      run: Effect.Effect<A>,
+      refuse: (reason: string) => Effect.Effect<A>,
+    ): Effect.Effect<A> =>
+      Effect.gen(function* () {
+        const row = yield* sessionRowOf(sessionId)
+        if (row === null || row.mission !== 'build') return yield* run
+        const phase = phaseOf(row)
+        if (BUILD_TOOLS.includes(tool) && (phase === 'accepted' || phase === 'stopped')) {
+          return yield* refuse(
+            phase === 'accepted'
+              ? 'the build was accepted: its tasks are settled'
+              : `the build is stopped${row.buildDetail === null ? '' : `: ${row.buildDetail}`}`,
+          )
+        }
+        return yield* Effect.gen(function* () {
+          const refusal = yield* start(sessionId).pipe(
+            Effect.catch((cause) =>
+              diagnostic
+                .write(`builds: starting the tasks of ${sessionId}: ${cause.message}`)
+                .pipe(Effect.as(null)),
+            ),
+          )
+          if (refusal !== null) return yield* refuse(refusal)
+          return yield* run
+        })
       })
 
     const view = (sessionId: string) => must(sessionId).pipe(Effect.map(viewOf))
@@ -475,6 +637,11 @@ export const buildsLayer = Layer.effect(
 
       holder: (specId) =>
         Effect.gen(function* () {
+          const spec = yield* database
+            .select({ currentRevisionId: specs.currentRevisionId })
+            .from(specs)
+            .where(eq(specs.id, specId))
+            .pipe(Effect.mapError(failed('reading the Spec')))
           const builds = yield* database
             .select()
             .from(sessions)
@@ -488,7 +655,37 @@ export const buildsLayer = Layer.effect(
             )
             .orderBy(asc(sessions.createdAt))
             .pipe(Effect.mapError(failed('reading the builds of the Spec')))
-          const holding = builds[0] ?? null
+          let holding: (typeof builds)[number] | null = null
+          for (const build of builds) {
+            const phase = phaseOf(build)
+            const obsolete =
+              phase !== null &&
+              ACTIVE.includes(phase) &&
+              build.revisionId !== (spec[0]?.currentRevisionId ?? build.revisionId)
+            if (!obsolete) {
+              holding ??= build
+              continue
+            }
+            // A build whose revision the Spec left can never begin (L3): stopped, it frees the
+            // slot, and it stays readable.
+            yield* withDatabase(
+              mutate('stopping an obsolete build', (transaction) =>
+                Effect.gen(function* () {
+                  const rows = yield* readBuild(transaction, build.id)
+                  yield* movePhase(transaction, build.id, 'stopped', { buildDetail: OBSOLETE })
+                  return {
+                    result: undefined,
+                    events:
+                      rows === null
+                        ? []
+                        : [buildEvent(rows, 'build.stopped', 'hemera', { reason: OBSOLETE })],
+                  }
+                }),
+              ),
+            )
+            yield* stopTurn(build.id)
+            yield* told(build.id)
+          }
           if (holding !== null) {
             const phase = phaseOf(holding)
             if (holding.buildPausedAt !== null) return 'it is paused'
@@ -594,6 +791,7 @@ export const buildsLayer = Layer.effect(
           }
         }),
 
+      admitted,
       view,
     }
     return service
