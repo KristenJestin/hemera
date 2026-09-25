@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Menu } from '../components/menu/menu.tsx'
-import { StatusDot } from '../components/status-dot/status-dot.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconChevronRight, IconRefresh } from '../icons.ts'
 import type { RevisionView, SpecStatus, SpecType } from './model.ts'
@@ -29,6 +29,17 @@ const TITLE = 'min-w-0 truncate text-base font-semibold'
 const STATUS = 'flex shrink-0 items-center gap-1.5 text-xs'
 
 const END = 'ml-auto flex shrink-0 items-center gap-1.5'
+
+/**
+ * The dot of each status (D8-13): a draft is nothing yet, a frozen Spec is the success one, a
+ * Spec a build has taken on is running, and one taken back is the quiet one.
+ */
+const DOT: Record<SpecStatus, StatusTone> = {
+  draft: 'pending',
+  ready: 'success',
+  in_progress: 'running',
+  cancelled: 'cancelled',
+}
 
 export interface SpecHeadProps {
   specKey: string
@@ -69,7 +80,7 @@ export function SpecHead({
       <h2 className={TITLE}>{title}</h2>
       <Badge>{type}</Badge>
       <span className={STATUS}>
-        <StatusDot status={ready ? 'success' : 'pending'} />
+        <StatusDot status={DOT[status]} />
         <span className={ready ? 'text-success-muted-foreground' : 'text-muted-foreground'}>
           {status}
         </span>

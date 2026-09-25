@@ -74,7 +74,7 @@ import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
 import type { UnknownWorkspaceError } from './workspaces/described.ts'
 import { Preparation, type PreparationRunningError } from './workspaces/preparation.ts'
-import type { Launches } from './workspaces/launches.ts'
+import { LaunchRefusedError, Launches, type LaunchRefusal } from './workspaces/launches.ts'
 import { Recipe, type RecipeRefusedError } from './workspaces/recipe.ts'
 import { Variables } from './workspaces/variables.ts'
 import {
@@ -540,6 +540,37 @@ export function answer(
     if (decision.name === 'specs.buffers.discard') {
       return yield* specs.buffers.discard(decision.argument)
     }
+    if (decision.name === 'specs.useWorkspace') {
+      const { specId, workspaceId } = decision.argument
+      return yield* specs.useWorkspace(specId, workspaceId)
+    }
+
+    // The build of a ready Spec (D8-12, D8-13): the panel of a Spec reads the whole of it at
+    // once, asks for a build in a Workspace, starts the one the Spec is already set on, and
+    // starts a refused one again. `start` is what "Start the build" presses once a preparation
+    // made only: no Workspace named, the one D8-12 gave the Spec.
+    const launches = yield* Launches
+    if (decision.name === 'launches.forSpec') {
+      return yield* launches.forSpec(decision.argument.specId)
+    }
+    if (decision.name === 'launches.request') {
+      const { specId, workspaceId } = decision.argument
+      return yield* launches.request(specId, workspaceId)
+    }
+    if (decision.name === 'launches.start') {
+      const { specId } = decision.argument
+      const settled = yield* specs.read(specId)
+      const workspaceId = settled.spec.workspaceId
+      if (workspaceId === null) {
+        return yield* Effect.fail(
+          new LaunchRefusedError({ reason: 'this Spec has no Workspace yet: prepare one first.' }),
+        )
+      }
+      return yield* launches.request(specId, workspaceId)
+    }
+    if (decision.name === 'launches.retry') {
+      return yield* launches.retry(decision.argument.launchId)
+    }
 
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
@@ -555,6 +586,7 @@ export function answer(
  */
 export type Refusal =
   | SpecRefusal
+  | LaunchRefusal
   | AgentRuntimeError
   | AgentUpdateRefusedError
   | DatabaseError

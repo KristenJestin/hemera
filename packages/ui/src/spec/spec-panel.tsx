@@ -79,8 +79,9 @@ export interface SpecPanelProps extends SpecPartHandlers {
   onTakeOver: () => void
   /**
    * Where the build stands, and what it is launched in (D8-12, D8-13), which the application
-   * composes. Drawn on a `ready` Spec alone: a draft offers nothing to build, and an older
-   * revision of a frozen one is read as it was frozen (D7-05).
+   * composes. Drawn on a Spec that is not being written, and on a launch already asked for
+   * whatever the Spec is doing: a draft offers nothing to build, and an older revision of a
+   * frozen one is read as it was frozen (D7-05).
    */
   build?: WorkspaceActionsProps | undefined
 }
@@ -103,9 +104,13 @@ export function SpecPanel({
   const [reworking, setReworking] = useState(defaultReworkOpen)
   const shown: StageChoice = pinned ?? { part: spec.focus ?? 'problem' }
   const reading = reader !== undefined
-  // The build is offered on a frozen Spec, and never on an older revision of one: only the
-  // current revision of a Spec is built, as only it can be reworked (D7-05, D8-12).
-  const buildable = spec.status === 'ready' && spec.replacedBy === undefined
+  // The build is offered on a Spec that is not being written, and never on an older revision of
+  // one: only the current revision of a Spec is built, as only it can be reworked (D7-05, D8-12).
+  // A launch already asked for stays where it stands once the Spec moves on: a build that started
+  // takes its Spec on (`in_progress`), and a Rework takes a waiting launch back — either way the
+  // panel is where the Session it opened, or what became of it, is said (D8-13).
+  const launched = build !== undefined && build.launch !== null
+  const buildable = spec.replacedBy === undefined && (spec.status !== 'draft' || launched)
   const groups = railOf(spec)
 
   const rail = {

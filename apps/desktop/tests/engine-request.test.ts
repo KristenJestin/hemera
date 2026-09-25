@@ -124,6 +124,7 @@ function running<A, E>(
       workspace: (projectId, workspaceId) => {
         told.push({ projectId, workspaceId })
       },
+      launched: () => undefined,
     }),
     Layer.succeed(StderrSink, { write: () => Effect.void }),
   )
@@ -170,6 +171,8 @@ function running<A, E>(
     Layer.provide(runtime),
     Layer.provide(rows),
     Layer.provide(preferencesLayer),
+    // A launch written tells the window (D8-13), through the same notices this harness holds.
+    Layer.provide(agents),
   )
 
   const services: Layer.Layer<
