@@ -354,6 +354,8 @@ export function Application() {
    * the reader comes back to a Project they already chose an agent in.
    */
   const [composers, setComposers] = useState<Record<string, ComposerChoice>>({})
+  /** Whether the ACP trace of each Session is written, as the settings last said (#131). */
+  const [acpTrace, setAcpTrace] = useState(false)
   /**
    * Which agent is being updated, and what its own tool last said about it (design D5-18).
    *
@@ -445,6 +447,7 @@ export function Application() {
         // Nothing where an older data folder, or an engine that predates the preference, answers
         // without it: what a window does then is open on no choice at all, not fall over.
         setComposers(worn.composers ?? {})
+        setAcpTrace(worn.acpTrace)
       })
       .catch(unanswered('preferences.read'))
     void window.hemera
@@ -1012,6 +1015,13 @@ export function Application() {
             void window.hemera
               .invoke('shell.open', { what: 'diagnostic' })
               .catch(unanswered('shell.open'))
+          }}
+          acpTrace={acpTrace}
+          onAcpTraceChange={(on) => {
+            setAcpTrace(on)
+            void window.hemera
+              .invoke('preferences.write', { acpTrace: on })
+              .catch(unanswered('preferences.write'))
           }}
           agents={{
             agents: agents.agents.map((one) => ({

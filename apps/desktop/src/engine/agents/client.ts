@@ -20,6 +20,7 @@
  */
 
 import {
+  type AnyMessage,
   ClientSideConnection,
   PROTOCOL_VERSION,
   ndJsonStream,
@@ -352,6 +353,51 @@ export interface ConnectionOptions {
   readonly adapter: AgentAdapter
   readonly onEvent: (event: AgentEvent) => void
   readonly onPermission: (question: PermissionQuestion) => Promise<PermissionAnswer>
+  /**
+   * Every message of the conversation, both ways, as it crosses (issue #131).
+   *
+   * What the SDK does with a message is its own, and what this hears is the wire: a request the
+   * SDK refused on its own is heard here with its refusal, which no handler above ever sees.
+   */
+  readonly onMessage?: ((direction: 'in' | 'out', message: AnyMessage) => void) | undefined
+}
+
+/**
+ * The SDK's stream of messages, with every message handed to a listener on its way through.
+ *
+ * Two pass-through transforms and nothing else: the SDK reads and writes exactly what it would
+ * have, and the listener hears it first. A listener that throws is a listener that heard nothing,
+ * never a message lost.
+ */
+function tapped(
+  stream: {
+    readonly readable: ReadableStream<AnyMessage>
+    readonly writable: WritableStream<AnyMessage>
+  },
+  onMessage: ((direction: 'in' | 'out', message: AnyMessage) => void) | undefined,
+) {
+  if (onMessage === undefined) return stream
+  const hear = (direction: 'in' | 'out', message: AnyMessage) => {
+    try {
+      onMessage(direction, message)
+    } catch {
+      // What was said goes on to be said: a trace that failed is not a conversation that did.
+    }
+  }
+  const inbound = new TransformStream<AnyMessage, AnyMessage>({
+    transform: (message, controller) => {
+      hear('in', message)
+      controller.enqueue(message)
+    },
+  })
+  const outbound = new TransformStream<AnyMessage, AnyMessage>({
+    transform: (message, controller) => {
+      hear('out', message)
+      controller.enqueue(message)
+    },
+  })
+  void outbound.readable.pipeTo(stream.writable).catch(() => undefined)
+  return { readable: stream.readable.pipeThrough(inbound), writable: outbound.writable }
 }
 
 /** One text Hemera provides an agent, named by the address it is known by (D6-07). */
@@ -751,7 +797,7 @@ export function connect(
 
     const connection = new ClientSideConnection(
       () => client,
-      ndJsonStream(options.output, options.input),
+      tapped(ndJsonStream(options.output, options.input), options.onMessage),
     )
 
     const handshake = yield* Effect.tryPromise({

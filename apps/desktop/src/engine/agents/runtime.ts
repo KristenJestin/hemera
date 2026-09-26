@@ -69,6 +69,7 @@ import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
+import { AcpTraces, type RequestBook, requestBook, traceLine } from './trace.ts'
 import { Commands } from '../commands/service.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
@@ -559,6 +560,8 @@ export const runtimeLayer = Layer.effect(
     // Where each agent's bare means is written: a directory of Hemera's, never the user's (D6-09).
     const directories = yield* AgentDirectories
     const database = yield* Database
+    // What a Session's agent and Hemera said to each other, written when the reader asked (#131).
+    const traces = yield* AcpTraces
 
     /**
      * The scope the engine gave this layer: the lifetime every fiber and process here lives in.
@@ -702,6 +705,29 @@ export const runtimeLayer = Layer.effect(
         payload: JSON.stringify({ reason }),
         turnId: turn?.id ?? null,
       })
+
+    /** Reads the preference, and writes the traces or stops writing them as it says (#131). */
+    const traceAsAsked = Effect.gen(function* () {
+      const read = yield* Effect.result(preferences.read)
+      traces.writing(Result.isSuccess(read) && read.success.acpTrace)
+    })
+
+    /** One line of a Session's trace that is not a message: the death of its agent. */
+    const traced = (sessionId: string, said: string) => {
+      if (traces.on()) traces.write(sessionId, `${new Date().toISOString()} ${said}`)
+    }
+
+    /**
+     * What a Session's connection hears, both ways (#131): the trace, when it is being written.
+     * The book names the request a response answers, which the response itself does not.
+     */
+    const listening = (sessionId: string) => {
+      const book = requestBook()
+      return (direction: 'in' | 'out', message: Parameters<RequestBook['heard']>[1]) => {
+        const heard = book.heard(direction, message)
+        if (traces.on()) traces.write(sessionId, traceLine(direction, heard, message, new Date()))
+      }
+    }
 
     /** What a load has replayed of this Session so far, made the first time it is asked. */
     const replayedOf = (sessionId: string): Map<string, string> => {
@@ -1397,6 +1423,7 @@ export const runtimeLayer = Layer.effect(
         Effect.gen(function* () {
           const observation = yield* held.process.exited
           held.death = { code: observation.code, signal: observation.signal }
+          traced(sessionId, `agent exited with ${String(observation.code ?? observation.signal)}`)
           if (live.get(sessionId) === held) live.delete(sessionId)
 
           const turn = turns.get(sessionId)
@@ -1486,6 +1513,8 @@ export const runtimeLayer = Layer.effect(
 
         const resolved = yield* attempt('finding the agent', discovery.resolve(provider))
         const cwd = yield* workingDirectory(session, native)
+        // Whether this agent's conversation is written down is asked now, before its first word.
+        yield* traceAsAsked
 
         // Bare, or not at all (D6-02): an agent whose means leaves a tool of its own behind opens
         // no Session, and nothing is written or started for it. The reason shown is the adapter's.
@@ -1562,6 +1591,7 @@ export const runtimeLayer = Layer.effect(
               Queue.offerUnsafe(queue, event)
             },
             onPermission: (question) => runOwned(ask(sessionId, question)),
+            onMessage: listening(sessionId),
           }),
         )
 
@@ -2423,6 +2453,10 @@ export const runtimeLayer = Layer.effect(
 
     const prompt = (sessionId: string, text: string) =>
       Effect.gen(function* () {
+        // The trace follows the preference from the next message on, not from the next start of
+        // an agent the pool may keep for minutes (#131). Read before the turn is held, so nothing
+        // waits between the check below and the turn it registers.
+        yield* traceAsAsked
         if (turns.has(sessionId) || starting.has(sessionId)) {
           return yield* Effect.fail(
             new AgentRuntimeError({

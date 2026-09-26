@@ -77,3 +77,21 @@ export function reported<E>(failed: E): string {
 export function said<E>(failed: E): string {
   return failed instanceof Error && failed.message !== '' ? failed.message : reported(failed)
 }
+
+/** The folder beside the diagnostic that holds the ACP traces, one file per Session (#131). */
+export const TRACES_FOLDER = 'traces'
+
+/** What a Session identifier may hold to name a file: nothing that walks out of the folder. */
+const FILE_SAFE = /^[\w-]+$/
+
+/**
+ * Where the ACP trace of one Session is written, or null for an identifier that could not name a
+ * file safely.
+ *
+ * One place spells it, because two programs need it: the engine writes the trace, and the main
+ * process opens it for the reader. A page never hands a path, only the Session it is about.
+ */
+export function traceFileOf(directory: string, sessionId: string): string | null {
+  if (!FILE_SAFE.test(sessionId)) return null
+  return join(directory, TRACES_FOLDER, `${sessionId}.log`)
+}

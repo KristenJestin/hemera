@@ -116,12 +116,22 @@ export type ComposerChoice = z.infer<typeof composerChoiceSchema>
 
 export const composersSchema = z.record(z.string(), composerChoiceSchema)
 
+/**
+ * Whether every ACP message of a Session is written to a trace beside the diagnostic (#131).
+ *
+ * Off unless the reader turned it on in the settings: a trace is for finding out why an agent
+ * went quiet, and a conversation written down by default is a conversation nobody asked to keep.
+ * A data folder, or a hint, written before it existed answers off.
+ */
+export const acpTraceSchema = z.boolean()
+
 export const displayPreferencesSchema = z.object({
   theme: themePreferenceSchema,
   sidebar: sidebarPreferenceSchema,
   activeProjectId: activeProjectSchema,
   activeSessions: activeSessionsSchema,
   composers: composersSchema,
+  acpTrace: acpTraceSchema.default(false),
 })
 
 export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
@@ -133,6 +143,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   activeProjectId: null,
   activeSessions: {},
   composers: {},
+  acpTrace: false,
 }
 
 /** A change to what the window wears: what is absent is what the user did not touch. */
@@ -142,6 +153,7 @@ export const displayPreferencesChangeSchema = z.object({
   activeProjectId: activeProjectSchema.optional(),
   activeSessions: activeSessionsSchema.optional(),
   composers: composersSchema.optional(),
+  acpTrace: acpTraceSchema.optional(),
 })
 
 export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>

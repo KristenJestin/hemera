@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import type {
@@ -37,7 +37,14 @@ import {
   type ScrollerEntry,
 } from '@hemera/ui'
 
-import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
+import {
+  activityOf,
+  hasEnded,
+  hasTrace,
+  openTrace,
+  type Activity,
+  type AgentSessionState,
+} from '../agent-store.ts'
 import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
@@ -118,6 +125,22 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
 
 /** What a turn that has just been asked for is doing, before anything of it has arrived. */
 const THINKING: Activity = { state: 'thinking' }
+
+/** Whether a Session has a trace to open, asked each time `asking` turns true. */
+function useTrace(sessionId: string, asking: boolean): boolean {
+  const [traced, setTraced] = useState(false)
+  useEffect(() => {
+    if (!asking) return undefined
+    let current = true
+    void hasTrace(sessionId).then((held) => {
+      if (current) setTraced(held)
+    })
+    return () => {
+      current = false
+    }
+  }, [sessionId, asking])
+  return traced
+}
 
 /** When a run was written, `HH:MM`, in the one reading the whole window uses. */
 function timeOf(at: number): string {
@@ -290,6 +313,8 @@ export function SessionPage({
   const [attempted, setAttempted] = useState<string | null>(null)
   /** Whether the reader has the Session details open: only the head's button opens them. */
   const [detailsOpen, setDetailsOpen] = useState(false)
+  // Whether the details have a trace to offer, asked each time they open (#131).
+  const traced = useTrace(session.id, detailsOpen)
   /**
    * What the reader's last decision in the thread was refused with — a proposal or a one-off
    * run whose name the catalogue already holds (D8-11) — or null once one went through. Said
@@ -768,6 +793,7 @@ export function SessionPage({
         plan={plan}
         files={touched}
         onSelectFile={onOpenFile}
+        onOpenTrace={traced ? () => void openTrace(session.id) : undefined}
         // The commands of a Session with an agent, whoever started them (D6-12): the same runs
         // the thread's blocks read, and the line a one-off is run from. A Session nothing
         // answers has no agent to lend a command to, and says so on the tab.

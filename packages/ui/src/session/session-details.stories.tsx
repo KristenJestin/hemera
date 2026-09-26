@@ -46,7 +46,7 @@ function Harness(props: Omit<SessionDetailsProps, 'open' | 'onOpenChange'>): Rea
 const meta = {
   title: 'Blocks/Session/SessionDetails',
   component: Harness,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     plan: [
@@ -111,6 +111,7 @@ const meta = {
       description: 'The tab the dialog opens on.',
     },
     onSelectFile: { description: 'Opens a file, when the reader presses its path.' },
+    onOpenTrace: { description: 'Opens the ACP trace of this Session, when there is one.' },
   },
 } satisfies Meta<typeof Harness>
 
@@ -413,5 +414,26 @@ export const TabChange: Story = {
     }
     expect(drawn.at(-1), 'the new panel did not land opaque').toBe(1)
     expect(Math.max(...room), 'the dialog grew away from the tab it shows').toBeLessThan(SPARE)
+  },
+}
+
+/**
+ * A Session whose conversation with its agent was written down, because the settings asked for it
+ * (issue #131): the trace is one press away, under what the Session is doing.
+ */
+export const WithATrace: Story = {
+  args: { onOpenTrace: fn() },
+  play: async ({ args, canvasElement }) => {
+    const dialog = await opened(canvasElement)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Open the trace' }))
+    await expect(args.onOpenTrace).toHaveBeenCalledOnce()
+  },
+}
+
+/** A Session with no trace offers none: there is nothing to open. */
+export const WithoutATrace: Story = {
+  play: async ({ canvasElement }) => {
+    const dialog = await opened(canvasElement)
+    await expect(within(dialog).queryByRole('button', { name: 'Open the trace' })).toBeNull()
   },
 }

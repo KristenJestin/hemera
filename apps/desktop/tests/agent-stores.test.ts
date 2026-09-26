@@ -29,7 +29,9 @@ import {
   agentOf,
   chooseOption,
   forgetAgentRefusal,
+  hasTrace,
   listenToAgents,
+  openTrace,
   offerAgent,
   offeringOf,
   optionsOf,
@@ -853,5 +855,22 @@ describe("A run no Session asked for is in no Session's panel", () => {
     expect(toolsSnapshot()).toBe(before)
     expect(runsOf(null)).toEqual([])
     stopTools()
+  })
+})
+
+describe('The trace of a Session is asked about by the Session, never by a path (#131)', () => {
+  test('the trace is asked about and opened by its Session, never by a path', async () => {
+    answers.set('trace.exists', true)
+    expect(await hasTrace('session-1')).toBe(true)
+    await openTrace('session-1')
+    expect(asked).toEqual([
+      { name: 'trace.exists', argument: { sessionId: 'session-1' } },
+      { name: 'trace.open', argument: { sessionId: 'session-1' } },
+    ])
+  })
+
+  test('a trace the main process cannot answer about is no trace', async () => {
+    answers.set('trace.exists', new Error('no such channel'))
+    expect(await hasTrace('session-1')).toBe(false)
   })
 })

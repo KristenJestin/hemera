@@ -524,6 +524,27 @@ export async function say(sessionId: string, text: string): Promise<string | nul
   }
 }
 
+/**
+ * Whether a Session has an ACP trace to open (issue #131): written only while the settings ask
+ * for it, so a Session may well have none. A question the main process cannot answer is none.
+ */
+export async function hasTrace(sessionId: string): Promise<boolean> {
+  try {
+    return await window.hemera.invoke('trace.exists', { sessionId })
+  } catch {
+    return false
+  }
+}
+
+/** Opens the ACP trace of a Session with the desktop, the way the diagnostic is opened. */
+export async function openTrace(sessionId: string): Promise<void> {
+  try {
+    await window.hemera.invoke('trace.open', { sessionId })
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
 /** Stops the turn running in a Session, which is what the composer's square does (D17-13). */
 export async function stopTurn(sessionId: string): Promise<void> {
   try {

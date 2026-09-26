@@ -23,6 +23,7 @@ import { type FakeAgent, fakeAgent, fakeSupervisor } from '#engine/agents/fake.t
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
 import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
 import { type Commands, UnknownRunError, commandsLayer } from '#engine/commands/service.ts'
@@ -164,6 +165,7 @@ function running<A, E>(
     Layer.provide(agents),
     Layer.provide(heldWordsLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
+    Layer.provide(acpTracesLayer(dataFolder)),
   )
 
   // The launches, which start the builds a ready Workspace was waited for (D8-13).
@@ -313,6 +315,7 @@ describe('Un message conforme est traité', () => {
       activeProjectId: null,
       activeSessions: {},
       composers: {},
+      acpTrace: false,
     })
   })
 })
