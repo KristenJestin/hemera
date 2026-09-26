@@ -698,11 +698,12 @@ export function SessionPage({
             not on the send: those are refusals of the header and of the opening, and a Session
             whose archive was refused is one that can still be written in. It stands in the same
             stack as the meter rather than over the thread, so what it moves is itself and nothing
-            above it (D4b-02).
+            above it (D4b-02). A build that could not be asked for is said here too, as a sentence
+            (#132), until the build's actions have a place of their own to say it.
           */}
-          {(refused ?? refusal ?? stored.refusal) !== null && (
+          {(refused ?? refusal ?? stored.refusal ?? stored.buildRefused) !== null && (
             <p role="alert" className="text-sm text-muted-foreground">
-              {refused ?? refusal ?? stored.refusal}
+              {refused ?? refusal ?? stored.refusal ?? stored.buildRefused}
             </p>
           )}
           <Composer
