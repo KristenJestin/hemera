@@ -259,6 +259,11 @@ export interface FakeScript {
   readonly between?: () => Promise<void>
   /** Awaited before a delivery is answered: how a suite catches a turn inside its delivery. */
   readonly holdsDelivery?: () => Promise<void>
+  /**
+   * Awaited before `initialize` is answered: an agent whose cold start takes its time, or never
+   * ends, which is how a suite holds a build `starting` (#132).
+   */
+  readonly holdsStart?: () => Promise<void>
   /** Called with the text of each prompt as it arrives, for a test that watches the pipe. */
   readonly onPrompt?: (text: string) => void
   /**
@@ -864,10 +869,11 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   }
 
   const agent: AcpAgent = {
-    initialize: (request) => {
+    initialize: async (request) => {
       // What the client said about itself, kept as it arrived: this is how a suite proves that
       // an extension Hemera advertises really reached the agent that reads it.
       answers.advertised.push(JSON.stringify(request.clientCapabilities))
+      await script.holdsStart?.()
       return {
         protocolVersion: PROTOCOL_VERSION,
         agentCapabilities: {

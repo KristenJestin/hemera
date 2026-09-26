@@ -50,6 +50,12 @@ export interface SpecState {
    * pressed on rather than under the thread, and forgotten with the next act that goes through.
    */
   readyRefused: string | null
+  /**
+   * What the last act on the build was refused with, said as a sentence — "The build could not be
+   * asked for: the application did not answer in time." — or null. Kept for the build's actions,
+   * where it was pressed, and forgotten with the next act on the build that goes through (#132).
+   */
+  buildRefused: string | null
 }
 
 const EMPTY: SpecState = {
@@ -62,6 +68,7 @@ const EMPTY: SpecState = {
   launches: null,
   refusal: null,
   readyRefused: null,
+  buildRefused: null,
 }
 
 /** What a story edit is refused with when its story was taken away meanwhile. */
@@ -355,7 +362,7 @@ export async function takeOver(sessionId: string): Promise<boolean> {
  * agent in it (D8-13).
  */
 export async function askForBuild(workspaceId: string): Promise<boolean> {
-  return await acting(async (specId) => {
+  return await building(ASK_REFUSED, async (specId) => {
     await window.hemera.invoke('launches.request', { specId, workspaceId })
   })
 }
@@ -365,7 +372,7 @@ export async function askForBuild(workspaceId: string): Promise<boolean> {
  * a preparation was made and no build was asked for.
  */
 export async function startBuild(): Promise<boolean> {
-  return await acting(async (specId) => {
+  return await building(ASK_REFUSED, async (specId) => {
     await window.hemera.invoke('launches.start', { specId })
   })
 }
@@ -374,9 +381,35 @@ export async function startBuild(): Promise<boolean> {
 export async function retryBuild(): Promise<boolean> {
   const launchId = state.launches?.launch?.id
   if (launchId === undefined) return false
-  return await acting(async () => {
+  return await building(RETRY_REFUSED, async () => {
     await window.hemera.invoke('launches.retry', { launchId })
   })
+}
+
+/** What a build that could not be asked for is said as, before the engine's own words. */
+const ASK_REFUSED = 'The build could not be asked for'
+
+/** What a build that could not be started again is said as, before the engine's own words. */
+const RETRY_REFUSED = 'The build could not be started again'
+
+/**
+ * An act on the build: its refusal is a sentence kept apart from the page's own line (#132), and
+ * the panel is read again either way — the launch says the rest through `launch.changed`.
+ */
+async function building(said: string, act: (specId: string) => Promise<void>): Promise<boolean> {
+  const specId = shown
+  if (specId === null) return false
+  try {
+    await act(specId)
+  } catch (cause) {
+    const reason = message(cause).replace(/\.$/, '')
+    replace({ ...state, buildRefused: `${said}: ${reason}.` })
+    await refresh(specId)
+    return false
+  }
+  replace({ ...state, buildRefused: null })
+  await refresh(specId)
+  return true
 }
 
 export function forgetSpecRefusal(): void {

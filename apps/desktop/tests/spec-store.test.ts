@@ -695,3 +695,59 @@ describe('The build of a frozen Spec is read and reached', () => {
     expect(names()).toEqual([])
   })
 })
+
+describe('A build that could not be asked for is said in words', () => {
+  test('a refused request is said as the build that could not be asked for, not as the thread’s refusal', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    answers.set('launches.request', new Error('the application did not answer in time'))
+
+    expect(await askForBuild('w-1')).toBe(false)
+
+    // Kept for the build's actions, where it was pressed (#132), and never the page's own line.
+    expect(specSnapshot().buildRefused).toBe(
+      'The build could not be asked for: the application did not answer in time.',
+    )
+    expect(specSnapshot().refusal).toBeNull()
+  })
+
+  test('a refused retry says the build could not be started again', async () => {
+    reads(2)
+    answers.set(
+      'launches.forSpec',
+      launches({
+        launch: {
+          id: 'l-1',
+          specId: 'spec-7',
+          revisionId: 'rev-1',
+          workspaceId: 'w-1',
+          state: 'failed',
+          sessionId: 's-1',
+          detail: 'it did not answer within 120 seconds',
+          createdAt: '2026-09-25T09:00:00.000Z',
+          updatedAt: '2026-09-25T09:00:00.000Z',
+        },
+      }),
+    )
+    await openSpec('spec-7')
+    answers.set('launches.retry', new Error('only a build whose agent failed is started again.'))
+
+    expect(await retryBuild()).toBe(false)
+
+    expect(specSnapshot().buildRefused).toBe(
+      'The build could not be started again: only a build whose agent failed is started again.',
+    )
+  })
+
+  test('the next build act that goes through forgets what the last one was refused with', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    answers.set('launches.start', new Error('the application did not answer in time'))
+    expect(await startBuild()).toBe(false)
+    answers.set('launches.start', {})
+
+    expect(await startBuild()).toBe(true)
+
+    expect(specSnapshot().buildRefused).toBeNull()
+  })
+})

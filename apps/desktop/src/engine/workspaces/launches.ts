@@ -36,10 +36,11 @@ import {
   renderSpecMarkdown,
 } from '@hemera/core'
 import { type SQL, and, desc, eq, inArray } from 'drizzle-orm'
-import { Context, Data, Effect, Layer, Result } from 'effect'
+import { Context, Data, Duration, Effect, Layer, Result } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
 import { AgentRuntime } from '../agents/runtime.ts'
+import { StderrSink } from '../agents/supervisor.ts'
 import { type InvalidCursorError, type NewEvent } from '../journal.ts'
 import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
@@ -114,7 +115,10 @@ export type LaunchRefusal =
 
 export interface LaunchesService {
   readonly one: (id: string) => Effect.Effect<LaunchView, LaunchRefusal>
-  /** Asks for a build of a ready Spec in a Workspace: `waiting`, or started at once if it is ready. */
+  /**
+   * Asks for a build of a ready Spec in a Workspace, answered `waiting` once the launch is written;
+   * on a Workspace already ready the build starts right after, in the engine (#132).
+   */
   readonly request: (
     specId: string,
     workspaceId: string,
@@ -123,17 +127,29 @@ export interface LaunchesService {
   readonly workspaceReady: (workspaceId: string) => Effect.Effect<void, LaunchRefusal>
   /**
    * What the engine does once, at its own start (D8-05, D8-13): the launches an engine that
-   * stopped left `starting` are `failed`, and the ones it left `waiting` on a Workspace that is
-   * already ready start now.
+   * stopped left `starting` are started again, and the ones it left `waiting` on a Workspace that
+   * is already ready start now. Answered at once: the work runs in the background (#132).
    */
   readonly recover: () => Effect.Effect<void, LaunchRefusal>
-  /** Starts a build that failed, again: its Session, its revision and its Workspace stand. */
+  /**
+   * Starts a build that failed, again: its Session, its revision and its Workspace stand.
+   * Answered `starting`; the agent is asked right after, in the engine (#132).
+   */
   readonly retry: (id: string) => Effect.Effect<LaunchView, LaunchRefusal>
   /** The whole panel of a Spec: its launch, its Workspace, and the ones a build may use (D8-12). */
   readonly forSpec: (specId: string) => Effect.Effect<SpecLaunchesView, LaunchRefusal>
 }
 
 export class Launches extends Context.Service<Launches, LaunchesService>()('Launches') {}
+
+/**
+ * How long the agent of a build is given to start: a spawn, a handshake and a `session/new`, a
+ * cold one included (#132). Past it the launch is `failed`, saying so, and `Retry` is offered
+ * instead of a "Starting the agent…" that never ends. A suite hands a shorter one.
+ */
+export const StartDeadline = Context.Reference<Duration.Duration>('LaunchStartDeadline', {
+  defaultValue: () => Duration.minutes(2),
+})
 
 /** What a launch waiting on a Workspace whose preparation failed is told (D8-13). */
 const NOT_PREPARED = 'The Workspace could not be prepared'
@@ -219,6 +235,10 @@ export const launchesLayer = Layer.effect(
     const preferences = yield* Preferences
     const runtime = yield* AgentRuntime
     const notices = yield* AgentNotices
+    /** The engine's diagnostic log: where a start run in the background says what it could not. */
+    const diagnostic = yield* StderrSink
+    /** The engine's own scope: a start run in the background ends when the engine does (#132). */
+    const scope = yield* Effect.scope
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -329,7 +349,22 @@ export const launchesLayer = Layer.effect(
         if ((yield* briefs(sessionId)).length === 0) {
           yield* writeBrief(sessionId, yield* readLaunched(launch.specId, launch.revisionId))
         }
-        const handshake = yield* Effect.result(runtime.start(sessionId))
+        // Bounded by the agent's start deadline (#132): an agent that never answers its handshake
+        // is a launch `failed` that offers `Retry`, not one "Starting the agent…" for ever.
+        const deadline = yield* StartDeadline
+        const handshake = yield* Effect.result(
+          runtime.start(sessionId).pipe(
+            Effect.timeoutOrElse({
+              duration: deadline,
+              orElse: () =>
+                Effect.fail(
+                  new LaunchRefusedError({
+                    reason: `it did not answer within ${String(Duration.toSeconds(deadline))} seconds`,
+                  }),
+                ),
+            }),
+          ),
+        )
         const at = now()
         const answered: LaunchView = Result.isSuccess(handshake)
           ? { ...launch, state: 'started', sessionId, detail: null, updatedAt: at }
@@ -570,6 +605,27 @@ export const launchesLayer = Layer.effect(
       })
 
     /**
+     * A start run after the answer, in the engine (#132): the window was answered once the launch
+     * was written and follows the rest through `launch.changed`. What refuses it is said on the
+     * launch, as for every other starter; a launch that cannot even say so goes to the diagnostic.
+     */
+    const inBackground = (
+      launch: LaunchView,
+      projectId: string,
+      starting: Effect.Effect<LaunchView, LaunchRefusal>,
+    ) =>
+      Effect.forkIn(scope)(
+        starting.pipe(
+          Effect.catch((refusal) => refused(launch, projectId, refusal)),
+          Effect.catch((failure) =>
+            diagnostic.write(
+              `starting the build of the launch ${launch.id} failed: ${failure.message}`,
+            ),
+          ),
+        ),
+      ).pipe(Effect.asVoid)
+
+    /**
      * Starts each of them on its own (D8-13): one that is refused is `failed` with what refused
      * it, and the next ones still start — one Project left on nothing holds back nothing beside
      * it.
@@ -613,8 +669,12 @@ export const launchesLayer = Layer.effect(
      * started again on its Session — the agent of that Session, no new one, as the builds that
      * were running are resumed — and one it left `waiting` on a Workspace that is already ready
      * starts now.
+     *
+     * Nothing of it is waited on (#132): an agent that never answers held the engine's start, and
+     * with it every request of the window. It runs in the background, each start bounded by the
+     * agent's deadline, and a launch it cannot start again is `failed` with its cause.
      */
-    const recover = () =>
+    const recovering = () =>
       Effect.gen(function* () {
         const left = yield* withDatabase(
           reading('reading the launches a stopped engine left', (transaction) =>
@@ -639,6 +699,10 @@ export const launchesLayer = Layer.effect(
               // `starting`, so a launch a stopped engine left there holds one.
               launch.sessionId as string,
               projectId,
+            ).pipe(
+              // One that cannot be started again says why, and the next ones still start.
+              Effect.catch((refusal) => refused(viewOf(launch), projectId, refusal)),
+              Effect.asVoid,
             ),
           { discard: true },
         )
@@ -662,6 +726,17 @@ export const launchesLayer = Layer.effect(
           waiting.map(({ launch, projectId }) => ({ launch: viewOf(launch), projectId })),
         )
       })
+
+    const recover = () =>
+      Effect.forkIn(scope)(
+        recovering().pipe(
+          Effect.catch((failure) =>
+            diagnostic.write(
+              `coming back to the launches a stopped engine left failed: ${failure.message}`,
+            ),
+          ),
+        ),
+      ).pipe(Effect.asVoid)
 
     /**
      * The panel of a Spec, read whole in one transaction (D8-12): the launch asked for last and
@@ -839,10 +914,14 @@ export const launchesLayer = Layer.effect(
           // What refuses it is said on the launch, as it is for every other starter: left `waiting`
           // (or `starting`), a start that failed is one the user waits on for ever, asks again for,
           // and the engine starts on the way back — two Sessions for one request (D8-13).
-          if (!asked.ready) return asked.launch
-          return yield* start(asked.launch).pipe(
-            Effect.catch((refusal) => refused(asked.launch, asked.projectId, refusal)),
-          )
+          //
+          // The request is answered once the launch is written, never after the agent (#132): a
+          // cold start outlives the few seconds the window gives a request, and the window follows
+          // the launch through `launch.changed` as it does while a Workspace is prepared.
+          if (asked.ready) {
+            yield* inBackground(asked.launch, asked.projectId, start(asked.launch))
+          }
+          return asked.launch
         }),
 
       forSpec,
@@ -893,7 +972,14 @@ export const launchesLayer = Layer.effect(
               }),
             ),
           ).pipe(Effect.tap((held) => tell(held, snapshot.spec.projectId)))
-          return yield* settled(starting, launch.sessionId, snapshot.spec.projectId)
+          // Answered `starting` once that is written (#132): the agent is asked after, in the
+          // engine, and the window follows the launch to what it answered.
+          yield* inBackground(
+            starting,
+            snapshot.spec.projectId,
+            settled(starting, launch.sessionId, snapshot.spec.projectId),
+          )
+          return starting
         }),
 
       workspaceReady,
