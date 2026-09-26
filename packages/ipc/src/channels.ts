@@ -207,6 +207,22 @@ export const CHANNELS = {
     arguments: z.object({ what: z.enum(['folder', 'diagnostic']) }),
     response: z.void(),
   },
+  /**
+   * Whether a Session has an ACP trace beside the diagnostic, and opening it with the desktop
+   * (issue #131).
+   *
+   * The Session and never a path, for the reason `shell.open` takes a choice: the main process
+   * resolves the file from the data folder it was started on, and refuses an identifier that
+   * could name anything else.
+   */
+  'trace.exists': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.boolean(),
+  },
+  'trace.open': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.void(),
+  },
   'repositories.status': {
     arguments: z.object({ root: z.string(), paths: z.array(z.string()) }),
     response: z.array(repositoryStatusSchema),

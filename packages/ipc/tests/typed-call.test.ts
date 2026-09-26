@@ -167,6 +167,8 @@ describe('Appel typé nominal', () => {
       'dialog.pickFolder',
       'dialog.pickFiles',
       'shell.open',
+      'trace.exists',
+      'trace.open',
       'repositories.status',
       'workspace.files',
       'workspace.folders',

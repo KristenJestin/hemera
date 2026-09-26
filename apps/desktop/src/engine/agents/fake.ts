@@ -159,6 +159,22 @@ export type FakeStep =
       readonly size: number
       readonly cost?: { readonly amount: number; readonly currency: string }
     }
+  | {
+      /**
+       * A line written on its standard error rather than said over the protocol (#131): what
+       * OpenCode does when its provider refuses it, and all it does about it.
+       */
+      readonly does: 'complains'
+      readonly line: string
+    }
+  | {
+      /**
+       * A request of a method Hemera does not implement, sent and awaited (#131): what the SDK
+       * answers it with is the agent's business, and the turn goes on either way.
+       */
+      readonly does: 'requests'
+      readonly method: string
+    }
 
 /**
  * What the agent is scripted to be: what it announces, and what it does when it is asked.
@@ -381,6 +397,8 @@ export interface FakeAgent {
    * takes its bare mode from variables is handed (D6-02, D6-09).
    */
   readonly environments: Record<string, string>[]
+  /** Hands a reader every line the agent writes on its standard error from now on. */
+  readonly onStderr: (read: (line: string) => void) => void
   /** Ends the agent now, as a process that died on the spot does. */
   readonly die: () => void
   /** The death of the agent, which resolves once and only once. */
@@ -459,6 +477,8 @@ function updateOf(step: FakeStep): SessionUpdate | null {
     case 'asks':
     case 'uses':
     case 'usesTogether':
+    case 'complains':
+    case 'requests':
       return null
     default:
       return null
@@ -713,6 +733,8 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   let cancelled = false
   let dead = false
   let connection: AgentSideConnection | null = null
+  // Who reads its standard error: the supervisor's port hands it every reader it was given.
+  const complaints: ((line: string) => void)[] = []
 
   // The death is announced to whoever is waiting on it, and the promise is the one thing about
   // the agent that outlives the turn that was running: a test reads it whether the script died
@@ -934,6 +956,15 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
           await use(step)
           continue
         }
+        if (step.does === 'complains') {
+          for (const read of complaints) read(step.line)
+          continue
+        }
+        if (step.does === 'requests') {
+          // oxlint-disable-next-line no-await-in-loop -- a request is answered before the agent goes on, as it would wait on it
+          await connection?.extMethod(step.method, {}).catch(() => undefined)
+          continue
+        }
         if (step.does === 'usesTogether') {
           // oxlint-disable-next-line no-await-in-loop -- the calls of one step run together, and the next step waits for all of them
           await Promise.all(step.calls.map(use))
@@ -980,6 +1011,9 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     output: toClient.readable,
     starts: [],
     environments: [],
+    onStderr: (read) => {
+      complaints.push(read)
+    },
     die,
     exited,
   }
@@ -1059,10 +1093,11 @@ function supervisedOf(agent: FakeAgent): SupervisedProcess {
       readers.push(read)
       pump()
     },
-    // The fake has no standard error: it is a peer in this process and not a program that can
-    // complain, so the reader is taken and never called. Refusing it would refuse a wiring the
-    // real port allows — a caller that reads both streams reads them here too.
-    onStderr: () => undefined,
+    // What a script writes there with a `complains` step, handed to every reader as the real
+    // port does.
+    onStderr: (read) => {
+      agent.onStderr(read)
+    },
   }
 }
 

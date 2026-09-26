@@ -1,6 +1,7 @@
 import { hemeraToolNamed } from '@hemera/core'
 import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
+  AgentReport,
   AgentText,
   CommandProposal,
   CommandRun,
@@ -32,6 +33,7 @@ import type { ReactNode } from 'react'
 import { z } from 'zod'
 
 import {
+  agentReportOf,
   commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
@@ -576,6 +578,19 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'note') {
+    const report = agentReportOf(entry)
+    if (report !== null) {
+      return (
+        <AgentReport
+          title={report.title}
+          detail={report.detail}
+          at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        />
+      )
+    }
     return (
       <MessageGroup author="hemera" name="Hemera" lines={[{ id: entry.id, body: entry.body }]} />
     )

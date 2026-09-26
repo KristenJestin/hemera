@@ -19,6 +19,8 @@ export function SettingsPage({
   agents,
   archived,
   onRestore,
+  acpTrace,
+  onAcpTraceChange,
 }: {
   subtitle: string
   theme: ThemeChoice
@@ -30,6 +32,9 @@ export function SettingsPage({
   agents: AgentsSectionProps
   archived: ArchivedProject[]
   onRestore: (id: string) => void
+  /** Whether the ACP trace of each Session is written (#131), and the switch that says so. */
+  acpTrace: boolean
+  onAcpTraceChange: (on: boolean) => void
 }): ReactNode {
   return (
     <Settings
@@ -42,6 +47,8 @@ export function SettingsPage({
       agents={agents}
       archived={archived}
       onRestore={onRestore}
+      acpTrace={acpTrace}
+      onAcpTraceChange={onAcpTraceChange}
     />
   )
 }

@@ -18,6 +18,7 @@ import type { MessagePortMain } from 'electron'
 import { openDiagnosticLog } from '../main/diagnostic.ts'
 import { registryLayer, updaterLayer } from './agents/installer.ts'
 import { QUALIFIED_VARIABLE, agentDirectoriesLayer, qualifiedBySuite } from './agents/bare.ts'
+import { acpTracesLayer } from './agents/trace.ts'
 import { heldWordsLayer } from './agents/held.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
@@ -278,6 +279,8 @@ function servicesOf(
     Layer.provide(heldWordsLayer),
     // A directory of Hemera's per agent, inside the data folder, where its bare means is written.
     Layer.provide(agentDirectoriesLayer(start.directory)),
+    // What an agent and Hemera said to each other, beside the diagnostic, when asked (#131).
+    Layer.provide(acpTracesLayer(start.directory)),
   )
 
   // Starting a build: the Spec asked for, the Workspace waited for, the Session that runs it

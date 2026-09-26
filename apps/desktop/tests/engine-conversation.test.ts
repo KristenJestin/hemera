@@ -68,6 +68,7 @@ describe('Un message conforme est traité', () => {
         activeProjectId: null,
         activeSessions: {},
         composers: {},
+        acpTrace: false,
       },
     }))
     const conversation = engineConversation(answering, alive)
@@ -78,6 +79,7 @@ describe('Un message conforme est traité', () => {
       activeProjectId: null,
       activeSessions: {},
       composers: {},
+      acpTrace: false,
     })
   })
 
@@ -91,6 +93,7 @@ describe('Un message conforme est traité', () => {
         activeProjectId: null,
         activeSessions: {},
         composers: {},
+        acpTrace: false,
       },
     }))
     const conversation = engineConversation(answering, alive)

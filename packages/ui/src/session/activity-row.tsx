@@ -2,6 +2,7 @@ import { cn } from 'cn'
 import { type ReactNode, useState } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
+import { Button } from '../components/button/button.tsx'
 import { Loading } from '../components/loading/loading.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 
@@ -63,6 +64,9 @@ const SUMMARY = 'flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground
 
 const LABEL = 'truncate'
 
+/** Stop and the trace, beside a line that has heard nothing for too long. */
+const ACTIONS = 'flex shrink-0 items-center gap-1'
+
 /** The thought arriving now, under the line that announced it. */
 const THOUGHT = 'max-w-3xl text-sm whitespace-pre-wrap text-muted-foreground'
 
@@ -106,11 +110,45 @@ function lasted(elapsedMs: number): string {
   return rest === 0 ? `${String(minutes)} min` : `${String(minutes)} min ${String(rest)} s`
 }
 
+/**
+ * How long a running turn may hear nothing before its line says so (issue #131).
+ *
+ * An agent between two blocks says nothing for a while, and that is thinking; half a minute of
+ * nothing at all is worth saying, because a line that reads "Thinking…" for ten minutes while
+ * the provider refused the request is a line that lies by omission.
+ */
+export const QUIET_AFTER_MS = 30_000
+
+/**
+ * How long before the line offers what can be done about it: stop the turn, or read the trace of
+ * what was said to find out why nothing comes.
+ */
+export const STUCK_AFTER_MS = 120_000
+
+/** The states in which a turn waits on its agent, whose silence is the agent's. */
+const LISTENING: readonly ActivityState[] = ['thinking', 'running', 'streaming']
+
+/**
+ * How long nothing has come, in the words a reader glances at: seconds under a minute, counted by
+ * fives so the line does not tick, and whole minutes after.
+ */
+function unheard(quietMs: number): string {
+  const seconds = Math.floor(quietMs / 1000)
+  if (seconds < 60) return `${String(seconds - (seconds % 5))} s`
+  return `${String(Math.floor(seconds / 60))} min`
+}
+
 /** The line the row reads, from its state and whatever the caller gave it to name. */
 function sayOf(state: ActivityState, detail?: string, elapsedMs?: number): string {
   if (state === 'running' && detail !== undefined) return `${SAID[state]} ${detail}`
   if (state === 'done' && elapsedMs !== undefined) return `${SAID[state]} in ${lasted(elapsedMs)}`
   return SAID[state]
+}
+
+/** How long a turn in this state has heard nothing, when that is long enough to say. */
+function quietOf(state: ActivityState, quietMs: number | undefined): number | null {
+  if (quietMs === undefined || !LISTENING.includes(state) || quietMs < QUIET_AFTER_MS) return null
+  return quietMs
 }
 
 export interface ActivityRowProps {
@@ -132,6 +170,18 @@ export interface ActivityRowProps {
    * figure is not what the reader wants from it.
    */
   elapsedMs?: number | undefined
+  /**
+   * How long the running turn has heard nothing from its agent (issue #131).
+   *
+   * Past `QUIET_AFTER_MS` the line says it — "Thinking… · 2 min, no answer yet" — and past
+   * `STUCK_AFTER_MS` it offers Stop and the trace beside it. A turn waiting on the reader's
+   * permission is not its agent being silent, and says nothing of the sort.
+   */
+  quietMs?: number | undefined
+  /** Stops the turn, offered once it has heard nothing for `STUCK_AFTER_MS`. */
+  onStop?: (() => void) | undefined
+  /** Opens the Session's trace, offered beside Stop when there is one to open. */
+  onOpenTrace?: (() => void) | undefined
   /** Where the row sits; never how it looks. */
   className?: string | undefined
 }
@@ -141,10 +191,16 @@ export function ActivityRow({
   detail,
   thought,
   elapsedMs,
+  quietMs,
+  onStop,
+  onOpenTrace,
   className,
 }: ActivityRowProps): ReactNode {
   const [open, setOpen] = useState(false)
-  const said = sayOf(state, detail, elapsedMs)
+  const quiet = quietOf(state, quietMs)
+  const doing = sayOf(state, detail, elapsedMs)
+  const said = quiet === null ? doing : `${doing} · ${unheard(quiet)}, no answer yet`
+  const stuck = quiet !== null && quiet >= STUCK_AFTER_MS
   const ended = ENDED[state]
   const line = (
     <span className={SUMMARY}>
@@ -162,6 +218,22 @@ export function ActivityRow({
       <Disclosure className={FOLD} open={open} onOpenChange={setOpen} summary={line}>
         {thought === undefined ? undefined : <p className={THOUGHT}>{thought}</p>}
       </Disclosure>
+      {stuck && (onStop !== undefined || onOpenTrace !== undefined) ? (
+        // Beside the line and outside the fold: a button inside the summary would be a press
+        // that opened the thought as well.
+        <span className={ACTIONS}>
+          {onStop === undefined ? null : (
+            <Button variant="link" size="sm" onClick={onStop}>
+              Stop
+            </Button>
+          )}
+          {onOpenTrace === undefined ? null : (
+            <Button variant="link" size="sm" onClick={onOpenTrace}>
+              Open the trace
+            </Button>
+          )}
+        </span>
+      ) : null}
     </div>
   )
 }

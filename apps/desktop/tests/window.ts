@@ -26,6 +26,7 @@ import type {
 } from '@hemera/ipc'
 
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { discoveryLayer } from '#engine/agents/discovery.ts'
 import type { FakeAgent } from '#engine/agents/fake.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
@@ -175,6 +176,7 @@ async function openOver(
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provideMerge(heldWordsLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
+    Layer.provide(acpTracesLayer(dataFolder)),
   )
 
   // The launches, which start the builds a ready Workspace was waited for (D8-13).

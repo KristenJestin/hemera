@@ -6,7 +6,7 @@ import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Tabs } from '../components/tabs/tabs.tsx'
-import { IconActivity, IconBrain, IconCommand, IconFolderOpen } from '../icons.ts'
+import { IconActivity, IconBrain, IconCommand, IconFileText, IconFolderOpen } from '../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 import { PlanPanel, type PlanEntry } from './plan-panel.tsx'
 
@@ -49,6 +49,9 @@ const ADDED = 'text-success-muted-foreground'
 const REMOVED = 'text-destructive-muted-foreground'
 
 const NOTHING = 'pt-1 text-sm text-muted-foreground'
+
+/** Where the trace is offered: under what the Session is doing, which it is the record of. */
+const TRACE = 'flex pt-1'
 
 /**
  * A tab's panel, faded in as it is chosen.
@@ -93,6 +96,11 @@ export interface SessionDetailsProps {
   defaultTab?: SessionDetailsTab | undefined
   /** Opens one of them, when the reader presses its path. */
   onSelectFile?: ((path: string) => void) | undefined
+  /**
+   * Opens the ACP trace of this Session, when there is one (issue #131): what the agent and
+   * Hemera said to each other, written while the settings ask for it. Absent, nothing is offered.
+   */
+  onOpenTrace?: (() => void) | undefined
 }
 
 export function SessionDetails({
@@ -104,6 +112,7 @@ export function SessionDetails({
   context,
   defaultTab = 'activity',
   onSelectFile,
+  onOpenTrace,
 }: SessionDetailsProps): ReactNode {
   return (
     <Dialog title="Session details" size="wide" open={open} onOpenChange={onOpenChange}>
@@ -168,6 +177,14 @@ export function SessionDetails({
                       ))}
                     </ul>
                   </Disclosure>
+                )}
+                {onOpenTrace === undefined ? null : (
+                  <div className={TRACE}>
+                    <Button variant="secondary" size="sm" onClick={onOpenTrace}>
+                      <IconFileText size="sm" />
+                      Open the trace
+                    </Button>
+                  </div>
                 )}
               </Crossfaded>
             ),
