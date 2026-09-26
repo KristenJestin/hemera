@@ -31,6 +31,7 @@ import { Journal } from '#engine/journal.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { SpecNotices } from '#engine/specs/notices.ts'
 import { Specs } from '#engine/specs/specs.ts'
+import { TOOL_DESCRIPTIONS } from '#engine/tools/arguments.ts'
 import { aSessionOn, gated, pause, threadOf, toolApplication } from './application.ts'
 import { agentOf, contracted, frozen, shaped, write } from './specs-harness.ts'
 import { type OpenWindow, openWindow } from './window.ts'
@@ -423,6 +424,20 @@ describe('ready attests and does not freeze', () => {
     expect(seen.after.revision.attestedContentVersion).toBe(seen.after.spec.contentVersion)
     expect(seen.after.spec.status).toBe('draft')
     expect(seen.gate.failures).toEqual([])
+  })
+})
+
+describe('The agent is told to ask the user through the question tool', () => {
+  test('the define brief and the description of spec_write both say every question goes through the tool, never in the reply', () => {
+    const through = 'Every question you put to the user goes through `spec_write` with `question`'
+    const never = 'never as text in your reply'
+    const labels = 'always adds an "Other" answer'
+    for (const told of [DEFINE_MISSION_BRIEF, TOOL_DESCRIPTIONS.spec_write]) {
+      expect(told).toContain(through)
+      expect(told).toContain(never)
+      expect(told).toContain(labels)
+    }
+    expect(TOOL_DESCRIPTIONS.spec_write).not.toContain('asked in the chat')
   })
 })
 

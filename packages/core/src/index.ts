@@ -212,6 +212,7 @@ export type {
 export {
   DEFINE_MISSION_BRIEF,
   PHASE_BRIEFS,
+  QUESTION_RULE,
   answersText,
   composeBrief,
   editsText,

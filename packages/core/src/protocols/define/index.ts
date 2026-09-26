@@ -9,7 +9,7 @@ import { SECTION_NAMES, answerWords } from '../../domain/spec.ts'
 import type { PhaseId, SpecQuestion, SpecSection, SpecSnapshot } from '../../domain/spec.ts'
 import { DEFINE_MISSION_BRIEF, PHASE_BRIEFS } from './briefs.ts'
 
-export { DEFINE_MISSION_BRIEF, PHASE_BRIEFS } from './briefs.ts'
+export { DEFINE_MISSION_BRIEF, PHASE_BRIEFS, QUESTION_RULE } from './briefs.ts'
 
 function byRank<T extends { rank: string }>(items: readonly T[]): T[] {
   return [...items].sort((left, right) => compareRanks(left.rank, right.rank))
