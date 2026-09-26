@@ -1,6 +1,18 @@
 /** Public surface of the Hemera domain and use cases. */
 
 export {
+  CLASSIFIER_POLICY_VERSION,
+  classifierVerdictFromScores,
+  localClassifierVerdict,
+} from './domain/classifier.ts'
+export type {
+  ClassifierVerdict,
+  LocalAction,
+  LocalVerdict,
+  ResolvedCommand,
+} from './domain/classifier.ts'
+
+export {
   FIRST_RANK,
   InvalidRankError,
   RankOrderError,
