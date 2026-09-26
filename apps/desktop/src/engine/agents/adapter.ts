@@ -114,6 +114,17 @@ export interface AgentAdapter {
    */
   readonly bareMode: (platform: NodeJS.Platform) => BareMode
   /**
+   * Whether the agent, run bare, has no mode of its own left to choose (issue #128).
+   *
+   * An agent whose means replaces its modes by an agent of Hemera's — OpenCode, whose `build`
+   * and `plan` are disabled for a `hemera` agent — announces modes that are not the user's to
+   * pick: `build` and `plan` on a session opened without that configuration, which a bare one
+   * then refuses (`mode not found: build`), and `hemera` on a bare one, which is Hemera's
+   * plumbing and not a feature. Such an agent offers no mode anywhere, and none is ever sent to
+   * it. An agent whose native modes survive its means declares nothing, and they are shown.
+   */
+  readonly modeless?: true
+  /**
    * What of the user's own choices a bare Session keeps, for an agent whose means moves its
    * configuration away (D6-09).
    *

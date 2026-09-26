@@ -552,6 +552,32 @@ export const Modes: Story = {
 }
 
 /**
+ * **An agent with no mode**: OpenCode, which Hemera runs bare with an agent of its own and its
+ * `build` and `plan` disabled (issue #128).
+ *
+ * The engine offers no mode for it, so there is no MODE section in the panel and the trigger
+ * names the model and the effort only: Hemera's own agent is never shown as if it were a feature.
+ */
+export const NoMode: Story = {
+  args: { agent: 'opencode', model: 'opencode-zen-kimi-k2-thinking', effort: 'low' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const trigger = canvas.getByRole('button', { name: /Kimi K2 Thinking · Low/ })
+    // The summary ends on the effort: no mode is named, `hemera` or any other.
+    await expect(trigger.textContent?.split(' · ')).toHaveLength(2)
+    await userEvent.click(trigger)
+    await screen.findByRole('listbox', { name: 'Models of this agent' })
+    // The effort still stands in its column; nothing is under it.
+    await waitFor(() => {
+      expect(screen.getByRole('slider', { name: 'Effort' })).toBeVisible()
+    })
+    await expect(screen.queryByRole('listbox', { name: 'Mode' })).toBeNull()
+    await expect(screen.queryByText('Mode')).toBeNull()
+    await waitForAnimations()
+  },
+}
+
+/**
  * **The recommended level**, ruled on the scale, beside what the agent advises in the list.
  *
  * There is no `Default` anywhere here. The agent named the model its default resolves to, so

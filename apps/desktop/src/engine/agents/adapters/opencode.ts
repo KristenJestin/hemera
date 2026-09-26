@@ -126,6 +126,9 @@ export const opencode: AgentAdapter = {
   acp: { from: 'agent', command: 'opencode', args: ['acp'] },
   readVersion: versionIn,
   isAuthenticated: (methods) => methods.length === 0,
+  // Bare, its one agent is Hemera's own: `build` and `plan` are disabled, so there is no mode
+  // to choose, before the start or after it (issue #128).
+  modeless: true,
   /**
    * This agent's means is a configuration of its own, handed inline so that no file of the
    * user's is read to get it, plus the two variables that keep the project's own configuration
