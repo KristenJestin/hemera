@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer, Option, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
@@ -1125,5 +1125,48 @@ describe('The engine answers before it comes back to what a stopped engine left'
     expect(seen.ended.state).toBe('failed')
     expect(seen.ended.detail).toContain('did not answer within')
     expect(seen.ended.sessionId).toBe(left.sessionId)
+  })
+
+  test('A launch left starting whose brief cannot be written on the way back is failed with its cause, and the engine starts', async () => {
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        // The engine stopped between the claim and the brief written after it (D8-13): a launch
+        // `starting`, its Session written, and no brief in it.
+        const sql = yield* SqliteClient
+        yield* sql`UPDATE build_launches SET state = 'starting', detail = NULL
+          WHERE id = ${failed.id}`
+        yield* sql`DELETE FROM session_entries WHERE session_id = ${failed.sessionId}`
+        return failed
+      }),
+    )
+    await opened.close()
+    const window = await openWindow(dataFolder, fakeAgent())
+    opened = window
+    const seen = await window.running(
+      Effect.gen(function* () {
+        const launched = yield* Launches
+        // The next engine cannot write that brief: the database refuses it (#121).
+        const sql = yield* SqliteClient
+        yield* sql`CREATE TRIGGER no_brief BEFORE INSERT ON session_entries BEGIN SELECT RAISE(ABORT, 'refused'); END`
+        const back = yield* Effect.result(recovered.pipe(Effect.timeoutOption(Duration.seconds(2))))
+        const status = yield* Effect.promise(() => window.bridge.invoke('engine.status', {}))
+        const ended = yield* until(launched.one(left.id), (one) => one.state !== 'starting')
+        return { back, builds: yield* builds, ended, status }
+      }),
+    )
+    // The engine started and answers; the launch says why it could not be started again, on the
+    // Session it holds, and Retry is offered.
+    expect(Result.isSuccess(seen.back) && Option.isSome(seen.back.success)).toBe(true)
+    expect(seen.status.channel).toBe('dev')
+    expect(seen.ended.state).toBe('failed')
+    expect(seen.ended.detail).toContain('refused')
+    expect(seen.ended.sessionId).toBe(left.sessionId)
+    expect(seen.builds).toHaveLength(1)
   })
 })
