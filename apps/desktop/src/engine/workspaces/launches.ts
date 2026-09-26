@@ -127,8 +127,8 @@ export interface LaunchesService {
   readonly workspaceReady: (workspaceId: string) => Effect.Effect<void, LaunchRefusal>
   /**
    * What the engine does once, at its own start (D8-05, D8-13): the launches an engine that
-   * stopped left `starting` are `failed`, and the ones it left `waiting` on a Workspace that is
-   * already ready start now.
+   * stopped left `starting` are started again, and the ones it left `waiting` on a Workspace that
+   * is already ready start now. Answered at once: the work runs in the background (#132).
    */
   readonly recover: () => Effect.Effect<void, LaunchRefusal>
   /**
@@ -669,8 +669,12 @@ export const launchesLayer = Layer.effect(
      * started again on its Session — the agent of that Session, no new one, as the builds that
      * were running are resumed — and one it left `waiting` on a Workspace that is already ready
      * starts now.
+     *
+     * Nothing of it is waited on (#132): an agent that never answers held the engine's start, and
+     * with it every request of the window. It runs in the background, each start bounded by the
+     * agent's deadline, and a launch it cannot start again is `failed` with its cause.
      */
-    const recover = () =>
+    const recovering = () =>
       Effect.gen(function* () {
         const left = yield* withDatabase(
           reading('reading the launches a stopped engine left', (transaction) =>
@@ -695,6 +699,10 @@ export const launchesLayer = Layer.effect(
               // `starting`, so a launch a stopped engine left there holds one.
               launch.sessionId as string,
               projectId,
+            ).pipe(
+              // One that cannot be started again says why, and the next ones still start.
+              Effect.catch((refusal) => refused(viewOf(launch), projectId, refusal)),
+              Effect.asVoid,
             ),
           { discard: true },
         )
@@ -718,6 +726,17 @@ export const launchesLayer = Layer.effect(
           waiting.map(({ launch, projectId }) => ({ launch: viewOf(launch), projectId })),
         )
       })
+
+    const recover = () =>
+      Effect.forkIn(scope)(
+        recovering().pipe(
+          Effect.catch((failure) =>
+            diagnostic.write(
+              `coming back to the launches a stopped engine left failed: ${failure.message}`,
+            ),
+          ),
+        ),
+      ).pipe(Effect.asVoid)
 
     /**
      * The panel of a Spec, read whole in one transaction (D8-12): the launch asked for last and

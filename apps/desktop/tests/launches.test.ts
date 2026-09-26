@@ -633,10 +633,12 @@ describe('The engine comes back to what a stopped engine left', () => {
         const sql = yield* SqliteClient
         const before = yield* builds
         yield* recovered
+        // Recovered in the background (#132): the launch is read once it has moved on.
+        const back = yield* until(launched.one(left.id), (one) => one.state !== 'starting')
         const interrupted = yield* sql<{ count: number }>`
           SELECT count(*) AS count FROM domain_events
           WHERE type = 'launch.failed' AND payload LIKE '%interrupted%'`
-        return { after: yield* builds, back: yield* launched.one(left.id), before, interrupted }
+        return { after: yield* builds, back, before, interrupted }
       }),
     )
     // The Session, the revision, the Workspace and the brief of that build stand: the engine
@@ -677,7 +679,7 @@ describe('The engine comes back to what a stopped engine left', () => {
         const sql = yield* SqliteClient
         yield* recovered
         return {
-          back: yield* launched.one(left.id),
+          back: yield* until(launched.one(left.id), (one) => one.state !== 'starting'),
           briefs: yield* sql<{ count: number }>`
             SELECT count(*) AS count FROM session_entries
             WHERE session_id = ${left.sessionId} AND kind = 'mission_brief'`,
@@ -721,7 +723,11 @@ describe('The engine comes back to what a stopped engine left', () => {
       Effect.gen(function* () {
         const launched = yield* Launches
         yield* recovered
-        return { builds: yield* builds, launch: yield* launched.one(LEFT_WAITING) }
+        const launch = yield* until(
+          launched.one(LEFT_WAITING),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        return { builds: yield* builds, launch }
       }),
     )
     // What it waited for is there: the build starts, on the revision and in the Workspace the
@@ -971,5 +977,45 @@ describe('A start that outlives the agent’s deadline fails', () => {
     expect(seen.ended.state).toBe('failed')
     expect(seen.ended.detail).toContain('did not answer within')
     expect(seen.ended.sessionId).not.toBeNull()
+  })
+})
+
+describe('The engine answers before it comes back to what a stopped engine left', () => {
+  test('The engine answers engine.status at once with a launch left starting whose agent cannot start, and that launch ends failed', async () => {
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        // The engine stopped while that build was being started (#132): a launch `starting`,
+        // with the Session it had already written.
+        const sql = yield* SqliteClient
+        yield* sql`UPDATE build_launches SET state = 'starting', detail = NULL
+          WHERE id = ${failed.id}`
+        return failed
+      }),
+    )
+    await opened.close()
+    // The next engine's agent never answers its handshake: the recovery must not hold back the
+    // engine's answers, which is what left the window with no Project at all (#132).
+    const window = await openWindow(dataFolder, fakeAgent({ holdsStart: never }))
+    opened = window
+    const seen = await window.running(
+      Effect.gen(function* () {
+        const launched = yield* Launches
+        const back = yield* recovered.pipe(Effect.timeoutOption(Duration.seconds(2)))
+        const status = yield* Effect.promise(() => window.bridge.invoke('engine.status', {}))
+        const ended = yield* until(launched.one(left.id), (one) => one.state !== 'starting')
+        return { back, ended, status }
+      }).pipe(Effect.provideService(StartDeadline, SHORT_DEADLINE)),
+    )
+    expect(Option.isSome(seen.back)).toBe(true)
+    expect(seen.status.channel).toBe('dev')
+    expect(seen.ended.state).toBe('failed')
+    expect(seen.ended.detail).toContain('did not answer within')
+    expect(seen.ended.sessionId).toBe(left.sessionId)
   })
 })
