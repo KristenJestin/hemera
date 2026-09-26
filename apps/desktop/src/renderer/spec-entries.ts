@@ -119,6 +119,27 @@ function answeredIn(questionId: string, thread: readonly SessionEntry[]): SpecAn
   return null
 }
 
+/**
+ * What the reader said, read off a `spec_answer` entry: the option they chose, in the words the
+ * question offered it, or the words they typed (issue #149). It is drawn as the reader's own
+ * message where it was given, which is what it is — not as Hemera saying it passed it on.
+ *
+ * Null when the entry does not parse, and when it names an option the question it answers does
+ * not hold: an answer drawn from a guess would be words put in the reader's mouth.
+ */
+export function answerOf(entry: SessionEntry, thread: readonly SessionEntry[]): string | null {
+  const answer = parsed(answerSchema, entry.payload)
+  if (answer === null) return null
+  if (answer.optionId === undefined) return answer.text ?? null
+  for (const asked of thread) {
+    if (asked.kind !== 'spec_question') continue
+    const question = parsed(questionSchema, asked.payload)
+    if (question?.id !== answer.questionId) continue
+    return question.options.find((option) => option.id === answer.optionId)?.label ?? null
+  }
+  return null
+}
+
 /** What the thread finds a question's block by: the page scrolls to it from the register. */
 export function questionAnchor(questionId: string): string {
   return `ask-${questionId}`

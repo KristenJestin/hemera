@@ -69,8 +69,14 @@ const commandProposalPayloadSchema = z.object({
   state: z.enum(['pending', 'accepted', 'declined']),
 })
 
-/** What one thing delivered to the agent carries (engine, `context/service.ts`). */
-const contextDeliveryPayloadSchema = z.object({ fingerprint: z.string() })
+/**
+ * What one thing delivered to the agent carries (engine, `context/service.ts`): its fingerprint, and
+ * what it was when it was a part of a `define` Session's parcel — `answer` or `edit`.
+ */
+const contextDeliveryPayloadSchema = z.object({
+  fingerprint: z.string(),
+  kind: z.string().optional(),
+})
 
 /**
  * The payload of an entry, read as the shape this kind is written in.
@@ -495,10 +501,18 @@ export interface ContextDeliveryDrawn {
   readonly body: string
 }
 
-/** `null` when the payload does not parse: the entry is left out rather than drawn from a guess. */
+/**
+ * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
+ *
+ * `null` too for the answers to the Spec's questions once handed over (issue #149): the answer is
+ * drawn as the reader's own message where it was given, and a line of Hemera's saying it handed
+ * it over, with a fingerprint, said the reader's words a second time in words nobody wrote. One
+ * that could not be handed over yet is still said: that is news.
+ */
 export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | null {
   const read = readPayload(contextDeliveryPayloadSchema, entry.payload)
   if (read === null) return null
+  if (read.kind === 'answer' && entry.state !== 'failed') return null
   const short = read.fingerprint.slice(0, FINGERPRINT_CHARACTERS)
   return { id: entry.id, body: `${entry.body} (${short})` }
 }

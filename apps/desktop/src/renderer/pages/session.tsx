@@ -53,7 +53,7 @@ import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
-import { type DefinedSpec, questionAnchor, waitsForAnswer } from '../spec-entries.ts'
+import { type DefinedSpec, answerOf, questionAnchor, waitsForAnswer } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
@@ -552,7 +552,10 @@ export function SessionPage({
       pinned.push({ id: entry.id, content: block })
       continue
     }
-    byEntry.set(entry.id, { id: entry.id, content: block })
+    // An answer to a question is the reader's own words, and marked on the rail as their messages
+    // are (issue #149).
+    const mark = entry.kind === 'spec_answer' ? (answerOf(entry, thread) ?? undefined) : undefined
+    byEntry.set(entry.id, { id: entry.id, mark, content: block })
   }
 
   const scroller: ScrollerEntry[] = []

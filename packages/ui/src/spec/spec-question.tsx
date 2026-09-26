@@ -27,9 +27,10 @@ import { type SpecAnswer, type SpecQuestionView, answerText } from './model.ts'
  * The question is Markdown, as everything the agent writes is, and reads as the thread reads it
  * (issue #134).
  *
- * Once answered, the card folds to the question with the answer in muted text under it. A turn
- * stopped before it was answered folds it too, and says so: the question stays open in the Spec's
- * register.
+ * Once answered, the card folds to the question alone: the answer is the reader's own message,
+ * which the thread draws where it was given, on the reader's side (issue #149) — said again in
+ * muted text under the question, it was said twice. A turn stopped before it was answered folds
+ * the card too, and says so: the question stays open in the Spec's register.
  */
 
 const CARD = 'flex flex-col gap-2.5 rounded-lg border border-primary bg-primary-muted p-3'
@@ -86,16 +87,18 @@ export function SpecQuestion({
   onAnswer,
 }: SpecQuestionProps): ReactNode {
   const [own, setOwn] = useState('')
-  const answer = answerText(question)
-  if (answer !== null || cancelled) {
+  const answered = answerText(question) !== null
+  if (answered || cancelled) {
     return (
       <div role="group" aria-label={`Question: ${question.body}`} className={FOLDED}>
         <div className={ASKED}>
           <AgentText text={question.body} />
         </div>
-        <span className={QUIET}>
-          {answer ?? 'Not answered · the turn was stopped; it stays open in the Spec'}
-        </span>
+        {!answered && (
+          <span className={QUIET}>
+            Not answered · the turn was stopped; it stays open in the Spec
+          </span>
+        )}
       </div>
     )
   }
