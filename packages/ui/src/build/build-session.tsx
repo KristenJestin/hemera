@@ -151,6 +151,7 @@ export function BuildSession({
               <BuildView
                 build={build}
                 now={now}
+                stories={spec.stories}
                 selected={selected}
                 onSelect={onSelect}
                 specOpen={specOpen}

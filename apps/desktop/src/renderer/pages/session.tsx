@@ -336,9 +336,9 @@ export function SessionPage({
   const remembered = shell.chatMinimised[session.id]
   const chatMinimised = remembered ?? session.mission === 'build'
   const minimiseChat = (minimised: boolean): void => setChatMinimised(session.id, minimised)
-  // Which task the banner above the composer opened, on the build view's stage: the banner and
+  // Which task the banner above the composer unfolded, on the build view's stage: the banner and
   // the view are two readings of one build, and the head's own choice answers to the same state.
-  const [openBuildTask, setOpenBuildTask] = useState<string | undefined>(undefined)
+  const [openBuildTask, setOpenBuildTask] = useState<string | null | undefined>(undefined)
   const [writes, setWrites] = useState<MessageState>('saved')
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /** What was last handed to the engine, so `Retry` has something to send again. */

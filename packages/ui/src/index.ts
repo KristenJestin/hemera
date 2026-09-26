@@ -541,7 +541,7 @@ export type {
  * the centre and the chat narrow beside it. View types only, close to the engine's `BuildView`: the
  * renderer maps one onto the other.
  */
-export { BuildView, FINAL_CHECKS_ENTRY, type BuildViewProps } from './build/build-view.tsx'
+export { BuildView, type BuildViewProps } from './build/build-view.tsx'
 export { TaskStage, type TaskStageProps } from './build/task-stage.tsx'
 export { YoursBlock, type YoursBlockProps } from './build/yours-block.tsx'
 export { BlockerBlock, type BlockerBlockProps } from './build/blocker-block.tsx'

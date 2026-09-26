@@ -648,8 +648,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'COMMAND_TYPE_LABELS',
       'EMPTY_DRAFT',
       'EVERYWHERE_PREFIX',
-      // Lot 22: the entry of the build view's list that puts the final checks on its stage.
-      'FINAL_CHECKS_ENTRY',
       // Lot 5c (issue #115): the one answer three readings of a build ask — does it wait for the
       // hand, and on what.
       'waitsOf',

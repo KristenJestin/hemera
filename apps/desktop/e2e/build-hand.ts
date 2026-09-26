@@ -22,6 +22,23 @@ export interface BuildNow {
   readonly handed: Readonly<Record<string, boolean>>
 }
 
+/**
+ * Unfolds the tasks of the Spec's story, and leaves them unfolded: the fold is a control of the
+ * user's, so a suite that only reads them must not close it again.
+ */
+export async function unfoldTasks(): Promise<void> {
+  const unfolded = await browser.execute(() => {
+    const fold = [...document.querySelectorAll('ol[aria-label^="Stories of"] button')].find(
+      (button) => (button.textContent ?? '').includes('Tasks \u00b7 3'),
+    )
+    if (!(fold instanceof HTMLButtonElement)) return false
+    if (fold.getAttribute('aria-expanded') !== 'true') fold.click()
+    return true
+  })
+  expect(unfolded).toBe(true)
+  await browser.pause(300)
+}
+
 /** The build of the Spec of this key, in the Project `Atlas`, read through the bridge. */
 export async function buildNow(key: string): Promise<BuildNow> {
   return await browser.execute(async (wanted: string) => {
