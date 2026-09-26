@@ -63,7 +63,14 @@ import {
   takeOver,
 } from '../spec-store.ts'
 import { launchOf, readerOf, specViewOf, specWorkspacesOf } from '../spec-views.ts'
-import { createForSpec, planForSpec, readPlanRepositories } from '../workspaces-store.ts'
+import {
+  closePlanReading,
+  createForSpec,
+  isPlanReadingOpen,
+  openPlanReading,
+  planForSpec,
+  readPlanRepositories,
+} from '../workspaces-store.ts'
 import { planLinesOf, worktreesOf } from '../workspace-details.ts'
 
 /**
@@ -324,8 +331,11 @@ export function SessionPage({
   const prepareWorkspace = (start: boolean): void => {
     const held = defined
     if (held === null) return
+    // The opening is taken here, before the plan is asked: this dialog is the one these answers
+    // belong to, and a dialog closed or opened again on another Spec takes the next one (#110).
+    const reading = openPlanReading()
     void planForSpec(session.projectId, held.spec.key, held.spec.slug).then((planned) => {
-      if (planned === null) return
+      if (planned === null || !isPlanReadingOpen(reading)) return
       setWorkspacePlan(planned)
       setWorkspaceReads([])
       setIntent(start ? 'start' : 'only')
@@ -334,6 +344,7 @@ export function SessionPage({
         held.spec.key,
         held.spec.slug,
         planned.repositories,
+        reading,
         (read) => {
           setWorkspaceReads((current) => [...current, read])
         },
@@ -802,7 +813,10 @@ export function SessionPage({
         <CreateWorkspaceDialog
           open={intent !== null}
           onOpenChange={(open) => {
-            if (!open) setIntent(null)
+            if (!open) {
+              closePlanReading()
+              setIntent(null)
+            }
           }}
           root={workspacePlan.root}
           defaultName={workspacePlan.name}

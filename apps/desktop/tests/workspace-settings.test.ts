@@ -34,10 +34,13 @@ import {
 import {
   addRecipeStep,
   cleanUp,
+  closePlanReading,
   createDedicated,
   createOnFolder,
   listenToWorkspaces,
+  isPlanReadingOpen,
   moveRecipeStep,
+  openPlanReading,
   planDedicated,
   readMainStatus,
   readPlanRepositories,
@@ -576,7 +579,8 @@ describe('A dedicated Workspace is made from the settings with no Spec', () => {
       // What the dialog hands over once named: every location of the plan, read on its own as the
       // dialog reads them (#110), on the branch the name makes.
       const reads: PlanRepository[] = []
-      await readPlanRepositories(project.id, null, '', plan!.repositories, (one) => {
+      const reading = openPlanReading()
+      await readPlanRepositories(project.id, null, '', plan!.repositories, reading, (one) => {
         reads.push(one)
       })
       const branch = branchOfName(plan!.branchPrefix)('Spike one')
@@ -606,6 +610,35 @@ describe('A dedicated Workspace is made from the settings with no Spec', () => {
     } finally {
       stop()
     }
+  })
+
+  test('a read left running when the dialog closes and opens again fills nothing of it', async () => {
+    const project = await atlas()
+    const plan = await planDedicated(project.id)
+    expect(plan).not.toBeNull()
+
+    // The dialog opens on the plan and starts reading its locations, one after the other.
+    const first = openPlanReading()
+    const stale: PlanRepository[] = []
+    const running = readPlanRepositories(project.id, null, '', plan!.repositories, first, (one) => {
+      stale.push(one)
+    })
+
+    // It is closed and opened again before the first answer arrived: what is read underneath was
+    // read for the opening before, and the plan now on screen is another one.
+    closePlanReading()
+    const second = openPlanReading()
+    const reads: PlanRepository[] = []
+    await readPlanRepositories(project.id, null, '', plan!.repositories, second, (one) => {
+      reads.push(one)
+    })
+    await running
+
+    expect(isPlanReadingOpen(first)).toBe(false)
+    expect(isPlanReadingOpen(second)).toBe(true)
+    // The dialog on screen is filled by its own reading, and by nothing of the one before it.
+    expect(reads).toMatchObject([{ relativePath: './api', holdsRepository: true }])
+    expect(stale).toEqual([])
   })
 })
 

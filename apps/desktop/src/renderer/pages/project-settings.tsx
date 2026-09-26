@@ -52,7 +52,12 @@ import {
   workspaceVariablesOf,
   worktreesOf,
 } from '../workspace-details.ts'
-import type { ShownWorkspace } from '../workspaces-store.ts'
+import {
+  closePlanReading,
+  isPlanReadingOpen,
+  openPlanReading,
+  type ShownWorkspace,
+} from '../workspaces-store.ts'
 
 /** What a Workspace opened in the list is asked through (D8-05, D8-06, D8-08). */
 export interface WorkspaceActions {
@@ -163,10 +168,11 @@ function WorkspacesCards({
   onPlan: () => Promise<WorkspacePlan | null>
   /**
    * Reads the locations of the plan the dialog is open on, in the plan's order, one after the
-   * other: each answer is given as it arrives (#110).
+   * other: each answer is given as it arrives, and only for the opening it was asked for (#110).
    */
   onReadPlan: (
     relativePaths: readonly string[],
+    reading: number,
     onRead: (read: PlanRepository) => void,
   ) => Promise<void>
   onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
@@ -185,13 +191,18 @@ function WorkspacesCards({
   // The plan is asked first, and the dialog opens on it at once: it takes its rows as it opens,
   // and each location is read on its own afterwards, so a repository that is slow, refused or
   // gone holds back its own row alone.
+  //
+  // The opening is taken before the plan is asked (#110): this dialog is the one these answers
+  // belong to, and a dialog closed or opened again on another plan takes the next one, which
+  // stops the reads underneath at their next answer.
   const create = () => {
+    const reading = openPlanReading()
     void onPlan().then((planned) => {
-      if (planned === null) return
+      if (planned === null || !isPlanReadingOpen(reading)) return
       setPlan(planned)
       setReads([])
       setCreating(true)
-      void onReadPlan(planned.repositories, (read) => {
+      void onReadPlan(planned.repositories, reading, (read) => {
         setReads((current) => [...current, read])
       })
     })
@@ -230,7 +241,10 @@ function WorkspacesCards({
       {plan !== null && (
         <CreateWorkspaceDialog
           open={creating}
-          onOpenChange={setCreating}
+          onOpenChange={(open) => {
+            if (!open) closePlanReading()
+            setCreating(open)
+          }}
           root={plan.root}
           defaultName={plan.name}
           repositories={planLinesOf(plan, reads)}
@@ -346,6 +360,7 @@ export function ProjectSettingsPage({
    */
   onReadPlanWorkspace: (
     relativePaths: readonly string[],
+    reading: number,
     onRead: (read: PlanRepository) => void,
   ) => Promise<void>
   /** Creates it from what the dialog kept, then prepares it; answers the refusal, or null. */

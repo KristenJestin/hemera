@@ -354,21 +354,65 @@ export async function readPlanRepository(
 }
 
 /**
+ * How many times the creation dialog was opened on a plan, whoever opened it.
+ *
+ * The dialog opens on a plan and its locations are read one after the other, which takes as long
+ * as Git takes. It is closed before they are all answered, or opened again on another Spec or
+ * Project, and the reads of the opening underneath go on: their answers were read for a plan that
+ * is no longer the one on screen, and `planLinesOf` matches a line to a row by its path, so an
+ * answer of the plan before would fill a row of the plan after it with a branch, a base and a
+ * reason that are not its own (#110).
+ */
+let readings = 0
+
+/**
+ * Opens the dialog on a plan: the number answered is the opening, and it is what its reads are
+ * held against. Every opening takes the next one, so the reads of the opening before it — still
+ * running — stop at their next answer, and nothing of them lands on the dialog now on screen.
+ */
+export function openPlanReading(): number {
+  readings += 1
+  return readings
+}
+
+/** Whether an opening is still the one on screen: a closing, or a later opening, took the next. */
+export function isPlanReadingOpen(reading: number): boolean {
+  return reading === readings
+}
+
+/**
+ * Closes the dialog: what is still being read for it is dropped rather than handed over, and no
+ * row of a dialog closed keeps filling itself in behind the page.
+ */
+export function closePlanReading(): void {
+  readings += 1
+}
+
+/**
  * Reads the locations of a plan, in the order the plan declared them, one after the other (D8-04,
  * #110): each answer is handed to `onRead` as it arrives, so a dialog open on the plan fills its
  * rows in as they come. Git is read for one location at a time, and the dialog never waits for a
  * repository that is slow, refused or gone to show the rows it already has.
+ *
+ * `reading` is the opening these answers are read for: an answer of an opening that was closed, or
+ * superseded by a later one, is dropped, and the loop stops there rather than reading the rest of
+ * a plan no dialog is open on.
  */
 export async function readPlanRepositories(
   projectId: string,
   key: string | null,
   slug: string,
   relativePaths: readonly string[],
+  reading: number,
   onRead: (read: PlanRepository) => void,
 ): Promise<void> {
   for (const relativePath of relativePaths) {
+    // Nothing is read for an opening that is not the one on screen any more.
+    if (!isPlanReadingOpen(reading)) return
     // oxlint-disable-next-line no-await-in-loop -- one location at a time, in the plan's order
-    onRead(await readPlanRepository(projectId, key, slug, relativePath))
+    const read = await readPlanRepository(projectId, key, slug, relativePath)
+    if (!isPlanReadingOpen(reading)) return
+    onRead(read)
   }
 }
 
