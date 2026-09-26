@@ -78,11 +78,24 @@ export class EngineRefused extends Data.TaggedError('EngineRefused')<
   OnUseCase & { readonly message: string }
 > {}
 
-/** It did not answer in time, which is an answer and not something to keep waiting for. */
-export class EngineTimeout extends Data.TaggedError('EngineTimeout')<OnUseCase> {}
+/**
+ * It did not answer in time, which is an answer and not something to keep waiting for.
+ *
+ * Said in words, as a refusal is: this is what the page shows where the action was pressed, and
+ * the fields of the error as JSON said nothing to whoever pressed it (#132). The log keeps them.
+ */
+export class EngineTimeout extends Data.TaggedError('EngineTimeout')<OnUseCase> {
+  override get message(): string {
+    return 'the application did not answer in time'
+  }
+}
 
-/** It is not there any more, so there is nobody for the message to reach. */
-export class EngineGone extends Data.TaggedError('EngineGone')<OnUseCase> {}
+/** It is not there any more, so there is nobody for the message to reach. Said in words too. */
+export class EngineGone extends Data.TaggedError('EngineGone')<OnUseCase> {
+  override get message(): string {
+    return 'the application’s engine has stopped'
+  }
+}
 
 /** What a conversation needs of a port, which is all a test has to stand in for. */
 export interface EnginePort {
