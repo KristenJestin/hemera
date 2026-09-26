@@ -19,20 +19,38 @@ const BUILD: WorkspaceActionsProps = {
   onOpen: fn(),
 }
 
-/** The footer of the panel the build's actions stand in, or null while it has none. */
-function buildFootOf(canvasElement: HTMLElement): HTMLElement | null {
+/** The panel's footer holding the build's actions, or `Mark ready`; null while it holds neither. */
+function footOf(canvasElement: HTMLElement, kind: 'build' | 'ready'): HTMLElement | null {
   return within(canvasElement)
     .getByRole('region', { name: 'Spec ATL-7' })
-    .querySelector<HTMLElement>('[data-build-foot]')
+    .querySelector<HTMLElement>(`[data-foot="${kind}"]`)
+}
+
+/** The footer the build's actions stand in, or null while it has none. */
+function buildFootOf(canvasElement: HTMLElement): HTMLElement | null {
+  return footOf(canvasElement, 'build')
+}
+
+/** `Mark ready` in the panel's footer, which a draft offers and nothing else does. */
+function markReadyOf(canvasElement: HTMLElement): HTMLElement {
+  const foot = footOf(canvasElement, 'ready')
+  if (foot === null) throw new Error('the footer holds no Mark ready')
+  return within(foot).getByRole('button', { name: 'Mark ready' })
+}
+
+/** Whether a button is drawn as the primary action, rather than a quiet one. */
+function isPrimary(button: HTMLElement): boolean {
+  return button.classList.contains('bg-primary')
 }
 
 /**
  * The Spec panel alone, in a Session's row beside a stand-in for the chat. Folded by default to a
  * band — the rail's glyphs and their tints — and unfolded by the band, a glyph, or the agent
- * starting on a part, unless the hand folded it. Unfolded, a head that stays on top, with `Mark
- * ready` on a draft, and the rail beside a stage that shows one part, or every part of one phase,
- * following the agent until a row is chosen. No readiness is drawn (issue #135); once the Spec
- * is ready, the build's actions arrive in a footer under the rail and the stage. The screens of the brief are drawn in their
+ * starting on a part, unless the hand folded it. Unfolded, a head that stays on top, the rail
+ * beside a stage that shows one part, or every part of one phase, following the agent until a row
+ * is chosen, and a footer under both (issue #150): `Mark ready` on a draft, quiet until the agent
+ * confirmed the Spec complete and primary after, and the build's actions once the Spec is ready.
+ * No readiness is drawn (issue #135). The screens of the brief are drawn in their
  * Session, under `Surfaces/Session/Define`; these are the panel's own states and paths.
  */
 const meta = {
@@ -138,7 +156,7 @@ export const Unfolded: Story = {
     // One part at a time: nothing of the other parts is on the stage.
     await expect(within(stage).queryByRole('heading', { name: /^Problem/ })).toBeNull()
     await expect(canvas.queryByText('Prototype')).toBeNull()
-    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeEnabled()
+    await expect(markReadyOf(canvasElement)).toBeEnabled()
     await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: /before ready/ })).toBeNull()
     // A draft offers nothing to build.
@@ -424,18 +442,19 @@ export const GroupOnStage: Story = {
 
 /**
  * `Mark ready` pressed on a draft that still lacks something: refused, and what is left is said
- * under the head, in plain words (issue #135). The Spec stays a draft.
+ * beside it in the footer, in plain words (issues #135, #150). The Spec stays a draft.
  */
 export const MarkReadyRefused: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
+    await userEvent.click(markReadyOf(canvasElement))
     await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
-    await expect(canvas.getByRole('alert')).toHaveTextContent(
+    const foot = within(footOf(canvasElement, 'ready')!)
+    await expect(foot.getByRole('alert')).toHaveTextContent(
       /^ATL-7 is not ready yet. Still to do: .*the credit-note question/,
     )
     await expect(canvas.getByText('draft')).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeVisible()
+    await expect(markReadyOf(canvasElement)).toBeVisible()
   },
 }
 
@@ -461,6 +480,46 @@ export const OlderRevision: Story = {
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    // Nothing to mark and nothing to build: the footer holds nothing.
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(buildFootOf(canvasElement)).toBeNull()
+  },
+}
+
+/**
+ * A draft half done (issue #150): shaped, the plan being written, nothing split into tasks. The
+ * head says no sentence of the phase, and the footer offers `Mark ready` quietly — the agent has
+ * not confirmed the Spec complete — across the panel's whole width.
+ */
+export const DraftHalfDone: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const header = canvasElement.querySelector('header')!
+    await expect(within(header).queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(header.querySelectorAll('p')).toHaveLength(0)
+    const mark = markReadyOf(canvasElement)
+    await expect(isPrimary(mark)).toBe(false)
+    const foot = footOf(canvasElement, 'ready')!.getBoundingClientRect()
+    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' }).getBoundingClientRect()
+    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' }).getBoundingClientRect()
+    await expect(foot.left).toBeCloseTo(rail.left, 0)
+    await expect(foot.right).toBeCloseTo(stage.right, 0)
+    await expect(buildFootOf(canvasElement)).toBeNull()
+  },
+}
+
+/**
+ * A draft the agent confirmed complete (issue #150): its `ready` proposal accepted, `Mark ready`
+ * is the primary action of the footer. Pressed, it freezes the Spec as before.
+ */
+export const DraftConfirmed: Story = {
+  args: { spec: GATE_FULL },
+  play: async ({ canvasElement, args }) => {
+    const mark = markReadyOf(canvasElement)
+    await expect(isPrimary(mark)).toBe(true)
+    await userEvent.click(mark)
+    await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(within(canvasElement).getByText('ready')).toBeVisible())
   },
 }
 
@@ -493,22 +552,26 @@ export const ReadyWithItsBuild: Story = {
     const header = canvasElement.querySelector('header')!
     await expect(within(header).queryByRole('button', { name: /build/ })).toBeNull()
     await expect(within(header).getByRole('button', { name: 'Rework' })).toBeVisible()
+    // Ready, the build's actions have taken `Mark ready`'s place.
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await userEvent.click(prepare)
     await expect(args.build?.onPrepareAndStart).toHaveBeenCalled()
   },
 }
 
 /**
- * The footer arrives when the Spec becomes ready: `Mark ready` pressed, the footer grows from
- * nothing under the rail and the stage; `Rework` confirmed, it folds away and is gone.
+ * The build's actions arrive when the Spec becomes ready: `Mark ready` pressed, it folds away as
+ * they grow in its place; `Rework` confirmed, they fold away and `Mark ready` is back, quiet
+ * again, since the agent has to confirm the reworked Spec anew.
  */
 export const BuildArrivesWhenReady: Story = {
   args: { spec: GATE_FULL },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(buildFootOf(canvasElement)).toBeNull()
-    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
+    await userEvent.click(markReadyOf(canvasElement))
     await waitFor(() => expect(buildFootOf(canvasElement)).not.toBeNull())
+    await waitFor(() => expect(footOf(canvasElement, 'ready')).toBeNull())
     const arriving = buildFootOf(canvasElement)!.parentElement!
     await waitFor(() =>
       expect(
@@ -526,5 +589,6 @@ export const BuildArrivesWhenReady: Story = {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Rework' }))
     await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
     await expect(canvas.queryByRole('button', { name: 'Prepare and start the build' })).toBeNull()
+    await expect(isPrimary(markReadyOf(canvasElement))).toBe(false)
   },
 }

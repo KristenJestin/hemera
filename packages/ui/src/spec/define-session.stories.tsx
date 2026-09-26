@@ -466,7 +466,7 @@ export const MidPlan: Story = {
 }
 
 /**
- * Unfolded, then `Mark ready` pressed too early: refused with what is left, said under the head;
+ * Unfolded, then `Mark ready` pressed too early: refused with what is left, said beside it;
  * the tasks, not written yet, put on the stage from the rail.
  */
 export const MidPlanMarkReadyRefused: Story = {
@@ -535,7 +535,7 @@ export const FromAFreeSession: Story = {
   },
 }
 
-/** Screen 4 · every check passes: `Mark ready` in the head, as on every draft. */
+/** Screen 4 · every check passes: `Mark ready` in the footer, the primary action once confirmed. */
 export const GateFull: Story = {
   args: { screen: 'gateFull', folded: false },
   play: async ({ canvasElement }) => {
