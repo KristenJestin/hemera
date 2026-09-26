@@ -12,6 +12,8 @@
  * `now`, which is what keeps a story the same whenever it is run.
  */
 
+import type { StoryView } from '../spec/model.ts'
+
 /** Where a build stands (D10-01): its three phases, then accepted or stopped. */
 export type BuildPhase = 'prepare' | 'execute' | 'verify' | 'accepted' | 'stopped'
 
@@ -143,6 +145,75 @@ export interface BuildStoryView {
   attempts: BuildAttemptView[]
 }
 
+/**
+ * Where a story of the Spec stands in the build: the tasks it was split into say it, and nothing
+ * else does (issue #116). Done once every one of them is over — a task the user skipped is over
+ * too — in progress while one is being worked on, and blocked as soon as one is blocked or waits
+ * for the user: a story someone has to answer for is a story that is not going anywhere without
+ * them.
+ */
+export type BuildStoryProgress = 'todo' | 'in_progress' | 'done' | 'blocked'
+
+/** A story's progress in plain words, as the view says it; the Spec's own key sits beside it. */
+export const STORY_PROGRESS_LABELS: Record<BuildStoryProgress, string> = {
+  todo: 'to do',
+  in_progress: 'in progress',
+  done: 'done',
+  blocked: 'blocked',
+}
+
+/** Where a story stands, from the tasks of it the build holds. */
+export function storyProgressOf(tasks: readonly BuildTaskView[]): BuildStoryProgress {
+  if (tasks.some((task) => task.state === 'blocked' || task.state === 'yours')) return 'blocked'
+  if (tasks.some((task) => task.state === 'in_progress' || task.state === 'checking')) {
+    return 'in_progress'
+  }
+  const over = tasks.every((task) => task.state === 'done' || task.state === 'skipped')
+  return tasks.length > 0 && over ? 'done' : 'todo'
+}
+
+/**
+ * A story of the Spec as the build view draws it: the words the Spec wrote — its narrative and
+ * the criteria the story is judged on — and, under them, what the build made of it.
+ */
+export interface BuildStoryRow {
+  id: string
+  key: string
+  title: string
+  narrative: string
+  criteria: readonly string[]
+  /** The tasks of the build that realise it, in the order the build holds them. */
+  tasks: BuildTaskView[]
+  progress: BuildStoryProgress
+}
+
+/**
+ * The stories of the build, each with the tasks that realise it: a task names its stories, so a
+ * story is drawn where its tasks are, and none of it is read from the chat (issue #116). The
+ * narrative and the criteria are the Spec's own, which is why the frozen stories are handed in
+ * beside the build: a story the Spec does not hold is drawn without them rather than not at all.
+ * A task that names several stories is drawn under the first of them only: the same task twice
+ * would be two stages under one name, and two landmarks the screen reader cannot tell apart.
+ */
+export function storyRowsOf(build: BuildViewData, stories: readonly StoryView[]): BuildStoryRow[] {
+  const drawn = new Set<string>()
+  return build.stories.map((story) => {
+    const written = stories.find((one) => one.id === story.id)
+    const realising = build.tasks.filter((task) => task.storyIds.includes(story.id))
+    const tasks = realising.filter((task) => !drawn.has(task.id))
+    for (const task of tasks) drawn.add(task.id)
+    return {
+      id: story.id,
+      key: story.key,
+      title: story.title,
+      narrative: written?.narrative ?? '',
+      criteria: written?.criteria ?? [],
+      tasks,
+      progress: storyProgressOf(realising),
+    }
+  })
+}
+
 /** Everything the build view draws, as the engine answers `build.read`. */
 export interface BuildViewData {
   sessionId: string
@@ -224,6 +295,22 @@ export function taskStateLabel(task: BuildTaskView): string {
 }
 
 /** The blocker still standing on a task, if the agent raised one and nobody dismissed it. */
+/**
+ * The task that waits for the hand in the build, if there is one: the one a blocker stands on, or
+ * the one that is the user's (lot 22). The band of a folded panel, the chat's button and the
+ * banner above the composer are three readings of this one answer.
+ */
+export function waitingOf(build: BuildViewData): BuildTaskView | undefined {
+  return build.tasks.find(
+    (task) => task.state === 'yours' || openBlockerOf(task, build.blockers) !== undefined,
+  )
+}
+
+/** Whether anything in the build waits for the hand at all. */
+export function waitsOf(build: BuildViewData): boolean {
+  return waitingOf(build) !== undefined
+}
+
 export function openBlockerOf(
   task: BuildTaskView,
   blockers: readonly BuildBlockerView[],

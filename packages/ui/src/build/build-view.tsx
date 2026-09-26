@@ -1,48 +1,46 @@
 import { cn } from 'cn'
-import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'react'
+import { type ReactNode, useId, useState } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
-import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { IconCheck, IconFileDescription, IconPlayerPause, IconPlayerPlay } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
+import type { StoryView } from '../spec/model.ts'
 import { BlockerBlock } from './blocker-block.tsx'
 import {
-  type BuildStoryState,
-  type BuildTaskState,
+  type BuildBlockerView,
+  type BuildStoryProgress,
+  type BuildStoryRow,
   type BuildTaskView,
   type BuildViewData,
   PHASE_LABELS,
-  TASK_STATE_LABELS,
-  TASK_STATE_ORDER,
+  STORY_PROGRESS_LABELS,
   lastAttempt,
   openBlockerOf,
+  storyRowsOf,
+  taskStateLabel,
 } from './model.ts'
+import { ReviewCard } from './review-card.tsx'
 import { StopBuild } from './stop-build.tsx'
 import { BuildTries, TaskStage } from './task-stage.tsx'
 import { ago, taskTime, tryLabel } from './times.ts'
 import { YoursBlock } from './yours-block.tsx'
 
 /**
- * The build view (D10-12): what a `build` Session shows at its centre, the larger part of the
- * page, while the chat stands narrow beside it.
+ * The build view: the Spec annotated with the build's progress (issue #116).
  *
- * A head that says where the build stands in plain words — Getting ready, Building, Final checks,
- * Accepted, Stopped, or Paused — how many tasks are done, where the stories stand, and what can be
- * done with it: Pause or Resume, Accept once the final checks are green and nothing waits for the
- * user (D10-11), Stop build, and "Spec", which opens the frozen Spec beside it, read only. Under
- * it the agent's approach (D10-02), and a waiting line while the agent has not written it.
+ * The head is the Spec, where the build stands in words, and the one Stop build there is: the panel
+ * is the only place a build is answered from, so its Stop is the only one, and a blocker carries
+ * none of its own. Under it the stories of the Spec, in the Spec's own order, each with the words
+ * it was written with, the criteria it is judged on, and where it stands — said by the tasks the
+ * build split it into, and by nothing else. Those tasks are one unfold away, and a task unfolds the
+ * stage 5a drew: its tries, the checks each try ran and their result, and the files it changed.
+ * The checks of the whole Spec come last, when the build reaches them.
  *
- * Then the tasks, grouped by state — what needs the user first (Yours, Blocked), then what moves
- * (Working, Checking), what waits (Ready, Waiting), and what is over (Done, Skipped) — each row
- * its label, its title and the one time its state says. A row puts its task on the stage beside
- * the list: its definition, its tries, their checks and the files they changed; and on top of it,
- * when the task needs the user, the block that answers it. The final checks are an entry of their
- * own once the build is in them.
- *
- * Everything is handed over and every act is reported: the view holds what is on the stage and
- * nothing else. It never reads a clock: `now` is its caller's.
+ * The chat says what is being done, the panel says what the Spec is now (D10-02): nothing here is
+ * read from the chat — the story, its criteria and its progress are the frozen Spec's and the
+ * build's own.
  */
 
 const VIEW = 'flex h-full min-h-0 min-w-0 flex-col bg-surface-content'
@@ -63,8 +61,6 @@ const PHASE = 'flex items-center gap-1.5 font-medium text-foreground'
 
 const QUIET = 'text-muted-foreground'
 
-const STORIES = 'flex flex-wrap items-center gap-1'
-
 /** The one sentence of a build that is paused, over, or stopped, under its head. */
 const BAND = 'border-b px-6 py-2 text-sm'
 
@@ -76,46 +72,58 @@ const BANDS = {
 
 const APPROACH = 'border-b border-border px-5 py-2'
 
+/** The review card, first in the pane under the head: the decision the pane is opened for. */
+const REVIEW = 'mx-6 mt-3'
+
 const APPROACH_LINE = 'flex items-center gap-2 text-sm'
 
 const APPROACH_BODY = 'max-h-48 overflow-y-auto pr-2'
 
 const WAITING = 'flex items-center gap-2 px-1 py-0.5 text-sm text-muted-foreground'
 
-const BODY = 'flex min-h-0 flex-1'
+const BODY =
+  'flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-5 outline-none focus-ring'
 
-const LIST = 'flex w-build-list shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-3'
+const STORIES = 'flex flex-col gap-6'
 
-const GROUP = 'flex flex-col gap-0.5'
+/** One story of the Spec, and under it what the build made of it. */
+const STORY = 'flex min-w-0 flex-col gap-2'
 
-const GROUP_HEAD = 'flex items-center gap-1.5 px-2 pb-1 text-xs font-medium text-muted-foreground'
+const STORY_HEAD = 'flex min-w-0 items-center gap-2'
 
-const ROW =
-  'relative flex h-control-sm w-full items-center gap-2 rounded-sm px-2 text-left text-sm text-muted-foreground outline-none focus-ring hover:bg-accent hover:text-foreground'
+const STORY_KEY = 'shrink-0 font-mono text-xs text-muted-foreground'
 
-const ROW_CURRENT =
-  'bg-accent text-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary'
+const STORY_TITLE = 'min-w-0 text-base font-medium'
 
-/** The rows that need the user, tinted as the rail tints what is to review or in conflict. */
-const ROW_TINTS: Partial<Record<BuildTaskState, string>> = {
-  yours: 'bg-warning/15',
-  blocked: 'bg-destructive/15',
+/** Where the story stands, pushed to the end of its line. */
+const STORY_WORD = 'ml-auto shrink-0 text-xs text-muted-foreground'
+
+const NARRATIVE = 'text-sm text-muted-foreground'
+
+const CRITERIA = 'flex list-disc flex-col gap-0.5 pl-5 text-sm'
+
+/** The line that unfolds a story's tasks, and the tasks' owns. */
+const TASKS = 'text-sm text-muted-foreground'
+
+const TASK = 'flex min-w-0 flex-1 items-center gap-2'
+
+const TASK_LABEL = 'shrink-0 font-mono text-xs'
+
+const TASK_TITLE = 'min-w-0 flex-1 truncate'
+
+const TASK_META = 'shrink-0 text-xs text-muted-foreground'
+
+/** Where a story stands, as the one dot its line wears. */
+const PROGRESS_TONES: Record<BuildStoryProgress, StatusTone> = {
+  todo: 'pending',
+  in_progress: 'running',
+  done: 'success',
+  blocked: 'failure',
 }
-
-const ROW_LABEL = 'shrink-0 font-mono text-xs'
-
-const ROW_TITLE = 'min-w-0 flex-1 truncate'
-
-const ROW_TIME = 'shrink-0 text-xs text-muted-foreground'
-
-const STAGE = 'min-h-0 min-w-0 flex-1 overflow-y-auto px-8 py-6 outline-none focus-ring'
 
 const HINT = 'text-sm text-muted-foreground'
 
 const WAITS = 'text-sm text-muted-foreground'
-
-/** The entry of the final checks, which stands among the tasks' ids. */
-export const FINAL_CHECKS_ENTRY = 'final-checks'
 
 /** A state said as a word and the dot beside it. */
 interface Standing {
@@ -123,22 +131,14 @@ interface Standing {
   tone: StatusTone
 }
 
-const STORY_WORDS: Record<
-  BuildStoryState,
-  { word: string; tone: 'neutral' | 'info' | 'success' | 'destructive' }
-> = {
-  open: { word: 'open', tone: 'neutral' },
-  checking: { word: 'checking', tone: 'info' },
-  green: { word: 'verified', tone: 'success' },
-  red: { word: 'red', tone: 'destructive' },
-}
-
-/** How a finished try of the final checks is said on its row. */
-const RESULT_WORDS = { green: 'green', red: 'red', unverified: 'not verified' } as const
-
 /** Where the build stands, as a dot and a word: paused wins over the phase it paused in. */
 function phaseOf(build: BuildViewData): Standing {
   if (build.pausedAt !== null && !closed(build)) return { word: 'Paused', tone: 'pending' }
+  // Everything is done and green, and nothing moves until the user accepts: the build is not
+  // building any more, it is waiting for the review it is owed (issue #116).
+  if (build.canAccept && !closed(build)) {
+    return { word: 'Waiting for your review', tone: 'success' }
+  }
   const tones: Record<BuildViewData['phase'], StatusTone> = {
     prepare: 'running',
     execute: 'running',
@@ -170,27 +170,38 @@ export function dependantsOf(label: string, tasks: readonly BuildTaskView[]): st
 }
 
 /**
- * What is on the stage when nothing was chosen: what needs the user, then the final checks once
- * the build is in them, then what is being worked on.
+ * What the view unfolds when nothing was chosen: what needs the user, then what is being worked
+ * on, then the first task of the build. Nothing once the build is in its final checks — the
+ * checks of the whole Spec are drawn under the stories, and they are the news then.
  */
 function firstShown(build: BuildViewData): string | null {
+  if (closed(build)) return null
   const needs = build.tasks.find(
     (task) =>
       task.state === 'yours' ||
       (task.state === 'blocked' && openBlockerOf(task, build.blockers) !== undefined),
   )
-  if (needs !== undefined && !closed(build)) return needs.id
-  if (build.phase === 'verify' || build.endAttempts.length > 0) return FINAL_CHECKS_ENTRY
+  if (needs !== undefined) return needs.id
   const moving = build.tasks.find(
     (task) => task.state === 'in_progress' || task.state === 'checking',
   )
-  return moving?.id ?? build.tasks[0]?.id ?? null
+  if (moving !== undefined) return moving.id
+  if (build.phase === 'verify' || build.endAttempts.length > 0) return null
+  return build.tasks[0]?.id ?? null
 }
 
-/** The one line under the title: the phase, the tasks done, the stories. */
-function StateLine({ build, now }: { build: BuildViewData; now: string }): ReactNode {
+/** The one line under the title: the phase in words, the stories done, the final checks. */
+function StateLine({
+  build,
+  stories,
+  now,
+}: {
+  build: BuildViewData
+  stories: readonly BuildStoryRow[]
+  now: string
+}): ReactNode {
   const { word, tone } = phaseOf(build)
-  const done = build.tasks.filter((task) => task.state === 'done').length
+  const done = stories.filter((story) => story.progress === 'done').length
   const final = lastAttempt(build.endAttempts)
   return (
     <div className={STATE_LINE}>
@@ -198,7 +209,9 @@ function StateLine({ build, now }: { build: BuildViewData; now: string }): React
         <StatusDot status={tone} />
         {word}
       </span>
-      <span className={QUIET}>{`${String(done)} of ${String(build.tasks.length)} tasks done`}</span>
+      {stories.length > 0 && (
+        <span className={QUIET}>{`${String(done)} of ${String(stories.length)} stories done`}</span>
+      )}
       {build.phase === 'verify' && final !== undefined && (
         <span className={QUIET}>
           {final.result === 'green'
@@ -208,21 +221,6 @@ function StateLine({ build, now }: { build: BuildViewData; now: string }): React
       )}
       {build.pausedAt !== null && !closed(build) && (
         <span className={QUIET}>{`since ${ago(build.pausedAt, now)}`}</span>
-      )}
-      {build.stories.length > 0 && (
-        <ul aria-label="Stories" className={STORIES}>
-          {build.stories.map((story) => {
-            const said = STORY_WORDS[story.state]
-            return (
-              <li key={story.id}>
-                <Badge tone={said.tone}>
-                  <span aria-hidden="true">{`${story.key} · ${said.word}`}</span>
-                  <span className="sr-only">{`${story.key} ${story.title}: ${said.word}`}</span>
-                </Badge>
-              </li>
-            )
-          })}
-        </ul>
       )}
     </div>
   )
@@ -289,11 +287,16 @@ export interface BuildViewProps {
   /** The caller's now, which every time of the view is said from. */
   now: string
   /**
-   * The task on the stage, by its build task id, or `FINAL_CHECKS_ENTRY`; for a caller that keeps it.
-   * Left out, the view holds it, and opens on what needs the user first.
+   * The stories of the frozen Spec, which the build's stories take their words from: what each
+   * story was written to be, and the criteria it is judged on.
    */
-  selected?: string | undefined
-  onSelect?: ((id: string) => void) | undefined
+  stories?: readonly StoryView[] | undefined
+  /**
+   * The task that is unfolded, by its build task id; for a caller that keeps it. Left out, the
+   * view holds it, and opens on what needs the user first; `null` says nothing is unfolded.
+   */
+  selected?: string | null | undefined
+  onSelect?: ((id: string | null) => void) | undefined
   /** Whether the frozen Spec is open beside the view, which its button says. */
   specOpen?: boolean | undefined
   /** Opens or closes the frozen Spec beside the view. */
@@ -306,13 +309,16 @@ export interface BuildViewProps {
   onTaskDone: (taskId: string) => void
   /** A task that was the user's is skipped, with the reason and whether its dependants go on. */
   onTaskSkip: (taskId: string, reason: string, unblock: boolean) => void
-  /** The Spec stands: the blocked task goes back to ready. */
-  onDismissBlocker: (blockerId: string) => void
+  /** The Spec stands: the blocked task goes back to ready, with the note the user wrote. */
+  onDismissBlocker: (blockerId: string, note: string | null) => void
+  /** The build waits for the user's review: the panel asks for it where it is written. */
+  onOpenChat: () => void
 }
 
 export function BuildView({
   build,
   now,
+  stories = [],
   selected,
   onSelect,
   specOpen = false,
@@ -324,48 +330,32 @@ export function BuildView({
   onTaskDone,
   onTaskSkip,
   onDismissBlocker,
+  onOpenChat,
 }: BuildViewProps): ReactNode {
   const [chosen, setChosen] = useState<string | null>(() => firstShown(build))
+  const [unfolded, setUnfolded] = useState<readonly string[]>([])
   const shown = selected ?? chosen
   const over = closed(build)
   const paused = build.pausedAt !== null
-  const list = useRef<HTMLDivElement>(null)
-  const stageSaid = useId()
+  const storyIds = useId()
+  const rows = storyRowsOf(build, stories)
+  const finals = build.phase === 'verify' || build.endAttempts.length > 0
 
-  const choose = (id: string) => {
+  // The story of the task that is unfolded is unfolded too: a stage nobody can see is a stage
+  // that was asked for and never shown. Folding the story folds what was unfolded in it.
+  const held = rows.find((story) => story.tasks.some((one) => one.id === shown))
+  if (held !== undefined && !unfolded.includes(held.id)) {
+    setUnfolded((was) => [...was, held.id])
+  }
+
+  const choose = (id: string | null) => {
     setChosen(id)
     onSelect?.(id)
   }
 
-  /** Moves the keyboard to another row, without choosing it: Enter does that. */
-  function walk(event: KeyboardEvent<HTMLDivElement>): void {
-    const rows = [...(list.current?.querySelectorAll<HTMLButtonElement>('[data-row]') ?? [])]
-    const at = rows.findIndex((row) => row === document.activeElement)
-    if (at === -1) return
-    const last = rows.length - 1
-    const moves = new Map([
-      ['ArrowDown', Math.min(at + 1, last)],
-      ['ArrowUp', Math.max(at - 1, 0)],
-      ['Home', 0],
-      ['End', last],
-    ])
-    const next = moves.get(event.key)
-    if (next === undefined) return
-    event.preventDefault()
-    rows[next]?.focus()
+  const unfold = (id: string, open: boolean) => {
+    setUnfolded((was) => (open ? [...was, id] : was.filter((one) => one !== id)))
   }
-
-  const groups = TASK_STATE_ORDER.map((state) => ({
-    state,
-    tasks: build.tasks.filter((task) => task.state === state),
-  })).filter((group) => group.tasks.length > 0)
-  const finals = build.phase === 'verify' || build.endAttempts.length > 0
-  // One stop of the tab order: the row on the stage, or the first one when none is.
-  const ids = [...groups.flatMap((group) => group.tasks.map((task) => task.id))]
-  if (finals) ids.push(FINAL_CHECKS_ENTRY)
-  const stop = shown !== null && ids.includes(shown) ? shown : ids[0]
-
-  const task = build.tasks.find((one) => one.id === shown)
 
   /** What stands on top of a task's stage when it needs the user. */
   function attentionOf(on: BuildTaskView): ReactNode {
@@ -381,19 +371,8 @@ export function BuildView({
       )
     }
     if (on.state !== 'blocked') return null
-    const blocker = openBlockerOf(on, build.blockers)
-    if (blocker !== undefined) {
-      return (
-        <BlockerBlock
-          blocker={blocker}
-          specKey={build.specKey}
-          now={now}
-          suspended={dependantsOf(on.label, build.tasks)}
-          onDismiss={() => onDismissBlocker(blocker.id)}
-          onStop={onStop}
-        />
-      )
-    }
+    // A blocker of its own stands on the story, above the tasks: it says what it holds.
+    if (openBlockerOf(on, build.blockers) !== undefined) return null
     const holding = build.blockers
       .filter((one) => one.dismissedAt === null)
       .filter((one) => dependantsOf(one.label, build.tasks).includes(on.label))
@@ -405,26 +384,15 @@ export function BuildView({
     )
   }
 
-  const row = (id: string, content: ReactNode, name: string, state?: BuildTaskState) => {
-    const on = id === shown
-    return (
-      <li key={id} className="flex">
-        <button
-          type="button"
-          data-row
-          tabIndex={id === stop ? 0 : -1}
-          aria-current={on ? 'true' : undefined}
-          aria-label={name}
-          className={cn(ROW, state !== undefined && ROW_TINTS[state], on && ROW_CURRENT)}
-          onClick={() => choose(id)}
-        >
-          {content}
-        </button>
-      </li>
-    )
+  /** The blockers still standing on the tasks of a story, each with the task it holds. */
+  function blockersOf(story: BuildStoryRow): { task: BuildTaskView; blocker: BuildBlockerView }[] {
+    return build.blockers
+      .filter((blocker) => blocker.dismissedAt === null)
+      .flatMap((blocker) => {
+        const on = story.tasks.find((one) => one.id === blocker.taskId)
+        return on === undefined ? [] : [{ task: on, blocker }]
+      })
   }
-
-  const final = lastAttempt(build.endAttempts)
 
   return (
     <div className={VIEW}>
@@ -465,80 +433,89 @@ export function BuildView({
             {!over && <StopBuild specKey={build.specKey} onStop={onStop} />}
           </div>
         </div>
-        <StateLine build={build} now={now} />
+        <StateLine build={build} stories={rows} now={now} />
       </header>
       <Band build={build} />
+      {!over && build.canAccept && <ReviewCard className={REVIEW} onOpenChat={onOpenChat} />}
       <Approach build={build} />
-      <div className={BODY}>
-        <div ref={list} role="navigation" aria-label="Tasks" className={LIST} onKeyDown={walk}>
-          {groups.map((group) => (
-            <div
-              key={group.state}
-              role="group"
-              aria-label={`${TASK_STATE_LABELS[group.state]}, ${String(group.tasks.length)}`}
-              className={GROUP}
-            >
-              <p aria-hidden="true" className={GROUP_HEAD}>
-                {`${TASK_STATE_LABELS[group.state]} · ${String(group.tasks.length)}`}
-              </p>
-              <ul className="flex flex-col">
-                {group.tasks.map((one) =>
-                  row(
-                    one.id,
-                    <>
-                      <span className={ROW_LABEL}>{one.label}</span>
-                      <span className={ROW_TITLE}>{one.title}</span>
-                      <span className={ROW_TIME}>{taskTime(one, now)}</span>
-                    </>,
-                    `${one.label} ${one.title}, ${taskTime(one, now)}`,
-                    one.state,
-                  ),
-                )}
-              </ul>
-            </div>
-          ))}
-          {finals && (
-            <div role="group" aria-label="Final checks" className={GROUP}>
-              <p aria-hidden="true" className={GROUP_HEAD}>
-                Final checks
-              </p>
-              <ul className="flex flex-col">
-                {row(
-                  FINAL_CHECKS_ENTRY,
-                  <>
-                    <span className={ROW_TITLE}>The whole Spec</span>
-                    <span className={ROW_TIME}>
-                      {final === undefined
-                        ? 'not run yet'
-                        : final.result === null
-                          ? tryLabel(final.number).toLowerCase()
-                          : RESULT_WORDS[final.result]}
-                    </span>
-                  </>,
-                  'Final checks of the whole Spec',
-                )}
-              </ul>
-            </div>
-          )}
-        </div>
-        <div role="region" aria-labelledby={stageSaid} tabIndex={0} className={STAGE}>
-          <span id={stageSaid} className="sr-only">
-            {task !== undefined
-              ? `Stage of ${task.label}`
-              : shown === FINAL_CHECKS_ENTRY
-                ? 'Stage of the final checks'
-                : 'Stage'}
-          </span>
-          {task !== undefined ? (
-            <TaskStage task={task} now={now} attention={attentionOf(task)} />
-          ) : shown === FINAL_CHECKS_ENTRY ? (
-            <FinalChecks build={build} now={now} />
-          ) : (
-            <p className={HINT}>
-              Pick a task to see its tries, their checks and the files they changed.
-            </p>
-          )}
-        </div>
+      <div className={BODY} role="region" tabIndex={0} aria-label={`The build of ${build.specKey}`}>
+        {rows.length === 0 && <p className={HINT}>No story of the Spec is being built yet.</p>}
+        {rows.length > 0 && (
+          <ol aria-label={`Stories of ${build.specKey}`} className={STORIES}>
+            {rows.map((story) => {
+              const open = unfolded.includes(story.id)
+              const heading = `${storyIds}-${story.id}`
+              return (
+                <li key={story.id} className="flex">
+                  <article aria-labelledby={heading} className={STORY}>
+                    <div className={STORY_HEAD}>
+                      <StatusDot status={PROGRESS_TONES[story.progress]} />
+                      <span className={STORY_KEY}>{story.key}</span>
+                      <h2 id={heading} className={STORY_TITLE}>
+                        {story.title}
+                      </h2>
+                      <span className={STORY_WORD}>{STORY_PROGRESS_LABELS[story.progress]}</span>
+                    </div>
+                    {story.narrative !== '' && <p className={NARRATIVE}>{story.narrative}</p>}
+                    {story.criteria.length > 0 && (
+                      <ul aria-label={`Criteria of ${story.key}`} className={CRITERIA}>
+                        {story.criteria.map((criterion) => (
+                          <li key={criterion}>{criterion}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {blockersOf(story).map(({ task: blocked, blocker }) => (
+                      <BlockerBlock
+                        key={blocker.id}
+                        blocker={blocker}
+                        now={now}
+                        suspended={dependantsOf(blocked.label, build.tasks)}
+                        onDismiss={(note) => onDismissBlocker(blocker.id, note)}
+                      />
+                    ))}
+                    {story.tasks.length > 0 && (
+                      <Disclosure
+                        open={open}
+                        onOpenChange={(next) => {
+                          unfold(story.id, next)
+                          if (!next && story.tasks.some((one) => one.id === shown)) choose(null)
+                        }}
+                        summary={
+                          <span className={TASKS}>{`Tasks · ${String(story.tasks.length)}`}</span>
+                        }
+                      >
+                        <ul className="flex flex-col">
+                          {story.tasks.map((one) => (
+                            <li key={one.id}>
+                              <Disclosure
+                                open={shown === one.id}
+                                onOpenChange={(next) => choose(next ? one.id : null)}
+                                summary={
+                                  <span className={TASK}>
+                                    <span className={TASK_LABEL}>{one.label}</span>
+                                    <span className="sr-only">{', '}</span>
+                                    <span className={TASK_TITLE}>{one.title}</span>
+                                    <span className="sr-only">{', '}</span>
+                                    <span className={TASK_META}>
+                                      {`${taskStateLabel(one)}, ${taskTime(one, now)}`}
+                                    </span>
+                                  </span>
+                                }
+                              >
+                                <TaskStage task={one} now={now} attention={attentionOf(one)} />
+                              </Disclosure>
+                            </li>
+                          ))}
+                        </ul>
+                      </Disclosure>
+                    )}
+                  </article>
+                </li>
+              )
+            })}
+          </ol>
+        )}
+        {finals && <FinalChecks build={build} now={now} />}
       </div>
     </div>
   )

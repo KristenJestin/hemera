@@ -88,8 +88,8 @@ function Row({
 }: {
   defaultFolded?: boolean | undefined
   onFoldChange: (folded: boolean) => void
-  /** How wide it unfolds: a Spec's share, or the chat's beside a build. */
-  width?: 'wide' | 'narrow' | undefined
+  /** How wide it unfolds: the Spec's share of the row. */
+  width?: 'wide' | undefined
 }): ReactNode {
   const [following, setFollowing] = useState<string | undefined>(undefined)
   // What the page asks of the fold, once it asks anything: the page keeps it in step with the
@@ -167,8 +167,8 @@ const meta = {
     defaultFolded: { control: 'boolean', description: 'Whether it starts folded to its band.' },
     width: {
       control: 'inline-radio',
-      options: ['wide', 'narrow'],
-      description: 'How wide it unfolds: a Spec’s share, or the chat’s beside a build.',
+      options: ['wide'],
+      description: 'How wide it unfolds: a Spec’s share of the row.',
     },
     onFoldChange: { description: 'Told each time the panel folds or unfolds.' },
   },
@@ -311,19 +311,6 @@ export const AgentUnfolds: Story = {
       'aria-current',
       'true',
     )
-  },
-}
-
-/**
- * Narrow: the width the chat unfolds to beside a build (D10-12), a smaller share of the row, so
- * the build at the centre keeps the larger part.
- */
-export const Narrow: Story = {
-  args: { defaultFolded: false, width: 'narrow' },
-  play: async ({ canvasElement }) => {
-    const panel = panelOf(canvasElement)
-    const row = panel.parentElement!.getBoundingClientRect().width
-    await expect(panel.getBoundingClientRect().width).toBeCloseTo(row * 0.3, 0)
   },
 }
 

@@ -197,6 +197,11 @@ const meta = {
       description: 'Whether the agent has started, which fixes the Workspace.',
       table: { defaultValue: { summary: 'false' } },
     },
+    workspaceBound: {
+      control: 'boolean',
+      description: "Whether the Session is bound to its Spec's Workspace, which is then a label.",
+      table: { defaultValue: { summary: 'false' } },
+    },
     action: {
       control: 'text',
       description: 'The word on the button that sends.',

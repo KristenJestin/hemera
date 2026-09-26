@@ -272,7 +272,7 @@ describe('A task skipped without its dependants', () => {
 })
 
 describe('A blocker suspends the task and its dependants only', () => {
-  test('T1 and T3 are blocked, T2 goes on, and dismissing it makes T1 ready again', async () => {
+  test('T1 and T3 are blocked, T2 goes on, and dismissing it with a note makes T1 ready again', async () => {
     const TASKS = [
       { title: 'Write the exporter' },
       { title: 'Write the reader' },
@@ -306,6 +306,7 @@ describe('A blocker suspends the task and its dependants only', () => {
         const dismissed = yield* (yield* Builds).dismissBlocker(
           blocked.sessionId,
           blocked.blockers[0]?.id ?? '',
+          'The exporter takes the CSV header from the Spec.',
         )
         const after = yield* eventually(buildOf(sessionId), (view) => view.phase === 'verify')
         return { blocked, dismissed, after, journal: yield* journalOf(sessionId) }
@@ -318,6 +319,12 @@ describe('A blocker suspends the task and its dependants only', () => {
     expect(statesOf(seen.dismissed)).toEqual({ T1: 'ready', T2: 'done', T3: 'waiting' })
     // Handed again with the dismissal, then carried out, T3 after it.
     expect(handed.some((text) => text.includes('# Blockers the user dismissed'))).toBe(true)
+    // What the user wrote beside the dismissal goes to the agent with it.
+    expect(
+      handed.some((text) =>
+        text.includes('The user adds: "The exporter takes the CSV header from the Spec."'),
+      ),
+    ).toBe(true)
     expect(statesOf(seen.after)).toEqual({ T1: 'done', T2: 'done', T3: 'done' })
     expect(
       seen.journal
@@ -361,7 +368,11 @@ describe('A dismissed blocker costs no try', () => {
           Effect.sync(() => agent.answers.used.length),
           (used) => used === 2,
         )
-        yield* (yield* Builds).dismissBlocker(blocked.sessionId, blocked.blockers[0]?.id ?? '')
+        yield* (yield* Builds).dismissBlocker(
+          blocked.sessionId,
+          blocked.blockers[0]?.id ?? '',
+          null,
+        )
         const done = yield* eventually(
           buildOf(sessionId),
           (view) => view.tasks[0]?.state === 'done',

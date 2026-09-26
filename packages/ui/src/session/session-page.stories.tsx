@@ -116,8 +116,6 @@ function Page({
             editing={editing}
             onStartEditing={fn()}
             onCancelEditing={fn()}
-            onArchive={fn()}
-            archiveDisabled={empty}
           />
         </div>
         {empty ? (

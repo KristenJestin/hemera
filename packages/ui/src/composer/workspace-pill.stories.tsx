@@ -7,7 +7,8 @@ import { WorkspacePill } from './workspace-pill.tsx'
  * Which Workspace a Session works in (D8-08).
  *
  * The pill offers the Project's Workspaces that are `ready`, `main` first, and the choice is
- * fixed once the agent has started. A Project with no dedicated Workspace offers `main` alone.
+ * fixed once the agent has started. A Project with no dedicated Workspace offers `main` alone. A
+ * Session bound to a Spec says its Workspace as a label: there was never a choice to make.
  */
 const meta = {
   tags: ['autodocs'],
@@ -19,6 +20,7 @@ const meta = {
     workspace: 'main',
     onWorkspaceChange: fn(),
     fixed: false,
+    bound: false,
   },
   argTypes: {
     workspaces: {
@@ -30,6 +32,11 @@ const meta = {
     fixed: {
       control: 'boolean',
       description: 'Whether the agent has started, which fixes the choice.',
+      table: { defaultValue: { summary: 'false' } },
+    },
+    bound: {
+      control: 'boolean',
+      description: "Whether the Session is bound to its Spec's Workspace, which is then a label.",
       table: { defaultValue: { summary: 'false' } },
     },
   },
@@ -96,6 +103,17 @@ async function theWorkspaceIsFixedOnceTheAgentHasStarted({ canvasElement, args }
 export const Fixed: Story = {
   args: { workspaces: SEVERAL, workspace: 'login-form', fixed: true },
   play: theWorkspaceIsFixedOnceTheAgentHasStarted,
+}
+
+/** A `define` or `build` Session: the Workspace came with the Spec, and is said, not offered. */
+export const Bound: Story = {
+  args: { workspaces: SEVERAL, workspace: 'login-form', bound: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('login-form')).toBeVisible()
+    await expect(canvas.queryByRole('combobox')).toBeNull()
+    await expect(canvas.queryByRole('button')).toBeNull()
+  },
 }
 
 /** The pill is one stop of the tab order: Enter opens it, Escape closes it back onto it. */

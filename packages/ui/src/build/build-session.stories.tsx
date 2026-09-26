@@ -22,19 +22,25 @@ import {
   PAUSED,
   YOURS,
 } from './build-fixtures.ts'
+import { BuildBanner } from './build-banner.tsx'
+import { type BuildViewData } from './model.ts'
 import { BuildSession } from './build-session.tsx'
-import type { BuildViewData } from './model.ts'
+import { type BuildViewProps } from './build-view.tsx'
 
 /**
- * A `build` Session (lot 22, D10-12): the define layout turned over. The build view at the centre
- * with the larger part of the row; the chat narrow on the right, foldable to its band; "Spec"
- * opening the frozen Spec beside the view, read only, the chat folding to give it the room. What
- * waits for the user in the build is said in the view and as a banner above the composer, and a
- * permission the agent asks stands in the thread, the composer saying the turn waits.
+ * A `build` Session (lot 22, D10-12; the layout of lot 5c, issue #115): the same page every
+ * Session has, the chat at the centre and the mission panel on its right, with the build standing
+ * in the panel — its view, and the frozen Spec beside it when "Spec" opens it read only.
+ *
+ * What is the build's own is its default: a build opens with the chat minimised, so the build
+ * view is the page and the chat is the button at the end of the head until it is asked for. What
+ * waits for the user in the build — a task that is theirs, a blocker the agent raised — stands in
+ * the view and as a banner above the composer, and the button's ring says it while the chat is
+ * minimised. A permission the agent asks stands in the thread, the composer saying the turn waits.
  *
  * Every screen is the build of `ATL-7` at one moment, left as it opens: its play asserts and
- * changes nothing. The paths through it — the Spec and the chat taking turns, a banner opening
- * its task, the keyboard — are stories of their own.
+ * changes nothing. The paths through it — the Spec opening beside the view, a banner opening its
+ * task, the keyboard — are stories of their own.
  */
 
 /** A Hemera line of the thread. */
@@ -156,7 +162,7 @@ const SCREENS = {
 function Screen({
   screen,
   asking = false,
-  chatFolded = false,
+  chatMinimised = false,
   specOpen = false,
   onPause,
   onResume,
@@ -165,12 +171,13 @@ function Screen({
   onTaskDone,
   onTaskSkip,
   onDismissBlocker,
+  onOpenChat,
 }: {
   screen: keyof typeof SCREENS
   /** Whether a permission of the agent waits in the thread. */
   asking?: boolean
-  /** Whether the chat opens folded to its band. */
-  chatFolded?: boolean
+  /** Whether the chat opens minimised to its button, which is how a build opens it. */
+  chatMinimised?: boolean
   /** Whether the frozen Spec opens beside the view. */
   specOpen?: boolean
   onPause: () => void
@@ -179,40 +186,60 @@ function Screen({
   onStop: () => void
   onTaskDone: (taskId: string) => void
   onTaskSkip: (taskId: string, reason: string, unblock: boolean) => void
-  onDismissBlocker: (blockerId: string) => void
+  onDismissBlocker: (blockerId: string, note: string | null) => void
+  onOpenChat: () => void
 }): ReactNode {
   const thread = asking ? [...THREAD, PERMISSION] : THREAD
+  // The chat is the hand's to minimise and the page's to remember (lot 5c); the story holds it
+  // so that the control can be pressed in a play, and the task the banner opens is held with it,
+  // since the banner and the view's stage are two readings of one build.
+  const [minimised, setMinimised] = useState(chatMinimised)
+  const [selected, setSelected] = useState<string | null>(null)
+  // What both readings of one build need: the data and the handlers, without the Spec's own two,
+  // which the build session holds since it draws the frozen Spec beside the view.
+  const view: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> = {
+    build: SCREENS[screen],
+    now: NOW,
+    onPause,
+    onResume,
+    onAccept,
+    onStop,
+    onTaskDone,
+    onTaskSkip,
+    onDismissBlocker,
+    onOpenChat,
+  }
   return (
     <TooltipProvider>
-      <div className="h-screen bg-background text-foreground">
+      <div className="h-screen">
         <BuildSession
-          build={SCREENS[screen]}
-          now={NOW}
+          {...view}
+          selected={selected}
+          onSelect={setSelected}
           spec={READY}
-          header={
-            <div className="border-b border-border px-6 pt-4 pb-3">
-              <SessionHeader
-                title="Build CSV export"
-                projectName="Atlas"
-                meta="BUILD · Claude Code · Opus 5 · ATL-7"
-                onRename={fn()}
-                onStartEditing={fn()}
-                onArchive={fn()}
-                onOpenDetails={fn()}
-              />
-            </div>
+          head={
+            <SessionHeader
+              title="Build CSV export"
+              projectName="Atlas"
+              meta="BUILD · Claude Code · Opus 5 · ATL-7"
+              onRename={fn()}
+              onStartEditing={fn()}
+              onOpenDetails={fn()}
+            />
           }
-          chat={(banner) => <Chat thread={thread} banner={banner} asking={asking} />}
-          chatWaiting={asking ? 'The agent is asking to go on' : undefined}
-          defaultChatFolded={chatFolded}
+          chat={
+            <Chat
+              thread={thread}
+              banner={<BuildBanner view={view} onOpen={setSelected} />}
+              asking={asking}
+            />
+          }
+          chatOpen={!minimised}
+          onChatOpenChange={(open) => setMinimised(!open)}
+          chatState={asking ? 'waiting' : 'working'}
+          chatWords={asking ? 'Blocker on T3' : undefined}
+          chatDetail={asking ? undefined : 'T2 · the column order'}
           defaultSpecOpen={specOpen}
-          onPause={onPause}
-          onResume={onResume}
-          onAccept={onAccept}
-          onStop={onStop}
-          onTaskDone={onTaskDone}
-          onTaskSkip={onTaskSkip}
-          onDismissBlocker={onDismissBlocker}
         />
       </div>
     </TooltipProvider>
@@ -227,7 +254,7 @@ const meta = {
   args: {
     screen: 'building',
     asking: false,
-    chatFolded: false,
+    chatMinimised: false,
     specOpen: false,
     onPause: fn(),
     onResume: fn(),
@@ -236,6 +263,7 @@ const meta = {
     onTaskDone: fn(),
     onTaskSkip: fn(),
     onDismissBlocker: fn(),
+    onOpenChat: fn(),
   },
   argTypes: {
     screen: {
@@ -244,7 +272,10 @@ const meta = {
       description: 'Which moment of the build.',
     },
     asking: { control: 'boolean', description: 'Whether a permission waits in the thread.' },
-    chatFolded: { control: 'boolean', description: 'Whether the chat opens folded to its band.' },
+    chatMinimised: {
+      control: 'boolean',
+      description: 'Whether the chat opens minimised to its button.',
+    },
     specOpen: { control: 'boolean', description: 'Whether the frozen Spec opens beside it.' },
     onPause: { action: 'paused' },
     onResume: { action: 'resumed' },
@@ -253,6 +284,7 @@ const meta = {
     onTaskDone: { action: 'task done' },
     onTaskSkip: { action: 'task skipped' },
     onDismissBlocker: { action: 'blocker dismissed' },
+    onOpenChat: { action: 'chat opened' },
   },
 } satisfies Meta<typeof Screen>
 
@@ -260,33 +292,44 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The width of a region of the page, in pixels. */
+/** The width of a region of the page, in pixels, which only a browser decides. */
 function widthOf(canvasElement: HTMLElement, name: string): number {
-  return within(canvasElement).getByRole('region', { name }).getBoundingClientRect().width
+  return within(canvasElement).getByLabelText(name).getBoundingClientRect().width
 }
 
-/** The band's own width, read from the theme's rem: three of them. */
-const BAND = 48
+/** The row the chat and the panel share: the container their widths are read against. */
+function rowOf(canvasElement: HTMLElement): HTMLElement {
+  const box = canvasElement.querySelector('[data-chat]')
+  if (box?.parentElement == null) throw new Error('the chat stands in no row')
+  return box.parentElement
+}
 
 /**
- * Everything in place: the Session's head across the top, the build at the centre with the
- * larger part of the row — T2 on its second try on the stage — and the chat narrow on the
- * right, the agent's calls to the build's tools in its thread and a permission it asks, which
- * the composer says it waits on.
+ * Everything in place: the Session's head across the top with the chat's control at its end, the
+ * chat at the centre — the agent's calls to the build's tools in its thread and a permission it
+ * asks, which the composer says it waits on — and the build in the panel on its right, T2 on its
+ * second try on the view's stage.
  */
 export const Complete: Story = {
   args: { asking: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: 'Build CSV export' })).toBeVisible()
-    await expect(canvas.getByRole('region', { name: 'Stage of T2' })).toBeVisible()
-    const chat = widthOf(canvasElement, 'Chat')
-    const view = canvas.getByRole('navigation', { name: 'Tasks' }).parentElement!.parentElement!
-    await expect(view.getBoundingClientRect().width).toBeGreaterThan(chat * 2)
-    const thread = within(canvas.getByRole('region', { name: 'Chat' }))
+    await expect(
+      canvas.getByRole('region', { name: 'A CSV in the column order of the ledger' }),
+    ).toBeVisible()
+    // The chat is the larger part of the row, and the panel takes its share beside it (issue
+    // #115): the build is no longer the centre of the page.
+    await expect(widthOf(canvasElement, 'The thread of this Session')).toBeGreaterThan(
+      widthOf(canvasElement, 'Build ATL-7'),
+    )
+    const thread = within(canvas.getByRole('log', { name: 'The thread of this Session' }))
     await expect(thread.getByRole('button', { name: /Task finished T3/ })).toBeVisible()
     await expect(thread.getByRole('button', { name: 'Allow once' })).toBeVisible()
-    await expect(thread.getByText(/The agent is asking to go on/)).toBeVisible()
+    // The control at the head's right end says what the chat is doing: a permission waits for
+    // the hand, so its ring breathes and its state says so (issue #115).
+    const control = canvas.getByRole('button', { name: 'Minimise the chat' })
+    await expect(control.parentElement).toHaveAttribute('data-state', 'waiting')
   },
 }
 
@@ -316,7 +359,9 @@ export const Yours: Story = {
   args: { screen: 'yours' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'Stage of T4' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'The file imports into the ledger' }),
+    ).toBeVisible()
     await expect(
       canvas.getByRole('group', { name: 'Yours: T4 · The file imports into the ledger' }),
     ).toBeVisible()
@@ -328,7 +373,9 @@ export const Blocked: Story = {
   args: { screen: 'blocked' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'Stage of T3' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'Credit notes as negative rows' }),
+    ).toBeVisible()
     await expect(
       canvas.getByRole('group', { name: 'T3: the agent says this task contradicts the Spec' }),
     ).toBeVisible()
@@ -350,7 +397,7 @@ export const FinalChecks: Story = {
   args: { screen: 'finalChecks' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'Stage of the final checks' })).toBeVisible()
+    await expect(canvas.getByRole('region', { name: 'Final checks' })).toBeVisible()
     await expect(canvas.getByText('final checks on try 2 of 3')).toBeVisible()
   },
 }
@@ -366,22 +413,48 @@ export const Accepted: Story = {
 }
 
 /**
- * The chat folded to its band: the build takes the whole row but the band, which says a
- * permission waits in the chat.
+ * The chat minimised to its button: the build takes the whole page, its view on the stage, and
+ * the button at the head's right end says a blocker waits for the hand.
  */
-export const ChatFolded: Story = {
-  args: { chatFolded: true, asking: true },
+export const ChatMinimised: Story = {
+  args: { chatMinimised: true, screen: 'blocked' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(widthOf(canvasElement, 'Chat')).toBe(BAND)
-    await expect(canvas.getByRole('button', { name: 'Unfold the chat' })).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'The agent is asking to go on' })).toBeVisible()
+    await expect(canvas.queryByRole('log', { name: 'The thread of this Session' })).toBeNull()
+    await expect(
+      canvas.getByRole('region', { name: 'Credit notes as negative rows' }),
+    ).toBeVisible()
+    await expect(widthOf(canvasElement, 'Build ATL-7')).toBeGreaterThan(
+      rowOf(canvasElement).getBoundingClientRect().width * 0.95,
+    )
+    const button = canvas.getByRole('button', { name: 'Open the chat · Blocker on T3' })
+    await expect(button).toBeVisible()
+    await expect(button.parentElement?.querySelector('[data-ring]')).not.toBeNull()
   },
 }
 
 /**
- * The frozen Spec open beside the view, read only, the chat folded to its band: the two are
- * never open together.
+ * The chat brought back by its button: the build keeps its fold, the chat returns at the width it
+ * had, and the panel keeps the share it stood at (D10-12, lot 5c).
+ */
+export const ChatComesBack: Story = {
+  args: { chatMinimised: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // What the button says it opens is the build's own answer, whichever screen this is: the
+    // point of the press is that the chat comes back, and the ring goes on saying the rest.
+    await userEvent.click(canvas.getByRole('button', { name: /^Open the chat/ }))
+    await waitFor(() =>
+      expect(canvas.getByRole('log', { name: 'The thread of this Session' })).toBeVisible(),
+    )
+    await expect(canvas.getByRole('button', { name: 'Minimise the chat' })).toBeVisible()
+    await expect(canvas.getByRole('region', { name: 'Build ATL-7' })).toBeVisible()
+  },
+}
+
+/**
+ * The frozen Spec open beside the view, read only, inside the same panel: the chat keeps its
+ * place, and the two views of the panel never take turns.
  */
 export const SpecOpen: Story = {
   args: { specOpen: true },
@@ -392,28 +465,32 @@ export const SpecOpen: Story = {
       'aria-pressed',
       'true',
     )
-    await expect(widthOf(canvasElement, 'Chat')).toBe(BAND)
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
+    // The chat is untouched by the Spec opening: it is the same width, on screen.
+    const thread = widthOf(canvasElement, 'The thread of this Session')
+    await expect(thread).toBeGreaterThan(0)
+    const view = canvas.getByRole('region', { name: 'Build ATL-7' })
+    await expect(view?.getBoundingClientRect().width).toBeLessThan(thread)
   },
 }
 
 /**
- * The Spec and the chat take turns: "Spec" folds the chat to its band, the band unfolds the chat
- * and closes the Spec, and "Spec" pressed again opens it once more.
+ * "Spec" opens the frozen Spec beside the build view, and closing it gives the view the panel
+ * back: nothing of the chat moves either way (issue #115).
  */
-export const SpecAndChatTakeTurns: Story = {
+export const SpecOpensBesideTheView: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    const before = widthOf(canvasElement, 'The thread of this Session')
     await userEvent.click(canvas.getByRole('button', { name: 'Spec' }))
     await expect(await canvas.findByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
-    await waitFor(() => expect(widthOf(canvasElement, 'Chat')).toBe(BAND))
-    await userEvent.click(canvas.getByRole('button', { name: 'Unfold the chat' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Close the Spec' }))
     await waitFor(() => expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull())
-    await waitFor(() => expect(widthOf(canvasElement, 'Chat')).toBeGreaterThan(BAND))
     await expect(canvas.getByRole('button', { name: 'Spec' })).toHaveAttribute(
       'aria-pressed',
       'false',
     )
+    await expect(widthOf(canvasElement, 'The thread of this Session')).toBe(before)
   },
 }
 
@@ -422,19 +499,25 @@ export const BannerOpensTheTask: Story = {
   args: { screen: 'blocked' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    // T2 is drawn under its story once its tasks are unfolded, wherever the view was.
+    await userEvent.click(canvas.getByRole('button', { name: 'Tasks · 3' }))
     await userEvent.click(canvas.getByRole('button', { name: /^T2 / }))
-    await expect(canvas.getByRole('region', { name: 'Stage of T2' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'A CSV in the column order of the ledger' }),
+    ).toBeVisible()
     const banner = within(
       canvas.getByRole('group', { name: 'T3: the agent says this task contradicts the Spec' }),
     )
     await userEvent.click(banner.getByRole('button', { name: 'Open' }))
-    await expect(canvas.getByRole('region', { name: 'Stage of T3' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'Credit notes as negative rows' }),
+    ).toBeVisible()
   },
 }
 
 /**
  * The keyboard: "Spec" opens the Spec and the keyboard stays on it; the Spec's Close gives the
- * keyboard back to "Spec", and the chat comes back as it was.
+ * keyboard back to "Spec", which is where it was.
  */
 export const Keyboard: Story = {
   play: async ({ canvasElement }) => {
@@ -448,6 +531,5 @@ export const Keyboard: Story = {
     await userEvent.keyboard('{Enter}')
     await waitFor(() => expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull())
     await expect(spec).toHaveFocus()
-    await waitFor(() => expect(widthOf(canvasElement, 'Chat')).toBeGreaterThan(BAND))
   },
 }

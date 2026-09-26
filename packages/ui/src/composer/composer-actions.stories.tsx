@@ -38,6 +38,11 @@ const meta = {
       description: 'Whether the agent has started, which fixes the Workspace.',
       table: { defaultValue: { summary: 'false' } },
     },
+    workspaceBound: {
+      control: 'boolean',
+      description: "Whether the Session is bound to its Spec's Workspace, which is then a label.",
+      table: { defaultValue: { summary: 'false' } },
+    },
     spec: {
       control: 'boolean',
       description: 'Whether the row offers a Spec: the Home does, a Session does not.',

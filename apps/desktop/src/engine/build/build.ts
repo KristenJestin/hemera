@@ -388,11 +388,21 @@ export interface BuildsService {
     reason: string,
     unblocks: boolean,
   ) => Effect.Effect<BuildView, BuildRefusal>
-  /** A blocker of this build dismissed: its task is ready again, its dependants wait again (D10-08). */
+  /**
+   * A blocker of this build dismissed: its task is ready again, its dependants wait again, and what
+   * the user wrote beside the dismissal goes to the agent with it (D10-08, issue #117).
+   */
   readonly dismissBlocker: (
     sessionId: string,
     blockerId: string,
+    note: string | null,
   ) => Effect.Effect<BuildView, BuildRefusal>
+  /**
+   * The message the user sent while this build waited for their review (issue #117): the build goes
+   * back to work on it, and the agent is handed the review brief in front of it. Any other message,
+   * and any other Session, moves nothing.
+   */
+  readonly review: (sessionId: string) => Effect.Effect<void, BuildRefusal>
   /**
    * At the engine's start (D10-09): the checks a stopped engine left running run again, and every
    * build that is not paused has its agent started and handed the resume brief.
@@ -437,6 +447,9 @@ function refusedAnswer(reason: string): BuildAnswer {
 
 /** Why Accept is not offered, or null when it is (D10-11). */
 function acceptRefusal(rows: BuildRows): string | null {
+  // A review sent the build back to work (issue #117): Accept waits for the checks it runs again,
+  // and this says why, rather than the words meant for a build that never reached them.
+  if (rows.session.buildReviewAt !== null) return 'The build went back to work on your review.'
   if (rows.phase !== 'verify') return 'The build has not reached its final checks.'
   if (rows.session.buildPausedAt !== null) return 'The build is paused.'
   const states = rows.tasks.map(stateOf)
@@ -874,6 +887,15 @@ export const buildsLayer = Layer.effect(
                 .set(judged.scope === 'task' ? { result } : { result, endedAt: at })
                 .where(eq(buildAttempts.id, judged.id))
                 .pipe(Effect.mapError(failed('writing the verdict')))
+              // The checks a review sent the build back to (issue #117) are over: the user decides
+              // again on what they answered — green, or red and handed to the agent.
+              if (judged.scope === 'build' && current.session.buildReviewAt !== null) {
+                yield* transaction
+                  .update(sessions)
+                  .set({ buildReviewAt: null })
+                  .where(eq(sessions.id, sessionId))
+                  .pipe(Effect.mapError(failed('closing the review')))
+              }
               const rows = yield* readBuild(transaction, sessionId)
               const task = rows?.tasks.find((one) => one.id === judged.buildTaskId)
               if (rows === null || task === undefined || stateOf(task) !== 'checking') {
@@ -1620,6 +1642,40 @@ export const buildsLayer = Layer.effect(
               yield* wake(sessionId)
             }
           }
+          if (delivery.kind === 'review') {
+            // The turn that carried the user's review is over (issue #117): every task stands where
+            // it stood, the build goes on to `verify`, and the whole Spec is checked again — the
+            // check the user's Accept rests on cannot be the one that ran before their review.
+            const at = now()
+            const jobs = yield* withDatabase(
+              mutate('closing the review', (transaction) =>
+                Effect.gen(function* () {
+                  const rows = yield* readBuild(transaction, sessionId)
+                  if (rows === null || rows.phase !== 'execute') return { result: [], events: [] }
+                  const followed = yield* follow(transaction, sessionId, at)
+                  const fresh = yield* readBuild(transaction, sessionId)
+                  if (fresh === null || fresh.phase !== 'verify') {
+                    return { result: followed.jobs, events: followed.events }
+                  }
+                  const ends = fresh.attempts.filter((attempt) => attempt.scope === 'build')
+                  const attemptId = yield* openAttempt(transaction, {
+                    sessionId,
+                    scope: 'build',
+                    buildTaskId: null,
+                    storyId: null,
+                    number: (ends.at(-1)?.number ?? 0) + 1,
+                    at,
+                    trees: [],
+                  })
+                  const job: CheckJob = { attemptId, when: 'end' }
+                  return { result: [...followed.jobs, job], events: followed.events }
+                }),
+              ),
+            )
+            yield* runJobs(sessionId, jobs)
+            yield* told(sessionId)
+            yield* wake(sessionId)
+          }
           if (delivery.phase === 'verify') {
             // The turn that handed the `verify` brief is over: the end checks run now, once
             // (D10-07), and Accept waits for them.
@@ -1845,7 +1901,7 @@ export const buildsLayer = Layer.effect(
           )
         }),
 
-      dismissBlocker: (sessionId, blockerId) =>
+      dismissBlocker: (sessionId, blockerId, note) =>
         Effect.gen(function* () {
           const found = yield* database
             .select({ sessionId: buildBlockers.sessionId })
@@ -1868,7 +1924,7 @@ export const buildsLayer = Layer.effect(
               }
               yield* transaction
                 .update(buildBlockers)
-                .set({ dismissedAt: at })
+                .set({ dismissedAt: at, note })
                 .where(eq(buildBlockers.id, blockerId))
                 .pipe(Effect.mapError(failed('dismissing the blocker')))
               // The task is ready again and handed again, with the dismissal (D10-08).
@@ -1895,6 +1951,37 @@ export const buildsLayer = Layer.effect(
             }),
           )
         }),
+
+      /**
+       * The user's review (issue #117): their message is the review itself, so nothing is carried
+       * over but the build sent back to work — and its whole Spec checked again once that turn is
+       * over, in `turnEnded`, never beside it.
+       */
+      review: (sessionId) =>
+        read(sessionId).pipe(
+          Effect.flatMap((rows) =>
+            // A build that waits for the review and nothing else: any other message is the user
+            // talking to the agent, and moves no phase.
+            rows === null || acceptRefusal(rows) !== null
+              ? Effect.void
+              : acted(sessionId, "taking the user's review", (transaction, fresh, at) =>
+                  Effect.gen(function* () {
+                    yield* movePhase(transaction, sessionId, 'execute')
+                    yield* transaction
+                      .update(sessions)
+                      .set({ buildReviewAt: at })
+                      .where(eq(sessions.id, sessionId))
+                      .pipe(Effect.mapError(failed('recording the review of the user')))
+                    return {
+                      events: [buildEvent(fresh, 'build.reviewed', 'human')],
+                      // The ready set is not looked at here: every task stands where it stood, and
+                      // `follow` moves the phase on once the review's own turn is over.
+                      follows: false,
+                    }
+                  }),
+                ).pipe(Effect.asVoid),
+          ),
+        ),
 
       recover: () =>
         Effect.gen(function* () {

@@ -18,7 +18,7 @@ import { browser, expect } from '@wdio/globals'
 
 import { APPROACH } from './agent/script.ts'
 import { awaits, press, region } from './hand.ts'
-import { buildNow, pressExactly } from './build-hand.ts'
+import { buildNow, pressExactly, unfoldTasks } from './build-hand.ts'
 
 const KEY = 'ATL-1'
 
@@ -56,6 +56,8 @@ describe('Accept ends the build', () => {
     // The Spec stays in progress: delivery is a later lot's (D10-11).
     expect((await buildNow(KEY)).specStatus).toBe('in_progress')
     await awaits('Accepted')
-    expect(await region('[aria-label="Tasks"] [role="group"][aria-label^="Done"]')).toContain('T3')
+    // The story and its three tasks are still drawn, T3 now done.
+    await unfoldTasks()
+    expect(await region('ol[aria-label^="Stories of"]')).toContain('T3')
   })
 })

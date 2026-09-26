@@ -28,9 +28,9 @@ import { browser, expect } from '@wdio/globals'
 
 import { repository } from '../tests/repositories.ts'
 import { fakeWorkspace } from './agent/install.ts'
-import { APPROACH, BUILDABLE, BUILDABLE_SECTIONS, FIXED } from './agent/script.ts'
+import { APPROACH, BUILDABLE, BUILDABLE_SECTIONS, FIXED, STORY } from './agent/script.ts'
 import { addProject, awaits, press, pressIn, region, shows, sidebar } from './hand.ts'
-import { buildNow, pressExactly } from './build-hand.ts'
+import { buildNow, pressExactly, unfoldTasks } from './build-hand.ts'
 
 /** The folder of `main`, kept for the second instance, which goes on in it. */
 const MAIN = fakeWorkspace('builds')
@@ -153,31 +153,33 @@ describe("The agent's signal is not a verdict", () => {
   })
 })
 
-describe('The build view shows the tasks by state', () => {
-  it('lists the tasks grouped by state with their times, and T1 opens on its tries, checks and files', async () => {
+describe('The build view draws the Spec and the progress of its tasks', () => {
+  it('draws the story with its tasks and their times, and T1 opens on its tries, checks and files', async () => {
     await browser.waitUntil(async () => (await buildNow(KEY)).states.T2 === 'yours', {
       timeout: 20_000,
-      timeoutMsg: 'T2 never became the user’s',
+      timeoutMsg: 'T2 never became the user\u2019s',
     })
-    const groups = await browser.execute(() =>
-      [...document.querySelectorAll('[aria-label="Tasks"] [role="group"]')].map(
-        (group) => group.getAttribute('aria-label') ?? '',
+    // The Spec holds one story, drawn as the Spec wrote it, and its three tasks fold under it.
+    const stories = await browser.execute(() =>
+      [...document.querySelectorAll('ol[aria-label^="Stories of"] > li')].map(
+        (story) => story.querySelector('h2')?.textContent ?? '',
       ),
     )
-    // What needs the user first, then what waits, then what is over.
-    expect(groups).toEqual(['Yours, 1', 'Waiting, 1', 'Done, 1'])
+    expect(stories).toEqual([STORY.title])
+
+    await unfoldTasks()
     const rows = await browser.execute(() =>
-      [...document.querySelectorAll('[aria-label="Tasks"] button[data-row]')].map(
-        (row) => row.getAttribute('aria-label') ?? '',
+      [...document.querySelectorAll('ol[aria-label^="Stories of"] button')].map((row) =>
+        (row.textContent ?? '').replace(/\s+/g, ' ').trim(),
       ),
     )
     // Each row says its time: how long a done task took, how long a task has been the user's.
-    expect(rows.find((row) => row.startsWith('T1 Write the exporter, '))).toMatch(/, took \S/)
-    expect(rows.find((row) => row.startsWith('T2 '))).toMatch(/, for \S/)
+    expect(rows.find((row) => row.startsWith('T1'))).toMatch(/, took \S/)
+    expect(rows.find((row) => row.startsWith('T2'))).toMatch(/, for \S/)
 
     // Its evidence is on its stage, read there and not in the thread beside it: the red try said
     // in plain words, and the file it changed.
-    await pressIn('[aria-label="Tasks"]', 'T1')
+    await pressIn('ol[aria-label^="Stories of"]', 'T1')
     await browser.waitUntil(
       async () => (await region('ol[aria-label="Tries of T1"]')).includes('exited with 1'),
       { timeout: 20_000, timeoutMsg: 'the red try of T1 was never said on its stage' },
@@ -239,9 +241,8 @@ describe('Pause stops at the next safe point', () => {
       timeoutMsg: 'the build was never resumed',
     })
     expect((await buildNow(KEY)).states).toEqual({ T1: 'done', T2: 'yours', T3: 'waiting' })
-    // Left here: the next file starts the application again, mid-build.
-    expect(await region('[aria-label="Tasks"] [role="group"][aria-label^="Waiting"]')).toContain(
-      'T3',
-    )
+    // Left here: the next file starts the application again, mid-build, on the same view.
+    await unfoldTasks()
+    expect(await region('ol[aria-label^="Stories of"]')).toContain('T3')
   })
 })

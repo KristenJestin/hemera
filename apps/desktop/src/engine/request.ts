@@ -613,7 +613,8 @@ export function answer(
       return yield* builds.taskSkip(sessionId, taskId, reason, unblock)
     }
     if (decision.name === 'build.dismissBlocker') {
-      return yield* builds.dismissBlocker(sessionId, decision.argument.blockerId)
+      const { blockerId, note } = decision.argument
+      return yield* builds.dismissBlocker(sessionId, blockerId, note)
     }
     return yield* builds.view(sessionId)
   })

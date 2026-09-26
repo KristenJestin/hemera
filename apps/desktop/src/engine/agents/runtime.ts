@@ -2499,6 +2499,10 @@ export const runtimeLayer = Layer.effect(
         }
         starting.set(sessionId, turn)
 
+        // The user's message is their review when the build waits for one (issue #117): the build
+        // goes back to work on it, and this very turn is the one handed the review brief.
+        yield* attempt("taking the user's review", builds.review(sessionId))
+
         return yield* announcedTurn(sessionId, text, turn).pipe(
           Effect.ensuring(
             Effect.sync(() => {

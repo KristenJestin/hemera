@@ -341,6 +341,8 @@ export const sessions = sqliteTable(
     version: integer('version').notNull().default(1),
     buildPhase: text('build_phase'),
     buildPausedAt: text('build_paused_at'),
+    /** When the user's review came and the build went back to work on it (issue #117). */
+    buildReviewAt: text('build_review_at'),
     buildDetail: text('build_detail'),
     approachNote: text('approach_note'),
   },
@@ -1320,6 +1322,8 @@ export const buildBlockers = sqliteTable(
       .notNull()
       .references(() => buildTasks.id, { onDelete: 'cascade' }),
     reason: text('reason').notNull(),
+    /** What the user added when they answered (issue #117); null while it waits for them. */
+    note: text('note'),
     raisedAt: text('raised_at').notNull(),
     dismissedAt: text('dismissed_at'),
   },

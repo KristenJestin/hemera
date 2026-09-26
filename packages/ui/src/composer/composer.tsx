@@ -67,6 +67,11 @@ export interface ComposerProps {
   onWorkspaceChange?: ((workspace: string) => void) | undefined
   /** Whether the agent has started, which fixes the Workspace (D8-08). */
   workspaceFixed?: boolean | undefined
+  /**
+   * Whether the Session is bound to its Spec's Workspace — `define` and `build` — which the foot
+   * then says as a label rather than offering as a choice.
+   */
+  workspaceBound?: boolean | undefined
   /** The word on the button that sends: `Start chat` on the Home. */
   action?: string | undefined
   /**
@@ -138,6 +143,7 @@ export function Composer({
   workspace,
   onWorkspaceChange,
   workspaceFixed = false,
+  workspaceBound = false,
   action = 'Start chat',
   sendDisabledReason,
   variant = 'hero',
@@ -346,6 +352,7 @@ export function Composer({
               workspaces={workspaces}
               workspace={current}
               workspaceFixed={workspaceFixed}
+              workspaceBound={workspaceBound}
               onWorkspaceChange={(next) => {
                 setChosen(next)
                 onWorkspaceChange?.(next)

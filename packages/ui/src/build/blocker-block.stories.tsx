@@ -1,14 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { BlockerBlock } from './blocker-block.tsx'
 import { BLOCKER, NOW } from './build-fixtures.ts'
 
 /**
  * The agent saying a task contradicts the Spec (D10-08): its reason whole in the build view, one
- * line above the chat's composer. The task and its dependants wait, the others go on; the user
- * dismisses it — the Spec stands, the task goes back to ready — or stops the build, which asks
- * first.
+ * line above the chat's composer. The task and its dependants wait, the others go on, and the user
+ * dismisses it — the Spec stands, the task goes back to ready. Ending the build is the build view's
+ * own Stop (issue #116), the one there is: a blocker is answered, the build is not ended from it.
  */
 const meta = {
   title: 'Blocks/Build/BlockerBlock',
@@ -17,16 +17,13 @@ const meta = {
   parameters: { layout: 'padded' },
   args: {
     blocker: BLOCKER,
-    specKey: 'ATL-7',
     now: NOW,
     variant: 'view',
     suspended: ['T4'],
     onDismiss: fn(),
-    onStop: fn(),
   },
   argTypes: {
     blocker: { control: 'object', description: 'What the agent raised, and why.' },
-    specKey: { control: 'text', description: 'The Spec the build is of.' },
     now: { control: 'text', description: 'The caller’s now, the time is said from.' },
     variant: {
       control: 'inline-radio',
@@ -35,7 +32,6 @@ const meta = {
     },
     suspended: { control: 'object', description: 'The tasks that wait with it.' },
     onDismiss: { action: 'dismissed' },
-    onStop: { action: 'stopped' },
     onOpen: { action: 'opened' },
   },
 } satisfies Meta<typeof BlockerBlock>
@@ -44,7 +40,7 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** In the view: the agent's reason whole, what waits with it, Dismiss and Stop build. */
+/** In the view: the agent's reason whole, what waits with it, and the answer. */
 export const InTheView: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -57,7 +53,7 @@ export const InTheView: Story = {
   },
 }
 
-/** Above the composer: one line, a way to the task, and the same answers. */
+/** Above the composer: one line, a way to the task, and the same answer. */
 export const Banner: Story = {
   args: { variant: 'banner', onOpen: fn() },
   play: async ({ canvasElement }) => {
@@ -65,38 +61,30 @@ export const Banner: Story = {
     const banner = within(
       canvas.getByRole('group', { name: 'T3: the agent says this task contradicts the Spec' }),
     )
-    await expect(banner.getByRole('button', { name: 'Dismiss' })).toBeVisible()
-    await expect(banner.getByRole('button', { name: 'Stop build' })).toBeVisible()
+    await expect(banner.getByRole('button', { name: 'Open' })).toBeVisible()
+    await expect(banner.getByRole('button', { name: 'The Spec stands' })).toBeVisible()
   },
 }
 
-/** Dismissed: the Spec stands, and the answer goes out at once. */
+/** Answered: the Spec stands, and the answer goes out at once. */
 export const Dismissed: Story = {
   play: async ({ canvasElement, args }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Dismiss' }))
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'The Spec stands' }))
     await expect(args.onDismiss).toHaveBeenCalled()
   },
 }
 
 /**
- * The keyboard: Dismiss then Stop build; Stop asks first, and dismissing the question gives the
- * focus back to Stop build without stopping anything.
+ * The keyboard: the banner's Open then its answer, in that order, and the focus lands on the one the
+ * reader is being sent to.
  */
 export const Keyboard: Story = {
-  play: async ({ canvasElement, args }) => {
+  args: { variant: 'banner', onOpen: fn() },
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    canvas.getByRole('button', { name: 'Dismiss' }).focus()
+    canvas.getByRole('button', { name: 'Open' }).focus()
     await userEvent.tab()
-    const stop = canvas.getByRole('button', { name: 'Stop build' })
-    await expect(stop).toHaveFocus()
-    await userEvent.keyboard('{Enter}')
-    const page = within(document.body)
-    await waitFor(() =>
-      expect(page.getByRole('dialog', { name: 'Stop the build of ATL-7?' })).toBeVisible(),
-    )
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(page.queryByRole('dialog')).toBeNull())
-    await waitFor(() => expect(stop).toHaveFocus())
-    await expect(args.onStop).not.toHaveBeenCalled()
+    const answer = canvas.getByRole('button', { name: 'The Spec stands' })
+    await expect(answer).toHaveFocus()
   },
 }
