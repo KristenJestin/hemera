@@ -211,10 +211,14 @@ export const Pressed: Story = {
     // A real pointer event and not a synthesised click: motion tracks the pointer that went
     // down, and only the matching one up ends the press.
     fireEvent.pointerDown(trigger, { isPrimary: true, button: 0, pointerId: 1 })
+    // Both axes: the press is a box, and one of its two springs can still be in flight when the
+    // other has arrived.
     const pressed = await waitFor(() => {
       const box = trigger.getBoundingClientRect()
-      const edge = (rest.width - box.width) / 2
-      if (edge < 1.2) throw new Error(`the trigger has gone in by ${edge.toFixed(2)}px and no more`)
+      const gone = [(rest.width - box.width) / 2, (rest.height - box.height) / 2]
+      if (gone.some((edge) => edge < 1.2)) {
+        throw new Error(`the trigger has gone in by ${gone.map((it) => it.toFixed(2)).join(' / ')}px`)
+      }
       return box
     })
     fireEvent.pointerUp(trigger, { isPrimary: true, button: 0, pointerId: 1 })
@@ -222,7 +226,11 @@ export const Pressed: Story = {
 
     // In by the two pixels of every other control, and no more — the list hangs off a wrapper
     // around the trigger, so the anchor it is measured against does not move with it.
-    expect((rest.width - pressed.width) / 2).toBeLessThanOrEqual(PRESS_EDGE + 0.05)
-    expect((rest.height - pressed.height) / 2).toBeGreaterThan(0)
+    const edges = [(rest.width - pressed.width) / 2, (rest.height - pressed.height) / 2]
+    for (const edge of edges) {
+      const read = `the trigger gives ${edges.map((it) => it.toFixed(2)).join(' / ')}`
+      expect(edge, read).toBeGreaterThan(0)
+      expect(edge, read).toBeLessThanOrEqual(PRESS_EDGE + 0.05)
+    }
   },
 }
