@@ -284,8 +284,12 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     const node = box.current
     if (node !== null) {
       const moved = node.scrollTop - lastTop.current
-      if (moved < 0) pinned.current = false
-      const edge = node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE
+      const left = node.scrollHeight - node.scrollTop - node.clientHeight
+      // Going up and ending at the very bottom is not the reader: it is the browser putting the
+      // scroll back inside a thread that got shorter under it — a card taken out of the thread
+      // to be pinned above the composer (issue #149) — and a reader who was following still is.
+      if (moved < 0 && left > 1) pinned.current = false
+      const edge = left <= LIVE_EDGE
       if (moved > 0 && edge) pinned.current = true
       lastTop.current = node.scrollTop
     }
@@ -304,7 +308,22 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     node.scrollTop = node.scrollHeight
     lastTop.current = node.scrollTop
     look()
-    const sized = new ResizeObserver(look)
+    /**
+     * The reader who is following, taken to the end of what is written, then everything measured.
+     *
+     * Asked on either of the two changes that can take the end out of sight: the thread growing,
+     * and the room it is given shrinking. The second is a card pinned above the composer — a
+     * proposal, a question (issue #149) — which takes its height from the bottom of the thread:
+     * measured only, the thread stayed where it was and its last lines went under the card.
+     */
+    const follow = (): void => {
+      if (pinned.current && box.current !== null) {
+        box.current.scrollTop = box.current.scrollHeight
+        lastTop.current = box.current.scrollTop
+      }
+      look()
+    }
+    const sized = new ResizeObserver(follow)
     sized.observe(node)
     /**
      * The thread getting taller, which is not the same event as the thread getting an entry.
@@ -314,13 +333,7 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
      * the first word of an answer and then stood still for the rest of it. What is watched is
      * the height of what is written, and a reader who is following is taken along with it.
      */
-    const grown = new ResizeObserver(() => {
-      if (pinned.current && box.current !== null) {
-        box.current.scrollTop = box.current.scrollHeight
-        lastTop.current = box.current.scrollTop
-      }
-      look()
-    })
+    const grown = new ResizeObserver(follow)
     grown.observe(written)
     return () => {
       sized.disconnect()

@@ -285,7 +285,7 @@ const ASKED: ScrollerEntry[] = THREAD.map((entry) =>
 )
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Message/Scroller',
   component: MessageScroller,
   decorators: [withTooltips],
@@ -870,6 +870,59 @@ export const AnAnswerArriving: Story = {
       expect(canvas.getByTestId('arriving').textContent!.length).toBeGreaterThan(WORDS.length * 24)
     })
     await expect(thread.scrollTop, 'the thread moved under a reader who had gone up').toBe(held)
+  },
+}
+
+/**
+ * A thread under which a card is pinned above the composer, as the agent's proposal is the moment
+ * it arrives: nothing of the thread changes, and the room it is given loses the card's height.
+ */
+function Pinning(): ReactNode {
+  const [pinned, setPinned] = useState(false)
+  return (
+    <div className="flex h-screen flex-col gap-2 p-6">
+      <div className="min-h-0 flex-1">
+        <MessageScroller label="the thread of CSV invoice export" entries={THREAD} />
+      </div>
+      {pinned && (
+        <div data-testid="pinned" className="flex h-24 flex-col justify-end border-t border-border">
+          <p>Credit notes: where do they go in the export?</p>
+        </div>
+      )}
+      <button type="button" onClick={() => setPinned(true)}>
+        Pin the question
+      </button>
+    </div>
+  )
+}
+
+/**
+ * A card pinned above the composer does not take the end of the thread from a reader who was
+ * following it (issue #149).
+ *
+ * The card takes its height from the bottom of the room the thread is given, and nothing written
+ * in the thread changes: the thread was only following what it holds getting taller, so it
+ * measured its own box getting smaller and stayed where it was, and the last lines of the thread
+ * went under the card.
+ */
+export const ACardPinnedBelow: Story = {
+  render: () => <Pinning />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thread = canvas.getByRole('log', { name: /CSV invoice export/ })
+
+    await waitFor(() => {
+      expect(fromTheEdge(thread)).toBeLessThanOrEqual(56)
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Pin the question' }))
+    await expect(canvas.getByTestId('pinned')).toBeVisible()
+    await waitFor(() => {
+      expect(
+        fromTheEdge(thread),
+        'the thread stopped following when a card was pinned under it',
+      ).toBeLessThanOrEqual(1)
+    })
+    await expect(canvas.queryByRole('button', { name: 'Latest' })).toBeNull()
   },
 }
 
