@@ -69,7 +69,14 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { type Gate, type ReadyRefusedError, type ReadyRequest, gateOf, markReady } from './gate.ts'
+import {
+  type Gate,
+  type ReadyRefusedError,
+  type ReadyRequest,
+  attestable,
+  gateOf,
+  markReady,
+} from './gate.ts'
 import { SpecNotices } from './notices.ts'
 import {
   type Declaration,
@@ -1181,6 +1188,7 @@ export const specsLayer = Layer.effect(
         onSpec('attesting the Spec', specId, (transaction, snapshot) =>
           Effect.gen(function* () {
             yield* guard(transaction, snapshot, agent(sessionId))
+            yield* attestable(snapshot)
             return only(yield* attestIn(transaction, snapshot, agent(sessionId)))
           }),
         ),

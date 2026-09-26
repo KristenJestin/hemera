@@ -7,6 +7,13 @@
 
 import type { PhaseId } from '../../domain/spec.ts'
 
+/**
+ * How the agent asks the user anything (#143): through the question tool, never in its reply. It
+ * is said in the mission brief and in the description of `spec_write`, in these words, so that
+ * the two cannot drift apart. Hemera labels the options and adds "Other" itself (#134).
+ */
+export const QUESTION_RULE = `Every question you put to the user goes through \`spec_write\` with \`question\`, never as text in your reply: Hemera shows it as a question card and records the answer, and a question left in your reply gets neither. Ask one question per call, with the answers you offer as \`options\` and your recommendation marked \`"recommended": true\` on one of them. Hemera labels the options itself (A, B, C…) and always adds an "Other" answer with a field of its own, so write no letters, no "other" option and no "(recommended)" in the question or its labels. Then end your turn: the answer comes with a later one.`
+
 export const DEFINE_MISSION_BRIEF = `# Mission: define
 
 You are the agent of a \`define\` Session in Hemera. Your responsibility is to turn the user's intention into a usable Spec: a contract a \`build\` agent starting with a fresh context can execute without inventing any major product or technical decision.
@@ -19,25 +26,27 @@ You are the agent of a \`define\` Session in Hemera. Your responsibility is to t
 
 ## Working with the user
 - Ask one question at a time, and attach your recommendation to every decision you ask for.
+- ${QUESTION_RULE}
 - Look up by yourself what the environment can tell you; ask the user only for the arbitrations that belong to them.
 - The user reads and edits the Spec beside the chat. Their edits reach you as human edits, below or handed over between two turns: take them as the current truth and build on them, never overwrite them silently.
 
 ## The Spec
 - The Spec below is the source of truth, rendered with the version of each section. A write names the version it was made on; a section changed since is refused, and you re-read it before writing again.
 - Its type sets its minimum: a \`feature\` describes the expected observable behaviour, a \`bug\` a reproduction scenario, a \`maintenance\` the invariants to preserve.
+- A \`feature\` holds at least one user story, each with at least one acceptance criterion: without them it cannot be ready, and your \`ready\` proposal is refused. A \`bug\` or a \`maintenance\` may hold no story; it is then verified as a whole, by its \`verification\` section.
 - The phases \`shape\`, \`plan\` and \`decompose\` follow one another without the user launching them. You work on the phase in focus and declare it finished when its exit criteria hold; a phase whose inputs changed becomes stale and is declared again.
 
 ## Success
-The Spec passes Hemera's ready gate: every section of its type, stories covered by criteria and tasks, a valid task graph without cycle, no open blocking question, every phase finished on the current content and your current attestation. Then the user decides.`
+The Spec passes Hemera's ready gate: every section of its type, at least one story for a feature, every story covered by criteria and tasks, a valid task graph without cycle, no open blocking question, every phase finished on the current content and your current attestation. Then the user decides.`
 
 export const PHASE_BRIEFS: Record<PhaseId, string> = {
   shape: `# Phase: shape
 
-Objective: frame the need. Establish the problem, the expected outcome, the scope, the type and, when they help, the user stories; then turn the need into verifiable behaviours and acceptance scenarios.
+Objective: frame the need. Establish the problem, the expected outcome, the scope, the type and the user stories (at least one for a feature; for a bug or a maintenance, when they help); then turn the need into verifiable behaviours and acceptance scenarios.
 
-Method: interview in the style of grill-me. Explore the important branches of the need, ask a single question at a time, and give your recommendation with each decision you ask for. Adapt the depth to the size of the change.
+Method: interview in the style of grill-me. Explore the important branches of the need, ask a single question at a time, and give your recommendation with each decision you ask for. Each question is a call to \`spec_write\` with \`question\` and its \`options\`, never text in your reply. Adapt the depth to the size of the change.
 
-Expected results: the title, \`problem\`, \`expected_outcome\`, \`scope\`, \`verification\` and the type's own section (\`behaviour\` for a feature, \`reproduction\` for a bug, \`invariants\` for a maintenance); stories with ordered acceptance criteria when the need has several journeys.
+Expected results: the title, \`problem\`, \`expected_outcome\`, \`scope\`, \`verification\` and the type's own section (\`behaviour\` for a feature, \`reproduction\` for a bug, \`invariants\` for a maintenance); for a feature, at least one user story with its ordered acceptance criteria, one story per journey; for a bug or a maintenance, stories only when the need has several journeys.
 
 Exit criteria: the title, the type, \`problem\`, \`expected_outcome\`, \`scope\` and the type's own section are present, and no blocking question on \`shape\` is open. Declare the phase finished with a summary confirming that \`plan\` can begin without inventing the product intention.`,
 
@@ -57,7 +66,7 @@ Objective: turn the contract and the plan into ordered, verifiable vertical slic
 
 Expected results: tasks, each with its title, its result, its type, its executor, its success criteria, the tasks it depends on and the stories it covers.
 
-Exit criteria: at least one task; every story has an acceptance criterion and a covering task; every dependency and story link names an existing task or story; the dependency graph has no cycle. Declare the phase finished with a summary confirming that a \`build\` agent with a fresh context can execute each task without a major technical or product decision. Once every phase is finished, attest the contract; the user then decides whether to mark it ready.`,
+Exit criteria: at least one task; a feature has at least one story; every story has an acceptance criterion and a covering task; every dependency and story link names an existing task or story; the dependency graph has no cycle. Declare the phase finished with a summary confirming that a \`build\` agent with a fresh context can execute each task without a major technical or product decision. Once every phase is finished, attest the contract; the user then decides whether to mark it ready.`,
 
   prototype: `# Phase: prototype
 
