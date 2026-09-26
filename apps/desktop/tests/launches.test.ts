@@ -9,16 +9,18 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Duration, Effect, Option } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
+import { NoNotices } from '#engine/agents/notices.ts'
+import { StderrSink } from '#engine/agents/supervisor.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { ReopenRefusedError } from '#engine/specs/revisions.ts'
 import { Specs } from '#engine/specs/specs.ts'
-import { SqliteClient } from '#engine/storage/database.ts'
-import { Launches, StartDeadline } from '#engine/workspaces/launches.ts'
+import { Database, type EngineDatabase, SqliteClient } from '#engine/storage/database.ts'
+import { Launches, StartDeadline, launchesLayer } from '#engine/workspaces/launches.ts'
 import { Preparation, recovered } from '#engine/workspaces/preparation.ts'
 import { Workspaces } from '#engine/workspaces/workspaces.ts'
 
@@ -143,6 +145,60 @@ const unwrittenSpec = (projectId: string) =>
       (id, spec_id, number, title, type, created_by, created_at)
       VALUES (${revisionId}, ${id}, 1, 'Left on nothing', 'feature', 'human', ${at})`
     return { id, revisionId }
+  })
+
+/**
+ * The launches over a database that lets something land right after their first transaction,
+ * once: where a Rework falls when a use case reads in one transaction and writes in the next
+ * (#121). A use case that reads and writes in one transaction leaves it no room between the two:
+ * it lands after the write, and the write sees nothing of it.
+ *
+ * Built fresh: the window's own launches are built already, and a layer is built once.
+ */
+const interleaved = (landing: Effect.Effect<void>) =>
+  Layer.fresh(launchesLayer).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.effect(
+          Database,
+          Effect.gen(function* () {
+            const database = yield* Database
+            let armed = true
+            const transaction: EngineDatabase['transaction'] = (body) =>
+              database.transaction(body).pipe(
+                Effect.tap(() => {
+                  if (!armed) return Effect.void
+                  armed = false
+                  return landing
+                }),
+              )
+            return new Proxy(database, {
+              get: (target, key, receiver) =>
+                key === 'transaction' ? transaction : Reflect.get(target, key, receiver),
+            })
+          }),
+        ),
+        NoNotices,
+        Layer.succeed(StderrSink, { write: () => Effect.void }),
+      ),
+    ),
+  )
+
+/** The Rework of a Spec (D7-05), from its current revision, as its writer asks for it. */
+const rework = (specId: string, sessionId: string) =>
+  Effect.gen(function* () {
+    const specs = yield* Specs
+    const sql = yield* SqliteClient
+    const [spec] = yield* sql<{ current_revision_id: string }>`
+      SELECT current_revision_id FROM specs WHERE id = ${specId}`
+    return specs
+      .reopen({
+        specId,
+        expectedRevisionId: spec?.current_revision_id ?? '',
+        reason: 'Another shape.',
+        sessionId,
+      })
+      .pipe(Effect.asVoid, Effect.orDie)
   })
 
 describe('A build waits for its environment', () => {
@@ -352,8 +408,7 @@ describe('A retry reads its launch where it writes', () => {
         // A Rework cancels it — the row is where the Rework left it — and the start again reads it
         // in the very transaction that writes it: nothing is started for a build nothing asks for
         // (D8-13). The Rework lands before this call here: what the test pins is that the refusal
-        // is said and nothing is started. Arming it between the read and the claim takes a seam the
-        // window the suite composes has not, so it is green at the base too.
+        // is said and nothing is started. The one below lands it between the read and the claim.
         yield* sql`UPDATE build_launches SET state = 'cancelled' WHERE id = ${asked.id}`
         const refused = yield* Effect.flip(launched.retry(asked.id))
         return { failed, refused, rows: yield* launches, builds: yield* builds }
@@ -362,6 +417,34 @@ describe('A retry reads its launch where it writes', () => {
     expect(seen.failed.sessionId).not.toBeNull()
     expect(seen.refused.message).toContain('only a build whose agent failed is started again')
     expect(seen.rows.map((row) => row.state)).toEqual(['cancelled'])
+    expect(seen.builds).toHaveLength(1)
+  })
+
+  test('A Rework landing between the retry’s read and its claim is not overwritten', async () => {
+    // A machine that holds none of the agents' bare means: the build's agent fails (D6-02).
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId, session } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        // The retry reads the launch `failed`, and the Rework lands right after that read: it
+        // cancels the launch (D8-13), and the claim that follows reads it where it writes.
+        const refused = yield* Effect.flip(
+          Effect.gen(function* () {
+            return yield* (yield* Launches).retry(failed.id)
+          }).pipe(Effect.provide(interleaved(yield* rework(specId, session.id)))),
+        )
+        return { failed, refused, rows: yield* launches, builds: yield* builds }
+      }),
+    )
+    expect(seen.failed.sessionId).not.toBeNull()
+    expect(seen.refused.message).toContain('only a build whose agent failed is started again')
+    expect(seen.rows).toEqual([
+      { state: 'cancelled', session_id: seen.failed.sessionId, detail: 'reworked' },
+    ])
     expect(seen.builds).toHaveLength(1)
   })
 })
@@ -385,6 +468,31 @@ describe('The Spec of a request is read where the launch is written', () => {
     )
     expect(seen.asked.state).toBe('waiting')
     expect(seen.rows).toEqual([{ state: 'waiting', session_id: null, detail: null }])
+  })
+
+  test('A Rework landing between the Spec’s read and the launch’s write leaves no launch waiting on a revision the Spec left', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId, session } = yield* atlas()
+        const workspace = yield* making(project.id, specId, key)
+        // The Rework lands right after the request's first read of the Spec. Read where the launch
+        // is written, the launch is written before it, on the revision the Spec was ready on, and
+        // the Rework cancels it as it cancels any launch still waiting (D8-13).
+        const asked = yield* Effect.gen(function* () {
+          return yield* (yield* Launches).request(specId, workspace.id)
+        }).pipe(Effect.provide(interleaved(yield* rework(specId, session.id))))
+        const sql = yield* SqliteClient
+        const [spec] = yield* sql<{ status: string; current_revision_id: string }>`
+          SELECT status, current_revision_id FROM specs WHERE id = ${specId}`
+        return { asked, rows: yield* launches, spec }
+      }),
+    )
+    // The Rework moved the Spec on; the one launch there is, on the revision it left, is not one
+    // that still waits to be built.
+    expect(seen.spec?.status).toBe('draft')
+    expect(seen.spec?.current_revision_id).not.toBe(seen.asked.revisionId)
+    expect(seen.rows).toEqual([{ state: 'cancelled', session_id: null, detail: 'reworked' }])
   })
 })
 
