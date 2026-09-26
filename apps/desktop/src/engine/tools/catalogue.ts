@@ -38,6 +38,7 @@ import { basename, dirname, join, relative } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
+import { Builds } from '../build/build.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
@@ -270,6 +271,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | Specs
   | Database
   | Variables
+  | Builds
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -283,6 +285,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const notices = yield* AgentNotices
     const variables = yield* Variables
     const specs = yield* Specs
+    const builds = yield* Builds
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -1133,6 +1136,11 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'spec_write':
           case 'spec_propose':
             return yield* spec(asked.sessionId, call)
+
+          case 'build_read':
+          case 'task_finished':
+          case 'task_blocked':
+            return yield* builds.tool(asked.sessionId, call)
         }
       })
 
@@ -1212,8 +1220,10 @@ export const toolCatalogueLayer: Layer.Layer<
         }
 
         // Measured around the tool itself, question to the human included: what the Journal
-        // says a call took is how long the agent waited for it.
-        const run = Effect.gen(function* () {
+        // says a call took is how long the agent waited for it. A build's own rule comes first: a
+        // paused build starts nothing new, and the first call after a delivery handed tasks is
+        // what starts them (D10-04, D10-09).
+        const measured = Effect.gen(function* () {
           // A monotonic clock, to the microsecond: a read inside the root takes less than a
           // millisecond, and a call recorded as taking none is a call that says nothing of itself.
           const began = performance.now()
@@ -1248,6 +1258,9 @@ export const toolCatalogueLayer: Layer.Layer<
               made,
             ),
           ),
+        )
+        const run = builds.admitted(asked.sessionId, named, measured, (reason) =>
+          refused(asked, made, reason),
         )
         if (asked.key === null) return yield* run
 

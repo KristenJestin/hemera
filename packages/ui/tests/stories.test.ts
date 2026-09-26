@@ -110,6 +110,9 @@ const SURFACES = {
     'preparation-editor',
     'repository-dialog',
     'command-dialog',
+    // Lot 22: the Build section, the checks a build is judged by, and the dialog of a check.
+    'build-checks',
+    'check-dialog',
   ],
   journal: ['journal'],
   composer: ['composer', 'prompt-input'],
@@ -133,6 +136,16 @@ const SURFACES = {
     'cleanup-dialog',
     'variables-editor',
     'service-list',
+  ],
+  // Lot 22: the build view, the stage of a task, and the blocks that hand a task to the user.
+  build: [
+    'build-view',
+    'task-stage',
+    'yours-block',
+    'blocker-block',
+    'build-spec-panel',
+    'review-card',
+    'build-session',
   ],
 }
 
@@ -238,9 +251,71 @@ const NAMED_STATES = new Map([
       'Commands',
       'Preparation',
       'Variables',
+      'Build',
       'Refused',
       'Keyboard',
     ],
+  ],
+  // Lot 22: a task of a build in each of the states its stage draws, and the two blocks that hand
+  // a task to the user, in the view and as a banner, answered and walked.
+  [
+    'build/build-view',
+    [
+      'GettingReady',
+      'Building',
+      'Yours',
+      'ThreeRedTries',
+      'Blocked',
+      'Paused',
+      'FinalChecks',
+      'FinalChecksRed',
+      'ReadyToAccept',
+      'Accepted',
+      'Stopped',
+      'Keyboard',
+    ],
+  ],
+  ['build/task-stage', ['Working', 'Checking', 'Done', 'DoneNotVerified', 'Waiting', 'Skipped']],
+  [
+    'build/yours-block',
+    ['HumanTask', 'ThreeRedTries', 'Banner', 'BannerThreeRedTries', 'Skipping', 'Keyboard'],
+  ],
+  ['build/blocker-block', ['InTheView', 'Banner', 'Dismissed', 'Keyboard']],
+  ['build/review-card', ['WaitingForYourReview', 'OpeningTheChat']],
+  ['build/build-spec-panel', ['ReadOnly', 'Tasks', 'Keyboard']],
+  // Lot 22: the page of a `build` Session, `Complete` first for the UI gate, then one screen per
+  // moment of the build, then the paths through it.
+  [
+    'build/build-session',
+    [
+      'Complete',
+      'GettingReady',
+      'Building',
+      'Yours',
+      'Blocked',
+      'Paused',
+      'FinalChecks',
+      'Accepted',
+      // Lot 5c (issue #115): the chat is minimised rather than folded — one word for one
+      // movement, the panel growing over the chat instead of the chat closing — it comes back,
+      // and "Spec" opens the frozen revision beside the view rather than in its place.
+      'ChatMinimised',
+      'ChatComesBack',
+      'SpecOpen',
+      'SpecOpensBesideTheView',
+      'BannerOpensTheTask',
+      'Keyboard',
+    ],
+  ],
+  // Lot 22: the checks of a Project's build, filled, empty, proposed and used or discarded, added
+  // to, and walked; and the dialog of a check in each of its shapes, refused, and walked.
+  [
+    'project/build-checks',
+    ['Filled', 'Empty', 'Proposed', 'ProposalsUsed', 'ProposalsDiscarded', 'Adding', 'Keyboard'],
+  ],
+  [
+    'project/check-dialog',
+    ['Add', 'Edit', 'LineWithFiles', 'ExpectedResult', 'Invalid', 'Refused', 'Keyboard'],
   ],
   ['project/repository-dialog', ['Add', 'Edit', 'Invalid', 'Refused', 'Keyboard']],
   [
@@ -523,9 +598,27 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // and the rail it is fed with.
       'MissionPanel',
       'MissionRail',
+      // Lot 5c (issue #115): the page of a Session whatever its mission — the chat at the centre,
+      // the panel on its right, the head across the top — and the control at the head's right end
+      // that minimises the chat and wears what the chat is doing in its ring.
+      'SessionLayout',
+      'ChatButton',
       // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
       'CommandDialog',
       'RepositoryDialog',
+      // Lot 22: the build view of a `build` Session and its blocks.
+      'BuildView',
+      'TaskStage',
+      'YoursBlock',
+      'BlockerBlock',
+      'ReviewCard',
+      'BuildSpecPanel',
+      'BuildSession',
+      // Lot 5c (issue #115): the banner above the chat's composer, which opens what waits for the
+      // user in the build on the view's stage.
+      'BuildBanner',
+      'BuildChecks',
+      'CheckDialog',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
@@ -558,6 +651,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'COMMAND_TYPE_LABELS',
       'EMPTY_DRAFT',
       'EVERYWHERE_PREFIX',
+      // Lot 5c (issue #115): the one answer three readings of a build ask — does it wait for the
+      // hand, and on what.
+      'waitsOf',
+      'waitingOf',
       'HOME_ENTRY',
       'JOURNAL_ENTRY',
       'NESTED_RADIUS',

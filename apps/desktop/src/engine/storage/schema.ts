@@ -8,7 +8,9 @@
  * Lot 3 gave it what the application knows about itself; lot 4 adds the domain — the Projects,
  * their working environments and the journal every change is written to (design D4-04). The
  * Sessions are lot 5's; the Specs, their revisions and the mission of a Session are lot 19's
- * (design D7-01, D7-07).
+ * (design D7-01, D7-07); the Workspaces and the launches of a build are lot 20's (D8-01, D8-13);
+ * the build itself — its tasks, attempts, evidence and the Project's checks — is lot 22's (D10-01,
+ * D10-05, D10-06).
  *
  * Two conventions run through all of it. An identifier is a `crypto.randomUUID()` in a text
  * column, because an identifier the database hands out is one that cannot be decided before the
@@ -23,6 +25,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   unique,
@@ -31,6 +34,12 @@ import {
 
 import {
   AGENT_PROVIDERS,
+  ATTEMPT_RESULTS,
+  ATTEMPT_SCOPES,
+  BUILD_PHASES,
+  CHECK_VERDICTS,
+  CHECK_WHEN,
+  CHECK_WHERE,
   COMMAND_SCOPES,
   COMMAND_TYPES,
   LAUNCH_STATES,
@@ -50,6 +59,7 @@ import {
   STEP_KINDS,
   STEP_STATES,
   TASK_EXECUTORS,
+  TASK_STATES,
   WORKSPACE_STATES,
 } from '@hemera/core'
 
@@ -303,6 +313,12 @@ export const SESSION_ENTRY_ROLES = ['user', 'agent', 'hemera'] as const
  * JSON object of the agent's own option ids to the values chosen, in the order they were first
  * chosen. An agent does not keep them across a restart of its process: every start puts the
  * agent back on them, or the Session would go on with the agent's defaults (issue #133).
+ *
+ * The build columns are a `build` Session's and null on every other (D10-01): `build_phase` is
+ * where its protocol stands, a row rather than a memory so that a restart resumes exactly;
+ * `build_paused_at` is when the user paused it, null while it runs (D10-09); `build_detail` says
+ * why it stopped, as the user is told; `approach_note` is the agent's answer to the `prepare`
+ * brief, shown before `execute` starts (D10-02).
  */
 export const sessions = sqliteTable(
   'sessions',
@@ -329,6 +345,12 @@ export const sessions = sqliteTable(
     lastWrittenAt: text('last_written_at').notNull(),
     archivedAt: text('archived_at'),
     version: integer('version').notNull().default(1),
+    buildPhase: text('build_phase'),
+    buildPausedAt: text('build_paused_at'),
+    /** When the user's review came and the build went back to work on it (issue #117). */
+    buildReviewAt: text('build_review_at'),
+    buildDetail: text('build_detail'),
+    approachNote: text('approach_note'),
   },
   (table) => [
     check(
@@ -345,6 +367,10 @@ export const sessions = sqliteTable(
       sql`${table.nativeState} IN (${sql.raw(oneOf(NATIVE_STATES))})`,
     ),
     check('session_mission_is_known', sql`${table.mission} IN (${sql.raw(oneOf(MISSIONS))})`),
+    check(
+      'session_build_phase_is_known',
+      sql`${table.buildPhase} IS NULL OR ${table.buildPhase} IN (${sql.raw(oneOf(BUILD_PHASES))})`,
+    ),
     // The list of a Project is read in one order, and it is this one: the index is the query.
     index('session_by_project').on(table.projectId, table.lastWrittenAt),
   ],
@@ -675,7 +701,8 @@ export const contextDeliveries = sqliteTable(
 /**
  * What an event is about. `session` is lot 5's, `spec` lot 19's (design D7-13); `workspace`,
  * `command` and `launch` are lot 20's (D8-16): a Workspace prepared and cleaned, a run started,
- * ready and ended, a proposal decided, a build launched.
+ * ready and ended, a proposal decided, a build launched. `task` is lot 22's (D10-14): a build
+ * task made ready, started, finished, checked, done, handed to the user, blocked or skipped.
  */
 export const ENTITY_KINDS = [
   'project',
@@ -685,6 +712,7 @@ export const ENTITY_KINDS = [
   'workspace',
   'command',
   'launch',
+  'task',
 ] as const
 
 /** Where an event came from: the user acting, or the application doing its work. */
@@ -1052,4 +1080,258 @@ export const buildLaunches = sqliteTable(
     check('launch_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(LAUNCH_STATES))})`),
     index('launch_by_spec').on(table.specId, table.state),
   ],
+)
+
+/**
+ * The checks a Project runs to judge a build (D10-06), in `rank` order.
+ *
+ * A check runs a catalogue command or a line of the user's, exactly one of the two, which the
+ * database holds rather than the use case: a check running both, or neither, is one nobody can
+ * say what it ran. A command taken out of the catalogue takes its checks with it, since a check
+ * with nothing to run is not one. `where` is the Workspace root, one repository — named in
+ * `repository` as the Project declares it, set then and only then — or each repository whose
+ * task diff is not empty; `when` is after each task, after each story, or at the end.
+ *
+ * The expected result is `expect_pattern` and `expect_minimum`, both or neither: the first capture
+ * of the pattern in the output, read as a number, must be at least the minimum, on top of a zero
+ * exit code (D10-06). `files` is the glob `{files}` is expanded with, null when the line takes no
+ * files. `where` and `when` are words SQL reserves: a raw query quotes them.
+ */
+export const projectChecks = sqliteTable(
+  'project_checks',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'cascade' }),
+    line: text('line'),
+    where: text('where').notNull(),
+    repository: text('repository'),
+    when: text('when').notNull(),
+    expectPattern: text('expect_pattern'),
+    expectMinimum: real('expect_minimum'),
+    files: text('files'),
+    rank: text('rank').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('check_where_is_known', sql`${table.where} IN (${sql.raw(oneOf(CHECK_WHERE))})`),
+    check('check_when_is_known', sql`${table.when} IN (${sql.raw(oneOf(CHECK_WHEN))})`),
+    check(
+      'check_runs_a_command_or_a_line',
+      sql`(${table.commandId} IS NULL) <> (${table.line} IS NULL)`,
+    ),
+    check(
+      'check_repository_only_where_asked',
+      sql`(${table.where} = 'repository') = (${table.repository} IS NOT NULL)`,
+    ),
+    check(
+      'check_expect_is_whole',
+      sql`(${table.expectPattern} IS NULL) = (${table.expectMinimum} IS NULL)`,
+    ),
+    // One name per Project, as the catalogue's: a check is named where its verdict is shown.
+    unique('check_name_in_project').on(table.projectId, table.name),
+  ],
+)
+
+/**
+ * One contractual task of the revision a `build` Session was started on, and where it stands
+ * (D10-02, D10-04).
+ *
+ * Written in `prepare`, one row per task, `waiting` or `ready`; from then on every change of state
+ * is an update of this row with its time, which is how a new agent after a crash knows what is
+ * done. `task_id` is the `spec_tasks` row it builds and has no foreign key: the revision is
+ * frozen, and a Spec edited or reworked later must never cascade into a build's evidence. `label`
+ * is `T1…Tn` by rank in the revision, the name the agent and the user call it by, so it is
+ * unique in its Session; `rank` is the task's own, copied.
+ *
+ * `handed_at` is when a delivery first handed it to the agent, `started_at` when it went
+ * `in_progress` (D10-04), `finished_at` the last `task_finished`, `ended_at` when it was done,
+ * skipped or given to the user. `skip_reason` and `skip_unblocks` are the user's skip (D10-03): its
+ * reason, and whether its dependants may go on as if it were done (D10-03).
+ */
+export const buildTasks = sqliteTable(
+  'build_tasks',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').notNull(),
+    label: text('label').notNull(),
+    rank: text('rank').notNull(),
+    state: text('state').notNull(),
+    handedAt: text('handed_at'),
+    startedAt: text('started_at'),
+    finishedAt: text('finished_at'),
+    endedAt: text('ended_at'),
+    skipReason: text('skip_reason'),
+    skipUnblocks: integer('skip_unblocks', { mode: 'boolean' }).notNull().default(false),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('build_task_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(TASK_STATES))})`),
+    unique('build_task_once_in_session').on(table.sessionId, table.taskId),
+    unique('build_task_label_in_session').on(table.sessionId, table.label),
+    // The ready set and the view's groups are read by state inside one Session (D10-03).
+    index('build_task_by_state').on(table.sessionId, table.state),
+  ],
+)
+
+/**
+ * One attempt at a task, at the checks of a story, or at the end checks (D10-05, D10-07).
+ *
+ * The scope says which, and the row names its subject accordingly — the build task, the story, or
+ * neither for the build itself — which the database holds. `story_id` has no foreign key, for the
+ * reason `build_tasks.task_id` has none. `number` counts from one per task, per story and per
+ * build, and is unique in each, which the three partial indexes say: SQLite holds two NULLs as
+ * distinct, so one unique over the nullable columns would hold nothing.
+ *
+ * `result` is null while the attempt runs, then green, red, or unverified when there was no check
+ * to run. `told_at` is when its failures were handed to the agent, so that a red attempt is told
+ * once and its checks run again after the turn that carried them (D10-07).
+ */
+export const buildAttempts = sqliteTable(
+  'build_attempts',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    scope: text('scope').notNull(),
+    buildTaskId: text('build_task_id').references(() => buildTasks.id, { onDelete: 'cascade' }),
+    storyId: text('story_id'),
+    number: integer('number').notNull(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    result: text('result'),
+    toldAt: text('told_at'),
+  },
+  (table) => [
+    check('attempt_scope_is_known', sql`${table.scope} IN (${sql.raw(oneOf(ATTEMPT_SCOPES))})`),
+    check(
+      'attempt_result_is_known',
+      sql`${table.result} IS NULL OR ${table.result} IN (${sql.raw(oneOf(ATTEMPT_RESULTS))})`,
+    ),
+    check(
+      'attempt_names_its_subject',
+      sql`(${table.scope} = 'task') = (${table.buildTaskId} IS NOT NULL) AND (${table.scope} = 'story') = (${table.storyId} IS NOT NULL)`,
+    ),
+    index('attempt_by_session').on(table.sessionId, table.scope),
+    uniqueIndex('attempt_number_of_task')
+      .on(table.buildTaskId, table.number)
+      .where(sql`${table.buildTaskId} IS NOT NULL`),
+    uniqueIndex('attempt_number_of_story')
+      .on(table.sessionId, table.storyId, table.number)
+      .where(sql`${table.storyId} IS NOT NULL`),
+    uniqueIndex('attempt_number_of_build')
+      .on(table.sessionId, table.number)
+      .where(sql`${table.scope} = 'build'`),
+  ],
+)
+
+/**
+ * The snapshot of each repository of the Workspace at an attempt's start and end (D10-05).
+ *
+ * A tree written by Git with no commit and no ref (D10-05): `start_tree` when the attempt started,
+ * `end_tree` at `task_finished`, null until then. `repository` is the repository's path relative
+ * to the Workspace root, `''` for one at the root itself.
+ */
+export const buildAttemptTrees = sqliteTable(
+  'build_attempt_trees',
+  {
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => buildAttempts.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    startTree: text('start_tree').notNull(),
+    endTree: text('end_tree'),
+  },
+  (table) => [primaryKey({ columns: [table.attemptId, table.repository] })],
+)
+
+/**
+ * The files an attempt changed, per repository, copied from Git when the attempt ends (D10-05).
+ *
+ * Copied rather than read from the two trees each time, because a tree nothing refers to is one
+ * Git's garbage collection may prune: the evidence has to stay readable after that. `status` is
+ * Git's letter (`A`, `M`, `D`, `R`, `T`), and a rename is kept under its new path; `added` and
+ * `removed` are the lines, null for a binary file, which has none.
+ */
+export const buildAttemptFiles = sqliteTable(
+  'build_attempt_files',
+  {
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => buildAttempts.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    status: text('status').notNull(),
+    added: integer('added'),
+    removed: integer('removed'),
+  },
+  (table) => [primaryKey({ columns: [table.attemptId, table.repository, table.path] })],
+)
+
+/**
+ * One check's run for an attempt, and its verdict (D10-06, D10-07).
+ *
+ * What ran is copied — the check's name, where it ran (`''` for the Workspace root, or the
+ * repository's path), the line as run once `{files}` was expanded — so a check edited or removed
+ * later leaves the evidence as it was: `check_id` is then set to null. `run_id` is the command's
+ * run in the Session's activity (D10-06), whose whole output stays there; `output_tail` is its last
+ * lines, what the agent and the view are shown. `value` is the number the expected result read,
+ * `detail` why a red one is red (`64.2 < 70`, `exited with 1`, D10-06).
+ */
+export const buildCheckResults = sqliteTable(
+  'build_check_results',
+  {
+    id: text('id').primaryKey(),
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => buildAttempts.id, { onDelete: 'cascade' }),
+    checkId: text('check_id').references(() => projectChecks.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    place: text('place').notNull(),
+    line: text('line').notNull(),
+    runId: text('run_id').references(() => commandRuns.id, { onDelete: 'set null' }),
+    verdict: text('verdict').notNull(),
+    exitCode: integer('exit_code'),
+    value: real('value'),
+    detail: text('detail'),
+    outputTail: text('output_tail').notNull().default(''),
+    ranAt: text('ran_at').notNull(),
+  },
+  (table) => [
+    check('check_verdict_is_known', sql`${table.verdict} IN (${sql.raw(oneOf(CHECK_VERDICTS))})`),
+    index('check_result_by_attempt').on(table.attemptId, table.ranAt),
+  ],
+)
+
+/**
+ * A task the agent says contradicts the Spec, and the reason it gave (D10-08).
+ *
+ * The task and its dependants are `blocked` while it is open; the user dismisses it, which sets
+ * `dismissed_at` and puts the task back to `ready`, or stops the build. The row stays either way.
+ */
+export const buildBlockers = sqliteTable(
+  'build_blockers',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    buildTaskId: text('build_task_id')
+      .notNull()
+      .references(() => buildTasks.id, { onDelete: 'cascade' }),
+    reason: text('reason').notNull(),
+    /** What the user added when they answered (issue #117); null while it waits for them. */
+    note: text('note'),
+    raisedAt: text('raised_at').notNull(),
+    dismissedAt: text('dismissed_at'),
+  },
+  (table) => [index('blocker_by_session').on(table.sessionId, table.raisedAt)],
 )

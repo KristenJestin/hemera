@@ -58,6 +58,12 @@ export class Database extends Context.Service<Database, EngineDatabase>()('Datab
  */
 export function databaseLayer(file: string): Layer.Layer<Database | SqliteClient> {
   return Layer.effect(Database, makeWithDefaults({ relations })).pipe(
-    Layer.provideMerge(sqliteClientLayer({ filename: file })),
+    // Each query is prepared anew rather than taken from the client's cache: a cached statement
+    // is one object for every fiber asking the same query, and the client switches it between
+    // rows as objects and rows as arrays across two steps of a fiber — another fiber running the
+    // same query in between reads rows in the other shape, which the query builder then maps to
+    // rows of nothing but `undefined`. Preparing a statement costs microseconds; a row read wrong
+    // is a build that stalls.
+    Layer.provideMerge(sqliteClientLayer({ filename: file, prepareCacheSize: 0 })),
   )
 }

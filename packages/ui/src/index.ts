@@ -91,9 +91,16 @@ export {
 /** The dialogs a repository and a command of the Project are added and edited in. */
 export { CommandDialog, type CommandDialogProps } from './project/command-dialog.tsx'
 export { RepositoryDialog, type RepositoryDialogProps } from './project/repository-dialog.tsx'
+/** The Build section of the Project settings: the checks a build is judged by (lot 22, D10-06). */
+export { BuildChecks, type BuildChecksProps } from './project/build-checks.tsx'
+export { CheckDialog, type CheckDialogProps } from './project/check-dialog.tsx'
 
 export {
   REPOSITORY_ICONS,
+  type CheckExpect,
+  type CheckLine,
+  type CheckWhen,
+  type CheckWhere,
   type CommandLine,
   type ProjectDraft,
   type ProjectSettingsDraft,
@@ -427,6 +434,20 @@ export {
   type WorkspaceRepositoriesProps,
 } from './workspace/workspace-repositories.tsx'
 /**
+ * The page of a Session (lot 5c, issue #115): the head across the top with the control that
+ * minimises the chat at its end, the chat at the centre — covered and uncovered as the panel
+ * grows over it — and, in a `define` or a `build`, the mission panel on its right. A `free`
+ * Session is the chat alone.
+ */
+export {
+  ChatButton,
+  type ChatButtonProps,
+  type ChatState,
+  SessionLayout,
+  type SessionLayoutProps,
+} from './session/session-layout.tsx'
+
+/**
  * The panel a Session's mission opens beside the chat, and the rail it is fed with: the fold, the
  * width that pushes the chat, the band; groups of items that say what needs attention. The Spec
  * panel stands in it; a `build` panel is the next.
@@ -511,3 +532,38 @@ export type {
   StoryView,
   TaskView,
 } from './spec/model.ts'
+
+/**
+ * The build view of a `build` Session (lot 22, D10-12): the build at the centre — its phase, its
+ * actions, the approach, the tasks by state — the stage of one task with its tries,
+ * their checks and the files they changed, and the blocks that hand a task to the user — a task
+ * that is theirs, a blocker the agent raised — in the view and as a banner above the composer;
+ * the frozen Spec, opened beside the view read only; and the page of a `build` Session, the view at
+ * the centre and the chat narrow beside it. View types only, close to the engine's `BuildView`: the
+ * renderer maps one onto the other.
+ */
+export { BuildView, type BuildViewProps } from './build/build-view.tsx'
+export { TaskStage, type TaskStageProps } from './build/task-stage.tsx'
+export { YoursBlock, type YoursBlockProps } from './build/yours-block.tsx'
+export { BlockerBlock, type BlockerBlockProps } from './build/blocker-block.tsx'
+export { ReviewCard, type ReviewCardProps } from './build/review-card.tsx'
+export { BuildSpecPanel, type BuildSpecPanelProps } from './build/build-spec-panel.tsx'
+export { BuildSession, type BuildSessionProps } from './build/build-session.tsx'
+export { BuildBanner, type BuildBannerProps } from './build/build-banner.tsx'
+export { waitsOf, waitingOf } from './build/model.ts'
+export type {
+  BuildAttemptResult,
+  BuildAttemptScope,
+  BuildAttemptView,
+  BuildBlockerView,
+  BuildCheckVerdict,
+  BuildCheckView,
+  BuildExecutor,
+  BuildFileView,
+  BuildPhase,
+  BuildStoryState,
+  BuildStoryView,
+  BuildTaskState,
+  BuildTaskView,
+  BuildViewData,
+} from './build/model.ts'

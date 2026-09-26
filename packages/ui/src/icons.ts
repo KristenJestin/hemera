@@ -50,6 +50,8 @@ import {
   IconChevronDownFilled as TablerChevronDownFilled,
   IconChevronLeft as TablerChevronLeft,
   IconChevronRight as TablerChevronRight,
+  IconClipboardList as TablerClipboardList,
+  IconClipboardListFilled as TablerClipboardListFilled,
   IconCircleCheck as TablerCircleCheck,
   IconCircleCheckFilled as TablerCircleCheckFilled,
   IconCircleDashed as TablerCircleDashed,
@@ -73,6 +75,8 @@ import {
   IconEyeFilled as TablerEyeFilled,
   IconFileDescription as TablerFileDescription,
   IconFileDescriptionFilled as TablerFileDescriptionFilled,
+  IconFileDiff as TablerFileDiff,
+  IconFileDiffFilled as TablerFileDiffFilled,
   IconFileText as TablerFileText,
   IconFilePlus as TablerFilePlus,
   IconFileTextFilled as TablerFileTextFilled,
@@ -91,6 +95,7 @@ import {
   IconGitCompare as TablerGitCompare,
   IconGitFork as TablerGitFork,
   IconHammer as TablerHammer,
+  IconHandStop as TablerHandStop,
   IconHome as TablerHome,
   IconHomeFilled as TablerHomeFilled,
   IconInfoCircle as TablerInfoCircle,
@@ -119,6 +124,8 @@ import {
   IconPencil as TablerPencil,
   IconPencilFilled as TablerPencilFilled,
   IconPlayerPlay as TablerPlayerPlay,
+  IconPlayerPause as TablerPlayerPause,
+  IconPlayerPauseFilled as TablerPlayerPauseFilled,
   IconPlayerPlayFilled as TablerPlayerPlayFilled,
   IconPlayerSkipForward as TablerPlayerSkipForward,
   IconPlayerStopFilled as TablerPlayerStopFilled,
@@ -406,6 +413,24 @@ export const IconDeviceMobile = catalogued(
   'IconDeviceMobile',
 )
 export const IconPackage = catalogued(TablerPackage, TablerPackage, 'IconPackage')
+
+/**
+ * What lot 22 draws: a build's pause, the list of its tasks the agent reads, the files a try
+ * changed, and the hand that stops a task the agent says contradicts the Spec (D10-08, D10-12).
+ * Tabler draws no solid hand: the outline stands for both weights.
+ */
+export const IconClipboardList = catalogued(
+  TablerClipboardListFilled,
+  TablerClipboardList,
+  'IconClipboardList',
+)
+export const IconFileDiff = catalogued(TablerFileDiffFilled, TablerFileDiff, 'IconFileDiff')
+export const IconHandStop = catalogued(TablerHandStop, TablerHandStop, 'IconHandStop')
+export const IconPlayerPause = catalogued(
+  TablerPlayerPauseFilled,
+  TablerPlayerPause,
+  'IconPlayerPause',
+)
 
 /**
  * The type of a Spec that is `maintenance`: a wrench, beside the sparkles of a `feature` and the

@@ -238,6 +238,12 @@ and the human can also add a one-off execution from the Session. Repeating a one
 is not enough to promote it automatically. The details of groups and script imports remain to
 be designed.
 
+The checks a build is judged by run through the same service: each check Hemera runs is a run
+of the build Session, started by Hemera on the user's side and never by the agent, shown in the
+Session's activity with its output like any other run. A check runs a catalogue command, in the
+folder the catalogue gives it, or a line of the user's; the checks themselves are the Project's,
+described with the `build` mission protocol below.
+
 ## Spec
 
 A Spec represents the intention and the shared state of a piece of work followed end to end.
@@ -737,8 +743,13 @@ a `build` Session can perform an intermediate code review.
 - A `define` Session keeps the chat in the centre and the live Spec beside it, in the place of
   the side column; its header reads its mission, its agent and the key of its Spec. A `free`
   Session offers no Spec of its own: one begins with its agent's proposal in the thread.
-- An active `build` Session puts task progress and execution activity in the centre.
-  The chat remains accessible without taking up all the space.
+- An active `build` Session puts task progress and execution activity in the centre: the
+  build view, with the agent's approach, the tasks grouped by state with their times, and a
+  task's stage with its tries, their checks and the files they changed. The chat stands narrow
+  on its side and folds to a band; it is never out of reach. What waits for the user — a task
+  that is theirs, a blocker the agent raised — is said in the view, as a banner above the
+  composer and by a notification of the system. A "Spec" control opens the frozen revision the
+  build works from, read only, beside the view, and folds the chat while it is open.
 - When a `build` is finished or requests an intervention, the chat can take back the
   central place to explain the result and collect feedback.
 - During the automatic review then the user validation, the `build` Session highlights
@@ -991,6 +1002,67 @@ the user approves it. The closure of the Spec then waits for the delivery condit
 the explicit user click defined below. A failure or a skipped task cannot be hidden by
 the agent. The build result remains linked to the Session, the exact revision and the workspace
 used.
+
+#### What the first build runs
+
+The first delivered `build` (lot 5a) runs `prepare → execute → verify`, then the user's Accept,
+with one agent and no sub-agent; documentation, reviews, feedback and delivery come later. Its
+phase and every task's state are rows of the Profile, so a restart resumes the build exactly
+where it stood.
+
+- **`prepare`**: Hemera writes one build task per contractual task of the pinned revision,
+  labelled `T1…Tn` in the revision's order, `ready` when it has no dependency and `waiting`
+  otherwise, and asks the agent for a short approach note — for each task, what it expects to
+  touch, what it will check first, the risk it sees. The agent's answer to that brief is the
+  note; it is shown at the top of the build view. No task starts before it exists.
+- **`execute`**: Hemera hands the agent every ready task at once, with its definition; the agent
+  works through them in the order it chooses. A handed task is in progress from the agent's
+  first call after the hand-over, and the first task started moves the Spec to `in_progress`
+  in the same transaction. The agent never sets a state: it says `task_finished(T2)` or
+  `task_blocked(T3, reason)`, reads the frozen Spec and the build through `build_read`, and
+  Hemera decides. A build Session is offered the file, search, command, Project and Session
+  tools and these three, never a Spec write tool.
+- **Checks and tries**: a finished task is checked; all green, or no check at all, makes it
+  done — "done, not verified" when nothing judged it. A red check starts a new try, and the
+  agent's next turn carries the red checks, where they ran and the last lines of their output.
+  A third red try gives the task to the user. When every task covering a story is done, the
+  story's checks run; when no task is left, `verify` runs the end checks; a red one is a try on
+  the story or on the build, handed to the agent the same way, no task changing state.
+- **Human tasks and blockers**: a task entrusted to a human is the user's as soon as it is ready,
+  and is never handed to the agent; the user marks it Done, or skips it with a reason, saying
+  whether its dependants go on as if it were done. A blocker the agent raises suspends that task
+  and its dependants only; the user dismisses it, which makes the task ready again, or stops the
+  build. A Rework is refused once a task has started.
+- **Pause, resume, restart**: Pause refuses every new tool call of the Session, lets the running
+  one end, then stops the turn. Resume, and the start of the application for a build that was
+  not paused, hands the agent a brief of what is done with its evidence and what was in
+  progress with its tries, and asks it to check the real state before redoing anything; the
+  checks of a task left checking run again.
+- **Accept**: once the end checks are green and nothing waits for the user, the build view
+  offers Accept; the build is accepted, the Spec stays `in_progress`, and the branch and the
+  files stay in the Workspace for delivery. Stop closes a build for good; a stopped build stays
+  readable and frees its slot, but a Spec whose first task had started stays `in_progress` and is
+  neither built again nor reworked: only a build stopped before its first task leaves the Spec
+  `ready` for another.
+
+The checks are the Project's, set in the Build section of its settings, and all optional. A check
+runs a catalogue command or a line of the user's; where — at the Workspace root (for a command,
+where the catalogue puts it), in one repository, or in each repository the task changed; when —
+after each task, after each story, or at the end. It is green when it exits with 0; it can also
+expect a number read in its output by a pattern, at least a minimum, and is then green only when
+it exits with 0 and the number is high enough (`64.2 < 70` says why it is not). Its line can take
+`{files}`, replaced by the files the task changed that match a filter, so only the tests the agent
+wrote run; when none match, the check is skipped. A Project with no check is proposed some from its
+catalogue's command types — a lint or a type check after each task, tests after each story, an
+end-to-end suite and the build at the end — and nothing is saved until the user accepts them.
+
+The evidence needs no commit. At the start and at the end of each try, Hemera writes a snapshot
+of each repository of the Workspace as a Git tree, through a temporary index: no commit, no ref,
+nothing in the user's index, branch or log. The files a try changed — per repository, with their
+status and their lines added and removed — are the difference between its two trees, copied into
+the Profile when the try ends, so the evidence stays readable after Git prunes the trees. A task's
+evidence is its tries, their files and their checks' verdicts and outputs. Commits and pushes
+belong to delivery.
 
 ### External actions and delivery
 

@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { AnimatePresence, animate, motion, useMotionValue } from 'motion/react'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
@@ -31,13 +32,26 @@ import { CROSSFADE, crossfade, instant, morph, useTransition } from '../motion.t
  * (`mission-panel-slot`). What the panel holds is laid at the unfolded width from the first frame
  * and hangs from the slot's left edge, which clips the rest: the stage's text does not reflow on
  * the way, only the chat's does.
+ *
+ * The slot can also be the whole row: while the chat is minimised (`page`, lot 5c, issue #115) the
+ * panel is the page. It grows from wherever the fold left it to the whole row on the same spring,
+ * over the chat, which keeps the width it had and is covered — the same `mission-panel-slot` the
+ * fold draws, blended to `100cqw` by `--mission-panel-page`. The fold is held while the panel is
+ * the page: there is no band beside nothing, and the fold the hand had is the one the chat is
+ * uncovered onto when it comes back.
  */
 
 /** The slot the panel takes in its row, whose width moves; what it holds past it is clipped. */
-const SLOT = 'mission-panel-slot relative min-h-0 shrink-0 overflow-hidden border-l border-border'
+const SLOT = 'relative min-h-0 shrink-0 overflow-hidden border-l border-border'
 
 /** What the unfolded panel holds, laid at the unfolded width whatever the slot's own is. */
-const OPEN = 'absolute inset-y-0 left-0 flex w-mission-panel flex-col bg-surface-content'
+const OPEN = 'absolute inset-y-0 left-0 flex flex-col bg-surface-content'
+
+/**
+ * The width a panel unfolds to: the share a Spec takes beside the chat. A slot whose width moves,
+ * and the width what it holds is laid at.
+ */
+const WIDTHS = { wide: { slot: 'mission-panel-slot', open: 'mission-panel-body' } } as const
 
 const BAND = 'absolute inset-y-0 left-0 z-10 flex w-mission-band flex-col bg-surface-content'
 
@@ -73,6 +87,21 @@ export interface MissionPanelProps {
   /** Told each time the panel folds or unfolds, by the hand or because the agent works. */
   onFoldChange?: ((folded: boolean) => void) | undefined
   /**
+   * Whether it is folded, for a caller that folds it itself: a change is taken as a hand's, and
+   * holds against the agent the same way. A build folds the chat to its band when the Spec opens
+   * beside it, since the two are never open together (core.md, "Session view").
+   */
+  folded?: boolean | undefined
+  /** How wide it unfolds: the share a Spec takes beside the chat. */
+  width?: 'wide' | undefined
+  /**
+   * Whether the chat beside it is minimised, which makes the panel the page (lot 5c, issue #115):
+   * the slot grows from the fold to the whole row over the chat, and the fold it holds is the one
+   * the chat comes back to. Nothing is folded while this is on — the control that folds the panel
+   * belongs to the caller's head, and a head drawn on the page is drawn without one.
+   */
+  page?: boolean | undefined
+  /**
    * Whether the panel arrives rather than being there when its Session is opened (issue #130):
    * the mission has just begun — a Spec created from the agent's proposal — and the panel opens
    * from nothing to its unfolded width on the width's own spring, pushing the chat as an unfold
@@ -93,14 +122,17 @@ export function MissionPanel({
   onFollow,
   defaultFolded = true,
   onFoldChange,
+  folded: asked,
+  width: size = 'wide',
+  page = false,
   arrives = false,
 }: MissionPanelProps): ReactNode {
-  const startsFolded = arrives ? false : defaultFolded
-  const [folded, setFolded] = useState(startsFolded)
+  const starts = asked ?? (arrives ? false : defaultFolded)
+  const [folded, setFolded] = useState(starts)
   // Whether the width is on its way. Folding, what was open stays in the slot until it has closed.
   const [moving, setMoving] = useState(false)
   // The fold as it is now, read by the several hands one click may bubble through.
-  const isFolded = useRef(startsFolded)
+  const isFolded = useRef(starts)
   // Whether the last fold was the hand's: it holds against the agent until the hand unfolds.
   const byHand = useRef(false)
   const followed = useRef(following)
@@ -109,8 +141,10 @@ export function MissionPanel({
   // was on is gone, and the focus goes to what stands in its place.
   const refocus = useRef(false)
   const width = useTransition(morph)
-  // How far open the panel is, from the band (0) to the unfolded width (1).
-  const open = useMotionValue(startsFolded ? 0 : 1)
+  // How far open the panel is, from the band (0) to the unfolded width (1), and how far it has
+  // grown over the chat, from its slot in the row (0) to the whole of it (1).
+  const open = useMotionValue(starts ? 0 : 1)
+  const whole = useMotionValue(page ? 1 : 0)
   // How far in the panel has arrived, from nothing (0) to its place in the row (1).
   const present = useMotionValue(arrives ? 0 : 1)
   const fade = useTransition(crossfade)
@@ -124,6 +158,16 @@ export function MissionPanel({
     setMoving(true)
     onFoldChange?.(next)
   }
+
+  // The caller folding or unfolding it is a hand doing so: a change of what it asks, and not the
+  // fold it opened on.
+  const askedBefore = useRef(asked)
+  useEffect(() => {
+    const before = askedBefore.current
+    askedBefore.current = asked
+    if (asked === undefined || asked === before) return
+    fold(asked, true)
+  }, [asked])
 
   // The agent starting on something unfolds the panel onto it — unless the hand folded it.
   useEffect(() => {
@@ -143,17 +187,31 @@ export function MissionPanel({
    * assembled in a style attribute is a length living outside the theme.
    */
   function pose(share: number): void {
-    slot.current?.style.setProperty('--mission-panel-open', String(share))
+    // Written on the row the panel stands in and not on the slot itself: the slot draws its width
+    // from it by inheritance, and the chat beside it — laid at what the panel leaves it, so that
+    // the panel can grow over it without its text reflowing (lot 5c) — reads the same value, which
+    // a property on the slot alone would never reach.
+    const row = slot.current?.parentElement
+    row?.style.setProperty('--mission-panel-open', String(share))
   }
 
-  /** Writes how far in the panel has arrived, which scales the whole of its slot's width. */
+  /** Writes how far the panel has grown over the chat onto the same slot. */
+  function poseWhole(grown: number): void {
+    slot.current?.style.setProperty('--mission-panel-page', String(grown))
+  }
+
+  /**
+   * Writes how far in the panel has arrived, which scales the whole of its slot's width: on the row,
+   * as the fold is, so the chat beside it is pushed as the panel arrives.
+   */
   function place(share: number): void {
-    slot.current?.style.setProperty('--mission-panel-in', String(share))
+    slot.current?.parentElement?.style.setProperty('--mission-panel-in', String(share))
   }
 
   // The first frame has no animation to report a width: the resting one is written before it.
   useLayoutEffect(() => {
     pose(open.get())
+    poseWhole(whole.get())
     place(present.get())
   }, [])
 
@@ -192,20 +250,54 @@ export function MissionPanel({
     }
   }, [folded])
 
-  // Folded, the keyboard lands on the band's unfold button; unfolded, on what is on the stage.
+  // The chat leaving or coming back moves the panel over the row the same way a fold moves it into
+  // it: on `morph`, from where it stands, and at once when the system asks for less movement.
+  useLayoutEffect(() => {
+    const target = page ? 1 : 0
+    if (whole.get() === target) return
+    if (width === instant) {
+      whole.jump(target)
+      poseWhole(target)
+      setMoving(false)
+      return
+    }
+    let live = true
+    const travel = animate(whole, target, { ...width, onUpdate: poseWhole })
+    void travel.then(() => {
+      if (live) setMoving(false)
+    })
+    return () => {
+      live = false
+      travel.stop()
+    }
+  }, [page])
+
+  // Folded, the keyboard lands on the band's unfold button; unfolded, on what is on the stage, or
+  // on the head's fold button when the stage has no rows to land on — the chat has none.
   useEffect(() => {
     if (!refocus.current) return
     refocus.current = false
     const target = folded ? '[data-unfold]' : '[data-row][tabindex="0"]'
-    slot.current?.querySelector<HTMLElement>(target)?.focus()
+    const landing =
+      slot.current?.querySelector<HTMLElement>(target) ??
+      (folded ? null : slot.current?.querySelector<HTMLElement>('[data-fold]'))
+    landing?.focus()
   }, [folded])
 
+  // The panel is the page while the chat is minimised: folded or not, what it holds is what is
+  // drawn, and the band — a rail beside nothing — is not.
+  const shown = page || !folded
+
   return (
-    <section ref={slot} aria-label={label} className={SLOT}>
-      {(!folded || moving) && (
+    <section ref={slot} aria-label={label} className={cn(SLOT, WIDTHS[size].slot)}>
+      {(shown || moving) && (
         // Folding, what was open stays under the band until the slot has closed on it, and
         // is out of reach of the keyboard and of a screen reader the whole way.
-        <div inert={folded} aria-hidden={folded ? true : undefined} className={OPEN}>
+        <div
+          inert={!shown}
+          aria-hidden={shown ? undefined : true}
+          className={cn(OPEN, WIDTHS[size].open)}
+        >
           {head(() => fold(true, true))}
           <div className={BODY}>
             {rail}
@@ -215,33 +307,34 @@ export function MissionPanel({
         </div>
       )}
       <AnimatePresence initial={false}>
-        {folded && (
-          // The band: anything pressed in it unfolds the panel, a glyph onto what it names. It
-          // comes up over the closing panel and goes at once when the slot opens: what it was
-          // pressed for is already there under it, and two rails are one too many.
-          <motion.div
-            key="band"
-            className={BAND}
-            initial={CROSSFADE.from}
-            animate={CROSSFADE.to}
-            transition={fade}
-            onClick={() => fold(false, true)}
-          >
-            <div className={BAND_TOP}>
-              <Tooltip label={`Unfold the ${noun}`} side="left">
-                <IconButton
-                  variant="ghost"
-                  size="sm"
-                  icon={<IconChevronLeft size="sm" />}
-                  aria-label={`Unfold the ${noun}`}
-                  data-unfold
-                  onClick={() => fold(false, true)}
-                />
-              </Tooltip>
-            </div>
-            {band}
-          </motion.div>
-        )}
+        {folded &&
+          !page && (
+            // The band: anything pressed in it unfolds the panel, a glyph onto what it names. It
+            // comes up over the closing panel and goes at once when the slot opens: what it was
+            // pressed for is already there under it, and two rails are one too many.
+            <motion.div
+              key="band"
+              className={BAND}
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              transition={fade}
+              onClick={() => fold(false, true)}
+            >
+              <div className={BAND_TOP}>
+                <Tooltip label={`Unfold the ${noun}`} side="left">
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<IconChevronLeft size="sm" />}
+                    aria-label={`Unfold the ${noun}`}
+                    data-unfold
+                    onClick={() => fold(false, true)}
+                  />
+                </Tooltip>
+              </div>
+              {band}
+            </motion.div>
+          )}
       </AnimatePresence>
     </section>
   )

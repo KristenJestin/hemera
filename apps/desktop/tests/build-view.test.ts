@@ -1,0 +1,332 @@
+/**
+ * The engine's part of the build view: Accept and Stop, and the Journal a build writes (design
+ * D10-11, D10-12, D10-14).
+ *
+ * Named after the scenario of `Spec · build-view` it covers, over the whole engine on the fake
+ * agent, with the Project's checks scripted green.
+ */
+
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { Effect, Result } from 'effect'
+import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
+
+import type { FakeStep } from '#engine/agents/fake.ts'
+import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { Builds } from '#engine/build/build.ts'
+import { Specs } from '#engine/specs/specs.ts'
+
+import {
+  THREE,
+  aReadySpec,
+  buildAgent,
+  buildOf,
+  eventually,
+  finished,
+  journalOf,
+  launched,
+  statesOf,
+  scriptedChecks,
+} from './build-harness.ts'
+import { held } from './application.ts'
+import { git } from './repositories.ts'
+import { type OpenWindow, openWindowChecked } from './window.ts'
+
+let dataFolder: string
+let opened: OpenWindow | undefined
+
+beforeEach(() => {
+  dataFolder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-build-view-')))
+})
+
+afterEach(async () => {
+  await opened?.close()
+  opened = undefined
+  rmSync(dataFolder, { recursive: true, force: true })
+})
+
+/** Every check green, at every moment. */
+const green = scriptedChecks((request) => [{ name: `${request.when} check`, verdict: 'green' }])
+
+/** The agent writes a file for T1 before finishing it, and finishes every other task handed. */
+const writing = () =>
+  buildAgent({
+    execute: (labels): readonly FakeStep[] =>
+      labels.flatMap((label) =>
+        label === 'T1'
+          ? [
+              {
+                does: 'uses' as const,
+                call: 'fs_write',
+                arguments: { path: 'sources/api/export.ts', content: 'export {}\n', key: 'export' },
+              },
+              finished(label),
+            ]
+          : [finished(label)],
+      ),
+  })
+
+describe('Accept ends the build', () => {
+  test('only once verify is green; the Spec stays in progress and the branch and files stay', async () => {
+    const { agent } = writing()
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const builds = yield* Builds
+        const early = yield* eventually(buildOf(sessionId), (view) => view.phase === 'execute')
+        const refused = yield* Effect.flip(builds.accept(sessionId))
+        const ready = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        const before = {
+          status: git(spec.repository, 'status', '--porcelain'),
+          log: git(spec.repository, 'log', '--oneline', '--all'),
+          branch: git(spec.repository, 'branch', '--show-current'),
+        }
+        const accepted = yield* builds.accept(sessionId)
+        const after = {
+          status: git(spec.repository, 'status', '--porcelain'),
+          log: git(spec.repository, 'log', '--oneline', '--all'),
+          branch: git(spec.repository, 'branch', '--show-current'),
+        }
+        return {
+          early,
+          refused,
+          ready,
+          before,
+          accepted,
+          after,
+          file: readFileSync(join(spec.repository, 'export.ts'), 'utf8'),
+          status: (yield* (yield* Specs).read(spec.specId)).spec.status,
+        }
+      }),
+    )
+    expect(seen.early.canAccept).toBe(false)
+    expect(seen.refused.message).toBe('The build has not reached its final checks.')
+    expect(seen.ready.phase).toBe('verify')
+    expect(seen.ready.endAttempts.map((attempt) => attempt.result)).toEqual(['green'])
+    expect(seen.accepted.phase).toBe('accepted')
+    expect(seen.accepted.canAccept).toBe(false)
+    expect(seen.status).toBe('in_progress')
+    // Nothing of the user's moved: the file is where the agent wrote it, uncommitted.
+    expect(seen.after).toEqual(seen.before)
+    expect(seen.before.status).toBe('?? export.ts')
+    expect(seen.file).toBe('export {}\n')
+    // The evidence of T1 is its diff, copied from its two snapshots (D10-05).
+    expect(seen.accepted.tasks[0]?.attempts[0]?.files).toEqual([
+      { repository: 'sources/api', path: 'export.ts', status: 'A', added: 1, removed: 0 },
+    ])
+  })
+})
+
+describe('The end checks wait for the verify turn', () => {
+  test('verify hands its brief first, runs the end checks once that turn is over, then Accept', async () => {
+    // The agent's answer to the verify brief is held until the suite lets it go.
+    const answer = held()
+    let verifying = false
+    const { agent } = buildAgent(
+      {
+        verify: () => {
+          verifying = true
+          return [{ does: 'says', text: 'Verified against the Spec.' }]
+        },
+      },
+      { between: () => (verifying ? answer.promise : Promise.resolve()) },
+    )
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const during = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.phase === 'verify' && verifying,
+        )
+        // Given the time a check would have taken, had it been started with the phase.
+        yield* Effect.sleep('200 millis')
+        const still = yield* buildOf(sessionId)
+        const refused = yield* Effect.flip((yield* Builds).accept(sessionId))
+        answer.carryOn()
+        const after = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        return { during, still, refused, after }
+      }),
+    )
+    expect(seen.still.endAttempts).toEqual([])
+    expect(seen.still.canAccept).toBe(false)
+    expect(seen.refused.message).toBe('The final checks are still running.')
+    expect(seen.after.endAttempts.map((attempt) => attempt.result)).toEqual(['green'])
+  })
+})
+
+describe('A build writes its Journal lines', () => {
+  test('each phase, each task move and each of the user’s actions, correlated (D10-14)', async () => {
+    const { agent } = buildAgent()
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const builds = yield* Builds
+        yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        yield* builds.pause(sessionId)
+        yield* builds.resume(sessionId)
+        const view = yield* builds.accept(sessionId)
+        return { spec, view, lines: yield* journalOf(sessionId) }
+      }),
+    )
+    const build = seen.lines.filter(
+      (line) => line.type.startsWith('build.') || line.type.startsWith('task.'),
+    )
+    const byType = (type: string) => build.filter((line) => line.type === type)
+    expect(byType('build.phase_started').map((line) => JSON.parse(line.payload).phase)).toEqual([
+      'prepare',
+      'execute',
+      'verify',
+    ])
+    for (const type of [
+      'task.ready',
+      'task.started',
+      'task.finished',
+      'task.checked',
+      'task.done',
+    ]) {
+      expect(
+        byType(type)
+          .map((line) => JSON.parse(line.payload).label)
+          .toSorted(),
+      ).toEqual(['T1', 'T2', 'T3'])
+    }
+    expect(byType('build.paused')).toHaveLength(1)
+    expect(byType('build.resumed')).toHaveLength(1)
+    expect(byType('build.accepted')).toHaveLength(1)
+    // Every line names the Session, the Spec and the revision; a task's names its row.
+    for (const line of build) {
+      expect(line.spec_id).toBe(seen.spec.specId)
+      expect(line.revision_id).toBe(seen.spec.revisionId)
+      expect(line.session_id).toBe(seen.view.sessionId)
+    }
+    const ids = new Set(seen.view.tasks.map((task) => task.id))
+    for (const line of build.filter((one) => one.type.startsWith('task.'))) {
+      expect(line.entity_kind).toBe('task')
+      expect(ids.has(line.entity_id)).toBe(true)
+    }
+    expect(JSON.parse(byType('task.checked')[0]?.payload ?? '{}')).toMatchObject({
+      attempt: 1,
+      result: 'green',
+    })
+    // The Spec's own line when its first task started (D10-10).
+    expect(seen.lines.filter((line) => line.type === 'spec.in_progress')).toHaveLength(1)
+  })
+})
+
+describe('Stop closes the build', () => {
+  test('Stops asked at once close it once', async () => {
+    const { agent } = buildAgent({ execute: () => [] })
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(sessionId), (view) => view.phase === 'execute')
+        const builds = yield* Builds
+        const stops = yield* Effect.all(
+          Array.from({ length: 20 }, () => Effect.result(builds.stop(sessionId))),
+          { concurrency: 'unbounded' },
+        )
+        return { stops, lines: yield* journalOf(sessionId) }
+      }),
+    )
+    expect(seen.stops.filter(Result.isSuccess)).toHaveLength(1)
+    expect(seen.lines.filter((line) => line.type === 'build.stopped')).toHaveLength(1)
+  })
+
+  test('a stopped build stays readable, and frees the Spec for another build', async () => {
+    // The second build is a second agent: a fake that was stopped does not speak again.
+    const { agent } = buildAgent({ execute: () => [] })
+    opened = await openWindowChecked(dataFolder, green, agent, buildAgent().agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(sessionId), (view) => view.phase === 'execute')
+        const builds = yield* Builds
+        const stopped = yield* builds.stop(sessionId)
+        const again = yield* Effect.flip(builds.pause(sessionId))
+        const next = yield* launched(spec.specId, spec.workspaceId)
+        return { sessionId, stopped, again, next, read: yield* buildOf(sessionId) }
+      }),
+    )
+    expect(seen.stopped.phase).toBe('stopped')
+    expect(seen.stopped.detail).toBe('Stopped by the user.')
+    expect(seen.read.tasks.map((task) => task.label)).toEqual(['T1', 'T2', 'T3'])
+    expect(seen.again.message).toBe('This build is stopped.')
+    expect(seen.next).not.toBe(seen.sessionId)
+  })
+})
+
+describe('A review sends the build back to work', () => {
+  test('a message sent while the build waits for it is its review, and the whole Spec is checked again', async () => {
+    // The review's turn is held before its one step, so what it leaves behind can be read.
+    const answer = held()
+    let reviewing = false
+    const { agent, handed } = buildAgent(
+      {
+        execute: (labels, text): readonly FakeStep[] => {
+          if (!text.includes("# The user's review")) return labels.map(finished)
+          reviewing = true
+          return [{ does: 'says', text: 'The exporter writes the header row first now.' }]
+        },
+      },
+      { between: () => (reviewing ? answer.promise : Promise.resolve()) },
+    )
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const builds = yield* Builds
+        const runtime = yield* AgentRuntime
+        const waiting = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        // The review is written in the chat and sent like any other message (issue #117), so the
+        // turn it starts runs beside what the suite reads of the build while it is held.
+        const [, read] = yield* Effect.all(
+          [
+            runtime.prompt(sessionId, 'The export needs a header row; the reader is fine.'),
+            Effect.gen(function* () {
+              const working = yield* eventually(
+                buildOf(sessionId),
+                (view) => view.phase === 'execute' && !view.canAccept,
+              )
+              const refused = yield* Effect.flip(builds.accept(sessionId))
+              answer.carryOn()
+              const back = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+              return { working, refused, back }
+            }),
+          ],
+          { concurrency: 2 },
+        )
+        return {
+          waiting,
+          ...read,
+          handed,
+          lines: yield* journalOf(sessionId),
+        }
+      }),
+    )
+    expect(seen.waiting.canAccept).toBe(true)
+    // Back to work: the phase is `execute` again, and Accept says what it waits for.
+    expect(seen.working.phase).toBe('execute')
+    expect(seen.refused.message).toBe('The build went back to work on your review.')
+    // The agent was handed the brief of a review, in front of the user's own message.
+    expect(seen.handed.some((text) => text.includes("# The user's review"))).toBe(true)
+    // Nothing was accepted: the whole Spec is checked again, and the build waits for the user once
+    // more — its tasks where they stood, its second round of end checks green.
+    expect(seen.back.endAttempts.map((attempt) => attempt.result)).toEqual(['green', 'green'])
+    expect(statesOf(seen.back)).toEqual({ T1: 'done', T2: 'done', T3: 'done' })
+    expect(
+      seen.lines.filter((line) => line.type === 'build.reviewed').map((line) => line.payload),
+    ).toEqual(['{}'])
+  })
+})

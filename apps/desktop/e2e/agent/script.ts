@@ -156,3 +156,72 @@ export const REWRITE = 'Tighten the expected outcome.'
 /** What it tries to write then, and what it says after the answer. */
 export const REWRITTEN = 'Every row of every CSV export carries its issue date.'
 export const REWRITE_ANSWER = 'I tried to tighten the expected outcome.'
+
+/**
+ * What makes the writer's agent write a Spec a build can run: the whole contract of a
+ * `feature`, one story, and three tasks each depending on the one before — the second one the
+ * user's — then every phase declared and the contract attested. Only the human's Mark ready
+ * freezes it.
+ */
+export const BUILDABLE = 'Write a Spec a build can run, then attest it.'
+
+/** The contract it writes then, each section over the empty one the Spec was created with. */
+export const BUILDABLE_SECTIONS = {
+  problem: 'The Journal cannot be read outside Hemera.',
+  expected_outcome: 'The Journal is exported to a file a spreadsheet opens.',
+  scope: 'The export of the Journal, nothing else.',
+  verification: 'An exported file opens in a spreadsheet with every line.',
+  behaviour: 'Export writes one row per line of the Journal.',
+} as const
+
+/** The three tasks, in order, as the JSON `spec_write` reads: T1, then T2 (the user's), then T3. */
+export const BUILD_TASKS = [
+  {
+    title: 'Write the exporter',
+    result: 'An exporter writes the rows',
+    type: 'code',
+    executor: 'agent',
+    criteria: 'Its check is green',
+    stories: [STORY.title],
+    dependsOn: [],
+  },
+  {
+    title: 'Sign the export format off',
+    result: 'The format is signed off',
+    type: 'review',
+    executor: 'human',
+    criteria: 'The user says so',
+    stories: [STORY.title],
+    dependsOn: ['Write the exporter'],
+  },
+  {
+    title: 'Publish the export',
+    result: 'The export is offered',
+    type: 'code',
+    executor: 'agent',
+    criteria: 'Its check is green',
+    stories: [STORY.title],
+    dependsOn: ['Sign the export format off'],
+  },
+] as const
+
+/** What it says once that Spec is written and attested. */
+export const BUILDABLE_DONE = 'The Spec can be built: it is yours to mark ready.'
+
+/**
+ * The file the Project's check looks for at the Workspace root: missing, the check is red. The
+ * build's agent writes it only on the try that follows a red one (D10-07).
+ */
+export const FIXED = 'fixed.txt'
+
+/** What the build's agent writes in the Project's repository on that try: its evidence (D10-05). */
+export const EXPORTER = {
+  path: 'sources/api/src/export.ts',
+  content: 'export const exported = true\n',
+} as const
+
+/** The agent's approach note: its answer to the `prepare` brief (D10-02). */
+export const APPROACH = 'T1 first: the exporter. T2 is yours to sign off. T3 publishes it.'
+
+/** What it says once the final checks are handed to it. */
+export const VERIFIED = 'Verified against the Spec.'

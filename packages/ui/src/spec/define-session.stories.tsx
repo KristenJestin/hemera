@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { AnimatePresence, motion } from 'motion/react'
+import { motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
@@ -9,6 +9,7 @@ import { AgentText } from '../message/agent-text.tsx'
 import { MessageGroup } from '../message/message.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
 import { crossfade, useTransition } from '../motion.ts'
+import { SessionLayout } from '../session/session-layout.tsx'
 import { SessionHeader } from '../session/session.tsx'
 import { CreateSpecProposal, type ProposalState } from './create-spec-proposal.tsx'
 import { MissionBrief } from './mission-brief.tsx'
@@ -229,30 +230,35 @@ function goToQuestion(id: string): void {
   block?.querySelector('button')?.focus()
 }
 
-/** The chat of a Session: its head, its thread and its composer. */
+/**
+ * The head of the Session, as the page's layout draws it: lot 5c took it out of the chat, since
+ * the control that brings the chat back stands in it and a head drawn where the chat is would go
+ * with it.
+ */
+function Head({ title, mission }: { title: string; mission: 'FREE' | 'DEFINE' }): ReactNode {
+  return (
+    <SessionHeader
+      title={title}
+      projectName="Atlas"
+      meta={`${mission} · Claude Code · Sonnet 5`}
+      onRename={fn()}
+      onStartEditing={fn()}
+    />
+  )
+}
+
+/** The chat of a Session: its thread and its composer, which the layout holds at the centre. */
 function Chat({
-  title,
-  mission,
   thread,
+  running = false,
 }: {
-  title: string
-  mission: 'FREE' | 'DEFINE'
   thread: ScrollerEntry[]
+  running?: boolean
 }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex w-full flex-col px-6 pt-6 pb-4">
-        <SessionHeader
-          title={title}
-          projectName="Atlas"
-          meta={`${mission} · Claude Code · Sonnet 5`}
-          onRename={fn()}
-          onStartEditing={fn()}
-          onArchive={fn()}
-        />
-      </div>
+    <>
       <MessageScroller className="flex-1" label="The thread of this Session" entries={thread} />
       <div className="flex w-full flex-col px-6 pb-4">
         <Composer
@@ -265,9 +271,11 @@ function Chat({
           action="Send"
           placeholder="Answer, or ask the agent…"
           onSend={() => Promise.resolve(null)}
+          running={running}
+          onStop={fn()}
         />
       </div>
-    </div>
+    </>
   )
 }
 
@@ -313,24 +321,37 @@ function DefineSession({
       },
     ]
   })
+  // The chat is the hand's to minimise, and the page remembers it per Session (lot 5c).
+  const [minimised, setMinimised] = useState(false)
   return (
-    // The row is the container the unfolded panel's width is a share of.
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <Chat title={shown.title} mission="DEFINE" thread={[...shown.thread, ...asked]} />
-      <SpecPanel
-        spec={spec}
-        reader={reader}
-        defaultReworkOpen={reworkOpen}
-        defaultFolded={folded}
-        onSaveSection={actions.onSaveSection}
-        onApplyMine={actions.onApplyMine}
-        onDiscardMine={actions.onDiscardMine}
-        onSaveStory={actions.onSaveStory}
-        onGoToQuestion={actions.onGoToQuestion}
-        onMarkReady={actions.onMarkReady}
-        onRework={actions.onRework}
-        onPickRevision={actions.onPickRevision}
-        onTakeOver={actions.onTakeOver}
+    <div className="h-screen">
+      <SessionLayout
+        head={<Head title={shown.title} mission="DEFINE" />}
+        chat={<Chat thread={[...shown.thread, ...asked]} running />}
+        // The row is the container the panel's width is a share of, and the panel takes the whole
+        // of it while the chat is minimised.
+        panel={(page) => (
+          <SpecPanel
+            spec={spec}
+            reader={reader}
+            page={page}
+            defaultReworkOpen={reworkOpen}
+            defaultFolded={folded}
+            onSaveSection={actions.onSaveSection}
+            onApplyMine={actions.onApplyMine}
+            onDiscardMine={actions.onDiscardMine}
+            onSaveStory={actions.onSaveStory}
+            onGoToQuestion={actions.onGoToQuestion}
+            onMarkReady={actions.onMarkReady}
+            onRework={actions.onRework}
+            onPickRevision={actions.onPickRevision}
+            onTakeOver={actions.onTakeOver}
+          />
+        )}
+        chatOpen={!minimised}
+        onChatOpenChange={(open) => setMinimised(!open)}
+        chatState="working"
+        chatDetail="Planning · writing the plan"
       />
     </div>
   )
@@ -369,36 +390,43 @@ function FreeThenDefine(): ReactNode {
     },
   ]
   return (
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <Chat
-        title="Invoices for the accountants"
-        mission={created === null ? 'FREE' : 'DEFINE'}
-        thread={thread}
+    <div className="h-screen">
+      <SessionLayout
+        head={
+          <Head
+            title="Invoices for the accountants"
+            mission={created === null ? 'FREE' : 'DEFINE'}
+          />
+        }
+        chat={<Chat thread={thread} />}
+        // A `free` Session has no panel at all: it is the chat alone, with nothing to minimise
+        // it, and the Spec arriving beside it is what turns the page into a `define` (lot 5c).
+        panel={
+          created === null
+            ? undefined
+            : () => (
+                <motion.div
+                  className="flex shrink-0"
+                  initial={{ filter: 'opacity(0)' }}
+                  animate={{ filter: 'opacity(1)' }}
+                  transition={transition}
+                >
+                  <SpecPanel
+                    spec={created}
+                    onSaveSection={fn()}
+                    onApplyMine={fn()}
+                    onDiscardMine={fn()}
+                    onSaveStory={fn()}
+                    onGoToQuestion={fn()}
+                    onMarkReady={fn()}
+                    onRework={fn()}
+                    onPickRevision={fn()}
+                    onTakeOver={fn()}
+                  />
+                </motion.div>
+              )
+        }
       />
-      <AnimatePresence initial={false}>
-        {created !== null && (
-          <motion.div
-            key="panel"
-            className="flex shrink-0"
-            initial={{ filter: 'opacity(0)' }}
-            animate={{ filter: 'opacity(1)' }}
-            transition={transition}
-          >
-            <SpecPanel
-              spec={created}
-              onSaveSection={fn()}
-              onApplyMine={fn()}
-              onDiscardMine={fn()}
-              onSaveStory={fn()}
-              onGoToQuestion={fn()}
-              onMarkReady={fn()}
-              onRework={fn()}
-              onPickRevision={fn()}
-              onTakeOver={fn()}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   )
 }

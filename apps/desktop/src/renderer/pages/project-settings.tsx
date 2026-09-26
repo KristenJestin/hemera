@@ -1,7 +1,9 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useMemo, useState } from 'react'
 
 import type {
+  CheckDraft,
   Command,
+  ProjectCheck,
   PlanRepository,
   RecipeStep,
   RepositoryState,
@@ -11,6 +13,7 @@ import type {
   Worktree,
 } from '@hemera/ipc'
 import {
+  BuildChecks,
   Card,
   CleanupDialog,
   CreateWorkspaceDialog,
@@ -29,10 +32,14 @@ import {
 
 import {
   type CommandWrite,
+  checkCommandsOf,
+  checkDraftOf,
+  checkLineOf,
   commandLineOf,
   commandWriteOf,
   folderBasePath,
   folderUnderBase,
+  proposedLinesOf,
 } from '../project-lines.ts'
 import {
   branchOfName,
@@ -275,6 +282,54 @@ function WorkspacesCards({
   )
 }
 
+/** What the Build section is asked through (D10-06). */
+export interface CheckActions {
+  /** Writes a check: a new one when `id` is null; answers the engine's refusal, or null. */
+  onSave: (id: string | null, draft: CheckDraft) => Promise<string | null>
+  onRemove: (id: string) => void
+  /** Saves the proposals the user kept, edited or not; answers the refusal, or null. */
+  onAcceptProposed: (drafts: CheckDraft[]) => Promise<string | null>
+  /** Puts the proposals away, writing nothing. */
+  onDiscardProposed: () => void
+}
+
+/**
+ * The checks of the Project's build (D10-06): the ones it saved, or those proposed from its
+ * catalogue while it has none, with the catalogue and the repositories a check is set on.
+ *
+ * The proposals are mapped once per answer of the engine: the section takes them again whenever
+ * it is handed another list, and a list mapped anew at each render would put back, at the next
+ * push of anything, a proposal the user was editing.
+ */
+function ChecksCard({
+  checks,
+  proposed,
+  commands,
+  repositories,
+  actions,
+}: {
+  checks: readonly ProjectCheck[]
+  proposed: readonly CheckDraft[]
+  commands: readonly Command[]
+  repositories: readonly RepositoryLine[]
+  actions: CheckActions
+}): ReactNode {
+  const proposals = useMemo(() => proposedLinesOf(proposed), [proposed])
+  return (
+    <BuildChecks
+      checks={checks.map(checkLineOf)}
+      proposed={proposals}
+      commands={checkCommandsOf(commands)}
+      repositories={repositories}
+      onAdd={async (line) => await actions.onSave(null, checkDraftOf(line))}
+      onUpdate={async (line) => await actions.onSave(line.id, checkDraftOf(line))}
+      onRemove={actions.onRemove}
+      onAcceptProposed={async (lines) => await actions.onAcceptProposed(lines.map(checkDraftOf))}
+      onDiscardProposed={actions.onDiscardProposed}
+    />
+  )
+}
+
 /** The settings of the active Project (design D4-07): composed, and bound to its callbacks. */
 export function ProjectSettingsPage({
   project,
@@ -310,6 +365,9 @@ export function ProjectSettingsPage({
   onMoveRecipeStep,
   onSetProjectVariable,
   onRemoveProjectVariable,
+  checks,
+  proposedChecks,
+  checkActions,
   workspacesRefusal,
 }: {
   project: ProjectSettingsDraft
@@ -380,8 +438,14 @@ export function ProjectSettingsPage({
   /** Sets one of the Project's own variables; answers the engine's refusal, or null (D8-06). */
   onSetProjectVariable: (key: string, value: string) => Promise<string | null>
   onRemoveProjectVariable: (key: string) => void
+  /** The checks the Project saved, as the engine listed them (D10-06). */
+  checks: readonly ProjectCheck[]
+  /** The checks proposed from the catalogue while none is saved; nothing of them is saved. */
+  proposedChecks: readonly CheckDraft[]
+  checkActions: CheckActions
   /**
-   * What the engine last refused about the Workspaces, the recipe or the variables, in its words:
+   * What the engine last refused about the Workspaces, the recipe, the variables or the checks, in
+   * its words:
    * a read that failed, or an act whose card has no place of its own to say it. Null once the
    * next act began.
    */
@@ -456,6 +520,15 @@ export function ProjectSettingsPage({
             variables={projectVariablesOf(projectVariables)}
             onSet={onSetProjectVariable}
             onRemove={onRemoveProjectVariable}
+          />
+        }
+        checks={
+          <ChecksCard
+            checks={checks}
+            proposed={proposedChecks}
+            commands={commands}
+            repositories={repositories}
+            actions={checkActions}
           />
         }
       />

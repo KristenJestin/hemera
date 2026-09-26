@@ -1,9 +1,10 @@
-import type { Command, Project } from '@hemera/ipc'
-import type { CommandLine, RepositoryLine } from '@hemera/ui'
+import type { CheckDraft, Command, Project, ProjectCheck } from '@hemera/ipc'
+import type { CheckLine, CommandLine, RepositoryLine } from '@hemera/ui'
 
 /**
- * What the Commands and Repositories sections of a Project's settings draw from the engine's
- * views, and what they hand back to it (D6-12, D8-04, D8-07, D8-10, recette 1 and 2).
+ * What the Commands, Repositories and Build sections of a Project's settings draw from the
+ * engine's views, and what they hand back to it (D6-12, D8-04, D8-07, D8-10, D10-06, recette 1
+ * and 2).
  *
  * Both ways, and nothing lost on the way: a command read and saved unchanged is written as it was
  * read. Kept apart from the page, which imports the components, so a test reads it without a DOM.
@@ -148,4 +149,54 @@ export function repositoryLinesOf(
     includedByDefault: project.included.includes(one.path),
     icon: project.repositoryIcons[one.path] ?? null,
   }))
+}
+
+/**
+ * The catalogue as the Build section and its check dialog pick from it (D10-06): the rows of the
+ * Commands section, known by the command's id, which is what a check runs a command by — where the
+ * Commands section knows a command by its name, which is what the agent asks for.
+ */
+export function checkCommandsOf(catalogue: readonly Command[]): CommandLine[] {
+  return catalogue.map((command) => ({ ...commandLineOf(command), id: command.id }))
+}
+
+/** A check the Project saved, on its row and in its dialog. */
+export function checkLineOf(check: ProjectCheck): CheckLine {
+  return {
+    id: check.id,
+    name: check.name,
+    commandId: check.commandId,
+    line: check.line,
+    where: check.where,
+    repository: check.repository,
+    when: check.when,
+    expect: check.expect === null ? null : { ...check.expect },
+    files: check.files,
+  }
+}
+
+/**
+ * The checks proposed from the catalogue, each on a row of its own: a proposal has no id until it
+ * is saved, so it is known by its place in the list while the section edits it.
+ */
+export function proposedLinesOf(drafts: readonly CheckDraft[]): CheckLine[] {
+  return drafts.map((draft, at) => ({
+    ...draft,
+    id: `proposed-${String(at)}`,
+    expect: draft.expect === null ? null : { ...draft.expect },
+  }))
+}
+
+/** What the engine writes a check from: everything the dialog edits, and not the row's id. */
+export function checkDraftOf(line: CheckLine): CheckDraft {
+  return {
+    name: line.name,
+    commandId: line.commandId,
+    line: line.line,
+    where: line.where,
+    repository: line.repository,
+    when: line.when,
+    expect: line.expect === null ? null : { ...line.expect },
+    files: line.files,
+  }
 }

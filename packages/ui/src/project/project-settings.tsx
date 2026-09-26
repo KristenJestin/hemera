@@ -15,6 +15,7 @@ import {
   IconChecklist,
   IconFolders,
   IconGitFork,
+  IconHammer,
   IconPencil,
   IconPlus,
   type IconProps,
@@ -36,7 +37,8 @@ export type { CommandLine } from './model.ts'
  * The settings of one Project (design D4-07, recette 1 of lot 20).
  *
  * A navigation on the left and one section on screen at a time: General, Repositories,
- * Workspaces, Commands, Preparation, Variables. A page that held all six one under the other was
+ * Workspaces, Commands, Preparation, Variables, and Build — the checks a build is judged by
+ * (lot 22, D10-06). A page that held all six one under the other was
  * a page read by scrolling past five things to reach the sixth. The section chosen stays chosen
  * while the page is open; the arrows walk the navigation, as in any list of tabs.
  *
@@ -49,7 +51,7 @@ export type { CommandLine } from './model.ts'
  *
  * Repositories and Commands are lists, and every addition and every edit is a dialog: a row says
  * what a thing is and offers to edit or remove it, and nothing is typed into a row. Workspaces,
- * Preparation and Variables are composed by the caller and drawn here as they are handed.
+ * Preparation, Variables and Build are composed by the caller and drawn here as they are handed.
  */
 const PAGE = 'flex flex-col gap-6'
 
@@ -99,6 +101,7 @@ export type ProjectSettingsSection =
   | 'commands'
   | 'preparation'
   | 'variables'
+  | 'build'
 
 const SECTIONS: {
   value: ProjectSettingsSection
@@ -111,6 +114,7 @@ const SECTIONS: {
   { value: 'commands', label: 'Commands', icon: IconTerminal2 },
   { value: 'preparation', label: 'Preparation', icon: IconChecklist },
   { value: 'variables', label: 'Variables', icon: IconVariable },
+  { value: 'build', label: 'Build', icon: IconHammer },
 ]
 
 export interface ProjectSettingsProps {
@@ -165,9 +169,11 @@ export interface ProjectSettingsProps {
   preparation?: ReactNode
   /** The Project's variables, composed by the caller (D8-06). */
   variables?: ReactNode
+  /** The checks of the Project's build, composed by the caller: its `BuildChecks` (D10-06). */
+  checks?: ReactNode
   /**
-   * What the engine last refused about the Workspaces, the preparation or the variables, in its
-   * words, shown at the top of those three sections; null or absent when nothing was.
+   * What the engine last refused about the Workspaces, the preparation, the variables or the
+   * checks, in its words, shown at the top of those sections; null or absent when nothing was.
    */
   slotRefusal?: string | null | undefined
   /** The section shown first; General unless said otherwise. */
@@ -199,6 +205,7 @@ export function ProjectSettings({
   workspaces,
   preparation,
   variables,
+  checks,
   slotRefusal = null,
   defaultSection = 'general',
   section,
@@ -355,6 +362,7 @@ export function ProjectSettings({
     ),
     preparation: slot(preparation, 'The preparation of this Project cannot be read yet.'),
     variables: slot(variables, 'The variables of this Project cannot be read yet.'),
+    build: slot(checks, 'The checks of this Project cannot be read yet.'),
   }
 
   return (

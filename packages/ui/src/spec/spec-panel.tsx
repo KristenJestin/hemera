@@ -28,7 +28,8 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  *
  * The mission panel (`session/mission-panel.tsx`) is its shell: the fold to a band beside the
  * chat, the width that pushes the chat as it unfolds, the agent unfolding it onto what it starts
- * on unless the hand folded it, and the keyboard across a fold. What is the Spec's is here.
+ * on unless the hand folded it, the keyboard across a fold, and the page it becomes while the
+ * chat is minimised. What is the Spec's is here.
  *
  * Unfolded, a head that stays on top — the key, the title, the status and the one sentence of
  * what is happening — and under it the rail beside the stage, the readiness at the rail's foot.
@@ -74,6 +75,11 @@ export interface SpecPanelProps extends SpecPartHandlers {
   /** Told each time the panel folds or unfolds, by the hand or because the agent writes. */
   onFoldChange?: ((folded: boolean) => void) | undefined
   /**
+   * Whether the chat beside it is minimised, which makes this panel the page (lot 5c, issue
+   * #115). A panel drawn on the page has no band to fold to and offers no fold.
+   */
+  page?: boolean | undefined
+  /**
    * Whether the Spec was just created in this Session, from the agent's proposal: the panel then
    * arrives, unfolding from nothing on its own spring, rather than standing there (issue #130).
    */
@@ -97,6 +103,7 @@ export function SpecPanel({
   defaultReworkOpen = false,
   defaultFolded = true,
   onFoldChange,
+  page = false,
   arrives,
   onMarkReady,
   onRework,
@@ -139,6 +146,7 @@ export function SpecPanel({
         noun="Spec"
         defaultFolded={defaultFolded}
         onFoldChange={onFoldChange}
+        page={page}
         arrives={arrives}
         following={spec.focus}
         // Unfolded by the agent, the stage shows the part it starts on, whatever was chosen.
@@ -156,7 +164,9 @@ export function SpecPanel({
                 superseded={spec.replacedBy !== undefined}
                 onPickRevision={onPickRevision}
                 onRework={() => setReworking(true)}
-                onFold={fold}
+                // The fold is not offered on the page: the panel is the whole row, and a band
+                // beside nothing is not a place to put it (lot 5c, issue #115).
+                onFold={page ? undefined : fold}
               />
               <p className={NOW}>{spec.now}</p>
               {buildable && build !== undefined && <WorkspaceActions {...build} />}

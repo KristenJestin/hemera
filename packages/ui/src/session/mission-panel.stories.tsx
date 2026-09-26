@@ -84,15 +84,21 @@ const LABELS = new Map([
 function Row({
   defaultFolded,
   onFoldChange,
+  width,
   arrives,
 }: {
   defaultFolded?: boolean | undefined
   onFoldChange: (folded: boolean) => void
+  /** How wide it unfolds: the Spec's share of the row. */
+  width?: 'wide' | undefined
   arrives?: boolean | undefined
 }): ReactNode {
   // Arriving, the panel is not there until the mission begins, which the chat's button does.
   const [begun, setBegun] = useState(arrives !== true)
   const [following, setFollowing] = useState<string | undefined>(undefined)
+  // What the page asks of the fold, once it asks anything: the page keeps it in step with the
+  // panel's own answer, as a caller that folds it itself does.
+  const [asked, setAsked] = useState<boolean | undefined>(undefined)
   const [current, setCurrent] = useState<RailChoice>({ item: 't1' })
   const groups = groupsOf(following)
   const rail = {
@@ -112,6 +118,7 @@ function Row({
             of it but the band while the panel is folded, and what is left beside it once unfolded.
           </p>
           <Button onClick={() => setFollowing('t2')}>Let the agent start the ledger</Button>
+          <Button onClick={() => setAsked(true)}>Fold it from the page</Button>
           {!begun && <Button onClick={() => setBegun(true)}>Begin the build</Button>}
         </div>
         {begun && (
@@ -120,7 +127,12 @@ function Row({
             label="Build B-3"
             noun="build"
             defaultFolded={defaultFolded}
-            onFoldChange={onFoldChange}
+            folded={asked}
+            width={width}
+            onFoldChange={(folded) => {
+              setAsked(folded)
+              onFoldChange(folded)
+            }}
             following={following}
             onFollow={() => setCurrent({ item: following ?? 't2' })}
             head={(fold) => (
@@ -161,6 +173,11 @@ const meta = {
   args: { onFoldChange: fn() },
   argTypes: {
     defaultFolded: { control: 'boolean', description: 'Whether it starts folded to its band.' },
+    width: {
+      control: 'inline-radio',
+      options: ['wide'],
+      description: 'How wide it unfolds: a Spec’s share of the row.',
+    },
     arrives: {
       control: 'boolean',
       description: 'Whether it arrives, opening from nothing, once the mission begins.',
@@ -306,6 +323,25 @@ export const AgentUnfolds: Story = {
       'aria-current',
       'true',
     )
+  },
+}
+
+/**
+ * Folded by the page: the page folding it is a hand folding it — it holds against the agent —
+ * and the band unfolds it as it always does, which the page is told.
+ */
+export const FoldedByThePage: Story = {
+  args: { defaultFolded: false },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Fold it from the page' }))
+    await waitFor(() => expect(panelOf(canvasElement).getBoundingClientRect().width).toBe(BAND))
+    await expect(args.onFoldChange).toHaveBeenLastCalledWith(true)
+    await userEvent.click(canvas.getByRole('button', { name: 'Let the agent start the ledger' }))
+    await expect(canvas.queryByRole('region', { name: 'Stage of B-3' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Unfold the build' }))
+    await expect(args.onFoldChange).toHaveBeenLastCalledWith(false)
+    await expect(await canvas.findByRole('region', { name: 'Stage of B-3' })).toBeVisible()
   },
 }
 

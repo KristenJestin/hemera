@@ -118,3 +118,40 @@ export interface CommandLine {
   /** The folder it runs in, relative to its base; empty for the base itself. */
   folder: string
 }
+
+/** Where a check runs (D10-06): at the root, in one repository, or in each repository changed. */
+export type CheckWhere = 'root' | 'repository' | 'changed'
+
+/** When a check runs (D10-06): after each task, after each story, or at the end of the build. */
+export type CheckWhen = 'task' | 'story' | 'end'
+
+/**
+ * A number a check's output has to show (D10-06): the first capture of `pattern`, read as a
+ * number, must be at least `minimum` — and the check must still exit 0.
+ */
+export interface CheckExpect {
+  pattern: string
+  minimum: number
+}
+
+/**
+ * One check of a Project's build (D10-06): what Hemera runs to judge the agent's work. A command
+ * of the catalogue or a line of the user's — exactly one of the two — where and when it runs, what
+ * number its output has to show beyond its exit code, and the files its `{files}` stands for.
+ */
+export interface CheckLine {
+  id: string
+  /** What the check is called, unique in the Project. */
+  name: string
+  /** The catalogue command it runs, by id; null for a line of the user's. */
+  commandId: string | null
+  /** The line it runs; null for a catalogue command. */
+  line: string | null
+  where: CheckWhere
+  /** The repository's path as the Project declares it, when `where` is `repository`. */
+  repository: string | null
+  when: CheckWhen
+  expect: CheckExpect | null
+  /** The filter `{files}` is expanded with: the task's changed files that match it. */
+  files: string | null
+}

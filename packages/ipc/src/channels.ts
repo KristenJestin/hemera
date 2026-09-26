@@ -168,6 +168,22 @@ export const CHANNELS = {
   'variables.set': ENGINE_REQUESTS['variables.set'],
   'variables.remove': ENGINE_REQUESTS['variables.remove'],
 
+  // The build of a `build` Session and the checks of a Project, relayed the same way: a task's
+  // state, an attempt and a check are the engine's, and the window only says what the user did
+  // (D10-04, D10-06).
+  'build.read': ENGINE_REQUESTS['build.read'],
+  'build.pause': ENGINE_REQUESTS['build.pause'],
+  'build.resume': ENGINE_REQUESTS['build.resume'],
+  'build.accept': ENGINE_REQUESTS['build.accept'],
+  'build.stop': ENGINE_REQUESTS['build.stop'],
+  'build.taskDone': ENGINE_REQUESTS['build.taskDone'],
+  'build.taskSkip': ENGINE_REQUESTS['build.taskSkip'],
+  'build.dismissBlocker': ENGINE_REQUESTS['build.dismissBlocker'],
+  'checks.list': ENGINE_REQUESTS['checks.list'],
+  'checks.save': ENGINE_REQUESTS['checks.save'],
+  'checks.remove': ENGINE_REQUESTS['checks.remove'],
+  'checks.acceptProposed': ENGINE_REQUESTS['checks.acceptProposed'],
+
   /**
    * The four the main process answers itself, because each of them is something only it can do.
    *

@@ -9,7 +9,13 @@ import { ServiceList } from '../workspace/service-list.tsx'
 import { VariablesEditor } from '../workspace/variables-editor.tsx'
 import { WorkspaceList } from '../workspace/workspace-list.tsx'
 import { WorkspaceRepositories } from '../workspace/workspace-repositories.tsx'
-import type { CommandLine, ProjectSettingsDraft, RepositoryLine } from './model.ts'
+import { BuildChecks } from './build-checks.tsx'
+import {
+  CHECKS,
+  COMMANDS as CHECK_COMMANDS,
+  REPOSITORIES as CHECK_REPOSITORIES,
+} from './check-fixtures.ts'
+import type { CheckLine, CommandLine, ProjectSettingsDraft, RepositoryLine } from './model.ts'
 import { PreparationEditor, type RecipeStepLine } from './preparation-editor.tsx'
 import { ProjectSettings, type ProjectSettingsProps } from './project-settings.tsx'
 
@@ -21,8 +27,8 @@ import { ProjectSettings, type ProjectSettingsProps } from './project-settings.t
  * rule, and the panel stands in for it: `saveRefusal`, `repositoryRefusal` and `commandRefusal`
  * are what the engine would have answered.
  *
- * The Workspaces, the preparation and the variables are composed by the caller: the stories hand
- * in the blocks the application hands in, with their own fixtures.
+ * The Workspaces, the preparation, the variables and the checks are composed by the caller: the
+ * stories hand in the blocks the application hands in, with their own fixtures.
  */
 const ATLAS: ProjectSettingsDraft = {
   name: 'Atlas',
@@ -335,6 +341,37 @@ function HeldVariables() {
 
 const VARIABLES = <HeldVariables />
 
+/**
+ * The Build section: the checks a build is judged by (lot 22, D10-06), held so that a check added
+ * or edited in its dialog lands in the list.
+ */
+function HeldChecks() {
+  const [checks, setChecks] = useState<readonly CheckLine[]>(CHECKS)
+  return (
+    <BuildChecks
+      checks={checks}
+      commands={CHECK_COMMANDS}
+      repositories={CHECK_REPOSITORIES}
+      onAdd={async (check) => {
+        setChecks((now) => [...now, check])
+        return await Promise.resolve(null)
+      }}
+      onUpdate={async (check) => {
+        setChecks((now) => now.map((one) => (one.id === check.id ? check : one)))
+        return await Promise.resolve(null)
+      }}
+      onRemove={(id) => setChecks((now) => now.filter((one) => one.id !== id))}
+      onAcceptProposed={async (proposals) => {
+        setChecks(proposals)
+        return await Promise.resolve(null)
+      }}
+      onDiscardProposed={() => undefined}
+    />
+  )
+}
+
+const BUILD_CHECKS = <HeldChecks />
+
 interface Extra {
   /** What saving answers: nothing, or the refusal the engine sent back. */
   saveRefusal?: string | null
@@ -451,6 +488,7 @@ const meta = {
     workspaces: WORKSPACES,
     preparation: PREPARATION,
     variables: VARIABLES,
+    checks: BUILD_CHECKS,
     slotRefusal: null,
     onSave: fn(async () => await Promise.resolve(null)),
     onAddCommand: fn(async () => await Promise.resolve(null)),
@@ -491,13 +529,22 @@ const meta = {
       description: 'The Preparation section, composed by the caller.',
     },
     variables: { control: false, description: 'The Variables section, composed by the caller.' },
+    checks: { control: false, description: 'The Build section, composed by the caller.' },
     slotRefusal: {
       control: 'text',
       description: 'What the engine last refused about the three composed sections.',
     },
     defaultSection: {
       control: 'select',
-      options: ['general', 'repositories', 'workspaces', 'commands', 'preparation', 'variables'],
+      options: [
+        'general',
+        'repositories',
+        'workspaces',
+        'commands',
+        'preparation',
+        'variables',
+        'build',
+      ],
       description: 'The section shown first.',
     },
     section: { control: false, description: 'The section shown, for a caller that keeps it.' },
@@ -532,7 +579,7 @@ function rowOf(canvasElement: HTMLElement, text: string) {
 }
 
 /**
- * Everything in place, on General: the navigation of six sections, the form, its button, the
+ * Everything in place, on General: the navigation of seven sections, the form, its button, the
  * archive at the bottom.
  */
 export const Complete: Story = {
@@ -543,7 +590,15 @@ export const Complete: Story = {
       within(nav)
         .getAllByRole('tab')
         .map((tab) => tab.textContent),
-    ).toEqual(['General', 'Repositories', 'Workspaces', 'Commands', 'Preparation', 'Variables'])
+    ).toEqual([
+      'General',
+      'Repositories',
+      'Workspaces',
+      'Commands',
+      'Preparation',
+      'Variables',
+      'Build',
+    ])
     await expect(canvas.getByRole('tab', { name: 'General' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -902,6 +957,29 @@ export const Variables: Story = {
   },
 }
 
+/**
+ * Build: the checks a build is judged by (D10-06), composed by the caller, and one edited in its
+ * dialog where it stands.
+ */
+export const Build: Story = {
+  args: { defaultSection: 'build' },
+  play: async ({ canvasElement }) => {
+    const panel = panelOf(canvasElement)
+    await expect(panel.getByRole('heading', { name: 'Checks' })).toBeVisible()
+    await userEvent.click(panel.getByRole('button', { name: 'Edit lint' }))
+    const inside = within(await waitFor(() => within(document.body).getByRole('dialog')))
+    await waitFor(() => expect(inside.getByRole('heading', { name: 'Edit check' })).toBeVisible())
+    await userEvent.click(inside.getByLabelText('When'))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'At the end' }))
+    await userEvent.click(inside.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    const lint = panel.getByRole('button', { name: 'Edit lint' }).closest('li')!
+    await expect(within(lint).getByText('At the end')).toBeVisible()
+  },
+}
+
 /** What the engine refused about a composed section, said at its top, as it said it. */
 export const Refused: Story = {
   args: {
@@ -935,9 +1013,10 @@ export const Keyboard: Story = {
       'aria-selected',
       'true',
     )
-    // Tab leaves the navigation for the first control of the section.
+    // Tab leaves the navigation for the first control of the section, once the section is there.
+    const addCommand = await canvas.findByRole('button', { name: 'Add command' })
     await userEvent.tab()
-    await expect(canvas.getByRole('button', { name: 'Add command' })).toHaveFocus()
+    await expect(addCommand).toHaveFocus()
 
     const pencil = canvas.getByRole('button', { name: 'Edit check' })
     pencil.focus()

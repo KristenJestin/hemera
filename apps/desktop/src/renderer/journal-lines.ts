@@ -58,10 +58,26 @@ export function whenOf(when: number, now: number = Date.now()): string {
   return new Date(when).toLocaleDateString()
 }
 
+/** A build's phase, in the words the build view says it in (D10-01). */
+const PHASE_WORDS = new Map([
+  ['prepare', 'Build getting ready'],
+  ['execute', 'Building'],
+  ['verify', 'Final checks'],
+])
+
+/** Where a check ran: the Workspace root, or the repository's path (D10-06). */
+function placeWords(place: string): string {
+  return place === '' ? 'at the Workspace root' : `in ${place}`
+}
+
 /** What each type of event says, with what its payload adds to it. */
 function labelOf(entry: JournalEntry): string {
   const payload = entry.payload
   const said = (key: string): string => String(payload[key] ?? '')
+  /** A build task by the label the build names it with. */
+  const task = (): string => said('label')
+  /** What a sentence adds after a colon when the payload has it, and nothing otherwise. */
+  const because = (key: string): string => ((payload[key] ?? null) === null ? '' : `: ${said(key)}`)
   switch (entry.type) {
     case 'project.created':
       return `Project “${said('name')}” created`
@@ -131,6 +147,71 @@ function labelOf(entry: JournalEntry): string {
       return (payload.reason ?? null) === null
         ? `Reworked into revision ${said('number')}`
         : `Reworked into revision ${said('number')}: ${said('reason')}`
+    // A build (D10-14), in the plain words of its view: a phase begun, a task moving, a check
+    // run and what it said, and the user's pause, resume, accept and stop.
+    case 'build.phase_started':
+      return PHASE_WORDS.get(said('phase')) ?? `Build ${said('phase')}`
+    case 'build.paused':
+      return 'Build paused'
+    case 'build.resumed':
+      return 'Build resumed'
+    case 'build.reviewed':
+      return 'Build back to work on the review of the user'
+    case 'build.accepted':
+      return 'Build accepted'
+    case 'build.stopped':
+      return `Build stopped${because('reason')}`
+    case 'spec.in_progress':
+      return 'Spec in progress: its first task started'
+    case 'task.ready':
+      return `${task()} ready`
+    case 'task.started':
+      return Number(payload.attempt ?? 1) > 1
+        ? `${task()} started again, try ${said('attempt')} of 3`
+        : `${task()} started`
+    case 'task.finished':
+      return `${task()} finished by the agent`
+    case 'task.checked':
+      if (payload.result !== 'red') return `${task()} checked`
+      return (payload.attempt ?? null) === null
+        ? `${task()} checked: red`
+        : `${task()} checked: red, try ${said('attempt')} of 3`
+    case 'task.done':
+      return payload.result === 'unverified' ? `${task()} done, not verified` : `${task()} done`
+    case 'task.yours':
+      // The user's own task, or one whose three tries were red (D10-07).
+      return (payload.reason ?? 'human') === 'human'
+        ? `${task()} is yours`
+        : `${task()} is yours after three red tries`
+    case 'task.blocked':
+      // The task the agent said contradicts the Spec, with its reason; a dependant, with it.
+      return (payload.because ?? null) === null
+        ? `${task()} blocked${because('reason')}`
+        : `${task()} blocked with ${said('because')}`
+    case 'task.skipped':
+      return `${task()} skipped${because('reason')}`
+    case 'check.ran': {
+      // What it judged — a task by its label, a story, or the end — then what it said, and where.
+      const about =
+        payload.scope === 'story'
+          ? 'Story · '
+          : payload.scope === 'build'
+            ? 'Final checks · '
+            : (payload.label ?? null) === null
+              ? ''
+              : `${said('label')} · `
+      const check = `${about}Check “${said('name')}”`
+      const where = placeWords(said('place'))
+      if (payload.verdict === 'green') return `${check} green ${where}`
+      if (payload.verdict === 'skipped') return `${check} skipped ${where}`
+      return `${check} red ${where}${because('detail')}`
+    }
+    case 'check.created':
+      return `Check “${said('name')}” added`
+    case 'check.updated':
+      return `Check “${said('name')}” changed`
+    case 'check.removed':
+      return `Check “${said('name')}” removed`
     default:
       // An event written by a version that knew more still has a type, and a type read out is
       // more use than a line that says nothing at all.
@@ -141,9 +222,10 @@ function labelOf(entry: JournalEntry): string {
 /**
  * The entity a line is drawn under. The Journal tells a Project, a Session, a Spec and the Profile
  * apart; a Workspace, a command and a launch (D8-16) belong to their Project, and are drawn under
- * it.
+ * it; a build task belongs to the build Session it is built in (D10-14).
  */
 function drawnKind(kind: JournalEntry['entityKind']): JournalLine['kind'] {
+  if (kind === 'task') return 'session'
   return kind === 'session' || kind === 'profile' || kind === 'spec' ? kind : 'project'
 }
 

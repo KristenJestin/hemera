@@ -250,6 +250,8 @@ const RELAYED = [
   'variables.list',
   'variables.set',
   'variables.remove',
+  // A build asked for on a ready Spec (D8-13).
+  'launches.request',
   // The Specs, all of them the engine's to answer (D7-01).
   'specs.list',
   'specs.read',
@@ -274,6 +276,20 @@ const RELAYED = [
   'launches.request',
   'launches.start',
   'launches.retry',
+  // The build of a `build` Session and the checks it is judged by, the engine's like the rest
+  // (D10-04, D10-06).
+  'build.read',
+  'build.pause',
+  'build.resume',
+  'build.accept',
+  'build.stop',
+  'build.taskDone',
+  'build.taskSkip',
+  'build.dismissBlocker',
+  'checks.list',
+  'checks.save',
+  'checks.remove',
+  'checks.acceptProposed',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

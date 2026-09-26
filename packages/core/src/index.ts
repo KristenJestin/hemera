@@ -144,6 +144,48 @@ export type {
   WorkspaceStep,
 } from './domain/workspace.ts'
 export {
+  ATTEMPTS_BEFORE_YOURS,
+  ATTEMPT_RESULTS,
+  ATTEMPT_SCOPES,
+  BUILD_PHASES,
+  CHECK_VERDICTS,
+  CHECK_WHEN,
+  CHECK_WHERE,
+  FILES_PLACEHOLDER,
+  TASK_STATES,
+  attemptResult,
+  checkPlaces,
+  checkProblem,
+  dependantsOf,
+  evaluateExpect,
+  expandFiles,
+  promotions,
+  proposeChecks,
+  readySet,
+  satisfied,
+  stateAfterAttempt,
+  storyDone,
+  taskLabels,
+  tasksSettled,
+} from './domain/build.ts'
+export type {
+  ActiveBuildPhase,
+  AttemptResult,
+  AttemptScope,
+  BuildPhase,
+  BuildTask,
+  ChangedFile,
+  CheckDraft,
+  CheckExpect,
+  CheckJudgement,
+  CheckVerdict,
+  CheckWhen,
+  CheckWhere,
+  ProjectCheck,
+  Promotion,
+  TaskState,
+} from './domain/build.ts'
+export {
   BASE_SECTIONS,
   DEFAULT_SPEC_PREFIX,
   DEFINE_PROTOCOL,
@@ -218,3 +260,19 @@ export {
   renderSpecMarkdown,
 } from './protocols/define/index.ts'
 export type { BriefInput } from './protocols/define/index.ts'
+export {
+  BUILD_MISSION_BRIEF,
+  BUILD_PHASE_BRIEFS,
+  BUILD_PROTOCOL,
+  composeBuildBrief,
+} from './protocols/build/index.ts'
+export type {
+  BriefAttempt,
+  BriefBlocker,
+  BriefCheck,
+  BriefFailure,
+  BriefFile,
+  BriefSnapshot,
+  BriefTask,
+  BuildBriefInput,
+} from './protocols/build/index.ts'

@@ -450,7 +450,6 @@
      changes while it unfolds: what the panel holds is laid at this width from the first frame,
      so nothing inside it reflows on the way. */
   --spacing-mission-panel: 45cqw;
-
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -571,14 +570,45 @@
    and not a length, because the two ends are lengths of different kinds, rems and a share of the row, and
    only the browser can put them on one line; at rest it is one of the two tokens exactly, and
    stays so while the window is resized. The fallback is the band, which the panel opens at.
-   `--mission-panel-in` scales the whole of it, from nothing to 1, while a panel whose mission has
-   just begun arrives in the row (issue #130); it is 1 for a panel that was already there. */
+
+   The page (lot 5c, issue #115) is the same slot taken to the whole row, which the layout writes
+   as `--mission-panel-page` while the chat is minimised: the panel grows over the chat on that
+   value, and the chat is covered rather than resized. Blended and not added, so the two ends of
+   the travel are exactly the band and exactly the row, whatever the fold stood at when the chat
+   went away.
+
+   `--mission-panel-in` scales the band and the fold, from nothing to 1, while a panel whose
+   mission has just begun arrives in the row (issue #130); it is 1 for a panel that was already
+   there. */
 @utility mission-panel-slot {
   width: calc(
     (var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
         var(--mission-panel-open, 0)) *
+      var(--mission-panel-in, 1) * (1 - var(--mission-panel-page, 0)) + 100cqw *
+      var(--mission-panel-page, 0)
+  );
+}
+
+/* The chat beside a mission panel (lot 5c, issue #115), pinned to the width the panel leaves it:
+   the band, or the unfolded share. A length asked of the row rather than a share of the chat's own
+   box, so the chat's width answers the fold and not the box it happens to be in — which is what
+   keeps its text from reflowing when the panel grows over it to the page. It reads
+   `--mission-panel-open` and `--mission-panel-in` alone: the page moves the panel over the chat,
+   never the chat under it, while a panel arriving pushes it as a fold does (issue #130). */
+@utility chat-pinned {
+  width: calc(
+    100cqw -
+      (var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
+        var(--mission-panel-open, 0)) *
       var(--mission-panel-in, 1)
   );
+}
+
+/* What an unfolded panel holds (lot 5c): its own share, or the whole row when it is the page.
+   Laid at `max`, so a slot narrower than the share clips it — a fold reflows the chat and nothing
+   of the panel — while a slot wider, which is the page, is filled by it. */
+@utility mission-panel-body {
+  width: max(var(--spacing-mission-panel), 100%);
 }
 
 /* Where the active tab meets the sheet it opens (design D2-02).

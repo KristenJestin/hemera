@@ -32,6 +32,7 @@ const application = dirname(fileURLToPath(import.meta.url))
 const CONTINUED = new Map([
   ['sessions.reopened.e2e.ts', 'sessions.e2e.ts'],
   ['specs.reopened.e2e.ts', 'specs.e2e.ts'],
+  ['builds.reopened.e2e.ts', 'builds.e2e.ts'],
 ])
 
 /**

@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { BUILD_PHASE_BRIEFS } from '@hemera/core'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -60,6 +61,15 @@ const builds = Effect.gen(function* () {
   }>`SELECT id, spec_id, revision_id, workspace_id FROM sessions
     WHERE mission = 'build' ORDER BY created_at`
 })
+
+/** The briefs a Session's thread holds, in the order they were written. */
+const briefsOf = (sessionId: string | null) =>
+  Effect.gen(function* () {
+    const sql = yield* SqliteClient
+    return yield* sql<{ body: string; payload: string }>`
+      SELECT body, payload FROM session_entries
+      WHERE session_id = ${sessionId} AND kind = 'mission_brief' ORDER BY seq`
+  })
 
 /** The Workspace a Spec is built in, which a launch writes (D8-12). */
 const builtIn = (specId: string) =>
@@ -423,6 +433,31 @@ describe('A refusal says the Session the start had written', () => {
   })
 })
 
+describe('A build is given its brief before its agent starts', () => {
+  test('A build Session holds the build’s prepare brief, written before its agent starts, and once', async () => {
+    // A machine that holds none of the agents' bare means: the agent cannot be started (D6-02),
+    // so whatever the thread holds was written before the start.
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        yield* (yield* Preparation).prepare(workspace.id)
+        const launch = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        return { launch, briefs: yield* briefsOf(launch.sessionId) }
+      }),
+    )
+    // One brief, the build's `prepare` brief (D10-02): never the Spec rendered as a `define`
+    // brief beside it.
+    expect(seen.launch.sessionId).not.toBeNull()
+    expect(seen.briefs).toHaveLength(1)
+    expect(JSON.parse(seen.briefs[0]!.payload)).toEqual({ phase: 'prepare' })
+    expect(seen.briefs[0]!.body).toContain(BUILD_PHASE_BRIEFS.prepare)
+  })
+})
+
 describe('A launch waiting on a Workspace that will never be ready ends', () => {
   test('A preparation that fails fails the launches that waited on it', async () => {
     opened = await openWindow(dataFolder, fakeAgent())
@@ -665,18 +700,27 @@ describe('The engine comes back to what a stopped engine left', () => {
         const launched = yield* Launches
         const sql = yield* SqliteClient
         yield* recovered
+        // The agent took the `prepare` brief it was handed once started (D10-02).
+        const delivered = yield* until(
+          sql<{ path: string }>`SELECT path FROM context_deliveries
+            WHERE session_id = ${left.sessionId} AND path = 'build · prepare'`,
+          (rows) => rows.length > 0,
+        )
         return {
           back: yield* launched.one(left.id),
-          briefs: yield* sql<{ count: number }>`
-            SELECT count(*) AS count FROM session_entries
-            WHERE session_id = ${left.sessionId} AND kind = 'mission_brief'`,
+          briefs: yield* briefsOf(left.sessionId),
           builds: yield* builds,
+          delivered,
         }
       }),
     )
     // The brief that build was never given is written again, from the revision the launch names,
-    // before its agent is asked: a build is never resumed blind (D8-13).
-    expect(seen.briefs).toEqual([{ count: 1 }])
+    // before its agent is asked: a build is never resumed blind (D8-13). It is the build's own
+    // `prepare` brief, and the delivery that handed it to the agent did not write it twice.
+    expect(seen.delivered).not.toHaveLength(0)
+    expect(seen.briefs).toHaveLength(1)
+    expect(JSON.parse(seen.briefs[0]!.payload)).toEqual({ phase: 'prepare' })
+    expect(seen.briefs[0]!.body).toContain(BUILD_PHASE_BRIEFS.prepare)
     expect(seen.back.state).toBe('started')
     expect(seen.back.sessionId).toBe(left.sessionId)
     expect(seen.builds).toHaveLength(1)
@@ -852,7 +896,9 @@ describe('A Rework cancels a launch that has not started', () => {
     )
 
     expect(seen.refused).toBeInstanceOf(ReopenRefusedError)
-    expect(seen.refused.message).toContain('in_progress')
+    // Once a build's first task has run, the refusal names the frozen contract rather than the
+    // bare status (D10-10, "The build mission protocol").
+    expect(seen.refused.message).toContain('The build has started')
     // The build that started is untouched: the same launch, the same Session, and no launch was
     // cancelled.
     expect(seen.reworked.revision.number).toBe(2)

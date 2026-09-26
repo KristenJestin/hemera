@@ -29,13 +29,16 @@ import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { discoveryLayer } from '#engine/agents/discovery.ts'
 import type { FakeAgent } from '#engine/agents/fake.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { buildChecksLayer, projectChecksLayer } from '#engine/build/checks.ts'
 import { AgentNotices } from '#engine/agents/notices.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
 import { Agents } from '#engine/agents/service.ts'
+import { BuildNotices, buildsLayer } from '#engine/build/build.ts'
+import type { BuildChecks } from '#engine/build/checks.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
-import { commandsLayer } from '#engine/commands/service.ts'
+import { type Commands, commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
 import { type EngineServices, PUSHED, named } from '#engine/index.ts'
 import { journalLayer } from '#engine/journal.ts'
@@ -47,7 +50,7 @@ import { sessionsLayer } from '#engine/sessions.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { specsLayer } from '#engine/specs/specs.ts'
 import { engineStatusLayer } from '#engine/status.ts'
-import { databaseLayer } from '#engine/storage/database.ts'
+import { type Database, databaseLayer } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
@@ -56,10 +59,11 @@ import { gitLayer } from '#engine/git.ts'
 import { hostLinks, preparationLayer } from '#engine/workspaces/preparation.ts'
 import { launchesLayer } from '#engine/workspaces/launches.ts'
 import { recipeLayer } from '#engine/workspaces/recipe.ts'
-import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { SHIPPED, VERSION, besideTheAgent, machine } from './application.ts'
+import { noChecks } from './build-harness.ts'
 
 /** A window over one engine: the bridge the stores talk through, and the way to close it. */
 export interface OpenWindow {
@@ -68,6 +72,8 @@ export interface OpenWindow {
   readonly pushed: readonly EngineEvent[]
   /** What the engine wrote to its diagnostic, which is where a refused access is told. */
   readonly written: readonly string[]
+  /** The build Sessions the engine said changed (`build.changed`), in the order it said it. */
+  readonly built: readonly string[]
   /**
    * Runs a program against this window's engine.
    *
@@ -90,7 +96,20 @@ export async function openWindow(
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {
-  return openOver(dataFolder, machine, agent, ...others)
+  return openOver(dataFolder, machine, noChecks, agent, ...others)
+}
+
+/**
+ * The same window, over the Project's checks a build suite scripts (D10-07), or the checks' own
+ * layer, run through the very commands the tools run.
+ */
+export async function openWindowChecked(
+  dataFolder: string,
+  checks: Layer.Layer<BuildChecks, never, Database | Commands | Variables>,
+  agent: FakeAgent,
+  ...others: readonly FakeAgent[]
+): Promise<OpenWindow> {
+  return openOver(dataFolder, machine, checks, agent, ...others)
 }
 
 /**
@@ -103,17 +122,19 @@ export async function openWindowOn(
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {
-  return openOver(dataFolder, over, agent, ...others)
+  return openOver(dataFolder, over, noChecks, agent, ...others)
 }
 
 async function openOver(
   dataFolder: string,
   over: typeof machine,
+  checks: Layer.Layer<BuildChecks, never, Database | Commands | Variables>,
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {
   const pushed: EngineEvent[] = []
   const written: string[] = []
+  const built: string[] = []
   const listeners = new Set<(event: EngineEvent) => void>()
   const push = (event: EngineEvent) => {
     pushed.push(event)
@@ -141,8 +162,23 @@ async function openOver(
   })
   const database = databaseLayer(join(dataFolder, 'hemera.sqlite'))
 
+  // The builds, on the checks the suite scripts, and the window hearing that one changed: one
+  // service, the catalogue's and the runtime's, as the engine builds it.
+  const builds = buildsLayer.pipe(
+    Layer.provide(gitLayer()),
+    Layer.provide(checks),
+    Layer.provide(
+      Layer.succeed(BuildNotices, {
+        changed: (sessionId) => {
+          built.push(sessionId)
+          push({ event: 'build.changed', sessionId })
+        },
+      }),
+    ),
+  )
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
@@ -191,7 +227,14 @@ async function openOver(
     Layer.provide(runtime),
   )
 
-  const services = Layer.mergeAll(runtime, workspaces)
+  // The Project's checks, over the very catalogue the tools run, and run through it (D10-06): what
+  // the settings and the checks' own suites reach. The builds above run the ones a suite scripts.
+  const projectCheckServices = buildChecksLayer.pipe(
+    Layer.provideMerge(projectChecksLayer),
+    Layer.provide(runtime),
+  )
+
+  const services = Layer.mergeAll(runtime, workspaces, projectCheckServices)
 
   mkdirSync(dataFolder, { recursive: true })
   const scope = Effect.runSync(Scope.make())
@@ -230,6 +273,7 @@ async function openOver(
     bridge,
     pushed,
     written,
+    built,
     running,
     close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
   }

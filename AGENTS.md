@@ -240,6 +240,13 @@ the variables given to what runs in them. Git is `apps/desktop/src/engine/git.ts
 own `git`, spawned with its arguments and no shell, never inside a transaction, its refusal
 answered as Git wrote it.
 
+The builds live under `apps/desktop/src/engine/build/`: the `build` mission protocol and its loop
+(`build.ts`), the tasks' states and the ready set of a build (`tasks.ts`), the briefs its agent is
+handed (`brief.ts`), the Project's checks and how a build runs them through the Commands service
+(`checks.ts`), and the snapshots of a Workspace's repositories taken as Git trees through a
+temporary index, never a commit or a ref (`snapshots.ts`). Hemera owns every task's state: the
+agent only signals, and each change is a row and its Journal line in one transaction.
+
 `data` and `engine` are the names the code uses; `Profile` is the word the interface keeps for
 the same folder, in the settings, in the Journal filter and on the `profile` events the engine
 writes at start-up.
@@ -272,9 +279,9 @@ writes at start-up.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
 - Storybook sidebar, five roots in this order and nothing else: **Foundations** (tokens,
   icons, motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the
-  composed pieces that are not a screen, grouped by family and six families at most
+  composed pieces that are not a screen, grouped by family and seven families at most
   (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`, `Blocks/Spec`,
-  `Blocks/Workspace`);
+  `Blocks/Workspace`, `Blocks/Build`);
   **Surfaces**, one entry per screen (`Surfaces/Session`, `Surfaces/Project/Dialog` when a
   screen has several parts), never one entry per variant; **Shell**, the window frame. The
   order of the roots and the alphabetical order inside are forced by `storySort` in
