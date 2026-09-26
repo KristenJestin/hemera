@@ -323,6 +323,76 @@ describe('A build waits for its environment', () => {
   })
 })
 
+describe('A starter that lost the claim leaves the launch to the one that holds it', () => {
+  test('A starter refused while another one holds the launch starting does not fail it', async () => {
+    // The winner's agent holds its handshake, and says when it got there: the launch stays
+    // `starting`, held by the winner, while the loser is refused.
+    let reached: () => void = () => undefined
+    const handshake = new Promise<void>((resolve) => {
+      reached = resolve
+    })
+    let release: () => void = () => undefined
+    const slow = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    opened = await openWindow(
+      dataFolder,
+      fakeAgent({
+        holdsStart: () => {
+          reached()
+          return slow
+        },
+      }),
+    )
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const sql = yield* SqliteClient
+        const workspace = yield* making(project.id, specId, key)
+        const asked = yield* launched.request(specId, workspace.id)
+        // Ready with no ready step, so nothing starts on its own: the two starters below are the
+        // only ones.
+        yield* sql`UPDATE workspaces SET state = 'ready' WHERE id = ${workspace.id}`
+        // The loser reads the launch `waiting`; right then the winner takes it and is held at its
+        // agent's handshake, and the database refuses the loser what it reads next, before its
+        // own claim (D8-13).
+        const winner = Effect.gen(function* () {
+          yield* Effect.forkDetach(launched.workspaceReady(workspace.id))
+          yield* Effect.promise(() => handshake)
+          yield* sql`ALTER TABLE spec_sections RENAME TO spec_sections_gone`
+        }).pipe(Effect.orDie)
+        yield* Effect.gen(function* () {
+          yield* (yield* Launches).workspaceReady(workspace.id)
+        }).pipe(Effect.provide(interleaved(winner)))
+        const held = yield* launched.one(asked.id)
+        yield* sql`ALTER TABLE spec_sections_gone RENAME TO spec_sections`
+        release()
+        const settled = yield* until(launched.one(asked.id), (one) => one.state !== 'starting')
+        return {
+          builds: yield* builds,
+          held,
+          lines: yield* sql<{ payload: string }>`
+            SELECT payload FROM domain_events WHERE type = 'launch.failed'`,
+          settled,
+        }
+      }),
+    )
+    // The loser said nothing of a launch it never held: the winner's build started, once.
+    expect(seen.held.state).toBe('starting')
+    expect(seen.lines).toEqual([])
+    expect(seen.settled.state).toBe('started')
+    expect(seen.builds).toEqual([
+      {
+        id: seen.settled.sessionId,
+        spec_id: seen.settled.specId,
+        revision_id: seen.settled.revisionId,
+        workspace_id: seen.settled.workspaceId,
+      },
+    ])
+  })
+})
+
 describe('A launch refuses what cannot be built', () => {
   test('A launch on a Spec that is not ready is refused', async () => {
     opened = await openWindow(dataFolder, fakeAgent())
