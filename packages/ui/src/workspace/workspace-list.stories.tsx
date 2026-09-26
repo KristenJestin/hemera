@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { movesLess } from '../../.storybook/reduced-motion.ts'
 
 import { CreateWorkspaceDialog } from './create-workspace-dialog.tsx'
 import type { PlanRepositoryLine, WorkspaceRow } from './model.ts'
@@ -367,6 +368,141 @@ export const Expanded: Story = {
     await waitFor(() => {
       expect(document.getElementById(room)).toHaveStyle({ filter: 'opacity(1)' })
     })
+  },
+}
+
+/** How long the engine takes to answer in this story: the row is open well before it does. */
+const LATE = 700
+
+/** The repositories Git is reading, and the steps that have not landed yet: what arrives. */
+function Arriving({ name }: { name: string }): ReactNode {
+  const [answered, setAnswered] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAnswered(true)
+    }, LATE)
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [])
+  return (
+    <>
+      <WorkspaceRepositories
+        name={name}
+        repositories={[
+          {
+            path: './sources/api',
+            git: answered
+              ? {
+                  ok: true,
+                  branch: `atlas/${name}`,
+                  commit: '4f2c9a1e0b7d3c5a8e6f1d2b9c0a7e4f3d2c1b0a',
+                  staged: 0,
+                  unstaged: 1,
+                  untracked: 0,
+                }
+              : null,
+          },
+        ]}
+      />
+      {answered && (
+        <PreparationSteps
+          steps={[
+            { id: 'w1', kind: 'worktree', target: './sources/api', state: 'done' },
+            { id: 'r1', kind: 'run', target: 'install', state: 'done' },
+          ]}
+          onResume={fn()}
+        />
+      )}
+    </>
+  )
+}
+
+/** The height of a room and of what it holds, one pair per frame. */
+interface Frames {
+  room: number[]
+  held: number[]
+}
+
+/** What is watched while the row is open, and the way to stop watching. */
+interface Followed {
+  frames: Frames
+  stop: () => void
+}
+
+/**
+ * The room's height and the height of what it holds, sampled every frame until `stop`.
+ *
+ * Read off the page and not off a motion value: what the reader sees is the box, and the box is
+ * what has to stop being a number the room decided once.
+ */
+function following(room: HTMLElement, content: HTMLElement): Followed {
+  const frames: Frames = { room: [], held: [] }
+  let running = true
+  const tick = (): void => {
+    frames.room.push(room.getBoundingClientRect().height)
+    frames.held.push(content.getBoundingClientRect().height)
+    if (running) requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+  return {
+    frames,
+    stop: (): void => {
+      running = false
+    },
+  }
+}
+
+/**
+ * The details arrive while the row is unfolding (issue #108): the repositories Git is reading at
+ * once, the steps a moment later. The room follows what it holds — a height measured at `auto`
+ * would have been kept, and the fold would have ended under its own content.
+ */
+export const Unfolding: Story = {
+  args: { expanded: null, renderDetails: (id) => <Arriving name={id} /> },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = rowOf(canvasElement, 'login-form')
+    const disclosure = row.getByRole('button', { name: 'Details of login-form' })
+    await userEvent.click(disclosure)
+
+    const room = await waitFor(() => {
+      const element = document.getElementById(disclosure.getAttribute('aria-controls')!)
+      expect(element, 'the room is not open').not.toBeNull()
+      return element!
+    })
+    const content = room.firstElementChild
+    if (!(content instanceof HTMLElement)) throw new Error('the room holds no details')
+    const height = (element: HTMLElement): number => element.getBoundingClientRect().height
+
+    // What Git is reading is already the height it will answer in; the steps are not there yet,
+    // and it is the growth that the room has to play rather than take.
+    const seen = following(room, content)
+    const before = height(content)
+    await waitFor(
+      () => {
+        expect(canvas.queryByText('Reading Git…')).toBeNull()
+        expect(Math.abs(height(room) - height(content))).toBeLessThan(0.5)
+      },
+      { timeout: 5000 },
+    )
+    seen.stop()
+
+    // The fold ends at the full height…
+    expect(height(content)).toBeGreaterThan(before)
+    expect(height(room)).toBeCloseTo(height(content), 0)
+    // …and it got there a frame at a time: the room was seen above the height it started at and
+    // under the height it now holds, which no jump gives. A system asking for less movement plays
+    // no journey at all — the fold is `instant` — and the end state read above is then the whole
+    // of what this story answers for.
+    const moving = seen.frames.room.filter(
+      (sample, index) => sample > before + 1 && sample < seen.frames.held[index]! - 1,
+    )
+    if (movesLess()) {
+      expect(moving).toHaveLength(0)
+    } else {
+      expect(moving.length).toBeGreaterThan(2)
+    }
   },
 }
 

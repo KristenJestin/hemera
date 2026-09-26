@@ -51,12 +51,16 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
  * and that distance is a share only the layout knows — the width of a button is its label's, and
  * no token holds it. It sizes no zone by what it reads: what it reads was laid out by the theme
  * and by the label in the first place.
+ *
+ * The room of a Workspace row is the same case, a height at a time: the details of a row arrive by
+ * pieces, so the height of the room is one it follows rather than one it decided (issue #108).
  */
 export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/shell/gutter.tsx',
   'packages/ui/src/shell/tab-mark.tsx',
   'packages/ui/src/composer/effort-slider.tsx',
   'packages/ui/src/motion.ts',
+  'packages/ui/src/workspace/workspace-list.tsx',
 ]
 
 export interface Refusal {
