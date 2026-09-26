@@ -102,13 +102,14 @@ export interface ComposerProps {
    */
   agentMenu?: ReactNode | undefined
   /**
-   * Whether the foot offers to turn what is written into a Spec (design D4b-02).
+   * Writes the text as the start of a Session that writes a Spec, and answers as `onSend` does
+   * (design D4b-02, issue #128).
    *
-   * The Home does and a Session does not: a Session is a conversation that is already under
-   * way, and a Spec is made from the question that starts one. Off unless the page asks for it,
-   * so the control has to be earned rather than removed.
+   * The Home offers it and a Session does not: a Session is a conversation that is already under
+   * way, and a Spec is made from the question that starts one. No `New Spec` unless the page
+   * hands this over, so the control has to be earned rather than removed.
    */
-  spec?: boolean | undefined
+  onSpec?: ((text: string) => Promise<string | null>) | undefined
   /**
    * Whether a turn is running, which is what the send becomes while it does (design D17-13).
    *
@@ -159,7 +160,7 @@ export function Composer({
   placeholder = 'Ask anything, think out loud, or describe what you want to do…',
   onSend,
   agentMenu,
-  spec = false,
+  onSpec,
   running = false,
   onStop,
   blocked,
@@ -304,10 +305,10 @@ export function Composer({
    * busy with this one, and Enter keeps the sentence where it is rather than sending it into a
    * turn that would refuse it.
    */
-  const send = async () => {
+  const send = async (write: (text: string) => Promise<string | null> = onSend) => {
     if (!ready || running) return
     setSending(true)
-    const said = await onSend(value)
+    const said = await write(value)
     setSending(false)
     setRefusal(said)
     if (said !== null) return
@@ -385,7 +386,9 @@ export function Composer({
               sending={sending}
               running={running}
               forcing={stopPressed}
-              spec={spec}
+              // The same write as the send, handed to the page's other door: what is written
+              // leaves the box, or stays with the reason, exactly as it does for a send.
+              onSpec={onSpec === undefined ? undefined : () => void send(onSpec)}
               action={action}
               onSend={() => void send()}
               onStop={stop}

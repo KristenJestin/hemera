@@ -42,10 +42,9 @@ const meta = {
       description: 'Whether the agent has started, which fixes the Workspace.',
       table: { defaultValue: { summary: 'false' } },
     },
-    spec: {
-      control: 'boolean',
-      description: 'Whether the row offers a Spec: the Home does, a Session does not.',
-      table: { defaultValue: { summary: 'false' } },
+    onSpec: {
+      description:
+        'Starts a Session that writes a Spec: the Home hands it over, a Session does not.',
     },
     onStop: { description: 'Cancels the running turn, when there is one to cancel.' },
   },
@@ -70,18 +69,33 @@ export const ReadyToSend: Story = {
 }
 
 /**
- * The Home's foot, which is the one that offers a Spec.
+ * The Home's foot, which is the one that offers a Spec (issue #128).
  *
- * It is drawn and off: a Spec is lot 6. What this story holds is that it is drawn *here* and
- * nowhere else — the same row in a Session has no such button at all.
+ * Something is written: `New Spec` is on, says what it does, and pressing it asks for a Session
+ * that writes a Spec rather than a chat. It is drawn *here* and nowhere else: the same row in a
+ * Session has no such button at all.
  */
 export const WithASpec: Story = {
-  args: { spec: true, action: 'Start chat' },
-  play: async ({ canvasElement }) => {
+  args: { onSpec: fn(), action: 'Start chat' },
+  play: async ({ canvasElement, args }) => {
+    args.onSend.mockClear()
     const canvas = within(canvasElement)
     const spec = canvas.getByRole('button', { name: /New Spec/ })
-    await expect(spec).toBeDisabled()
-    await expect(spec).toHaveAttribute('title', 'A Spec comes with lot 6')
+    await expect(spec).toBeEnabled()
+    await expect(spec).toHaveAttribute('title', 'Start a Session that writes a Spec from this')
+    await userEvent.click(spec)
+    await expect(args.onSpec).toHaveBeenCalled()
+    await expect(args.onSend).not.toHaveBeenCalled()
+  },
+}
+
+/** Nothing written yet: `New Spec` is off, as `Start chat` is, and for the same reason. */
+export const WithASpecEmpty: Story = {
+  args: { onSpec: fn(), action: 'Start chat', ready: false },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: /New Spec/ })).toBeDisabled()
+    await expect(canvas.getByRole('button', { name: /Start chat/ })).toBeDisabled()
   },
 }
 

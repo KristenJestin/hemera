@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 
-import type { ComposerChoice } from '@hemera/ipc'
+import type { ComposerChoice, PromptIntent } from '@hemera/ipc'
 import {
   ActivityFrame,
   AgentModelMenu,
@@ -103,9 +103,14 @@ export function HomePage({
   workspaces: readonly OfferedWorkspace[]
   /**
    * Starts the Session with the chosen agent in the chosen Workspace (null for `main`), and says
-   * what to write in it.
+   * what to write in it: with the intent `spec` when it was started by `New Spec` (issue #128).
    */
-  onSend: (text: string, agent: string, workspaceId: string | null) => Promise<string | null>
+  onSend: (
+    text: string,
+    agent: string,
+    workspaceId: string | null,
+    intent?: PromptIntent,
+  ) => Promise<string | null>
 }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -201,8 +206,11 @@ export function HomePage({
           />
         }
         // The Home is where a Spec is made from the question that starts a Session; a Session is
-        // a conversation already under way and offers nothing of the sort (D4b-02).
-        spec
+        // a conversation already under way and offers nothing of the sort (D4b-02). The same
+        // Session as a send, whose agent is asked for a Spec proposal from it (issue #128).
+        onSpec={async (text) =>
+          agent === null ? NO_AGENT : await onSend(text, agent, workspace?.id ?? null, 'spec')
+        }
         onSend={async (text) =>
           agent === null ? NO_AGENT : await onSend(text, agent, workspace?.id ?? null)
         }

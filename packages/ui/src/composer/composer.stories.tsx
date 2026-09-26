@@ -184,7 +184,7 @@ const meta = {
     onSearchFiles: fn(async (query: string) => await Promise.resolve(lookUp(query))),
     onSend: fn(async (): Promise<string | null> => await Promise.resolve(null)),
     agentMenu: <Menu start="opencode" />,
-    spec: true,
+    onSpec: fn(async (): Promise<string | null> => await Promise.resolve(null)),
   },
   argTypes: {
     value: { control: 'text', description: 'What is written; the page holds it.' },
@@ -223,10 +223,10 @@ const meta = {
       description:
         'The agent, its model, its effort and its mode, at the end of the box’s own row.',
     },
-    spec: {
-      control: 'boolean',
-      description: 'Whether the foot offers a Spec: the Home does, a Session does not.',
-      table: { defaultValue: { summary: 'false' } },
+    onSpec: {
+      action: 'spec asked',
+      description:
+        'Starts a Session that writes a Spec from the sentence: the Home hands it over, a Session does not.',
     },
     sendDisabledReason: {
       control: 'text',
@@ -814,6 +814,40 @@ export const WriteRefused: Story = {
     // story waits for it: a colour read halfway through a fade is a contrast axe refuses.
     await waitFor(() => {
       expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
+    })
+  },
+}
+
+/**
+ * `New Spec` starts the Session with the intent of writing a Spec (issue #128).
+ *
+ * The same sentence as `Start chat`, through the page's other door: off while the box is empty,
+ * alive once something is written, and what it wrote leaves the box as a send's does. What it
+ * does is said on the control, in plain words.
+ */
+export const NewSpec: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onSend.mockClear()
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+    const spec = canvas.getByRole('button', { name: /New Spec/ })
+    // "New Spec is off while there is nothing to write a Spec from"
+    expect(spec).toBeDisabled()
+    expect(spec).toHaveAttribute('title', 'Start a Session that writes a Spec from this')
+
+    await userEvent.type(box, 'Export the invoices with HT and TTC')
+    // "New Spec is on once something is written, like Start chat"
+    await waitFor(() => {
+      expect(spec).toBeEnabled()
+    })
+    await userEvent.click(spec)
+
+    await waitFor(() => {
+      expect(args.onSpec).toHaveBeenCalledWith('Export the invoices with HT and TTC')
+    })
+    expect(args.onSend).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(box.textContent).toBe('')
     })
   },
 }

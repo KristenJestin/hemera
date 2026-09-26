@@ -1312,7 +1312,7 @@ export function Application() {
         // Session it opens is opened on them (D5-17). An agent the engine does not know is
         // refused by the engine rather than by a sentence written here.
         workspaces={offeredWorkspacesOf(sessions.workspaces)}
-        onSend={async (text, chosen, workspaceId) => {
+        onSend={async (text, chosen, workspaceId, intent) => {
           const asked = providerOf(chosen)
           const made = await startSession(active.id, asked, workspaceId)
           if (made === null) return sessionsSnapshot().refusal
@@ -1322,7 +1322,8 @@ export function Application() {
           await openSession(made.id)
           // The turn is watched in the Session, which is where the window just went, and the Home
           // does not wait for it: a first answer can take a minute.
-          void say(made.id, text)
+          // With what it was sent for: New Spec asks the agent for a Spec proposal (issue #128).
+          void say(made.id, text, intent)
           return null
         }}
       />
