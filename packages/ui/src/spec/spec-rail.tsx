@@ -174,8 +174,6 @@ export interface SpecRailProps {
   onSelect: (target: SpecTarget) => void
   /** Puts every part of a phase on the stage. */
   onSelectGroup: (phase: PhaseName) => void
-  /** What stands at the bottom of the rail, unfolded: the build's actions of a ready Spec. */
-  foot?: ReactNode
   /** The band of glyphs the panel folds to, rather than the rail of words. */
   folded?: boolean | undefined
 }
@@ -191,7 +189,6 @@ export function SpecRail({
   following,
   onSelect,
   onSelectGroup,
-  foot,
   folded = false,
 }: SpecRailProps): ReactNode {
   // The ids of the rail are the Spec's own names: a part's target, a phase's name.
@@ -212,7 +209,6 @@ export function SpecRail({
         const group = phases.get(id)
         if (group !== undefined) onSelectGroup(group.phase)
       }}
-      foot={foot}
       folded={folded}
     />
   )

@@ -19,10 +19,10 @@ const BUILD: WorkspaceActionsProps = {
   onOpen: fn(),
 }
 
-/** The footer of the rail the build's actions stand in, or null while it has none. */
+/** The footer of the panel the build's actions stand in, or null while it has none. */
 function buildFootOf(canvasElement: HTMLElement): HTMLElement | null {
   return within(canvasElement)
-    .getByRole('navigation', { name: 'Parts of ATL-7' })
+    .getByRole('region', { name: 'Spec ATL-7' })
     .querySelector<HTMLElement>('[data-build-foot]')
 }
 
@@ -32,7 +32,7 @@ function buildFootOf(canvasElement: HTMLElement): HTMLElement | null {
  * starting on a part, unless the hand folded it. Unfolded, a head that stays on top, with `Mark
  * ready` on a draft, and the rail beside a stage that shows one part, or every part of one phase,
  * following the agent until a row is chosen. No readiness is drawn (issue #135); once the Spec
- * is ready, the build's actions arrive in a footer at the bottom of the rail. The screens of the brief are drawn in their
+ * is ready, the build's actions arrive in a footer under the rail and the stage. The screens of the brief are drawn in their
  * Session, under `Surfaces/Session/Define`; these are the panel's own states and paths.
  */
 const meta = {
@@ -75,7 +75,7 @@ const meta = {
     onFoldChange: { description: 'Told each time the panel folds or unfolds.' },
     build: {
       control: 'object',
-      description: 'The build, which a ready Spec offers at the rail foot.',
+      description: 'The build, which a ready Spec offers in the panel footer.',
     },
   },
 } satisfies Meta<typeof LiveSpecPanel>
@@ -141,7 +141,7 @@ export const Unfolded: Story = {
     await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeEnabled()
     await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: /before ready/ })).toBeNull()
-    // A draft offers nothing to build: the rail has no footer.
+    // A draft offers nothing to build.
     await expect(buildFootOf(canvasElement)).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Prepare and start the build' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Show all' })).toBeNull()
@@ -465,9 +465,9 @@ export const OlderRevision: Story = {
 }
 
 /**
- * A ready Spec with its footer (issue #135): the build's actions stand at the bottom of the rail,
- * one under the other, each the rail's width and none of them cut — not in the head, which says
- * the status and offers `Rework`.
+ * A ready Spec with its footer (issues #135, #150): the build's actions stand in a footer that runs
+ * the panel's whole width, under the rail and the stage together, side by side at its end and
+ * none of them cut — not in the head, which says the status and offers `Rework`.
  */
 export const ReadyWithItsBuild: Story = {
   args: { spec: READY },
@@ -482,12 +482,14 @@ export const ReadyWithItsBuild: Story = {
       expect(button).toBeVisible()
       expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth)
     }
-    // At the bottom of the rail, under its last row.
-    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(foot!.getBoundingClientRect().bottom).toBeCloseTo(
-      rail.getBoundingClientRect().bottom,
-      0,
-    )
+    // The panel's whole width: from the rail's left edge to the stage's right one, under both.
+    const box = foot!.getBoundingClientRect()
+    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' }).getBoundingClientRect()
+    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' }).getBoundingClientRect()
+    await expect(box.left).toBeCloseTo(rail.left, 0)
+    await expect(box.right).toBeCloseTo(stage.right, 0)
+    await expect(box.top).toBeGreaterThanOrEqual(rail.bottom - 1)
+    await expect(box.top).toBeGreaterThanOrEqual(stage.bottom - 1)
     const header = canvasElement.querySelector('header')!
     await expect(within(header).queryByRole('button', { name: /build/ })).toBeNull()
     await expect(within(header).getByRole('button', { name: 'Rework' })).toBeVisible()
@@ -498,7 +500,7 @@ export const ReadyWithItsBuild: Story = {
 
 /**
  * The footer arrives when the Spec becomes ready: `Mark ready` pressed, the footer grows from
- * nothing at the bottom of the rail; `Rework` confirmed, it folds away and is gone.
+ * nothing under the rail and the stage; `Rework` confirmed, it folds away and is gone.
  */
 export const BuildArrivesWhenReady: Story = {
   args: { spec: GATE_FULL },

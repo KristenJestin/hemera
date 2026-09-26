@@ -34,8 +34,8 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * beside the stage. The stage shows one part, or every part of one phase when its heading in the
  * rail is chosen. Folded, the band is the rail's glyphs and their tints. No readiness is drawn
  * (issue #135): what the draft lacks is the agent's to say, and `Mark ready`'s to refuse with.
- * Once the Spec is ready, the build's actions arrive in a footer at the bottom of the rail, and
- * leave it when the Spec is reworked.
+ * Once the Spec is ready, the build's actions arrive in a footer under the rail and the stage,
+ * the panel's whole width (issue #150), and leave it when the Spec is reworked.
  *
  * Which part is on the stage follows one rule. While the reader has chosen nothing, it follows
  * the agent: the part it writes. A row of the rail or a group heading pins the choice, and from
@@ -56,8 +56,8 @@ const SCROLL = 'min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring'
 
 const STAGE = 'flex flex-col gap-10 px-10 pt-5 pb-10'
 
-/** The footer of the rail the build's actions stand in, over the rail's own bottom edge. */
-const BUILD_FOOT = 'flex flex-col gap-2 border-t border-border px-2 py-3'
+/** The footer of the panel the build's actions stand in, under the rail and the stage alike. */
+const BUILD_FOOT = 'flex items-center justify-end gap-3 border-t border-border px-5 py-3'
 
 /** What a part does with the reader's hand, handed down from the panel. */
 export interface SpecPartHandlers {
@@ -86,7 +86,7 @@ export interface SpecPanelProps extends SpecPartHandlers {
   onTakeOver: () => void
   /**
    * Where the build stands, and what it is launched in (D8-12, D8-13), which the application
-   * composes. Drawn in a footer of the rail on a Spec that is not being written, and on a launch
+   * composes. Drawn in the panel's footer on a Spec that is not being written, and on a launch
    * already asked for whatever the Spec is doing: a draft offers nothing to build, and an older
    * revision of a ready one is read as it was (D7-05).
    */
@@ -179,14 +179,10 @@ export function SpecPanel({
             )}
           </>
         )}
-        rail={
-          <SpecRail
-            {...rail}
-            foot={<BuildFoot build={buildable && build !== undefined ? build : undefined} />}
-          />
-        }
+        rail={<SpecRail {...rail} />}
         stage={<SpecStage spec={spec} shown={shown} groups={groups} {...handlers} />}
         band={<SpecRail {...rail} folded />}
+        foot={<BuildFoot build={buildable && build !== undefined ? build : undefined} />}
       />
       <ReworkDialog
         open={reworking}
@@ -203,12 +199,13 @@ export function SpecPanel({
 }
 
 /**
- * The footer of the rail the build's actions stand in (issue #135): `Prepare and start the build`
- * and `Use an existing Workspace`, then where the launch stands.
+ * The footer of the panel the build's actions stand in (issues #135, #150): under the rail and the
+ * stage together, `Prepare and start the build` and `Use an existing Workspace` at its end, then
+ * where the launch stands.
  *
  * It arrives when the Spec becomes ready and leaves when it is reworked, on the `expand` and
- * `collapse` kinds: its height is what makes room, so the rows above it move up rather than being
- * covered, and it fades as it goes. A Spec opened ready finds it there, with nothing arriving.
+ * `collapse` kinds: its height is what makes room, so the rail and the stage above it give it room
+ * rather than being covered, and it fades as it goes. A Spec opened ready finds it there.
  * While it leaves it is still in the page, and a button there is a button a second press reaches:
  * so the moment it starts leaving it is `inert` and hidden from assistive technology.
  */

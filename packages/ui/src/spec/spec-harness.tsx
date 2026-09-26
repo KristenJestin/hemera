@@ -167,7 +167,7 @@ export interface LiveSpecPanelProps extends SpecActions {
   arrives?: boolean | undefined
   /** A part the agent can be made to start on, from a button where the chat stands. */
   agentWrites?: SpecTarget | undefined
-  /** The build of the Spec once it is ready, which the footer of the rail holds. */
+  /** The build of the Spec once it is ready, which the footer of the panel holds. */
   build?: WorkspaceActionsProps | undefined
 }
 
