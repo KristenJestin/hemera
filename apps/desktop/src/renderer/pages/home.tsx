@@ -12,6 +12,7 @@ import {
   type HomeSession,
   type JournalLine,
   type OfferedAgent,
+  type MenuClassifier,
 } from '@hemera/ui'
 
 import {
@@ -59,6 +60,7 @@ export function HomePage({
   sessions,
   entries,
   agents,
+  classifier,
   choice,
   offeringOf,
   onChooseAgent,
@@ -77,6 +79,7 @@ export function HomePage({
   entries: JournalLine[]
   /** The agents this machine has, as the registry named them. */
   agents: OfferedAgent[]
+  classifier?: MenuClassifier | undefined
   /**
    * What this Project's composer was left on, as the data folder remembers it (design D5-17).
    *
@@ -174,6 +177,7 @@ export function HomePage({
         onWorkspaceChange={setNamed}
         agentMenu={
           <AgentModelMenu
+            classifier={classifier}
             agents={agents}
             agent={agent}
             onAgentChange={choose}

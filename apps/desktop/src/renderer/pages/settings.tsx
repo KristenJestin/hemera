@@ -4,6 +4,7 @@ import {
   Settings,
   type AgentsSectionProps,
   type ArchivedProject,
+  type ClassifierSectionProps,
   type ProfileFacts,
 } from '@hemera/ui'
 import type { ThemeChoice } from '@hemera/ui/window'
@@ -17,6 +18,7 @@ export function SettingsPage({
   onOpenFolder,
   onOpenDiagnostic,
   agents,
+  classifier,
   archived,
   onRestore,
 }: {
@@ -28,6 +30,7 @@ export function SettingsPage({
   onOpenDiagnostic: () => void
   /** What this machine has, and the one thing the reader can do about it. */
   agents: AgentsSectionProps
+  classifier: ClassifierSectionProps | undefined
   archived: ArchivedProject[]
   onRestore: (id: string) => void
 }): ReactNode {
@@ -40,6 +43,7 @@ export function SettingsPage({
       onOpenFolder={onOpenFolder}
       onOpenDiagnostic={onOpenDiagnostic}
       agents={agents}
+      classifier={classifier}
       archived={archived}
       onRestore={onRestore}
     />

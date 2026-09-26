@@ -294,6 +294,7 @@ function servicesOf(
   // rather than minting a second one, and a token of one book means nothing to the other.
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(classifierSettingsLayer),
     Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),

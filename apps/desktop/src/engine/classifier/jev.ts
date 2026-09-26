@@ -1,5 +1,6 @@
 /** The direct, bounded TypeSafe boundary for Hemera Auto (D59-04). */
 
+import { Context } from 'effect'
 import { z } from 'zod'
 
 import { classifierVerdictFromScores, type ClassifierVerdict } from '@hemera/core'
@@ -53,6 +54,11 @@ export const typeSafeTransport: JevTransport = {
       redirect: 'error',
     }),
 }
+
+/** Tests replace only this network boundary; production uses the pinned TypeSafe endpoint. */
+export const JevTransportPort = Context.Reference<JevTransport>('JevTransport', {
+  defaultValue: () => typeSafeTransport,
+})
 
 /** No raw provider response or exception is allowed to become a visible reason. */
 export async function evaluateJev(

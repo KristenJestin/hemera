@@ -33,7 +33,7 @@ import {
   sessionTitle,
   titleAfterMessage,
 } from '@hemera/core'
-import { and, desc, eq, getColumns, isNull, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, getColumns, isNull, lt, or, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
 import { StderrSink } from './agents/supervisor.ts'
@@ -198,6 +198,8 @@ export interface SessionsService {
     before?: number | undefined,
     limit?: number | undefined,
   ) => Effect.Effect<ThreadPage, Refusal | InvalidCursorError>
+  /** Only persisted human-origin words, for a classifier's authorization context (D59-05). */
+  readonly humanMessages: (id: string) => Effect.Effect<DomainSessionEntry[], DatabaseError>
   /**
    * Chooses the agent of a Session, and the model it is asked for.
    *
@@ -1109,6 +1111,26 @@ export const sessionsLayer = Layer.effect(
               nextBefore: rows.length > held ? (page.at(-1)?.seq ?? null) : null,
             } satisfies ThreadPage
           }),
+        ),
+      humanMessages: (id) =>
+        withDatabase(
+          database
+            .select()
+            .from(sessionEntries)
+            .where(
+              and(
+                eq(sessionEntries.sessionId, id),
+                eq(sessionEntries.role, 'user'),
+                eq(sessionEntries.origin, 'live'),
+                or(eq(sessionEntries.kind, 'message'), eq(sessionEntries.kind, 'spec_answer')),
+              ),
+            )
+            .orderBy(desc(sessionEntries.seq))
+            .limit(6)
+            .pipe(
+              Effect.map((rows) => rows.map(entryOf).reverse()),
+              Effect.mapError(failed('reading the human context')),
+            ),
         ),
     } satisfies SessionsService
   }),

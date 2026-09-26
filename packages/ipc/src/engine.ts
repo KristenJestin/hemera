@@ -403,6 +403,7 @@ export const ENGINE_REQUESTS = {
     response: z.object({
       mode: classifierModeSchema,
       hasKey: z.boolean(),
+      consent: z.boolean(),
       generation: z.number().int(),
     }),
   },
@@ -410,6 +411,7 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ mode: classifierModeSchema }),
     response: z.void(),
   },
+  'classifier.consent.write': { arguments: z.object({ consent: z.boolean() }), response: z.void() },
   'classifier.ciphertext.read': { arguments: nothingSchema, response: z.string().nullable() },
   'classifier.key.replace': {
     arguments: z.object({ ciphertext: z.string().min(1), plaintext: z.string().min(1) }),

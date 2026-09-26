@@ -1,4 +1,5 @@
 import type { ComposerChoice, ConfigOption } from '@hemera/ipc'
+import { nativePermissionMode } from '@hemera/core'
 import type { EffortChoice, ModeChoice, ModelChoice } from '@hemera/ui'
 
 /**
@@ -108,7 +109,11 @@ export function modeStage(options: readonly ConfigOption[]): Stage<ModeChoice> |
   if (option === null) return null
   return {
     optionId: option.id,
-    choices: option.values.map((value) => ({ id: value.value, label: value.name })),
+    choices: option.values.map((value) => ({
+      id: value.value,
+      label: value.name,
+      permission: nativePermissionMode(option, value.value),
+    })),
     current: currentOf(option),
   }
 }

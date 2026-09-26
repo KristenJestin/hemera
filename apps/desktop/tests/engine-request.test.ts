@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Result } from 'effect'
 
 import { DEFINE_MISSION_BRIEF, DELIVERY_MARKER, contextUri, readerLine } from '@hemera/core'
 import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
@@ -921,10 +921,22 @@ describe('A key can be saved replaced and removed safely', () => {
         return { before, after: yield* settings.current }
       }),
     )
-    expect(first.before).toEqual({ mode: 'agent-default', key: 'private-one', generation: 1 })
-    expect(first.after).toEqual({ mode: 'hemera-auto', key: 'private-one', generation: 2 })
+    expect(first.before).toEqual({
+      mode: 'agent-default',
+      key: 'private-one',
+      consent: false,
+      generation: 1,
+    })
+    expect(first.after).toEqual({
+      mode: 'hemera-auto',
+      key: 'private-one',
+      consent: false,
+      generation: 2,
+    })
     expect(await send('classifier.ciphertext.read', {})).toBe('encrypted-one')
     expect(await send('classifier.state', {})).toMatchObject({ mode: 'hemera-auto', hasKey: false })
+    await send('classifier.consent.write', { consent: true })
+    expect(await send('classifier.state', {})).toMatchObject({ consent: true })
     expect(JSON.stringify(await send('preferences.read', {}))).not.toContain('private-one')
     const restored = await running(
       Effect.gen(function* () {
@@ -937,5 +949,49 @@ describe('A key can be saved replaced and removed safely', () => {
     await send('classifier.key.remove', {})
     expect(await send('classifier.ciphertext.read', {})).toBeNull()
     expect(await send('classifier.state', {})).toMatchObject({ mode: 'hemera-auto', hasKey: false })
+  })
+})
+
+describe('Hemera Auto owns native permission selection across existing Sessions', () => {
+  test('a stale native permission request is refused before reaching the agent', async () => {
+    const agent = fakeAgent({
+      configOptions: [
+        {
+          id: 'session-mode',
+          type: 'select',
+          name: 'Mode',
+          category: 'mode',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'acceptEdits', name: 'Accept edits' },
+            { value: 'plan', name: 'Plan' },
+          ],
+        },
+      ],
+    })
+    const outcome = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'claude')
+        yield* (yield* AgentRuntime).start(session.id)
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const decision = decideRequest('agents.setOption', {
+          sessionId: session.id,
+          optionId: 'session-mode',
+          value: 'acceptEdits',
+        })
+        if (!decision.accepted) return false
+        const result = yield* Effect.result(answer(decision))
+        return Result.isFailure(result)
+      }),
+      agent,
+    )
+    expect(outcome).toBe(true)
+    expect(agent.answers.choices).toEqual([])
   })
 })

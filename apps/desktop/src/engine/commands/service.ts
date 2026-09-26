@@ -75,7 +75,7 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { type Lookup, findOnPath, hostLookup, invocationOf } from './line.ts'
+import { type Invocation, type Lookup, findOnPath, hostLookup, invocationOf } from './line.ts'
 
 /** How many runs `recent` hands back: what a panel draws, oldest ones out of sight. */
 const RECENT_RUNS = 8
@@ -346,6 +346,8 @@ export interface RunRequest {
   /** The variables it is given over the process's environment, the Workspace's last (D8-06). */
   readonly environment: Record<string, string>
   readonly startedBy: 'agent' | 'user'
+  /** Exact process the classifier checked; a changed resolution must never start. */
+  readonly expectedInvocation?: Invocation | undefined
 }
 
 /** What a catalogue entry is written from. */
@@ -1289,6 +1291,20 @@ export const commandsLayer = Layer.effect(
           if (invocation === null) {
             record.state = 'failed'
             record.kept = `Hemera has nothing to run: the line of ${asked.name} is empty`
+            record.endedAt = startedAt
+            yield* writeRow(id, record, 'command.run_ended')
+            yield* Deferred.succeed(record.ended, undefined)
+            live.delete(id)
+            return viewOf(id, record)
+          }
+          if (
+            asked.expectedInvocation !== undefined &&
+            (invocation.command !== asked.expectedInvocation.command ||
+              invocation.verbatim !== asked.expectedInvocation.verbatim ||
+              JSON.stringify(invocation.args) !== JSON.stringify(asked.expectedInvocation.args))
+          ) {
+            record.state = 'failed'
+            record.kept = 'the command changed after classification: nothing was started'
             record.endedAt = startedAt
             yield* writeRow(id, record, 'command.run_ended')
             yield* Deferred.succeed(record.ended, undefined)

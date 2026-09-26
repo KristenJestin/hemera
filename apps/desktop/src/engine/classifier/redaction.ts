@@ -3,7 +3,7 @@
 import { z } from 'zod'
 
 const credentialField = /(?:api[_-]?key|password|passwd|secret|token|credential|authorization)/i
-const destinationField = /^(?:path|target|cwd|command|program|line|url|host)$/i
+const destinationField = /^(?:path|target|resolvedTarget|cwd|command|program|line|url|host)$/i
 const credentialInText =
   /\b(api[_ -]?key|password|passwd|secret|token|credential|authorization)\s*[:=]\s*([^\s,;]+)/gi
 const MASK = '[REDACTED]'

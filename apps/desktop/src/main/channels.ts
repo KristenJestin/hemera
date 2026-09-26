@@ -43,20 +43,30 @@ export function registerChannels(
         return {
           mode: state.mode,
           credential: 'storage-unavailable' as const,
+          consent: state.consent,
           generation: state.generation,
         }
       }
       if (state.hasKey)
-        return { mode: state.mode, credential: 'saved' as const, generation: state.generation }
+        return {
+          mode: state.mode,
+          credential: 'saved' as const,
+          consent: state.consent,
+          generation: state.generation,
+        }
       const ciphertext = yield* engine.ask('classifier.ciphertext.read', {})
       return {
         mode: state.mode,
         credential: ciphertext === null ? ('missing' as const) : ('invalid' as const),
+        consent: state.consent,
         generation: state.generation,
       }
     }),
   )
   handle('classifier.mode.write', ({ mode }) => engine.ask('classifier.mode.write', { mode }))
+  handle('classifier.consent.write', ({ consent }) =>
+    engine.ask('classifier.consent.write', { consent }),
+  )
   handle('classifier.key.save', ({ key }) => {
     const ciphertext = encryptClassifierKey(key)
     return ciphertext === null

@@ -4,6 +4,14 @@ export const CLASSIFIER_POLICY_VERSION = '1'
 export type ClassifierVerdict = 'allow' | 'ask' | 'deny'
 export type LocalVerdict = 'allow' | 'deny' | 'defer'
 
+/** Planning stays an independent agent choice; permission modes are global under Hemera Auto. */
+export function nativePermissionMode(
+  option: { readonly id: string; readonly category: string | null },
+  value: string,
+): boolean {
+  return (option.id === 'mode' || option.category === 'mode') && value !== 'plan'
+}
+
 /** A command after the runner has selected its platform line and resolved its invocation. */
 export interface ResolvedCommand {
   readonly program: string

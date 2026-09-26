@@ -661,6 +661,9 @@ describe('The rule of the scale marks the recommended level', () => {
     expect(modelStage(announced)?.optionId).toBe('model')
     expect(effortStage(announced)?.optionId).toBe('effort')
     expect(modeStage(announced)?.optionId).toBe('mode')
+    expect(modeStage(announced)?.choices).toEqual([
+      { id: 'plan', label: 'plan', permission: false },
+    ])
     // Alone, it is none of the three: no stage, so no row in the menu.
     expect([modelStage([fast]), effortStage([fast]), modeStage([fast])]).toEqual([null, null, null])
   })

@@ -179,6 +179,7 @@ async function openOver(
   )
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(classifierSettingsLayer),
     Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),

@@ -10,10 +10,12 @@ import { appPreferences } from '../storage/schema.ts'
 
 const MODE_KEY = 'classifier.mode'
 const CIPHERTEXT_KEY = 'classifier.jev.ciphertext'
+const CONSENT_KEY = 'classifier.jev.consent'
 
 export interface ClassifierSnapshot {
   readonly mode: ClassifierMode
   readonly key: string | null
+  readonly consent: boolean
   readonly generation: number
 }
 
@@ -22,6 +24,7 @@ export class ClassifierSettings extends Context.Service<
   {
     readonly current: Effect.Effect<ClassifierSnapshot, DatabaseError>
     readonly select: (mode: ClassifierMode) => Effect.Effect<void, DatabaseError>
+    readonly setConsent: (consent: boolean) => Effect.Effect<void, DatabaseError>
     readonly ciphertext: Effect.Effect<string | null, DatabaseError>
     readonly replaceKey: (
       ciphertext: string,
@@ -60,12 +63,21 @@ export const classifierSettingsLayer = Layer.effect(
         )
     return {
       current: Effect.gen(function* () {
-        const rows = yield* value(MODE_KEY)
+        const [rows, consentRows] = yield* Effect.all([value(MODE_KEY), value(CONSENT_KEY)])
         const mode = rows[0]?.value === 'hemera-auto' ? 'hemera-auto' : 'agent-default'
-        return { mode, key, generation }
+        return { mode, key, consent: consentRows[0]?.value === 'true', generation }
       }),
       select: (mode) =>
         write(MODE_KEY, mode).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              generation += 1
+            }),
+          ),
+          Effect.asVoid,
+        ),
+      setConsent: (consent) =>
+        write(CONSENT_KEY, String(consent)).pipe(
           Effect.tap(() =>
             Effect.sync(() => {
               generation += 1

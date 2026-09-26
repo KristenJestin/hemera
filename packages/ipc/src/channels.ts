@@ -43,10 +43,12 @@ export const CHANNELS = {
     response: z.object({
       mode: ENGINE_REQUESTS['classifier.state'].response.shape.mode,
       credential: z.enum(['missing', 'saved', 'invalid', 'storage-unavailable']),
+      consent: z.boolean(),
       generation: z.number().int(),
     }),
   },
   'classifier.mode.write': ENGINE_REQUESTS['classifier.mode.write'],
+  'classifier.consent.write': ENGINE_REQUESTS['classifier.consent.write'],
   'classifier.key.save': {
     arguments: z.object({ key: z.string().trim().min(1) }),
     response: z.void(),

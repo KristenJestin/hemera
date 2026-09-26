@@ -4,6 +4,7 @@ export {
   CLASSIFIER_POLICY_VERSION,
   classifierVerdictFromScores,
   localClassifierVerdict,
+  nativePermissionMode,
 } from './domain/classifier.ts'
 
 export {
