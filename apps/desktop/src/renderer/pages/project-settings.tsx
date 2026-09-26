@@ -2,6 +2,7 @@ import { type ReactNode, useState } from 'react'
 
 import type {
   Command,
+  PathEntryKind,
   PlanRepository,
   RecipeStep,
   RepositoryState,
@@ -283,6 +284,7 @@ export function ProjectSettingsPage({
   folders,
   onSave,
   onBrowse,
+  onListEntries,
   onCheckFolder,
   onMainPathChange,
   onAddRepository,
@@ -323,6 +325,15 @@ export function ProjectSettingsPage({
    * at all.
    */
   onBrowse: (start?: string) => Promise<string | null>
+  /**
+   * The entries of one folder under an absolute base, of the kinds asked for: what a command's
+   * Folder offers as it is typed, from where it runs and never above it (#109).
+   */
+  onListEntries: (
+    base: string,
+    relative: string,
+    kinds: readonly PathEntryKind[],
+  ) => Promise<readonly { name: string; kind: PathEntryKind }[]>
   onCheckFolder: (path: string) => Promise<string | null>
   onMainPathChange: (path: string) => void
   onAddRepository: (path: string) => Promise<string | null>
@@ -417,7 +428,9 @@ export function ProjectSettingsPage({
         onAddCommand={async (line) => await onSaveCommand(commandWriteOf(line), false)}
         onUpdateCommand={async (line) => await onSaveCommand(commandWriteOf(line), true)}
         onRemoveCommand={onRemoveCommand}
-        onBrowseCommandFolder={browseUnderBase}
+        onListCommandFolder={async ({ base, relative, kinds }) =>
+          await onListEntries(folderBasePath(project.mainPath, base), relative, kinds)
+        }
         portlessInstalled={portlessInstalled}
         onArchive={onArchive}
         slotRefusal={workspacesRefusal}

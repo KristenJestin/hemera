@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../components/button/button.tsx'
+import type { PathEntry, PathListing } from '../components/suggest/path-input.tsx'
 import { CommandDialog, type CommandDialogProps } from './command-dialog.tsx'
 import type { CommandLine, RepositoryLine } from './model.ts'
 
@@ -35,6 +36,25 @@ const DEV: CommandLine = {
 }
 
 const TAKEN = 'a command named "check" is already declared'
+
+/**
+ * The folders under each base, one level at a time, as the engine would list them (#109): keyed
+ * by the base — '' for the Workspace root — and the folder under it.
+ */
+const TREE = new Map<string, string[]>([
+  [':', ['docs', 'legacy', 'sources']],
+  [':sources', ['api', 'front']],
+  ['./sources/front:', ['packages', 'web']],
+  ['./sources/front:packages', ['core', 'ui']],
+])
+
+async function listing({ base, relative }: PathListing): Promise<readonly PathEntry[]> {
+  const names = TREE.get(`${base ?? ''}:${relative}`) ?? []
+  return await Promise.resolve(names.map((name) => ({ name, kind: 'folder' as const })))
+}
+
+/** The listing the stories hand over, kept so a play can ask what it was asked. */
+const listFolder = fn(listing)
 
 interface Extra {
   /** What the engine answers when the command is handed over: null, or a refusal. */
@@ -69,7 +89,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/CommandDialog',
   component: CommandDialog,
   render: (args) => <Controlled {...args} />,
@@ -82,6 +102,7 @@ const meta = {
     projectName: 'Atlas Web',
     refusal: null,
     onOpenChange: fn(),
+    onListFolder: listFolder,
     onSubmit: fn(async () => await Promise.resolve(null)),
   },
   argTypes: {
@@ -98,6 +119,10 @@ const meta = {
     projectName: { control: 'text', description: 'The Project, whose slug Portless is offered.' },
     refusal: { control: 'text', description: 'What the engine answers; null writes it.' },
     onOpenChange: { control: false, description: 'Opens or closes the dialog.' },
+    onListFolder: {
+      control: false,
+      description: 'Lists one folder under the base a command runs from.',
+    },
     onSubmit: { control: false, description: 'Writes the command.' },
   },
 } satisfies Meta<typeof Controlled>
@@ -128,13 +153,15 @@ export const Add: Story = {
     args.onSubmit.mockClear()
     const inside = dialog()
     await expect(inside.getByRole('button', { name: 'Add command' })).toBeDisabled()
+    // The name says what it is for: what the agent runs the command by (#109).
+    await expect(inside.getByText('The agent runs it by this name.')).toBeVisible()
     await userEvent.type(inside.getByRole('textbox', { name: 'Name' }), 'check')
     await userEvent.type(inside.getByRole('textbox', { name: 'Line' }), 'pnpm check')
     await choose('Type', /^Test/)
     // Two repositories are called `api`: each is named with its path beside it.
     await choose('Runs from', /^api \(\.\/sources\/api\)/)
     await userEvent.type(inside.getByRole('textbox', { name: 'Folder' }), 'packages/core')
-    // No picker was handed over: the field is typed and drawn without the button.
+    // The folder is typed, with suggestions, and there is no picker beside it (#109).
     await expect(inside.queryByRole('button', { name: /^Browse/ })).toBeNull()
     // A scope and Portless are a server's alone.
     await expect(inside.queryByLabelText('Scope')).toBeNull()
@@ -158,50 +185,53 @@ export const Add: Story = {
 }
 
 /**
- * One line, run on every system: the field a command with one line opens on, and the switch that
- * gives it two (recette 2).
+ * One line, run on every system: the field a command with one line opens on, and the box beside
+ * its label that gives it two (#109).
  *
  * The line is never asked twice: the one typed here becomes what Linux and macOS run, and it is
- * still there when the switch comes back.
+ * still there when the box is unticked.
  */
-export const SameLine: Story = {
+export const OneLine: Story = {
   args: { command: null },
   play: async ({ args }) => {
     args.onSubmit.mockClear()
     const inside = dialog()
-    await expect(inside.getByLabelText('Lines')).toHaveTextContent('Same line on every system')
+    const perSystem = inside.getByRole('checkbox', { name: 'A line per system' })
+    await expect(perSystem).not.toBeChecked()
+    // No select says it any more: one box, on the row of the line.
+    await expect(inside.queryByLabelText('Lines')).toBeNull()
     await userEvent.type(inside.getByRole('textbox', { name: 'Line' }), 'pnpm check')
     // One field or two, never three: the two of a line per system replace the one they came from.
-    await choose('Lines', /^A line per system/)
+    await userEvent.click(perSystem)
     await expect(inside.queryByRole('textbox', { name: 'Line' })).toBeNull()
-    await expect(inside.getByRole('textbox', { name: 'Windows line' })).toBeVisible()
-    await expect(inside.getByRole('textbox', { name: 'Linux and macOS line' })).toHaveValue(
-      'pnpm check',
-    )
+    await expect(inside.getByRole('textbox', { name: 'Windows' })).toBeVisible()
+    await expect(inside.getByRole('textbox', { name: 'Linux and macOS' })).toHaveValue('pnpm check')
     // Back to one line: the field holds what was typed, and the systems are gone.
-    await choose('Lines', /^Same line on every system/)
+    await userEvent.click(perSystem)
     await expect(inside.getByRole('textbox', { name: 'Line' })).toHaveValue('pnpm check')
-    await expect(inside.queryByRole('textbox', { name: 'Windows line' })).toBeNull()
+    await expect(inside.queryByRole('textbox', { name: 'Windows' })).toBeNull()
   },
 }
 
 /**
- * A line per system, which is what a command with a line of its own opens on (recette 2): the
- * line Windows runs, and the line every other system runs.
+ * Two lines, side by side on one row, which is what a command with a line of its own opens on
+ * (#109): the line Windows runs, and the line every other system runs.
  */
-export const PerSystem: Story = {
+export const TwoLines: Story = {
   args: { command: { ...DEV, lineWindows: 'pnpm dev:win', lineLinux: 'pnpm dev' } },
   play: async ({ args }) => {
     args.onSubmit.mockClear()
     const inside = dialog()
     // Saved with a line of its own, it opens on the two fields rather than on one of them.
-    await expect(inside.getByLabelText('Lines')).toHaveTextContent('A line per system')
-    await expect(inside.getByRole('textbox', { name: 'Windows line' })).toHaveValue('pnpm dev:win')
-    await expect(inside.getByRole('textbox', { name: 'Linux and macOS line' })).toHaveValue(
-      'pnpm dev',
-    )
+    await expect(inside.getByRole('checkbox', { name: 'A line per system' })).toBeChecked()
+    const windows = inside.getByRole('textbox', { name: 'Windows' })
+    const others = inside.getByRole('textbox', { name: 'Linux and macOS' })
+    await expect(windows).toHaveValue('pnpm dev:win')
+    await expect(others).toHaveValue('pnpm dev')
+    // Side by side: the two boxes stand on the same row.
+    await expect(windows.getBoundingClientRect().top).toBe(others.getBoundingClientRect().top)
     // Typing for Windows leaves the other system alone.
-    await userEvent.type(inside.getByRole('textbox', { name: 'Windows line' }), ' --watch')
+    await userEvent.type(windows, ' --watch')
     await userEvent.click(inside.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
       expect(args.onSubmit).toHaveBeenCalledWith({
@@ -230,13 +260,13 @@ export const Edit: Story = {
     await expect(line).toHaveValue('pnpm dev')
     await userEvent.clear(line)
     await userEvent.type(line, 'pnpm dev --host')
-    await choose('Lines', /^A line per system/)
+    await userEvent.click(inside.getByRole('checkbox', { name: 'A line per system' }))
     // Nothing is lost and nothing is asked twice: the one line is the one Linux and macOS run.
     await expect(inside.queryByRole('textbox', { name: 'Line' })).toBeNull()
-    await expect(inside.getByRole('textbox', { name: 'Linux and macOS line' })).toHaveValue(
+    await expect(inside.getByRole('textbox', { name: 'Linux and macOS' })).toHaveValue(
       'pnpm dev --host',
     )
-    await userEvent.type(inside.getByRole('textbox', { name: 'Windows line' }), 'pnpm dev:win')
+    await userEvent.type(inside.getByRole('textbox', { name: 'Windows' }), 'pnpm dev:win')
     await choose('Runs from', /^Workspace root/)
     await userEvent.click(inside.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
@@ -251,22 +281,66 @@ export const Edit: Story = {
   },
 }
 
-/** A folder chosen rather than typed: what the picker answers is what the field holds. */
-export const Browse: Story = {
-  args: { onBrowse: fn(async () => await Promise.resolve('./sources/front/web')) },
+/**
+ * The folder typed with suggestions, one level at a time, from where the command runs (#109):
+ * the folders of `./sources/front`, then what `packages` holds once it is chosen. `..` is never
+ * offered, and a path typed above the base is refused with its reason.
+ */
+export const Suggestions: Story = {
   play: async ({ args }) => {
+    args.onSubmit.mockClear()
     const inside = dialog()
-    await expect(inside.getByRole('textbox', { name: 'Folder' })).toHaveValue('')
-    await userEvent.click(inside.getByRole('button', { name: /^Browse/ }))
-    // The base the command runs from is handed to the picker: the Workspace root is a null.
+    const folder = inside.getByRole('textbox', { name: 'Folder' })
+    await userEvent.click(folder)
+    // The first level: what the base holds, asked of the base the command runs from.
+    const first = await waitFor(() => within(document.body).getByRole('listbox'))
     await waitFor(() => {
-      expect(args.onBrowse).toHaveBeenCalledWith('./sources/front')
+      expect(within(first).getByRole('option', { name: 'packages/' })).toBeVisible()
     })
     await waitFor(() => {
-      expect(inside.getByRole('textbox', { name: 'Folder' })).toHaveValue('./sources/front/web')
+      expect(within(first).getByRole('option', { name: 'web/' })).toBeVisible()
     })
-    // The button says what it does now: the folder is there to be changed.
-    await expect(inside.getByRole('button', { name: 'Change…' })).toBeVisible()
+    await expect(within(first).queryByRole('option', { name: /\.\./ })).toBeNull()
+    await expect(listFolder).toHaveBeenCalledWith({
+      base: './sources/front',
+      relative: '',
+      kinds: ['folder'],
+    })
+    // Above the base: nothing is offered, and the field says why.
+    await userEvent.type(folder, '../')
+    await waitFor(() => {
+      expect(inside.getByText('That path climbs above where it runs from.')).toHaveStyle({
+        opacity: '1',
+      })
+    })
+    await expect(within(document.body).queryByRole('option')).toBeNull()
+    await expect(inside.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await userEvent.clear(folder)
+    listFolder.mockClear()
+    await userEvent.type(folder, 'pa')
+    await waitFor(() => {
+      expect(within(document.body).getByRole('option', { name: 'packages/' })).toBeVisible()
+    })
+    await userEvent.keyboard('{Enter}')
+    await expect(folder).toHaveValue('packages/')
+    // The second level: the list stays open on what the folder chosen holds.
+    await waitFor(() => {
+      expect(listFolder).toHaveBeenCalledWith({
+        base: './sources/front',
+        relative: 'packages',
+        kinds: ['folder'],
+      })
+    })
+    const second = within(document.body).getByRole('listbox')
+    await waitFor(() => {
+      expect(within(second).getByRole('option', { name: 'packages/ui/' })).toBeVisible()
+    })
+    await userEvent.click(within(second).getByRole('option', { name: 'packages/ui/' }))
+    await expect(folder).toHaveValue('packages/ui/')
+    await userEvent.click(inside.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(args.onSubmit).toHaveBeenCalledWith({ ...DEV, folder: 'packages/ui' })
+    })
   },
 }
 
@@ -382,7 +456,7 @@ export const Keyboard: Story = {
     await userEvent.tab()
     await expect(inside.getByLabelText('Type')).toHaveFocus()
     await userEvent.tab()
-    await expect(inside.getByLabelText('Lines')).toHaveFocus()
+    await expect(inside.getByRole('checkbox', { name: 'A line per system' })).toHaveFocus()
     await userEvent.tab()
     await expect(inside.getByRole('textbox', { name: 'Line' })).toHaveFocus()
     await userEvent.keyboard('pnpm dev')

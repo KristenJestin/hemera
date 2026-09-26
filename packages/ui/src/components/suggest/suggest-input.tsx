@@ -44,6 +44,13 @@ export interface SuggestInputProps extends Omit<InputProps, 'action' | 'onBlur'>
   emptyLabel?: string | undefined
   /** A control of the field, on the same line as its box. */
   action?: ReactNode
+  /** What the list is called to a screen reader: what is on offer. */
+  listLabel?: string | undefined
+  /**
+   * Whether choosing this leaves the list open: a folder a path goes on under, whose own entries
+   * are offered next. Closed on every choice when absent.
+   */
+  staysOpen?: ((chosen: string) => boolean) | undefined
 }
 
 export function SuggestInput({
@@ -52,6 +59,8 @@ export function SuggestInput({
   value = '',
   onValueChange,
   action,
+  listLabel = 'Folders of the Workspace',
+  staysOpen,
   ...rest
 }: SuggestInputProps): ReactNode {
   const [open, setOpen] = useState(false)
@@ -65,7 +74,8 @@ export function SuggestInput({
 
   const choose = (chosen: string) => {
     onValueChange?.(chosen)
-    setOpen(false)
+    setActive(0)
+    setOpen(staysOpen?.(chosen) === true)
   }
 
   return (
@@ -76,7 +86,7 @@ export function SuggestInput({
       align="start"
       keepFocus
       anchorOnly
-      label="Folders of the Workspace"
+      label={listLabel}
       trigger={
         <span className="flex flex-1 flex-col">
           <Input
@@ -89,6 +99,12 @@ export function SuggestInput({
             }}
             onFocus={() => setOpen(true)}
             onKeyDown={(event) => {
+              // Tab leaves the field for the next control, never for the list: the list is
+              // walked with the arrows, and a Tab that stepped into it would trap the form.
+              if (event.key === 'Tab') {
+                setOpen(false)
+                return
+              }
               if (!shown) return
               if (event.key === 'ArrowDown') {
                 event.preventDefault()
@@ -122,11 +138,7 @@ export function SuggestInput({
         {matches.length === 0 ? (
           <p className={EMPTY}>{emptyLabel}</p>
         ) : (
-          <div
-            role="listbox"
-            aria-label="Folders of the Workspace"
-            className="flex flex-col gap-0.5"
-          >
+          <div role="listbox" aria-label={listLabel} className="flex flex-col gap-0.5">
             {matches.map((one, index) => (
               <button
                 key={one.value}

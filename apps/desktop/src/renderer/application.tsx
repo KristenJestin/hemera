@@ -22,6 +22,7 @@ import type {
   ComposerChoice,
   EngineStatus,
   MotionMeasure,
+  PathEntryKind,
   Project,
   Session,
 } from '@hemera/ipc'
@@ -263,12 +264,28 @@ function unanswered(channel: string) {
 /**
  * The system's own folder picker, which belongs to the main process.
  *
- * Opened on the folder the caller says the user is working in, when it says one: a command's
- * picker starts where that command runs from. The pages that have nowhere in mind ask for no
+ * Opened on the folder the caller says the user is working in, when it says one: a preparation
+ * step's picker starts where that step works. The pages that have nowhere in mind ask for no
  * start, and the system's own last place is what they get.
  */
 async function pickFolder(start?: string): Promise<string | null> {
   return await window.hemera.invoke('dialog.pickFolder', start === undefined ? {} : { start })
+}
+
+/**
+ * The entries of one folder under a base, which a path field offers as it is typed (#109).
+ *
+ * A refusal — a folder above the base — offers nothing: the field says why on its own, in the
+ * words of its schema, and a list is help rather than a verdict.
+ */
+async function listEntries(
+  base: string,
+  relative: string,
+  kinds: readonly PathEntryKind[],
+): Promise<readonly { name: string; kind: PathEntryKind }[]> {
+  return await window.hemera
+    .invoke('paths.entries', { base, relative, kinds: [...kinds] })
+    .catch(() => [])
 }
 
 /**
@@ -1161,6 +1178,7 @@ export function Application() {
           }}
           folders={folders}
           onBrowse={pickFolder}
+          onListEntries={listEntries}
           onCheckFolder={checkFolder}
           onMainPathChange={setShownPath}
           onAddRepository={async (path) => {

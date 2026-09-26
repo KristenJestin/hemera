@@ -53,6 +53,19 @@ export const relativePathSchema = z
   )
   .refine((path) => !climbsOut(path.trim()), 'That path climbs out of the Workspace.')
 
+/**
+ * A folder under the one something runs from, as a command's folder is (#109): the same refusals
+ * as a location of the Project, said about where it runs from rather than about the Workspace.
+ * An empty folder is that folder itself, so nothing here asks for one to be typed.
+ */
+export const underBaseSchema = z
+  .string()
+  .refine(
+    (path) => !/^([\\/]|[a-zA-Z]:)/.test(path.trim()),
+    'That path is absolute: write it from where it runs.',
+  )
+  .refine((path) => !climbsOut(path.trim()), 'That path climbs above where it runs from.')
+
 function climbsOut(candidate: string): boolean {
   let depth = 0
   for (const segment of candidate.replaceAll('\\', '/').split('/')) {

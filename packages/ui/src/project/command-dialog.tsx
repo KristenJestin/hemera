@@ -12,7 +12,8 @@ import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Select } from '../components/select/select.tsx'
-import { relativePathSchema } from '../form/schemas.ts'
+import { type PathEntry, PathInput, type PathListing } from '../components/suggest/path-input.tsx'
+import { underBaseSchema } from '../form/schemas.ts'
 import type { CommandLine, RepositoryLine } from './model.ts'
 import { repositoryNamesOf, slugOf } from './naming.ts'
 
@@ -26,7 +27,8 @@ import { repositoryNamesOf, slugOf } from './naming.ts'
  * a new name is a new command.
  *
  * The lines are one or two and never three (recette 2): either the same line runs on every
- * system, or there is a line per system, asked for Windows and for Linux and macOS. There is no
+ * system, or there is a line per system, asked for Windows and for Linux and macOS. They stand on
+ * one row, and the box that switches between the two sits on the line of their labels (#109). There is no
  * third field to ask what a system with none of its own runs: what Linux and macOS run is what
  * every other system runs, and a field saying it a second time would only be the same line
  * written twice.
@@ -34,8 +36,9 @@ import { repositoryNamesOf, slugOf } from './naming.ts'
  * The folder is a base and a path under it. The base is the Workspace root or one of the
  * Project's repositories, named as a reader names them, and it follows the Workspace the run is
  * in: the same command runs in the `api` of `main` and in the `api` worktree of a dedicated one.
- * The folder is typed or picked, and what the picker answers is written relative to the folder
- * the command runs from.
+ * The folder is typed, and offered one level at a time as it is typed, from the folder the
+ * command runs from and never above it (#109): `..` is not offered, and a typed path that climbs
+ * or is absolute is refused with its reason.
  *
  * Portless is offered on a server alone, and only where it can run (D8-10): not installed, the
  * option is not drawn at all; a line that already calls `portless` runs as it is written, and
@@ -44,6 +47,20 @@ import { repositoryNamesOf, slugOf } from './naming.ts'
 const FORM = 'flex flex-col gap-4'
 
 const ROW = 'flex flex-wrap items-start gap-3'
+
+/**
+ * The row of the lines: one field across it or two side by side, and the box that switches them
+ * laid over the end of their labels' line, where it reads as part of that row (#109).
+ */
+const LINES = 'grid grid-cols-2 items-start gap-x-3'
+
+const LINES_SWITCH = 'col-start-2 row-start-1 justify-self-end'
+
+const LINE_ALONE = 'col-span-2 col-start-1 row-start-1'
+
+const LINE_WINDOWS = 'col-start-1 row-start-1 min-w-0'
+
+const LINE_OTHERS = 'col-start-2 row-start-1 min-w-0'
 
 const FIELD = 'min-w-0 flex-1'
 
@@ -66,11 +83,11 @@ const SCOPE_ITEMS: { value: CommandScope; label: string }[] = [
   { value: 'project', label: 'One instance, run in main' },
 ]
 
-/** The two ways a command says what it runs, and there is no third (recette 2). */
-const LINE_MODE_ITEMS: { value: 'same' | 'system'; label: string }[] = [
-  { value: 'same', label: 'Same line on every system' },
-  { value: 'system', label: 'A line per system' },
-]
+/** A command's folder is a folder: files are not offered. */
+const FOLDERS = ['folder'] as const
+
+/** No listing handed over: the field is typed without suggestions. */
+const NOTHING_LISTED = async (): Promise<readonly PathEntry[]> => await Promise.resolve([])
 
 /** Whether a line already goes through Portless, in which case it runs as it is written. */
 export function callsPortless(line: string): boolean {
@@ -124,11 +141,10 @@ export interface CommandDialogProps {
   /** The Project's name, whose slug is the name Portless is offered first. */
   projectName: string
   /**
-   * Asks for a folder, handed the base the command runs from — null for the Workspace root — and
-   * answers what the field holds, relative to that base, or null when the picker was dismissed.
-   * No button is drawn without it.
+   * Lists one folder under the base the command runs from — null for the Workspace root — which
+   * is what the Folder field offers as it is typed (#109). Typed without suggestions without it.
    */
-  onBrowse?: ((base: string | null) => Promise<string | null>) | undefined
+  onListFolder?: ((listing: PathListing) => Promise<readonly PathEntry[]>) | undefined
   /** Writes the command; answers the refusal to show, or null once it is written. */
   onSubmit: (command: CommandLine) => Promise<string | null>
 }
@@ -140,7 +156,7 @@ export function CommandDialog({
   repositories,
   portlessInstalled,
   projectName,
-  onBrowse,
+  onListFolder = NOTHING_LISTED,
   onSubmit,
 }: CommandDialogProps): ReactNode {
   const [name, setName] = useState('')
@@ -193,7 +209,7 @@ export function CommandDialog({
     ...(base === ROOT || names.has(base) ? [] : [{ value: base, label: base }]),
   ]
 
-  const folderRead = relativePathSchema.safeParse(folder)
+  const folderRead = underBaseSchema.safeParse(folder)
   const folderError =
     folder.trim() === '' || folderRead.success
       ? undefined
@@ -232,7 +248,8 @@ export function CommandDialog({
 
   const submit = async () => {
     setSaving(true)
-    const typedFolder = folder.trim()
+    // A folder chosen from the suggestions ends with the slash it was offered with (#109).
+    const typedFolder = folder.trim().replace(/(.)[\\/]+$/, '$1')
     // One line, it is `line` and no system has one of its own; a line per system, `line` is what
     // Linux and macOS run — and with them every system that has no line of its own (recette 2).
     const written = linesPerSystem ? lineLinux.trim() : line.trim()
@@ -288,7 +305,7 @@ export function CommandDialog({
             className={FIELD}
             placeholder="check"
             description={
-              adding ? 'What the agent asks for.' : 'Fixed: a new name is a new command.'
+              adding ? 'The agent runs it by this name.' : 'Fixed: a new name is a new command.'
             }
             value={name}
             onValueChange={setName}
@@ -304,44 +321,43 @@ export function CommandDialog({
             />
           </Labelled>
         </div>
-        <Labelled label="Lines">
-          <Select
-            label="Lines"
-            value={linesPerSystem ? 'system' : 'same'}
-            onValueChange={(mode) => {
-              chooseLines(mode === 'system')
-            }}
-            items={LINE_MODE_ITEMS}
+        <div className={LINES}>
+          <Checkbox
+            label="A line per system"
+            className={LINES_SWITCH}
+            checked={linesPerSystem}
+            onCheckedChange={chooseLines}
           />
-        </Labelled>
-        {linesPerSystem ? (
-          <div className={ROW}>
+          {linesPerSystem ? (
+            <>
+              <Input
+                label="Windows"
+                className={LINE_WINDOWS}
+                placeholder="scripts\check.cmd"
+                description="Run on Windows."
+                value={lineWindows}
+                onValueChange={setLineWindows}
+              />
+              <Input
+                label="Linux and macOS"
+                className={LINE_OTHERS}
+                placeholder="./scripts/check.sh"
+                description="And on any other system."
+                value={lineLinux}
+                onValueChange={setLineLinux}
+              />
+            </>
+          ) : (
             <Input
-              label="Windows line"
-              className={FIELD}
-              placeholder="scripts\check.cmd"
-              description="Run on Windows."
-              value={lineWindows}
-              onValueChange={setLineWindows}
+              label="Line"
+              className={LINE_ALONE}
+              placeholder="pnpm check"
+              description="Run on every system."
+              value={line}
+              onValueChange={setLine}
             />
-            <Input
-              label="Linux and macOS line"
-              className={FIELD}
-              placeholder="./scripts/check.sh"
-              description="Run on Linux and macOS, and on any other system."
-              value={lineLinux}
-              onValueChange={setLineLinux}
-            />
-          </div>
-        ) : (
-          <Input
-            label="Line"
-            placeholder="pnpm check"
-            description="Run on every system."
-            value={line}
-            onValueChange={setLine}
-          />
-        )}
+          )}
+        </div>
         {serve && (
           <Labelled label="Scope">
             <Select label="Scope" value={scope} onValueChange={setScope} items={SCOPE_ITEMS} />
@@ -351,29 +367,17 @@ export function CommandDialog({
           <Labelled label="Runs from">
             <Select label="Runs from" value={base} onValueChange={setBase} items={baseItems} />
           </Labelled>
-          <Input
+          <PathInput
             label="Folder"
             className={FIELD}
             placeholder="."
-            description="Relative to where it runs from; leave empty for that folder itself."
+            description="Under where it runs from; leave empty for that folder itself."
             value={folder}
             onValueChange={setFolder}
             error={folderError}
-            action={
-              onBrowse === undefined ? undefined : (
-                <Button
-                  variant="secondary"
-                  className="shrink-0"
-                  onClick={() => {
-                    void onBrowse(base === ROOT ? null : base).then((chosen) => {
-                      if (chosen !== null) setFolder(chosen)
-                    })
-                  }}
-                >
-                  {folder === '' ? 'Browse…' : 'Change…'}
-                </Button>
-              )
-            }
+            base={base === ROOT ? null : base}
+            kinds={FOLDERS}
+            onList={onListFolder}
           />
         </div>
         {offersPortless && (

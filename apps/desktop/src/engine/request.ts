@@ -55,6 +55,7 @@ import { Commands, type UnknownCommandError, type UnknownRunError } from './comm
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
+import { type PathOutsideBaseError, entriesUnder } from './paths.ts'
 import { Preferences } from './preferences.ts'
 import {
   type InvalidBranchPrefixError,
@@ -477,6 +478,12 @@ export function answer(
       return yield* variables.remove(projectId, workspaceId, key)
     }
 
+    // The entries of a folder under a base, which a path field offers as it is typed (#109).
+    if (decision.name === 'paths.entries') {
+      const { base, relative, kinds } = decision.argument
+      return yield* entriesUnder(base, relative, kinds)
+    }
+
     // The Spec use cases (D7-03). The renderer is the human actor: whatever it writes carries
     // human provenance and the Session whose panel it came from (D7-04, D7-11).
     const specs = yield* Specs
@@ -640,3 +647,4 @@ export type Refusal =
   | WorkspaceFixedError
   | UnknownProposalError
   | ProposalDecidedError
+  | PathOutsideBaseError

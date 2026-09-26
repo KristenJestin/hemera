@@ -6,6 +6,7 @@ import { AlertDialog } from '../components/alert-dialog/alert-dialog.tsx'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card, CardRow } from '../components/card/card.tsx'
+import type { PathEntry, PathListing } from '../components/suggest/path-input.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { useAppForm } from '../form/app-form.ts'
@@ -154,8 +155,8 @@ export interface ProjectSettingsProps {
   /** Rewrites a command the catalogue holds, found by its name; answers like `onAddCommand`. */
   onUpdateCommand?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemoveCommand?: ((id: string) => void) | undefined
-  /** Asks for a folder a command runs in, handed the base it runs from (recette 2). */
-  onBrowseCommandFolder?: ((base: string | null) => Promise<string | null>) | undefined
+  /** Lists one folder under the base a command runs from, as its Folder is typed (#109). */
+  onListCommandFolder?: ((listing: PathListing) => Promise<readonly PathEntry[]>) | undefined
   /** Whether `portless` is on this machine, which is what offers it on a server (D8-10). */
   portlessInstalled: boolean
   onArchive: () => void
@@ -193,7 +194,7 @@ export function ProjectSettings({
   onAddCommand,
   onUpdateCommand,
   onRemoveCommand,
-  onBrowseCommandFolder,
+  onListCommandFolder,
   portlessInstalled,
   onArchive,
   workspaces,
@@ -350,7 +351,7 @@ export function ProjectSettings({
         onAdd={onAddCommand}
         onUpdate={onUpdateCommand}
         onRemove={onRemoveCommand}
-        onBrowse={onBrowseCommandFolder}
+        onListFolder={onListCommandFolder}
       />
     ),
     preparation: slot(preparation, 'The preparation of this Project cannot be read yet.'),
@@ -612,7 +613,7 @@ export function CommandList({
   onAdd,
   onUpdate,
   onRemove,
-  onBrowse,
+  onListFolder,
 }: {
   commands: readonly CommandLine[]
   /** The repositories of the Project, which a command's folder may start from. */
@@ -625,8 +626,8 @@ export function CommandList({
   /** Rewrites the command of the same name. */
   onUpdate?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemove?: ((id: string) => void) | undefined
-  /** Asks for a folder, handed the base a command runs from; null for the Workspace root. */
-  onBrowse?: ((base: string | null) => Promise<string | null>) | undefined
+  /** Lists one folder under the base a command runs from; null for the Workspace root. */
+  onListFolder?: ((listing: PathListing) => Promise<readonly PathEntry[]>) | undefined
 }): ReactNode {
   /**
    * The command the dialog edits, or null when it adds one. Kept while the dialog closes, so it
@@ -705,7 +706,7 @@ export function CommandList({
         repositories={repositories}
         portlessInstalled={portlessInstalled}
         projectName={projectName}
-        onBrowse={onBrowse}
+        onListFolder={onListFolder}
         onSubmit={submit}
       />
     </Card>
