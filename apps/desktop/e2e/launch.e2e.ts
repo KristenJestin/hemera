@@ -37,12 +37,10 @@ import {
   choose,
   control,
   fill,
-  leave,
   press,
   pressIn,
   pressTab,
   region,
-  showPart,
   unfoldSpec,
   write,
 } from './hand.ts'
@@ -202,61 +200,59 @@ async function writeSpec(asked: string, key: string): Promise<void> {
 
   await unfoldSpec(key)
   // The `shape` phase cannot finish without these two, and this fake agent writes neither: they
-  // are the human's, written in the panel as a human writes them.
-  await writeSection(key, 'Problem', PROBLEM)
-  await showPart(key, 'Scope')
-  await writeSection(key, 'Scope', SCOPE)
+  // go through the window's bridge, since nothing of the Spec is edited by hand (issue #135).
+  await writeSection(key, 'problem', PROBLEM)
+  await writeSection(key, 'scope', SCOPE)
 
   await write(COMPLETE)
   await press('Send')
   await awaits(COMPLETED, 60_000)
   await browser.pause(1500)
-  await readyOffered(key)
-  await pressIn(panelOf(key), 'Mark ready')
-  await browser.pause(1500)
+  await markedReady(key)
 }
 
 /**
- * Writes a section of the Spec from the panel, as the human's own edit. `typeIn` wants the field
- * focused afterwards, and the answer of the thread takes the caret back: here the text is set and
- * the blur commits it, which is what the panel listens to.
+ * Writes a section of the Spec through the window's bridge, on the version it is at, from the
+ * Session that writes the Spec: the panel edits nothing (issue #135), and this fake agent writes
+ * neither `problem` nor `scope`.
  */
-async function writeSection(key: string, title: string, body: string): Promise<void> {
-  const written = await browser.execute(
-    (label: string, said: string) => {
-      const field = document.querySelector(`textarea[aria-label="${label}"]`)
-      if (!(field instanceof HTMLTextAreaElement)) return 'no field'
-      field.focus()
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
-        field,
-        said,
-      )
-      field.dispatchEvent(new Event('input', { bubbles: true }))
-      return 'written'
+async function writeSection(key: string, name: 'problem' | 'scope', body: string): Promise<void> {
+  const specId = await specIdOf(key)
+  await browser.execute(
+    async (id: string, section: 'problem' | 'scope', said: string) => {
+      const read = await window.hemera.invoke('specs.read', { specId: id })
+      await window.hemera.invoke('specs.writeSection', {
+        specId: id,
+        sessionId: read.spec.writerSessionId ?? '',
+        name: section,
+        body: said,
+        baseVersion: read.sections.find((one) => one.name === section)?.version ?? 0,
+      })
     },
-    title,
+    specId,
+    name,
     body,
   )
-  if (written !== 'written') {
-    throw new Error(`wrote ${title}: ${written}. Panel: ${await region(panelOf(key))}`)
-  }
-  await leave(title)
+  await browser.pause(600)
 }
 
 /**
- * Waits for the panel's `Mark ready`, and says what the panel and the thread hold when it never
- * comes: the gate is the engine's, and a write it refused is read in the thread.
+ * Presses the panel's `Mark ready` until the engine accepts it, and says what the panel and the
+ * thread hold when it never does: `Mark ready` is offered on every draft (issue #135), the gate
+ * is the engine's, and a write it refused is read in the thread.
  */
-async function readyOffered(key: string): Promise<void> {
+async function markedReady(key: string): Promise<void> {
   const until = Date.now() + 30_000
   while (Date.now() < until) {
-    // oxlint-disable-next-line no-await-in-loop -- the panel is asked again until it offers the press
-    if ((await control('Mark ready')) !== null) return
-    // oxlint-disable-next-line no-await-in-loop -- the pause between two asks
-    await browser.pause(500)
+    // oxlint-disable-next-line no-await-in-loop -- pressed again until the engine accepts it
+    await pressIn(panelOf(key), 'Mark ready')
+    // oxlint-disable-next-line no-await-in-loop -- the pause the engine answers in
+    await browser.pause(1000)
+    // oxlint-disable-next-line no-await-in-loop -- read after each press
+    if ((await stateOf(key)).status === 'ready') return
   }
   throw new Error(
-    `no Mark ready for ${key}. Panel: ${await region(panelOf(key))} || Thread: ${await region(THREAD)}`,
+    `${key} never ready. Panel: ${await region(panelOf(key))} || Thread: ${await region(THREAD)}`,
   )
 }
 

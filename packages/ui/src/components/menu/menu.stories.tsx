@@ -5,7 +5,7 @@ import { IconDots, IconPlus, IconSettings, IconTrash } from '../../icons.ts'
 import { Menu } from './menu.tsx'
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Menu',
   component: Menu,
   args: { label: 'Session', groups: [] },
@@ -13,6 +13,7 @@ const meta = {
     label: { control: 'text' },
     icon: { table: { disable: true } },
     disabled: { control: 'boolean' },
+    size: { control: 'inline-radio', options: ['sm', 'md'] },
     groups: { table: { disable: true } },
     className: { table: { disable: true } },
   },
@@ -50,6 +51,35 @@ export const Variants: Story = {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('button', { name: 'Session' })).toBeInTheDocument()
     expect(canvas.getByRole('button', { name: 'Locked' })).toBeDisabled()
+  },
+}
+
+/**
+ * A small trigger, the height and type of a small button beside it: what the footer of the Spec
+ * rail stacks under `Prepare and start the build` (issue #135).
+ */
+export const Small: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <div className="flex items-start gap-4">
+      <Menu {...args} label="Session" size="sm" groups={commands(fn())} />
+      <Menu {...args} label="Default" groups={commands(fn())} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const small = canvas.getByRole('button', { name: 'Session' })
+    const regular = canvas.getByRole('button', { name: 'Default' })
+    await expect(small.getBoundingClientRect().height).toBeLessThan(
+      regular.getBoundingClientRect().height,
+    )
+    await userEvent.click(small)
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    expect(within(menu).getByRole('menuitem', { name: /new session/i })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
   },
 }
 

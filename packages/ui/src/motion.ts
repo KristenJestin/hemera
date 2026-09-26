@@ -323,19 +323,6 @@ export const CROSSFADE = {
 } as const
 
 /**
- * The `fill` kind: a measure filling up to where it stands.
- *
- * The readiness bar of a Spec is seven segments, and one that passes fills from its left edge
- * rather than switching colour: the eye catches a change it saw happen. The theme's `slow`, on
- * the calm curve, and each segment a `FILL_STEP` behind the one before it, so a bar that fills
- * at once reads as a sweep from left to right and not as seven lamps going on together.
- */
-export const fill: Transition = { duration: durations.slow, ease: easing }
-
-/** How far behind the segment before it a segment of a measure starts filling, in seconds. */
-export const FILL_STEP = 0.04
-
-/**
  * The `ping` kind: a ring leaving what is running, over and over.
  *
  * A dot that is breathing says "this is the state you are waiting on" in opacity alone, which

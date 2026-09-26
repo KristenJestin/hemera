@@ -471,7 +471,6 @@ export { SectionPart, type SectionPartProps } from './spec/section-part.tsx'
 export { StoriesPart, type StoriesPartProps } from './spec/stories-part.tsx'
 export { TasksPart, type TasksPartProps } from './spec/tasks-part.tsx'
 export { QuestionsPart, type QuestionsPartProps } from './spec/questions-part.tsx'
-export { ConflictBanner, type ConflictBannerProps } from './spec/conflict-banner.tsx'
 export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
 export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
 export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
@@ -484,7 +483,6 @@ export {
 } from './spec/create-spec-proposal.tsx'
 export type {
   Author,
-  ConflictView,
   Executor,
   GateCheck,
   GateCheckView,

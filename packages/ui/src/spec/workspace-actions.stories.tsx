@@ -9,7 +9,8 @@ const MAIN: LaunchWorkspace = { id: 'ws-main', name: 'main' }
 const SPIKE: LaunchWorkspace = { id: 'ws-spike', name: 'spike' }
 
 /**
- * The build of a frozen Spec: what it is launched in, and where the launch stands (D8-12, D8-13).
+ * The build of a ready Spec: what it is launched in, and where the launch stands (D8-12, D8-13),
+ * drawn at the width of the rail whose footer holds it (issue #135).
  *
  * With no Workspace yet, the two ways in and the menu that holds the second one; with one ready,
  * the one thing left to do. Then the five states of a launch, each with the one thing it offers
@@ -19,8 +20,15 @@ const SPIKE: LaunchWorkspace = { id: 'ws-spike', name: 'spike' }
 const meta = {
   title: 'Blocks/Spec/WorkspaceActions',
   component: WorkspaceActions,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
+  decorators: [
+    (Story) => (
+      <div className="w-rail">
+        <Story />
+      </div>
+    ),
+  ],
   args: {
     launch: null,
     workspaces: [MAIN, SPIKE],
@@ -53,6 +61,19 @@ export const NoWorkspace: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const body = within(document.body)
+    // One under the other, each the rail's width, and neither cut.
+    const prepare = canvas.getByRole('button', { name: 'Prepare and start the build' })
+    const existing = canvas.getByRole('button', { name: 'Use an existing Workspace' })
+    await expect(existing.getBoundingClientRect().top).toBeGreaterThan(
+      prepare.getBoundingClientRect().bottom - 1,
+    )
+    await expect(existing.getBoundingClientRect().width).toBeCloseTo(
+      prepare.getBoundingClientRect().width,
+      0,
+    )
+    for (const button of [prepare, existing]) {
+      expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth)
+    }
 
     await userEvent.click(canvas.getByRole('button', { name: 'Prepare and start the build' }))
     await expect(args.onPrepareAndStart).toHaveBeenCalled()

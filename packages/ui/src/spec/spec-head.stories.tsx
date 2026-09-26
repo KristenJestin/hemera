@@ -6,8 +6,8 @@ import { SpecHead } from './spec-head.tsx'
 
 /**
  * The first line of the Spec panel: the key, the title, the type, the status, and — once there
- * is more than one revision — the picker of the revisions, with `Rework` on a `ready` Spec — and
- * at the very end the fold that takes the panel back to its band.
+ * is more than one revision — the picker of the revisions, with `Mark ready` on a draft and
+ * `Rework` on a `ready` Spec — and at the very end the fold that takes the panel back to its band.
  */
 const meta = {
   title: 'Blocks/Spec/SpecHead',
@@ -30,6 +30,7 @@ const meta = {
     revisions: [{ number: 1, detail: 'Latest · draft' }],
     onPickRevision: fn(),
     onRework: fn(),
+    onMarkReady: fn(),
     onFold: fn(),
   },
   argTypes: {
@@ -42,6 +43,9 @@ const meta = {
     superseded: { control: 'boolean', description: 'Whether an older revision is shown.' },
     onPickRevision: { description: 'Shows another revision.' },
     onRework: { description: 'Opens the rework of a `ready` Spec.' },
+    onMarkReady: {
+      description: 'Marks a draft ready; refused by the engine while it lacks something.',
+    },
     onFold: { description: 'Folds the panel to its band.' },
   },
 } satisfies Meta<typeof SpecHead>
@@ -50,7 +54,10 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** A first draft: no revision named, no picker, no Rework; the fold at the end of the line. */
+/**
+ * A first draft: no revision named, no picker, no Rework; `Mark ready`, never disabled, and the
+ * fold at the end of the line.
+ */
 export const Draft: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
@@ -58,6 +65,10 @@ export const Draft: Story = {
     await expect(canvas.getByText('draft')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /rev/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
+    const mark = canvas.getByRole('button', { name: 'Mark ready' })
+    await expect(mark).toBeEnabled()
+    await userEvent.click(mark)
+    await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
     await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
     await expect(args.onFold).toHaveBeenCalled()
   },
@@ -90,7 +101,7 @@ export const Maintenance: Story = {
 }
 
 /**
- * Frozen at revision 2: the picker lists the older one as read only, and `Rework` is the way
+ * Ready at revision 2: the picker lists the older one as read only, and `Rework` is the way
  * back to a draft.
  */
 export const Ready: Story = {
@@ -98,20 +109,21 @@ export const Ready: Story = {
     status: 'ready',
     revision: 2,
     revisions: [
-      { number: 2, detail: 'Latest · frozen' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 2, detail: 'Latest · ready' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Latest' }))
     const older = await within(document.body).findByRole('menuitem', {
-      name: 'Frozen 22 Sep · read only',
+      name: 'Marked ready 22 Sep · read only',
     })
     await userEvent.click(older)
     await expect(args.onPickRevision).toHaveBeenCalledWith(1)
     await userEvent.click(canvas.getByRole('button', { name: 'Rework' }))
     await expect(args.onRework).toHaveBeenCalled()
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
   },
 }
 
@@ -122,14 +134,15 @@ export const OlderRevision: Story = {
     revision: 1,
     superseded: true,
     revisions: [
-      { number: 2, detail: 'Latest · frozen' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 2, detail: 'Latest · ready' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('button', { name: 'Earlier' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
   },
 }
 
@@ -139,8 +152,8 @@ export const Reworked: Story = {
     revision: 3,
     revisions: [
       { number: 3, detail: 'Latest · draft' },
-      { number: 2, detail: 'Frozen 23 Sep · read only' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 2, detail: 'Marked ready 23 Sep · read only' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement }) => {

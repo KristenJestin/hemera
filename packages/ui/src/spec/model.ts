@@ -52,55 +52,30 @@ export type SectionName =
 export type SpecTarget = SectionName | 'stories' | 'tasks' | 'questions'
 
 /**
- * The mark in the margin of a part: nothing written yet, written by the agent, edited by you, out
- * of date after a rework, in conflict with an unsaved text of yours, or being written right now.
+ * The mark of a part: nothing written yet, written by the agent, written by you, out of date after
+ * a rework, or being written right now.
  */
-export type Mark = 'empty' | 'agent' | 'human' | 'stale' | 'conflict' | 'writing'
+export type Mark = 'empty' | 'agent' | 'human' | 'stale' | 'writing'
 
 /** Who wrote a section last. */
 export type Author = 'agent' | 'human'
-
-/**
- * A text of yours that could not be saved, because the section moved under it (D7-12).
- *
- * It is kept whole: the editor holds `mine`, and `current` is what the section says now, for
- * the comparison.
- */
-export interface ConflictView {
-  /** The version the human's text was written on. */
-  base: number
-  /** The version the section is at now. */
-  current: number
-  /** The human's text, never lost. */
-  mine: string
-  /** What the section says at `current`, written by whoever wrote it. */
-  theirs: string
-}
 
 export interface SectionView {
   name: SectionName
   /** The Markdown body; empty while nothing is written. */
   body: string
-  /** The section's own version, which a save is checked against. */
-  version: number
   /** Who wrote it last; `null` while nothing is written. */
   author: Author | null
   mark: Mark
-  /** A human edit not yet handed to the agent: it goes with the next turn. */
-  pendingForAgent?: boolean | undefined
   /** The revision it was copied from, after a rework, while its phase is stale. */
   copiedFrom?: number | undefined
-  conflict?: ConflictView | undefined
   /** A line under the text saying what the section is for, when the type says it. */
   note?: string | undefined
 }
 
 /** A story (core.md, "Spec"): one sentence of actor, need and benefit, and ordered criteria. */
 export interface StoryView {
-  /**
-   * The story itself, whatever its place: an edit is handed back on it, so a story added or moved
-   * while its text was being edited never receives another story's text.
-   */
+  /** The story itself, whatever its place. */
   id: string
   /** `S1`, `S2`: how tasks and questions point at it. */
   key: string
@@ -207,14 +182,17 @@ export interface ReadinessItem {
   target?: SpecTarget | undefined
 }
 
+/**
+ * The ready gate as the panel is handed it. Since issue #135 the panel draws none of it but what
+ * `Mark ready` was refused with, which the application writes from the things left.
+ */
 export interface ReadinessView {
   checks: GateCheckView[]
   /** What is left, in the order the sentence says it. Empty when every check passes. */
   todo: ReadinessItem[]
   /**
-   * What the last `Mark ready` was refused with, in the engine's words: the Spec changed since
-   * the gate was shown, and the bar now shows it as it is (D7-10, "An obsolete request is
-   * refused").
+   * What the last `Mark ready` was refused with: what the draft still lacks, or that the Spec
+   * changed as it was pressed (D7-10, "An obsolete request is refused").
    */
   refused?: string | undefined
 }
@@ -222,7 +200,7 @@ export interface ReadinessView {
 /** A revision as the picker lists it. */
 export interface RevisionView {
   number: number
-  /** What the picker says of it, in plain words: `Latest · frozen`, `Frozen 22 Sep · read only`. */
+  /** What the picker says of it, in plain words: `Latest · ready`, `Marked ready 22 Sep · read only`. */
   detail: string
 }
 
@@ -249,7 +227,10 @@ export interface SpecView {
   revisions: RevisionView[]
   /** The state of each phase, which the group headings of the document wear. */
   phases: PhaseView[]
-  /** The one sentence under the head: `Plan · the agent is writing the plan`. */
+  /**
+   * The one sentence under the head: `Plan · the agent is writing the plan`. Empty when there is
+   * nothing to say beside the status: a `ready` Spec.
+   */
   now: string
   /** Where the agent is writing now, which the document highlights and scrolls to. */
   focus?: SpecTarget | undefined
@@ -262,8 +243,6 @@ export interface SpecView {
   questions: SpecQuestionView[]
   questionsMark: Mark
   readiness: ReadinessView
-  /** When it was frozen, already written: `23 Sep`. Present on a `ready` Spec only. */
-  frozenOn?: string | undefined
   /**
    * The current revision, when the one shown is an older one (D7-05): it is read as it was
    * frozen, and it offers no Rework — only the current revision of a Spec can be reworked.
