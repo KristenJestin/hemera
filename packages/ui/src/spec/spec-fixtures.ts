@@ -250,7 +250,6 @@ export const MID_PLAN: SpecView = {
   revision: 1,
   revisions: [{ number: 1, detail: 'Latest · draft' }],
   phases: phases('finished', 'open', 'pending'),
-  now: 'Plan · the agent is writing the plan',
   focus: 'plan',
   sections: [PROBLEM, OUTCOME, SCOPE, VERIFICATION, BEHAVIOUR, PLAN_WRITING],
   stories: STORIES,
@@ -274,7 +273,6 @@ export const BUG: SpecView = {
   revision: 1,
   revisions: [{ number: 1, detail: 'Latest · draft' }],
   phases: phases('open', 'pending', 'pending'),
-  now: 'Shape · waiting for your answer',
   focus: 'reproduction',
   sections: [
     {
@@ -329,7 +327,6 @@ export const BUG: SpecView = {
 export const GATE_FULL: SpecView = {
   ...MID_PLAN,
   phases: phases('finished', 'finished', 'finished'),
-  now: 'Decompose · finished, the agent confirmed the Spec is complete',
   focus: 'tasks',
   sections: [PROBLEM, OUTCOME, SCOPE, VERIFICATION, BEHAVIOUR, PLAN],
   tasks: TASKS,
@@ -344,7 +341,6 @@ export const READY: SpecView = {
   status: 'ready',
   revision: 2,
   revisions: FROZEN_REVISIONS,
-  now: '',
   focus: undefined,
 }
 
@@ -355,7 +351,6 @@ export const READY: SpecView = {
 export const OLDER_REVISION: SpecView = {
   ...READY,
   revision: 1,
-  now: 'An earlier version · read only',
   replacedBy: 2,
 }
 
@@ -366,7 +361,6 @@ export const OLDER_REVISION: SpecView = {
 export const READER: SpecView = {
   ...MID_PLAN,
   phases: phases('finished', 'finished', 'open'),
-  now: 'Decompose · the agent of the writer is splitting the tasks',
   focus: 'tasks',
   sections: [PROBLEM, OUTCOME, SCOPE, VERIFICATION, BEHAVIOUR, PLAN],
   tasks: TASKS.slice(0, 2).concat(TASKS[3]!),
@@ -399,7 +393,6 @@ export const STALE: SpecView = {
     { number: 1, detail: 'Marked ready 22 Sep · read only' },
   ],
   phases: phases('finished', 'stale', 'stale'),
-  now: 'Every phase to review · the agent goes over each again',
   focus: 'plan',
   sections: [
     PROBLEM,
@@ -428,7 +421,6 @@ export const MAINTENANCE: SpecView = {
   revision: 1,
   revisions: [{ number: 1, detail: 'Latest · draft' }],
   phases: phases('finished', 'open', 'pending'),
-  now: 'Plan · the agent is reading the storage adapter',
   focus: 'invariants',
   sections: [
     {
@@ -489,7 +481,6 @@ export const MAINTENANCE: SpecView = {
  */
 export const ONE_QUESTION_LEFT: SpecView = {
   ...GATE_FULL,
-  now: 'Decompose · finished, one question is still yours',
   focus: 'questions',
   questions: QUESTIONS,
   readiness: gate({ questions: 'questions · 1 blocking' }, [
@@ -509,7 +500,6 @@ export const JUST_CREATED: SpecView = {
   revision: 1,
   revisions: [{ number: 1, detail: 'Latest · draft' }],
   phases: phases('open', 'pending', 'pending'),
-  now: 'Shape · the agent is writing the problem',
   focus: 'problem',
   sections: [
     {

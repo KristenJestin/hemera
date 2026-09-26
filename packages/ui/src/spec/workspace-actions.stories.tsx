@@ -10,7 +10,7 @@ const SPIKE: LaunchWorkspace = { id: 'ws-spike', name: 'spike' }
 
 /**
  * The build of a ready Spec: what it is launched in, and where the launch stands (D8-12, D8-13),
- * drawn at the width of the rail whose footer holds it (issue #135).
+ * drawn at the end of the panel's footer that holds it, under the rail and the stage (issue #150).
  *
  * With no Workspace yet, the two ways in and the menu that holds the second one; with one ready,
  * the one thing left to do. Then the five states of a launch, each with the one thing it offers
@@ -22,13 +22,6 @@ const meta = {
   component: WorkspaceActions,
   tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
-  decorators: [
-    (Story) => (
-      <div className="w-rail">
-        <Story />
-      </div>
-    ),
-  ],
   args: {
     launch: null,
     workspaces: [MAIN, SPIKE],
@@ -61,15 +54,15 @@ export const NoWorkspace: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const body = within(document.body)
-    // One under the other, each the rail's width, and neither cut.
+    // Side by side on one line, the primary one last, and neither cut.
     const prepare = canvas.getByRole('button', { name: 'Prepare and start the build' })
     const existing = canvas.getByRole('button', { name: 'Use an existing Workspace' })
-    await expect(existing.getBoundingClientRect().top).toBeGreaterThan(
-      prepare.getBoundingClientRect().bottom - 1,
-    )
-    await expect(existing.getBoundingClientRect().width).toBeCloseTo(
-      prepare.getBoundingClientRect().width,
+    await expect(existing.getBoundingClientRect().top).toBeCloseTo(
+      prepare.getBoundingClientRect().top,
       0,
+    )
+    await expect(prepare.getBoundingClientRect().left).toBeGreaterThan(
+      existing.getBoundingClientRect().right - 1,
     )
     for (const button of [prepare, existing]) {
       expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth)
@@ -179,11 +172,7 @@ export const Keyboard: Story = {
     const canvas = within(canvasElement)
     const body = within(document.body)
 
-    await userEvent.tab()
-    await expect(canvas.getByRole('button', { name: 'Prepare and start the build' })).toHaveFocus()
-    await userEvent.keyboard('{Enter}')
-    await expect(args.onPrepareAndStart).toHaveBeenCalled()
-
+    // In the order they are read, left to right: the menu, then the primary action at the end.
     await userEvent.tab()
     const trigger = canvas.getByRole('button', { name: 'Use an existing Workspace' })
     await expect(trigger).toHaveFocus()
@@ -196,5 +185,10 @@ export const Keyboard: Story = {
       expect(body.queryByRole('menu')).toBeNull()
     })
     await expect(trigger).toHaveFocus()
+
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Prepare and start the build' })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onPrepareAndStart).toHaveBeenCalled()
   },
 }

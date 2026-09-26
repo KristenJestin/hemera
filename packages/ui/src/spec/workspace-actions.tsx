@@ -18,12 +18,13 @@ import type { LaunchView, LaunchWorkspace } from './model.ts'
 /**
  * What to do next on a ready Spec, and where the build it starts stands (D8-12, D8-13).
  *
- * The footer of the Spec panel's rail holds it on a Spec that is not being written (issue #135): a
+ * The footer of the Spec panel holds it on a Spec that is not being written (issue #135): a
  * Spec being written offers nothing to build, and an older revision of a ready one is read only
  * (D7-05). A launch already asked for keeps the actions where they are once the Spec moves on —
  * the build it started is reached through `Open`, and one a Rework took back says so (D8-13).
  *
- * The rail is narrow, so the actions stand one under the other, each the rail's width.
+ * The footer runs under the rail and the stage alike (issue #150), so the actions stand side by
+ * side at its end, each at its own width, the primary one last.
  *
  * With no Workspace yet, the two ways in are the hand's: prepare one from the plan and start the
  * build in it, or start the build in a Workspace the Project already has — `main`, which every
@@ -41,7 +42,7 @@ import type { LaunchView, LaunchWorkspace } from './model.ts'
  * launch and what a press becomes belong to the caller.
  */
 
-const ACTIONS = 'flex flex-col items-stretch gap-2'
+const ACTIONS = 'flex flex-wrap items-center justify-end gap-2'
 
 const SAYS = 'flex flex-wrap items-center gap-2 text-sm text-muted-foreground'
 
@@ -98,16 +99,15 @@ export function WorkspaceActions({
     }))
     return (
       <div role="group" aria-label={GROUP} className={ACTIONS}>
-        <Button variant="primary" size="sm" className="w-full" onClick={onPrepareAndStart}>
-          <IconHammer size="sm" aria-hidden="true" />
-          Prepare and start the build
-        </Button>
         <Menu
           label="Use an existing Workspace"
           size="sm"
-          className="w-full"
           groups={existing.length === 0 ? [[prepareOnly]] : [[prepareOnly], existing]}
         />
+        <Button variant="primary" size="sm" onClick={onPrepareAndStart}>
+          <IconHammer size="sm" aria-hidden="true" />
+          Prepare and start the build
+        </Button>
       </div>
     )
   }
@@ -115,7 +115,7 @@ export function WorkspaceActions({
   if (launch === null) {
     return (
       <div role="group" aria-label={GROUP} className={ACTIONS}>
-        <Button variant="primary" size="sm" className="w-full" onClick={onStart}>
+        <Button variant="primary" size="sm" onClick={onStart}>
           <IconPlayerPlay size="sm" aria-hidden="true" />
           Start the build
         </Button>

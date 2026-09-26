@@ -1,11 +1,4 @@
-import {
-  type GateFailure,
-  contractOf,
-  focusOf,
-  readyGate,
-  sectionOwner,
-  takeOverRefusal,
-} from '@hemera/core'
+import { type GateFailure, readyGate, sectionOwner, takeOverRefusal } from '@hemera/core'
 import type {
   JournalEntry,
   PhaseId,
@@ -39,10 +32,9 @@ import type {
  * A Spec snapshot as the Spec panel of `@hemera/ui` draws it (design D7-01, D7-08, D7-10, D7-12).
  *
  * The design system mirrors nothing of the domain: its view says what is shown, already decided —
- * one sentence of what is happening, a mark per part, the readiness as seven segments and the
- * things left before ready. This is where a snapshot, its revisions and its Journal become
- * that. Pure, and free of what `@hemera/ui` runs when it loads, so it is
- * tested on Node.
+ * a mark per part, the readiness as seven segments and the things left before ready. This is where
+ * a snapshot, its revisions and its Journal become that. Pure, and free of what `@hemera/ui` runs
+ * when it loads, so it is tested on Node.
  */
 
 /** Everything a Spec view is read from: the store's answers, as they came. */
@@ -56,13 +48,6 @@ export interface SpecReading {
 }
 
 const PHASES: readonly PhaseId[] = ['shape', 'plan', 'decompose', 'prototype']
-
-const PHASE_WORDS: Record<PhaseId, string> = {
-  shape: 'Shape',
-  plan: 'Plan',
-  decompose: 'Decompose',
-  prototype: 'Prototype',
-}
 
 /** How a section is named inside a sentence. */
 const SECTION_WORDS: Record<SectionName, string> = {
@@ -226,54 +211,6 @@ function phasesOf(snapshot: SpecSnapshot): PhaseView[] {
 function listMark(snapshot: SpecSnapshot, count: number): Mark {
   if (count === 0) return 'empty'
   return phaseState(snapshot, 'decompose') === 'stale' ? 'stale' : 'agent'
-}
-
-/** Whether the agent attested the content the Spec is at now (D7-10). */
-function attested(snapshot: SpecSnapshot): boolean {
-  return snapshot.revision.attestedContentVersion === snapshot.spec.contentVersion
-}
-
-/**
- * The one sentence under the head: the phase in focus and where it stands.
- *
- * In the reader's words, never the engine's: no revision, no attestation, no stale. Ready, it
- * says nothing: the status beside the title says it (issue #135). With every phase finished, whether the agent confirmed the Spec complete; with a phase
- * stale, that it is to review and the agent goes over it again — every phase after a Rework, the
- * one a new shaping made stale otherwise; with a blocking question of that phase open, that the answer is yours; and
- * otherwise what the agent is writing: the first empty section of the shape, the plan, the tasks.
- */
-export function nowOf(snapshot: SpecSnapshot): string {
-  if (!isCurrent(snapshot)) return 'An earlier version · read only'
-  if (snapshot.spec.status !== 'draft') return ''
-  const focus = focusOf(snapshot.phases)
-  if (focus === null) {
-    return attested(snapshot)
-      ? 'Decompose · finished, the agent confirmed the Spec is complete'
-      : 'Decompose · finished, waiting for the agent to confirm the Spec is complete'
-  }
-  const phase = PHASE_WORDS[focus]
-  if (phaseState(snapshot, focus) === 'stale') {
-    // Right after a Rework every phase that can run is stale; one stale among others finished is
-    // a new shaping's doing, whatever the revision.
-    const reworked = snapshot.phases.every(
-      (one) => one.state === 'stale' || one.state === 'unavailable',
-    )
-    return reworked
-      ? 'Every phase to review · the agent goes over each again'
-      : `${phase} · to review, the agent goes over it again`
-  }
-  const waiting = snapshot.questions.some(
-    (question) => question.blocking && question.resolvedAt === null && question.phase === focus,
-  )
-  if (waiting) return `${phase} · waiting for your answer`
-  if (focus === 'decompose') return 'Decompose · the agent is splitting the tasks'
-  if (focus === 'plan') return 'Plan · the agent is writing the plan'
-  const empty = contractOf(snapshot.revision.type).find(
-    (name) => (snapshot.sections.find((one) => one.name === name)?.body.trim() ?? '') === '',
-  )
-  return empty === undefined
-    ? `${phase} · the agent is shaping the need`
-    : `${phase} · the agent is writing ${SECTION_WORDS[empty]}`
 }
 
 function isSection(target: string): target is SectionName {
@@ -445,7 +382,6 @@ export function specViewOf({ snapshot, revisions, journal, readyRefused }: SpecR
     revision: snapshot.revision.number,
     revisions: revisionsOf(snapshot, revisions, journal),
     phases: phasesOf(snapshot),
-    now: nowOf(snapshot),
     sections: sectionsOf(snapshot),
     stories: storiesOf(snapshot),
     storiesMark: listMark(snapshot, snapshot.stories.length),
