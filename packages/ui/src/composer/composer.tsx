@@ -111,6 +111,15 @@ export interface ComposerProps {
    */
   onSpec?: ((text: string) => Promise<string | null>) | undefined
   /**
+   * Whether the page asks for the caret in the box, now (issue #128).
+   *
+   * A one-shot request rather than an `autoFocus`: the Home is often already on screen when a new
+   * Session is asked for, and a box that is not mounted again is never focused by a mount. The box
+   * takes the caret when this turns true, and `onFocusTaken` tells the page it can let go.
+   */
+  takeFocus?: boolean | undefined
+  onFocusTaken?: (() => void) | undefined
+  /**
    * Whether a turn is running, which is what the send becomes while it does (design D17-13).
    *
    * It is not the same question as `sending`: a write is in flight for as long as the engine
@@ -161,6 +170,8 @@ export function Composer({
   onSend,
   agentMenu,
   onSpec,
+  takeFocus = false,
+  onFocusTaken,
   running = false,
   onStop,
   blocked,
@@ -168,6 +179,13 @@ export function Composer({
 }: ComposerProps): ReactNode {
   const growing = useTransition(morph)
   const box = useRef<ComposerBoxHandle>(null)
+
+  // The caret, where the page asked for it: once per request, after the box is on screen.
+  useEffect(() => {
+    if (!takeFocus) return
+    box.current?.focus()
+    onFocusTaken?.()
+  }, [takeFocus])
   const [matches, setMatches] = useState<string[]>([])
   const [picking, setPicking] = useState<Picking>(null)
   const [active, setActive] = useState(0)

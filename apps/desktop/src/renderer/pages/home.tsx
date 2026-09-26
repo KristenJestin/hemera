@@ -70,6 +70,8 @@ export function HomePage({
   onPickFiles,
   workspaces,
   onSend,
+  focusComposer = false,
+  onFocusTaken,
 }: {
   projectName: string
   /** The last Sessions of this Project, most recently written first. */
@@ -111,6 +113,12 @@ export function HomePage({
     workspaceId: string | null,
     intent?: PromptIntent,
   ) => Promise<string | null>
+  /**
+   * Whether the caret is asked for in the composer, now: the sidebar's `+` (issue #128). Let go
+   * of with `onFocusTaken` once the box has it.
+   */
+  focusComposer?: boolean | undefined
+  onFocusTaken?: (() => void) | undefined
 }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -214,6 +222,8 @@ export function HomePage({
         onSend={async (text) =>
           agent === null ? NO_AGENT : await onSend(text, agent, workspace?.id ?? null)
         }
+        takeFocus={focusComposer}
+        onFocusTaken={onFocusTaken}
       />
       {sessions.length === 0 ? (
         <EmptyProject projectName={projectName} onOpenJournal={onOpenJournal} />

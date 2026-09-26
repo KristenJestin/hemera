@@ -367,6 +367,8 @@ export function Application() {
   const [putAway, setPutAway] = useState<Session[]>([])
   /** The Session whose title is being typed into, when one is. */
   const [naming, setNaming] = useState<string | null>(null)
+  /** Whether a new Session was asked for and the Home's composer has not taken the caret yet. */
+  const [focusHome, setFocusHome] = useState(false)
   /** Which Project the window has already decided where to look in. */
   const placed = useRef<string | null>(null)
   /**
@@ -758,10 +760,14 @@ export function Application() {
    * Session exists from the moment that first message is sent, and the message names it (D4b-01):
    * a Session made before there is an agent to answer it would be a thread nothing can be said
    * to, which is exactly what the Home used to make.
+   *
+   * The caret goes into that composer at once (issue #128): what was asked for is a Session, and
+   * the next thing the hand does is type its first message.
    */
   const newSession = useCallback(() => {
     if (shell.activeProjectId === null) return
     goTo(HOME_ENTRY)
+    setFocusHome(true)
   }, [shell.activeProjectId, goTo])
 
   /** Writes a message into a Session, and reads the Journal again when one was written. */
@@ -1326,6 +1332,8 @@ export function Application() {
           void say(made.id, text, intent)
           return null
         }}
+        focusComposer={focusHome}
+        onFocusTaken={() => setFocusHome(false)}
       />
     )
   }

@@ -852,6 +852,22 @@ export const NewSpec: Story = {
   },
 }
 
+/**
+ * The page asks for the caret, and the box takes it (issue #128): the sidebar's `+` goes to the
+ * Home and the next key typed is already in the composer.
+ */
+export const TakesTheFocus: Story = {
+  args: { takeFocus: true, onFocusTaken: fn() },
+  play: async ({ canvasElement, args }) => {
+    const box = within(canvasElement).getByRole('textbox')
+    await waitFor(() => {
+      expect(document.activeElement).toBe(box)
+    })
+    // Said back once, so the page lets go of the request and the next one is a new one.
+    expect(args.onFocusTaken).toHaveBeenCalledTimes(1)
+  },
+}
+
 /** Scenario « Mouvement réduit » of `specs/shell-navigation/spec.md`. */
 export const ReducedMotion: Story = {
   play: async ({ canvasElement }) => {
