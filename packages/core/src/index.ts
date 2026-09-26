@@ -5,6 +5,18 @@ export {
   classifierVerdictFromScores,
   localClassifierVerdict,
 } from './domain/classifier.ts'
+
+export {
+  CLASSIFIER_CONTEXT_CHARACTERS,
+  CLASSIFIER_ITEM_CHARACTERS,
+  CLASSIFIER_MESSAGE_LIMIT,
+  classifierHumanContext,
+} from './domain/classifier-context.ts'
+export type {
+  FrozenSpecSection,
+  HumanContext,
+  HumanContextItem,
+} from './domain/classifier-context.ts'
 export type {
   ClassifierVerdict,
   LocalAction,
