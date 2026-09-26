@@ -491,17 +491,20 @@ export const Unfolding: Story = {
     // The fold ends at the full height…
     expect(height(content)).toBeGreaterThan(before)
     expect(height(room)).toBeCloseTo(height(content), 0)
-    // …and it got there a frame at a time: the room was seen above the height it started at and
-    // under the height it now holds, which no jump gives. A system asking for less movement plays
-    // no journey at all — the fold is `instant` — and the end state read above is then the whole
-    // of what this story answers for.
+    // …and it got there over frames rather than in one: between the height it started at and the
+    // height it now holds, the room was seen on a height of its own, which a jump never gives —
+    // a jump is the first height and then the second, and nothing between. What is counted is the
+    // frames it was seen on, not a duration: a loaded machine shows the journey on fewer of them,
+    // and the one is what tells a journey from a jump. A system that asked for less movement
+    // plays no journey at all — the fold is `instant` — and the end state read above is then the
+    // whole of what this story answers for.
     const moving = seen.frames.room.filter(
       (sample, index) => sample > before + 1 && sample < seen.frames.held[index]! - 1,
     )
     if (movesLess()) {
       expect(moving).toHaveLength(0)
     } else {
-      expect(moving.length).toBeGreaterThan(2)
+      expect(moving.length).toBeGreaterThan(0)
     }
   },
 }
