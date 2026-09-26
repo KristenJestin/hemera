@@ -600,7 +600,7 @@ export const LastQuestionAnswered: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await userEvent.type(
-      canvas.getByRole('textbox', { name: 'Something else' }),
+      canvas.getByRole('textbox', { name: 'Other' }),
       'Negative rows, marked by a type column.{Enter}',
     )
     await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks met' })).toBeVisible()

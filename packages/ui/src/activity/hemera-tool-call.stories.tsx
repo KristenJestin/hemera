@@ -19,7 +19,7 @@ import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
  */
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/HemeraToolCall',
   component: HemeraToolCall,
   parameters: { layout: 'padded' },
@@ -47,13 +47,14 @@ const meta = {
     },
     status: {
       control: 'inline-radio',
-      options: ['pending', 'in_progress', 'completed', 'failed', 'refused'],
+      options: ['pending', 'in_progress', 'completed', 'failed', 'refused', 'deferred'],
       description: 'Where the call stands: running and waiting are held open, done folds.',
     },
     summary: { control: 'text', description: 'What the call returned, in one line.' },
     arguments: { control: 'object', description: 'The arguments as they were bounded.' },
     ms: { control: 'number', description: 'How long the call took: the dot’s hover.' },
     error: { control: 'text', description: 'Why the call failed, or why it was refused.' },
+    note: { control: 'text', description: 'How a “not yet” ended, in a few words on its line.' },
     onOpenPath: { control: false, description: 'What a press on a subject that is a path does.' },
     children: { control: false, description: 'What the call returned, already drawn.' },
   },
@@ -335,6 +336,43 @@ export const Refused: Story = {
     // Over, so the reader's to fold (recette 4 of 23 September 2026).
     await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'false')
+  },
+}
+
+/**
+ * A phase proposed finished while a question is open (issue #134): Hemera said "not yet". A quiet
+ * folded row like the other calls, the few words of why on its line, the whole reason in the
+ * body in the colour of a caption, not a warning.
+ */
+export const NotYet: Story = {
+  args: {
+    tool: 'spec_propose',
+    label: 'Propose',
+    mark: 'propose-spec',
+    subject: { text: 'shape' },
+    status: 'deferred',
+    note: 'not yet: a question is open',
+    summary:
+      'The shape phase cannot finish: a blocking question is open: Which date decides the month?.',
+    error:
+      'The shape phase cannot finish: a blocking question is open: Which date decides the month?.',
+    arguments: [
+      { label: 'kind', value: 'phase' },
+      { label: 'phase', value: 'shape' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /Propose shape — not yet: a question is open/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await expect(canvas.getByRole('img', { name: 'Not yet' })).toBeVisible()
+    await expect(canvas.queryByText(/Which date decides the month/)).toBeNull()
+    await userEvent.click(row)
+    const reason = await canvas.findByText(/Which date decides the month/)
+    await expect(reason).toBeVisible()
+    // Quiet: the caption's colour, never the warning's.
+    await expect(reason.className).toContain('text-muted-foreground')
+    await expect(reason.className).not.toContain('warning')
   },
 }
 

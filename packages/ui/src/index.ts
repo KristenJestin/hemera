@@ -385,6 +385,8 @@ export {
 export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
 /** What the turn is doing right now, at the end of the thread while it runs. */
 export { ActivityRow, type ActivityRowProps, type ActivityState } from './session/activity-row.tsx'
+/** The row above the box: what the turn is doing, and what it has spent. */
+export { TurnLine, type TurnLineProps } from './session/turn-line.tsx'
 export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,

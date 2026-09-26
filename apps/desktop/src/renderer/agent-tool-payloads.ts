@@ -281,6 +281,8 @@ export interface HemeraToolCallDrawn {
   readonly arguments: readonly HemeraToolArgument[]
   readonly ms: number | undefined
   readonly error: string | undefined
+  /** How a call Hemera answered "not yet" ended, in the few words its line says. */
+  readonly note: string | undefined
   readonly defaultOpen: boolean
 }
 
@@ -288,6 +290,18 @@ export interface HemeraToolCallDrawn {
 export function hemeraToolLabelOf(tool: string): { label: string; mark: ToolMark | undefined } {
   const named = hemeraToolNamed(tool)
   return named === null ? { label: tool, mark: undefined } : TOOL_LABELS[named]
+}
+
+/**
+ * A phase the agent proposed finished before it could be (D7-08): the protocol refused it, and the
+ * refusal is a "not yet" rather than a mistake (issue #134) — the agent carries on, and the thread
+ * folds the call to a quiet line. The engine words it `The shape phase cannot finish: …`; the line
+ * names the question when a question is what holds it.
+ */
+function notYetOf(tool: string, state: string, body: string): string | null {
+  if (tool !== 'spec_propose' || state !== 'refused') return null
+  if (!/^The \w+ phase cannot finish: /.test(body)) return null
+  return body.includes('a blocking question is open') ? 'not yet: a question is open' : 'not yet'
 }
 
 /**
@@ -304,16 +318,18 @@ export function hemeraToolCallOf(
   if (read === null) return null
   const { tool, state, arguments: bounded, ms } = read
   const said = state === 'completed' ? entry.body : plainRefusal(entry.body)
+  const notYet = notYetOf(tool, state, entry.body)
   return {
     tool,
     ...hemeraToolLabelOf(tool),
     subject: subjectOf(tool, bounded, runs),
-    status: state,
+    status: notYet === null ? state : 'deferred',
     summary: said,
     arguments: argumentsOf(bounded),
     ms,
     error: state !== 'completed' ? said : undefined,
-    defaultOpen: state !== 'completed',
+    note: notYet ?? undefined,
+    defaultOpen: state !== 'completed' && notYet === null,
   }
 }
 

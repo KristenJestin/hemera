@@ -470,6 +470,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // marker the thread already had.
       'ActivityRow',
       'UsageMeter',
+      // Issue #134: the two share the row above the box, and the meter stands at its foot.
+      'TurnLine',
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
