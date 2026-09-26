@@ -144,6 +144,7 @@ const SURFACES = {
     'yours-block',
     'blocker-block',
     'build-spec-panel',
+    'review-card',
     'build-session',
   ],
 }
@@ -280,6 +281,7 @@ const NAMED_STATES = new Map([
     ['HumanTask', 'ThreeRedTries', 'Banner', 'BannerThreeRedTries', 'Skipping', 'Keyboard'],
   ],
   ['build/blocker-block', ['InTheView', 'Banner', 'Dismissed', 'Keyboard']],
+  ['build/review-card', ['WaitingForYourReview', 'OpeningTheChat']],
   ['build/build-spec-panel', ['ReadOnly', 'Tasks', 'Keyboard']],
   // Lot 22: the page of a `build` Session, `Complete` first for the UI gate, then one screen per
   // moment of the build, then the paths through it.
@@ -609,6 +611,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'TaskStage',
       'YoursBlock',
       'BlockerBlock',
+      'ReviewCard',
       'BuildSpecPanel',
       'BuildSession',
       // Lot 5c (issue #115): the banner above the chat's composer, which opens what waits for the

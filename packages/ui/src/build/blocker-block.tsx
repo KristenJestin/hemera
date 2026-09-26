@@ -1,7 +1,8 @@
 import { cn } from 'cn'
-import { type ReactNode, useId } from 'react'
+import { type ReactNode, useId, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
+import { Textarea } from '../components/field/field.tsx'
 import { IconHandStop } from '../icons.ts'
 import type { BuildBlockerView } from './model.ts'
 import { ago } from './times.ts'
@@ -32,8 +33,11 @@ export interface BlockerBlockProps {
   variant?: 'view' | 'banner' | undefined
   /** The labels of the tasks suspended with it, because they depend on it. */
   suspended: readonly string[]
-  /** The Spec stands: the task goes back to ready. */
-  onDismiss: () => void
+  /**
+   * The Spec stands: the task goes back to ready, with the note the user wrote beside the
+   * dismissal (issue #117) or nothing when they wrote none.
+   */
+  onDismiss: (note: string | null) => void
   /** Shows the task in the build view; the banner offers it when given. */
   onOpen?: (() => void) | undefined
   /** Where the block sits; never how it looks. */
@@ -50,9 +54,12 @@ export function BlockerBlock({
   className,
 }: BlockerBlockProps): ReactNode {
   const named = useId()
-  const dismiss = (
-    <Button variant="secondary" size="sm" onClick={onDismiss}>
-      Dismiss
+  const [note, setNote] = useState('')
+  const written = note.trim()
+  /** Dismissed with what the user wrote, or with nothing when they wrote none. */
+  const dismiss = (added: string | null) => (
+    <Button variant="secondary" size="sm" onClick={() => onDismiss(added)}>
+      The Spec stands
     </Button>
   )
 
@@ -67,7 +74,7 @@ export function BlockerBlock({
             Open
           </Button>
         )}
-        {dismiss}
+        {dismiss(null)}
       </div>
     )
   }
@@ -82,10 +89,18 @@ export function BlockerBlock({
       <blockquote className={REASON}>{blocker.reason}</blockquote>
       <p className={NOTE}>
         {suspended.length === 0
-          ? 'The other tasks go on. Dismiss it if the Spec stands: the task goes back to ready.'
-          : `${suspended.join(', ')} ${suspended.length === 1 ? 'waits' : 'wait'} with it; the other tasks go on. Dismiss it if the Spec stands: the task goes back to ready.`}
+          ? 'The other tasks go on. If the Spec stands, say so: the task goes back to ready.'
+          : `${suspended.join(', ')} ${suspended.length === 1 ? 'waits' : 'wait'} with it; the other tasks go on. If the Spec stands, say so: the task goes back to ready.`}
       </p>
-      <div className={ACTIONS}>{dismiss}</div>
+      <Textarea
+        label="A note for the agent"
+        description="Optional: it goes to the agent with your answer."
+        placeholder="The Spec stands, and the refund ships in the next one."
+        rows={2}
+        value={note}
+        onValueChange={setNote}
+      />
+      <div className={ACTIONS}>{dismiss(written === '' ? null : written)}</div>
     </div>
   )
 }

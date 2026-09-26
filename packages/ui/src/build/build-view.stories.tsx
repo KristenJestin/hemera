@@ -52,6 +52,7 @@ const meta = {
     onTaskDone: fn(),
     onTaskSkip: fn(),
     onDismissBlocker: fn(),
+    onOpenChat: fn(),
     onSelect: fn(),
   },
   argTypes: {
@@ -71,6 +72,7 @@ const meta = {
     onTaskDone: { action: 'task done' },
     onTaskSkip: { action: 'task skipped' },
     onDismissBlocker: { action: 'blocker dismissed' },
+    onOpenChat: { action: 'chat opened' },
     onSelect: { action: 'task chosen' },
   },
 } satisfies Meta<typeof BuildView>
@@ -184,8 +186,8 @@ export const Blocked: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('The agent says this task contradicts the Spec')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Dismiss' }))
-    await expect(args.onDismissBlocker).toHaveBeenCalledWith('blocker-1')
+    await userEvent.click(canvas.getByRole('button', { name: 'The Spec stands' }))
+    await expect(args.onDismissBlocker).toHaveBeenCalledWith('blocker-1', null)
     const one = storyOf(canvasElement, 'Export a month')
     await userEvent.click(within(one).getByRole('button', { name: 'Tasks · 3' }))
     await userEvent.click(within(one).getByRole('button', { name: /^T4 / }))

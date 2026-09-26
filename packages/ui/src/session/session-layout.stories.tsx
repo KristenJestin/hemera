@@ -180,7 +180,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   // Created by lot 5c (issue #115), which is what this badge says: the first thing a lot that
   // touches the design system does is take the previous lot's badges off.
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   // Every story here draws its own Session, the chat and the panel together being the point: the
   // two props the layout cannot do without are given a value and never read.
   args: { head: null, chat: null },

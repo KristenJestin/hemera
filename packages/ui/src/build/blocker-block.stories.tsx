@@ -40,7 +40,7 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** In the view: the agent's reason whole, what waits with it, and Dismiss. */
+/** In the view: the agent's reason whole, what waits with it, and the answer. */
 export const InTheView: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -62,20 +62,20 @@ export const Banner: Story = {
       canvas.getByRole('group', { name: 'T3: the agent says this task contradicts the Spec' }),
     )
     await expect(banner.getByRole('button', { name: 'Open' })).toBeVisible()
-    await expect(banner.getByRole('button', { name: 'Dismiss' })).toBeVisible()
+    await expect(banner.getByRole('button', { name: 'The Spec stands' })).toBeVisible()
   },
 }
 
-/** Dismissed: the Spec stands, and the answer goes out at once. */
+/** Answered: the Spec stands, and the answer goes out at once. */
 export const Dismissed: Story = {
   play: async ({ canvasElement, args }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Dismiss' }))
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'The Spec stands' }))
     await expect(args.onDismiss).toHaveBeenCalled()
   },
 }
 
 /**
- * The keyboard: the banner's Open then Dismiss, in that order, and the focus lands on the one the
+ * The keyboard: the banner's Open then its answer, in that order, and the focus lands on the one the
  * reader is being sent to.
  */
 export const Keyboard: Story = {
@@ -84,7 +84,7 @@ export const Keyboard: Story = {
     const canvas = within(canvasElement)
     canvas.getByRole('button', { name: 'Open' }).focus()
     await userEvent.tab()
-    const dismiss = canvas.getByRole('button', { name: 'Dismiss' })
-    await expect(dismiss).toHaveFocus()
+    const answer = canvas.getByRole('button', { name: 'The Spec stands' })
+    await expect(answer).toHaveFocus()
   },
 }

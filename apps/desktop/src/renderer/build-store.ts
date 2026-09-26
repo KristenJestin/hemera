@@ -177,9 +177,9 @@ export async function skipTask(taskId: string, reason: string, unblock: boolean)
   return await acting('build.taskSkip', { taskId, reason, unblock })
 }
 
-/** Puts a blocker aside: its task is ready again (D10-08). */
-export async function dismissBlocker(blockerId: string): Promise<boolean> {
-  return await acting('build.dismissBlocker', { blockerId })
+/** Puts a blocker aside: its task is ready again (D10-08), with the note the user wrote. */
+export async function dismissBlocker(blockerId: string, note: string | null): Promise<boolean> {
+  return await acting('build.dismissBlocker', { blockerId, note })
 }
 
 /** How the OS is told that a build needs the user: a title and a sentence. */

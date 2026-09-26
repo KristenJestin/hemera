@@ -859,7 +859,8 @@ export function SessionPage({
       onStop: () => void stopBuild(),
       onTaskDone: (taskId) => void doneTask(taskId),
       onTaskSkip: (taskId, reason, unblock) => void skipTask(taskId, reason, unblock),
-      onDismissBlocker: (blockerId) => void dismissBlocker(blockerId),
+      onDismissBlocker: (blockerId, note) => void dismissBlocker(blockerId, note),
+      onOpenChat: () => minimiseChat(false),
     }
     return (
       <>

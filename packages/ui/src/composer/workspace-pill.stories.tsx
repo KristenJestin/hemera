@@ -11,7 +11,7 @@ import { WorkspacePill } from './workspace-pill.tsx'
  * Session bound to a Spec says its Workspace as a label: there was never a choice to make.
  */
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Composer/WorkspacePill',
   component: WorkspacePill,
   parameters: { layout: 'padded' },

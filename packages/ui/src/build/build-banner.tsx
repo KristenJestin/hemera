@@ -48,7 +48,7 @@ export function BuildBanner({ view, onOpen }: BuildBannerProps): ReactNode {
       blocker={blocker}
       now={now}
       suspended={dependantsOf(blocked.label, build.tasks)}
-      onDismiss={() => view.onDismissBlocker(blocker.id)}
+      onDismiss={() => view.onDismissBlocker(blocker.id, null)}
       onOpen={() => onOpen(blocked.id)}
     />
   )

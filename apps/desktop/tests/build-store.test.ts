@@ -399,10 +399,14 @@ describe('A blocker suspends the task and its dependants only', () => {
       },
     ])
     asked = []
-    await dismissBlocker('blocker-1')
+    await dismissBlocker('blocker-1', 'The exporter takes the CSV header from the Spec.')
     expect(asked[0]).toEqual({
       name: 'build.dismissBlocker',
-      argument: { sessionId: 'build', blockerId: 'blocker-1' },
+      argument: {
+        sessionId: 'build',
+        blockerId: 'blocker-1',
+        note: 'The exporter takes the CSV header from the Spec.',
+      },
     })
   })
 

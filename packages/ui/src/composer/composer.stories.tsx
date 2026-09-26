@@ -166,7 +166,7 @@ function frameOf(box: HTMLElement): HTMLElement {
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Composer/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
