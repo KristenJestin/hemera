@@ -1,8 +1,10 @@
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { IconButton } from '../components/button/button.tsx'
 import { Frame, FrameFooter } from '../components/frame/frame.tsx'
 import { IconAt, IconPaperclip } from '../icons.ts'
+import { collapse, expand, morph, useTransition } from '../motion.ts'
 import { ComposerActions } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
@@ -125,6 +127,19 @@ export interface ComposerProps {
    * already written, and the composer only gives it the room.
    */
   blocked?: ReactNode | undefined
+  /**
+   * What waits for the reader's answer, pinned above the box for as long as it waits (issue
+   * #130): a proposal of the agent, a question it asked. The thread scrolls on under the agent's
+   * words and would carry them out of sight; here they stay in reach, and once answered the page
+   * draws them back in the thread. Each grows into its room and folds away on `morph`.
+   */
+  pinned?: readonly Pinned[] | undefined
+}
+
+/** One thing pinned above the box, under the key it keeps while it waits. */
+export interface Pinned {
+  id: string
+  content: ReactNode
 }
 
 export function Composer({
@@ -148,7 +163,9 @@ export function Composer({
   running = false,
   onStop,
   blocked,
+  pinned = [],
 }: ComposerProps): ReactNode {
+  const growing = useTransition(morph)
   const box = useRef<ComposerBoxHandle>(null)
   const [matches, setMatches] = useState<string[]>([])
   const [picking, setPicking] = useState<Picking>(null)
@@ -329,6 +346,20 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2">
+      <AnimatePresence initial={false}>
+        {pinned.map((one) => (
+          <motion.div
+            key={one.id}
+            className="shrink-0 overflow-hidden"
+            initial={collapse}
+            animate={expand}
+            exit={collapse}
+            transition={growing}
+          >
+            {one.content}
+          </motion.div>
+        ))}
+      </AnimatePresence>
       {blocked}
       <Frame
         animated

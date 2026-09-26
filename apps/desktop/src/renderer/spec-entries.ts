@@ -179,3 +179,25 @@ export function proposalOf(
 export function proposalIdOf(entry: SessionEntry): string {
   return (entry.correlationId ?? '').replace(/^proposal:/, '')
 }
+
+/**
+ * Whether a Spec entry waits for the reader's answer (issue #130): a proposal of a `free` Session
+ * still proposed, a question neither answered nor left behind by a Rework. The page pins it above
+ * the composer while it waits — the agent's words go on under it and would scroll it out of
+ * sight — and draws it back in the thread once it is answered.
+ */
+export function waitsForAnswer(
+  entry: SessionEntry,
+  thread: readonly SessionEntry[],
+  specId: string | null,
+  asked: ReadonlySet<string> | null,
+): boolean {
+  if (entry.kind === 'spec_proposal') {
+    return specId === null && proposalOf(entry, thread, null, null)?.state === 'proposed'
+  }
+  if (entry.kind === 'spec_question') {
+    const block = questionEntryOf(entry, thread, asked)
+    return block !== null && block.question.answer === null && !block.cancelled
+  }
+  return false
+}

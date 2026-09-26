@@ -11,7 +11,13 @@
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
-import { briefOf, proposalIdOf, proposalOf, questionEntryOf } from '#renderer/spec-entries.ts'
+import {
+  briefOf,
+  proposalIdOf,
+  proposalOf,
+  questionEntryOf,
+  waitsForAnswer,
+} from '#renderer/spec-entries.ts'
 
 function entry(kind: SessionEntry['kind'], payload: string, id: string = kind): SessionEntry {
   return {
@@ -179,5 +185,36 @@ describe('A free Session’s agent proposes a Spec', () => {
     expect(proposalOf(proposal, thread, 'spec-7', null)).toBe(null)
     const epic = entry('spec_proposal', JSON.stringify({ title: 'X', type: 'epic' }))
     expect(proposalOf(epic, [epic], null, null)).toBe(null)
+  })
+})
+
+describe('A pending proposal and a pending question are pinned above the composer', () => {
+  const proposal = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'CSV invoice export', type: 'feature' }),
+    'proposal',
+  )
+  const answer = entry(
+    'spec_answer',
+    JSON.stringify({ questionId: 'q-date', optionId: 'issue' }),
+    'answer',
+  )
+
+  test('a proposal waits while the Session is free and not declined, then goes back in the thread', () => {
+    expect(waitsForAnswer(proposal, [proposal], null, null)).toBe(true)
+    const declined = { ...proposal, state: 'declined' }
+    expect(waitsForAnswer(declined, [declined], null, null)).toBe(false)
+    expect(waitsForAnswer(proposal, [proposal], 'spec-7', null)).toBe(false)
+  })
+
+  test('a question waits until it is answered, and a question left behind by a Rework does not', () => {
+    expect(waitsForAnswer(QUESTION, [QUESTION], 'spec-7', new Set(['q-date']))).toBe(true)
+    expect(waitsForAnswer(QUESTION, [QUESTION, answer], 'spec-7', new Set(['q-date']))).toBe(false)
+    expect(waitsForAnswer(QUESTION, [QUESTION], 'spec-7', new Set(['q-other']))).toBe(false)
+  })
+
+  test('nothing else is pinned', () => {
+    const brief = entry('mission_brief', JSON.stringify({ phase: 'shape' }))
+    expect(waitsForAnswer(brief, [brief], null, null)).toBe(false)
   })
 })

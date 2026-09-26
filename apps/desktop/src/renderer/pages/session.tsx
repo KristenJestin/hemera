@@ -45,7 +45,7 @@ import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
-import { type DefinedSpec, questionAnchor } from '../spec-entries.ts'
+import { type DefinedSpec, questionAnchor, waitsForAnswer } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
@@ -430,6 +430,17 @@ export function SessionPage({
     if (entry.kind === 'tool_call' && id.startsWith('call:'))
       reported.set(id.slice('call:'.length), entry)
   }
+  // The ids of the current revision's questions, null until the Spec is read.
+  const asked =
+    stored.current?.spec.id === session.specId
+      ? new Set(stored.current.questions.map((one) => one.id))
+      : null
+  /**
+   * What waits for the reader's answer — the agent's proposal, a question of the Spec — drawn
+   * above the composer rather than where it was asked, for as long as it waits (issue #130): the
+   * agent goes on writing under it, and the reader had to scroll back up past all of it to answer.
+   */
+  const pinned: { id: string; content: ReactNode }[] = []
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
@@ -450,10 +461,7 @@ export function SessionPage({
         thread,
         specId: session.specId,
         defined: definedOf(defined, stored.revisions),
-        asked:
-          stored.current?.spec.id === session.specId
-            ? new Set(stored.current.questions.map((one) => one.id))
-            : null,
+        asked,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
         onDecline: (proposalId) => deciding(declineSpecProposal(session.id, proposalId)),
@@ -461,7 +469,12 @@ export function SessionPage({
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
-    if (block !== null) byEntry.set(entry.id, { id: entry.id, content: block })
+    if (block === null) continue
+    if (waitsForAnswer(entry, thread, session.specId, asked)) {
+      pinned.push({ id: entry.id, content: block })
+      continue
+    }
+    byEntry.set(entry.id, { id: entry.id, content: block })
   }
 
   const scroller: ScrollerEntry[] = []
@@ -747,6 +760,7 @@ export function SessionPage({
             }
             running={agent.running}
             onStop={onStop}
+            pinned={pinned}
             blocked={
               waiting === null ? undefined : (
                 <BlockedBanner waiting="The agent is asking to go on." onStop={onStop} />
