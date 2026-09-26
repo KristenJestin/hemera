@@ -889,6 +889,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string(), type: specTypeSchema, title: z.string() }),
     response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
   },
+  'specs.declineProposal': {
+    // The agent's proposal declined: its entry is kept declined, the Session stays free, and the
+    // agent is told at once, in a turn of its own (issue #130).
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
+  },
   'specs.openSession': {
     // A new `define` Session on an existing Spec, from a list of Specs: the writer when the Spec
     // has none, a reader otherwise (D7-11). Its agent is chosen as `sessions.create` chooses it.

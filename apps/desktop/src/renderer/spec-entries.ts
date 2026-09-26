@@ -154,21 +154,28 @@ function createdFrom(thread: readonly SessionEntry[], spec: DefinedSpec): string
 
 /**
  * A proposal of the agent, and where it stands (D7-07). While the Session is `free`, `proposed`,
- * or `declined` when `Not now` was pressed in this window — which nothing keeps. Once it defines a
- * Spec, the proposal the Spec came from is `created` and every other one `declined`; until that
- * Spec is read, `spec` is null and the proposal is not drawn, rather than drawn as a guess.
+ * or `declined` once `Not now` was pressed, which the engine keeps on the entry (issue #130).
+ * Once it defines a Spec, the proposal the Spec came from is `created` and every other one
+ * `declined`; until that Spec is read, `spec` is null and the proposal is not drawn, rather than
+ * drawn as a guess.
  */
 export function proposalOf(
   entry: SessionEntry,
   thread: readonly SessionEntry[],
   specId: string | null,
   spec: DefinedSpec | null,
-  declined: boolean,
 ): ProposalView | null {
   const proposal = parsed(proposalSchema, entry.payload)
   if (proposal === null) return null
   const { title, type } = proposal
-  if (specId === null) return { title, type, state: declined ? 'declined' : 'proposed' }
+  if (specId === null) {
+    return { title, type, state: entry.state === 'declined' ? 'declined' : 'proposed' }
+  }
   if (spec === null) return null
   return { title, type, state: createdFrom(thread, spec) === entry.id ? 'created' : 'declined' }
+}
+
+/** What the engine names a proposal by: its entry's correlation, without the prefix. */
+export function proposalIdOf(entry: SessionEntry): string {
+  return (entry.correlationId ?? '').replace(/^proposal:/, '')
 }

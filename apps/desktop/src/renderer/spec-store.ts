@@ -201,6 +201,22 @@ export async function createSpec(
 }
 
 /**
+ * Declines the agent's proposal (issue #130): the engine keeps it declined, the Session stays
+ * `free`, and the agent is told. Answers what it was refused with, or null.
+ */
+export async function declineSpecProposal(
+  sessionId: string,
+  proposalId: string,
+): Promise<string | null> {
+  try {
+    await window.hemera.invoke('specs.declineProposal', { sessionId, proposalId })
+    return null
+  } catch (cause) {
+    return message(cause)
+  }
+}
+
+/**
  * Saves one section on the version its editor was opened on (D7-12).
  *
  * Refused while the section moved on since that version, the text goes into the Spec's edit

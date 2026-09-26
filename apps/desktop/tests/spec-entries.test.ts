@@ -11,7 +11,7 @@
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
-import { briefOf, proposalOf, questionEntryOf } from '#renderer/spec-entries.ts'
+import { briefOf, proposalIdOf, proposalOf, questionEntryOf } from '#renderer/spec-entries.ts'
 
 function entry(kind: SessionEntry['kind'], payload: string, id: string = kind): SessionEntry {
   return {
@@ -149,30 +149,35 @@ describe('A free Session’s agent proposes a Spec', () => {
   const created = { key: 'ATL-7', title: 'CSV invoice export', type: 'feature' as const }
 
   test('proposed while the Session is free, created once it defines the Spec it proposed', () => {
-    expect(proposalOf(proposal, thread, null, null, false)).toEqual({
+    expect(proposalOf(proposal, thread, null, null)).toEqual({
       title: 'CSV invoice export',
       type: 'feature',
       state: 'proposed',
     })
-    expect(proposalOf(proposal, thread, 'spec-7', created, false)?.state).toBe('created')
+    expect(proposalOf(proposal, thread, 'spec-7', created)?.state).toBe('created')
   })
 
   test('of two proposals in one Session, only the one the Spec came from reads created', () => {
-    expect(proposalOf(other, thread, 'spec-7', created, false)?.state).toBe('declined')
+    expect(proposalOf(other, thread, 'spec-7', created)?.state).toBe('declined')
     // Created with a title edited in the card, the Spec came from the last proposal.
     const edited = { ...created, title: 'CSV export of a month' }
-    expect(proposalOf(proposal, thread, 'spec-7', edited, false)?.state).toBe('declined')
-    expect(proposalOf(other, thread, 'spec-7', edited, false)?.state).toBe('created')
+    expect(proposalOf(proposal, thread, 'spec-7', edited)?.state).toBe('declined')
+    expect(proposalOf(other, thread, 'spec-7', edited)?.state).toBe('created')
   })
 
-  test('declined when Not now was pressed, which the Spec it came from overrides', () => {
-    expect(proposalOf(proposal, thread, null, null, true)?.state).toBe('declined')
-    expect(proposalOf(proposal, thread, 'spec-7', created, true)?.state).toBe('created')
+  test('declined once the engine kept it declined, which the Spec it came from overrides', () => {
+    const declined = { ...proposal, state: 'declined' }
+    expect(proposalOf(declined, thread, null, null)?.state).toBe('declined')
+    expect(proposalOf(declined, [declined, other], 'spec-7', created)?.state).toBe('created')
+  })
+
+  test('named to the engine by its correlation, without the prefix', () => {
+    expect(proposalIdOf({ ...proposal, correlationId: 'proposal:4f1c' })).toBe('4f1c')
   })
 
   test('not drawn while the Spec of a define Session is still being read, nor of an unknown type', () => {
-    expect(proposalOf(proposal, thread, 'spec-7', null, false)).toBe(null)
+    expect(proposalOf(proposal, thread, 'spec-7', null)).toBe(null)
     const epic = entry('spec_proposal', JSON.stringify({ title: 'X', type: 'epic' }))
-    expect(proposalOf(epic, [epic], null, null, false)).toBe(null)
+    expect(proposalOf(epic, [epic], null, null)).toBe(null)
   })
 })

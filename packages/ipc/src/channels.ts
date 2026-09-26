@@ -93,6 +93,7 @@ export const CHANNELS = {
   'specs.read': ENGINE_REQUESTS['specs.read'],
   'specs.revisions': ENGINE_REQUESTS['specs.revisions'],
   'specs.create': ENGINE_REQUESTS['specs.create'],
+  'specs.declineProposal': ENGINE_REQUESTS['specs.declineProposal'],
   'specs.openSession': ENGINE_REQUESTS['specs.openSession'],
   'specs.writeSection': ENGINE_REQUESTS['specs.writeSection'],
   'specs.writeStories': ENGINE_REQUESTS['specs.writeStories'],

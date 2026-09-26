@@ -50,6 +50,7 @@ import {
   answerQuestion,
   askForBuild,
   createSpec,
+  declineSpecProposal,
   discardMine,
   markReady,
   retryBuild,
@@ -299,8 +300,6 @@ export function SessionPage({
   const deciding = (decision: Promise<string | null>): void => {
     void decision.then(setRefused)
   }
-  /** The proposals `Not now` was pressed on: this window's answer, which nothing keeps. */
-  const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set())
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
   const spec =
@@ -455,10 +454,9 @@ export function SessionPage({
           stored.current?.spec.id === session.specId
             ? new Set(stored.current.questions.map((one) => one.id))
             : null,
-        declined,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
-        onDecline: (entryId) => setDeclined(new Set([...declined, entryId])),
+        onDecline: (proposalId) => deciding(declineSpecProposal(session.id, proposalId)),
       },
     })
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
