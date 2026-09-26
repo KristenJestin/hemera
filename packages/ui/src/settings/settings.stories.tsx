@@ -29,12 +29,26 @@ const ARCHIVED: ArchivedProject[] = [
   { id: 'shop', name: 'Legacy shop', archivedAt: 'in August' },
 ]
 
-function Controlled({ theme, archived, onThemeChange, onRestore, ...rest }: SettingsProps) {
+function Controlled({
+  theme,
+  archived,
+  onThemeChange,
+  onRestore,
+  acpTrace,
+  onAcpTraceChange,
+  ...rest
+}: SettingsProps) {
   const [chosen, setChosen] = useState<ThemeChoice>(theme)
   const [kept, setKept] = useState(archived)
+  const [tracing, setTracing] = useState(acpTrace ?? false)
   return (
     <Settings
       {...rest}
+      acpTrace={tracing}
+      onAcpTraceChange={(on) => {
+        setTracing(on)
+        onAcpTraceChange?.(on)
+      }}
       theme={chosen}
       onThemeChange={(next) => {
         setChosen(next)
@@ -108,7 +122,7 @@ const AGENTS: SettingsProps['agents'] = {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Settings',
   component: Settings,
   render: (args) => <Controlled {...args} />,
@@ -123,6 +137,8 @@ const meta = {
     onOpenFolder: fn(),
     onOpenDiagnostic: fn(),
     onRestore: fn(),
+    acpTrace: false,
+    onAcpTraceChange: fn(),
   },
   argTypes: {
     subtitle: { control: 'text', description: 'The product, its version and its channel.' },
@@ -138,6 +154,11 @@ const meta = {
     onOpenFolder: { action: 'folder opened' },
     onOpenDiagnostic: { action: 'diagnostic opened' },
     onRestore: { action: 'restored' },
+    acpTrace: {
+      control: 'boolean',
+      description: 'Whether the ACP trace of each Session is written.',
+    },
+    onAcpTraceChange: { action: 'trace turned on or off' },
   },
 } satisfies Meta<typeof Settings>
 
@@ -243,5 +264,24 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(canvas.getByRole('radio', { name: 'System' })).toBeChecked()
     })
+  },
+}
+
+/**
+ * The ACP trace of each Session, off until the reader turns it on (issue #131), with the sentence
+ * that says what it keeps and what it does not.
+ */
+export const TurningTheTraceOn: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('checkbox', { name: /Write an ACP trace of each Session/ })
+    expect(box).not.toBeChecked()
+    expect(canvas.getByText(/written as their size only/)).toBeInTheDocument()
+
+    await userEvent.click(box)
+    await waitFor(() => {
+      expect(box).toBeChecked()
+    })
+    expect(args.onAcpTraceChange).toHaveBeenCalledWith(true)
   },
 }

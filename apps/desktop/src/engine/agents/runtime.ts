@@ -16,6 +16,7 @@
  * to answer a question nobody answered.
  */
 import {
+  Clock,
   Context,
   Data,
   Deferred,
@@ -69,6 +70,7 @@ import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
+import { AcpTraces, type Heard, type RequestBook, requestBook, traceLine } from './trace.ts'
 import { Commands } from '../commands/service.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
@@ -108,6 +110,36 @@ const DRAIN_LIMIT = Duration.seconds(5)
  * (D6-08): an editor saves a file in several writes, and one change is one delivery.
  */
 export const INSTRUCTIONS_SETTLE = Duration.millis(300)
+
+/**
+ * How long a request of the agent's may wait for Hemera before the thread says it is (#131).
+ *
+ * Hemera answers what it can draw — a permission is a block of the thread, and the rest the SDK
+ * refuses at once — so a request still open after this is one the agent is waiting on and the
+ * reader cannot see. A few seconds, because a permission being written is a request open for the
+ * time of one write, and that one is drawn.
+ */
+export const UNANSWERED_AFTER = Duration.seconds(5)
+
+/**
+ * What the agent writes on its standard error while a turn runs, as the thread says it (#131).
+ *
+ * A line that names a failure is what an agent says when its provider refuses it — OpenCode writes
+ * its 429 there and tells the protocol nothing — so it is shown as a quiet row under the turn. Not
+ * every line: an agent writes its progress there too, and a row claiming an error for a line that
+ * names none would be a row that lies.
+ */
+export const REPORTED_ERROR =
+  /error|fail|fatal|exception|refus|denied|invalid|timed? ?out|rate.?limit|too many requests|\b[45]\d\d\b|ECONN|EPIPE/i
+
+/** How far apart two of those rows are at least, so an agent retrying in a loop is one row. */
+export const REPORT_GAP = Duration.seconds(10)
+
+/** How many of those rows one turn shows at most. */
+export const REPORTS_PER_TURN = 5
+
+/** How much of a line of the agent's standard error a row keeps. */
+const REPORTED_LIMIT = 500
 
 /** Everything that can stop the engine from talking to an agent, as one thing to report. */
 export class AgentRuntimeError extends Data.TaggedError('AgentRuntimeError')<{
@@ -559,6 +591,8 @@ export const runtimeLayer = Layer.effect(
     // Where each agent's bare means is written: a directory of Hemera's, never the user's (D6-09).
     const directories = yield* AgentDirectories
     const database = yield* Database
+    // What a Session's agent and Hemera said to each other, written when the reader asked (#131).
+    const traces = yield* AcpTraces
 
     /**
      * The scope the engine gave this layer: the lifetime every fiber and process here lives in.
@@ -702,6 +736,117 @@ export const runtimeLayer = Layer.effect(
         payload: JSON.stringify({ reason }),
         turnId: turn?.id ?? null,
       })
+
+    /** Reads the preference, and writes the traces or stops writing them as it says (#131). */
+    const traceAsAsked = Effect.gen(function* () {
+      const read = yield* Effect.result(preferences.read)
+      traces.writing(Result.isSuccess(read) && read.success.acpTrace)
+    })
+
+    /** One line of a Session's trace that is not a message: a death, a line of standard error. */
+    const traced = (sessionId: string, said: string) => {
+      if (traces.on()) traces.write(sessionId, `${new Date().toISOString()} ${said}`)
+    }
+
+    /**
+     * What each turn has shown of the agent's standard error: the lines already shown, when the
+     * last one was, and how many. Kept beside the turn rather than in it, and gone with it.
+     */
+    const reported = new WeakMap<Turn, { lines: Set<string>; at: number | null; count: number }>()
+
+    /**
+     * A line the agent wrote on its standard error, shown under the running turn when it names a
+     * failure (#131): once per line, one row per `REPORT_GAP` at most, `REPORTS_PER_TURN` in all.
+     * Outside a turn it goes to the diagnostic alone, as it always did.
+     */
+    const reportedError = (sessionId: string, line: string) =>
+      Effect.gen(function* () {
+        const turn = turns.get(sessionId)
+        if (turn === undefined || turn.closed !== null) return
+        if (!REPORTED_ERROR.test(line)) return
+        const said = line.trim().slice(0, REPORTED_LIMIT)
+        // Two lines that differ only by a time or a count are the same complaint said again.
+        const known = said.replaceAll(/\d+/g, '#')
+        const now = yield* Clock.currentTimeMillis
+        const held = reported.get(turn) ?? { lines: new Set<string>(), at: null, count: 0 }
+        reported.set(turn, held)
+        if (held.lines.has(known) || held.count >= REPORTS_PER_TURN) return
+        if (held.at !== null && now - held.at < Duration.toMillis(REPORT_GAP)) return
+        held.lines.add(known)
+        held.at = now
+        held.count += 1
+        yield* write(sessionId, {
+          role: 'hemera',
+          kind: 'note',
+          body: 'The agent reported an error',
+          payload: JSON.stringify({ reason: 'agent_stderr', line: said }),
+          turnId: turn.id,
+        })
+      })
+
+    /**
+     * A request of the agent's that Hemera has not answered after `UNANSWERED_AFTER`, said in the
+     * thread with its method (#131). A permission the thread is drawing is not one: its block is
+     * already what says the agent is waiting.
+     */
+    const watchedRequest = (sessionId: string, book: RequestBook, heard: Heard) =>
+      Effect.gen(function* () {
+        yield* Effect.sleep(UNANSWERED_AFTER)
+        if (heard.id === null || !book.waiting(heard.id)) return
+        const turn = turns.get(sessionId)
+        if (heard.method === 'session/request_permission' && (turn?.permission ?? null) !== null) {
+          return
+        }
+        yield* write(sessionId, {
+          role: 'hemera',
+          kind: 'note',
+          body: 'The agent is waiting for an answer Hemera cannot show',
+          payload: JSON.stringify({ reason: 'unanswered_request', method: heard.method }),
+          correlationId: `request:${heard.id}`,
+          turnId: turn?.id ?? null,
+        })
+      })
+
+    /**
+     * A request of the agent's that Hemera refused, said once per method and agent (#131): the SDK
+     * answers a method Hemera does not implement with an error, and an agent that then waits on
+     * something else is an agent whose reader was never told what it asked for.
+     */
+    const refusedRequest = (sessionId: string, heard: Heard) =>
+      write(sessionId, {
+        role: 'hemera',
+        kind: 'note',
+        body: 'The agent asked for something Hemera cannot answer',
+        payload: JSON.stringify({
+          reason: 'refused_request',
+          method: heard.method,
+          line: heard.error ?? '',
+        }),
+        turnId: turns.get(sessionId)?.id ?? null,
+      })
+
+    /**
+     * What a Session's connection hears, both ways (#131): the trace when it is being written, and
+     * the agent's requests watched until Hemera has answered them.
+     */
+    const listening = (sessionId: string) => {
+      const book = requestBook()
+      const refused = new Set<string>()
+      return (direction: 'in' | 'out', message: Parameters<RequestBook['heard']>[1]) => {
+        const heard = book.heard(direction, message)
+        if (traces.on()) traces.write(sessionId, traceLine(direction, heard, message, new Date()))
+        if (heard.askedBy !== 'agent') return
+        if (heard.kind === 'request') {
+          runOwned(watchedRequest(sessionId, book, heard).pipe(Effect.ignore)).catch(
+            () => undefined,
+          )
+          return
+        }
+        if (heard.error === null || refused.has(heard.method)) return
+        refused.add(heard.method)
+        runOwned(refusedRequest(sessionId, heard).pipe(Effect.ignore)).catch(() => undefined)
+      }
+    }
 
     /** What a load has replayed of this Session so far, made the first time it is asked. */
     const replayedOf = (sessionId: string): Map<string, string> => {
@@ -1397,6 +1542,7 @@ export const runtimeLayer = Layer.effect(
         Effect.gen(function* () {
           const observation = yield* held.process.exited
           held.death = { code: observation.code, signal: observation.signal }
+          traced(sessionId, `agent exited with ${String(observation.code ?? observation.signal)}`)
           if (live.get(sessionId) === held) live.delete(sessionId)
 
           const turn = turns.get(sessionId)
@@ -1486,6 +1632,8 @@ export const runtimeLayer = Layer.effect(
 
         const resolved = yield* attempt('finding the agent', discovery.resolve(provider))
         const cwd = yield* workingDirectory(session, native)
+        // Whether this agent's conversation is written down is asked now, before its first word.
+        yield* traceAsAsked
 
         // Bare, or not at all (D6-02): an agent whose means leaves a tool of its own behind opens
         // no Session, and nothing is written or started for it. The reason shown is the adapter's.
@@ -1562,8 +1710,16 @@ export const runtimeLayer = Layer.effect(
               Queue.offerUnsafe(queue, event)
             },
             onPermission: (question) => runOwned(ask(sessionId, question)),
+            onMessage: listening(sessionId),
           }),
         )
+        // What the agent says on its standard error while a turn runs is said under the turn
+        // when it names a failure, and its size is written in the trace (#131): an agent whose
+        // provider refused it says so there, and nowhere the protocol carries.
+        process.onStderr((line) => {
+          traced(sessionId, `agent stderr ‹${String(line.length)} chars›`)
+          runOwned(reportedError(sessionId, line).pipe(Effect.ignore)).catch(() => undefined)
+        })
 
         const started: Live = {
           connection,
@@ -2423,6 +2579,10 @@ export const runtimeLayer = Layer.effect(
 
     const prompt = (sessionId: string, text: string) =>
       Effect.gen(function* () {
+        // The trace follows the preference from the next message on, not from the next start of
+        // an agent the pool may keep for minutes (#131). Read before the turn is held, so nothing
+        // waits between the check below and the turn it registers.
+        yield* traceAsAsked
         if (turns.has(sessionId) || starting.has(sessionId)) {
           return yield* Effect.fail(
             new AgentRuntimeError({

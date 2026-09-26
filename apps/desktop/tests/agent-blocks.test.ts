@@ -15,6 +15,7 @@ import { hemeraToolNamed } from '@hemera/core'
 import type { SessionEntry } from '@hemera/ipc'
 
 import {
+  agentReportOf,
   commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
@@ -601,5 +602,50 @@ describe('A Session read back draws a decided question as decided', () => {
     expect(questionOpen(asked('cancelled'))).toBe(false)
     // Only a question nobody has answered yet is waiting for the reader.
     expect(questionOpen(asked('pending'))).toBe(true)
+  })
+})
+
+describe('What the agent reported outside the conversation is drawn as a quiet row (#131)', () => {
+  test('a line of its standard error is drawn with the line, word for word', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent reported an error',
+      JSON.stringify({ reason: 'agent_stderr', line: 'ERROR status=429 Too Many Requests' }),
+    )
+    expect(agentReportOf(note)).toEqual({
+      title: 'The agent reported an error',
+      detail: 'ERROR status=429 Too Many Requests',
+    })
+  })
+
+  test('a request nobody can see is drawn with its method', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent is waiting for an answer Hemera cannot show',
+      JSON.stringify({ reason: 'unanswered_request', method: 'elicitation/create' }),
+    )
+    expect(agentReportOf(note)?.detail).toBe('elicitation/create')
+  })
+
+  test('a refused request is drawn with its method and what it was answered', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent asked for something Hemera cannot answer',
+      JSON.stringify({ reason: 'refused_request', method: '_x/y', line: 'Method not found' }),
+    )
+    expect(agentReportOf(note)?.detail).toBe('_x/y: Method not found')
+  })
+
+  test("a note of Hemera's own is no report, and keeps the line it always had", () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent stopped running.',
+      JSON.stringify({ reason: 'stop_timeout' }),
+    )
+    expect(agentReportOf(note)).toBeNull()
   })
 })

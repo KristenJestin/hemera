@@ -5,13 +5,14 @@ import { ENGINE_EVENT_CHANNEL } from '@hemera/ipc'
 import { type BrowserWindow, dialog } from 'electron/main'
 import type { OpenDialogOptions } from 'electron'
 import { shell } from 'electron/common'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
 
 import type { ApplicationIdentity } from './channel.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
-import { DIAGNOSTIC_FILE } from './diagnostic.ts'
+import { DIAGNOSTIC_FILE, traceFileOf } from './diagnostic.ts'
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
 import type { EngineConversation } from './engine-conversation.ts'
@@ -158,6 +159,25 @@ export function registerChannels(
   handle('shell.open', ({ what }) =>
     Effect.promise(async () => {
       await shell.openPath(what === 'folder' ? directory : join(directory, DIAGNOSTIC_FILE))
+    }),
+  )
+
+  /**
+   * The ACP trace of one Session, which the engine writes when the settings ask it to (#131):
+   * whether there is one, and the file itself opened with the desktop. Resolved here, from the
+   * Session's identifier, as the diagnostic is.
+   */
+  handle('trace.exists', ({ sessionId }) =>
+    Effect.sync(() => {
+      const file = traceFileOf(directory, sessionId)
+      return file !== null && existsSync(file)
+    }),
+  )
+
+  handle('trace.open', ({ sessionId }) =>
+    Effect.promise(async () => {
+      const file = traceFileOf(directory, sessionId)
+      if (file !== null && existsSync(file)) await shell.openPath(file)
     }),
   )
 

@@ -29,7 +29,10 @@ import {
   agentOf,
   chooseOption,
   forgetAgentRefusal,
+  hasTrace,
+  heardSince,
   listenToAgents,
+  openTrace,
   offerAgent,
   offeringOf,
   optionsOf,
@@ -853,5 +856,43 @@ describe("A run no Session asked for is in no Session's panel", () => {
     expect(toolsSnapshot()).toBe(before)
     expect(runsOf(null)).toEqual([])
     stopTools()
+  })
+})
+
+describe('A running turn that hears nothing says so (#131)', () => {
+  test('what the window heard last is when the silence is counted from', () => {
+    const before = Date.now()
+    push({ event: 'turn_start', sessionId: 'session-9', entry: null })
+    const started = agentOf('session-9').heardAt ?? 0
+    expect(started).toBeGreaterThanOrEqual(before)
+
+    push({ event: 'entry', sessionId: 'session-9', entry: entry('e1', 'agent', 'Sai') })
+    const heard = agentOf('session-9').heardAt ?? 0
+    expect(heard).toBeGreaterThanOrEqual(started)
+    expect(heardSince(agentOf('session-9'), [])).toBe(heard)
+  })
+
+  test('a Session opened while its turn ran counts from the last entry of its thread', () => {
+    const quiet = agentOf('session-never-heard')
+    expect(quiet.heardAt).toBeNull()
+    expect(heardSince(quiet, [{ ...entry('e1', 'user', 'go'), createdAt: 1_000 }])).toBe(1_000)
+    expect(heardSince(quiet, [])).toBeNull()
+  })
+})
+
+describe('The trace of a Session is asked about by the Session, never by a path (#131)', () => {
+  test('the trace is asked about and opened by its Session, never by a path', async () => {
+    answers.set('trace.exists', true)
+    expect(await hasTrace('session-1')).toBe(true)
+    await openTrace('session-1')
+    expect(asked).toEqual([
+      { name: 'trace.exists', argument: { sessionId: 'session-1' } },
+      { name: 'trace.open', argument: { sessionId: 'session-1' } },
+    ])
+  })
+
+  test('a trace the main process cannot answer about is no trace', async () => {
+    answers.set('trace.exists', new Error('no such channel'))
+    expect(await hasTrace('session-1')).toBe(false)
   })
 })

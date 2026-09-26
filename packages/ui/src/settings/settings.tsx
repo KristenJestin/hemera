@@ -7,6 +7,7 @@ import { type ReactNode, useId } from 'react'
 import { AgentsSection, type AgentsSectionProps } from './agents-section.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
+import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
 import {
   IconArchive,
@@ -171,6 +172,32 @@ export function ProfileSection({
   )
 }
 
+/**
+ * What Hemera writes down to find out why an agent went quiet (issue #131).
+ *
+ * One switch, off unless turned on: the ACP trace of each Session, beside the diagnostic. A
+ * conversation written to a file is not something a reader should find out about afterwards, so
+ * the sentence under it says what is kept and what is not.
+ */
+function DiagnosticsSection({
+  acpTrace,
+  onAcpTraceChange,
+}: {
+  acpTrace: boolean
+  onAcpTraceChange: (on: boolean) => void
+}): ReactNode {
+  return (
+    <Card title="Diagnostics">
+      <Checkbox
+        checked={acpTrace}
+        onCheckedChange={onAcpTraceChange}
+        label="Write an ACP trace of each Session"
+        description="Every message between Hemera and the agent, with its time, beside diagnostic.log. Prompts, files and secrets are written as their size only. Takes effect from the next message."
+      />
+    </Card>
+  )
+}
+
 export interface ArchivedProject {
   id: string
   name: string
@@ -223,6 +250,10 @@ export interface SettingsProps {
   onOpenDiagnostic: () => void
   archived: ArchivedProject[]
   onRestore: (id: string) => void
+  /** Whether the ACP trace of each Session is written (issue #131). Off unless turned on. */
+  acpTrace?: boolean | undefined
+  /** Turns it on or off; absent, the Diagnostics card is not drawn. */
+  onAcpTraceChange?: ((on: boolean) => void) | undefined
 }
 
 export function Settings({
@@ -235,6 +266,8 @@ export function Settings({
   agents,
   archived,
   onRestore,
+  acpTrace = false,
+  onAcpTraceChange,
 }: SettingsProps): ReactNode {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-10">
@@ -248,6 +281,9 @@ export function Settings({
         onOpenFolder={onOpenFolder}
         onOpenDiagnostic={onOpenDiagnostic}
       />
+      {onAcpTraceChange === undefined ? null : (
+        <DiagnosticsSection acpTrace={acpTrace} onAcpTraceChange={onAcpTraceChange} />
+      )}
       <AgentsSection {...agents} />
       <ArchivedProjects projects={archived} onRestore={onRestore} />
     </div>
