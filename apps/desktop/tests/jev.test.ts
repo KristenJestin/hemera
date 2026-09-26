@@ -7,7 +7,10 @@ import {
   type JevTransport,
 } from '#engine/classifier/jev.ts'
 
-const state = { action: 'write a file in the Workspace', userContext: ['Please write the file.'] }
+const state = {
+  action: JSON.stringify({ tool: 'fs_write', path: 'notes.txt', content: 'hello' }),
+  userContext: ['Please write the file.'],
+}
 
 function answer(risk = 1, approval = 0.2, userRequested = 0.9) {
   return {
@@ -108,5 +111,43 @@ describe('Every invalid or unavailable evaluation asks', () => {
     expect(body).toContain(state.action)
     expect(body).toContain(JEV_MODEL)
     expect(body).not.toContain('test-key')
+  })
+
+  test('nested credentials and known secret values are masked, but a masked destination stops the request', async () => {
+    let sent = ''
+    const fake: JevTransport = {
+      send: async (body) => {
+        sent = body
+        return Response.json(answer())
+      },
+    }
+    await evaluateJev(
+      {
+        action: JSON.stringify({
+          tool: 'fs_write',
+          path: 'notes.txt',
+          arguments: { options: { apiKey: 'hidden', content: 'known-value' } },
+        }),
+        userContext: ['password: hidden; use known-value'],
+      },
+      'test-key',
+      new AbortController().signal,
+      fake,
+      ['known-value'],
+    )
+    expect(sent).not.toContain('hidden')
+    expect(sent).not.toContain('known-value')
+    expect(sent).toContain('[REDACTED]')
+    sent = ''
+    expect(
+      await evaluateJev(
+        { ...state, action: JSON.stringify({ tool: 'fs_write', path: 'known-value' }) },
+        'test-key',
+        new AbortController().signal,
+        fake,
+        ['known-value'],
+      ),
+    ).toMatchObject({ kind: 'unavailable', reason: 'input' })
+    expect(sent).toBe('')
   })
 })

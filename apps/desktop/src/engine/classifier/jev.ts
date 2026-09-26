@@ -4,6 +4,8 @@ import { z } from 'zod'
 
 import { classifierVerdictFromScores, type ClassifierVerdict } from '@hemera/core'
 
+import { redactAction, redactText } from './redaction.ts'
+
 export const JEV_MODEL = 'jev-1.13.0'
 export const JEV_DEADLINE_MS = 10_000
 export const JEV_ACTION_LIMIT = 20_000
@@ -58,13 +60,23 @@ export async function evaluateJev(
   key: string,
   signal: AbortSignal,
   transport: JevTransport,
+  knownSecrets: readonly string[] = [],
 ): Promise<JevResult> {
-  if (key.trim() === '' || state.action.length === 0 || state.action.length > JEV_ACTION_LIMIT) {
+  const action = redactAction(state.action, [key, ...knownSecrets])
+  if (
+    key.trim() === '' ||
+    action === null ||
+    state.action.length > JEV_ACTION_LIMIT ||
+    action.length > JEV_ACTION_LIMIT
+  ) {
     return { kind: 'unavailable', reason: 'input' }
   }
   const body = JSON.stringify({
     model: JEV_MODEL,
-    state: { action: state.action, user_context: state.userContext },
+    state: {
+      action: JSON.parse(action),
+      user_context: state.userContext.map((item) => redactText(item, [key, ...knownSecrets])),
+    },
     questions: {
       risk: {
         type: 'score',
