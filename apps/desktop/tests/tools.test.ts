@@ -39,6 +39,13 @@ import {
 import { heldWordsLayer } from '#engine/agents/held.ts'
 import { NoNotices } from '#engine/agents/notices.ts'
 import { Commands, commandsLayer } from '#engine/commands/service.ts'
+import { ClassifierSettings, classifierSettingsLayer } from '#engine/classifier/settings.ts'
+import {
+  JEV_MODEL,
+  JevTransportPort,
+  type JevTransport,
+  typeSafeTransport,
+} from '#engine/classifier/jev.ts'
 import { Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
@@ -116,6 +123,7 @@ function humanSaying(...answers: readonly OutsideAnswer[]): Human {
 
 /** Everything a program of these suites may ask: the engine, and nothing of the window. */
 type Engine =
+  | ClassifierSettings
   | Projects
   | Sessions
   | Commands
@@ -133,12 +141,13 @@ type Engine =
  * the real supervisor, so a run of a command is a real process of this machine, and the human is
  * the layer this suite hands over rather than a default that would let a tool through.
  */
-function engine(human: Human) {
+function engine(human: Human, transport: JevTransport = typeSafeTransport) {
   const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
   const services: Layer.Layer<Engine> = toolCatalogueLayer.pipe(
+    Layer.provideMerge(classifierSettingsLayer),
     // No build runs here: a Session that is none passes through the builds untouched.
     Layer.provide(idleBuilds),
     Layer.provideMerge(journalLayer),
@@ -157,6 +166,7 @@ function engine(human: Human) {
     Layer.provide(heldWordsLayer),
     // Nobody is watching: these suites read the thread and the runs, not what was pushed.
     Layer.provide(NoNotices),
+    Layer.provide(Layer.succeed(JevTransportPort, transport)),
   )
   return <A, E>(program: Effect.Effect<A, E, Engine | Scope.Scope>): Promise<A> =>
     Effect.runPromise(
@@ -237,6 +247,23 @@ const fileInRoot = (name: string, content: string) => {
   return path
 }
 
+function jevResponse(risk: number): Response {
+  return Response.json({
+    model: JEV_MODEL,
+    answers: {
+      risk: {
+        type: 'score',
+        score: risk,
+        confidence: 0.9,
+        legend: { '0': 'read', '1': 'limited', '2': 'significant', '3': 'destructive' },
+        probabilities: { '0': 0.1, '1': 0.9, '2': 0, '3': 0 },
+      },
+      approval: { type: 'noul', noul: 0.2 },
+      user_requested: { type: 'noul', noul: 0.9 },
+    },
+  })
+}
+
 describe('every tool name is one the model APIs accept', () => {
   it('is letters, digits, underscores or hyphens, 64 characters at most, and no dot', () => {
     // The Anthropic and OpenAI APIs refuse a tool name outside this pattern, and an agent hands
@@ -276,6 +303,171 @@ describe('A read inside the Workspace goes through on its own', () => {
     const written = seen.lines.filter((line) => line.type.startsWith('tool.'))
     expect(written.map((line) => line.type)).toEqual(['tool.completed'])
     // Nothing was asked of the human: a read inside the root is what Hemera promises.
+    expect(human.asked).toHaveLength(0)
+  })
+})
+
+describe('Hemera Auto classifies one admitted tool call before execution', () => {
+  it('allows an inside read locally and asks once for an inside write without a Jev key', async () => {
+    fileInRoot('read-me.md', 'readable')
+    const human = humanSaying('allowed')
+    const result = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const read = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: 'read-me.md' },
+        })
+        const write = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'written.md', content: 'written once', key: 'auto-write' },
+        })
+        return { read, write, lines: yield* journalLines(session.projectId) }
+      }),
+    )
+    expect(result.read.state).toBe('completed')
+    expect(result.write.state).toBe('completed')
+    expect(human.asked).toHaveLength(1)
+    expect(readFileSync(join(root, 'written.md'), 'utf8')).toBe('written once')
+    expect(result.lines.filter((line) => line.type === 'classifier.decision')).toHaveLength(2)
+  })
+
+  it('refuses a destructive one-off before asking or starting it', async () => {
+    const human = humanSaying('allowed')
+    const result = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'rm -rf .git', key: 'destructive' },
+        })
+      }),
+    )
+    expect(result.state).toBe('refused')
+    expect(human.asked).toHaveLength(0)
+  })
+
+  it('sends a bounded action to fake Jev and executes only its valid allow', async () => {
+    const human = humanSaying()
+    const sent: string[] = []
+    const transport: JevTransport = {
+      send: async (body, key) => {
+        sent.push(body)
+        expect(key).toBe('private-key')
+        return jevResponse(1)
+      },
+    }
+    const result = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'jev.md', content: 'safe content', key: 'jev-write' },
+        })
+      }),
+    )
+    expect(result.state).toBe('completed')
+    expect(human.asked).toHaveLength(0)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('jev.md')
+    expect(sent[0]).not.toContain('private-key')
+    expect(readFileSync(join(root, 'jev.md'), 'utf8')).toBe('safe content')
+  })
+
+  it('does not dispatch a valid Jev deny or treat an invalid reply as approval', async () => {
+    const human = humanSaying('allowed')
+    let calls = 0
+    const transport: JevTransport = {
+      send: async () => {
+        calls += 1
+        return calls === 1 ? jevResponse(2.5) : Response.json({ model: JEV_MODEL, answers: {} })
+      },
+    }
+    const result = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const denied = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'denied.md', content: 'no', key: 'denied' },
+        })
+        const invalid = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'asked.md', content: 'yes', key: 'asked' },
+        })
+        return { denied, invalid }
+      }),
+    )
+    expect(result.denied.state).toBe('refused')
+    expect(existsSync(join(root, 'denied.md'))).toBe(false)
+    expect(result.invalid.state).toBe('completed')
+    expect(human.asked).toHaveLength(1)
+    expect(calls).toBe(2)
+  })
+
+  it('discards a Jev allow received after the global mode changes', async () => {
+    let signalStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve
+    })
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const transport: JevTransport = {
+      send: async () => {
+        signalStarted?.()
+        await held
+        return jevResponse(1)
+      },
+    }
+    const human = humanSaying()
+    const result = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const call = yield* Effect.forkScoped(
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'late.md', content: 'no', key: 'late' },
+          }),
+        )
+        yield* Effect.promise(() => started)
+        yield* settings.select('agent-default')
+        release?.()
+        return yield* Fiber.join(call)
+      }),
+    )
+    expect(result.state).toBe('refused')
+    expect(existsSync(join(root, 'late.md'))).toBe(false)
     expect(human.asked).toHaveLength(0)
   })
 })

@@ -570,6 +570,7 @@ describe('Aucune suppression proposée', () => {
       'chooseAgent',
       'chooseWorkspace',
       'create',
+      'humanMessages',
       'list',
       'mainOf',
       'one',

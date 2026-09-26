@@ -132,6 +132,17 @@ export {
   type SettingsProps,
 } from './settings/settings.tsx'
 export {
+  ClassifierSection,
+  CLASSIFIER_OPTIONS,
+  EVALUATION_ENGINES,
+  type ClassifierMode,
+  type ClassifierOption,
+  type ClassifierSectionProps,
+  type CredentialStatus,
+  type EvaluationEngineOption,
+  type EvaluatorStatus,
+} from './settings/classifier-section.tsx'
+export {
   NotificationBell,
   NotificationList,
   type NotificationBellProps,
@@ -321,6 +332,11 @@ export {
   type PermissionRequestProps,
 } from './approval/permission-request.tsx'
 export { DecisionSummary, type DecisionSummaryProps } from './approval/decision-summary.tsx'
+export {
+  ClassifierDecision,
+  type ClassifierDecisionProps,
+  type ClassifierDecisionState,
+} from './approval/classifier-decision.tsx'
 
 /**
  * What an agent advertises, what the reader sets, and what the session has spent.
@@ -340,6 +356,7 @@ export {
   type BlockedBannerProps,
   type EffortChoice,
   type ModeChoice,
+  type MenuClassifier,
   type ModeSelectorProps,
   type ModelChoice,
   type OfferedAgent,

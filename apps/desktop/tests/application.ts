@@ -38,6 +38,7 @@ import {
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
 import { type Commands, commandsLayer } from '#engine/commands/service.ts'
+import { classifierSettingsLayer } from '#engine/classifier/settings.ts'
 import { type Context as AgentContext, contextLayer } from '#engine/context/service.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -476,6 +477,7 @@ export function toolApplication(
     })
     const tools = toolServerLayer.pipe(
       Layer.provideMerge(toolCatalogueLayer),
+      Layer.provideMerge(classifierSettingsLayer),
       // One build service, the catalogue's and the runtime's: the runtime drives what it holds.
       Layer.provideMerge(idleBuilds),
       Layer.provideMerge(toolAccessLayer),

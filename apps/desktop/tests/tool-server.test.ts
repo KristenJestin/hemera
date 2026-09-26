@@ -31,6 +31,7 @@ import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { specsLayer } from '#engine/specs/specs.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
+import { classifierSettingsLayer } from '#engine/classifier/settings.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { type GrantedAccess, ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer, type ToolCatalogue } from '#engine/tools/catalogue.ts'
@@ -143,6 +144,7 @@ function engine(
   )
   const services: Layer.Layer<Engine> = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(classifierSettingsLayer),
     // No build runs here: a Session that is none passes through the builds untouched.
     Layer.provide(idleBuilds),
     Layer.provideMerge(offered === null ? toolAccessLayer : offering(offered)),

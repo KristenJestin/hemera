@@ -91,6 +91,14 @@ export interface EffortChoice {
 export interface ModeChoice {
   id: string
   label: string
+  /** An independent agent setting, such as planning, remains available under Hemera Auto. */
+  permission?: boolean | undefined
+}
+
+export interface MenuClassifier {
+  mode: 'agent-default' | 'hemera-auto'
+  status: 'ready' | 'unavailable' | 'transitioning'
+  onOpenSettings: () => void
 }
 
 /** What the effort slider is handed: the agent's levels, the one that is set, and the answer. */
@@ -135,6 +143,8 @@ export interface AgentModelMenuProps {
   modes: ModeChoice[]
   mode: string | null
   onModeChange: (id: string) => void
+  /** The effective application policy. Omitted until the phase-0 UI is wired into the app. */
+  classifier?: MenuClassifier | undefined
   /**
    * Whether the agent is the Session's own and cannot be changed.
    *

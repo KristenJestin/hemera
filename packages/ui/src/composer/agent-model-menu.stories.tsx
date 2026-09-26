@@ -5,6 +5,7 @@ import { waitForAnimations } from 'storybook/preview-api'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { AgentModelMenu } from './agent-model-menu.tsx'
+import { Button } from '../components/button/button.tsx'
 import {
   AGENTS,
   ARG_TYPES,
@@ -36,7 +37,7 @@ import type { ModelChoice } from './agent-model-menu-shared.tsx'
  * of it, and what is left under it is the panel's own surface.
  */
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/AgentModelMenu',
   component: AgentModelMenu,
   render: (args) => <Controlled {...args} render={(props) => <AgentModelMenu {...props} />} />,
@@ -105,6 +106,179 @@ function placeIn(element: Element, frame: Element) {
 
 /** Every prop as a control, and the four answers wired to a page that behaves like the engine. */
 export const Playground: Story = {}
+
+/** D59-11: native permission choices are replaced while the model and effort stay editable. */
+export const HemeraAuto: Story = {
+  name: 'Hemera Auto replaces native permission controls in the model menu',
+  args: {
+    agent: 'claude-code',
+    model: 'opus-4-5',
+    effort: 'high',
+    classifier: { mode: 'hemera-auto', status: 'ready', onOpenSettings: fn() },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
+    await waitFor(() => expect(screen.getByText('Ready · managed in App Settings')).toBeVisible())
+    expect(screen.queryByRole('listbox', { name: 'Mode' })).toBeNull()
+    expect(screen.getByRole('slider', { name: 'Effort' })).toBeVisible()
+    expect(screen.getByRole('listbox', { name: 'Models of this agent' })).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Open App Settings' }))
+    expect(args.classifier?.onOpenSettings).toHaveBeenCalled()
+    await expect(canvas.getByRole('button', { name: /Hemera Auto/ })).toHaveFocus()
+  },
+}
+
+/** D59-11: the status remains when neither effort nor native modes are available. */
+export const HemeraAutoWithoutEffort: Story = {
+  args: {
+    agent: 'codex',
+    model: 'gpt-5-2-codex',
+    efforts: [],
+    modes: [],
+    classifier: { mode: 'hemera-auto', status: 'ready', onOpenSettings: fn() },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
+    await waitFor(() => expect(screen.getByText('Ready · managed in App Settings')).toBeVisible())
+    expect(screen.queryByRole('slider', { name: 'Effort' })).toBeNull()
+    expect(screen.queryByRole('listbox', { name: 'Mode' })).toBeNull()
+  },
+}
+
+export const HemeraAutoUnavailable: Story = {
+  args: {
+    agent: 'claude-code',
+    model: 'opus-4-5',
+    classifier: { mode: 'hemera-auto', status: 'unavailable', onOpenSettings: fn() },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
+    await waitFor(() =>
+      expect(screen.getByText('Evaluator unavailable · calls ask you')).toBeVisible(),
+    )
+  },
+}
+
+export const HemeraAutoTransitioning: Story = {
+  args: {
+    agent: 'claude-code',
+    model: 'opus-4-5',
+    classifier: { mode: 'hemera-auto', status: 'transitioning', onOpenSettings: fn() },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
+    await waitFor(() => expect(screen.getByText('Changing across Sessions…')).toBeVisible())
+  },
+}
+
+export const HemeraAutoReducedMotion: Story = {
+  args: {
+    agent: 'claude-code',
+    model: 'opus-4-5',
+    classifier: { mode: 'hemera-auto', status: 'ready', onOpenSettings: fn() },
+  },
+  render: (args) => (
+    <MotionConfig reducedMotion="always">
+      <Controlled {...args} render={(props) => <AgentModelMenu {...props} />} />
+    </MotionConfig>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
+    await waitFor(() => expect(screen.getByText('Ready · managed in App Settings')).toBeVisible())
+  },
+}
+
+/** OpenCode's planning mode remains a separate agent setting in this contract fixture. */
+export const HemeraAutoKeepsPlanning: Story = {
+  args: {
+    agent: 'opencode',
+    model: 'opencode-zen-grok-code-fast',
+    modes: [
+      { id: 'build', label: 'Build', permission: false },
+      { id: 'plan', label: 'Plan', permission: false },
+    ],
+    classifier: { mode: 'hemera-auto', status: 'ready', onOpenSettings: fn() },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
+    await waitFor(() => expect(screen.getByRole('listbox', { name: 'Mode' })).toBeVisible())
+    expect(screen.getByRole('option', { name: /Plan/ })).toBeVisible()
+  },
+}
+
+export const AgentDefaultWithoutNativeModes: Story = {
+  args: {
+    agents: [...AGENTS, { id: 'fixture', name: 'Fixture agent', available: true, signedIn: true }],
+    agent: 'fixture',
+    models: [{ id: 'fixture-model', label: 'Fixture model' }],
+    model: 'fixture-model',
+    modes: [],
+    classifier: { mode: 'agent-default', status: 'ready', onOpenSettings: fn() },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Fixture model/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('listbox', { name: 'Models of this agent' })).toBeVisible(),
+    )
+    expect(screen.queryByRole('listbox', { name: 'Mode' })).toBeNull()
+    expect(screen.queryByText('Hemera Auto')).toBeNull()
+  },
+}
+
+function SwitchingClassifier(args: Parameters<typeof AgentModelMenu>[0]): ReactNode {
+  const [mode, setMode] = useState<'agent-default' | 'hemera-auto'>('agent-default')
+  return (
+    <div>
+      <Button
+        size="sm"
+        onClick={() => setMode(mode === 'agent-default' ? 'hemera-auto' : 'agent-default')}
+      >
+        Switch application classifier
+      </Button>
+      <Controlled
+        {...args}
+        render={(props) => (
+          <AgentModelMenu
+            {...props}
+            classifier={{
+              mode,
+              status: 'ready',
+              onOpenSettings: args.classifier?.onOpenSettings ?? fn(),
+            }}
+          />
+        )}
+      />
+    </div>
+  )
+}
+
+/** D59-11: an open menu drops stale native controls and refreshes its trigger summary. */
+export const ClassifierChangesRefreshMenu: Story = {
+  name: 'Classifier changes refresh the menu without a stale permission override',
+  args: {
+    agent: 'claude-code',
+    model: 'opus-4-5',
+    mode: 'accept-edits',
+    classifier: { mode: 'agent-default', status: 'ready', onOpenSettings: fn() },
+  },
+  render: (args) => <SwitchingClassifier {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Accept edits/ }))
+    await waitFor(() => expect(screen.getByRole('listbox', { name: 'Mode' })).toBeVisible())
+    await userEvent.click(canvas.getByRole('button', { name: 'Switch application classifier' }))
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Mode' })).toBeNull())
+    expect(canvas.getByRole('button', { name: /Hemera Auto/ })).toBeVisible()
+    expect(canvas.queryByRole('button', { name: /Accept edits/ })).toBeNull()
+  },
+}
 
 /**
  * Nothing chosen: the trigger says what to do rather than naming a model of nobody's.

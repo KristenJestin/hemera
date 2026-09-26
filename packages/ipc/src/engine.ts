@@ -14,6 +14,10 @@
 
 import { z } from 'zod'
 
+/** The application-wide permission choice; engine identity is separate from this mode. */
+export const classifierModeSchema = z.enum(['agent-default', 'hemera-auto'])
+export type ClassifierMode = z.infer<typeof classifierModeSchema>
+
 import {
   agentAvailabilitySchema,
   agentOfferSchema,
@@ -394,6 +398,30 @@ export type SessionEntry = z.infer<typeof sessionEntrySchema>
  * schema of what comes back, so the type of an answer is read from the same place.
  */
 export const ENGINE_REQUESTS = {
+  'classifier.state': {
+    arguments: nothingSchema,
+    response: z.object({
+      mode: classifierModeSchema,
+      hasKey: z.boolean(),
+      consent: z.boolean(),
+      generation: z.number().int(),
+    }),
+  },
+  'classifier.mode.write': {
+    arguments: z.object({ mode: classifierModeSchema }),
+    response: z.void(),
+  },
+  'classifier.consent.write': { arguments: z.object({ consent: z.boolean() }), response: z.void() },
+  'classifier.ciphertext.read': { arguments: nothingSchema, response: z.string().nullable() },
+  'classifier.key.replace': {
+    arguments: z.object({ ciphertext: z.string().min(1), plaintext: z.string().min(1) }),
+    response: z.void(),
+  },
+  'classifier.key.restore': {
+    arguments: z.object({ plaintext: z.string().min(1) }),
+    response: z.void(),
+  },
+  'classifier.key.remove': { arguments: nothingSchema, response: z.void() },
   'preferences.read': {
     arguments: nothingSchema,
     response: displayPreferencesSchema,

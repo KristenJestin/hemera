@@ -28,6 +28,7 @@ export {
   ENGINE_EVENT_CHANNEL,
   ENGINE_REQUESTS,
   channelSchema,
+  classifierModeSchema,
   composerChoiceSchema,
   composersSchema,
   displayPreferencesChangeSchema,
@@ -50,6 +51,7 @@ export {
   themePreferenceSchema,
 } from './engine.ts'
 export type {
+  ClassifierMode,
   Channel,
   RepositoryIcon,
   ComposerChoice,

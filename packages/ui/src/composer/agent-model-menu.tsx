@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/button/button.tsx'
 import { Loading } from '../components/loading/loading.tsx'
 import { Popover } from '../components/popover/popover.tsx'
-import { IconChevronLeft } from '../icons.ts'
+import { IconBrandHemeraAuto, IconChevronLeft } from '../icons.ts'
 import { arrival, slide, useTransition } from '../motion.ts'
 import { AgentMark } from './agent-mark.tsx'
 import {
@@ -86,6 +86,7 @@ export type {
   AgentModelMenuProps,
   EffortChoice,
   ModeChoice,
+  MenuClassifier,
   ModelChoice,
   OfferedAgent,
 } from './agent-model-menu-shared.tsx'
@@ -137,6 +138,7 @@ export function AgentModelMenu({
   modes,
   mode,
   onModeChange,
+  classifier,
   fixed = false,
   loading = false,
   refusal = null,
@@ -150,6 +152,9 @@ export function AgentModelMenu({
   const transition = useTransition(arrival)
 
   const chosen = agents.find((one) => one.id === agent) ?? null
+  const auto = classifier?.mode === 'hemera-auto'
+  const shownModes = auto ? modes.filter((choice) => choice.permission === false) : modes
+  const shownMode = shownModes.some((choice) => choice.id === mode) ? mode : null
   /** The stage the panel is on: a Session's agent leaves it only one to be on. */
   const shown: Stage = fixed ? 'model' : stage
   /** The stage the panel opens on, which is the one whose control is handed the caret. */
@@ -191,14 +196,23 @@ export function AgentModelMenu({
       keepFocus
       // What the panel is called, which is what it holds: a Session runs the agent it was made
       // with, so its menu has no agent stage to announce.
-      label={fixed ? 'Model, effort and mode' : 'Agent, model, effort and mode'}
+      label={
+        auto
+          ? fixed
+            ? 'Model, effort and Hemera Auto'
+            : 'Agent, model, effort and Hemera Auto'
+          : fixed
+            ? 'Model, effort and mode'
+            : 'Agent, model, effort and mode'
+      }
       trigger={
         <Button ref={trigger} variant="ghost" size="sm" disabled={disabled} className={className}>
           {chosen !== null && <AgentMark agent={chosen.name} agentId={chosen.id} />}
           {triggerLabel(chosen, [
             nameOfCurrent(models, model),
             nameOfCurrent(efforts, effort),
-            nameOfCurrent(modes, mode),
+            nameOfCurrent(shownModes, shownMode),
+            auto ? 'Hemera Auto' : undefined,
           ])}
           {loading && <Loading size="sm" label="Reading what the agent offers" />}
         </Button>
@@ -281,7 +295,7 @@ export function AgentModelMenu({
                 {/* What the agent announced about itself, beside its models. An agent that
                     announced neither — Codex has no effort at all — is given no column rather
                     than an empty one with a rule down its side, and its models take the room. */}
-                {(efforts.length > 0 || modes.length > 0) && (
+                {(efforts.length > 0 || shownModes.length > 0 || auto) && (
                   <div className={ASIDE}>
                     <EffortSlider
                       efforts={efforts}
@@ -289,7 +303,34 @@ export function AgentModelMenu({
                       onEffortChange={onEffortChange}
                       defaultId={effortDefault}
                     />
-                    <ModeList modes={modes} mode={mode} onModeChange={onModeChange} />
+                    <ModeList modes={shownModes} mode={shownMode} onModeChange={onModeChange} />
+                    {auto && (
+                      <div
+                        role="status"
+                        className="flex flex-col gap-1.5 border-t border-border pt-2 text-xs"
+                      >
+                        <span className="flex items-center gap-1.5 font-medium text-foreground">
+                          <IconBrandHemeraAuto size="sm" aria-hidden="true" />
+                          Hemera Auto
+                        </span>
+                        <span className="text-muted-foreground">
+                          {classifier.status === 'ready' && 'Ready · managed in App Settings'}
+                          {classifier.status === 'unavailable' &&
+                            'Evaluator unavailable · calls ask you'}
+                          {classifier.status === 'transitioning' && 'Changing across Sessions…'}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            close()
+                            classifier.onOpenSettings()
+                          }}
+                        >
+                          Open App Settings
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

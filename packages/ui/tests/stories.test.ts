@@ -518,6 +518,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'EmptyProject',
       'FirstLaunch',
       'Settings',
+      'ClassifierSection',
       'AppearanceSection',
       'ProfileSection',
       'ArchivedProjects',
@@ -533,6 +534,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'TerminalOutput',
       'DiffBlock',
       'PermissionRequest',
+      'ClassifierDecision',
       'DecisionSummary',
       // The agent, its model and its effort are one control since the trial of 22 September
       // 2026: three selectors in the foot of the composer, plus the agent's own at the far end
@@ -644,6 +646,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
     // theme, not components: the application needs them to hand the shell a width and to say
     // which place it is on.
     const values = [
+      'CLASSIFIER_OPTIONS',
+      'EVALUATION_ENGINES',
       // Lot 20: the seven command types, their scopes, their icons and their labels (D8-07).
       'COMMAND_SCOPES',
       'COMMAND_TYPES',

@@ -32,9 +32,10 @@ import type {
   InvalidVariableKeyError,
   NoAgentError,
 } from '@hemera/core'
+import { nativePermissionMode } from '@hemera/core'
 
 import { type AgentOption } from './agents/client.ts'
-import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
+import { AgentRuntime, AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
@@ -58,6 +59,7 @@ import { type Context, type UnreadableInstructionsError } from './context/servic
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
+import { ClassifierSettings } from './classifier/settings.ts'
 import {
   type InvalidBranchPrefixError,
   type InvalidWorkspacesRootError,
@@ -179,6 +181,7 @@ export function answer(
   EngineResponse<EngineRequestName>,
   Refusal,
   | Preferences
+  | ClassifierSettings
   | EngineStatus
   | Projects
   | Journal
@@ -199,6 +202,36 @@ export function answer(
   | Builds
 > {
   return Effect.gen(function* () {
+    if (decision.name === 'classifier.state') {
+      const current = yield* (yield* ClassifierSettings).current
+      return {
+        mode: current.mode,
+        hasKey: current.key !== null,
+        consent: current.consent,
+        generation: current.generation,
+      }
+    }
+    if (decision.name === 'classifier.mode.write') {
+      return yield* (yield* ClassifierSettings).select(decision.argument.mode)
+    }
+    if (decision.name === 'classifier.consent.write') {
+      return yield* (yield* ClassifierSettings).setConsent(decision.argument.consent)
+    }
+    if (decision.name === 'classifier.ciphertext.read') {
+      return yield* (yield* ClassifierSettings).ciphertext
+    }
+    if (decision.name === 'classifier.key.replace') {
+      return yield* (yield* ClassifierSettings).replaceKey(
+        decision.argument.ciphertext,
+        decision.argument.plaintext,
+      )
+    }
+    if (decision.name === 'classifier.key.restore') {
+      return yield* (yield* ClassifierSettings).restoreKey(decision.argument.plaintext)
+    }
+    if (decision.name === 'classifier.key.remove') {
+      return yield* (yield* ClassifierSettings).removeKey
+    }
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
 
     if (decision.name === 'preferences.read') return yield* (yield* Preferences).read
@@ -320,11 +353,36 @@ export function answer(
       // what the agent announces now, which is the only place an option it publishes after a
       // choice ever appears (D5-13).
       const { projectId, provider, optionId, value } = decision.argument
+      if ((yield* (yield* ClassifierSettings).current).mode === 'hemera-auto') {
+        const offered = yield* runtime.offer(projectId, provider)
+        const option = offered.options.find((one) => one.id === optionId)
+        if (option !== undefined && nativePermissionMode(option, value)) {
+          return {
+            options: announced(offered.options),
+            refusal: {
+              kind: 'failed' as const,
+              message: 'Permission modes are managed by Hemera Auto in App Settings.',
+            },
+          }
+        }
+      }
       const report = yield* runtime.offerSet(projectId, provider, optionId, value)
       return { options: announced(report.options), refusal: report.refusal }
     }
     if (decision.name === 'agents.setOption') {
       const { sessionId, optionId, value } = decision.argument
+      if ((yield* (yield* ClassifierSettings).current).mode === 'hemera-auto') {
+        const options = yield* runtime.options(sessionId)
+        const option = options.find((one) => one.id === optionId)
+        if (option !== undefined && nativePermissionMode(option, value)) {
+          return yield* Effect.fail(
+            new AgentRuntimeError({
+              what: 'choosing an option',
+              cause: 'permission modes are managed by Hemera Auto in App Settings',
+            }),
+          )
+        }
+      }
       return yield* runtime.setOption(sessionId, optionId, value)
     }
     if (decision.name === 'agents.prompt') {

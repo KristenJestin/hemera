@@ -4,6 +4,12 @@ import { useState } from 'react'
 
 import type { ThemeChoice } from '../window.ts'
 import {
+  EVALUATION_ENGINES,
+  type ClassifierSectionProps,
+  type ClassifierMode,
+  type CredentialStatus,
+} from './classifier-section.tsx'
+import {
   Settings,
   type ArchivedProject,
   type ProfileFacts,
@@ -29,12 +35,60 @@ const ARCHIVED: ArchivedProject[] = [
   { id: 'shop', name: 'Legacy shop', archivedAt: 'in August' },
 ]
 
-function Controlled({ theme, archived, onThemeChange, onRestore, ...rest }: SettingsProps) {
+function Controlled({
+  theme,
+  archived,
+  classifier,
+  onThemeChange,
+  onRestore,
+  ...rest
+}: SettingsProps) {
   const [chosen, setChosen] = useState<ThemeChoice>(theme)
   const [kept, setKept] = useState(archived)
+  const [mode, setMode] = useState<ClassifierMode>(classifier?.mode ?? 'agent-default')
+  const [engine, setEngine] = useState(classifier?.engine ?? 'jev')
+  const [credential, setCredential] = useState<CredentialStatus>(
+    classifier?.credential ?? 'missing',
+  )
+  const [consent, setConsent] = useState(classifier?.consent ?? false)
   return (
     <Settings
       {...rest}
+      classifier={
+        classifier === undefined
+          ? undefined
+          : {
+              ...classifier,
+              mode,
+              engine,
+              credential,
+              consent,
+              credentialMessage:
+                credential === 'invalid'
+                  ? 'The key was rejected. Replace it to retry.'
+                  : classifier.credentialMessage,
+              onModeChange: (next) => {
+                setMode(next)
+                classifier.onModeChange(next)
+              },
+              onEngineChange: (next) => {
+                setEngine(next)
+                classifier.onEngineChange(next)
+              },
+              onConsentChange: (next) => {
+                setConsent(next)
+                classifier.onConsentChange(next)
+              },
+              onSaveKey: (key) => {
+                setCredential(key === 'invalid' ? 'invalid' : 'saved')
+                classifier.onSaveKey(key)
+              },
+              onRemoveKey: () => {
+                setCredential('missing')
+                classifier.onRemoveKey()
+              },
+            }
+      }
       theme={chosen}
       onThemeChange={(next) => {
         setChosen(next)
@@ -107,8 +161,21 @@ const AGENTS: SettingsProps['agents'] = {
   onUpdate: fn(),
 }
 
+const CLASSIFIER: ClassifierSectionProps = {
+  mode: 'agent-default',
+  onModeChange: fn(),
+  engine: 'jev',
+  onEngineChange: fn(),
+  credential: 'missing',
+  evaluator: 'ready',
+  consent: false,
+  onConsentChange: fn(),
+  onSaveKey: fn(),
+  onRemoveKey: fn(),
+}
+
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Settings',
   component: Settings,
   render: (args) => <Controlled {...args} />,
@@ -118,6 +185,7 @@ const meta = {
     theme: 'dark',
     facts: FACTS,
     agents: AGENTS,
+    classifier: CLASSIFIER,
     archived: ARCHIVED,
     onThemeChange: fn(),
     onOpenFolder: fn(),
@@ -144,13 +212,16 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/** The assembled App Settings surface, with the application-wide choice visible. */
+export const Complete: Story = {}
+
 export const Playground: Story = {}
 
 /** The three theme choices, one of them on, and the Profile as the engine reported it. */
 export const Variants: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getAllByRole('radio')).toHaveLength(3)
+    expect(canvas.getAllByRole('radio')).toHaveLength(5)
     expect(canvas.getByRole('radio', { name: 'Dark' })).toBeChecked()
     expect(canvas.getByText('hemera.sqlite · 1.2 MB')).toBeInTheDocument()
     expect(canvas.getByText('20260916_projects_and_journal')).toBeInTheDocument()
@@ -243,5 +314,162 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(canvas.getByRole('radio', { name: 'System' })).toBeChecked()
     })
+  },
+}
+
+/** Agent default remains selected when a key is saved, and the mode is global. */
+export const ClassifierSelection: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const defaultMode = canvas.getByRole('radio', { name: /Agent default/ })
+    const auto = canvas.getByRole('radio', { name: /Hemera Auto/ })
+    expect(defaultMode).toBeChecked()
+    expect(canvas.queryByText('Data sent to TypeSafe AI')).toBeNull()
+    await userEvent.click(auto)
+    await waitFor(() => expect(auto).toBeChecked())
+    expect(defaultMode).not.toBeChecked()
+    expect(args.classifier?.onModeChange).toHaveBeenCalledWith('hemera-auto')
+    expect(canvas.getByText('Data sent to TypeSafe AI')).toBeInTheDocument()
+    await userEvent.click(defaultMode)
+    await waitFor(() => expect(defaultMode).toBeChecked())
+  },
+}
+
+/** The full key journey uses mock state and never holds a real credential. */
+export const CredentialJourney: Story = {
+  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const field = canvas.getByLabelText('Jev API key')
+    await userEvent.type(field, 'storybook-demo-key')
+    await userEvent.click(canvas.getByRole('button', { name: 'Save key' }))
+    expect(args.classifier?.onSaveKey).toHaveBeenCalledWith('storybook-demo-key')
+    await waitFor(() => expect(canvas.getByText('Saved')).toBeInTheDocument())
+    expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeChecked()
+    await userEvent.type(field, 'replacement-demo-key')
+    await userEvent.click(canvas.getByRole('button', { name: 'Replace key' }))
+    expect(args.classifier?.onSaveKey).toHaveBeenCalledWith('replacement-demo-key')
+    await userEvent.click(canvas.getByRole('button', { name: 'Remove key' }))
+    await waitFor(() => expect(canvas.getByText('Key required')).toBeVisible())
+    await expect(field).toHaveFocus()
+    expect(args.classifier?.onRemoveKey).toHaveBeenCalled()
+  },
+}
+
+export const MissingKey: Story = {
+  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+}
+
+export const InvalidKey: Story = {
+  args: {
+    classifier: {
+      ...CLASSIFIER,
+      mode: 'hemera-auto',
+      credential: 'invalid',
+      credentialMessage: 'The key was rejected. Replace it to retry.',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Key rejected')).toBeVisible()
+    expect(canvas.getByRole('alert')).toHaveTextContent('The key was rejected')
+  },
+}
+
+export const StorageUnavailable: Story = {
+  args: {
+    classifier: {
+      ...CLASSIFIER,
+      mode: 'hemera-auto',
+      credential: 'storage-unavailable',
+      credentialMessage: 'Protected credential storage is unavailable on this machine.',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Protected storage unavailable')).toBeVisible()
+    expect(canvas.getByLabelText('Jev API key')).toBeDisabled()
+    expect(canvas.getByRole('button', { name: 'Save key' })).toBeDisabled()
+  },
+}
+
+export const EvaluatorUnavailable: Story = {
+  args: {
+    classifier: {
+      ...CLASSIFIER,
+      mode: 'hemera-auto',
+      credential: 'saved',
+      evaluator: 'unavailable',
+    },
+  },
+}
+
+export const ConsentRequired: Story = {
+  args: {
+    classifier: { ...CLASSIFIER, mode: 'hemera-auto', credential: 'saved', consent: false },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Consent required')).toBeVisible()
+    await userEvent.click(canvas.getByRole('checkbox', { name: /Allow this evaluation data/ }))
+    await waitFor(() => expect(canvas.getByText('Ready')).toBeVisible())
+  },
+}
+
+export const TransitionPending: Story = {
+  args: {
+    classifier: {
+      ...CLASSIFIER,
+      mode: 'hemera-auto',
+      credential: 'saved',
+      evaluator: 'transitioning',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Changing across Sessions…')).toBeVisible()
+    expect(canvas.getByRole('radio', { name: /Agent default/ })).toBeDisabled()
+    expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeDisabled()
+  },
+}
+
+/** A second injected engine fits the same single-choice list without a second mode toggle. */
+export const ExtensibleEngine: Story = {
+  name: 'The application classifier selector is accessible and extensible',
+  args: {
+    classifier: {
+      ...CLASSIFIER,
+      mode: 'hemera-auto',
+      credential: 'saved',
+      engines: [
+        ...EVALUATION_ENGINES,
+        {
+          id: 'fixture',
+          label: 'Fixture engine',
+          provider: 'Test only',
+          description: 'A Storybook option.',
+          available: true,
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('radio', { name: /Fixture engine/ }))
+    expect(args.classifier?.onEngineChange).toHaveBeenCalledWith('fixture')
+    expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeChecked()
+  },
+}
+
+/** The main choice is one keyboard group; engine selection stays below the selected mode. */
+export const ClassifierKeyboard: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const defaultMode = canvas.getByRole('radio', { name: /Agent default/ })
+    defaultMode.focus()
+    await userEvent.keyboard('{ArrowDown}')
+    await waitFor(() => expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeChecked())
+    expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toHaveFocus()
+    expect(canvas.getByRole('radiogroup', { name: 'Evaluation engine' })).toBeVisible()
   },
 }

@@ -37,6 +37,7 @@ import {
   type MessageLine,
   type MessageState,
   type OfferedAgent,
+  type MenuClassifier,
   type PermissionOption,
   type ScrollerEntry,
   waitsOf,
@@ -212,6 +213,7 @@ export interface SessionPageProps {
    * belong to that agent, and reading which agent answers is half of reading them.
    */
   agents: OfferedAgent[]
+  classifier?: MenuClassifier | undefined
   /** What the agent of this Session offers, as its own handshake answered. */
   options: readonly ConfigOption[]
   onWrite: (body: string) => Promise<string | null>
@@ -294,6 +296,7 @@ export function SessionPage({
   sessions,
   running,
   agents,
+  classifier,
   options,
   onWrite,
   onSay,
@@ -748,6 +751,7 @@ export function SessionPage({
         // shows under the box, on the sentence that was not written (D4b-02).
         agentMenu={
           <AgentModelMenu
+            classifier={classifier}
             agents={agents}
             agent={session.provider}
             // The agent of a Session is the one it was made with and cannot be changed:

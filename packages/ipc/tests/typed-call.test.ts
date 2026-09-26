@@ -65,6 +65,11 @@ function compile(call: string) {
 describe('Appel typé nominal', () => {
   test('the channels of the application are the ones declared', () => {
     const names: ChannelName[] = [
+      'classifier.read',
+      'classifier.mode.write',
+      'classifier.consent.write',
+      'classifier.key.save',
+      'classifier.key.remove',
       'env.report',
       'preferences.read',
       'preferences.write',
@@ -212,6 +217,13 @@ describe('Appel typé nominal', () => {
 describe('Cas d’usage nommés du process dédié', () => {
   test('the use cases of the process that holds the database are the ones declared', () => {
     const names: EngineRequestName[] = [
+      'classifier.state',
+      'classifier.mode.write',
+      'classifier.consent.write',
+      'classifier.ciphertext.read',
+      'classifier.key.replace',
+      'classifier.key.restore',
+      'classifier.key.remove',
       'preferences.read',
       'preferences.write',
       'engine.status',

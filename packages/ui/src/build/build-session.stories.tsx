@@ -249,7 +249,7 @@ function Screen({
 const meta = {
   title: 'Surfaces/Session/Build',
   component: Screen,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   args: {
     screen: 'building',

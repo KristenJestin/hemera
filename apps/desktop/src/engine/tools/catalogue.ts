@@ -28,9 +28,15 @@ import {
   TOOL_NAMES,
   type ToolName,
   admitTool,
+  CLASSIFIER_POLICY_VERSION,
+  classifierHumanContext,
   commandPlace,
+  lineFor,
+  localClassifierVerdict,
   offeredTools,
   runsInMain,
+  type LocalAction,
+  type Mission,
 } from '@hemera/core'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -39,6 +45,10 @@ import { basename, dirname, join, relative } from 'node:path'
 import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Builds } from '../build/build.ts'
+import { ClassifierSettings } from '../classifier/settings.ts'
+import { evaluateJev, JevTransportPort } from '../classifier/jev.ts'
+import { invocationOf } from '../commands/line.ts'
+import { Platform, ProgramLookup } from '../commands/service.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
@@ -149,12 +159,47 @@ interface Kept {
   readonly outcome: ToolOutcome
 }
 
+interface Classified {
+  readonly verdict: 'allow' | 'ask' | 'deny'
+  readonly generation: number
+  readonly latestHumanSeq: number
+}
+
+interface AuthorizedTarget {
+  readonly path: string
+  readonly decision: Classified
+}
+
+interface ClassifierDetail {
+  readonly arguments?: ParsedCall['arguments']
+  readonly resolvedTarget?: string
+  readonly line?: string
+  readonly cwd?: string
+  readonly invocation?: NonNullable<ReturnType<typeof invocationOf>>
+  readonly portless?: boolean
+  readonly environmentNames?: readonly string[]
+}
+
 /**
  * The arguments of a call as one text, the same whatever order the agent wrote them in: what a
  * retry is compared by.
  */
 function argumentsSent(sent: ToolArguments): string {
   return JSON.stringify(Object.entries(sent).sort(([left], [right]) => (left < right ? -1 : 1)))
+}
+
+function targetName(call: ParsedCall): string | null {
+  switch (call.tool) {
+    case 'fs_read':
+    case 'fs_write':
+    case 'fs_edit':
+      return call.arguments.path
+    case 'fs_list':
+    case 'search':
+      return call.arguments.path ?? '.'
+    default:
+      return null
+  }
 }
 
 /** What a tool hands back before it has been written down. */
@@ -272,6 +317,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | Database
   | Variables
   | Builds
+  | ClassifierSettings
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -286,6 +332,10 @@ export const toolCatalogueLayer: Layer.Layer<
     const variables = yield* Variables
     const specs = yield* Specs
     const builds = yield* Builds
+    const classifier = yield* ClassifierSettings
+    const jevTransport = yield* JevTransportPort
+    const platform = yield* Platform
+    const lookupIn = yield* ProgramLookup
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -460,10 +510,13 @@ export const toolCatalogueLayer: Layer.Layer<
       )
 
     /** Where a tool may act: inside the root, or wherever the human has just allowed. */
-    const allowed = (asked: ToolCall, root: string, named: string) =>
+    const allowed = (asked: ToolCall, root: string, named: string, guard?: AuthorizedTarget) =>
       Effect.gen(function* () {
         const place = yield* placeOf(root, named)
         if (place.inside === null) return { allowed: false as const, reason: place.reason }
+        if (guard !== undefined && place.path !== guard.path) {
+          return { allowed: false as const, reason: 'the target changed after classification' }
+        }
         if (place.inside) return { allowed: true as const, path: place.path }
         const answer = yield* askHuman(
           asked,
@@ -479,6 +532,16 @@ export const toolCatalogueLayer: Layer.Layer<
           return {
             allowed: false as const,
             reason: 'the Session ended before the user answered, so nothing was done',
+          }
+        }
+        if (
+          answer.allowed &&
+          guard !== undefined &&
+          !(yield* decisionIsCurrent(asked, guard.decision))
+        ) {
+          return {
+            allowed: false as const,
+            reason: 'the classifier decision expired before execution',
           }
         }
         return answer
@@ -597,6 +660,87 @@ export const toolCatalogueLayer: Layer.Layer<
         return { allowed: true as const, path: where }
       })
 
+    /** A decision is scoped to this exact call, Session context and settings generation. */
+    const classify = (
+      asked: ToolCall,
+      made: Made,
+      mission: Mission,
+      action: LocalAction,
+      detail: ClassifierDetail,
+      knownSecrets: readonly string[] = [],
+    ): Effect.Effect<Classified> =>
+      Effect.gen(function* () {
+        const snapshot = yield* answered(classifier.current)
+        if (snapshot === undefined) return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
+        const entries = (yield* answered(sessions.humanMessages(asked.sessionId))) ?? []
+        const frozen =
+          mission === 'build' ? yield* answered(builds.view(asked.sessionId)) : undefined
+        const frozenSnapshot =
+          frozen === undefined
+            ? undefined
+            : yield* answered(specs.read(frozen.specId, frozen.revision))
+        const context = classifierHumanContext(
+          mission,
+          entries,
+          frozenSnapshot?.sections.map((section) => ({
+            label: section.name,
+            body: section.body,
+          })) ?? [],
+        )
+        let verdict: Classified['verdict'] = 'ask'
+        let source = 'unavailable'
+        let model = ''
+        const local = localClassifierVerdict(action)
+        if (local !== 'defer') {
+          verdict = local
+          source = 'local'
+        } else if (snapshot.key !== null && snapshot.consent) {
+          const key = snapshot.key
+          const evaluated = yield* Effect.tryPromise({
+            try: (signal) =>
+              evaluateJev(
+                {
+                  action: JSON.stringify({ ...detail, tool: action.tool, target: action.target }),
+                  userContext: context.items.map((item) => `${item.source}: ${item.text}`),
+                },
+                key,
+                signal,
+                jevTransport,
+                knownSecrets,
+              ),
+            catch: () => 'unavailable',
+          }).pipe(Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })))
+          if (evaluated.kind === 'evaluated') {
+            verdict = evaluated.verdict
+            source = 'jev'
+            model = evaluated.model
+          }
+        }
+        yield* journalled(asked, made, 'classifier.decision', {
+          verdict,
+          source,
+          model,
+          policy: CLASSIFIER_POLICY_VERSION,
+          generation: snapshot.generation,
+        })
+        return { verdict, generation: snapshot.generation, latestHumanSeq: context.latestHumanSeq }
+      })
+
+    const decisionIsCurrent = (asked: ToolCall, decision: Classified): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
+        const [settings, entries] = yield* Effect.all([
+          answered(classifier.current),
+          answered(sessions.humanMessages(asked.sessionId)),
+        ])
+        return (
+          settings?.mode === 'hemera-auto' &&
+          settings.generation === decision.generation &&
+          classifierHumanContext('free', entries ?? []).latestHumanSeq ===
+            decision.latestHumanSeq &&
+          (yield* access.live(asked.sessionId))
+        )
+      })
+
     /** Which run a call means, when it named none: the only one this Session has going. */
     /**
      * Which run a call is about: the one it names, else the only one running, else — when the
@@ -640,11 +784,12 @@ export const toolCatalogueLayer: Layer.Layer<
       projectName: string,
       repositories: readonly string[],
       call: ParsedCall,
+      guard?: AuthorizedTarget,
     ): Effect.Effect<Answer> =>
       Effect.gen(function* () {
         switch (call.tool) {
           case 'fs_read': {
-            const settled = yield* allowed(asked, root, call.arguments.path)
+            const settled = yield* allowed(asked, root, call.arguments.path, guard)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const page = yield* attempt<Page>(() =>
               readPage(
@@ -673,7 +818,7 @@ export const toolCatalogueLayer: Layer.Layer<
           }
 
           case 'fs_write': {
-            const settled = yield* allowed(asked, root, call.arguments.path)
+            const settled = yield* allowed(asked, root, call.arguments.path, guard)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const written = yield* attempt(() =>
               mkdir(dirname(settled.path), { recursive: true }).then(() =>
@@ -701,7 +846,7 @@ export const toolCatalogueLayer: Layer.Layer<
                 'the old and the new text are the same, so nothing was changed',
               )
             }
-            const settled = yield* allowed(asked, root, call.arguments.path)
+            const settled = yield* allowed(asked, root, call.arguments.path, guard)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const current = yield* attempt(() => readFile(settled.path, 'utf8'))
             if (!current.ok) {
@@ -735,7 +880,7 @@ export const toolCatalogueLayer: Layer.Layer<
 
           case 'fs_list': {
             const named = call.arguments.path ?? '.'
-            const settled = yield* allowed(asked, root, named)
+            const settled = yield* allowed(asked, root, named, guard)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const listed = yield* attempt(() =>
               readdir(settled.path, { withFileTypes: true }).then(async (entries) =>
@@ -771,7 +916,7 @@ export const toolCatalogueLayer: Layer.Layer<
             const within =
               call.arguments.path === undefined
                 ? { allowed: true as const, path: root }
-                : yield* allowed(asked, root, call.arguments.path)
+                : yield* allowed(asked, root, call.arguments.path, guard)
             if (!within.allowed) return failed(within.reason, within.reason)
             const found = yield* attempt((signal) =>
               searchIn({
@@ -884,20 +1029,97 @@ export const toolCatalogueLayer: Layer.Layer<
             if (home === undefined) {
               return failed("could not read the Project's main", 'the Workspace main did not read')
             }
+            const environment = (yield* answered(variables.givenFor(projectId, home.id))) ?? {}
+            const commandLine = lineFor(
+              {
+                line: entry?.line ?? line ?? '',
+                lineWindows: entry?.lineWindows ?? null,
+                lineLinux: entry?.lineLinux ?? null,
+              },
+              platform,
+            )
+            const resolvedPlace = yield* placeOf(entry === undefined ? root : home.path, folder)
+            if (resolvedPlace.inside === null)
+              return failed(resolvedPlace.reason, resolvedPlace.reason)
+            const invocation = invocationOf(commandLine, platform, lookupIn(resolvedPlace.path))
+            if (invocation === null)
+              return failed('the command line is empty', 'nothing was started')
+            const settings = yield* answered(classifier.current)
+            const auto =
+              settings?.mode === 'hemera-auto'
+                ? yield* classify(
+                    asked,
+                    { projectId, agent: 'agent', milliseconds: 0 },
+                    (yield* answered(sessions.one(asked.sessionId)))?.session.mission ?? 'free',
+                    {
+                      tool: 'commands_run',
+                      target: resolvedPlace.inside ? 'inside' : 'outside',
+                      command: {
+                        program: invocation.command,
+                        args: invocation.args,
+                        shell: invocation.verbatim,
+                        platform,
+                      },
+                    },
+                    {
+                      line: commandLine,
+                      cwd: resolvedPlace.path,
+                      invocation,
+                      portless: entry?.portless ?? false,
+                      environmentNames: Object.keys(environment),
+                    },
+                    Object.values(environment),
+                  )
+                : null
+            if (auto?.verdict === 'deny') {
+              return {
+                ...failed(
+                  'Hemera Auto refused this command',
+                  'The classifier refused this command.',
+                ),
+                refused: true,
+              }
+            }
             // A catalogue command is the user's own line, and inside the root it runs on its own.
             // A one-off is a line the agent wrote: whatever folder it names, the human sees the
             // line and decides before anything runs (D5-09) — one question, not one per rule.
             const inside =
               entry !== undefined
                 ? folder === '.'
-                  ? { allowed: true as const, path: home.path }
-                  : yield* allowed(asked, home.path, folder)
+                  ? auto?.verdict === 'ask'
+                    ? yield* askHuman(
+                        asked,
+                        home.path,
+                        folder,
+                        home.path,
+                        `commands_run asks to run ${commandLine} in ${home.path}`,
+                        commandLine,
+                      )
+                    : { allowed: true as const, path: home.path }
+                  : auto?.verdict === 'ask' && resolvedPlace.inside
+                    ? yield* askHuman(
+                        asked,
+                        home.path,
+                        folder,
+                        resolvedPlace.path,
+                        `commands_run asks to run ${commandLine} in ${resolvedPlace.path}`,
+                        commandLine,
+                      )
+                    : yield* allowed(
+                        asked,
+                        home.path,
+                        folder,
+                        auto === null ? undefined : { path: resolvedPlace.path, decision: auto },
+                      )
                 : yield* Effect.gen(function* () {
                     const place = yield* placeOf(root, folder)
                     if (place.inside === null) {
                       return { allowed: false as const, reason: place.reason }
                     }
                     const oneOff = line ?? ''
+                    if (auto?.verdict === 'allow' && place.inside) {
+                      return { allowed: true as const, path: place.path }
+                    }
                     return yield* askHuman(
                       asked,
                       root,
@@ -910,6 +1132,24 @@ export const toolCatalogueLayer: Layer.Layer<
                     )
                   })
             if (!inside.allowed) return failed(inside.reason, inside.reason)
+            if (inside.path !== resolvedPlace.path) {
+              return {
+                ...failed(
+                  'the command target changed',
+                  'Nothing was started after the target changed.',
+                ),
+                refused: true,
+              }
+            }
+            if (auto !== null && !(yield* decisionIsCurrent(asked, auto))) {
+              return {
+                ...failed(
+                  'the classifier decision expired',
+                  'Nothing was started after the classifier decision expired.',
+                ),
+                refused: true,
+              }
+            }
             // Asked again right before the start: a call admitted while the Session was alive can
             // reach this point after the Session ended — the human took their time — and a run
             // started now would come after the sweep that stops a Session's runs, and outlive it.
@@ -938,7 +1178,9 @@ export const toolCatalogueLayer: Layer.Layer<
                 workspaceId: home.id,
                 workspaceName: home.name,
                 // D8-06: the Project's variables overridden by that Workspace's, kept on the run.
-                environment: (yield* answered(variables.givenFor(projectId, home.id))) ?? {},
+                environment,
+                expectedInvocation:
+                  auto === null || entry?.portless === true ? undefined : invocation,
                 startedBy: 'agent',
               }),
             )
@@ -1227,15 +1469,68 @@ export const toolCatalogueLayer: Layer.Layer<
           // A monotonic clock, to the microsecond: a read inside the root takes less than a
           // millisecond, and a call recorded as taking none is a call that says nothing of itself.
           const began = performance.now()
-          const answer = yield* perform(
-            asked,
-            root,
-            workspace,
-            project.id,
-            project.name,
-            project.repositories,
-            parsed.call,
-          )
+          const answer = yield* Effect.gen(function* () {
+            let guard: AuthorizedTarget | undefined
+            const settings = yield* answered(classifier.current)
+            if (settings?.mode === 'hemera-auto' && parsed.call.tool !== 'commands_run') {
+              const namedTarget = targetName(parsed.call)
+              const place =
+                namedTarget === null
+                  ? { inside: true as const, path: root }
+                  : yield* placeOf(root, namedTarget)
+              if (place.inside === null) {
+                return { ...failed(place.reason, place.reason), refused: true }
+              }
+              const classified = yield* classify(
+                asked,
+                made,
+                session.mission,
+                { tool: named, target: place.inside ? 'inside' : 'outside' },
+                { arguments: parsed.call.arguments, resolvedTarget: place.path },
+              )
+              if (classified.verdict === 'deny') {
+                return {
+                  ...failed(
+                    'Hemera Auto refused this action',
+                    'The classifier refused this action.',
+                  ),
+                  refused: true,
+                }
+              }
+              if (classified.verdict === 'ask' && place.inside) {
+                const question = yield* askHuman(
+                  asked,
+                  root,
+                  namedTarget ?? '.',
+                  place.path,
+                  `${named} asks to act on ${place.path}`,
+                  null,
+                )
+                if (!question.allowed)
+                  return { ...failed(question.reason, question.reason), refused: true }
+              }
+              if (!(yield* decisionIsCurrent(asked, classified))) {
+                return {
+                  ...failed(
+                    'the classifier decision expired',
+                    'Nothing was executed after the classifier decision expired.',
+                  ),
+                  refused: true,
+                }
+              }
+              guard = { path: place.path, decision: classified }
+            }
+            return yield* perform(
+              asked,
+              root,
+              workspace,
+              project.id,
+              project.name,
+              project.repositories,
+              parsed.call,
+              guard,
+            )
+          })
           // A tool has no error channel on purpose: everything a tool can be told no by is
           // answered as a value, and what would remain is a defect the engine should hear about.
           return yield* settle(
