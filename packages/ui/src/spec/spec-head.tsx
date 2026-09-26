@@ -7,6 +7,7 @@ import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconChevronRight, IconRefresh } from '../icons.ts'
 import type { RevisionView, SpecStatus, SpecType } from './model.ts'
+import { SPEC_TYPE_ICONS } from './spec-icons.ts'
 
 /**
  * The first line of the Spec panel: which Spec, what kind, where it stands (lot 19, brief
@@ -73,12 +74,13 @@ export function SpecHead({
   onFold,
 }: SpecHeadProps): ReactNode {
   const ready = status === 'ready'
+  const TypeIcon = SPEC_TYPE_ICONS[type]
   const reworkable = ready && !superseded
   return (
     <div className={HEAD}>
       <span className={KEY}>{specKey}</span>
       <h2 className={TITLE}>{title}</h2>
-      <Badge>{type}</Badge>
+      <Badge icon={<TypeIcon size="sm" aria-hidden="true" />}>{type}</Badge>
       <span className={STATUS}>
         <StatusDot status={DOT[status]} />
         <span className={ready ? 'text-success-muted-foreground' : 'text-muted-foreground'}>
