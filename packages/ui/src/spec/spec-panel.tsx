@@ -30,7 +30,7 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * on unless the hand folded it, and the keyboard across a fold. What is the Spec's is here.
  *
  * Unfolded, a head that stays on top — the key, the title, the status, `Mark ready` on a draft
- * and `Rework` on a ready Spec, and the one sentence of what is happening — and under it the rail
+ * and `Rework` on a ready Spec, and no sentence of what the agent is doing — and under it the rail
  * beside the stage. The stage shows one part, or every part of one phase when its heading in the
  * rail is chosen. Folded, the band is the rail's glyphs and their tints. No readiness is drawn
  * (issue #135): what the draft lacks is the agent's to say, and `Mark ready`'s to refuse with.
@@ -156,7 +156,11 @@ export function SpecPanel({
                 onMarkReady={onMarkReady}
                 onFold={fold}
               />
-              {spec.now !== '' && <p className={NOW}>{spec.now}</p>}
+              {spec.replacedBy !== undefined && (
+                // The one line under the head, and only for an older revision: which phase the
+                // agent is on is the rail's to say, and whether it is done the footer's (#150).
+                <p className={NOW}>An earlier version · read only</p>
+              )}
               {spec.status === 'draft' &&
                 spec.readiness.refused !== undefined && (
                   // What `Mark ready` was refused with: what the draft still lacks, or that it

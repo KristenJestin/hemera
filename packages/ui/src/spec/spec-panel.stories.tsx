@@ -116,7 +116,7 @@ export const Folded: Story = {
 }
 
 /**
- * Unfolded: a feature being planned, the head with its one sentence and `Mark ready`, the rail
+ * Unfolded: a feature being planned, the head with no sentence under it, the rail
  * beside one part, and the stage following the agent onto the plan it writes. No readiness bar.
  */
 export const Unfolded: Story = {
@@ -124,7 +124,7 @@ export const Unfolded: Story = {
     const canvas = within(canvasElement)
     await expect(panelWidth(canvasElement)).toBeGreaterThan(BAND)
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
-    await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
+    await expect(canvas.queryByText(/^Plan ·/)).toBeNull()
     const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(
       within(rail).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
