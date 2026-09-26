@@ -205,24 +205,6 @@ function dateOf(at: number): string {
   return new Date(at).toLocaleString('en-GB')
 }
 
-/** `4 messages`, and the singular for the one that has just been written. */
-function countOf(entries: number): string {
-  return entries === 1 ? '1 message' : `${String(entries)} messages`
-}
-
-/**
- * The line under a Session's title: when it was made, what runs it, and how much is in it — or,
- * for a `define` Session, its mission, its agent and model, and the key of the Spec it defines
- * (core.md, "Session view": `DEFINE · Claude Sonnet`).
- */
-function metaOf(session: Session, entries: number, now: number, specKey: string | null): string {
-  const agent = session.provider === null ? 'no agent' : session.provider
-  if (session.mission === 'define') {
-    return ['DEFINE', agent, session.model, specKey].filter((one) => one !== null).join(' · ')
-  }
-  return `created ${whenOf(session.createdAt, now)} · ${agent} · ${countOf(entries)}`
-}
-
 /** The Spec a Session defines as its first revision named it, once it is read (D7-07). */
 function definedOf(
   snapshot: SpecSnapshot | null,
@@ -703,7 +685,6 @@ export function SessionPage({
           <SessionHeader
             title={session.title}
             projectName={projectName}
-            meta={metaOf(session, thread.length, now, spec?.key ?? null)}
             onRename={onRename}
             editing={editing}
             onStartEditing={onStartEditing}

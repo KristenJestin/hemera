@@ -388,7 +388,6 @@ function Page({
             <SessionHeader
               title={fresh ? 'Untitled' : 'CSV invoice export'}
               projectName="Atlas"
-              meta={fresh ? 'created just now · 0 entries' : 'started 12 minutes ago · 9 entries'}
               onRename={fn()}
               onStartEditing={fn()}
               onCancelEditing={fn()}
