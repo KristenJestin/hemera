@@ -12,7 +12,9 @@ import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.
  * The rail of the Spec panel: the parts of the Spec grouped by the phase that writes them, one
  * row each, what is on the stage on a plain selected surface. Every row says its own state
  * without being opened — written plainly, empty quietly, being written or to review by a tint —
- * and says it in a sentence in its tooltip (issue #135). A group opens on a header in the small type of a label, which puts the
+ * and says it in a sentence in its tooltip (issue #135). At its end, after its count, a mark says
+ * how far along it is: a check when done, a half circle when started, nothing when empty (issue
+ * #150). A group opens on a header in the small type of a label, which puts the
  * whole phase on the stage; `Show all` shows under the hand and the keyboard. The arrows walk it
  * and Enter opens a row. No readiness at its foot (issue #135). Folded, it is the band the panel
  * folds to, each phase a block of glyphs.
@@ -140,6 +142,11 @@ function tintOf(row: HTMLElement): string {
   return tint === null ? 'none' : getComputedStyle(tint).backgroundColor
 }
 
+/** The mark at the end of a row: `done`, `started`, or `none` when it wears none. */
+function progressOf(row: HTMLElement): string {
+  return row.querySelector('[data-progress]')?.getAttribute('data-progress') ?? 'none'
+}
+
 /** Puts the keyboard on a row and waits for its tooltip to say that; the one before may linger. */
 async function tooltipSays(row: HTMLElement, said: string): Promise<void> {
   row.focus()
@@ -173,11 +180,11 @@ export const States: Story = {
     const edited = row('Scope')
     const review = row('Behaviour')
     const writing = row('Plan')
-    // Written and current: plain — the foreground text, no tint, no edge, no sentence — and not
-    // the one on the stage, which the tasks are.
+    // Written and current: plain — the foreground text, no tint, no edge, a check at its end and
+    // `Done` its only sentence — and not the one on the stage, which the tasks are.
     await expect(tintOf(written)).toBe('none')
     await expect(getComputedStyle(written).borderLeftWidth).toBe('0px')
-    await expect(written).not.toHaveAttribute('aria-describedby')
+    await expect(written).toHaveAccessibleDescription('Done')
     await expect(written).not.toHaveAttribute('aria-current')
     await expect(selected(written)).toBe(false)
     // Empty: quiet, the name fainter than a written one's, nothing behind it, and said in its name.
@@ -199,14 +206,20 @@ export const States: Story = {
     await expect(tintOf(edited)).toBe('none')
     await expect(getComputedStyle(edited).borderLeftWidth).toBe('0px')
     // Each state in a sentence.
-    await expect(edited).toHaveAccessibleDescription('Edited by you')
-    await expect(review).toHaveAccessibleDescription('To review')
+    await expect(edited).toHaveAccessibleDescription('Done. Edited by you')
+    await expect(review).toHaveAccessibleDescription('Started. To review')
     await expect(writing).toHaveAccessibleDescription('The agent is writing this')
     await tooltipSays(empty, 'Empty')
-    await tooltipSays(edited, 'Edited by you')
-    await tooltipSays(review, 'To review')
+    await tooltipSays(edited, 'Done. Edited by you')
+    await tooltipSays(review, 'Started. To review')
     await tooltipSays(writing, 'The agent is writing this')
-    await tooltipSays(written, 'Problem')
+    await tooltipSays(written, 'Done')
+    // How far along each is, at its end: done, started — to review or being written — or nothing.
+    await expect(progressOf(written)).toBe('done')
+    await expect(progressOf(edited)).toBe('done')
+    await expect(progressOf(review)).toBe('started')
+    await expect(progressOf(writing)).toBe('started')
+    await expect(progressOf(empty)).toBe('none')
     // On the stage, the part you edited wears the selected surface, and no rule.
     await userEvent.click(edited)
     await expect(edited).toHaveAttribute('aria-current', 'true')
@@ -256,6 +269,41 @@ export const PhaseToReview: Story = {
     await expect(tintOf(shape)).toBe('none')
     await expect(tintOf(plan)).toBe(tintOf(canvas.getByRole('button', { name: 'Behaviour' })))
     await expect(plan).toHaveAccessibleDescription('To review')
+  },
+}
+
+/**
+ * Each part says how far along it is at a glance, at the end of its row and without a dot (issue
+ * #150), read from what is written and the phase that writes it. A feature being planned: the
+ * shaped sections are done, their phase finished; the plan, being written, is started; the
+ * stories and the question, written while `decompose` has not finished, are started too; the
+ * tasks, not written, wear nothing and their name is muted. The counts stay.
+ */
+export const Progress: Story = {
+  args: { groups: railOf(MID_PLAN), initial: 'plan', following: 'plan' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
+    await expect(dotsIn(rail)).toEqual([])
+    const row = (name: string): HTMLElement => canvas.getByRole('button', { name })
+    for (const name of ['Problem', 'Expected outcome', 'Scope', 'Verification', 'Behaviour']) {
+      expect(progressOf(row(name))).toBe('done')
+    }
+    await expect(row('Problem')).toHaveAccessibleDescription('Done')
+    await expect(progressOf(row('Plan'))).toBe('started')
+    await expect(progressOf(row('Stories, 2'))).toBe('started')
+    await expect(row('Stories, 2')).toHaveAccessibleDescription('Started')
+    await expect(progressOf(row('Questions, 1'))).toBe('started')
+    const tasks = row('Tasks, 0, empty')
+    await expect(progressOf(tasks)).toBe('none')
+    await expect(getComputedStyle(tasks).color).not.toBe(getComputedStyle(row('Problem')).color)
+    // The mark stands at the end of the row, after the count, and is the glyph of the catalogue.
+    const stories = row('Stories, 2')
+    const mark = stories.querySelector('[data-progress]')!
+    await expect(stories.lastElementChild).toBe(mark)
+    await expect(mark.querySelector('.tabler-icon-circle-half-2')).not.toBeNull()
+    await expect(row('Problem').querySelector('[data-progress] .tabler-icon-check')).not.toBeNull()
+    await expect(stories).toHaveTextContent('Stories2')
   },
 }
 
@@ -501,9 +549,9 @@ export const Folded: Story = {
     // Edited by you: no edge on its square either, the tooltip says it.
     await expect(getComputedStyle(square('Scope')).borderLeftWidth).toBe('0px')
     // The name and the state, in the tooltip.
-    await tooltipSays(square('Scope'), 'Scope · Edited by you')
-    await tooltipSays(square('Behaviour'), 'Behaviour · To review')
-    await tooltipSays(square('Problem'), 'Problem')
+    await tooltipSays(square('Scope'), 'Scope · Done. Edited by you')
+    await tooltipSays(square('Behaviour'), 'Behaviour · Started. To review')
+    await tooltipSays(square('Problem'), 'Problem · Done')
     // A phase's square says what it does.
     await tooltipSays(canvas.getByRole('button', { name: /^Shape phase/ }), 'Shape · show all')
   },
@@ -552,7 +600,7 @@ export const EveryIcon: Story = {
 /**
  * No foot (issue #135): no readiness bar, no count of checks, no things before ready, no
  * `Mark ready` and no line of when the Spec was marked ready. What the draft lacks is the agent's
- * to say, and `Mark ready`'s — in the head — to refuse with.
+ * to say, and `Mark ready`'s — in the panel's footer — to refuse with.
  */
 export const NoReadiness: Story = {
   args: { groups: railOf(MID_PLAN) },

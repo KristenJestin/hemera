@@ -689,7 +689,7 @@ export const StaleAfterRework: Story = {
       }),
     ).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Tasks, 4' })).toHaveAccessibleDescription(
-      'To review',
+      'Started. To review',
     )
     await expect(canvas.getAllByText('to review')[0]).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
