@@ -441,6 +441,12 @@ export const ARealThread: Story = {
     // heading over what follows it, and a heading is not somewhere to go.
     expect(marks).toHaveLength(12)
     expect(canvas.getByRole('log').scrollTop).toBeGreaterThan(0)
+    // At the left of the thread's column, away from the panel a mission opens on the right
+    // (issue #149).
+    const first = canvas.getAllByRole('group')[0]!
+    expect(rail.getBoundingClientRect().right).toBeLessThanOrEqual(
+      first.getBoundingClientRect().left,
+    )
     // The reading position is one effect further on than the rail, as in `States`.
     await waitFor(
       () => {
@@ -591,7 +597,7 @@ export const AMarkPressedUnderLoad: Story = {
 /** The three states of a mark, with nothing else around them: read, beside it, and the rest. */
 export const TheRail: Story = {
   render: () => (
-    <div className="flex h-screen items-start justify-end p-6">
+    <div className="flex h-screen items-start justify-start p-6">
       <NavigationRail label="Marks of the thread" marks={MARKS} active={2} onSelect={selectMark} />
     </div>
   ),
@@ -616,17 +622,33 @@ export const TheRail: Story = {
   },
 }
 
+/** A message much longer than two lines of the preview's measure, as a last message often is. */
+const LONG_MARK: NavigationMark = {
+  id: 'long',
+  label:
+    'Invoices should export with HT and TTC amounts per line. Today the CSV only has totals, and accounting re-keys everything by hand every month, which is where the mistakes come from.',
+}
+
 /**
  * What a mark says when the pointer rests on it, or when the keyboard lands on it.
  *
  * A mark is six pixels of line, and what it stands for is a sentence: the preview is the design
  * system's own tooltip, on the inside of the rail, and its words are the mark's name — what the
  * eye reads is what is announced, and not a shorter truth about where the mark goes.
+ *
+ * The rail stands at the left of the thread, and the preview opens to its right, towards the
+ * thread; it quotes the message in a measure of its own, two lines at most, then an ellipsis
+ * (issue #149).
  */
 export const APreviewUnderTheHand: Story = {
   render: () => (
-    <div className="flex h-screen items-start justify-end p-6">
-      <NavigationRail label="Marks of the thread" marks={MARKS} active={2} onSelect={selectMark} />
+    <div className="flex h-screen items-start justify-start p-6">
+      <NavigationRail
+        label="Marks of the thread"
+        marks={[...MARKS, LONG_MARK]}
+        active={5}
+        onSelect={selectMark}
+      />
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -635,9 +657,25 @@ export const APreviewUnderTheHand: Story = {
     const marks = within(rail).getAllByRole('button')
 
     await userEvent.hover(marks[0]!)
-
     const preview = await waitFor(() => within(document.body).getByRole('tooltip'))
     expect(preview).toHaveTextContent(MARKS[0]!.label)
+    await userEvent.unhover(marks[0]!)
+
+    const last = marks.at(-1)!
+    await userEvent.hover(last)
+    const quoted = await waitFor(() =>
+      within(document.body).getByRole('tooltip', { name: /accounting re-keys/ }),
+    )
+    // Towards the thread: the preview starts where the rail ends.
+    expect(quoted.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+      last.getBoundingClientRect().right,
+    )
+    // Two lines of its measure, and the rest cut rather than a line as wide as the thread.
+    const text = quoted.firstElementChild!
+    const lines =
+      text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)
+    expect(Math.round(lines)).toBe(2)
+    expect(text.scrollHeight).toBeGreaterThan(text.clientHeight)
   },
 }
 

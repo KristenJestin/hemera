@@ -649,8 +649,9 @@ export const Complete: Story = {
     await expect(answered.left, 'the agent’s block left the frame’s left edge').toBe(frame.left)
     await expect(answered.right, 'the agent’s block left the frame’s right edge').toBe(frame.right)
     const rail = canvas.getByRole('navigation', { name: /^Marks of/ }).getBoundingClientRect()
-    await expect(rail.left, 'the rail is inside the thread’s column').toBeGreaterThanOrEqual(
-      frame.right,
+    // Outside the column, at its left, away from the panel a mission opens on the right (#149).
+    await expect(rail.right, 'the rail is inside the thread’s column').toBeLessThanOrEqual(
+      frame.left,
     )
     /*
      * And the thread is what a wheel turns anywhere under the head, not only over the column:

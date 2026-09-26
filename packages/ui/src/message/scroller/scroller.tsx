@@ -51,7 +51,7 @@ const WIDTH = { rest: 1, near: 1.5, active: 2 } as const
  * The whole of the room the page gives the thread, which the rail and the pill stand in.
  *
  * It is as wide as the content area and not as wide as the thread (trial of 22 September 2026,
- * evening): the rail stands at its right edge, in the gutter beside the thread's column, and the
+ * evening): the rail stands at its left edge, in the gutter beside the thread's column, and the
  * pill floats over its middle — which is the middle of the column, since the column is centred
  * in it. Neither takes anything of the column's width.
  */
@@ -108,13 +108,19 @@ const PILL_ROW = 'pointer-events-none absolute inset-x-0 bottom-4 flex justify-c
 const RAIL = 'flex shrink-0 flex-col items-center gap-1 pt-3'
 
 /**
- * Where the scroller stands its rail: at the right edge of the frame, not beside the column.
+ * Where the scroller stands its rail: at the left edge of the frame, not beside the column.
  *
  * Counted inside the column, the rail took its own width and a gap out of the thread's, and the
  * thread ended short of the composer under it (trial of 22 September 2026, evening). Out here it
  * is in the gutter the column leaves, and the column is the composer's.
+ *
+ * The left and not the right (recette of 26 September 2026, issue #149): the panel of the
+ * Session's mission opens on the right of the chat, and the rail — the reader's history of the
+ * thread, with the preview of the message each mark stands for — stood against it, its preview
+ * laid over the thread's own side of the column. At the left it stays by the chat whatever opens
+ * beside it, and its preview opens towards the thread.
  */
-const RAIL_PLACE = 'absolute top-0 right-1'
+const RAIL_PLACE = 'absolute top-0 left-1'
 
 /**
  * A mark is drawn as a line, and pressed as a square.
@@ -477,7 +483,9 @@ export interface NavigationRailProps {
  *
  * Every mark answers the pointer and the keyboard, and wears its preview in the design system's
  * tooltip: a mark is six pixels of line, and what it stands for is a sentence that has to be
- * read somewhere. The rail sits outside the thread's own column and never scrolls with it — a
+ * read somewhere. The preview is a quote and not a name, so it keeps a measure of its own and
+ * wraps over two lines at most, then ends on an ellipsis (issue #149): a whole message laid over
+ * the thread on one line was a line as wide as the thread. The rail sits outside the thread's own column and never scrolls with it — a
  * map that travelled with the territory would move under the hand at the exact moment the hand
  * is on it.
  *
@@ -491,7 +499,7 @@ export function NavigationRail({ label, marks, active, onSelect }: NavigationRai
   return (
     <nav aria-label={label} className={RAIL}>
       {marks.map((mark, index) => (
-        <Tooltip key={mark.id} label={mark.label} side="left">
+        <Tooltip key={mark.id} label={mark.label} side="right" quote>
           <button
             type="button"
             aria-label={mark.label}

@@ -10,7 +10,7 @@ function bell() {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Tooltip',
   component: Tooltip,
   args: { label: 'Notifications', children: bell() },
@@ -18,6 +18,10 @@ const meta = {
     label: { control: 'text' },
     keys: { control: 'text' },
     side: { control: 'select', options: ['top', 'right', 'bottom', 'left'] },
+    quote: {
+      control: 'boolean',
+      description: 'Whether the label quotes a text: two lines at most.',
+    },
     children: { table: { disable: true } },
   },
   // The shared delay is the point of the component, and it comes from a provider: a tooltip
@@ -55,6 +59,39 @@ export const Variants: Story = {
       </Tooltip>
     </div>
   ),
+}
+
+/** A sentence quoted by a mark of the thread, much longer than two lines of its measure. */
+const QUOTED =
+  'Invoices should export with HT and TTC amounts per line. Today the CSV only has totals, and accounting re-keys everything by hand every month, which is where the mistakes come from.'
+
+/**
+ * A quote rather than a name (issue #149): what a mark of the thread stands for, in a measure of
+ * its own, two lines at most, then an ellipsis — not one line as wide as the page it covers.
+ */
+export const Quote: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <Tooltip {...args} label={QUOTED} side="right" quote>
+      <IconButton variant="ghost" icon={<IconBell />} aria-label="A message of the thread" />
+    </Tooltip>
+  ),
+  play: async ({ canvasElement }) => {
+    const trigger = within(canvasElement).getByRole('button', { name: 'A message of the thread' })
+    await userEvent.hover(trigger)
+    const tip = await waitFor(() => within(document.body).getByRole('tooltip'))
+    const text = tip.firstElementChild!
+    const lines =
+      text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)
+    // Two lines, and the rest cut: a quote this long would be four without its clamp.
+    expect(Math.round(lines)).toBe(2)
+    expect(text.scrollHeight).toBeGreaterThan(text.clientHeight)
+    // A measure of its own, far narrower than the page.
+    expect(tip.getBoundingClientRect().width).toBeLessThanOrEqual(
+      parseFloat(getComputedStyle(document.documentElement).fontSize) * 20 + 1,
+    )
+    await userEvent.unhover(trigger)
+  },
 }
 
 export const States: Story = {
