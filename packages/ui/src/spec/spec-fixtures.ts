@@ -33,14 +33,20 @@ export function phases(shape: PhaseState, plan: PhaseState, decompose: PhaseStat
   ]
 }
 
-/** The seven checks, every one passing but those named with what fails. */
+/**
+ * The seven checks, every one met but those named with what fails and those `unmet`: passing on
+ * nothing — no task, so no broken link and no cycle — which leaves their segment empty (#130).
+ */
 export function gate(
   failing: Partial<Record<GateCheck, string>>,
   todo: ReadinessItem[],
+  unmet: readonly GateCheck[] = [],
 ): ReadinessView {
   const checks: GateCheckView[] = GATE_CHECKS.map((check) => {
     const detail = failing[check]
-    return detail === undefined ? { check, passed: true } : { check, passed: false, detail }
+    return detail === undefined
+      ? { check, passed: !unmet.includes(check) }
+      : { check, passed: false, detail }
   })
   return { checks, todo }
 }
@@ -235,11 +241,13 @@ const MID_PLAN_GATE = gate(
     { label: 'plan and decompose', target: 'plan' },
     { label: "the agent's final check" },
   ],
+  ['references', 'cycle'],
 )
 
 /**
  * Screen 1 · a `feature`, shaped and being planned: the plan is being written, a question is
- * open, and no task exists yet because `decompose` has not opened. Three checks of seven pass.
+ * open, and no task exists yet because `decompose` has not opened. One check of seven is met: the
+ * contract; the links and the cycles pass on no task at all, which meets nothing.
  */
 export const MID_PLAN: SpecView = {
   key: 'ATL-7',
@@ -324,6 +332,7 @@ export const BUG: SpecView = {
       { label: 'the tasks', target: 'tasks' },
       { label: "the agent's final check" },
     ],
+    ['references', 'cycle'],
   ),
 }
 

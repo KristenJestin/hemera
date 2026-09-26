@@ -8,7 +8,7 @@ import { BUG, MAINTENANCE, MID_PLAN, OLDER_REVISION } from './spec-fixtures.ts'
 
 /**
  * The Spec panel alone, in a Session's row beside a stand-in for the chat. Folded by default to a
- * band — the rail's glyphs, their tints and `3/7` — and unfolded by the band, a glyph, or the agent
+ * band — the rail's glyphs, their tints and `1/7` — and unfolded by the band, a glyph, or the agent
  * starting on a part, unless the hand folded it. Unfolded, a head that stays on top and the rail
  * beside a stage that shows one part, or every part of one phase, following the agent until a row
  * is chosen; the readiness at the rail's foot. The screens of the brief are drawn in their
@@ -73,7 +73,7 @@ const BAND = 48
 
 /**
  * Folded, as a Session opens it: a band of glyphs beside the chat, each phase a block over the
- * glyphs of its parts, and the readiness as `3/7`. No head and no stage: the chat has the width.
+ * glyphs of its parts, and the readiness as `1/7`. No head and no stage: the chat has the width.
  */
 export const Folded: Story = {
   args: { defaultFolded: true },
@@ -86,8 +86,8 @@ export const Folded: Story = {
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
     await expect(
-      within(band).getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),
-    ).toHaveTextContent('3/7')
+      within(band).getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
+    ).toHaveTextContent('1/7')
     // The names leave the eye and stay the accessible name.
     await expect(canvas.queryByText('Expected outcome')).toBeNull()
     await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
@@ -119,7 +119,7 @@ export const Unfolded: Story = {
     await expect(within(stage).queryByRole('heading', { name: /^Problem/ })).toBeNull()
     await expect(canvas.queryByText('Prototype')).toBeNull()
     await expect(
-      within(rail).getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),
+      within(rail).getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
     ).toBeVisible()
     await expect(within(rail).getByRole('button', { name: '4 things before ready' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Show all' })).toBeNull()
