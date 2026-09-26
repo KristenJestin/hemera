@@ -10,9 +10,9 @@ import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.
 
 /**
  * The rail of the Spec panel: the parts of the Spec grouped by the phase that writes them, one
- * quiet row each, what is on the stage marked by a thin rule. A row says only what needs
- * attention, by a tint of the whole row or a fainter name, and says it in a
- * sentence in its tooltip. A group opens on a header in the small type of a label, which puts the
+ * row each, what is on the stage on a plain selected surface. Every row says its own state
+ * without being opened — written plainly, empty quietly, being written or to review by a tint —
+ * and says it in a sentence in its tooltip (issue #135). A group opens on a header in the small type of a label, which puts the
  * whole phase on the stage; `Show all` shows under the hand and the keyboard. The arrows walk it
  * and Enter opens a row. No readiness at its foot (issue #135). Folded, it is the band the panel
  * folds to, each phase a block of glyphs.
@@ -154,11 +154,12 @@ async function tooltipSays(row: HTMLElement, said: string): Promise<void> {
 }
 
 /**
- * One row per state, and no dot anywhere: a part written and current carries nothing, a part
- * still empty has a fainter name, the part being written and one to review are each tinted in
- * their own colour, and a part you edited wears nothing on
- * the row: the only line on a row's left is the rule of what is on the stage, even on a part you
- * edited. Each says its state in a sentence, in its tooltip and as its accessible description.
+ * One row per state, each said in the row without opening it, and no dot anywhere (issue #135): a
+ * part written is plain, its name in the foreground; a part still empty is quiet, its name muted
+ * and `empty` in its accessible name; the part being written and one to review are each tinted
+ * in their own colour; a part you edited wears nothing more than a written one. What is on the
+ * stage wears a plain selected surface, and no rule. Each says its state in a sentence in its
+ * tooltip.
  */
 export const States: Story = {
   args: { initial: 'tasks' },
@@ -168,17 +169,22 @@ export const States: Story = {
     await expect(dotsIn(rail)).toEqual([])
     const row = (name: string): HTMLElement => canvas.getByRole('button', { name })
     const written = row('Problem')
-    const empty = row('Expected outcome')
+    const empty = row('Expected outcome, empty')
     const edited = row('Scope')
     const review = row('Behaviour')
     const writing = row('Plan')
-    // Written and current: nothing, no tint, no edge, no sentence.
+    // Written and current: plain — the foreground text, no tint, no edge, no sentence — and not
+    // the one on the stage, which the tasks are.
     await expect(tintOf(written)).toBe('none')
     await expect(getComputedStyle(written).borderLeftWidth).toBe('0px')
     await expect(written).not.toHaveAttribute('aria-describedby')
-    // Empty: the name fainter than a written one's, and nothing behind it.
+    await expect(written).not.toHaveAttribute('aria-current')
+    await expect(selected(written)).toBe(false)
+    // Empty: quiet, the name fainter than a written one's, nothing behind it, and said in its name.
     await expect(tintOf(empty)).toBe('none')
     await expect(getComputedStyle(empty).color).not.toBe(getComputedStyle(written).color)
+    await expect(getComputedStyle(row('Questions, 1')).color).toBe(getComputedStyle(written).color)
+    await expect(empty).not.toHaveAttribute('aria-describedby')
     // The two tints, each its own.
     const tints = [tintOf(writing), tintOf(review)]
     await expect(tints).not.toContain('none')
@@ -193,7 +199,6 @@ export const States: Story = {
     await expect(tintOf(edited)).toBe('none')
     await expect(getComputedStyle(edited).borderLeftWidth).toBe('0px')
     // Each state in a sentence.
-    await expect(empty).toHaveAccessibleDescription('Empty')
     await expect(edited).toHaveAccessibleDescription('Edited by you')
     await expect(review).toHaveAccessibleDescription('To review')
     await expect(writing).toHaveAccessibleDescription('The agent is writing this')
@@ -202,11 +207,13 @@ export const States: Story = {
     await tooltipSays(review, 'To review')
     await tooltipSays(writing, 'The agent is writing this')
     await tooltipSays(written, 'Problem')
-    // On the stage, the part you edited wears the rule and nothing beside it: one line.
+    // On the stage, the part you edited wears the selected surface, and no rule.
     await userEvent.click(edited)
     await expect(edited).toHaveAttribute('aria-current', 'true')
-    await expect(ruled(edited)).toBe(true)
+    await expect(selected(edited)).toBe(true)
+    await expect(ruled(edited)).toBe(false)
     await expect(getComputedStyle(edited).borderLeftWidth).toBe('0px')
+    await expect(selected(row('Tasks, 0, empty'))).toBe(false)
   },
 }
 
@@ -263,7 +270,7 @@ export const Feature: Story = {
       }),
     ).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Behaviour' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tasks, 0, empty' })).toBeVisible()
   },
 }
 
@@ -290,16 +297,22 @@ function shown(header: HTMLElement): boolean {
   return getComputedStyle(hintOf(header)).opacity === '1'
 }
 
-/** Whether something of the rail wears the rule of what is on the stage. */
+/** Whether something of the rail wears a rule on its left, which nothing unfolded does any more. */
 function ruled(element: HTMLElement): boolean {
   return getComputedStyle(element, '::before').content !== 'none'
+}
+
+/** Whether something of the rail wears the selected surface of what is on the stage. */
+function selected(element: HTMLElement): boolean {
+  return getComputedStyle(element).backgroundColor !== 'rgba(0, 0, 0, 0)'
 }
 
 /**
  * The headers of the groups read as the headers of sections, not as rows: a smaller, heavier type
  * in the muted colour, a hairline above every group but the first, the rows set in under them.
  * `Show all` shows under the hand or the keyboard and only then, whatever is on the stage. A
- * group on the stage wears the rule on its header and on every part under it, and nothing else.
+ * group on the stage wears the selected surface on its header alone: no primary bar, and nothing on
+ * the parts under it but their own states (issue #135).
  */
 export const GroupHeaders: Story = {
   args: { groups: railOf(MID_PLAN), initial: 'plan' },
@@ -346,9 +359,8 @@ export const GroupHeaders: Story = {
     await waitFor(() => expect(shown(plan)).toBe(true))
     plan.blur()
     await waitFor(() => expect(shown(plan)).toBe(false))
-    // Its group on the stage: the rule on the header and on every part under it, the hint gone
-    // with the hand, and no word saying so.
-    const rule = getComputedStyle(onStage, '::before').backgroundColor
+    // Its group on the stage: the selected surface on the header alone, the hint gone with the
+    // hand, and no word saying so.
     await userEvent.click(decompose)
     await userEvent.unhover(decompose)
     decompose.blur()
@@ -356,27 +368,29 @@ export const GroupHeaders: Story = {
     await waitFor(() => expect(shown(decompose)).toBe(false))
     await expect(hintOf(decompose)).toHaveTextContent('Show all')
     await expect(canvas.queryByText('Showing all')).toBeNull()
-    await expect(ruled(decompose)).toBe(true)
-    await expect(getComputedStyle(decompose, '::before').backgroundColor).toBe(rule)
+    await expect(selected(decompose)).toBe(true)
+    await expect(ruled(decompose)).toBe(false)
     const parts = within(canvas.getByRole('group', { name: 'Decompose' })).getAllByRole('listitem')
     for (const part of parts) {
       const button = within(part).getByRole('button')
-      expect(ruled(button)).toBe(true)
-      expect(getComputedStyle(button, '::before').backgroundColor).toBe(rule)
+      expect(ruled(button)).toBe(false)
+      expect(selected(button)).toBe(false)
     }
     // Nothing else of the rail wears it.
-    await expect(ruled(onStage)).toBe(false)
-    await expect(ruled(problem)).toBe(false)
-    await expect(ruled(plan)).toBe(false)
+    await expect(selected(onStage)).toBe(false)
+    await expect(selected(problem)).toBe(false)
+    await expect(selected(plan)).toBe(false)
     // Never cut: the longest name and its hint hold in the rail's width.
     await userEvent.hover(decompose)
     await waitFor(() => expect(shown(decompose)).toBe(true))
     await expect(decompose.scrollWidth).toBeLessThanOrEqual(decompose.clientWidth)
-    await expect(getComputedStyle(decompose).color).toBe(header.color)
   },
 }
 
-/** A group header chosen: the whole phase on the stage, the header wearing the rule. */
+/**
+ * `Show all` chosen: the whole phase on the stage, its header on the selected surface and the
+ * parts under it with nothing but their own states — no primary bar on any of them.
+ */
 export const GroupChosen: Story = {
   args: { groups: railOf(MID_PLAN) },
   play: async ({ canvasElement, args }) => {
@@ -384,14 +398,15 @@ export const GroupChosen: Story = {
     const decompose = canvas.getByRole('button', {
       name: 'Decompose phase, pending, show all its parts',
     })
-    await expect(ruled(decompose)).toBe(false)
+    await expect(selected(decompose)).toBe(false)
     await userEvent.click(decompose)
     await expect(args.onSelectGroup).toHaveBeenCalledWith('decompose')
     await expect(decompose).toHaveAttribute('aria-current', 'true')
-    await expect(ruled(decompose)).toBe(true)
-    // The parts under it wear the rule, and the stage stays one stop of the tab order.
+    await expect(selected(decompose)).toBe(true)
+    // The parts under it wear nothing of it, and the stage stays one stop of the tab order.
     const questions = canvas.getByRole('button', { name: /^Questions/ })
-    await expect(ruled(questions)).toBe(true)
+    await expect(selected(questions)).toBe(false)
+    await expect(ruled(questions)).toBe(false)
     await expect(questions).not.toHaveAttribute('aria-current')
   },
 }

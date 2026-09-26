@@ -457,9 +457,8 @@ export const MidPlan: Story = {
       'aria-current',
       'true',
     )
-    await expect(
-      within(band).getByRole('button', { name: 'Tasks, 0' }),
-    ).toHaveAccessibleDescription('Empty')
+    // The tasks, not written yet, say so in the band without being opened.
+    await expect(within(band).getByRole('button', { name: 'Tasks, 0, empty' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
     await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
     await expect(canvas.getByRole('group', { name: /^Question: Credit notes/ })).toBeVisible()

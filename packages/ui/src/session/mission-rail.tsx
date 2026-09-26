@@ -18,19 +18,21 @@ import type { IconProps } from '../icons.ts'
  *
  * The rail knows nothing of a Spec. It is handed groups of items, each with its glyph, its name,
  * a count, and the one thing that needs attention about it, if anything does; and it draws them
- * the way the maintainer decided for the Spec (lot 19, the rail's states): a row says only what
- * needs attention, and says it with the row itself. An item with nothing to say carries nothing.
- * An empty one has its name in a fainter text. The one the agent is working on is tinted in the
- * primary, the tint breathing; one to review is tinted in the warning colour. One edited by the reader wears nothing: the part itself says who wrote it,
- * and the only line on a row's left is the rule of what is on the stage. Each says its state in a
- * sentence, in its tooltip and as its accessible description.
+ * the way the maintainer decided for the Spec (lot 19, the rail's states; issue #135): every row
+ * says its own state, in the row, without being opened. A written one is plain, its name in the
+ * foreground text; an empty one is quiet, its name muted and `empty` in its accessible name. The
+ * one the agent is working on is tinted in the primary, the tint breathing; one to review is
+ * tinted in the warning colour. One edited by the reader wears nothing more: the part itself says
+ * who wrote it. Each says its state in a sentence in its tooltip, and to a screen reader: an
+ * empty one in its name, the others as its accessible description.
  *
- * What is on the stage says so with a thin rule of the one accent and nothing else. A group opens
- * on its header, which reads as the header of a section and not as one more row: its name in the
+ * What is on the stage says so with a plain selected surface, and nothing else. A group opens on
+ * its header, which reads as the header of a section and not as one more row: its name in the
  * small type of a label, a hairline above every group but the first, the rows set in under it. It
  * wears no state of its own but the warning tint when the group as a whole is to review. Pressed,
- * it puts the whole group on the stage, and the rule runs on the header and on every row under
- * it. `Show all` shows at its end under the hand and the keyboard, and only then.
+ * it puts the whole group on the stage, and the header alone wears the selected surface: the rows
+ * under it keep their own states and nothing more. `Show all` shows at its end under the hand and
+ * the keyboard, and only then.
  *
  * One stop of the tab order, and the arrows walk it: up and down, Home and End, Enter opens.
  *
@@ -38,7 +40,7 @@ import type { IconProps } from '../icons.ts'
  * each group a block, its glyph in a tinted square, the smaller glyphs of its items right under
  * it and set in, and a gap and a hairline before the next group. The tints of the rows land on
  * the squares of the items; the names leave the eye and stay the accessible name and the
- * tooltip, beside the state.
+ * tooltip, beside the state; what is on the stage wears a thin rule left of its square.
  */
 
 /** What needs attention about an item, which the row says with a tint, a fainter name or a sentence. */
@@ -93,11 +95,11 @@ const TINTS: Partial<Record<RailAttention, string>> = {
   review: 'bg-warning/15',
 }
 
-/**
- * The name of an empty item, fainter than the others: as faint as small text goes on the panel
- * and still reads. A step further and the light theme falls under the contrast it needs.
- */
-const EMPTY = 'text-muted-foreground/90'
+/** The name of an empty item: quiet, the muted text, where a written one is the foreground. */
+const EMPTY = 'text-muted-foreground'
+
+/** The name of a written item, whatever else it says: plain. */
+const WRITTEN = 'text-foreground'
 
 /** A glyph of the rail, named by `data-icon` so a play can tell one from another. */
 function Glyph({ icon: Icon, size = 'sm' }: { icon: RailIcon; size?: 'sm' | 'md' }): ReactNode {
@@ -143,10 +145,9 @@ const GROUP_FOLDED =
 const ROWS_FOLDED = 'flex flex-col gap-0.5 pl-2'
 
 /**
- * A row: its glyph and its words, and no surface but the tint of what needs attention. The row
- * on the stage is the foreground text and a 2-pixel rule of the accent on its left; every other
- * row is the muted text, brightening under the hand. Folded, the glyph stands alone in a small
- * square, which is what the tint fills.
+ * A row: its glyph and its words, and no surface but the tint of what needs attention and, on
+ * the stage, the selected one. Folded, the glyph stands alone in a small square, which is what
+ * the tint fills.
  */
 const ROW =
   'relative isolate flex h-control-sm w-full items-center gap-2 rounded-sm px-2 text-left text-sm outline-none focus-ring hover:text-foreground'
@@ -156,7 +157,7 @@ const ROW_FOLDED =
 
 /**
  * A group's header: its glyph and name in the small type of a label — smaller, heavier, a little
- * spaced, and muted even on the stage, where only the rule says so — and never cut.
+ * spaced, and muted until it is on the stage — and never cut.
  */
 const HEADING =
   'group/head relative isolate flex h-6 w-full items-center gap-1.5 rounded-sm px-2 text-left text-xs font-medium tracking-wide whitespace-nowrap text-muted-foreground outline-none focus-ring'
@@ -169,19 +170,13 @@ const HEADING_FOLDED =
 const HEADING_FOLDED_REVIEW =
   'relative isolate flex size-control-sm items-center justify-center rounded-md text-muted-foreground outline-none focus-ring hover:text-foreground'
 
-const ROW_OFF = 'text-muted-foreground'
+/** What is on the stage, unfolded: a plain selected surface, a row or a group's header. */
+const SELECTED = 'bg-accent'
 
-const ROW_CURRENT = 'text-foreground'
+/** A header on the stage: the selected surface, and its name out of the muted text. */
+const HEADING_SELECTED = 'bg-accent text-foreground'
 
-/** The rule of what is on the stage: a row, a header, or every row of a group on the stage. */
-const RULE =
-  'before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary'
-
-/** The same rule on a header, whose line is shorter. */
-const HEADING_RULE =
-  'before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary'
-
-/** Folded, the rule stands in the room left of the square rather than over its edge. */
+/** Folded, what is on the stage wears a rule in the room left of its square. */
 const RULE_FOLDED =
   'before:absolute before:inset-y-1 before:-left-1 before:w-0.5 before:rounded-full before:bg-primary'
 
@@ -278,7 +273,7 @@ export function MissionRail({
                   aria-describedby={group.description === undefined ? undefined : headingSaid}
                   className={cn(
                     folded ? (review ? HEADING_FOLDED_REVIEW : HEADING_FOLDED) : HEADING,
-                    whole && (folded ? RULE_FOLDED : HEADING_RULE),
+                    whole && (folded ? RULE_FOLDED : HEADING_SELECTED),
                   )}
                   onClick={() => onSelectGroup(group.id)}
                   onPointerEnter={() => setPointed(group.id)}
@@ -309,8 +304,13 @@ export function MissionRail({
                 {group.items.map((item) => {
                   const on = 'item' in current && current.item === item.id
                   const rowSaid = `${said}-item-${item.id}`
-                  const name =
+                  const empty = item.attention === 'empty'
+                  const counted =
                     item.count === undefined ? item.label : `${item.label}, ${item.count}`
+                  // An empty item says so in its name, which is what a screen reader reads first;
+                  // its sentence would only say it twice.
+                  const name = empty ? `${counted}, empty` : counted
+                  const described = item.description !== undefined && !empty
                   const tip =
                     item.description === undefined
                       ? item.label
@@ -327,11 +327,11 @@ export function MissionRail({
                           tabIndex={on ? 0 : -1}
                           aria-current={on ? 'true' : undefined}
                           aria-label={name}
-                          aria-describedby={item.description === undefined ? undefined : rowSaid}
+                          aria-describedby={described ? rowSaid : undefined}
                           className={cn(
                             folded ? ROW_FOLDED : ROW,
-                            on ? ROW_CURRENT : item.attention === 'empty' ? EMPTY : ROW_OFF,
-                            (on || whole) && (folded ? RULE_FOLDED : RULE),
+                            empty ? EMPTY : WRITTEN,
+                            on && (folded ? RULE_FOLDED : SELECTED),
                           )}
                           onClick={() => onSelect(item.id)}
                         >
@@ -347,7 +347,7 @@ export function MissionRail({
                           )}
                         </button>
                       </Tooltip>
-                      {item.description !== undefined && (
+                      {described && (
                         <span id={rowSaid} hidden>
                           {item.description}
                         </span>
