@@ -6,7 +6,7 @@
  * the click, and a gate that lists anything refuses it too. Nothing here is automatic.
  */
 
-import { type GateFailure, type SpecSnapshot, readyGate } from '@hemera/core'
+import { type GateFailure, type SpecSnapshot, readyGate, storyFailures } from '@hemera/core'
 import { eq } from 'drizzle-orm'
 import { Data, Effect } from 'effect'
 
@@ -14,7 +14,10 @@ import type { EngineTransaction } from '../storage/database.ts'
 import { specs } from '../storage/schema.ts'
 import { failed, now, specEvent } from './snapshot.ts'
 
-/** A "Mark ready" click refused: obsolete, or on a gate that lists a failure (D7-10). */
+/**
+ * A "Mark ready" click refused: obsolete, or on a gate that lists a failure (D7-10); or the
+ * agent's `ready` proposal refused on what the stories lack (#143).
+ */
 export class ReadyRefusedError extends Data.TaggedError('ReadyRefusedError')<{
   readonly reason: string
 }> {
@@ -31,6 +34,22 @@ export interface Gate {
 
 export function gateOf(snapshot: SpecSnapshot): Gate {
   return { failures: readyGate(snapshot), contentVersion: snapshot.spec.contentVersion }
+}
+
+/**
+ * The agent's `ready` proposal is refused as "Mark ready" is on what its stories lack (#143): a
+ * feature with no story, or a story with no acceptance criterion, is not attested. The rest of
+ * the gate is answered with the attestation, since the attestation is one of its checks.
+ */
+export function attestable(snapshot: SpecSnapshot) {
+  const failures = storyFailures(snapshot)
+  return failures.length === 0
+    ? Effect.void
+    : Effect.fail(
+        new ReadyRefusedError({
+          reason: `${snapshot.spec.key} cannot be proposed ready: ${failures.map((failure) => failure.message).join('; ')}`,
+        }),
+      )
 }
 
 /** What a "Mark ready" click was shown (D7-10). */

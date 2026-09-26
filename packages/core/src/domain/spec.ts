@@ -425,27 +425,49 @@ function graphFailures(snapshot: SpecSnapshot): GateFailure[] {
 }
 
 /**
- * Requirements covered by criteria and tasks (D7-10): each story has a criterion and a task
- * covering it; with no story, the contract still has a task. The `verification` section that
- * D7-10 also asks of a Spec without stories is required of every type, and reported once, by
- * the type contract.
+ * What the stories of a Spec lack (#143): a `feature` holds at least one user story, and every
+ * story holds at least one acceptance criterion. A `bug` or a `maintenance` may hold no story and
+ * is then verified as a whole, by its `verification` section. The agent's `ready` proposal is
+ * refused on these, as "Mark ready" is.
  */
-function coverageFailures(snapshot: SpecSnapshot): GateFailure[] {
+export function storyFailures(snapshot: SpecSnapshot): GateFailure[] {
   if (snapshot.stories.length === 0) {
-    return snapshot.tasks.length === 0
-      ? [{ check: 'coverage', target: 'tasks', message: 'the contract has no task' }]
+    return snapshot.revision.type === 'feature'
+      ? [
+          {
+            check: 'coverage',
+            target: 'stories',
+            message:
+              'a feature Spec needs at least one user story with an acceptance criterion, and it has no story',
+          },
+        ]
       : []
   }
-  const taskIds = new Set(snapshot.tasks.map((task) => task.id))
-  const failures: GateFailure[] = []
-  for (const story of snapshot.stories) {
-    if (!snapshot.criteria.some((criterion) => criterion.storyId === story.id)) {
-      failures.push({
-        check: 'coverage',
-        target: story.id,
-        message: `the story "${story.title}" has no acceptance criterion`,
-      })
+  return snapshot.stories
+    .filter((story) => !snapshot.criteria.some((criterion) => criterion.storyId === story.id))
+    .map((story) => ({
+      check: 'coverage',
+      target: story.id,
+      message: `the story "${story.title}" has no acceptance criterion`,
+    }))
+}
+
+/**
+ * Requirements covered by criteria and tasks (D7-10): a feature has a story, each story has a
+ * criterion and a task covering it; with no story, the contract still has a task. The
+ * `verification` section that D7-10 also asks of a Spec without stories is required of every
+ * type, and reported once, by the type contract.
+ */
+function coverageFailures(snapshot: SpecSnapshot): GateFailure[] {
+  const failures = storyFailures(snapshot)
+  if (snapshot.stories.length === 0) {
+    if (snapshot.tasks.length === 0) {
+      failures.push({ check: 'coverage', target: 'tasks', message: 'the contract has no task' })
     }
+    return failures
+  }
+  const taskIds = new Set(snapshot.tasks.map((task) => task.id))
+  for (const story of snapshot.stories) {
     if (
       !snapshot.taskStories.some((link) => link.storyId === story.id && taskIds.has(link.taskId))
     ) {
