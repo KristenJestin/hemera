@@ -10,6 +10,7 @@ import {
 } from './model.ts'
 import { phases } from './spec-fixtures.ts'
 import { SpecPanel } from './spec-panel.tsx'
+import type { WorkspaceActionsProps } from './workspace-actions.tsx'
 
 /**
  * The Spec held by the state the engine would hold, for the stories (lot 19, phase 0).
@@ -169,6 +170,8 @@ export interface LiveSpecPanelProps extends SpecActions {
   arrives?: boolean | undefined
   /** A part the agent can be made to start on, from a button where the chat stands. */
   agentWrites?: SpecTarget | undefined
+  /** The build of the Spec once it is ready, which the footer of the rail holds. */
+  build?: WorkspaceActionsProps | undefined
 }
 
 /**
@@ -183,6 +186,7 @@ export function LiveSpecPanel({
   onFoldChange,
   arrives,
   agentWrites,
+  build,
   ...on
 }: LiveSpecPanelProps): ReactNode {
   const { spec, reader, actions, write } = useLiveSpec(initial, initialReader, on)
@@ -212,6 +216,7 @@ export function LiveSpecPanel({
         onRework={actions.onRework}
         onPickRevision={actions.onPickRevision}
         onTakeOver={actions.onTakeOver}
+        build={build}
       />
     </div>
   )

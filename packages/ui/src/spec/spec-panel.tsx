@@ -1,7 +1,7 @@
-import { motion } from 'motion/react'
+import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
-import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
+import { CROSSFADE, collapse, crossfade, expand, morph, useTransition } from '../motion.ts'
 import { MissionPanel } from '../session/mission-panel.tsx'
 import type {
   PhaseName,
@@ -34,6 +34,8 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * beside the stage. The stage shows one part, or every part of one phase when its heading in the
  * rail is chosen. Folded, the band is the rail's glyphs and their tints. No readiness is drawn
  * (issue #135): what the draft lacks is the agent's to say, and `Mark ready`'s to refuse with.
+ * Once the Spec is ready, the build's actions arrive in a footer at the bottom of the rail, and
+ * leave it when the Spec is reworked.
  *
  * Which part is on the stage follows one rule. While the reader has chosen nothing, it follows
  * the agent: the part it writes. A row of the rail or a group heading pins the choice, and from
@@ -53,6 +55,9 @@ const REFUSED = 'text-sm text-destructive-muted-foreground'
 const SCROLL = 'min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring'
 
 const STAGE = 'flex flex-col gap-10 px-10 pt-5 pb-10'
+
+/** The footer of the rail the build's actions stand in, over the rail's own bottom edge. */
+const BUILD_FOOT = 'flex flex-col gap-2 border-t border-border px-2 py-3'
 
 /** What a part does with the reader's hand, handed down from the panel. */
 export interface SpecPartHandlers {
@@ -81,9 +86,9 @@ export interface SpecPanelProps extends SpecPartHandlers {
   onTakeOver: () => void
   /**
    * Where the build stands, and what it is launched in (D8-12, D8-13), which the application
-   * composes. Drawn on a Spec that is not being written, and on a launch already asked for
-   * whatever the Spec is doing: a draft offers nothing to build, and an older revision of a
-   * frozen one is read as it was frozen (D7-05).
+   * composes. Drawn in a footer of the rail on a Spec that is not being written, and on a launch
+   * already asked for whatever the Spec is doing: a draft offers nothing to build, and an older
+   * revision of a ready one is read as it was (D7-05).
    */
   build?: WorkspaceActionsProps | undefined
 }
@@ -160,7 +165,6 @@ export function SpecPanel({
                     {spec.readiness.refused}
                   </p>
                 )}
-              {buildable && build !== undefined && <WorkspaceActions {...build} />}
             </header>
             {reader !== undefined && (
               <ReaderBar
@@ -171,7 +175,12 @@ export function SpecPanel({
             )}
           </>
         )}
-        rail={<SpecRail {...rail} />}
+        rail={
+          <SpecRail
+            {...rail}
+            foot={<BuildFoot build={buildable && build !== undefined ? build : undefined} />}
+          />
+        }
         stage={<SpecStage spec={spec} shown={shown} groups={groups} {...handlers} />}
         band={<SpecRail {...rail} folded />}
       />
@@ -186,6 +195,53 @@ export function SpecPanel({
         }}
       />
     </>
+  )
+}
+
+/**
+ * The footer of the rail the build's actions stand in (issue #135): `Prepare and start the build`
+ * and `Use an existing Workspace`, then where the launch stands.
+ *
+ * It arrives when the Spec becomes ready and leaves when it is reworked, on the `expand` and
+ * `collapse` kinds: its height is what makes room, so the rows above it move up rather than being
+ * covered, and it fades as it goes. A Spec opened ready finds it there, with nothing arriving.
+ * While it leaves it is still in the page, and a button there is a button a second press reaches:
+ * so the moment it starts leaving it is `inert` and hidden from assistive technology.
+ */
+function BuildFoot({ build }: { build: WorkspaceActionsProps | undefined }): ReactNode {
+  const transition = useTransition(morph)
+  return (
+    <AnimatePresence initial={false}>
+      {build !== undefined && (
+        <motion.div
+          key="build"
+          className="shrink-0 overflow-hidden"
+          initial={collapse}
+          animate={expand}
+          exit={collapse}
+          transition={transition}
+        >
+          <Leaving>
+            <WorkspaceActions {...build} />
+          </Leaving>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+/** The footer's content, out of reach from the moment it starts leaving. */
+function Leaving({ children }: { children: ReactNode }): ReactNode {
+  const present = useIsPresent()
+  return (
+    <div
+      className={BUILD_FOOT}
+      inert={!present}
+      aria-hidden={present ? undefined : true}
+      data-build-foot
+    >
+      {children}
+    </div>
   )
 }
 

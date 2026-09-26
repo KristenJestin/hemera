@@ -588,9 +588,9 @@ export function SessionPage({
           void selectRevision(revision === current?.number ? null : revision)
         }}
         onTakeOver={() => void takeOver(session.id)}
-        // Where the build of this frozen Spec stands, and what is to be pressed next (D8-12,
-        // D8-13): the panel's head holds it, and the whole journey it opens — the plan, the
-        // Workspace, the launch — belongs here.
+        // Where the build of this ready Spec stands, and what is to be pressed next (D8-12,
+        // D8-13): the footer of the panel's rail holds it (issue #135), and the whole journey it
+        // opens — the plan, the Workspace, the launch — belongs here.
         build={{
           launch: launchOf(stored.launches),
           ...specWorkspacesOf(stored.launches),
