@@ -7,7 +7,7 @@ import { MissionBrief } from './mission-brief.tsx'
 const meta = {
   title: 'Blocks/Spec/MissionBrief',
   component: MissionBrief,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     title: 'What the agent was told · Plan',
@@ -26,13 +26,19 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** Folded: one line and a rule, read in passing. */
+/**
+ * Folded: one line and a rule, read in passing, behind a document's glyph muted like the glyph of
+ * every other row of the thread — not Hemera's mark in the accent colour (issue #130).
+ */
 export const Folded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(
-      canvas.getByRole('button', { name: /What the agent was told · Plan/ }),
-    ).toHaveAttribute('aria-expanded', 'false')
+    const line = canvas.getByRole('button', { name: /What the agent was told · Plan/ })
+    await expect(line).toHaveAttribute('aria-expanded', 'false')
+    const glyph = line.querySelector('.tabler-icon-file-text')
+    await expect(glyph).not.toBeNull()
+    await expect(glyph?.parentElement).toHaveClass('text-muted-foreground')
+    await expect(line.querySelector('.text-primary')).toBeNull()
   },
 }
 
