@@ -73,7 +73,7 @@ import { Commands } from '../commands/service.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
-import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
+import { Sessions, type NativeRecord, type OptionChoice, type ThreadWrite } from '../sessions.ts'
 import { type SpecDelivery, briefFor, briefed, definedBy } from '../specs/brief.ts'
 import { Database } from '../storage/database.ts'
 import { ToolAccess } from '../tools/access.ts'
@@ -1470,7 +1470,10 @@ export const runtimeLayer = Layer.effect(
         if (held !== undefined && held.death === null) return held
         if (held !== undefined) live.delete(sessionId)
 
-        const { session, native } = yield* attempt('reading the Session', sessions.one(sessionId))
+        const { session, native, choices } = yield* attempt(
+          'reading the Session',
+          sessions.one(sessionId),
+        )
         const provider: AgentProvider | null = session.provider
         if (provider === null) {
           return yield* Effect.fail(
@@ -1612,14 +1615,29 @@ export const runtimeLayer = Layer.effect(
         const root = yield* workspacePathOf(session)
         watched(sessionId, root)
 
-        // A Session opened for the first time starts on the choices its composer made before it
-        // existed: the model and the mode were picked on the Home's probe, and the session the
-        // agent has just opened knows nothing of them until it is told (D5-17).
-        if (fresh) {
-          for (const [optionId, value] of chosen.get(`${session.projectId}:${provider}`) ?? []) {
-            yield* attempt('choosing an option', connection.setOption(optionId, value)).pipe(
-              // A choice the agent will not take is not a Session that cannot start: it opens on
-              // what the agent is on, and the composer shows what that is.
+        // The agent is put back on what the Session chose, whatever started it this time: an
+        // agent keeps its model, its effort and its mode for as long as its process lives, and a
+        // session it resumes, loads or opens again after an idle release, a define brief, a death
+        // or a restart of the application is on the agent's own defaults (issue #133).
+        //
+        // A Session opened for the first time has chosen nothing yet, and starts on the choices
+        // its composer made before it existed: the model and the mode were picked on the Home's
+        // probe, and the session the agent has just opened knows nothing of them until it is told
+        // (D5-17). Those become the Session's own, so the next start puts them back too.
+        const inherited = fresh && choices.length === 0
+        const put: readonly OptionChoice[] = inherited
+          ? [...(chosen.get(`${session.projectId}:${provider}`) ?? [])].map(
+              ([optionId, value]) => ({ optionId, value }),
+            )
+          : choices
+        for (const choice of put) {
+          const set = yield* Effect.result(
+            attempt('choosing an option', connection.setOption(choice.optionId, choice.value)),
+          )
+          // A choice the agent will not take is not a Session that cannot start: it opens on
+          // what the agent is on, and the composer shows what that is.
+          if (Result.isSuccess(set) && inherited) {
+            yield* attempt('recording a choice', sessions.recordChoice(sessionId, choice)).pipe(
               Effect.ignore,
             )
           }
@@ -2395,6 +2413,12 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
         yield* attempt('choosing an option', held.connection.setOption(optionId, value))
+        // Written down once the agent took it: the next start of this Session's agent is put back
+        // on it, which no agent does by itself (issue #133).
+        yield* attempt(
+          'recording a choice',
+          sessions.recordChoice(sessionId, { optionId, value }),
+        ).pipe(Effect.ignore)
       })
 
     const prompt = (sessionId: string, text: string) =>
