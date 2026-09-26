@@ -80,15 +80,44 @@ const stepsOf = (workspaceId: string) =>
       WHERE workspace_id = ${workspaceId} ORDER BY position`
   })
 
-/** The plan for `HEM-7`, `login-form`, created as proposed. */
+/**
+ * One location of a plan, read on its own, as the dialog reads them (D8-04, #110).
+ */
+const readLocation = (projectId: string, key: string | null, slug: string, relativePath: string) =>
+  Effect.gen(function* () {
+    const workspaces = yield* Workspaces
+    return yield* workspaces.planRepository(projectId, key, slug, relativePath)
+  })
+
+/**
+ * Every location of a plan, read one after the other, as the dialog does (#110).
+ */
+const readPlan = (
+  projectId: string,
+  key: string | null,
+  slug: string,
+  relativePaths: readonly string[],
+) =>
+  Effect.gen(function* () {
+    const workspaces = yield* Workspaces
+    return yield* Effect.forEach(relativePaths, (relativePath) =>
+      workspaces.planRepository(projectId, key, slug, relativePath),
+    )
+  })
+
+/**
+ * The plan for `HEM-7`, `login-form`, created as proposed, on what each location was read as
+ * (#110).
+ */
 const created = (projectId: string) =>
   Effect.gen(function* () {
     const workspaces = yield* Workspaces
     const plan = yield* workspaces.plan(projectId, 'HEM-7', 'login-form')
+    const reads = yield* readPlan(projectId, 'HEM-7', 'login-form', plan.repositories)
     return yield* workspaces.create(projectId, {
       specId: 'HEM-7',
       name: plan.name,
-      repositories: plan.repositories
+      repositories: reads
         .filter((one) => one.included)
         .map((one) => ({
           relativePath: one.relativePath,
@@ -107,7 +136,7 @@ const prepared = (projectId: string) =>
   })
 
 describe('A dedicated Workspace assembles one worktree per repository', () => {
-  it('proposes the branches of each repository and the branch of the prefix, and writes the Workspace preparing', async () => {
+  it('names the folder and every location of it before Git has read any, and writes the Workspace preparing', async () => {
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
         const projects = yield* Projects
@@ -115,7 +144,7 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
         const project = yield* atlas(main, [API, FRONT])
         const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
         yield* projects.setBranchPrefix(project.id, project.version, 'hemera')
-        const prefixed = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const prefixed = yield* readLocation(project.id, 'HEM-7', 'login-form', API)
         const workspace = yield* created(project.id)
         return { plan, prefixed, workspace, steps: yield* stepsOf(workspace.id) }
       }),
@@ -124,36 +153,23 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
     // The prefix is the Project's name as a slug until one is set (D8-04).
     expect(seen.plan.branchPrefix).toBe('atlas')
     expect(seen.plan.gitAvailable).toBe(true)
-    expect(seen.plan.repositories).toEqual([
-      {
-        relativePath: API,
-        holdsRepository: true,
-        // The branch it is checked out on, out of the branches it has here: a branch name as the
-        // base, and never the sha it points at (D8-04).
-        branches: ['main'],
-        base: 'main',
-        detachedCommit: null,
-        branch: 'atlas/HEM-7-login-form',
-        included: true,
-        reason: null,
-      },
-      {
-        relativePath: FRONT,
-        holdsRepository: true,
-        branches: ['main'],
-        base: 'main',
-        detachedCommit: null,
-        branch: 'atlas/HEM-7-login-form',
-        included: true,
-        reason: null,
-      },
-    ])
+    // The plan names its locations and reads none of them: the dialog opens on the folder and on
+    // the rows, and each row is read on its own afterwards (#110).
+    expect(seen.plan.repositories).toEqual([API, FRONT])
     expect(seen.plan.path).toBe(join(seen.plan.root, 'login-form'))
-    expect(seen.prefixed.repositories.map((one) => one.branch)).toEqual([
-      'hemera/HEM-7-login-form',
-      'hemera/HEM-7-login-form',
-    ])
-
+    // One location read on its own: the branch it is checked out on, out of the branches it has
+    // here — a branch name as the base, and never the sha it points at (D8-04) — and the branch
+    // it would be given under the prefix set since.
+    expect(seen.prefixed).toEqual({
+      relativePath: API,
+      holdsRepository: true,
+      branches: ['main'],
+      base: 'main',
+      detachedCommit: null,
+      branch: 'hemera/HEM-7-login-form',
+      included: true,
+      reason: null,
+    })
     // Written preparing, with its two worktree steps, and nothing on disk yet.
     expect(seen.workspace.state).toBe('preparing')
     expect(seen.workspace.specId).toBe('HEM-7')
@@ -211,10 +227,11 @@ describe('A dedicated Workspace is made from the Project settings, with no Spec'
           lineLinux: null,
         })
         const plan = yield* workspaces.plan(project.id, null, 'spike')
+        const reads = yield* readPlan(project.id, null, 'spike', plan.repositories)
         const workspace = yield* workspaces.create(project.id, {
           specId: null,
           name: plan.name,
-          repositories: plan.repositories
+          repositories: reads
             .filter((one) => one.included)
             .map((one) => ({
               relativePath: one.relativePath,
@@ -223,11 +240,11 @@ describe('A dedicated Workspace is made from the Project settings, with no Spec'
             })),
         })
         const ready = yield* preparation.prepare(workspace.id)
-        return { plan, ready, steps: yield* preparation.steps(workspace.id) }
+        return { plan, reads, ready, steps: yield* preparation.steps(workspace.id) }
       }),
     )
 
-    expect(seen.plan.repositories.map((one) => one.branch)).toEqual(['atlas/spike', 'atlas/spike'])
+    expect(seen.reads.map((one) => one.branch)).toEqual(['atlas/spike', 'atlas/spike'])
     expect(seen.ready).toMatchObject({ state: 'ready', specId: null, dedicated: true })
     expect(seen.steps.map((step) => [step.kind, step.state])).toEqual([
       ['worktree', 'done'],
@@ -249,17 +266,16 @@ describe('A repository on no branch proposes the commit it is on', () => {
     const api = join(main, 'sources', 'api')
     git(api, 'branch', 'release')
     git(api, 'checkout', '--detach')
-    const plan = await workspaceEngine(folder)(
+    const read = await workspaceEngine(folder)(
       Effect.gen(function* () {
-        const workspaces = yield* Workspaces
         const project = yield* atlas(main, [API])
-        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return yield* readLocation(project.id, 'HEM-7', 'login-form', API)
       }),
     )
 
     // A hash is read where no branch name can stand for it: the commit it is on, said as such,
     // its short form as the hint the dialog shows, and the branches still there to choose instead.
-    expect(plan.repositories[0]).toMatchObject({
+    expect(read).toMatchObject({
       relativePath: API,
       holdsRepository: true,
       branches: ['main', 'release'],
@@ -273,15 +289,14 @@ describe('A repository on no branch proposes the commit it is on', () => {
     const tools = join(main, 'sources', 'tools')
     mkdirSync(tools, { recursive: true })
     git(tools, 'init', '-q', '-b', 'main')
-    const plan = await workspaceEngine(folder)(
+    const read = await workspaceEngine(folder)(
       Effect.gen(function* () {
-        const workspaces = yield* Workspaces
         const project = yield* atlas(main, [API, './sources/tools'])
-        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return yield* readLocation(project.id, 'HEM-7', 'login-form', './sources/tools')
       }),
     )
 
-    expect(plan.repositories[1]).toMatchObject({
+    expect(read).toMatchObject({
       relativePath: './sources/tools',
       holdsRepository: true,
       branches: [],
@@ -294,14 +309,15 @@ describe('A repository on no branch proposes the commit it is on', () => {
   })
 })
 
-describe('A repository whose head fails once is still in the plan', () => {
-  it('reads it again, and proposes it as it is, with nothing to report', async () => {
+describe('A repository whose head fails once is still read', () => {
+  it('reads it again, and answers as it is, with nothing to report', async () => {
     // A machine at work: the first read of one repository's head fails, and the second answers.
-    // The repositories are Git's own and the read that fails is a read of Git itself, so the plan
-    // survives the whole of the service, nothing of it taken on trust (D8-04, #102).
+    // The repositories are Git's own and the read that fails is a read of Git itself: the read of
+    // that location survives it, nothing of it taken on trust (D8-04, #102, #110).
     let reads = 0
     const once: GitSpawn = (program, cwd, args, limit) => {
-      if (!cwd.endsWith(join('sources', 'api')) || !args.includes('--abbrev-ref')) {
+      const isHead = args.some((one) => one.startsWith('--format=%(HEAD)'))
+      if (!cwd.endsWith(join('sources', 'api')) || !isHead) {
         return spawnGit(program, cwd, args, limit)
       }
       reads += 1
@@ -316,7 +332,7 @@ describe('A repository whose head fails once is still in the plan', () => {
         : spawnGit(program, cwd, args, limit)
     }
 
-    const plan = await workspaceEngine(
+    const read = await workspaceEngine(
       folder,
       undefined,
       undefined,
@@ -324,15 +340,14 @@ describe('A repository whose head fails once is still in the plan', () => {
       gitLayer('git', once),
     )(
       Effect.gen(function* () {
-        const workspaces = yield* Workspaces
         const project = yield* atlas(main, [API, FRONT])
-        return yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return yield* readLocation(project.id, 'HEM-7', 'login-form', API)
       }),
     )
 
-    // It was read twice — the refusal, then the answer — and proposed as it is.
+    // It was read twice — the refusal, then the answer — and answered as it is.
     expect(reads).toBe(2)
-    expect(plan.repositories[0]).toMatchObject({
+    expect(read).toMatchObject({
       relativePath: API,
       holdsRepository: true,
       branches: ['main'],
@@ -353,16 +368,14 @@ describe('A repository Git keeps refusing is shown with its reason, not ticked',
 
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
-        const workspaces = yield* Workspaces
         const project = yield* atlas(main, [API, './sources/billing'])
-        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const read = yield* readLocation(project.id, 'HEM-7', 'login-form', './sources/billing')
         const workspace = yield* created(project.id)
-        return { plan, steps: yield* stepsOf(workspace.id) }
+        return { read, steps: yield* stepsOf(workspace.id) }
       }),
     )
 
-    const billingRow = seen.plan.repositories[1]!
-    expect(billingRow).toMatchObject({
+    expect(seen.read).toMatchObject({
       relativePath: './sources/billing',
       holdsRepository: false,
       branches: [],
@@ -370,8 +383,9 @@ describe('A repository Git keeps refusing is shown with its reason, not ticked',
       detachedCommit: null,
       included: false,
     })
-    // What Git said, in the plan's own words, where a location without a repository says nothing.
-    expect(billingRow.reason).toMatch(/^Git could not read this repository: fatal: /)
+    // What Git said, in the read's own words, where a location that holds no repository at all
+    // says nothing (#110).
+    expect(seen.read.reason).toMatch(/^Git could not read this repository: fatal: /)
     expect(seen.steps).toEqual([
       { kind: 'worktree', target: API, state: 'pending', message: null },
       {
@@ -388,15 +402,14 @@ describe('A location without a repository gets no worktree', () => {
   it('is not proposed, and its worktree step is skipped naming it', async () => {
     const seen = await workspaceEngine(folder)(
       Effect.gen(function* () {
-        const workspaces = yield* Workspaces
         const project = yield* atlas(main, [API, './docs', FRONT])
-        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const docs = yield* readLocation(project.id, 'HEM-7', 'login-form', './docs')
         const workspace = yield* created(project.id)
-        return { plan, steps: yield* stepsOf(workspace.id) }
+        return { docs, steps: yield* stepsOf(workspace.id) }
       }),
     )
 
-    expect(seen.plan.repositories[1]).toMatchObject({
+    expect(seen.docs).toMatchObject({
       relativePath: './docs',
       holdsRepository: false,
       base: null,
@@ -448,17 +461,20 @@ describe('A failed check refuses the whole creation', () => {
         const project = yield* atlas(main, [API, FRONT])
         const before = yield* counted
         const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const reads = yield* readPlan(project.id, 'HEM-7', 'login-form', plan.repositories)
         occupy(plan.path)
         const refused = yield* Effect.flip(
           workspaces.create(project.id, {
             specId: 'HEM-7',
             name: 'login-form',
             repositories: edit(
-              plan.repositories.map((one) => ({
-                relativePath: one.relativePath,
-                base: one.base ?? '',
-                branch: one.branch,
-              })),
+              reads
+                .filter((one) => one.included)
+                .map((one) => ({
+                  relativePath: one.relativePath,
+                  base: one.base ?? '',
+                  branch: one.branch,
+                })),
             ),
           }),
         )
@@ -622,6 +638,7 @@ describe('A missing git is a named refusal', () => {
         const workspaces = yield* Workspaces
         const project = yield* atlas(main, [API, FRONT])
         const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const reads = yield* readPlan(project.id, 'HEM-7', 'login-form', plan.repositories)
         const before = yield* counted
         const refused = yield* Effect.flip(
           workspaces.create(project.id, {
@@ -630,15 +647,15 @@ describe('A missing git is a named refusal', () => {
             repositories: [{ relativePath: API, base: 'HEAD', branch: 'atlas/HEM-7-login-form' }],
           }),
         )
-        return { plan, refused, before, after: yield* counted }
+        return { plan, reads, refused, before, after: yield* counted }
       }),
     )
 
     // The plan still answers, with nothing to start from, and says why for each repository.
     expect(seen.plan.gitAvailable).toBe(false)
-    expect(seen.plan.repositories.every((one) => one.base === null && !one.included)).toBe(true)
+    expect(seen.reads.every((one) => one.base === null && !one.included)).toBe(true)
     expect(
-      seen.plan.repositories.every((one) =>
+      seen.reads.every((one) =>
         (one.reason ?? '').endsWith('git-that-does-not-exist-hemera was not found on the PATH'),
       ),
     ).toBe(true)

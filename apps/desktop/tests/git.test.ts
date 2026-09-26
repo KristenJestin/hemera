@@ -182,25 +182,35 @@ describe('A refused read of HEAD is not a repository without a commit', () => {
     // what the plan reads again and then reports, not a repository to lose (#102).
     let reads = 0
     const once: GitSpawn = (program, cwd, args, limit) => {
-      if (!args.includes('--abbrev-ref')) return spawnGit(program, cwd, args, limit)
+      if (!args.some((one) => one.startsWith('--format=%(HEAD)'))) {
+        return spawnGit(program, cwd, args, limit)
+      }
       reads += 1
       return reads === 1
         ? Effect.fail(new GitError({ args, cwd, stderr: 'fatal: a moment of it, and no more' }))
         : spawnGit(program, cwd, args, limit)
     }
 
-    const refused = await asked(Effect.flip(Git.use((one) => one.head(api))), undefined, once)
+    const refused = await asked(
+      Effect.flip(Git.use((one) => one.headAndBranches(api))),
+      undefined,
+      once,
+    )
 
     expect(refused).toBeInstanceOf(GitError)
     expect(refused.message).toBe('fatal: a moment of it, and no more')
     // And the read that follows answers what the repository is on: nothing was swallowed.
     const head = await asked(
-      Git.use((one) => one.head(api)),
+      Git.use((one) => one.headAndBranches(api)),
       undefined,
       once,
     )
 
-    expect(head).toEqual({ branch: 'main', commit: git(api, 'rev-parse', 'HEAD'), short: null })
+    expect(head.head).toEqual({
+      branch: 'main',
+      commit: git(api, 'rev-parse', 'HEAD'),
+      short: null,
+    })
     expect(reads).toBe(2)
   })
 
@@ -215,7 +225,11 @@ describe('A refused read of HEAD is not a repository without a commit', () => {
     const seen = await asked(
       Effect.gen(function* () {
         const one = yield* Git
-        return { unborn: yield* one.head(tools), refused: yield* Effect.flip(one.head(broken)) }
+        const standing = yield* one.headAndBranches(tools)
+        return {
+          unborn: standing.head,
+          refused: yield* Effect.flip(one.headAndBranches(broken)),
+        }
       }),
     )
 

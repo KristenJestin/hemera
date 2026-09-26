@@ -416,6 +416,10 @@ export function answer(
       const { projectId, key, slug } = decision.argument
       return yield* workspaces.plan(projectId, key, slug)
     }
+    if (decision.name === 'workspaces.planRepository') {
+      const { projectId, key, slug, relativePath } = decision.argument
+      return yield* workspaces.planRepository(projectId, key, slug, relativePath)
+    }
     if (decision.name === 'workspaces.create') {
       const { projectId, ...draft } = decision.argument
       return yield* workspaces.create(projectId, draft)

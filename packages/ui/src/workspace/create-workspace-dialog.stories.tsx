@@ -7,7 +7,13 @@ import {
   CreateWorkspaceDialog,
   type CreateWorkspaceDialogProps,
 } from './create-workspace-dialog.tsx'
-import type { PlanRepositoryLine } from './model.ts'
+import type { PlanRepositoryLine, PlanRepositoryRead } from './model.ts'
+
+/**
+ * A location the engine has answered for: `read` is not null, so what it answered can be spread
+ * into a variant of it (#110).
+ */
+type AnsweredLine = PlanRepositoryLine & { read: PlanRepositoryRead }
 
 /**
  * Creating the Workspace of Spec `HEM-7` from the plan the engine proposed (D8-04), on fixtures.
@@ -15,80 +21,92 @@ import type { PlanRepositoryLine } from './model.ts'
  * The checks are the engine's, and the panel stands in for it: `refusal` is what
  * `workspaces.create` would have answered.
  */
-const API: PlanRepositoryLine = {
+const API: AnsweredLine = {
   path: './sources/api',
-  holdsRepository: true,
-  branches: ['main', 'dev'],
-  base: 'main',
-  detachedCommit: null,
-  branch: 'hemera/HEM-7-login-form',
-  included: true,
-  reason: null,
+  read: {
+    holdsRepository: true,
+    branches: ['main', 'dev'],
+    base: 'main',
+    detachedCommit: null,
+    branch: 'hemera/HEM-7-login-form',
+    included: true,
+    reason: null,
+  },
 }
 
-const FRONT: PlanRepositoryLine = {
+const FRONT: AnsweredLine = {
   path: './sources/front',
-  holdsRepository: true,
-  branches: ['main', 'dev', 'release'],
-  base: 'dev',
-  detachedCommit: null,
-  branch: 'hemera/HEM-7-login-form',
-  included: true,
-  reason: null,
+  read: {
+    holdsRepository: true,
+    branches: ['main', 'dev', 'release'],
+    base: 'dev',
+    detachedCommit: null,
+    branch: 'hemera/HEM-7-login-form',
+    included: true,
+    reason: null,
+  },
 }
 
 /** A location the Project declares where `main` holds no repository. */
-const DOCS: PlanRepositoryLine = {
+const DOCS: AnsweredLine = {
   path: './docs',
-  holdsRepository: false,
-  branches: [],
-  base: null,
-  detachedCommit: null,
-  branch: 'hemera/HEM-7-login-form',
-  included: false,
-  reason: null,
+  read: {
+    holdsRepository: false,
+    branches: [],
+    base: null,
+    detachedCommit: null,
+    branch: 'hemera/HEM-7-login-form',
+    included: false,
+    reason: null,
+  },
 }
 
 /**
  * A repository whose `main` is on no branch at all: the base is the commit it is on, and there is
  * no branch name to show in its place (D8-04).
  */
-const DETACHED: PlanRepositoryLine = {
+const DETACHED: AnsweredLine = {
   path: './sources/reports',
-  holdsRepository: true,
-  branches: ['main', 'release'],
-  base: '4f2c9a1f0a1e4f4f8a1c2f5b7d9e0a3b6c8d1e2f',
-  detachedCommit: '4f2c9a1',
-  branch: 'hemera/HEM-7-login-form',
-  included: true,
-  reason: null,
+  read: {
+    holdsRepository: true,
+    branches: ['main', 'release'],
+    base: '4f2c9a1f0a1e4f4f8a1c2f5b7d9e0a3b6c8d1e2f',
+    detachedCommit: '4f2c9a1',
+    branch: 'hemera/HEM-7-login-form',
+    included: true,
+    reason: null,
+  },
 }
 
 /** A repository with nothing committed yet: it is in `main`, and has no base to start from. */
-const EMPTY: PlanRepositoryLine = {
+const EMPTY: AnsweredLine = {
   path: './sources/tools',
-  holdsRepository: true,
-  branches: [],
-  base: null,
-  detachedCommit: null,
-  branch: 'hemera/HEM-7-login-form',
-  included: false,
-  reason: null,
+  read: {
+    holdsRepository: true,
+    branches: [],
+    base: null,
+    detachedCommit: null,
+    branch: 'hemera/HEM-7-login-form',
+    included: false,
+    reason: null,
+  },
 }
 
 /**
  * A repository Git refused to read: the plan keeps it, not ticked, and says what Git said where a
  * location that simply holds no repository says nothing of the sort (D8-04).
  */
-const UNREAD: PlanRepositoryLine = {
+const UNREAD: AnsweredLine = {
   path: './sources/billing',
-  holdsRepository: false,
-  branches: [],
-  base: null,
-  detachedCommit: null,
-  branch: 'hemera/HEM-7-login-form',
-  included: false,
-  reason: 'Git could not read this repository: fatal: not a git repository: /nowhere/billing',
+  read: {
+    holdsRepository: false,
+    branches: [],
+    base: null,
+    detachedCommit: null,
+    branch: 'hemera/HEM-7-login-form',
+    included: false,
+    reason: 'Git could not read this repository: fatal: not a git repository: /nowhere/billing',
+  },
 }
 
 const TAKEN = 'a branch named hemera/HEM-7-login-form already exists in ./sources/api'
@@ -96,24 +114,36 @@ const TAKEN = 'a branch named hemera/HEM-7-login-form already exists in ./source
 interface Extra {
   /** What the engine answers when the draft is handed over: null, or a refusal. */
   refusal?: string | null
+  /**
+   * The plan once Git has answered it (#110): the dialog opens on `repositories`, which is that
+   * plan with nothing read of it yet, and is handed this one when it closes — so a story can open
+   * the dialog twice, before and after the answers, and compare the two.
+   */
+  answered?: readonly PlanRepositoryLine[] | undefined
 }
 
 function Controlled({
   open,
   refusal = null,
+  answered,
   onOpenChange,
   onCreate,
   ...rest
 }: CreateWorkspaceDialogProps & Extra) {
   const [shown, setShown] = useState(open)
+  const [read, setRead] = useState<readonly PlanRepositoryLine[] | undefined>(undefined)
   return (
     <div className="flex h-screen flex-col items-start gap-2 p-6">
       <Button onClick={() => setShown(true)}>New Workspace</Button>
       <CreateWorkspaceDialog
         {...rest}
+        repositories={read ?? rest.repositories}
         open={shown}
         onOpenChange={(next) => {
           setShown(next)
+          // Git answered every location before the dialog was closed (#110): the next opening is
+          // the same plan, read.
+          if (!next && answered !== undefined) setRead(answered)
           onOpenChange(next)
         }}
         onCreate={async (draft) => {
@@ -164,7 +194,12 @@ type Context = Parameters<NonNullable<Story['play']>>[0]
 
 /** The row of one repository, found by the path its checkbox is named after. */
 function rowOf(dialog: HTMLElement, path: string) {
-  return within(within(dialog).getByRole('checkbox', { name: path }).closest('li')!)
+  return within(lineOf(dialog, path))
+}
+
+/** The row itself, which is where what a row takes rather than says is read (#110). */
+function lineOf(dialog: HTMLElement, path: string): HTMLElement {
+  return within(dialog).getByRole('checkbox', { name: path }).closest('li')!
 }
 
 /**
@@ -255,9 +290,81 @@ async function aLocationWithoutARepositoryGetsNoWorktree({ args }: Context) {
   })
 }
 
+/**
+ * The dialog just opened on a plan whose locations Git has not answered for yet (#110): each row
+ * is there and says it is being read, and Create waits for the last of them. The name is typed
+ * while the plan is still out: the dialog answers the hand before Git answers anything.
+ */
+export const Reading: Story = {
+  args: { repositories: [API, { path: './sources/front', read: null }, DOCS] },
+  play: aNameIsTypedBeforeThePlanArrives,
+}
+
+// Scenario "The dialog opens at once, and fills in as Git answers" (#110).
+async function aNameIsTypedBeforeThePlanArrives(): Promise<void> {
+  const dialog = within(document.body).getByRole('dialog')
+  // The row nothing is known about yet is on screen with the others, and says as much.
+  const front = rowOf(dialog, './sources/front')
+  front.getByText('being read')
+  // And it is already the height of the row it becomes: what Git has not answered for yet is
+  // reserved at the size the fields take, so the dialog never moves under the answers (#110).
+  await expect(lineOf(dialog, './sources/front').getBoundingClientRect().height).toBeCloseTo(
+    lineOf(dialog, './sources/api').getBoundingClientRect().height,
+    0,
+  )
+  await expect(front.getByRole('checkbox', { name: './sources/front' })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  )
+  // The name is typed while the plan is still out.
+  const name = within(dialog).getByRole('textbox', { name: 'Name' })
+  await userEvent.type(name, ' at once')
+  await expect(name).toHaveValue('login-form at once')
+  // And the folder follows it, before Git has said anything of any repository.
+  within(dialog).getByText('/home/kris/.local/share/hemera/workspaces/atlas/login-form at once')
+  // Create waits for the last location to be read.
+  await expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled()
+}
+
+/**
+ * The dialog opened before Git has answered anything, and opened again once every location is
+ * read: the same plan, and the same height (#110). This is the pair the rows are held to — the
+ * first opening is what the dialog looks like while the answers are still coming, and the second
+ * is where they land.
+ */
+export const Answered: Story = {
+  args: {
+    repositories: [API, { path: './sources/front', read: null }, DOCS],
+    answered: [API, FRONT, DOCS],
+  },
+  play: theDialogIsTheSameHeightBeforeAndAfterTheAnswers,
+}
+
+// Scenario "The dialog opens at once, and fills in as Git answers" (#110).
+async function theDialogIsTheSameHeightBeforeAndAfterTheAnswers(): Promise<void> {
+  const before = within(document.body).getByRole('dialog')
+  await expect(within(before).getByText('being read')).toBeVisible()
+  // Its layout height, which the rise into place does not change: what is compared is where the
+  // dialog sits on the screen, not what it is drawn from.
+  const height = before.offsetHeight
+  await userEvent.click(within(before).getByRole('button', { name: 'Cancel' }))
+  await waitFor(() => {
+    expect(within(document.body).queryByRole('dialog')).toBeNull()
+  })
+  // Git has answered every location by now: it opens read, and what was reserved while it was
+  // being read is exactly what the fields take.
+  await userEvent.click(within(document.body).getByRole('button', { name: 'New Workspace' }))
+  const after = within(document.body).getByRole('dialog')
+  await expect(within(after).queryByText('being read')).toBeNull()
+  await expect(
+    rowOf(after, './sources/front').getByRole('combobox', { name: 'Base' }),
+  ).toHaveTextContent('dev')
+  expect(after.offsetHeight).toBe(height)
+}
+
 /** One repository left out, and a declared location with no repository in `main`. */
 export const RepositoryLeftOut: Story = {
-  args: { repositories: [API, { ...FRONT, included: false }, DOCS] },
+  args: { repositories: [API, { ...FRONT, read: { ...FRONT.read, included: false } }, DOCS] },
   play: aLocationWithoutARepositoryGetsNoWorktree,
 }
 
@@ -368,8 +475,8 @@ export const FromSettings: Story = {
   args: {
     defaultName: '',
     repositories: [
-      { ...API, branch: 'atlas/' },
-      { ...FRONT, branch: 'atlas/' },
+      { ...API, read: { ...API.read, branch: 'atlas/' } },
+      { ...FRONT, read: { ...FRONT.read, branch: 'atlas/' } },
     ],
     branchOf: (name) => `atlas/${name}`,
   },

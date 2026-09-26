@@ -150,6 +150,7 @@ export const CHANNELS = {
   // relayed the same way: a worktree, a step and a variable are the engine's (D8-01 to D8-06).
   'workspaces.list': ENGINE_REQUESTS['workspaces.list'],
   'workspaces.plan': ENGINE_REQUESTS['workspaces.plan'],
+  'workspaces.planRepository': ENGINE_REQUESTS['workspaces.planRepository'],
   'workspaces.create': ENGINE_REQUESTS['workspaces.create'],
   'workspaces.createOnFolder': ENGINE_REQUESTS['workspaces.createOnFolder'],
   'workspaces.status': ENGINE_REQUESTS['workspaces.status'],

@@ -117,6 +117,7 @@ export type {
   RunState,
 } from './tools.ts'
 export {
+  planRepositorySchema,
   recipeKindSchema,
   recipeStepSchema,
   repositoryStateSchema,
@@ -128,6 +129,7 @@ export {
   worktreeSchema,
 } from './workspaces.ts'
 export type {
+  PlanRepository,
   RecipeStep,
   RepositoryState,
   Variable,

@@ -36,7 +36,7 @@ import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { Context, Data, Duration, Effect, Layer, Schedule } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
-import { Git, type GitHead, type GitStatus } from '../git.ts'
+import { Git, type GitHead, type GitService, type GitStatus } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
 import { Database, DatabaseError, type EngineTransaction } from '../storage/database.ts'
@@ -165,12 +165,63 @@ function unread(message: string): LocationRead {
   }
 }
 
+/** One repository as the Project declares it: its path under `main`, and whether a creation
+ * includes it by default (D8-04). */
+interface DeclaredLocation {
+  readonly relativePath: string
+  readonly included: boolean
+}
+
+/**
+ * One location of `main`, read through Git as the plan reads it (D8-04, #110): read once, and
+ * once more when Git refuses, because what fails under a machine at work is a moment, and a
+ * repository the plan used to lose without a word is the one a person is left wondering about.
+ *
+ * A folder that holds no repository of its own holds none whatever Git answers of the repository
+ * it may sit in: `./docs` in a `main` that is one is not a repository. A `.git` Git will not read
+ * is not a folder without one either, and there Git's refusal is kept and shown (D8-04).
+ */
+function readLocation(
+  git: GitService,
+  main: string,
+  location: DeclaredLocation,
+): Effect.Effect<LocationRead> {
+  const folder = join(main, location.relativePath)
+  return Effect.gen(function* () {
+    const holdsRepository = yield* git.isRepository(folder)
+    if (!holdsRepository) {
+      // A `.git` Git will not read is not a folder without one: where one is there, ask Git what
+      // it says of the place and keep its refusal (D8-04).
+      return existsSync(join(folder, '.git'))
+        ? yield* git.headAndBranches(folder).pipe(Effect.as(noRepository))
+        : noRepository
+    }
+    // What the new branch would start from, read locally and nothing fetched (D8-04). A
+    // repository with no commit yet has nothing to start from, which Git answers, not refuses.
+    const standing = yield* git.headAndBranches(folder)
+    // What the dialog offers as bases: the branches this repository has here, and the commit
+    // when `main` is on none of them.
+    const branches: readonly string[] = standing.head === null ? [] : standing.branches
+    return { holdsRepository, head: standing.head, branches, reason: null }
+  }).pipe(
+    Effect.retry({ times: 1, schedule: Schedule.spaced(READ_AGAIN) }),
+    Effect.catchTags({
+      GitError: (refusal) => Effect.succeed(unread(refusal.message)),
+      GitUnavailableError: (refusal) => Effect.succeed(unread(refusal.message)),
+    }),
+  )
+}
+
 export interface WorkspacePlan {
   readonly name: string
   readonly root: string
   readonly path: string
   readonly branchPrefix: string
-  readonly repositories: readonly PlanRepository[]
+  /**
+   * The locations the Project declares, relative to the Workspace, in the order it declares them
+   * (D8-04): the paths themselves, and nothing read of them yet (#110).
+   */
+  readonly repositories: readonly string[]
   /** False when `git` is not on the `PATH`: the plan answers, and the creation is refused. */
   readonly gitAvailable: boolean
 }
@@ -195,12 +246,28 @@ export interface WorkspacesService {
   /**
    * What a Workspace named `slug` would be made of, proposed and editable: for Spec `key`, or
    * with no key for one made from the Project's settings, whose branches are `<prefix>/<slug>`.
+   *
+   * Answered before Git has read any of the Project's repositories (#110), so the creation dialog
+   * opens on it at once: what it holds is the name, the folder and the branch prefix, and one
+   * path per declared location. Each of those is read on its own through `planRepository`.
    */
   readonly plan: (
     projectId: string,
     key: string | null,
     slug: string,
   ) => Effect.Effect<WorkspacePlan, DatabaseError | UnknownProjectError>
+  /**
+   * One location of that plan, as Git answers of it (D8-04): whether `main` holds a repository
+   * there, the branches it has here, the base a worktree would start from — or, when Git would
+   * not read it, its own words. Read on its own so that a repository that is slow, refused or
+   * gone holds back its own row alone, and never the dialog (#110).
+   */
+  readonly planRepository: (
+    projectId: string,
+    key: string | null,
+    slug: string,
+    relativePath: string,
+  ) => Effect.Effect<PlanRepository, DatabaseError | UnknownProjectError>
   /** Checks the draft with Git, then writes it `preparing` with its steps — and nothing else. */
   readonly create: (
     projectId: string,
@@ -630,63 +697,17 @@ export const workspacesLayer = Layer.effect(
 
       one: viewOf,
 
-      plan: (projectId, key, slug) =>
+      plan: (projectId, _key, slug) =>
         Effect.gen(function* () {
           const project = yield* projectRow(projectId)
           const main = yield* mainPathOf(projectId)
           const declared = yield* declaredOf(projectId)
           const branchPrefix = project.branchPrefix ?? defaultBranchPrefix(project.name)
-          const branch = branchNameFor(branchPrefix, key, slug)
           // Asked once: without `git` the plan still answers, with nothing to start from, and the
           // creation is what refuses, by name (D8-03).
           const gitAvailable = yield* git.isRepository(main).pipe(
             Effect.as(true),
             Effect.catchTag('GitUnavailableError', () => Effect.succeed(false)),
-          )
-          const repositories = yield* Effect.forEach(declared, (location) =>
-            Effect.gen(function* () {
-              const folder = join(main, location.relativePath)
-              // Read once, and once more when Git refuses: what fails under a machine at work is
-              // a moment, and a repository the plan used to lose without a word is the one a
-              // person is left wondering about (D8-04).
-              const read = yield* Effect.gen(function* () {
-                const holdsRepository = gitAvailable ? yield* git.isRepository(folder) : false
-                if (!holdsRepository) {
-                  // A `.git` Git will not read is not a folder without one: where one is there,
-                  // the plan asks Git what it says of the place and keeps its refusal (D8-04).
-                  return existsSync(join(folder, '.git'))
-                    ? yield* git.head(folder).pipe(Effect.as(noRepository))
-                    : noRepository
-                }
-                // What the new branch would start from, read locally and nothing fetched
-                // (D8-04). A repository with no commit yet has nothing to start from, and is
-                // left out — which Git answers, and does not refuse.
-                const head = yield* git.head(folder)
-                // What the dialog offers as bases: the branches this repository has here, and the
-                // commit when `main` is on none of them.
-                const branches: readonly string[] =
-                  head === null ? [] : yield* git.localBranches(folder)
-                return { holdsRepository, head, branches, reason: null }
-              }).pipe(
-                Effect.retry({ times: 1, schedule: Schedule.spaced(READ_AGAIN) }),
-                Effect.catchTags({
-                  GitError: (refusal) => Effect.succeed(unread(refusal.message)),
-                  GitUnavailableError: (refusal) => Effect.succeed(unread(refusal.message)),
-                }),
-              )
-              return {
-                relativePath: location.relativePath,
-                holdsRepository: read.holdsRepository,
-                branches: read.branches,
-                base: read.head === null ? null : (read.head.branch ?? read.head.commit),
-                // The one hash the dialog shows, and only where no branch name can stand for it.
-                detachedCommit:
-                  read.head !== null && read.head.branch === null ? read.head.short : null,
-                branch,
-                included: location.included && read.head !== null,
-                reason: read.reason,
-              } satisfies PlanRepository
-            }),
           )
           const root = rootOf(project)
           return {
@@ -694,9 +715,37 @@ export const workspacesLayer = Layer.effect(
             root,
             path: join(root, slug),
             branchPrefix,
-            repositories,
+            // The locations themselves, in the Project's order: what the dialog opens with, and it
+            // asks for each of them as it shows its row (#110).
+            repositories: declared.map((location) => location.relativePath),
             gitAvailable,
           } satisfies WorkspacePlan
+        }),
+
+      planRepository: (projectId, key, slug, relativePath) =>
+        Effect.gen(function* () {
+          const project = yield* projectRow(projectId)
+          const main = yield* mainPathOf(projectId)
+          const declared = yield* declaredOf(projectId)
+          const branchPrefix = project.branchPrefix ?? defaultBranchPrefix(project.name)
+          const branch = branchNameFor(branchPrefix, key, slug)
+          const location = declared.find((one) => one.relativePath === relativePath)
+          // A location the Project does not declare is answered as one that holds no repository:
+          // the plan reads the folders the Project named, and no other (#110).
+          const read =
+            location === undefined ? noRepository : yield* readLocation(git, main, location)
+          return {
+            relativePath,
+            holdsRepository: read.holdsRepository,
+            branches: read.branches,
+            base: read.head === null ? null : (read.head.branch ?? read.head.commit),
+            // The one hash the dialog shows, and only where no branch name can stand for it.
+            detachedCommit:
+              read.head !== null && read.head.branch === null ? read.head.short : null,
+            branch,
+            included: location !== undefined && location.included && read.head !== null,
+            reason: read.reason,
+          } satisfies PlanRepository
         }),
 
       create: (projectId, draft) =>

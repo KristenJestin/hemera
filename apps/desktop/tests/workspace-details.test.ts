@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from 'vite-plus/test'
 
-import type { RepositoryState, Variable, WorkspacePlan } from '@hemera/ipc'
+import type { PlanRepository, RepositoryState, Variable, WorkspacePlan } from '@hemera/ipc'
 import {
   branchOfName,
   branchesKeptOf,
@@ -288,53 +288,78 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
     root: '/data/workspaces/atlas',
     path: '/data/workspaces/atlas',
     branchPrefix: 'atlas',
-    repositories: [
-      {
-        relativePath: 'sources/api',
-        holdsRepository: true,
-        branches: ['main', 'dev'],
-        base: 'main',
-        detachedCommit: null,
-        branch: 'atlas/',
-        included: true,
-        reason: null,
-      },
-      {
-        relativePath: 'docs',
-        holdsRepository: false,
-        branches: [],
-        base: null,
-        detachedCommit: null,
-        branch: 'atlas/',
-        included: false,
-        reason: null,
-      },
-    ],
+    repositories: ['sources/api', 'docs'],
     gitAvailable: true,
   }
 
-  test('the dialog takes each repository of the plan, one with none in main included', () => {
-    expect(planLinesOf(plan)).toEqual([
+  /** What Git answered of each of them, read one at a time (#110). */
+  const reads: PlanRepository[] = [
+    {
+      relativePath: 'sources/api',
+      holdsRepository: true,
+      branches: ['main', 'dev'],
+      base: 'main',
+      detachedCommit: null,
+      branch: 'atlas/',
+      included: true,
+      reason: null,
+    },
+    {
+      relativePath: 'docs',
+      holdsRepository: false,
+      branches: [],
+      base: null,
+      detachedCommit: null,
+      branch: 'atlas/',
+      included: false,
+      reason: null,
+    },
+  ]
+
+  test('the dialog takes a row per location of the plan, with what was read of each', () => {
+    expect(planLinesOf(plan, reads)).toEqual([
       {
         path: 'sources/api',
-        holdsRepository: true,
-        branches: ['main', 'dev'],
-        base: 'main',
-        detachedCommit: null,
-        branch: 'atlas/',
-        included: true,
-        reason: null,
+        read: {
+          holdsRepository: true,
+          branches: ['main', 'dev'],
+          base: 'main',
+          detachedCommit: null,
+          branch: 'atlas/',
+          included: true,
+          reason: null,
+        },
       },
       {
         path: 'docs',
-        holdsRepository: false,
-        branches: [],
-        base: null,
-        detachedCommit: null,
-        branch: 'atlas/',
-        included: false,
-        reason: null,
+        read: {
+          holdsRepository: false,
+          branches: [],
+          base: null,
+          detachedCommit: null,
+          branch: 'atlas/',
+          included: false,
+          reason: null,
+        },
       },
+    ])
+  })
+
+  test('a location nothing has been read of yet has its row and no answer', () => {
+    expect(planLinesOf(plan, [reads[0]!])).toEqual([
+      {
+        path: 'sources/api',
+        read: {
+          holdsRepository: true,
+          branches: ['main', 'dev'],
+          base: 'main',
+          detachedCommit: null,
+          branch: 'atlas/',
+          included: true,
+          reason: null,
+        },
+      },
+      { path: 'docs', read: null },
     ])
   })
 

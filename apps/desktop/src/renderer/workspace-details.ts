@@ -3,6 +3,7 @@ import type {
   ChannelArguments,
   Command,
   CommandRun,
+  PlanRepository,
   RecipeStep,
   RepositoryState,
   Variable,
@@ -13,6 +14,7 @@ import type {
 } from '@hemera/ipc'
 import type {
   PlanRepositoryLine,
+  PlanRepositoryRead,
   PreparationStepLine,
   RecipeCommand,
   RecipeStepDraft,
@@ -262,20 +264,34 @@ export function recipeCommandsOf(catalogue: readonly Command[]): RecipeCommand[]
 }
 
 /**
- * The plan of a dedicated Workspace as its creation dialog takes it (D8-04): each repository of
- * the Project, whether `main` holds one there, its base and its branch.
+ * The plan of a dedicated Workspace as its creation dialog takes it (D8-04): every location the
+ * plan declared, in the order it declared them, each with what Git answered of it — or with
+ * nothing while that answer has not arrived yet, the dialog having opened on the plan (#110).
  */
-export function planLinesOf(plan: WorkspacePlan): PlanRepositoryLine[] {
-  return plan.repositories.map((one) => ({
-    path: one.relativePath,
-    holdsRepository: one.holdsRepository,
-    branches: one.branches,
-    base: one.base,
-    detachedCommit: one.detachedCommit,
-    branch: one.branch,
-    included: one.included,
-    reason: one.reason,
-  }))
+export function planLinesOf(
+  plan: WorkspacePlan,
+  reads: readonly PlanRepository[],
+): PlanRepositoryLine[] {
+  return plan.repositories.map((path) => {
+    const read = reads.find((one) => one.relativePath === path)
+    return { path, read: read === undefined ? null : readOf(read) }
+  })
+}
+
+/**
+ * What Git answered of one location, as the dialog takes it (D8-04): the engine's own answer,
+ * with nothing added to it and nothing dropped from it.
+ */
+function readOf(read: PlanRepository): PlanRepositoryRead {
+  return {
+    holdsRepository: read.holdsRepository,
+    branches: read.branches,
+    base: read.base,
+    detachedCommit: read.detachedCommit,
+    branch: read.branch,
+    included: read.included,
+    reason: read.reason,
+  }
 }
 
 /**
