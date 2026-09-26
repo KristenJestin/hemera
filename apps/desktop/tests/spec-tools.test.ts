@@ -426,6 +426,30 @@ describe('ready attests and does not freeze', () => {
   })
 })
 
+describe('ready is refused on a feature Spec without a story', () => {
+  test('the proposal is refused with what is missing, and nothing is attested', async () => {
+    const agent = fakeAgent({ steps: [uses('spec_propose', { kind: 'ready', key: 'propose-6' })] })
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const specs = yield* Specs
+        const { sessionId, specId } = yield* defining
+        yield* contracted(specId, sessionId)
+        yield* specs.writeStories(agentOf(sessionId), { specId, stories: [] })
+        const entries = yield* turn(sessionId)
+        return { after: yield* specs.read(specId), gate: yield* specs.gate(specId), entries }
+      }),
+    )
+    const missing =
+      'a feature Spec needs at least one user story with an acceptance criterion, and it has no story'
+    expect(agent.answers.used[0]).toMatchObject({ isError: true })
+    expect(agent.answers.used[0]?.text).toContain(`cannot be proposed ready: ${missing}`)
+    expect(callsIn(seen.entries)).toMatchObject([{ tool: 'spec_propose', state: 'refused' }])
+    expect(seen.after.revision.attestedContentVersion).toBeNull()
+    expect(seen.after.spec.status).toBe('draft')
+    expect(seen.gate.failures.map((failure) => failure.message)).toContain(missing)
+  })
+})
+
 describe('An older revision is read and never written', () => {
   test('spec_read names revision 1 read-only, and a write naming it is refused', async () => {
     const agent = fakeAgent({

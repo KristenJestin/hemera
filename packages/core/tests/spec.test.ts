@@ -25,6 +25,7 @@ import {
   specPrefix,
   specPrefixFrom,
   staleAfterWrite,
+  storyFailures,
   taskGraph,
   writable,
 } from '#index.ts'
@@ -34,6 +35,31 @@ import { passingSnapshot, section } from './spec-fixture.ts'
 
 function checks(snapshot: SpecSnapshot): string[] {
   return readyGate(snapshot).map((failure) => failure.check)
+}
+
+/** The passing feature as a bug or a maintenance: its own section, and the basis it was shaped on. */
+function asType(snapshot: SpecSnapshot, type: 'bug' | 'maintenance'): SpecSnapshot {
+  const own = type === 'bug' ? 'reproduction' : 'invariants'
+  return {
+    ...snapshot,
+    revision: { ...snapshot.revision, type },
+    sections: snapshot.sections.map((entry) =>
+      entry.name === 'behaviour' ? { ...entry, name: own } : entry,
+    ),
+    phases: snapshot.phases.map((phase) =>
+      phase.phase === 'shape'
+        ? {
+            ...phase,
+            basis: { problem: 1, expected_outcome: 1, scope: 1, verification: 1, [own]: 1 },
+          }
+        : phase,
+    ),
+  }
+}
+
+/** A Spec without any story: no story, no criterion, no link of a task to a story. */
+function withoutStory(snapshot: SpecSnapshot): SpecSnapshot {
+  return { ...snapshot, stories: [], criteria: [], taskStories: [] }
 }
 
 function phasesIn(states: Record<PhaseId, PhaseState>): SpecPhase[] {
@@ -156,16 +182,9 @@ describe('The button is offered only when the checks pass', () => {
     ['a story’s criterion', 'coverage', (s) => ({ ...s, criteria: [] })],
     ['a story’s covering task', 'coverage', (s) => ({ ...s, taskStories: [] })],
     [
-      'every task, with no story',
+      'every task, with no story, from a bug',
       'coverage',
-      (s) => ({
-        ...s,
-        stories: [],
-        criteria: [],
-        tasks: [],
-        dependencies: [],
-        taskStories: [],
-      }),
+      (s) => ({ ...withoutStory(asType(s, 'bug')), tasks: [], dependencies: [] }),
     ],
     [
       'the absence of a cycle',
@@ -212,6 +231,45 @@ describe('The button is offered only when the checks pass', () => {
 
   test.each(removals)('removing %s lists exactly the %s check', (_what, check, remove) => {
     expect(checks(remove(passingSnapshot()))).toEqual([check])
+  })
+})
+
+describe('A feature Spec needs a user story with an acceptance criterion', () => {
+  test('A feature Spec without a story is not ready', () => {
+    const failures = readyGate(withoutStory(passingSnapshot()))
+    expect(failures).toEqual([
+      {
+        check: 'coverage',
+        target: 'stories',
+        message:
+          'a feature Spec needs at least one user story with an acceptance criterion, and it has no story',
+      },
+    ])
+    expect(storyFailures(withoutStory(passingSnapshot()))).toEqual(failures)
+  })
+
+  test('A feature Spec whose story has no criterion is not ready', () => {
+    const snapshot = { ...passingSnapshot(), criteria: [] }
+    expect(readyGate(snapshot)).toEqual([
+      {
+        check: 'coverage',
+        target: 'story-1',
+        message: 'the story "Export" has no acceptance criterion',
+      },
+    ])
+    expect(storyFailures(snapshot)).toEqual(readyGate(snapshot))
+  })
+
+  test.each(['bug', 'maintenance'] as const)('A %s Spec without a story can be ready', (type) => {
+    const snapshot = withoutStory(asType(passingSnapshot(), type))
+    expect(readyGate(snapshot)).toEqual([])
+    expect(storyFailures(snapshot)).toEqual([])
+  })
+
+  test('decompose does not finish a feature without a story', () => {
+    expect(
+      phaseExit('decompose', withoutStory(passingSnapshot())).map((failure) => failure.target),
+    ).toEqual(['stories'])
   })
 })
 

@@ -135,13 +135,17 @@ describe('The button is offered only when the checks pass', () => {
             { title: 'Import', narrative: 'As a user, I import.', priority: null, criteria: [] },
           ],
         })
-        yield* specs.attest(specId, session.id)
-        return (yield* specs.gate(specId)).failures
+        // A story with no criterion is not attested either (#143): the proposal is refused.
+        const refusal = yield* Effect.flip(specs.attest(specId, session.id))
+        return { refusal, failures: (yield* specs.gate(specId)).failures }
       }),
     )
-    expect(failures.map((failure) => [failure.check, failure.message])).toEqual([
+    expect(failures.refusal).toBeInstanceOf(ReadyRefusedError)
+    expect(failures.refusal.message).toContain('the story "Import" has no acceptance criterion')
+    expect(failures.failures.map((failure) => [failure.check, failure.message])).toEqual([
       ['coverage', 'the story "Import" has no acceptance criterion'],
       ['coverage', 'no task covers the story "Import"'],
+      ['attestation', 'the agent attested an earlier content of the Spec'],
     ])
   })
 })

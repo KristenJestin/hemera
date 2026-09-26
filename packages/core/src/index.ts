@@ -174,6 +174,7 @@ export {
   specPrefix,
   specPrefixFrom,
   staleAfterWrite,
+  storyFailures,
   takeOverRefusal,
   taskGraph,
   unbriefedEdit,
