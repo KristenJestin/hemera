@@ -90,7 +90,7 @@ export const Maintenance: Story = {
 }
 
 /**
- * Frozen at revision 2: the picker lists the older one as read only, and `Rework` is the way
+ * Ready at revision 2: the picker lists the older one as read only, and `Rework` is the way
  * back to a draft.
  */
 export const Ready: Story = {
@@ -98,15 +98,15 @@ export const Ready: Story = {
     status: 'ready',
     revision: 2,
     revisions: [
-      { number: 2, detail: 'Latest · frozen' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 2, detail: 'Latest · ready' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Latest' }))
     const older = await within(document.body).findByRole('menuitem', {
-      name: 'Frozen 22 Sep · read only',
+      name: 'Marked ready 22 Sep · read only',
     })
     await userEvent.click(older)
     await expect(args.onPickRevision).toHaveBeenCalledWith(1)
@@ -122,8 +122,8 @@ export const OlderRevision: Story = {
     revision: 1,
     superseded: true,
     revisions: [
-      { number: 2, detail: 'Latest · frozen' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 2, detail: 'Latest · ready' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement }) => {
@@ -139,8 +139,8 @@ export const Reworked: Story = {
     revision: 3,
     revisions: [
       { number: 3, detail: 'Latest · draft' },
-      { number: 2, detail: 'Frozen 23 Sep · read only' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 2, detail: 'Marked ready 23 Sep · read only' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ],
   },
   play: async ({ canvasElement }) => {

@@ -171,7 +171,7 @@ const SCREENS = {
       hemera('ready', 'ATL-7 marked ready', '11:34'),
       agents(
         'answer',
-        'The Spec is frozen at revision 2. A build Session can start from it. I can no longer change it unless you rework it.',
+        'The Spec is ready at revision 2. A build Session can start from it. I can no longer change it unless you rework it.',
       ),
     ],
   },
@@ -549,7 +549,7 @@ export const GateFull: Story = {
   },
 }
 
-/** Mark ready pressed: the Spec is frozen, the document read only, and Rework appears. */
+/** Mark ready pressed: the Spec is ready, the document read only, and Rework appears. */
 export const GateFullMarkedReady: Story = {
   args: { screen: 'gateFull' },
   play: async ({ canvasElement }) => {
@@ -591,21 +591,25 @@ export const LastQuestionAnswered: Story = {
 }
 
 /**
- * Screen 5 · ready and frozen at revision 2: no editing look, the picker of the revisions, and
- * Rework at the end of the head.
+ * Screen 5 · ready at revision 2: the status says it, and nothing else — no `frozen` on a
+ * section, no line under the head — the picker of the revisions, and Rework at the end of the head.
  */
-export const ReadyFrozen: Story = {
+export const Ready: Story = {
   args: { screen: 'ready', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getAllByText('frozen').length).toBeGreaterThan(0)
+    const panel = canvas.getByRole('region', { name: 'Spec ATL-7' })
+    await expect(within(panel).getByText('ready')).toBeVisible()
+    await expect(within(panel).queryByText(/Ready · frozen/)).toBeNull()
+    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
+    await expect(within(stage).queryByText(/frozen/i)).toBeNull()
     await expect(canvas.queryByRole('textbox', { name: 'Expected outcome' })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
   },
 }
 
-/** Screen 5, with the rework dialog open over the frozen Spec, as the brief draws it. */
+/** Screen 5, with the rework dialog open over the ready Spec, as the brief draws it. */
 export const ReworkAsked: Story = {
   args: { screen: 'ready', reworkOpen: true, folded: false },
   play: async () => {

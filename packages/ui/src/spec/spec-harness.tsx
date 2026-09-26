@@ -83,13 +83,13 @@ export function useLiveSpec(
         status: 'ready',
         frozenOn: 'today',
         focus: undefined,
-        now: 'Ready · frozen, a build can start from it',
+        now: '',
         revisions:
           now.revisions.length > 1
             ? now.revisions.map((one) =>
-                one.number === now.revision ? { ...one, detail: 'Latest · frozen' } : one,
+                one.number === now.revision ? { ...one, detail: 'Latest · ready' } : one,
               )
-            : [{ number: now.revision, detail: 'Latest · frozen' }],
+            : [{ number: now.revision, detail: 'Latest · ready' }],
       }))
     },
     onRework: (reason) => {
@@ -102,7 +102,9 @@ export function useLiveSpec(
         revisions: [
           { number: now.revision + 1, detail: 'Latest · draft' },
           ...now.revisions.map((one) =>
-            one.number === now.revision ? { ...one, detail: 'Frozen today · read only' } : one,
+            one.number === now.revision
+              ? { ...one, detail: 'Marked ready today · read only' }
+              : one,
           ),
         ],
         phases: phases('finished', 'stale', 'stale'),

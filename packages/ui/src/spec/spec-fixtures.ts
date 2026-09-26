@@ -18,7 +18,7 @@ import { GATE_CHECKS } from './model.ts'
  * and the rounding bug beside it, `ATL-12` (lot 19, the prototype's example).
  *
  * One Spec, taken through the eight screens of the brief, so that what changes from one story
- * to the next is the state and never the words: shaped and being planned, frozen, reworked, read
+ * to the next is the state and never the words: shaped and being planned, ready, reworked, read
  * from a second Session. Consistent with the product rules on purpose: no task
  * exists before `decompose` opens, and a gate is only full when every phase has finished.
  */
@@ -216,8 +216,8 @@ export const ROUNDING: SpecQuestionView = {
 
 /** The revisions of ATL-7 once it has been frozen at 2. */
 const FROZEN_REVISIONS = [
-  { number: 2, detail: 'Latest · frozen' },
-  { number: 1, detail: 'Frozen 22 Sep · read only' },
+  { number: 2, detail: 'Latest · ready' },
+  { number: 1, detail: 'Marked ready 22 Sep · read only' },
 ]
 
 /** The same three facts every mid-plan gate says: no task yet, a question, plan still open. */
@@ -338,25 +338,25 @@ export const GATE_FULL: SpecView = {
   readiness: FULL_GATE,
 }
 
-/** Screen 5 · frozen at revision 2: read only, a picker for the older one, and Rework. */
+/** Screen 5 · ready at revision 2: read only, a picker for the older one, and Rework. */
 export const READY: SpecView = {
   ...GATE_FULL,
   status: 'ready',
   revision: 2,
   revisions: FROZEN_REVISIONS,
-  now: 'Ready · frozen, a build can start from it',
+  now: '',
   focus: undefined,
   frozenOn: '23 Sep',
 }
 
 /**
- * The same Spec, its older revision 1 picked: read as it was frozen, with no editor and no
+ * The same Spec, its older revision 1 picked: read as it was marked ready, with no editor and no
  * Rework, since only the current revision can be reworked (D7-05).
  */
 export const OLDER_REVISION: SpecView = {
   ...READY,
   revision: 1,
-  now: 'An earlier version · read only, as it was frozen',
+  now: 'An earlier version · read only',
   frozenOn: '22 Sep',
   replacedBy: 2,
 }
@@ -397,8 +397,8 @@ export const STALE: SpecView = {
   revision: 3,
   revisions: [
     { number: 3, detail: 'Latest · draft' },
-    { number: 2, detail: 'Frozen 23 Sep · read only' },
-    { number: 1, detail: 'Frozen 22 Sep · read only' },
+    { number: 2, detail: 'Marked ready 23 Sep · read only' },
+    { number: 1, detail: 'Marked ready 22 Sep · read only' },
   ],
   phases: phases('finished', 'stale', 'stale'),
   now: 'Every phase to review · the agent goes over each again',

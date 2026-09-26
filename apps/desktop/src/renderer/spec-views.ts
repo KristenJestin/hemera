@@ -236,17 +236,15 @@ function attested(snapshot: SpecSnapshot): boolean {
 /**
  * The one sentence under the head: the phase in focus and where it stands.
  *
- * In the reader's words, never the engine's: no revision, no attestation, no stale. Frozen, it
- * says so; with every phase finished, whether the agent confirmed the Spec complete; with a phase
+ * In the reader's words, never the engine's: no revision, no attestation, no stale. Ready, it
+ * says nothing: the status beside the title says it (issue #135). With every phase finished, whether the agent confirmed the Spec complete; with a phase
  * stale, that it is to review and the agent goes over it again — every phase after a Rework, the
  * one a new shaping made stale otherwise; with a blocking question of that phase open, that the answer is yours; and
  * otherwise what the agent is writing: the first empty section of the shape, the plan, the tasks.
  */
 export function nowOf(snapshot: SpecSnapshot): string {
-  if (!isCurrent(snapshot)) return 'An earlier version · read only, as it was frozen'
-  if (snapshot.spec.status !== 'draft') {
-    return 'Ready · frozen, a build can start from it'
-  }
+  if (!isCurrent(snapshot)) return 'An earlier version · read only'
+  if (snapshot.spec.status !== 'draft') return ''
   const focus = focusOf(snapshot.phases)
   if (focus === null) {
     return attested(snapshot)
@@ -411,8 +409,8 @@ export function revisionsOf(
       number: revision.number,
       detail:
         revision.id === snapshot.spec.currentRevisionId
-          ? `Latest · ${snapshot.spec.status === 'draft' ? 'draft' : 'frozen'}`
-          : `Frozen ${dayOf(frozenAt(revision, snapshot, revisions, journal))} · read only`,
+          ? `Latest · ${snapshot.spec.status === 'draft' ? 'draft' : 'ready'}`
+          : `Marked ready ${dayOf(frozenAt(revision, snapshot, revisions, journal))} · read only`,
     }))
 }
 

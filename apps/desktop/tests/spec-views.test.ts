@@ -185,11 +185,9 @@ describe('The panel says what is happening in one sentence', () => {
     )
   })
 
-  test('ready: frozen at its revision, a build can start from it', () => {
+  test('ready: nothing beside the status, which says it', () => {
     const frozen = snapshot()
-    expect(nowOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } })).toBe(
-      'Ready · frozen, a build can start from it',
-    )
+    expect(nowOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } })).toBe('')
   })
 
   test('after a Rework every phase is stale, and the agent re-declares each', () => {
@@ -401,7 +399,7 @@ describe('An old revision is readable and not editable', () => {
   test('the picker lists the revisions newest first, the older ones read only', () => {
     expect(revisionsOf(second, revisions, [ready('2026-09-22T10:00:00.000Z', 'rev-1')])).toEqual([
       { number: 2, detail: 'Latest · draft' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ])
   })
 
@@ -414,7 +412,7 @@ describe('An old revision is readable and not editable', () => {
     })
     expect(view.status).toBe('ready')
     expect(view.frozenOn).toBe('22 Sep')
-    expect(view.now).toBe('An earlier version · read only, as it was frozen')
+    expect(view.now).toBe('An earlier version · read only')
     expect(view.readiness.todo).toEqual([])
     expect(view.replacedBy).toBe(2)
   })
@@ -438,7 +436,7 @@ describe('An old revision is readable and not editable', () => {
       journal: [],
     })
     expect(view.frozenOn).toBe(dayOf(Date.UTC(2026, 8, 23, 12)))
-    expect(view.revisions).toEqual([{ number: 1, detail: 'Latest · frozen' }])
+    expect(view.revisions).toEqual([{ number: 1, detail: 'Latest · ready' }])
   })
 })
 

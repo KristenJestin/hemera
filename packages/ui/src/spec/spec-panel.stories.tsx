@@ -423,14 +423,14 @@ export const QuestionLinked: Story = {
 }
 
 /**
- * An older revision picked: shown as it was frozen, with no editor, no `Rework` and no
+ * An older revision picked: shown as it was marked ready, with no editor, no `Rework` and no
  * `Mark ready`, and the foot says which revision replaced it.
  */
 export const OlderRevision: Story = {
   args: { spec: OLDER_REVISION },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('An earlier version · read only, as it was frozen')).toBeVisible()
+    await expect(canvas.getByText('An earlier version · read only')).toBeVisible()
     await expect(canvas.getByText(/a newer version replaced it/)).toBeVisible()
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()

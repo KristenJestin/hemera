@@ -151,7 +151,7 @@ export function SpecPanel({
                 onRework={() => setReworking(true)}
                 onFold={fold}
               />
-              <p className={NOW}>{spec.now}</p>
+              {spec.now !== '' && <p className={NOW}>{spec.now}</p>}
               {buildable && build !== undefined && <WorkspaceActions {...build} />}
             </header>
             {reader !== undefined && (
@@ -211,7 +211,7 @@ export function SpecPart({ spec, target, onGoToQuestion }: SpecPartProps): React
       />
     )
   }
-  return <SectionPart section={sectionOf(spec, target)} editable={spec.status === 'draft'} />
+  return <SectionPart section={sectionOf(spec, target)} />
 }
 
 export interface SpecStageProps extends SpecPartHandlers {

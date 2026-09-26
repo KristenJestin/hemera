@@ -197,7 +197,7 @@ export interface ReadinessView {
 /** A revision as the picker lists it. */
 export interface RevisionView {
   number: number
-  /** What the picker says of it, in plain words: `Latest · frozen`, `Frozen 22 Sep · read only`. */
+  /** What the picker says of it, in plain words: `Latest · ready`, `Marked ready 22 Sep · read only`. */
   detail: string
 }
 
@@ -224,7 +224,10 @@ export interface SpecView {
   revisions: RevisionView[]
   /** The state of each phase, which the group headings of the document wear. */
   phases: PhaseView[]
-  /** The one sentence under the head: `Plan · the agent is writing the plan`. */
+  /**
+   * The one sentence under the head: `Plan · the agent is writing the plan`. Empty when there is
+   * nothing to say beside the status: a `ready` Spec.
+   */
   now: string
   /** Where the agent is writing now, which the document highlights and scrolls to. */
   focus?: SpecTarget | undefined

@@ -28,13 +28,9 @@ const meta = {
   component: SectionPart,
   tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
-  args: {
-    section: sectionOf(GATE_FULL.sections, 'expected_outcome'),
-    editable: true,
-  },
+  args: { section: sectionOf(GATE_FULL.sections, 'expected_outcome') },
   argTypes: {
     section: { control: 'object', description: 'The section: body, author, mark.' },
-    editable: { control: 'boolean', description: 'A draft at its current revision.' },
   },
 } satisfies Meta<typeof SectionPart>
 
@@ -54,6 +50,8 @@ export const ByTheAgent: Story = {
     await expect(canvas.queryByText(/^v\d+$/)).toBeNull()
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.queryByRole('button')).toBeNull()
+    // Whether the Spec is ready is the head's status to say: no section says `frozen`.
+    await expect(canvas.queryByText(/frozen/i)).toBeNull()
   },
 }
 
@@ -97,16 +95,6 @@ export const Writing: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('writing…')).toBeVisible()
-  },
-}
-
-/** Frozen: the text and a lock. */
-export const Frozen: Story = {
-  args: { editable: false },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.queryByRole('textbox')).toBeNull()
-    await expect(canvas.getByText('frozen')).toBeVisible()
   },
 }
 
