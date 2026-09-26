@@ -644,3 +644,32 @@ export function hemeraPermissionOf(
   }
   return { label, subject, intent }
 }
+
+/**
+ * A note about the agent rather than about Hemera (issue #131): a line it wrote on its standard
+ * error while the turn ran, a request it is waiting on that no block draws, a request Hemera
+ * refused. Each carries what the agent wrote or asked, which the row shows word for word.
+ */
+const agentReportPayloadSchema = z.object({
+  reason: z.enum(['agent_stderr', 'unanswered_request', 'refused_request']),
+  line: z.string().optional(),
+  method: z.string().optional(),
+})
+
+/** What an `AgentReport` draws: the sentence of the note, and the agent's own words under it. */
+export interface AgentReportDrawn {
+  title: string
+  detail: string
+}
+
+/**
+ * The report a note is, or null for a note of Hemera's own — a stop that timed out, a context
+ * rebuilt — which the thread draws as a line of Hemera's as it always did.
+ */
+export function agentReportOf(entry: SessionEntry): AgentReportDrawn | null {
+  if (entry.kind !== 'note') return null
+  const read = readPayload(agentReportPayloadSchema, entry.payload)
+  if (read === null) return null
+  const said = [read.method, read.line].filter((one) => one !== undefined && one !== '')
+  return { title: entry.body, detail: said.join(': ') }
+}

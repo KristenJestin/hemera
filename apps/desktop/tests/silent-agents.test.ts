@@ -10,16 +10,18 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
+import * as TestClock from 'effect/testing/TestClock'
 
 import type { AnyMessage } from '@agentclientprotocol/sdk'
+import type { SessionEntry } from '@hemera/core'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
-import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { AgentRuntime, REPORT_GAP } from '#engine/agents/runtime.ts'
 import { AcpTraces, TRACE_LIMIT, acpTracesLayer, elided } from '#engine/agents/trace.ts'
 import { Preferences } from '#engine/preferences.ts'
 import { traceFileOf } from '#main/diagnostic.ts'
-import { application, aSession } from './application.ts'
+import { application, aSession, gated, heldInThread, pause, threadOf } from './application.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -41,6 +43,17 @@ const traceOf = (sessionId: string): string => {
   const file = traceFileOf(dataFolder, sessionId)
   if (file === null || !existsSync(file)) return ''
   return readFileSync(file, 'utf8')
+}
+
+/** The notes of a thread that say one thing, by the reason their payload carries. */
+const notesOf = (entries: readonly SessionEntry[], reason: string) =>
+  entries.filter((entry) => entry.kind === 'note' && (entry.payload ?? '').includes(reason))
+
+/** What a note carries beyond its sentence. */
+const payloadOf = (entry: SessionEntry | undefined): { method?: string; line?: string } => {
+  // SAFETY: the payload of a note is the JSON the runtime wrote for it, and the two fields read
+  // here are optional: a note that carries neither answers undefined for both.
+  return JSON.parse(entry?.payload ?? '{}') as { method?: string; line?: string }
 }
 
 describe('An ACP trace per Session, on demand', () => {
@@ -156,5 +169,93 @@ describe('An ACP trace per Session, on demand', () => {
 
   test('an identifier that could not name a file safely names none', () => {
     expect(traceFileOf(dataFolder, '../elsewhere')).toBeNull()
+  })
+})
+
+describe('What the agent writes to stderr while a turn runs', () => {
+  test('an error line shows as a quiet row with the line', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'complains', line: 'ERROR service=llm status=429 Too Many Requests' },
+        { does: 'says', text: 'still here' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'go')
+
+        const entries = yield* heldInThread(
+          session.id,
+          (held) => notesOf(held, 'agent_stderr').length === 1,
+        )
+        const [row] = notesOf(entries, 'agent_stderr')
+        expect(row?.body).toBe('The agent reported an error')
+        expect(row?.role).toBe('hemera')
+        expect(payloadOf(row).line).toBe('ERROR service=llm status=429 Too Many Requests')
+      }),
+    )
+  })
+
+  test('the same complaint said again is one row, and rows are rate-limited', async () => {
+    const gate = gated(3)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'complains', line: 'ERROR retry 1: rate limited' },
+        { does: 'complains', line: 'ERROR retry 2: rate limited' },
+        { does: 'complains', line: 'error: connection reset' },
+        { does: 'complains', line: 'fatal: the provider refused the request' },
+        { does: 'says', text: 'done' },
+      ],
+      between: gate.between,
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'go'))
+
+        // Three lines said in the same instant: the retry is the first said again, and the
+        // third comes inside the gap, so one row stands.
+        yield* heldInThread(session.id, (held) => notesOf(held, 'agent_stderr').length === 1)
+        yield* pause(20)
+        expect(notesOf(yield* threadOf(session.id), 'agent_stderr')).toHaveLength(1)
+
+        // Past the gap, the next complaint is a row of its own.
+        yield* TestClock.adjust(REPORT_GAP)
+        gate.carryOn()
+        yield* Fiber.join(running)
+        const entries = yield* heldInThread(
+          session.id,
+          (held) => notesOf(held, 'agent_stderr').length === 2,
+        )
+        expect(payloadOf(notesOf(entries, 'agent_stderr')[1]).line).toBe(
+          'fatal: the provider refused the request',
+        )
+      }),
+    )
+  })
+
+  test('a line that names no error is not shown, nor one written while no turn runs', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'complains', line: 'loading the model list' },
+        { does: 'says', text: 'done' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.prompt(session.id, 'go')
+        yield* pause(20)
+
+        expect(notesOf(yield* threadOf(session.id), 'agent_stderr')).toHaveLength(0)
+      }),
+    )
   })
 })

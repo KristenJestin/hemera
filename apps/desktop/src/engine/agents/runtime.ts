@@ -16,6 +16,7 @@
  * to answer a question nobody answered.
  */
 import {
+  Clock,
   Context,
   Data,
   Deferred,
@@ -109,6 +110,26 @@ const DRAIN_LIMIT = Duration.seconds(5)
  * (D6-08): an editor saves a file in several writes, and one change is one delivery.
  */
 export const INSTRUCTIONS_SETTLE = Duration.millis(300)
+
+/**
+ * What the agent writes on its standard error while a turn runs, as the thread says it (#131).
+ *
+ * A line that names a failure is what an agent says when its provider refuses it — OpenCode writes
+ * its 429 there and tells the protocol nothing — so it is shown as a quiet row under the turn. Not
+ * every line: an agent writes its progress there too, and a row claiming an error for a line that
+ * names none would be a row that lies.
+ */
+export const REPORTED_ERROR =
+  /error|fail|fatal|exception|refus|denied|invalid|timed? ?out|rate.?limit|too many requests|\b[45]\d\d\b|ECONN|EPIPE/i
+
+/** How far apart two of those rows are at least, so an agent retrying in a loop is one row. */
+export const REPORT_GAP = Duration.seconds(10)
+
+/** How many of those rows one turn shows at most. */
+export const REPORTS_PER_TURN = 5
+
+/** How much of a line of the agent's standard error a row keeps. */
+const REPORTED_LIMIT = 500
 
 /** Everything that can stop the engine from talking to an agent, as one thing to report. */
 export class AgentRuntimeError extends Data.TaggedError('AgentRuntimeError')<{
@@ -712,10 +733,46 @@ export const runtimeLayer = Layer.effect(
       traces.writing(Result.isSuccess(read) && read.success.acpTrace)
     })
 
-    /** One line of a Session's trace that is not a message: the death of its agent. */
+    /** One line of a Session's trace that is not a message: a death, a line of standard error. */
     const traced = (sessionId: string, said: string) => {
       if (traces.on()) traces.write(sessionId, `${new Date().toISOString()} ${said}`)
     }
+
+    /**
+     * What each turn has shown of the agent's standard error: the lines already shown, when the
+     * last one was, and how many. Kept beside the turn rather than in it, and gone with it.
+     */
+    const reported = new WeakMap<Turn, { lines: Set<string>; at: number | null; count: number }>()
+
+    /**
+     * A line the agent wrote on its standard error, shown under the running turn when it names a
+     * failure (#131): once per line, one row per `REPORT_GAP` at most, `REPORTS_PER_TURN` in all.
+     * Outside a turn it goes to the diagnostic alone, as it always did.
+     */
+    const reportedError = (sessionId: string, line: string) =>
+      Effect.gen(function* () {
+        const turn = turns.get(sessionId)
+        if (turn === undefined || turn.closed !== null) return
+        if (!REPORTED_ERROR.test(line)) return
+        const said = line.trim().slice(0, REPORTED_LIMIT)
+        // Two lines that differ only by a time or a count are the same complaint said again.
+        const known = said.replaceAll(/\d+/g, '#')
+        const now = yield* Clock.currentTimeMillis
+        const held = reported.get(turn) ?? { lines: new Set<string>(), at: null, count: 0 }
+        reported.set(turn, held)
+        if (held.lines.has(known) || held.count >= REPORTS_PER_TURN) return
+        if (held.at !== null && now - held.at < Duration.toMillis(REPORT_GAP)) return
+        held.lines.add(known)
+        held.at = now
+        held.count += 1
+        yield* write(sessionId, {
+          role: 'hemera',
+          kind: 'note',
+          body: 'The agent reported an error',
+          payload: JSON.stringify({ reason: 'agent_stderr', line: said }),
+          turnId: turn.id,
+        })
+      })
 
     /**
      * What a Session's connection hears, both ways (#131): the trace, when it is being written.
@@ -1594,6 +1651,13 @@ export const runtimeLayer = Layer.effect(
             onMessage: listening(sessionId),
           }),
         )
+        // What the agent says on its standard error while a turn runs is said under the turn
+        // when it names a failure, and its size is written in the trace (#131): an agent whose
+        // provider refused it says so there, and nowhere the protocol carries.
+        process.onStderr((line) => {
+          traced(sessionId, `agent stderr ‹${String(line.length)} chars›`)
+          runOwned(reportedError(sessionId, line).pipe(Effect.ignore)).catch(() => undefined)
+        })
 
         const started: Live = {
           connection,

@@ -383,6 +383,7 @@ export {
   type BareModeStateProps,
 } from './session/bare-mode-state.tsx'
 export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
+export { AgentReport, type AgentReportProps } from './session/agent-report.tsx'
 /** What the turn is doing right now, at the end of the thread while it runs. */
 export {
   ActivityRow,

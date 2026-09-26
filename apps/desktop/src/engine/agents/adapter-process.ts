@@ -94,8 +94,11 @@ export function forkedScript(
   let spawned: (() => void) | undefined
   let ended: ((code: number | null, signal: string | null) => void) | undefined
   let refused: ((cause: string) => void) | undefined
-  let readOut: ((line: string) => void) | undefined
-  let readErr: ((line: string) => void) | undefined
+  // Every reader is handed every line, as the spawned child's pipes do: the supervisor copies the
+  // standard error to the diagnostic and the runtime reads it for the thread (#131), and a second
+  // reader that replaced the first would have taken the diagnostic's copy away.
+  const readOut: ((line: string) => void)[] = []
+  const readErr: ((line: string) => void)[] = []
 
   const send = (message: AdapterInput): void => {
     if (port === undefined) held.push(message)
@@ -110,8 +113,8 @@ export function forkedScript(
         // SAFETY: the other end of this port is the adapter's bootstrap, which puts exactly
         // `AdapterOutput` on it; a port carries values, not types.
         const wrote = event.data as AdapterOutput
-        if ('output' in wrote) readOut?.(wrote.output)
-        else readErr?.(wrote.diagnostic)
+        if ('output' in wrote) for (const read of readOut) read(wrote.output)
+        else for (const read of readErr) read(wrote.diagnostic)
       })
       port?.start()
       for (const message of held) port?.postMessage(message)
@@ -166,10 +169,10 @@ export function forkedScript(
       refused = listener
     },
     onStdout: (listener) => {
-      readOut = listener
+      readOut.push(listener)
     },
     onStderr: (listener) => {
-      readErr = listener
+      readErr.push(listener)
     },
   }
 }

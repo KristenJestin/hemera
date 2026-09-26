@@ -475,6 +475,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'PlanPanel',
       'SessionDetails',
       'StoppedTurn',
+      // #131: what an agent reported outside the conversation, or asked and nobody could see.
+      'AgentReport',
       'ResumeFallbackBanner',
       // HEM-18: Hemera lends the agent its own tools. A call to one of them is a block of the
       // thread with the mark that tells it from a native call, a command it runs is a block of
