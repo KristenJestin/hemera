@@ -192,7 +192,7 @@ function Screen({
   // so that the control can be pressed in a play, and the task the banner opens is held with it,
   // since the banner and the view's stage are two readings of one build.
   const [minimised, setMinimised] = useState(chatMinimised)
-  const [selected, setSelected] = useState<string | undefined>(undefined)
+  const [selected, setSelected] = useState<string | null>(null)
   // What both readings of one build need: the data and the handlers, without the Spec's own two,
   // which the build session holds since it draws the frozen Spec beside the view.
   const view: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> = {
@@ -310,7 +310,9 @@ export const Complete: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: 'Build CSV export' })).toBeVisible()
-    await expect(canvas.getByRole('region', { name: 'Stage of T2' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'A CSV in the column order of the ledger' }),
+    ).toBeVisible()
     // The chat is the larger part of the row, and the panel takes its share beside it (issue
     // #115): the build is no longer the centre of the page.
     await expect(widthOf(canvasElement, 'The thread of this Session')).toBeGreaterThan(
@@ -352,7 +354,9 @@ export const Yours: Story = {
   args: { screen: 'yours' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'Stage of T4' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'The file imports into the ledger' }),
+    ).toBeVisible()
     await expect(
       canvas.getByRole('group', { name: 'Yours: T4 · The file imports into the ledger' }),
     ).toBeVisible()
@@ -364,7 +368,9 @@ export const Blocked: Story = {
   args: { screen: 'blocked' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'Stage of T3' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'Credit notes as negative rows' }),
+    ).toBeVisible()
     await expect(
       canvas.getByRole('group', { name: 'T3: the agent says this task contradicts the Spec' }),
     ).toBeVisible()
@@ -386,7 +392,7 @@ export const FinalChecks: Story = {
   args: { screen: 'finalChecks' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('region', { name: 'Stage of the final checks' })).toBeVisible()
+    await expect(canvas.getByRole('region', { name: 'Final checks' })).toBeVisible()
     await expect(canvas.getByText('final checks on try 2 of 3')).toBeVisible()
   },
 }
@@ -410,7 +416,9 @@ export const ChatMinimised: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('log', { name: 'The thread of this Session' })).toBeNull()
-    await expect(canvas.getByRole('region', { name: 'Stage of T3' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'Credit notes as negative rows' }),
+    ).toBeVisible()
     await expect(widthOf(canvasElement, 'Build ATL-7')).toBeGreaterThan(
       rowOf(canvasElement).getBoundingClientRect().width * 0.95,
     )
@@ -456,7 +464,7 @@ export const SpecOpen: Story = {
     // The chat is untouched by the Spec opening: it is the same width, on screen.
     const thread = widthOf(canvasElement, 'The thread of this Session')
     await expect(thread).toBeGreaterThan(0)
-    const view = canvas.getByRole('navigation', { name: 'Tasks' }).parentElement?.parentElement
+    const view = canvas.getByRole('region', { name: 'Build ATL-7' })
     await expect(view?.getBoundingClientRect().width).toBeLessThan(thread)
   },
 }
@@ -486,13 +494,19 @@ export const BannerOpensTheTask: Story = {
   args: { screen: 'blocked' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    // T2 is drawn under its story once its tasks are unfolded, wherever the view was.
+    await userEvent.click(canvas.getByRole('button', { name: 'Tasks · 3' }))
     await userEvent.click(canvas.getByRole('button', { name: /^T2 / }))
-    await expect(canvas.getByRole('region', { name: 'Stage of T2' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'A CSV in the column order of the ledger' }),
+    ).toBeVisible()
     const banner = within(
       canvas.getByRole('group', { name: 'T3: the agent says this task contradicts the Spec' }),
     )
     await userEvent.click(banner.getByRole('button', { name: 'Open' }))
-    await expect(canvas.getByRole('region', { name: 'Stage of T3' })).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'Credit notes as negative rows' }),
+    ).toBeVisible()
   },
 }
 

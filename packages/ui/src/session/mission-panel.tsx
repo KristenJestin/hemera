@@ -48,14 +48,10 @@ const SLOT = 'relative min-h-0 shrink-0 overflow-hidden border-l border-border'
 const OPEN = 'absolute inset-y-0 left-0 flex flex-col bg-surface-content'
 
 /**
- * The two widths a panel unfolds to: the share a Spec takes beside the chat, and the narrower one
- * the chat itself takes beside a build (D10-12). Each is a slot whose width moves and the width
- * what it holds is laid at.
+ * The width a panel unfolds to: the share a Spec takes beside the chat. A slot whose width moves,
+ * and the width what it holds is laid at.
  */
-const WIDTHS = {
-  wide: { slot: 'mission-panel-slot', open: 'mission-panel-body' },
-  narrow: { slot: 'mission-panel-slot-narrow', open: 'mission-panel-body-narrow' },
-} as const
+const WIDTHS = { wide: { slot: 'mission-panel-slot', open: 'mission-panel-body' } } as const
 
 const BAND = 'absolute inset-y-0 left-0 z-10 flex w-mission-band flex-col bg-surface-content'
 
@@ -96,11 +92,8 @@ export interface MissionPanelProps {
    * beside it, since the two are never open together (core.md, "Session view").
    */
   folded?: boolean | undefined
-  /**
-   * How wide it unfolds: `wide`, the share a Spec takes beside the chat, or `narrow`, the chat
-   * beside a build, which leaves the build the larger part of the row (D10-12).
-   */
-  width?: 'wide' | 'narrow' | undefined
+  /** How wide it unfolds: the share a Spec takes beside the chat. */
+  width?: 'wide' | undefined
   /**
    * Whether the chat beside it is minimised, which makes the panel the page (lot 5c, issue #115):
    * the slot grows from the fold to the whole row over the chat, and the fold it holds is the one

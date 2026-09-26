@@ -450,15 +450,6 @@
      changes while it unfolds: what the panel holds is laid at this width from the first frame,
      so nothing inside it reflows on the way. */
   --spacing-mission-panel: 45cqw;
-
-  /* The chat beside a build (lot 22, D10-12): the same fold, narrower, so the build at the centre
-     keeps the larger part of the row. A share of the row, for the reason the panel's is. */
-  --spacing-mission-chat: 30cqw;
-
-  /* The list of a build's tasks beside the stage of the one chosen (lot 22, D10-12): wide enough
-     for a label, a title of a few words and the time at the end of a row, on one line. */
-  --spacing-build-list: 20rem;
-
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -593,15 +584,6 @@
   );
 }
 
-/* The same slot for the chat beside a build (lot 22, D10-12), which unfolds to its narrower share. */
-@utility mission-panel-slot-narrow {
-  width: calc(
-    (var(--spacing-mission-band) + (var(--spacing-mission-chat) - var(--spacing-mission-band)) *
-        var(--mission-panel-open, 0)) *
-      (1 - var(--mission-panel-page, 0)) + 100cqw * var(--mission-panel-page, 0)
-  );
-}
-
 /* The chat beside a mission panel (lot 5c, issue #115), pinned to the width the panel leaves it:
    the band, or the unfolded share. A length asked of the row rather than a share of the chat's own
    box, so the chat's width answers the fold and not the box it happens to be in — which is what
@@ -615,24 +597,11 @@
   );
 }
 
-/* The same beside the narrower panel of a build (lot 22, D10-12). */
-@utility chat-pinned-narrow {
-  width: calc(
-    100cqw -
-      (var(--spacing-mission-band) + (var(--spacing-mission-chat) - var(--spacing-mission-band)) *
-        var(--mission-panel-open, 0))
-  );
-}
-
 /* What an unfolded panel holds (lot 5c): its own share, or the whole row when it is the page.
    Laid at `max`, so a slot narrower than the share clips it — a fold reflows the chat and nothing
    of the panel — while a slot wider, which is the page, is filled by it. */
 @utility mission-panel-body {
   width: max(var(--spacing-mission-panel), 100%);
-}
-
-@utility mission-panel-body-narrow {
-  width: max(var(--spacing-mission-chat), 100%);
 }
 
 /* Where the active tab meets the sheet it opens (design D2-02).

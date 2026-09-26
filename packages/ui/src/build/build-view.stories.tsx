@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { STORIES as SPEC_STORIES } from '../spec/spec-fixtures.ts'
 import {
   ACCEPTED,
   BLOCKED,
@@ -18,15 +19,17 @@ import {
 import { BuildView } from './build-view.tsx'
 
 /**
- * The build view (D10-12), alone: the head with the phase in plain words and what can be done
- * with the build, the agent's approach, the tasks grouped by state — what needs the user first —
- * and the stage of the one chosen. One story per state of the build `ATL-7` goes through; the
- * view in its Session, beside the chat, is `Surfaces/Session/Build`.
+ * The build view (issue #116): the head with the phase in plain words and what can be done with
+ * the build, the agent's approach, then the stories of the frozen Spec — each with the words it
+ * was written with, the criteria it is judged on, and where it stands — with the build's tasks
+ * unfolded under them, one stage at a time, and the final checks of the whole Spec. One story per
+ * state of the build `ATL-7`; the view in its Session, beside the chat, is
+ * `Surfaces/Session/Build`.
  */
 const meta = {
   title: 'Blocks/Build/BuildView',
   component: BuildView,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
@@ -38,6 +41,8 @@ const meta = {
   args: {
     build: BUILDING,
     now: NOW,
+    // The stories of the frozen Spec, which the build's own take their words from.
+    stories: SPEC_STORIES,
     specOpen: false,
     onToggleSpec: fn(),
     onPause: fn(),
@@ -52,9 +57,10 @@ const meta = {
   argTypes: {
     build: { control: 'object', description: 'The build, as the engine answers it.' },
     now: { control: 'text', description: 'The caller’s now, every time is said from.' },
+    stories: { control: 'object', description: 'The stories of the frozen Spec, its own words.' },
     selected: {
       control: 'text',
-      description: 'The task on the stage, for a caller that keeps it.',
+      description: 'The task that is unfolded, by its build task id; for a caller that keeps it.',
     },
     specOpen: { control: 'boolean', description: 'Whether the frozen Spec is open beside it.' },
     onToggleSpec: { action: 'spec toggled' },
@@ -73,17 +79,19 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The names of the groups of the list, in the order they are drawn. */
-function groupsOf(canvasElement: HTMLElement): string[] {
-  const list = within(canvasElement).getByRole('navigation', { name: 'Tasks' })
-  return within(list)
-    .getAllByRole('group')
-    .map((group) => group.getAttribute('aria-label') ?? '')
+/** The stories of the Spec as the view draws them, in the Spec's own order. */
+function storiesList(canvasElement: HTMLElement): HTMLElement {
+  return within(canvasElement).getByRole('list', { name: 'Stories of ATL-7' })
+}
+
+/** The one story of the Spec, by its title, with everything drawn under it. */
+function storyOf(canvasElement: HTMLElement, title: string): HTMLElement {
+  return within(storiesList(canvasElement)).getByRole('article', { name: title })
 }
 
 /**
- * Getting ready: the rows are there, T1 ready and the others waiting on it, and a line that waits
- * for the agent's approach — no task starts before it.
+ * Getting ready: the stories of the Spec with their words, T1 ready and the others waiting on it,
+ * and a line that waits for the agent's approach — no task starts before it.
  */
 export const GettingReady: Story = {
   args: { build: GETTING_READY },
@@ -93,48 +101,65 @@ export const GettingReady: Story = {
     await expect(
       canvas.getByText("Waiting for the agent's approach: no task starts before it."),
     ).toBeVisible()
-    await expect(groupsOf(canvasElement)).toEqual(['Ready, 1', 'Waiting, 3'])
-    await expect(canvas.getByRole('button', { name: /^T2 .* after T1$/ })).toBeVisible()
+    await expect(storiesList(canvasElement).children).toHaveLength(2)
+    await expect(storyOf(canvasElement, 'Export a month')).toHaveTextContent('to do')
+    await expect(storyOf(canvasElement, 'Credit notes in the same file')).toHaveTextContent('to do')
+    const one = storyOf(canvasElement, 'Export a month')
+    await expect(within(one).getByRole('button', { name: /^T1\b/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    await expect(within(one).getByRole('button', { name: /^T1 / })).toHaveTextContent(
+      'The invoice lines of the month',
+    )
+    await expect(
+      within(storyOf(canvasElement, 'Credit notes in the same file')).getByRole('button', {
+        name: 'Tasks · 1',
+      }),
+    ).toBeVisible()
   },
 }
 
 /**
- * Building: T1 done, T2 on its second try, T3 being checked and T4 waiting on both; the approach
- * folded now that tasks started, and T2 on the stage.
+ * Building: everything the panel holds at once — the phase, the stories with the words they were
+ * written with and the criteria they are judged on, the task being worked on unfolded into its
+ * stage, and the approach folded now that tasks started.
  */
 export const Building: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Building')).toBeVisible()
-    await expect(canvas.getByText('1 of 4 tasks done')).toBeVisible()
-    await expect(groupsOf(canvasElement)).toEqual([
-      'Working, 1',
-      'Checking, 1',
-      'Waiting, 1',
-      'Done, 1',
-    ])
-    await expect(canvas.getByRole('button', { name: /^T2 / })).toHaveAttribute(
-      'aria-current',
-      'true',
+    await expect(canvas.getByText('0 of 2 stories done')).toBeVisible()
+    await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
+    const one = storyOf(canvasElement, 'Export a month')
+    await expect(one).toHaveTextContent('in progress')
+    await expect(within(one).getByText(/As an accountant closing a month/)).toBeVisible()
+    await expect(within(one).getByRole('list', { name: 'Criteria of S1' })).toHaveTextContent(
+      'An empty month downloads the header row only.',
     )
-    await expect(canvas.getByRole('region', { name: 'Stage of T2' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Pause' })).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: 'Accept' })).toBeNull()
-    await expect(canvas.getByRole('list', { name: 'Stories' })).toHaveTextContent('S1 · open')
-    // The approach, folded once tasks started, opens on its note.
-    await userEvent.click(canvas.getByRole('button', { name: 'Approach' }))
+    // The task on the stage: its story is unfolded, and so is it.
+    const on = within(one).getByRole('button', { name: /^T2\b/ })
+    await expect(on).toHaveAttribute('aria-expanded', 'true')
+    await expect(
+      within(one).getByRole('region', { name: 'A CSV in the column order of the ledger' }),
+    ).toBeVisible()
+    // The approach: folded once tasks started, and it opens on the note.
+    const approach = canvas.getByRole('button', { name: 'Approach' })
+    await expect(approach).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(approach)
     await expect(await canvas.findByText(/the invoice query of/)).toBeVisible()
   },
 }
 
-/** The human task is ready: it is Yours, first in the list, on the stage with Done and Skip. */
+/** The human task is ready: it is Yours, its stage unfolded with Done and Skip. */
 export const Yours: Story = {
   args: { build: YOURS },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(groupsOf(canvasElement)[0]).toBe('Yours, 1')
-    const stage = within(canvas.getByRole('region', { name: 'Stage of T4' }))
-    await userEvent.click(stage.getByRole('button', { name: 'Done' }))
+    await expect(
+      canvas.getByRole('region', { name: 'The file imports into the ledger' }),
+    ).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Done' }))
     await expect(args.onTaskDone).toHaveBeenCalledWith('bt-4')
   },
 }
@@ -144,7 +169,6 @@ export const ThreeRedTries: Story = {
   args: { build: THREE_RED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(groupsOf(canvasElement)[0]).toBe('Yours, 1')
     await expect(
       canvas.getByRole('group', { name: 'T2 came back to you after 3 red tries' }),
     ).toBeVisible()
@@ -152,20 +176,20 @@ export const ThreeRedTries: Story = {
 }
 
 /**
- * The agent says T3 contradicts the Spec: T3 and T4 are blocked, T2 goes on; the blocker on T3's
- * stage, and T4 says what it waits on.
+ * The agent says T3 contradicts the Spec: T3 and T4 are blocked, T2 goes on; the blocker stands on
+ * T3's story, and T4 says what it waits on.
  */
 export const Blocked: Story = {
   args: { build: BLOCKED },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(groupsOf(canvasElement)).toEqual(['Blocked, 2', 'Working, 1', 'Done, 1'])
+    await expect(canvas.getByText('The agent says this task contradicts the Spec')).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'Dismiss' }))
     await expect(args.onDismissBlocker).toHaveBeenCalledWith('blocker-1')
-    await userEvent.click(canvas.getByRole('button', { name: /^T4 / }))
-    await expect(
-      canvas.getByText('Waits on T3, which the agent says contradicts the Spec.'),
-    ).toBeVisible()
+    const one = storyOf(canvasElement, 'Export a month')
+    await userEvent.click(within(one).getByRole('button', { name: 'Tasks · 3' }))
+    await userEvent.click(within(one).getByRole('button', { name: /^T4 / }))
+    await expect(canvas.getByText(/Waits on T3/)).toBeVisible()
   },
 }
 
@@ -182,15 +206,16 @@ export const Paused: Story = {
   },
 }
 
-/** Final checks: every task done, the final checks on the stage, the first one green so far. */
+/** Final checks: every task done, the checks of the whole Spec drawn under the stories. */
 export const FinalChecks: Story = {
   args: { build: FINAL_CHECKS },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Final checks', { selector: 'span' })).toBeVisible()
-    await expect(canvas.getByRole('region', { name: 'Stage of the final checks' })).toBeVisible()
+    await expect(canvas.getByText('final checks on try 1 of 3')).toBeVisible()
+    await expect(canvas.getByRole('heading', { name: 'Final checks' })).toBeVisible()
     await expect(canvas.getByRole('list', { name: 'Tries of the final checks' })).toBeVisible()
-    await expect(canvas.getByRole('list', { name: 'Stories' })).toHaveTextContent('S1 · verified')
+    await expect(storyOf(canvasElement, 'Export a month')).toHaveTextContent('done')
   },
 }
 
@@ -228,23 +253,27 @@ export const Accepted: Story = {
   },
 }
 
-/** Stopped: over and readable, why it stopped said, T3 skipped with its reason. */
+/** Stopped: over and readable, why it stopped said, T3 skipped with its reason on its row. */
 export const Stopped: Story = {
   args: { build: STOPPED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('status')).toHaveTextContent('You stopped the build.')
-    await expect(groupsOf(canvasElement)).toContain('Skipped, 1')
     await expect(canvas.queryByRole('button', { name: 'Resume' })).toBeNull()
+    const two = storyOf(canvasElement, 'Credit notes in the same file')
+    await userEvent.click(within(two).getByRole('button', { name: 'Tasks · 1' }))
+    await expect(within(two).getAllByRole('button', { name: /^T3\b/ })[0]).toHaveTextContent(
+      'Skipped',
+    )
   },
 }
 
 /**
- * The keyboard: the head's controls in order, then the list as one stop that the arrows walk and
- * Enter opens, then the stage; Stop asks first and gives the focus back.
+ * The keyboard: the head's controls in order, Stop asking first and giving the focus back, then
+ * the approach, then the fold of a story's tasks and the stage of a task.
  */
 export const Keyboard: Story = {
-  play: async ({ canvasElement, args }) => {
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const spec = canvas.getByRole('button', { name: 'Spec' })
     spec.focus()
@@ -261,16 +290,5 @@ export const Keyboard: Story = {
     await waitFor(() => expect(stop).toHaveFocus())
     await userEvent.tab()
     await expect(canvas.getByRole('button', { name: 'Approach' })).toHaveFocus()
-    await userEvent.tab()
-    // The list is one stop: the task on the stage.
-    await expect(canvas.getByRole('button', { name: /^T2 / })).toHaveFocus()
-    await userEvent.keyboard('{End}')
-    const last = canvas.getByRole('button', { name: /^T1 / })
-    await expect(last).toHaveFocus()
-    await userEvent.keyboard('{Enter}')
-    await expect(args.onSelect).toHaveBeenCalledWith('bt-1')
-    await expect(canvas.getByRole('region', { name: 'Stage of T1' })).toBeVisible()
-    await userEvent.tab()
-    await expect(canvas.getByRole('region', { name: 'Stage of T1' })).toHaveFocus()
   },
 }
