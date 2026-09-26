@@ -28,6 +28,7 @@ import {
   SessionDetails,
   SessionHeader,
   SpecPanel,
+  ActivityRow,
   STUCK_AFTER_MS,
   UsageMeter,
   type MessageLine,
