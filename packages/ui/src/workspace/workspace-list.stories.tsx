@@ -76,23 +76,27 @@ const FILLED: WorkspaceRow[] = [
 const PLAN: PlanRepositoryLine[] = [
   {
     path: './sources/api',
-    holdsRepository: true,
-    branches: ['main', 'dev'],
-    base: 'main',
-    detachedCommit: null,
-    branch: 'atlas/',
-    included: true,
-    reason: null,
+    read: {
+      holdsRepository: true,
+      branches: ['main', 'dev'],
+      base: 'main',
+      detachedCommit: null,
+      branch: 'atlas/',
+      included: true,
+      reason: null,
+    },
   },
   {
     path: './sources/web',
-    holdsRepository: true,
-    branches: ['main'],
-    base: 'main',
-    detachedCommit: null,
-    branch: 'atlas/',
-    included: true,
-    reason: null,
+    read: {
+      holdsRepository: true,
+      branches: ['main'],
+      base: 'main',
+      detachedCommit: null,
+      branch: 'atlas/',
+      included: true,
+      reason: null,
+    },
   },
 ]
 

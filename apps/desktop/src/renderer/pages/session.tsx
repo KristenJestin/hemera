@@ -5,6 +5,7 @@ import type {
   CommandRun,
   ConfigOption,
   ContextView as Provided,
+  PlanRepository,
   SectionName,
   Session,
   SessionEntry,
@@ -62,7 +63,7 @@ import {
   takeOver,
 } from '../spec-store.ts'
 import { launchOf, readerOf, specViewOf, specWorkspacesOf } from '../spec-views.ts'
-import { createForSpec, planForSpec } from '../workspaces-store.ts'
+import { createForSpec, planForSpec, readPlanRepositories } from '../workspaces-store.ts'
 import { planLinesOf, worktreesOf } from '../workspace-details.ts'
 
 /**
@@ -309,13 +310,16 @@ export function SessionPage({
     spec?.sections.find((one) => one.name === name)?.version ?? 0
   /** The plan the Workspace dialog is open on, and what it is to leave behind. */
   const [workspacePlan, setWorkspacePlan] = useState<WorkspacePlan | null>(null)
+  /** What Git has answered of that plan so far, in the order the answers arrived (#110). */
+  const [workspaceReads, setWorkspaceReads] = useState<readonly PlanRepository[]>([])
   const [intent, setIntent] = useState<'start' | 'only' | null>(null)
-
   /**
    * Prepares a Workspace for this Spec (D8-12): the plan is asked for first — its branches are
-   * named after the Spec (D8-04) — and the dialog opens on it, because it takes its rows as it
-   * opens. Both ways in go through it: the Workspace is named and its branches chosen by the hand
-   * either way, and `start` is the only thing that differs afterwards.
+   * named after the Spec (D8-04) — and the dialog opens on it at once, because it takes its rows
+   * as it opens; each location of the plan is read on its own afterwards, so a repository that
+   * is slow, refused or gone holds back its own row alone (#110). Both ways in go through it:
+   * the Workspace is named and its branches chosen by the hand either way, and `start` is the
+   * only thing that differs afterwards.
    */
   const prepareWorkspace = (start: boolean): void => {
     const held = defined
@@ -323,7 +327,17 @@ export function SessionPage({
     void planForSpec(session.projectId, held.spec.key, held.spec.slug).then((planned) => {
       if (planned === null) return
       setWorkspacePlan(planned)
+      setWorkspaceReads([])
       setIntent(start ? 'start' : 'only')
+      void readPlanRepositories(
+        session.projectId,
+        held.spec.key,
+        held.spec.slug,
+        planned.repositories,
+        (read) => {
+          setWorkspaceReads((current) => [...current, read])
+        },
+      )
     })
   }
 
@@ -792,7 +806,7 @@ export function SessionPage({
           }}
           root={workspacePlan.root}
           defaultName={workspacePlan.name}
-          repositories={planLinesOf(workspacePlan)}
+          repositories={planLinesOf(workspacePlan, workspaceReads)}
           gitMissing={!workspacePlan.gitAvailable}
           // No `branchOf`: the branches follow the Spec, which the plan they came with already
           // names (D8-04), and a name typed here does not rename the Spec.

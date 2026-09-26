@@ -2,6 +2,7 @@ import { type ReactNode, useState } from 'react'
 
 import type {
   Command,
+  PlanRepository,
   RecipeStep,
   RepositoryState,
   Variable,
@@ -147,6 +148,7 @@ function WorkspacesCards({
   actions,
   onBrowse,
   onPlan,
+  onReadPlan,
   onCreateDedicated,
   onCreate,
   onCleanup,
@@ -159,6 +161,14 @@ function WorkspacesCards({
   actions: WorkspaceActions
   onBrowse: () => Promise<string | null>
   onPlan: () => Promise<WorkspacePlan | null>
+  /**
+   * Reads the locations of the plan the dialog is open on, in the plan's order, one after the
+   * other: each answer is given as it arrives (#110).
+   */
+  onReadPlan: (
+    relativePaths: readonly string[],
+    onRead: (read: PlanRepository) => void,
+  ) => Promise<void>
   onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
   onCreate: (path: string, name: string) => Promise<string | null>
   onCleanup: (id: string) => Promise<string | null>
@@ -168,14 +178,22 @@ function WorkspacesCards({
   const [refusal, setRefusal] = useState<string | null>(null)
   /** The plan the creation dialog is open on; kept while it closes, so it does not empty. */
   const [plan, setPlan] = useState<WorkspacePlan | null>(null)
+  /** What Git has answered of that plan so far, in the order the answers arrived (#110). */
+  const [reads, setReads] = useState<readonly PlanRepository[]>([])
   const [creating, setCreating] = useState(false)
 
-  // The plan is asked first, and the dialog opens on it: it takes its rows as it opens.
+  // The plan is asked first, and the dialog opens on it at once: it takes its rows as it opens,
+  // and each location is read on its own afterwards, so a repository that is slow, refused or
+  // gone holds back its own row alone.
   const create = () => {
     void onPlan().then((planned) => {
       if (planned === null) return
       setPlan(planned)
+      setReads([])
       setCreating(true)
+      void onReadPlan(planned.repositories, (read) => {
+        setReads((current) => [...current, read])
+      })
     })
   }
 
@@ -215,7 +233,7 @@ function WorkspacesCards({
           onOpenChange={setCreating}
           root={plan.root}
           defaultName={plan.name}
-          repositories={planLinesOf(plan)}
+          repositories={planLinesOf(plan, reads)}
           // No Spec to name the branches after: they follow the name (D8-04).
           branchOf={branchOfName(plan.branchPrefix)}
           gitMissing={!plan.gitAvailable}
@@ -267,6 +285,7 @@ export function ProjectSettingsPage({
   projectVariables,
   workspaceActions,
   onPlanWorkspace,
+  onReadPlanWorkspace,
   onCreateDedicated,
   onCreateWorkspace,
   onCleanupWorkspace,
@@ -321,6 +340,14 @@ export function ProjectSettingsPage({
   workspaceActions: WorkspaceActions
   /** Plans a dedicated Workspace with no Spec; null when the engine refused (D8-04). */
   onPlanWorkspace: () => Promise<WorkspacePlan | null>
+  /**
+   * Reads the locations of that plan, in the plan's order, one after the other: the dialog is
+   * open on the plan already, and each answer fills its own row as it arrives (#110).
+   */
+  onReadPlanWorkspace: (
+    relativePaths: readonly string[],
+    onRead: (read: PlanRepository) => void,
+  ) => Promise<void>
   /** Creates it from what the dialog kept, then prepares it; answers the refusal, or null. */
   onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
   /** Makes a Workspace on a folder the user picked; answers the engine's refusal, or null. */
@@ -389,6 +416,7 @@ export function ProjectSettingsPage({
             actions={workspaceActions}
             onBrowse={onBrowse}
             onPlan={onPlanWorkspace}
+            onReadPlan={onReadPlanWorkspace}
             onCreateDedicated={onCreateDedicated}
             onCreate={onCreateWorkspace}
             onCleanup={onCleanupWorkspace}

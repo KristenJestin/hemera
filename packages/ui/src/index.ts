@@ -410,6 +410,7 @@ export {
 export {
   type GitState,
   type PlanRepositoryLine,
+  type PlanRepositoryRead,
   type PreparationStepLine,
   type StepKind,
   type StepState,

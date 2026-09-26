@@ -2,6 +2,7 @@ import type {
   ChannelArguments,
   CommandRun,
   EngineEvent,
+  PlanRepository,
   RecipeStep,
   RepositoryState,
   Variable,
@@ -314,6 +315,60 @@ export async function planForSpec(
   } catch (cause) {
     refused(cause)
     return null
+  }
+}
+
+/**
+ * One location of a plan the dialog is open on, read on its own (D8-04, #110): what Git says of it,
+ * its branches, the base a worktree takes and the branch it is created on.
+ *
+ * A refusal of the engine's own is answered as that location's reason rather than as a failure
+ * of the read: the dialog has a row per location, and a row the engine would not answer says so
+ * in its own row instead of holding the other rows back.
+ */
+export async function readPlanRepository(
+  projectId: string,
+  key: string | null,
+  slug: string,
+  relativePath: string,
+): Promise<PlanRepository> {
+  try {
+    return await window.hemera.invoke('workspaces.planRepository', {
+      projectId,
+      key,
+      slug,
+      relativePath,
+    })
+  } catch (cause) {
+    return {
+      relativePath,
+      holdsRepository: false,
+      branches: [],
+      base: null,
+      detachedCommit: null,
+      branch: '',
+      included: false,
+      reason: message(cause),
+    }
+  }
+}
+
+/**
+ * Reads the locations of a plan, in the order the plan declared them, one after the other (D8-04,
+ * #110): each answer is handed to `onRead` as it arrives, so a dialog open on the plan fills its
+ * rows in as they come. Git is read for one location at a time, and the dialog never waits for a
+ * repository that is slow, refused or gone to show the rows it already has.
+ */
+export async function readPlanRepositories(
+  projectId: string,
+  key: string | null,
+  slug: string,
+  relativePaths: readonly string[],
+  onRead: (read: PlanRepository) => void,
+): Promise<void> {
+  for (const relativePath of relativePaths) {
+    // oxlint-disable-next-line no-await-in-loop -- one location at a time, in the plan's order
+    onRead(await readPlanRepository(projectId, key, slug, relativePath))
   }
 }
 

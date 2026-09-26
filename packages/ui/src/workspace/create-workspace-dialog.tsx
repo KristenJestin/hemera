@@ -6,7 +6,7 @@ import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Select, type SelectItem } from '../components/select/select.tsx'
-import type { PlanRepositoryLine, WorkspaceDraft } from './model.ts'
+import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './model.ts'
 
 /**
  * Where a dedicated Workspace is created, from the plan the engine proposed (D8-04).
@@ -21,6 +21,11 @@ import type { PlanRepositoryLine, WorkspaceDraft } from './model.ts'
  * folder before it writes anything, and one failed check refuses the whole creation. What it
  * answers is shown under the form as it was said, and the form stays as it was typed. A machine
  * without `git` is said up front, and nothing can be created on it (D8-03).
+ *
+ * The dialog opens at once: the plan names the folder and every location of the Project before
+ * Git has read any of them, and each location is read on its own afterwards, one after the other.
+ * A row not read yet shows nothing, and Create waits for the last of them — a repository that is
+ * slow, refused or gone holds back its own row alone, and never the dialog.
  *
  * Opened from a Spec, the name is the Spec's slug and the branches are the Spec's. Opened from the
  * settings, there is no Spec: the name may start empty, and each branch follows the name as it is
@@ -70,6 +75,8 @@ interface Commit {
 /** What the dialog keeps of a row while it is edited: the plan's line, with text to type in. */
 interface Row {
   path: string
+  /** Whether that location has been read yet: a row not read shows nothing, and is not created. */
+  read: boolean
   holdsRepository: boolean
   /** The branches the base may be chosen from: this repository's own, in Git's order. */
   branches: readonly string[]
@@ -84,24 +91,47 @@ interface Row {
   written: boolean
 }
 
-function rowsOf(plan: readonly PlanRepositoryLine[]): Row[] {
-  return plan.map((line) => ({
-    path: line.path,
-    holdsRepository: line.holdsRepository,
-    branches: line.branches,
-    base: line.base ?? '',
+/**
+ * What Git answered of a location, as a row takes it (#110): the fields a read fills in, and none
+ * of the ones the user edits.
+ */
+function answered(read: PlanRepositoryRead): Partial<Row> {
+  return {
+    read: true,
+    holdsRepository: read.holdsRepository,
+    branches: read.branches,
+    base: read.base ?? '',
     // A plan names a commit as the base and says so in the same breath: the two go together, and
     // the commit is kept so that choosing a branch afterwards leaves it something to choose back.
     detached:
-      line.detachedCommit !== null && line.base !== null
-        ? { commit: line.base, short: line.detachedCommit }
+      read.detachedCommit !== null && read.base !== null
+        ? { commit: read.base, short: read.detachedCommit }
         : null,
-    branch: line.branch,
+    branch: read.branch,
     // A location without a repository cannot be included, whatever the plan says (D8-04).
-    included: line.holdsRepository && line.included,
-    reason: line.reason,
-    written: false,
-  }))
+    included: read.holdsRepository && read.included,
+    reason: read.reason,
+  }
+}
+
+function rowsOf(plan: readonly PlanRepositoryLine[]): Row[] {
+  return plan.map((line) => {
+    // The plan names its locations before Git has read them, so a row may have no answer yet: it
+    // is then shown as one that says nothing, and no field of it is filled in from nothing.
+    const row: Row = {
+      path: line.path,
+      read: false,
+      holdsRepository: false,
+      branches: [],
+      base: '',
+      detached: null,
+      branch: '',
+      included: false,
+      reason: null,
+      written: false,
+    }
+    return line.read === null ? row : { ...row, ...answered(line.read) }
+  })
 }
 
 /**
@@ -179,6 +209,24 @@ export function CreateWorkspaceDialog({
     setRefusal(null)
   }, [open])
 
+  // Each answer fills its own row in as it arrives (#110): the dialog opened on the plan, and
+  // every location of it is read on its own, so a row nothing has been read of yet stays as it is
+  // and a repository that is slow, refused or gone holds back its own row alone.
+  useEffect(() => {
+    if (!open) return
+    setRows((current) => {
+      let filled = false
+      const next = current.map((row) => {
+        if (row.read) return row
+        const line = repositories.find((one) => one.path === row.path)
+        if (line === undefined || line.read === null) return row
+        filled = true
+        return { ...row, ...answered(line.read) }
+      })
+      return filled ? next : current
+    })
+  }, [open, repositories])
+
   // What a form can refuse on its own is refused here, and Create waits until nothing is: the
   // engine is asked only about what only Git and the disk can answer (D8-04).
   const nameRefusal = nameRefusalOf(name)
@@ -190,7 +238,11 @@ export function CreateWorkspaceDialog({
   // only a plan that offers a repository can be left with none.
   const noneIncluded = included.length === 0 && rows.some((row) => row.holdsRepository)
   const incomplete = included.some((row) => row.base.trim() === '' || row.branch.trim() === '')
-  const refused = nameRefusal !== undefined || noneIncluded || incomplete
+  // Every location of the plan is read on its own, and Create waits for the last of them: a
+  // repository that is slow, refused or gone holds back its own row alone, and never what the
+  // other rows say.
+  const reading = rows.some((row) => !row.read)
+  const refused = nameRefusal !== undefined || reading || noneIncluded || incomplete
 
   const change = (path: string, next: Partial<Row>) => {
     setRows(rows.map((row) => (row.path === path ? { ...row, ...next } : row)))
@@ -267,15 +319,20 @@ export function CreateWorkspaceDialog({
                   className="min-w-0"
                   label={<span className={PATH}>{row.path}</span>}
                   checked={row.included}
-                  disabled={!row.holdsRepository}
+                  disabled={!row.read || !row.holdsRepository}
                   onCheckedChange={(checked) => change(row.path, { included: checked })}
                 />
-                {/* A repository Git would not read says so in Git's own words, where a location
-                    that simply holds none is not the user's problem (D8-04). */}
-                {!row.holdsRepository && (
-                  <Badge tone={row.reason === null ? 'neutral' : 'destructive'}>
-                    {row.reason ?? 'no repository in main'}
-                  </Badge>
+                {/* A row Git has not answered for yet says so and nothing else, and a repository
+                    Git would not read says it in Git's own words, where a location that simply
+                    holds none is not the user's problem (D8-04). */}
+                {!row.read ? (
+                  <Badge tone="neutral">being read</Badge>
+                ) : (
+                  !row.holdsRepository && (
+                    <Badge tone={row.reason === null ? 'neutral' : 'destructive'}>
+                      {row.reason ?? 'no repository in main'}
+                    </Badge>
+                  )
                 )}
               </span>
               {row.holdsRepository && (

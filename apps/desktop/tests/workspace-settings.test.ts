@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import type { PlanRepository } from '@hemera/ipc'
+
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { repositoryLinesOf } from '#renderer/project-lines.ts'
 import {
@@ -38,6 +40,7 @@ import {
   moveRecipeStep,
   planDedicated,
   readMainStatus,
+  readPlanRepositories,
   readProjectVariables,
   readRecipe,
   readWorkspaces,
@@ -163,11 +166,21 @@ async function loginForm(
     key: 'HEM-7',
     slug: 'login-form',
   })
+  const reads: PlanRepository[] = await Promise.all(
+    plan.repositories.map((relativePath) =>
+      engine.bridge.invoke('workspaces.planRepository', {
+        projectId,
+        key: 'HEM-7',
+        slug: 'login-form',
+        relativePath,
+      }),
+    ),
+  )
   const made = await engine.bridge.invoke('workspaces.create', {
     projectId,
     specId: null,
     name: 'login-form',
-    repositories: plan.repositories.flatMap((one) =>
+    repositories: reads.flatMap((one) =>
       one.base === null
         ? []
         : [{ relativePath: one.relativePath, branch: one.branch, base: one.base }],
@@ -560,14 +573,18 @@ describe('A dedicated Workspace is made from the settings with no Spec', () => {
 
       const plan = await planDedicated(project.id)
       expect(plan).not.toBeNull()
-      // What the dialog hands over once named: every repository of the plan, on the branch the
-      // name makes.
+      // What the dialog hands over once named: every location of the plan, read on its own as the
+      // dialog reads them (#110), on the branch the name makes.
+      const reads: PlanRepository[] = []
+      await readPlanRepositories(project.id, null, '', plan!.repositories, (one) => {
+        reads.push(one)
+      })
       const branch = branchOfName(plan!.branchPrefix)('Spike one')
       const worktrees = worktreesOf({
         name: 'spike-one',
-        repositories: planLinesOf(plan!).map((one) => ({
+        repositories: planLinesOf(plan!, reads).map((one) => ({
           path: one.path,
-          base: one.base!,
+          base: one.read!.base!,
           branch,
         })),
       })
