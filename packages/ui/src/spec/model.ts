@@ -133,7 +133,7 @@ export interface SpecQuestionOption {
 }
 
 /**
- * The answer given: one of the options, or words of the reader's own — "Something else…".
+ * The answer given: one of the options, or words of the reader's own, given under `Other`.
  */
 export interface SpecAnswer {
   optionId?: string | undefined
