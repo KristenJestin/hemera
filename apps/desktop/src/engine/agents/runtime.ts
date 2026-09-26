@@ -70,7 +70,7 @@ import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
-import { AcpTraces, type RequestBook, requestBook, traceLine } from './trace.ts'
+import { AcpTraces, type Heard, type RequestBook, requestBook, traceLine } from './trace.ts'
 import { Commands } from '../commands/service.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
@@ -110,6 +110,16 @@ const DRAIN_LIMIT = Duration.seconds(5)
  * (D6-08): an editor saves a file in several writes, and one change is one delivery.
  */
 export const INSTRUCTIONS_SETTLE = Duration.millis(300)
+
+/**
+ * How long a request of the agent's may wait for Hemera before the thread says it is (#131).
+ *
+ * Hemera answers what it can draw — a permission is a block of the thread, and the rest the SDK
+ * refuses at once — so a request still open after this is one the agent is waiting on and the
+ * reader cannot see. A few seconds, because a permission being written is a request open for the
+ * time of one write, and that one is drawn.
+ */
+export const UNANSWERED_AFTER = Duration.seconds(5)
 
 /**
  * What the agent writes on its standard error while a turn runs, as the thread says it (#131).
@@ -775,14 +785,66 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
-     * What a Session's connection hears, both ways (#131): the trace, when it is being written.
-     * The book names the request a response answers, which the response itself does not.
+     * A request of the agent's that Hemera has not answered after `UNANSWERED_AFTER`, said in the
+     * thread with its method (#131). A permission the thread is drawing is not one: its block is
+     * already what says the agent is waiting.
+     */
+    const watchedRequest = (sessionId: string, book: RequestBook, heard: Heard) =>
+      Effect.gen(function* () {
+        yield* Effect.sleep(UNANSWERED_AFTER)
+        if (heard.id === null || !book.waiting(heard.id)) return
+        const turn = turns.get(sessionId)
+        if (heard.method === 'session/request_permission' && (turn?.permission ?? null) !== null) {
+          return
+        }
+        yield* write(sessionId, {
+          role: 'hemera',
+          kind: 'note',
+          body: 'The agent is waiting for an answer Hemera cannot show',
+          payload: JSON.stringify({ reason: 'unanswered_request', method: heard.method }),
+          correlationId: `request:${heard.id}`,
+          turnId: turn?.id ?? null,
+        })
+      })
+
+    /**
+     * A request of the agent's that Hemera refused, said once per method and agent (#131): the SDK
+     * answers a method Hemera does not implement with an error, and an agent that then waits on
+     * something else is an agent whose reader was never told what it asked for.
+     */
+    const refusedRequest = (sessionId: string, heard: Heard) =>
+      write(sessionId, {
+        role: 'hemera',
+        kind: 'note',
+        body: 'The agent asked for something Hemera cannot answer',
+        payload: JSON.stringify({
+          reason: 'refused_request',
+          method: heard.method,
+          line: heard.error ?? '',
+        }),
+        turnId: turns.get(sessionId)?.id ?? null,
+      })
+
+    /**
+     * What a Session's connection hears, both ways (#131): the trace when it is being written, and
+     * the agent's requests watched until Hemera has answered them.
      */
     const listening = (sessionId: string) => {
       const book = requestBook()
+      const refused = new Set<string>()
       return (direction: 'in' | 'out', message: Parameters<RequestBook['heard']>[1]) => {
         const heard = book.heard(direction, message)
         if (traces.on()) traces.write(sessionId, traceLine(direction, heard, message, new Date()))
+        if (heard.askedBy !== 'agent') return
+        if (heard.kind === 'request') {
+          runOwned(watchedRequest(sessionId, book, heard).pipe(Effect.ignore)).catch(
+            () => undefined,
+          )
+          return
+        }
+        if (heard.error === null || refused.has(heard.method)) return
+        refused.add(heard.method)
+        runOwned(refusedRequest(sessionId, heard).pipe(Effect.ignore)).catch(() => undefined)
       }
     }
 

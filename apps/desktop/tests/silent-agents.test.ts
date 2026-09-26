@@ -17,11 +17,25 @@ import type { AnyMessage } from '@agentclientprotocol/sdk'
 import type { SessionEntry } from '@hemera/core'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
-import { AgentRuntime, REPORT_GAP } from '#engine/agents/runtime.ts'
-import { AcpTraces, TRACE_LIMIT, acpTracesLayer, elided } from '#engine/agents/trace.ts'
+import { AgentRuntime, REPORT_GAP, UNANSWERED_AFTER } from '#engine/agents/runtime.ts'
+import {
+  AcpTraces,
+  TRACE_LIMIT,
+  acpTracesLayer,
+  elided,
+  requestBook,
+} from '#engine/agents/trace.ts'
 import { Preferences } from '#engine/preferences.ts'
 import { traceFileOf } from '#main/diagnostic.ts'
-import { application, aSession, gated, heldInThread, pause, threadOf } from './application.ts'
+import {
+  ASKED,
+  application,
+  aSession,
+  gated,
+  heldInThread,
+  pause,
+  threadOf,
+} from './application.ts'
 
 let dataFolder: string
 let workingDirectory: string
@@ -257,5 +271,71 @@ describe('What the agent writes to stderr while a turn runs', () => {
         expect(notesOf(yield* threadOf(session.id), 'agent_stderr')).toHaveLength(0)
       }),
     )
+  })
+})
+
+describe('A request Hemera must answer is never left silent', () => {
+  test('a permission request is drawn, and not reported as a request nobody can see', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'asks', call: ASKED }] })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const running = yield* Effect.forkScoped(runtime.prompt(session.id, 'touch the config'))
+
+        yield* heldInThread(session.id, (held) =>
+          held.some((entry) => entry.kind === 'permission_request' && entry.state === 'pending'),
+        )
+        yield* TestClock.adjust(UNANSWERED_AFTER)
+        yield* pause(20)
+        expect(notesOf(yield* threadOf(session.id), 'unanswered_request')).toHaveLength(0)
+
+        yield* runtime.decide(session.id, 'call-1', 'allow-once')
+        yield* Fiber.join(running)
+      }),
+    )
+  })
+
+  test('a request of a kind Hemera cannot draw is shown with its method', async () => {
+    const agent = fakeAgent({
+      steps: [
+        { does: 'requests', method: '_fake/unknown' },
+        { does: 'requests', method: '_fake/unknown' },
+        { does: 'says', text: 'went on without it' },
+      ],
+    })
+
+    await opened(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        const report = yield* runtime.prompt(session.id, 'go')
+        expect(report.stopReason).toBe('end_turn')
+
+        const entries = yield* heldInThread(
+          session.id,
+          (held) => notesOf(held, 'refused_request').length > 0,
+        )
+        // Said once per method: an agent asking again is the same thing to know.
+        const rows = notesOf(entries, 'refused_request')
+        expect(rows).toHaveLength(1)
+        expect(rows[0]?.body).toBe('The agent asked for something Hemera cannot answer')
+        expect(payloadOf(rows[0]).method).toBe('_fake/unknown')
+      }),
+    )
+  })
+
+  test('a request of the agent is waiting until Hemera answered it, whatever it was', () => {
+    const book = requestBook()
+    book.heard('in', { jsonrpc: '2.0', id: 7, method: 'elicitation/create', params: {} })
+    expect(book.waiting('7')).toBe(true)
+    // Hemera's own request with the same number is another request.
+    book.heard('out', { jsonrpc: '2.0', id: 7, method: 'session/prompt', params: {} })
+    book.heard('in', { jsonrpc: '2.0', id: 7, result: {} })
+    expect(book.waiting('7')).toBe(true)
+    const answered = book.heard('out', { jsonrpc: '2.0', id: 7, result: {} })
+    expect(answered).toMatchObject({ kind: 'response', method: 'elicitation/create' })
+    expect(book.waiting('7')).toBe(false)
   })
 })

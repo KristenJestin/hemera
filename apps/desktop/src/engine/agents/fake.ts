@@ -167,6 +167,14 @@ export type FakeStep =
       readonly does: 'complains'
       readonly line: string
     }
+  | {
+      /**
+       * A request of a method Hemera does not implement, sent and awaited (#131): what the SDK
+       * answers it with is the agent's business, and the turn goes on either way.
+       */
+      readonly does: 'requests'
+      readonly method: string
+    }
 
 /**
  * What the agent is scripted to be: what it announces, and what it does when it is asked.
@@ -470,6 +478,7 @@ function updateOf(step: FakeStep): SessionUpdate | null {
     case 'uses':
     case 'usesTogether':
     case 'complains':
+    case 'requests':
       return null
     default:
       return null
@@ -949,6 +958,11 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         }
         if (step.does === 'complains') {
           for (const read of complaints) read(step.line)
+          continue
+        }
+        if (step.does === 'requests') {
+          // oxlint-disable-next-line no-await-in-loop -- a request is answered before the agent goes on, as it would wait on it
+          await connection?.extMethod(step.method, {}).catch(() => undefined)
           continue
         }
         if (step.does === 'usesTogether') {
