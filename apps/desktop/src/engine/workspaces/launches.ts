@@ -446,13 +446,17 @@ export const launchesLayer = Layer.effect(
      * The Session is written in the transaction that says `starting`, before the agent is asked:
      * a start that fails is started again on that same Session, so it has to be there first, and
      * its row carries the revision and the Workspace for good (D8-13).
+     *
+     * `claim` is this starter's token: the identifier of the Session it writes, written with
+     * `starting`. It is what tells the launch this start holds from one another starter took, and
+     * `refused` writes `failed` only on its own (#121).
      */
-    const start = (asked: LaunchView) =>
+    const start = (asked: LaunchView, claim: string) =>
       Effect.gen(function* () {
         const snapshot = yield* readLaunched(asked.specId, asked.revisionId)
         const projectId = snapshot.spec.projectId
         const agent = yield* agentOf(snapshot.spec)
-        const sessionId = crypto.randomUUID()
+        const sessionId = claim
         const starting = yield* withDatabase(
           mutate('starting the build', (transaction) =>
             Effect.gen(function* () {
@@ -542,8 +546,9 @@ export const launchesLayer = Layer.effect(
           ),
         ).pipe(Effect.tap((held) => tell(held, projectId)))
         // Another starter — a request and the Workspace becoming ready at once — took the launch
-        // between the two reads: what it said of the build is not this caller's to say again.
-        if (starting.state !== 'starting') return starting
+        // between the two reads: what it said of the build is not this caller's to say again, and
+        // a launch it holds `starting` is its own, not this one's (#121).
+        if (starting.state !== 'starting' || starting.sessionId !== claim) return starting
         yield* writeBrief(sessionId, snapshot)
         return yield* settled(starting, sessionId, projectId)
       })
@@ -553,8 +558,16 @@ export const launchesLayer = Layer.effect(
      * what the caller is answered with. Its Session, when the start got that far, stands for a
      * `retry` to start again. A launch this start no longer holds — a Rework cancelled it,
      * another starter took it — is left where it stands, and the caller is answered with it.
+     *
+     * `claim` is the token the start holds the launch by (the Session it writes with `starting`):
+     * a launch `starting` on another token is another starter's (#121).
      */
-    const refused = (launch: LaunchView, projectId: string, refusal: LaunchRefusal) =>
+    const refused = (
+      launch: LaunchView,
+      projectId: string,
+      claim: string,
+      refusal: LaunchRefusal,
+    ) =>
       Effect.gen(function* () {
         const at = now()
         const detail = refusal.message
@@ -575,9 +588,11 @@ export const launchesLayer = Layer.effect(
               }
               // A launch that is no longer this refusal's to write is left where it stands, and
               // nothing is said of it (D8-13): a Rework that cancelled it, or another starter
-              // that took it, is not undone by the start that lost it.
+              // that took it, is not undone by the start that lost it. `waiting` is nobody's
+              // claim yet; `starting` is this start's only on its own token (#121).
               const held = LAUNCH_STATES.find((known) => known === row.state)
-              if (held !== 'waiting' && held !== 'starting') {
+              const ours = held === 'waiting' || (held === 'starting' && row.sessionId === claim)
+              if (!ours) {
                 return { result: viewOf(row), events: [] } satisfies Mutation<LaunchView>
               }
               yield* transaction
@@ -612,11 +627,12 @@ export const launchesLayer = Layer.effect(
     const inBackground = (
       launch: LaunchView,
       projectId: string,
+      claim: string,
       starting: Effect.Effect<LaunchView, LaunchRefusal>,
     ) =>
       Effect.forkIn(scope)(
         starting.pipe(
-          Effect.catch((refusal) => refused(launch, projectId, refusal)),
+          Effect.catch((refusal) => refused(launch, projectId, claim, refusal)),
           Effect.catch((failure) =>
             diagnostic.write(
               `starting the build of the launch ${launch.id} failed: ${failure.message}`,
@@ -635,11 +651,13 @@ export const launchesLayer = Layer.effect(
     ) =>
       Effect.forEach(
         waiting,
-        ({ launch, projectId }) =>
-          start(launch).pipe(
-            Effect.catch((refusal) => refused(launch, projectId, refusal)),
+        ({ launch, projectId }) => {
+          const claim = crypto.randomUUID()
+          return start(launch, claim).pipe(
+            Effect.catch((refusal) => refused(launch, projectId, claim, refusal)),
             Effect.asVoid,
-          ),
+          )
+        },
         { discard: true },
       )
 
@@ -692,18 +710,16 @@ export const launchesLayer = Layer.effect(
         // that never got that far (D8-13).
         yield* Effect.forEach(
           left,
-          ({ launch, projectId }) =>
-            settled(
-              viewOf(launch),
-              // SAFETY: the claim writes the Session in the very transaction that says
-              // `starting`, so a launch a stopped engine left there holds one.
-              launch.sessionId as string,
-              projectId,
-            ).pipe(
+          ({ launch, projectId }) => {
+            // SAFETY: the claim writes the Session in the very transaction that says `starting`,
+            // so a launch a stopped engine left there holds one — and it is the claim's token.
+            const claim = launch.sessionId as string
+            return settled(viewOf(launch), claim, projectId).pipe(
               // One that cannot be started again says why, and the next ones still start.
-              Effect.catch((refusal) => refused(viewOf(launch), projectId, refusal)),
+              Effect.catch((refusal) => refused(viewOf(launch), projectId, claim, refusal)),
               Effect.asVoid,
-            ),
+            )
+          },
           { discard: true },
         )
         // A Workspace that was made ready by an engine that stopped before its ready step: what
@@ -919,7 +935,8 @@ export const launchesLayer = Layer.effect(
           // cold start outlives the few seconds the window gives a request, and the window follows
           // the launch through `launch.changed` as it does while a Workspace is prepared.
           if (asked.ready) {
-            yield* inBackground(asked.launch, asked.projectId, start(asked.launch))
+            const claim = crypto.randomUUID()
+            yield* inBackground(asked.launch, asked.projectId, claim, start(asked.launch, claim))
           }
           return asked.launch
         }),
@@ -977,6 +994,8 @@ export const launchesLayer = Layer.effect(
           yield* inBackground(
             starting,
             snapshot.spec.projectId,
+            // A retry holds the launch again on the Session it had: that is its token.
+            launch.sessionId,
             settled(starting, launch.sessionId, snapshot.spec.projectId),
           )
           return starting
