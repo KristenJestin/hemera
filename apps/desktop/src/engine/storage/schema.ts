@@ -298,6 +298,11 @@ export const SESSION_ENTRY_ROLES = ['user', 'agent', 'hemera'] as const
  *
  * `workspace_id` is the Workspace the Session works in (D8-08), fixed once its agent started;
  * null on a Session written before this lot, which is read as `main`.
+ *
+ * `choices` is what the user put the Session's agent on — its model, its effort, its mode — as a
+ * JSON object of the agent's own option ids to the values chosen, in the order they were first
+ * chosen. An agent does not keep them across a restart of its process: every start puts the
+ * agent back on them, or the Session would go on with the agent's defaults (issue #133).
  */
 export const sessions = sqliteTable(
   'sessions',
@@ -313,6 +318,7 @@ export const sessions = sqliteTable(
     nativeSessionId: text('native_session_id'),
     nativeState: text('native_state').notNull().default('none'),
     cwd: text('cwd'),
+    choices: text('choices').notNull().default('{}'),
     workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
     /** The revision a `build` Session was started on (D8-13); null on every other Session. */
     revisionId: text('revision_id'),
