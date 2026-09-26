@@ -4,8 +4,8 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { emulateReducedMotion, movesLess } from '../../.storybook/reduced-motion.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
-import type { PhaseName, ReadinessView, SpecTarget } from './model.ts'
-import { BUG, FULL_GATE, MID_PLAN, READER, gate } from './spec-fixtures.ts'
+import type { PhaseName, SpecTarget } from './model.ts'
+import { BUG, MID_PLAN } from './spec-fixtures.ts'
 import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.tsx'
 
 /**
@@ -14,9 +14,8 @@ import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.
  * attention, by a tint of the whole row or a fainter name, and says it in a
  * sentence in its tooltip. A group opens on a header in the small type of a label, which puts the
  * whole phase on the stage; `Show all` shows under the hand and the keyboard. The arrows walk it
- * and Enter opens a row. At its foot, how far the Spec is from ready: seven thin segments and one
- * line, whose things left open a popover of links, and `Mark ready` once every check passes.
- * Folded, it is the band the panel folds to, each phase a block of glyphs.
+ * and Enter opens a row. No readiness at its foot (issue #135). Folded, it is the band the panel
+ * folds to, each phase a block of glyphs.
  */
 
 /** Every mark once, so the five of them are read side by side. */
@@ -64,12 +63,8 @@ function Held({
   groups,
   initial,
   following,
-  readiness,
-  frozenOn,
-  replacedBy,
   onSelect,
   onSelectGroup,
-  onMarkReady,
   folded = false,
 }: {
   /** What the rail is called; two rails side by side need two names. */
@@ -77,12 +72,8 @@ function Held({
   groups: RailGroup[]
   initial: SpecTarget
   following?: SpecTarget | undefined
-  readiness: ReadinessView
-  frozenOn?: string | undefined
-  replacedBy?: number | undefined
   onSelect: (target: SpecTarget) => void
   onSelectGroup: (phase: PhaseName) => void
-  onMarkReady: () => void
   /** Draws the band the panel folds to, rather than the rail of words. */
   folded?: boolean | undefined
 }): ReactNode {
@@ -103,10 +94,6 @@ function Held({
             setCurrent({ group: phase })
             onSelectGroup(phase)
           }}
-          readiness={readiness}
-          frozenOn={frozenOn}
-          replacedBy={replacedBy}
-          onMarkReady={onMarkReady}
           folded={folded}
         />
       </div>
@@ -122,22 +109,16 @@ const meta = {
   args: {
     groups: EVERY_MARK,
     initial: 'questions',
-    readiness: MID_PLAN.readiness,
     onSelect: fn(),
     onSelectGroup: fn(),
-    onMarkReady: fn(),
   },
   argTypes: {
     groups: { control: 'object', description: 'The groups and their rows, with their marks.' },
     initial: { control: 'text', description: 'The part on the stage.' },
     following: { control: 'text', description: 'The part the agent writes, which breathes.' },
-    readiness: { control: 'object', description: 'The seven checks and what is left.' },
-    frozenOn: { control: 'text', description: 'When a `ready` Spec was frozen.' },
-    replacedBy: { control: 'number', description: 'The revision that replaced this one.' },
     folded: { control: 'boolean', description: 'The band the panel folds to.' },
     onSelect: { description: 'Puts a part on the stage.' },
     onSelectGroup: { description: 'Puts every part of a phase on the stage.' },
-    onMarkReady: { description: 'The human click that freezes the Spec.' },
   },
 } satisfies Meta<typeof Held>
 
@@ -288,7 +269,7 @@ export const Feature: Story = {
 
 /** A bug: Reproduction in Shape, and never a Behaviour nor a Stories row. */
 export const Bug: Story = {
-  args: { groups: railOf(BUG), initial: 'reproduction', readiness: BUG.readiness },
+  args: { groups: railOf(BUG), initial: 'reproduction' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('button', { name: /^Reproduction/ })).toBeVisible()
@@ -461,7 +442,7 @@ export const Keyboard: Story = {
  * Folded, the band keeps the hierarchy: each phase a block, its glyph in a tinted square, the
  * smaller glyphs of its parts right under it and set in, and a gap and a hairline before the next
  * phase. The tints of the rows fill the squares of the parts; the names leave the eye and stay the
- * accessible name and the tooltip, the state said beside the name. The readiness is said as `1/7`.
+ * accessible name and the tooltip, the state said beside the name. Nothing stands at its foot.
  */
 export const Folded: Story = {
   args: { groups: EVERY_MARK, initial: 'tasks', folded: true },
@@ -470,10 +451,8 @@ export const Folded: Story = {
     const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(canvas.queryByText('Expected outcome')).toBeNull()
     await expect(dotsIn(rail)).toEqual([])
-    await expect(
-      canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
-    ).toHaveTextContent('1/7')
-    await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
+    await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
+    await expect(canvas.queryByText(/^[0-9]+[/][0-9]+$/)).toBeNull()
     const blocks = ['Shape', 'Plan', 'Decompose'].map((name) => canvas.getByRole('group', { name }))
     for (const [index, block] of blocks.entries()) {
       const [phase, ...parts] = within(block).getAllByRole('button')
@@ -556,162 +535,18 @@ export const EveryIcon: Story = {
 }
 
 /**
- * The foot, partial: seven thin segments, one filled, and under them what they count in words —
- * `1 of 7 checks met` — then `4 things before ready`: no `Mark ready`, never drawn disabled.
+ * No foot (issue #135): no readiness bar, no count of checks, no things before ready, no
+ * `Mark ready` and no line of when the Spec was marked ready. What the draft lacks is the agent's
+ * to say, and `Mark ready`'s — in the head — to refuse with.
  */
-export const FootPartial: Story = {
+export const NoReadiness: Story = {
   args: { groups: railOf(MID_PLAN) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' })).toBeVisible()
-    await expect(canvas.getByText('1 of 7 checks met')).toBeVisible()
-    await expect(canvas.getByRole('button', { name: '4 things before ready' })).toBeVisible()
+    await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
+    await expect(canvas.queryByText(/checks met/)).toBeNull()
+    await expect(canvas.queryByRole('button', { name: /before ready/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-  },
-}
-
-/**
- * The foot of a Spec just created, where nothing is written yet (issue #130): the bar is empty —
- * a check the gate passes on nothing, no task and no question, meets nothing — and says so.
- */
-export const FootEmpty: Story = {
-  args: {
-    groups: railOf(MID_PLAN),
-    readiness: gate(
-      { contract: 'contract · nothing written', phases: 'phases · shape open' },
-      [{ label: 'the problem', target: 'problem' }],
-      ['references', 'coverage', 'cycle', 'questions', 'attestation'],
-    ),
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const bar = canvas.getByRole('img', { name: 'Readiness, 0 of 7 checks met' })
-    await expect(bar.querySelectorAll('.bg-success')).toHaveLength(0)
-    await expect(canvas.getByText('0 of 7 checks met')).toBeVisible()
-  },
-}
-
-/** The things left open a popover of links, each putting its part on the stage. */
-export const FootLinks: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: READER.readiness },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: '3 things before ready' }))
-    const page = within(document.body)
-    const list = await page.findByRole('dialog', { name: 'Things before ready' })
-    // The attestation has no part in the document: it is said, not linked.
-    // The popover comes down into place; what is asked is where it lands.
-    await waitFor(() => expect(within(list).getByText("the agent's final check")).toBeVisible())
-    await expect(within(list).queryByRole('button', { name: "the agent's final check" })).toBeNull()
-    await userEvent.click(within(list).getByRole('button', { name: 'a task for S2' }))
-    await expect(args.onSelect).toHaveBeenCalledWith('tasks')
-    await expect(canvas.getByRole('button', { name: /^Tasks/ })).toHaveAttribute(
-      'aria-current',
-      'true',
-    )
-  },
-}
-
-/** The foot, full: `Ready to freeze`, and `Mark ready` sits under it. */
-export const FootFull: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks met' })).toBeVisible()
-    await expect(canvas.getByText('Ready to freeze')).toBeVisible()
-    const mark = canvas.getByRole('button', { name: 'Mark ready' })
-    await expect(mark).toBeEnabled()
-    await userEvent.click(mark)
-    await expect(args.onMarkReady).toHaveBeenCalled()
-  },
-}
-
-/** The foot of a Spec that freezes on the press, as the panel does once the engine answered. */
-function Freezing({ onMarkReady }: { onMarkReady: () => void }): ReactNode {
-  const [frozenOn, setFrozenOn] = useState<string | undefined>(undefined)
-  return (
-    <Held
-      groups={railOf(MID_PLAN)}
-      initial="questions"
-      readiness={FULL_GATE}
-      frozenOn={frozenOn}
-      onSelect={fn()}
-      onSelectGroup={fn()}
-      onMarkReady={() => {
-        onMarkReady()
-        setFrozenOn('24 Sep')
-      }}
-    />
-  )
-}
-
-/**
- * `Mark ready` leaving: pressed, the Spec freezes and the button fades out. While it fades it is
- * still in the page, and it is inert and hidden from then on: a second press lands on nothing,
- * and the Spec is marked ready once.
- */
-export const MarkReadyLeaving: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE },
-  render: (args) => <Freezing onMarkReady={args.onMarkReady} />,
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    const mark = canvas.getByRole('button', { name: 'Mark ready' })
-    await userEvent.click(mark)
-    await expect(canvas.getByText(/Frozen on 24 Sep/)).toBeVisible()
-    if (mark.isConnected) {
-      // Still fading: nothing offered, nothing reachable.
-      const leaving = mark.closest('[inert]')
-      expect(leaving).not.toBeNull()
-      expect(leaving).toHaveAttribute('aria-hidden', 'true')
-      expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    }
-    // A second press during the exit, forced past the check a person's pointer would fail.
-    await userEvent.click(mark, { pointerEventsCheck: 0 })
-    await waitFor(() => {
-      expect(mark.isConnected).toBe(false)
-    })
-    await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
-  },
-}
-
-/**
- * An obsolete request refused: the Spec changed between the gate shown and the click, so it was
- * not frozen; the foot says why, under `Mark ready`.
- */
-export const FootRefused: Story = {
-  args: {
-    groups: railOf(MID_PLAN),
-    readiness: {
-      ...FULL_GATE,
-      refused:
-        'ATL-7 changed since its gate was shown: read the gate again before marking it ready.',
-    },
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('alert')).toHaveTextContent(/changed since its gate was shown/)
-    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeVisible()
-  },
-}
-
-/** Frozen: the bar full, and the line says since when. */
-export const FootFrozen: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE, frozenOn: '23 Sep' },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText(/Frozen on 23 Sep/)).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-  },
-}
-
-/** An older revision: frozen too, and the line says a newer version replaced it. */
-export const FootReplaced: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE, frozenOn: '22 Sep', replacedBy: 2 },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(
-      canvas.getByText('Frozen on 22 Sep · read only, a newer version replaced it'),
-    ).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(canvas.queryByText(/Frozen on|Ready to freeze/)).toBeNull()
   },
 }

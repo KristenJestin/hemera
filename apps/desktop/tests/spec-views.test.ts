@@ -22,7 +22,6 @@ import type {
   SpecSnapshot,
 } from '@hemera/ipc'
 import {
-  dayOf,
   launchOf,
   nowOf,
   readerOf,
@@ -359,7 +358,7 @@ describe('The readiness bar says what is left', () => {
     expect(readiness.todo).toEqual([])
   })
 
-  test('an obsolete request refused is said by the bar, and nothing is said otherwise', () => {
+  test('an obsolete request refused is said as it is, and nothing is said otherwise', () => {
     const reading = {
       snapshot: snapshot(),
       revisions: [snapshot().revision],
@@ -370,7 +369,7 @@ describe('The readiness bar says what is left', () => {
     expect(specViewOf({ ...reading, readyRefused: null }).readiness.refused).toBe(undefined)
   })
 
-  test("a refusal listing the gate's failures is said without the engine's words", () => {
+  test("a refusal listing the gate's failures says what is left, without the engine's words", () => {
     const reading = {
       snapshot: snapshot(),
       revisions: [snapshot().revision],
@@ -378,8 +377,10 @@ describe('The readiness bar says what is left', () => {
       readyRefused:
         'ATL-7 does not pass its gate: the decompose phase is open, not finished; the attestation is missing.',
     }
+    const left = readinessOf(snapshot()).todo.map((item) => item.label)
+    expect(left.length).toBeGreaterThan(0)
     expect(specViewOf(reading).readiness.refused).toBe(
-      'ATL-7 is not ready yet: see what is left above.',
+      `ATL-7 is not ready yet. Still to do: ${left.join(', ')}.`,
     )
   })
 })
@@ -411,7 +412,6 @@ describe('An old revision is readable and not editable', () => {
       journal: [ready('2026-09-22T10:00:00.000Z', 'rev-1')],
     })
     expect(view.status).toBe('ready')
-    expect(view.frozenOn).toBe('22 Sep')
     expect(view.now).toBe('An earlier version · read only')
     expect(view.readiness.todo).toEqual([])
     expect(view.replacedBy).toBe(2)
@@ -428,14 +428,13 @@ describe('An old revision is readable and not editable', () => {
     expect(view.replacedBy).toBe(undefined)
   })
 
-  test('a ready Spec whose line the Journal page did not hold froze when it last changed', () => {
+  test('a ready Spec reads as the latest, ready, in its picker', () => {
     const frozen = snapshot()
     const view = specViewOf({
       snapshot: { ...frozen, spec: { ...frozen.spec, status: 'ready' } },
       revisions: [frozen.revision],
       journal: [],
     })
-    expect(view.frozenOn).toBe(dayOf(Date.UTC(2026, 8, 23, 12)))
     expect(view.revisions).toEqual([{ number: 1, detail: 'Latest · ready' }])
   })
 })

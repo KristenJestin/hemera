@@ -17,7 +17,7 @@ import { SpecPanel } from './spec-panel.tsx'
  * A story is where the panel is tried, and a panel whose actions go nowhere cannot be. So this
  * stands in for the engine with the few answers phase 1 gives for real — an answer in the chat
  * closes its question and, when it was the last blocking one, lets the gate pass; `Mark ready`
- * freezes; `Rework` copies into a new draft whose plan and tasks are stale — and nothing else.
+ * marks the Spec ready, or is refused with what is left; `Rework` copies into a new draft whose plan and tasks are stale — and nothing else.
  * Every action is also reported to `on`, which is what a play asserts on.
  */
 
@@ -78,26 +78,37 @@ export function useLiveSpec(
     onGoToQuestion: on.onGoToQuestion,
     onMarkReady: () => {
       on.onMarkReady()
-      setSpec((now) => ({
-        ...now,
-        status: 'ready',
-        frozenOn: 'today',
-        focus: undefined,
-        now: '',
-        revisions:
-          now.revisions.length > 1
-            ? now.revisions.map((one) =>
-                one.number === now.revision ? { ...one, detail: 'Latest · ready' } : one,
-              )
-            : [{ number: now.revision, detail: 'Latest · ready' }],
-      }))
+      setSpec((now) => {
+        // Refused while anything is left, with what is left, as the engine refuses it.
+        if (now.readiness.todo.length > 0) {
+          const left = now.readiness.todo.map((item) => item.label).join(', ')
+          return {
+            ...now,
+            readiness: {
+              ...now.readiness,
+              refused: `${now.key} is not ready yet. Still to do: ${left}.`,
+            },
+          }
+        }
+        return {
+          ...now,
+          status: 'ready',
+          focus: undefined,
+          now: '',
+          revisions:
+            now.revisions.length > 1
+              ? now.revisions.map((one) =>
+                  one.number === now.revision ? { ...one, detail: 'Latest · ready' } : one,
+                )
+              : [{ number: now.revision, detail: 'Latest · ready' }],
+        }
+      })
     },
     onRework: (reason) => {
       on.onRework(reason)
       setSpec((now) => ({
         ...now,
         status: 'draft',
-        frozenOn: undefined,
         revision: now.revision + 1,
         revisions: [
           { number: now.revision + 1, detail: 'Latest · draft' },

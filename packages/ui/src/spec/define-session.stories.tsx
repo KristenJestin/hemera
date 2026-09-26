@@ -439,7 +439,7 @@ async function unfold(canvasElement: HTMLElement): Promise<void> {
 /**
  * Screen 1 · a feature being planned, as the Session opens it: the chat has the width, the panel
  * a band beside it — the glyph of each part, the plan the agent writes tinted and breathing,
- * `Plan` open and three checks of seven. The thread says what the agent was handed in one folded
+ * `Plan` open, and no readiness. The thread says what the agent was handed in one folded
  * Hemera line, and asks the blocking question as a block.
  */
 export const MidPlan: Story = {
@@ -449,9 +449,7 @@ export const MidPlan: Story = {
       canvas.getByRole('button', { name: /What the agent was told · Plan/ }),
     ).toBeVisible()
     const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(
-      within(band).getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
-    ).toHaveTextContent('1/7')
+    await expect(within(band).queryByRole('img', { name: /^Readiness/ })).toBeNull()
     await expect(
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
@@ -469,16 +467,17 @@ export const MidPlan: Story = {
 }
 
 /**
- * Unfolded, then a thing left before ready followed from the rail's foot: the tasks, not written
- * yet, on the stage.
+ * Unfolded, then `Mark ready` pressed too early: refused with what is left, said under the head;
+ * the tasks, not written yet, put on the stage from the rail.
  */
-export const MidPlanLinkFollowed: Story = {
+export const MidPlanMarkReadyRefused: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: '4 things before ready' }))
-    await userEvent.click(await within(document.body).findByRole('button', { name: 'the tasks' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
+    await expect(canvas.getByRole('alert')).toHaveTextContent(/Still to do: .*the tasks/)
+    await userEvent.click(canvas.getByRole('button', { name: /^Tasks/ }))
     await expect(canvas.getByRole('button', { name: /^Tasks/ })).toHaveAttribute(
       'aria-current',
       'true',
@@ -489,7 +488,7 @@ export const MidPlanLinkFollowed: Story = {
   },
 }
 
-/** A question answered in the chat: the register records it, and the gate stops naming it. */
+/** A question answered in the chat: the register records it. */
 export const MidPlanQuestionAnswered: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
@@ -501,7 +500,6 @@ export const MidPlanQuestionAnswered: Story = {
     await userEvent.keyboard('{Enter}')
     await expect(canvas.queryByRole('button', { name: /^Answer in the chat/ })).toBeNull()
     await expect(canvas.getByRole('heading', { name: /^Questions · 0 open/ })).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Readiness, 2 of 7 checks met' })).toBeVisible()
   },
 }
 
@@ -538,12 +536,11 @@ export const FromAFreeSession: Story = {
   },
 }
 
-/** Screen 4 · every check passes: `Ready to freeze`, and `Mark ready` offered. */
+/** Screen 4 · every check passes: `Mark ready` in the head, as on every draft. */
 export const GateFull: Story = {
   args: { screen: 'gateFull', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Ready to freeze')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeEnabled()
     await expect(canvas.getByRole('heading', { name: /^Tasks · 4/ })).toBeVisible()
   },
@@ -557,29 +554,27 @@ export const GateFullMarkedReady: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
     await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
-    await expect(canvas.getByText(/Frozen on today/)).toBeVisible()
+    await expect(canvas.queryByText(/Frozen on/)).toBeNull()
     await expect(canvas.queryByRole('textbox', { name: 'Problem' })).toBeNull()
-    // It leaves the way it came, and is gone once it has.
-    await waitFor(() => expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull())
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
   },
 }
 
 /**
- * Mark ready appearing: the last blocking question answered in the chat, the bar fills, the
- * foot reads `Ready to freeze` and `Mark ready` is offered — and pressed.
+ * The last blocking question: `Mark ready` pressed while it is open is refused and names it;
+ * answered in the chat, the same press marks the Spec ready.
  */
 export const LastQuestionAnswered: Story = {
   args: { screen: 'lastQuestion' },
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
+    await expect(canvas.getByRole('alert')).toHaveTextContent(/the credit-note question/)
     await userEvent.type(
       canvas.getByRole('textbox', { name: 'Something else' }),
       'Negative rows, marked by a type column.{Enter}',
     )
-    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks met' })).toBeVisible()
-    await expect(canvas.getByText('Ready to freeze')).toBeVisible()
     await expect(
       canvas.getByText('Negative rows, marked by a type column.', { selector: 'p' }),
     ).toBeVisible()
@@ -600,9 +595,7 @@ export const Ready: Story = {
     const canvas = within(canvasElement)
     const panel = canvas.getByRole('region', { name: 'Spec ATL-7' })
     await expect(within(panel).getByText('ready')).toBeVisible()
-    await expect(within(panel).queryByText(/Ready · frozen/)).toBeNull()
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).queryByText(/frozen/i)).toBeNull()
+    await expect(within(panel).queryByText(/frozen/i)).toBeNull()
     await expect(canvas.queryByRole('textbox', { name: 'Expected outcome' })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
@@ -700,6 +693,6 @@ export const StaleAfterRework: Story = {
       'To review',
     )
     await expect(canvas.getAllByText('to review')[0]).toBeVisible()
-    await expect(canvas.getByRole('button', { name: '2 things before ready' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
   },
 }

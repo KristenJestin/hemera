@@ -415,19 +415,25 @@ export function revisionsOf(
 }
 
 /**
- * A refused "Mark ready" in the reader's words. The engine's refusal of a Spec that does not pass
- * its gate lists the gate's failures in its own vocabulary — phases, attestation — which the bar
- * above already says plainly; a Spec that changed meanwhile is said as it is.
+ * A refused "Mark ready" in the reader's words, which is where the panel says what the draft still
+ * lacks: no readiness is drawn anywhere else (issue #135). The engine's refusal of a Spec that does
+ * not pass its gate lists the gate's failures in its own vocabulary — phases, attestation — so it
+ * is said with the things left, in plain words; a Spec that changed meanwhile is said as it is.
  */
-export function plainRefusal(key: string, refused: string | null | undefined): string | undefined {
+export function plainRefusal(
+  key: string,
+  refused: string | null | undefined,
+  todo: readonly ReadinessItem[],
+): string | undefined {
   if (refused === null || refused === undefined) return undefined
-  return refused.includes('does not pass its gate')
-    ? `${key} is not ready yet: see what is left above.`
-    : refused
+  if (!refused.includes('does not pass its gate')) return refused
+  if (todo.length === 0) return `${key} is not ready yet.`
+  return `${key} is not ready yet. Still to do: ${todo.map((item) => item.label).join(', ')}.`
 }
 
 /** The whole view of the panel. */
 export function specViewOf({ snapshot, revisions, journal, readyRefused }: SpecReading): SpecView {
+  const readiness = readinessOf(snapshot)
   return {
     key: snapshot.spec.key,
     title: snapshot.revision.title,
@@ -449,12 +455,9 @@ export function specViewOf({ snapshot, revisions, journal, readyRefused }: SpecR
     questionsMark:
       snapshot.questions.length === 0 ? 'empty' : (snapshot.questions.at(-1)?.raisedBy ?? 'agent'),
     readiness: {
-      ...readinessOf(snapshot),
-      refused: plainRefusal(snapshot.spec.key, readyRefused),
+      ...readiness,
+      refused: plainRefusal(snapshot.spec.key, readyRefused, readiness.todo),
     },
-    frozenOn: isEditable(snapshot)
-      ? undefined
-      : dayOf(frozenAt(snapshot.revision, snapshot, revisions, journal)),
     // An older revision offers no Rework, which the engine would refuse: only the current one
     // can be reworked (D7-05).
     replacedBy: isCurrent(snapshot)

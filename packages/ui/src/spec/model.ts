@@ -182,14 +182,17 @@ export interface ReadinessItem {
   target?: SpecTarget | undefined
 }
 
+/**
+ * The ready gate as the panel is handed it. Since issue #135 the panel draws none of it but what
+ * `Mark ready` was refused with, which the application writes from the things left.
+ */
 export interface ReadinessView {
   checks: GateCheckView[]
   /** What is left, in the order the sentence says it. Empty when every check passes. */
   todo: ReadinessItem[]
   /**
-   * What the last `Mark ready` was refused with, in the engine's words: the Spec changed since
-   * the gate was shown, and the bar now shows it as it is (D7-10, "An obsolete request is
-   * refused").
+   * What the last `Mark ready` was refused with: what the draft still lacks, or that the Spec
+   * changed as it was pressed (D7-10, "An obsolete request is refused").
    */
   refused?: string | undefined
 }
@@ -240,8 +243,6 @@ export interface SpecView {
   questions: SpecQuestionView[]
   questionsMark: Mark
   readiness: ReadinessView
-  /** When it was frozen, already written: `23 Sep`. Present on a `ready` Spec only. */
-  frozenOn?: string | undefined
   /**
    * The current revision, when the one shown is an older one (D7-05): it is read as it was
    * frozen, and it offers no Rework — only the current revision of a Spec can be reworked.

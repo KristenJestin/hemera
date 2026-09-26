@@ -1,9 +1,5 @@
-import { AnimatePresence, type Transition, motion, useIsPresent } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import type { ReactNode } from 'react'
 
-import { Button } from '../components/button/button.tsx'
-import { Popover } from '../components/popover/popover.tsx'
-import { FILL_STEP, crossfade, fill, instant, useTransition } from '../motion.ts'
 import {
   type MissionRailGroup,
   type MissionRailItem,
@@ -13,11 +9,9 @@ import {
 import {
   PHASE_TITLES,
   SECTION_TITLES,
-  type GateCheckView,
   type Mark,
   type PhaseName,
   type PhaseState,
-  type ReadinessView,
   type SpecTarget,
   type SpecView,
   shapedSectionsOf,
@@ -25,16 +19,16 @@ import {
 import { SPEC_PART_ICONS, SPEC_PHASE_ICONS } from './spec-icons.ts'
 
 /**
- * The rail of the Spec panel: every part of the Spec, grouped by the phase that writes it, and at
- * its foot how far the Spec is from `ready` (lot 19, brief revisions 3 and 4, and the
- * maintainer's decisions on the rail's states).
+ * The rail of the Spec panel: every part of the Spec, grouped by the phase that writes it (lot 19,
+ * brief revisions 3 and 4, and the maintainer's decisions on the rail's states).
  *
  * What it draws and how is the mission rail's (`session/mission-rail.tsx`): a row says only what
  * needs attention, by a tint or a fainter name, and says it in a sentence; the headers,
  * the hint, the rule of what is on the stage and the folded band are the same for every mission.
  * What is the Spec's is here: which parts a type has, under which phase, the glyph of each, what
- * each mark asks of the reader, the sentences, and the readiness at the foot. The foot already
- * says what is done, so nothing of it is said twice on the rows.
+ * each mark asks of the reader, and the sentences. How far the Spec is from `ready` is not drawn
+ * (issue #135): what is missing is the agent's to say, and `Mark ready`'s to refuse with its
+ * reasons.
  */
 
 /** One row: where it leads, what it is called, its mark and, for a list, its count. */
@@ -125,7 +119,7 @@ const ATTENTION: Record<Mark, RailAttention> = {
   writing: 'writing',
 }
 
-/** The phase's state, said to whoever cannot see the foot: the header draws none of it. */
+/** The phase's state, said to a screen reader: the header draws none of it. */
 const PHASE_STATE_WORDS: Record<PhaseState, string> = {
   finished: 'finished',
   open: 'open',
@@ -180,21 +174,13 @@ export interface SpecRailProps {
   onSelect: (target: SpecTarget) => void
   /** Puts every part of a phase on the stage. */
   onSelectGroup: (phase: PhaseName) => void
-  /** The seven checks of the gate and what is left, which the foot says. */
-  readiness: ReadinessView
-  /** A frozen Spec says when it was frozen instead of what is left. */
-  frozenOn?: string | undefined
-  /** An older revision says which one replaced it. */
-  replacedBy?: number | undefined
-  /** The human click that freezes the Spec. */
-  onMarkReady: () => void
   /** The band of glyphs the panel folds to, rather than the rail of words. */
   folded?: boolean | undefined
 }
 
 /**
  * The Spec's parts said in the mission rail's vocabulary: each phase a group, each part an item,
- * its mark the attention it asks for, and at the foot how far the Spec is from `ready`.
+ * its mark the attention it asks for.
  */
 export function SpecRail({
   label,
@@ -203,10 +189,6 @@ export function SpecRail({
   following,
   onSelect,
   onSelectGroup,
-  readiness,
-  frozenOn,
-  replacedBy,
-  onMarkReady,
   folded = false,
 }: SpecRailProps): ReactNode {
   // The ids of the rail are the Spec's own names: a part's target, a phase's name.
@@ -228,233 +210,6 @@ export function SpecRail({
         if (group !== undefined) onSelectGroup(group.phase)
       }}
       folded={folded}
-      foldedFoot={<FoldedFoot readiness={readiness} />}
-      foot={
-        <ReadinessFoot
-          readiness={readiness}
-          frozenOn={frozenOn}
-          replacedBy={replacedBy}
-          onGoTo={onSelect}
-          onMarkReady={onMarkReady}
-        />
-      }
     />
-  )
-}
-
-/**
- * How many checks are met, out of how many, and the words the measure is named by. A check is met
- * when it passes on something written or decided: an empty Spec meets none (issue #130).
- */
-interface Score {
-  passed: number
-  total: number
-  name: string
-}
-
-function scoreOf(readiness: ReadinessView): Score {
-  const passed = readiness.checks.filter((check) => check.passed).length
-  const total = readiness.checks.length
-  return { passed, total, name: `Readiness, ${passed} of ${total} checks met` }
-}
-
-const FOLDED_FOOT = 'shrink-0 py-3 text-center font-mono text-xs text-muted-foreground'
-
-/** The readiness in the band: `3/7`, and nothing to press — the band itself unfolds. */
-function FoldedFoot({ readiness }: { readiness: ReadinessView }): ReactNode {
-  const { passed, total, name } = scoreOf(readiness)
-  return (
-    <p role="img" aria-label={name} className={FOLDED_FOOT}>
-      {`${passed}/${total}`}
-    </p>
-  )
-}
-
-const FOOT = 'flex shrink-0 flex-col gap-2 border-t border-border px-3 py-3'
-
-const BAR = 'flex gap-0.5'
-
-/** A segment: a thin track, and the fill inside it that grows from its left edge. */
-const TRACK = 'relative h-0.5 flex-1 overflow-hidden rounded-full bg-accent'
-
-const FILLED = 'absolute inset-0 origin-left rounded-full bg-success'
-
-const SAY = 'text-xs text-muted-foreground'
-
-const LINK =
-  'rounded-sm text-left whitespace-nowrap text-foreground underline decoration-input underline-offset-4 outline-none focus-ring hover:decoration-primary'
-
-const OK = 'font-semibold text-success-muted-foreground'
-
-const REFUSED = 'text-xs text-destructive-muted-foreground'
-
-interface ReadinessFootProps {
-  readiness: ReadinessView
-  frozenOn?: string | undefined
-  replacedBy?: number | undefined
-  onGoTo: (target: SpecTarget) => void
-  onMarkReady: () => void
-}
-
-/**
- * `Mark ready`, which fades in when the gate fills and out when the Spec is frozen.
- *
- * While it fades out it is still in the page, and a button there is a button a second press
- * reaches: so the moment it starts leaving it is `inert` and hidden from assistive technology,
- * and what is on its way out can be neither pressed, focused nor read as offered.
- */
-function MarkReady({
-  transition,
-  onMarkReady,
-}: {
-  transition: Transition
-  onMarkReady: () => void
-}): ReactNode {
-  const present = useIsPresent()
-  return (
-    <motion.div
-      className="flex"
-      inert={!present}
-      aria-hidden={present ? undefined : true}
-      initial={{ filter: 'opacity(0)' }}
-      animate={{ filter: 'opacity(1)' }}
-      exit={{ filter: 'opacity(0)' }}
-      transition={transition}
-    >
-      {/* A click dispatched by script is not stopped by `inert`: the handler goes with it. */}
-      <Button variant="primary" size="sm" onClick={present ? onMarkReady : undefined}>
-        Mark ready
-      </Button>
-    </motion.div>
-  )
-}
-
-/**
- * How far the Spec is from `ready`, at the foot of the rail (D7-10).
- *
- * Not a list of errors: seven thin segments the width of the rail, one per check of the gate,
- * filled in the success colour where the check is met — passed on something written or decided,
- * so an empty Spec shows an empty bar — and under them what it counts, in words: `3 of 7 checks
- * met`, then `2 things before ready` (issue #130). The things left open a small popover that
- * lists them, each a link that puts its part on the stage.
- *
- * When every check passes the line becomes `Ready to freeze` and `Mark ready` sits under it. It
- * is never drawn disabled: a button that cannot be pressed is a question it does not answer, and
- * the line is the answer. Only the human's press freezes the Spec; the gate is checked again when
- * it arrives (D7-10, "An obsolete request is refused").
- */
-function ReadinessFoot({
-  readiness,
-  frozenOn,
-  replacedBy,
-  onGoTo,
-  onMarkReady,
-}: ReadinessFootProps): ReactNode {
-  const transition = useTransition(crossfade)
-  const { passed, total, name } = scoreOf(readiness)
-  const full = passed === total
-  return (
-    <div className={FOOT}>
-      <div role="img" aria-label={name} className={BAR}>
-        {readiness.checks.map((check, index) => (
-          <Segment key={check.check} check={check} index={index} />
-        ))}
-      </div>
-      <p className={SAY}>
-        {frozenOn !== undefined ? (
-          replacedBy === undefined ? (
-            `Frozen on ${frozenOn} · nothing changes until you rework it`
-          ) : (
-            `Frozen on ${frozenOn} · read only, a newer version replaced it`
-          )
-        ) : full ? (
-          <span className={OK}>Ready to freeze</span>
-        ) : (
-          // What the bar counts, said in words, and what is left under it: two lines, because
-          // the count said plainly is as wide as the rail on its own.
-          <span className="flex flex-col items-start gap-0.5">
-            <span className="tabular-nums">{`${passed} of ${total} checks met`}</span>
-            <Left readiness={readiness} onGoTo={onGoTo} />
-          </span>
-        )}
-      </p>
-      <AnimatePresence initial={false}>
-        {full && frozenOn === undefined && (
-          <MarkReady key="mark-ready" transition={transition} onMarkReady={onMarkReady} />
-        )}
-      </AnimatePresence>
-      {readiness.refused !== undefined && (
-        <p role="alert" className={REFUSED}>
-          {readiness.refused}
-        </p>
-      )}
-    </div>
-  )
-}
-
-/** One check: a thin track, filled from its left edge when it passes. */
-function Segment({ check, index }: { check: GateCheckView; index: number }): ReactNode {
-  const base = useTransition(fill)
-  // Each segment a step behind the one before it, so a bar that fills at once sweeps from the
-  // left; a system asking for less movement gets the bar filled, with nothing to wait on.
-  const transition = base === instant ? base : { ...base, delay: index * FILL_STEP }
-  return (
-    <span className={TRACK}>
-      {check.passed && (
-        <motion.span
-          className={FILLED}
-          initial={{ scaleX: 0 }}
-          animate={{ scaleX: 1 }}
-          transition={transition}
-        />
-      )}
-    </span>
-  )
-}
-
-/** `2 things before ready`, which opens the list of them, each a link to where it is fixed. */
-function Left({
-  readiness,
-  onGoTo,
-}: {
-  readiness: ReadinessView
-  onGoTo: (target: SpecTarget) => void
-}): ReactNode {
-  const [open, setOpen] = useState(false)
-  const { todo } = readiness
-  return (
-    <Popover
-      label="Things before ready"
-      side="top"
-      align="start"
-      open={open}
-      onOpenChange={setOpen}
-      trigger={
-        <button type="button" className={LINK}>
-          {`${todo.length} ${todo.length === 1 ? 'thing' : 'things'} before ready`}
-        </button>
-      }
-    >
-      <ul className="flex flex-col gap-1.5">
-        {todo.map((item) => (
-          <li key={item.label}>
-            {item.target === undefined ? (
-              <span className="text-muted-foreground">{item.label}</span>
-            ) : (
-              <button
-                type="button"
-                className={LINK}
-                onClick={() => {
-                  setOpen(false)
-                  if (item.target !== undefined) onGoTo(item.target)
-                }}
-              >
-                {item.label}
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </Popover>
   )
 }

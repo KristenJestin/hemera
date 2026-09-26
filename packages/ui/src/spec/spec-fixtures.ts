@@ -346,7 +346,6 @@ export const READY: SpecView = {
   revisions: FROZEN_REVISIONS,
   now: '',
   focus: undefined,
-  frozenOn: '23 Sep',
 }
 
 /**
@@ -357,7 +356,6 @@ export const OLDER_REVISION: SpecView = {
   ...READY,
   revision: 1,
   now: 'An earlier version · read only',
-  frozenOn: '22 Sep',
   replacedBy: 2,
 }
 
@@ -487,7 +485,7 @@ export const MAINTENANCE: SpecView = {
 
 /**
  * The feature one answer away from ready: every phase finished and attested, the tasks written,
- * and the credit-note question still open. Answering it is what fills the bar.
+ * and the credit-note question still open. Answering it is what lets it be marked ready.
  */
 export const ONE_QUESTION_LEFT: SpecView = {
   ...GATE_FULL,

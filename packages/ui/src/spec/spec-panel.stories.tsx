@@ -8,10 +8,10 @@ import { BUG, MAINTENANCE, MID_PLAN, OLDER_REVISION } from './spec-fixtures.ts'
 
 /**
  * The Spec panel alone, in a Session's row beside a stand-in for the chat. Folded by default to a
- * band — the rail's glyphs, their tints and `1/7` — and unfolded by the band, a glyph, or the agent
- * starting on a part, unless the hand folded it. Unfolded, a head that stays on top and the rail
- * beside a stage that shows one part, or every part of one phase, following the agent until a row
- * is chosen; the readiness at the rail's foot. The screens of the brief are drawn in their
+ * band — the rail's glyphs and their tints — and unfolded by the band, a glyph, or the agent
+ * starting on a part, unless the hand folded it. Unfolded, a head that stays on top, with `Mark
+ * ready` on a draft, and the rail beside a stage that shows one part, or every part of one phase,
+ * following the agent until a row is chosen. No readiness is drawn (issue #135). The screens of the brief are drawn in their
  * Session, under `Surfaces/Session/Define`; these are the panel's own states and paths.
  */
 const meta = {
@@ -69,7 +69,7 @@ const BAND = 48
 
 /**
  * Folded, as a Session opens it: a band of glyphs beside the chat, each phase a block over the
- * glyphs of its parts, and the readiness as `1/7`. No head and no stage: the chat has the width.
+ * glyphs of its parts, and nothing at their foot. No head and no stage: the chat has the width.
  */
 export const Folded: Story = {
   args: { defaultFolded: true },
@@ -81,9 +81,7 @@ export const Folded: Story = {
     await expect(
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
-    await expect(
-      within(band).getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
-    ).toHaveTextContent('1/7')
+    await expect(within(band).queryByRole('img', { name: /^Readiness/ })).toBeNull()
     // The names leave the eye and stay the accessible name.
     await expect(canvas.queryByText('Expected outcome')).toBeNull()
     await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
@@ -92,8 +90,8 @@ export const Folded: Story = {
 }
 
 /**
- * Unfolded: a feature being planned, the head with its one sentence, the rail beside one part,
- * the stage following the agent onto the plan it writes, and the readiness at the rail's foot.
+ * Unfolded: a feature being planned, the head with its one sentence and `Mark ready`, the rail
+ * beside one part, and the stage following the agent onto the plan it writes. No readiness bar.
  */
 export const Unfolded: Story = {
   play: async ({ canvasElement }) => {
@@ -114,10 +112,9 @@ export const Unfolded: Story = {
     // One part at a time: nothing of the other parts is on the stage.
     await expect(within(stage).queryByRole('heading', { name: /^Problem/ })).toBeNull()
     await expect(canvas.queryByText('Prototype')).toBeNull()
-    await expect(
-      within(rail).getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
-    ).toBeVisible()
-    await expect(within(rail).getByRole('button', { name: '4 things before ready' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeEnabled()
+    await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: /before ready/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Show all' })).toBeNull()
   },
 }
@@ -396,19 +393,20 @@ export const GroupOnStage: Story = {
   },
 }
 
-/** A thing left before ready, in the popover of the rail's foot, puts its target on the stage. */
-export const LinkFollowed: Story = {
-  play: async ({ canvasElement }) => {
+/**
+ * `Mark ready` pressed on a draft that still lacks something: refused, and what is left is said
+ * under the head, in plain words (issue #135). The Spec stays a draft.
+ */
+export const MarkReadyRefused: Story = {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: '4 things before ready' }))
-    const page = within(document.body)
-    await userEvent.click(await page.findByRole('button', { name: 'the credit-note question' }))
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).getByRole('heading', { name: /^Questions/ })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: /^Questions/ })).toHaveAttribute(
-      'aria-current',
-      'true',
+    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
+    await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
+    await expect(canvas.getByRole('alert')).toHaveTextContent(
+      /^ATL-7 is not ready yet. Still to do: .*the credit-note question/,
     )
+    await expect(canvas.getByText('draft')).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeVisible()
   },
 }
 
@@ -424,14 +422,13 @@ export const QuestionLinked: Story = {
 
 /**
  * An older revision picked: shown as it was marked ready, with no editor, no `Rework` and no
- * `Mark ready`, and the foot says which revision replaced it.
+ * `Mark ready`.
  */
 export const OlderRevision: Story = {
   args: { spec: OLDER_REVISION },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('An earlier version · read only')).toBeVisible()
-    await expect(canvas.getByText(/a newer version replaced it/)).toBeVisible()
     await expect(canvas.queryByRole('textbox')).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()

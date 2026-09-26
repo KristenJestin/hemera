@@ -102,8 +102,8 @@ describe('Phases survive a restart', () => {
   })
 })
 
-describe('The button is offered only when the checks pass', () => {
-  it('lets the agent write the rest, declare the three phases and attest, then offers Mark ready', async () => {
+describe('Mark ready marks the Spec ready once the checks pass', () => {
+  it('lets the agent write the rest, declare the three phases and attest, and waits for the press', async () => {
     await press(OPENED)
     await browser.waitUntil(async () => (await region(PANEL)) !== '', {
       timeout: 10_000,
@@ -124,9 +124,10 @@ describe('The button is offered only when the checks pass', () => {
       expect.arrayContaining(['shape finished', 'plan finished', 'decompose finished']),
     )
     expect(spec.attested).toBe(true)
-    // The attestation alone froze nothing: the gate is empty, and the human's press is left.
-    expect(await region(PANEL)).toContain('Ready to freeze')
+    // The attestation alone marked nothing ready: the human's press is left, and no readiness
+    // is drawn beside it (issue #135).
     expect(await control('Mark ready')).not.toBeNull()
+    expect(await region(PANEL)).not.toContain('Ready to freeze')
   })
 
   it('freezes the Spec on the human’s Mark ready', async () => {
@@ -134,8 +135,8 @@ describe('The button is offered only when the checks pass', () => {
     await browser.pause(1500)
 
     expect((await specNow()).status).toBe('ready')
-    expect(await region(PANEL)).toContain('Frozen on')
-    // And Mark ready is gone: a frozen Spec offers nothing to freeze.
+    expect(await region(PANEL)).not.toMatch(/frozen/i)
+    // And Mark ready is gone: a ready Spec offers nothing to mark.
     expect(await control('Mark ready')).toBeNull()
   })
 })

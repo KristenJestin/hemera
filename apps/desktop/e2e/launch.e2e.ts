@@ -208,9 +208,7 @@ async function writeSpec(asked: string, key: string): Promise<void> {
   await press('Send')
   await awaits(COMPLETED, 60_000)
   await browser.pause(1500)
-  await readyOffered(key)
-  await pressIn(panelOf(key), 'Mark ready')
-  await browser.pause(1500)
+  await markedReady(key)
 }
 
 /**
@@ -239,19 +237,22 @@ async function writeSection(key: string, name: 'problem' | 'scope', body: string
 }
 
 /**
- * Waits for the panel's `Mark ready`, and says what the panel and the thread hold when it never
- * comes: the gate is the engine's, and a write it refused is read in the thread.
+ * Presses the panel's `Mark ready` until the engine accepts it, and says what the panel and the
+ * thread hold when it never does: `Mark ready` is offered on every draft (issue #135), the gate
+ * is the engine's, and a write it refused is read in the thread.
  */
-async function readyOffered(key: string): Promise<void> {
+async function markedReady(key: string): Promise<void> {
   const until = Date.now() + 30_000
   while (Date.now() < until) {
-    // oxlint-disable-next-line no-await-in-loop -- the panel is asked again until it offers the press
-    if ((await control('Mark ready')) !== null) return
-    // oxlint-disable-next-line no-await-in-loop -- the pause between two asks
-    await browser.pause(500)
+    // oxlint-disable-next-line no-await-in-loop -- pressed again until the engine accepts it
+    await pressIn(panelOf(key), 'Mark ready')
+    // oxlint-disable-next-line no-await-in-loop -- the pause the engine answers in
+    await browser.pause(1000)
+    // oxlint-disable-next-line no-await-in-loop -- read after each press
+    if ((await stateOf(key)).status === 'ready') return
   }
   throw new Error(
-    `no Mark ready for ${key}. Panel: ${await region(panelOf(key))} || Thread: ${await region(THREAD)}`,
+    `${key} never ready. Panel: ${await region(panelOf(key))} || Thread: ${await region(THREAD)}`,
   )
 }
 

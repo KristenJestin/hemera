@@ -29,14 +29,15 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * chat, the width that pushes the chat as it unfolds, the agent unfolding it onto what it starts
  * on unless the hand folded it, and the keyboard across a fold. What is the Spec's is here.
  *
- * Unfolded, a head that stays on top — the key, the title, the status and the one sentence of
- * what is happening — and under it the rail beside the stage, the readiness at the rail's foot.
- * The stage shows one part, or every part of one phase when its heading in the rail is chosen.
- * Folded, the band is the rail's glyphs, their tints and the readiness as `3/7`.
+ * Unfolded, a head that stays on top — the key, the title, the status, `Mark ready` on a draft
+ * and `Rework` on a ready Spec, and the one sentence of what is happening — and under it the rail
+ * beside the stage. The stage shows one part, or every part of one phase when its heading in the
+ * rail is chosen. Folded, the band is the rail's glyphs and their tints. No readiness is drawn
+ * (issue #135): what the draft lacks is the agent's to say, and `Mark ready`'s to refuse with.
  *
  * Which part is on the stage follows one rule. While the reader has chosen nothing, it follows
- * the agent: the part it writes. A row of the rail, a group heading or a thing left before ready
- * pins the choice, and from then on the agent's part only breathes in the rail.
+ * the agent: the part it writes. A row of the rail or a group heading pins the choice, and from
+ * then on the agent's part only breathes in the rail.
  *
  * Everything it shows is handed to it, and everything it does is reported: the panel holds only
  * what is on the stage, and whether the rework dialog is open; its shell, whether it is folded.
@@ -46,6 +47,8 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
 const HEAD = 'flex flex-col gap-1.5 border-b border-border px-5 pt-4 pb-3'
 
 const NOW = 'text-sm text-muted-foreground'
+
+const REFUSED = 'text-sm text-destructive-muted-foreground'
 
 const SCROLL = 'min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring'
 
@@ -119,10 +122,6 @@ export function SpecPanel({
     following: spec.focus,
     onSelect: (target: SpecTarget) => setPinned({ part: target }),
     onSelectGroup: (phase: PhaseName) => setPinned({ group: phase }),
-    readiness: spec.readiness,
-    frozenOn: spec.frozenOn,
-    replacedBy: spec.replacedBy,
-    onMarkReady,
   }
 
   return (
@@ -149,9 +148,18 @@ export function SpecPanel({
                 superseded={spec.replacedBy !== undefined}
                 onPickRevision={onPickRevision}
                 onRework={() => setReworking(true)}
+                onMarkReady={onMarkReady}
                 onFold={fold}
               />
               {spec.now !== '' && <p className={NOW}>{spec.now}</p>}
+              {spec.status === 'draft' &&
+                spec.readiness.refused !== undefined && (
+                  // What `Mark ready` was refused with: what the draft still lacks, or that it
+                  // changed as it was pressed (D7-10, issue #135).
+                  <p role="alert" className={REFUSED}>
+                    {spec.readiness.refused}
+                  </p>
+                )}
               {buildable && build !== undefined && <WorkspaceActions {...build} />}
             </header>
             {reader !== undefined && (
