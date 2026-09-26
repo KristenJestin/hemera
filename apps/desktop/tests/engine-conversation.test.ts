@@ -18,6 +18,7 @@ import {
   type EnginePort,
   engineConversation,
 } from '#main/engine-conversation.ts'
+import { reported, said } from '#main/diagnostic.ts'
 
 /** A port that answers each message the way the test says, or never answers at all. */
 function port(reply: ((request: EngineRequest) => EngineAnswer) | null): EnginePort {
@@ -180,6 +181,26 @@ describe('Un process dédié muet est une erreur, pas une attente', () => {
     expect(failed).toBeInstanceOf(EngineGone)
     expect(failed.useCase).toBe('preferences.read')
     expect(failed.name).toBe('EngineGone')
+  })
+})
+
+describe('A silence or a process gone is said to the page in words', () => {
+  test('a timeout and a process gone reach the page as a sentence, never as JSON', async () => {
+    const silent = engineConversation(port(null), alive, Duration.millis(30))
+    const ended = engineConversation(port(null), () => false, Duration.millis(30))
+
+    const timedOut = await Effect.runPromise(
+      Effect.flip(silent.ask('launches.forSpec', { specId: 'spec-7' })),
+    )
+    const gone = await Effect.runPromise(Effect.flip(ended.ask('preferences.read', {})))
+
+    // What the page shows where the action was pressed (#132): the raw
+    // `{"useCase":"launches.request","_tag":"EngineTimeout"}` said nothing to whoever pressed it.
+    expect(said(timedOut)).toBe('the application did not answer in time')
+    expect(said(gone)).toBe('the application’s engine has stopped')
+    // The log line keeps the tag and the use case: it is read by someone who was not there.
+    expect(reported(timedOut)).toContain('EngineTimeout')
+    expect(reported(timedOut)).toContain('launches.forSpec')
   })
 })
 

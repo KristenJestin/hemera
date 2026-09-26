@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect } from 'effect'
+import { Duration, Effect, Option } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
@@ -18,7 +18,7 @@ import { Sessions } from '#engine/sessions.ts'
 import { ReopenRefusedError } from '#engine/specs/revisions.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
-import { Launches } from '#engine/workspaces/launches.ts'
+import { Launches, StartDeadline } from '#engine/workspaces/launches.ts'
 import { Preparation, recovered } from '#engine/workspaces/preparation.ts'
 import { Workspaces } from '#engine/workspaces/workspaces.ts'
 
@@ -204,7 +204,13 @@ describe('A build waits for its environment', () => {
       Effect.gen(function* () {
         const { project, specId } = yield* atlas()
         const workspace = yield* picked(project.id)
-        const launch = yield* (yield* Launches).request(specId, workspace.id)
+        const launched = yield* Launches
+        const asked = yield* launched.request(specId, workspace.id)
+        // Answered once written, started right after, in the engine (#132).
+        const launch = yield* until(
+          launched.one(asked.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
         return { builds: yield* builds, builtIn: yield* builtIn(specId), launch, workspace }
       }),
     )
@@ -290,14 +296,16 @@ describe('A request whose start is refused says so on its launch', () => {
         const workspace = yield* picked(project.id)
         const nothing = yield* unwrittenSpec(project.id)
         const asked = yield* launched.request(nothing.id, workspace.id)
-        return { asked, builds: yield* builds, rows: yield* launches }
+        const ended = yield* until(launched.one(asked.id), (one) => one.state !== 'waiting')
+        return { asked, builds: yield* builds, ended, rows: yield* launches }
       }),
     )
     // Refused, and the launch says it: left `waiting`, the user asks again and the engine would
     // start the first one on the way back — two build Sessions for one request (D8-13).
-    expect(seen.asked.state).toBe('failed')
-    expect(seen.asked.detail).toContain('no agent has been chosen')
-    expect(seen.rows).toEqual([{ state: 'failed', session_id: null, detail: seen.asked.detail }])
+    expect(seen.asked.state).toBe('waiting')
+    expect(seen.ended.state).toBe('failed')
+    expect(seen.ended.detail).toContain('no agent has been chosen')
+    expect(seen.rows).toEqual([{ state: 'failed', session_id: null, detail: seen.ended.detail }])
     expect(seen.builds).toEqual([])
   })
 })
@@ -484,9 +492,11 @@ describe('A failed start is retried on its own', () => {
           (one) => one.state === 'started' || one.state === 'failed',
         )
         const before = yield* preparation.steps(workspace.id)
-        const again = yield* launched.retry(first.id)
+        const retried = yield* launched.retry(first.id)
+        const again = yield* until(launched.one(first.id), (one) => one.state === 'failed')
         return {
           again,
+          retried,
           after: yield* preparation.steps(workspace.id),
           before,
           builds: yield* builds,
@@ -499,6 +509,7 @@ describe('A failed start is retried on its own', () => {
     expect(seen.first.detail).toContain('Claude Code')
     expect(seen.before).toHaveLength(1)
     // The same Session, started again: the environment is not touched a second time.
+    expect(seen.retried.state).toBe('starting')
     expect(seen.again.sessionId).toBe(seen.first.sessionId)
     expect(seen.again.state).toBe('failed')
     expect(seen.after).toEqual(seen.before)
@@ -622,10 +633,12 @@ describe('The engine comes back to what a stopped engine left', () => {
         const sql = yield* SqliteClient
         const before = yield* builds
         yield* recovered
+        // Recovered in the background (#132): the launch is read once it has moved on.
+        const back = yield* until(launched.one(left.id), (one) => one.state !== 'starting')
         const interrupted = yield* sql<{ count: number }>`
           SELECT count(*) AS count FROM domain_events
           WHERE type = 'launch.failed' AND payload LIKE '%interrupted%'`
-        return { after: yield* builds, back: yield* launched.one(left.id), before, interrupted }
+        return { after: yield* builds, back, before, interrupted }
       }),
     )
     // The Session, the revision, the Workspace and the brief of that build stand: the engine
@@ -666,7 +679,7 @@ describe('The engine comes back to what a stopped engine left', () => {
         const sql = yield* SqliteClient
         yield* recovered
         return {
-          back: yield* launched.one(left.id),
+          back: yield* until(launched.one(left.id), (one) => one.state !== 'starting'),
           briefs: yield* sql<{ count: number }>`
             SELECT count(*) AS count FROM session_entries
             WHERE session_id = ${left.sessionId} AND kind = 'mission_brief'`,
@@ -710,7 +723,11 @@ describe('The engine comes back to what a stopped engine left', () => {
       Effect.gen(function* () {
         const launched = yield* Launches
         yield* recovered
-        return { builds: yield* builds, launch: yield* launched.one(LEFT_WAITING) }
+        const launch = yield* until(
+          launched.one(LEFT_WAITING),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        return { builds: yield* builds, launch }
       }),
     )
     // What it waited for is there: the build starts, on the revision and in the Workspace the
@@ -809,7 +826,11 @@ describe('A Rework cancels a launch that has not started', () => {
         // A Workspace that is already ready: the launch starts at once, and its build Session is
         // there (D8-13).
         const workspace = yield* picked(project.id)
-        const launch = yield* launched.request(specId, workspace.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const launch = yield* until(
+          launched.one(asked.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
         const [spec] = yield* sql<{ current_revision_id: string }>`
           SELECT current_revision_id FROM specs WHERE id = ${specId}`
         const revisionId = spec?.current_revision_id
@@ -873,5 +894,128 @@ describe('A Rework cancels a launch that has not started', () => {
     ])
     // And the Workspace the build works in is still there.
     expect(seen.workspace.state).toBe('ready')
+  })
+})
+
+/** A promise that never settles: the start of an agent that never answers its handshake. */
+const never = () => new Promise<void>(() => undefined)
+
+/** A deadline short enough for a suite to see a start outlive it (#132). */
+const SHORT_DEADLINE = Duration.millis(400)
+
+describe('A request answers once its launch is written', () => {
+  test('A request on a ready Workspace answers at once, and the launch reaches started after', async () => {
+    // The agent takes its time to start, as a cold Claude Code does: the window gives a request
+    // five seconds, and a request that waited for the agent was a timeout on screen (#132).
+    let release: () => void = () => undefined
+    const slow = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    opened = await openWindow(dataFolder, fakeAgent({ holdsStart: () => slow }))
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const answered = yield* launched
+          .request(specId, workspace.id)
+          .pipe(Effect.timeoutOption(Duration.seconds(2)))
+        // Whatever the request answered, the agent may start now.
+        release()
+        if (Option.isNone(answered)) return { answered: null, started: null }
+        const started = yield* until(
+          launched.one(answered.value.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        return { answered: answered.value, started }
+      }),
+    )
+    expect(seen.answered).not.toBeNull()
+    expect(['waiting', 'starting']).toContain(seen.answered?.state)
+    expect(seen.started?.state).toBe('started')
+  })
+
+  test('A retry answers at once, and the launch says how the agent answered after', async () => {
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        const again = yield* launched.retry(failed.id)
+        const after = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        return { again, after, failed }
+      }),
+    )
+    expect(seen.failed.state).toBe('failed')
+    expect(seen.again.state).toBe('starting')
+    expect(seen.again.sessionId).toBe(seen.failed.sessionId)
+    expect(seen.after.state).toBe('failed')
+    expect(seen.after.detail).toContain('Claude Code')
+  })
+})
+
+describe('A start that outlives the agent’s deadline fails', () => {
+  test('A launch staying starting past the agent’s start deadline becomes failed, and Retry is offered', async () => {
+    opened = await openWindow(dataFolder, fakeAgent({ holdsStart: never }))
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const ended = yield* until(
+          launched.one(asked.id),
+          (one) => one.state !== 'waiting' && one.state !== 'starting',
+        )
+        return { ended }
+      }).pipe(Effect.provideService(StartDeadline, SHORT_DEADLINE)),
+    )
+    // Failed, saying why, on the Session it wrote: what `Retry` starts again (D8-13).
+    expect(seen.ended.state).toBe('failed')
+    expect(seen.ended.detail).toContain('did not answer within')
+    expect(seen.ended.sessionId).not.toBeNull()
+  })
+})
+
+describe('The engine answers before it comes back to what a stopped engine left', () => {
+  test('The engine answers engine.status at once with a launch left starting whose agent cannot start, and that launch ends failed', async () => {
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        // The engine stopped while that build was being started (#132): a launch `starting`,
+        // with the Session it had already written.
+        const sql = yield* SqliteClient
+        yield* sql`UPDATE build_launches SET state = 'starting', detail = NULL
+          WHERE id = ${failed.id}`
+        return failed
+      }),
+    )
+    await opened.close()
+    // The next engine's agent never answers its handshake: the recovery must not hold back the
+    // engine's answers, which is what left the window with no Project at all (#132).
+    const window = await openWindow(dataFolder, fakeAgent({ holdsStart: never }))
+    opened = window
+    const seen = await window.running(
+      Effect.gen(function* () {
+        const launched = yield* Launches
+        const back = yield* recovered.pipe(Effect.timeoutOption(Duration.seconds(2)))
+        const status = yield* Effect.promise(() => window.bridge.invoke('engine.status', {}))
+        const ended = yield* until(launched.one(left.id), (one) => one.state !== 'starting')
+        return { back, ended, status }
+      }).pipe(Effect.provideService(StartDeadline, SHORT_DEADLINE)),
+    )
+    expect(Option.isSome(seen.back)).toBe(true)
+    expect(seen.status.channel).toBe('dev')
+    expect(seen.ended.state).toBe('failed')
+    expect(seen.ended.detail).toContain('did not answer within')
+    expect(seen.ended.sessionId).toBe(left.sessionId)
   })
 })
