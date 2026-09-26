@@ -227,9 +227,10 @@ export const BUILD_REQUESTS = {
     }),
     response: buildViewSchema,
   },
-  // The blocker put aside: its task is ready again (D10-08).
+  // The blocker put aside: its task is ready again, with what the user wrote beside it
+  // (D10-08, issue #117).
   'build.dismissBlocker': {
-    arguments: buildSchema.extend({ blockerId: z.string() }),
+    arguments: buildSchema.extend({ blockerId: z.string(), note: z.string().nullable() }),
     response: buildViewSchema,
   },
 

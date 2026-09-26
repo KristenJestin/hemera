@@ -171,6 +171,7 @@ function Screen({
   onTaskDone,
   onTaskSkip,
   onDismissBlocker,
+  onOpenChat,
 }: {
   screen: keyof typeof SCREENS
   /** Whether a permission of the agent waits in the thread. */
@@ -185,7 +186,8 @@ function Screen({
   onStop: () => void
   onTaskDone: (taskId: string) => void
   onTaskSkip: (taskId: string, reason: string, unblock: boolean) => void
-  onDismissBlocker: (blockerId: string) => void
+  onDismissBlocker: (blockerId: string, note: string | null) => void
+  onOpenChat: () => void
 }): ReactNode {
   const thread = asking ? [...THREAD, PERMISSION] : THREAD
   // The chat is the hand's to minimise and the page's to remember (lot 5c); the story holds it
@@ -205,6 +207,7 @@ function Screen({
     onTaskDone,
     onTaskSkip,
     onDismissBlocker,
+    onOpenChat,
   }
   return (
     <TooltipProvider>
@@ -260,6 +263,7 @@ const meta = {
     onTaskDone: fn(),
     onTaskSkip: fn(),
     onDismissBlocker: fn(),
+    onOpenChat: fn(),
   },
   argTypes: {
     screen: {
@@ -280,6 +284,7 @@ const meta = {
     onTaskDone: { action: 'task done' },
     onTaskSkip: { action: 'task skipped' },
     onDismissBlocker: { action: 'blocker dismissed' },
+    onOpenChat: { action: 'chat opened' },
   },
 } satisfies Meta<typeof Screen>
 

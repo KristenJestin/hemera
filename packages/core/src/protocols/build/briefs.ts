@@ -56,3 +56,16 @@ Check each story's acceptance criteria and the Spec's \`verification\` section a
 
 Expected result: your answer: what you verified, how, and what you observed. The user then accepts the build or not.`,
 }
+
+/**
+ * The brief of a review the user wrote in the chat while the build waited for it (issue #117).
+ * The review itself is the user's own message, in front of this brief; what this says is what it is
+ * and what the build does with it.
+ */
+export const BUILD_REVIEW_BRIEF = `# The user's review
+
+Objective: carry out the review the user wrote in the chat. Their message is the message in front of this brief: read it as the review of what the build has done — a change asked for, a fault found, a check to redo.
+
+Work in the Workspace as it asks, and redefine nothing: the Spec is as frozen as it was, and a task the review makes impossible is reported with \`task_blocked\` again, with the reason.
+
+Expected result: your answer: what the review changed, what you verified and how. When your turn ends, Hemera runs the end checks of the whole Spec again, and the user accepts the build or writes another review.`

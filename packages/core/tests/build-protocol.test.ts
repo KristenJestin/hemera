@@ -153,7 +153,7 @@ describe('Every ready task is handed at once', () => {
         { story: 'Export', attempt: { ...RED, number: 2 } },
         { story: null, attempt: RED },
       ],
-      dismissed: [{ label: 'T4', title: 'Title of T4', reason: 'the plan says CSV' }],
+      dismissed: [{ label: 'T4', title: 'Title of T4', reason: 'the plan says CSV', note: null }],
     })
     expect(brief).toContain('No task is ready for you now')
     expect(brief).toContain('## The checks of the story "Export": attempt 2 was red')
@@ -161,6 +161,26 @@ describe('Every ready task is handed at once', () => {
     expect(brief).toContain(
       '- T4 · Title of T4: you said "the plan says CSV". The user dismissed it',
     )
+  })
+
+  test('the note the user wrote beside a dismissal reaches the agent', () => {
+    const brief = composeBuildBrief({
+      kind: 'execute',
+      ready: [],
+      failures: [],
+      dismissed: [
+        {
+          label: 'T4',
+          title: 'Title of T4',
+          reason: 'the plan says CSV',
+          note: 'The export needs a header row.',
+        },
+        { label: 'T5', title: 'Title of T5', reason: 'the plan says JSON', note: null },
+      ],
+    })
+    expect(brief).toContain('The user adds: "The export needs a header row."')
+    // A dismissal the user wrote nothing beside says as much as it ever did.
+    expect(brief.match(/The user adds:/g)).toHaveLength(1)
   })
 
   test('an output holding a code fence stays inside its own', () => {

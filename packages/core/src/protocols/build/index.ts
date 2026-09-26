@@ -17,9 +17,9 @@ import type {
 } from '../../domain/build.ts'
 import type { MissionProtocol, SpecSnapshot, TaskExecutor } from '../../domain/spec.ts'
 import { renderSpecMarkdown } from '../define/index.ts'
-import { BUILD_MISSION_BRIEF, BUILD_PHASE_BRIEFS } from './briefs.ts'
+import { BUILD_MISSION_BRIEF, BUILD_PHASE_BRIEFS, BUILD_REVIEW_BRIEF } from './briefs.ts'
 
-export { BUILD_MISSION_BRIEF, BUILD_PHASE_BRIEFS } from './briefs.ts'
+export { BUILD_MISSION_BRIEF, BUILD_PHASE_BRIEFS, BUILD_REVIEW_BRIEF } from './briefs.ts'
 
 /**
  * The `build` protocol, v1 (D10-01): `prepare`, then `execute`, then `verify`, each waiting for
@@ -104,6 +104,8 @@ export interface BriefBlocker {
   readonly label: string
   readonly title: string
   readonly reason: string
+  /** What the user added when they answered it (issue #117); null when they added nothing. */
+  readonly note: string | null
 }
 
 /**
@@ -114,7 +116,8 @@ export interface BriefBlocker {
  *   red attempts of stories and of the build not told yet, and the blockers the user dismissed;
  * - `resume`: the phase the build stands in, the Spec, every task with its state, attempts and
  *   snapshots, the ready set and the failures still to address;
- * - `verify`: the red attempt on the end checks, if any.
+ * - `verify`: the red attempt on the end checks, if any;
+ * - `review`: nothing — the review is the user's own message, which the brief answers.
  */
 export type BuildBriefInput =
   | {
@@ -136,6 +139,9 @@ export type BuildBriefInput =
       readonly tasks: readonly BriefTask[]
       readonly ready: readonly BriefTask[]
       readonly failures: readonly BriefFailure[]
+    }
+  | {
+      readonly kind: 'review'
     }
   | {
       readonly kind: 'verify'
@@ -233,7 +239,9 @@ function failuresText(failures: readonly BriefFailure[]): string {
 function dismissedText(dismissed: readonly BriefBlocker[]): string {
   const lines = dismissed.map(
     (blocker) =>
-      `- ${blocker.label} · ${blocker.title}: you said "${blocker.reason}". The user dismissed it: carry the task out as the Spec says.`,
+      `- ${blocker.label} · ${blocker.title}: you said "${blocker.reason}". The user dismissed it: carry the task out as the Spec says.${
+        blocker.note === null ? '' : ` The user adds: "${blocker.note}".`
+      }`,
   )
   return ['# Blockers the user dismissed', ...lines].join('\n')
 }
@@ -318,7 +326,8 @@ Your previous work may have been interrupted — by a pause, a restart or a cras
  * - `resume`: the mission, the brief of the phase the build stands in and the Spec, where every
  *   task stands with its evidence, the instruction to inspect the real state first, then the
  *   ready set and the failures still to address;
- * - `verify`: the `verify` brief and the failures of the end checks.
+ * - `verify`: the `verify` brief and the failures of the end checks;
+ * - `review`: the `review` brief alone: the user's review is the message it answers.
  */
 export function composeBuildBrief(input: BuildBriefInput): string {
   switch (input.kind) {
@@ -346,6 +355,8 @@ export function composeBuildBrief(input: BuildBriefInput): string {
       if (input.failures.length > 0) parts.push(failuresText(input.failures))
       return parts.join('\n\n')
     }
+    case 'review':
+      return BUILD_REVIEW_BRIEF
     case 'verify': {
       const parts = [BUILD_PHASE_BRIEFS.verify]
       if (input.failures.length > 0) parts.push(failuresText(input.failures))

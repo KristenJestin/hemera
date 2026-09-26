@@ -4,10 +4,11 @@
  *
  * A build is driven by deliveries, never by a message of the user's: the `prepare` brief until the
  * approach note exists; in `execute`, every ready task not handed yet and the failures not told yet
- * — a task's red attempt, a story's or the end checks', a blocker the user dismissed —; the resume
+ * — a task's red attempt, a story's or the end checks', a blocker the user dismissed —; the review
+ * the user wrote in the chat while the build waited for it, handed once, before the others; the resume
  * brief after a Resume, a restart, or to an agent whose own session holds none; and at `verify`, the
  * `verify` brief then the failures of the end checks. The first delivery of a phase, and a resume, is
- * a brief folded in the thread; the others are a line of Hemera's.
+ * a brief folded in the thread; the others are a line of Hemera's, the review of the user's included.
  *
  * What a delivery hands is marked as it goes out (`handing`): the agent's first tool call inside
  * that very delivery starts the tasks it holds (D10-04). It counts as given once the agent took it
@@ -34,6 +35,7 @@ import {
   type AttemptRow,
   type BuildRows,
   type TaskRow,
+  reviewBrief,
   asBuildTasks,
   attemptsOf,
   briefPath,
@@ -48,13 +50,18 @@ import {
 /** One delivery of a build, as the runtime hands it over and gives it back. */
 export interface BuildDelivery {
   readonly sessionId: string
-  readonly kind: 'prepare' | 'execute' | 'resume' | 'verify'
+  readonly kind: 'prepare' | 'execute' | 'resume' | 'review' | 'verify'
   /** The phase it was composed in. */
   readonly phase: ActiveBuildPhase
   /** What the agent is handed. */
   readonly text: string
   /** Whether it is a brief folded in the thread — a phase's first, or a resume — or a line. */
   readonly opens: boolean
+  /**
+   * Where it is recorded once the agent took it: the phase's path, the review's own, or the verify
+   * a review asked for (issue #117).
+   */
+  readonly path: string
   /** What the line says, in the user's words, when it is one. */
   readonly said: string
   /** The build tasks it hands for the first time. */
@@ -170,6 +177,26 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
   const labels = new Map(rows.tasks.map((task) => [task.taskId, task.label]))
   const base = { sessionId, phase, stamp }
 
+  // A review the user wrote in the chat, which the build went back to work on (issue #117): the
+  // agent is told what it is, once, and the review itself is the user's own message.
+  if (
+    rows.session.buildReviewAt !== null &&
+    !rows.briefed.has(reviewBrief(rows.session.buildReviewAt))
+  ) {
+    return {
+      ...base,
+      kind: 'review',
+      path: reviewBrief(rows.session.buildReviewAt),
+      stamp: rows.session.buildReviewAt,
+      opens: true,
+      said: 'Hemera handed the agent the review of the user.',
+      text: composeBuildBrief({ kind: 'review' }),
+      handed: [],
+      told: [],
+      retold: [],
+    }
+  }
+
   if (phase === 'prepare') {
     // Until the note exists, the `prepare` brief is what an agent starting over is handed again:
     // it is the whole of what a resume in `prepare` has to say (D10-02).
@@ -177,6 +204,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
     return {
       ...base,
       kind: 'prepare',
+      path: briefPath('prepare'),
       opens: true,
       said: 'Hemera handed the agent the Spec to prepare its build.',
       text: composeBuildBrief({ kind: 'prepare', snapshot: rows.snapshot, labels }),
@@ -202,6 +230,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
     return {
       ...base,
       kind: 'resume',
+      path: briefPath(phase),
       opens: true,
       said: 'Hemera handed the agent where the build stands.',
       text: composeBuildBrief({
@@ -233,6 +262,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
     return {
       ...base,
       kind: 'verify',
+      path: briefPath('verify'),
       opens,
       said: `Hemera handed the agent ${listed(endsSaid)}.`,
       text: composeBuildBrief({
@@ -269,6 +299,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
   return {
     ...base,
     kind: 'execute',
+    path: briefPath('execute'),
     opens: !rows.briefed.has(briefPath('execute')),
     said: `Hemera handed the agent ${listed(words)}.`,
     text: composeBuildBrief({
@@ -279,6 +310,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
         label: task.label,
         title: specTaskOf(rows, task)?.title ?? task.label,
         reason: blocker.reason,
+        note: blocker.note,
       })),
     }),
     handed: fresh.map((task) => task.id),
@@ -323,7 +355,7 @@ export function taken(transaction: EngineTransaction, delivery: BuildDelivery) {
       id: crypto.randomUUID(),
       sessionId: delivery.sessionId,
       kind: 'brief',
-      path: briefPath(delivery.phase),
+      path: delivery.path,
       fingerprint: fingerprintOf(delivery.text),
       deliveredAt: now(),
     })

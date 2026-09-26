@@ -86,6 +86,8 @@ const WORKSPACES_MIGRATION = '20260924223401_workspaces'
  * (D10-01, D10-05, D10-06, D10-14).
  */
 const BUILD_MIGRATION = '20260925073422_build'
+/** Lot 5e (issue #117): the stamp a build waits under while the user reviews it. */
+const REVIEW_MIGRATION = '20260926030019_review'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -513,7 +515,12 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
 
     // Behind by this migration and the two after it, the Workspaces' and the build's, and the copy
     // is named after the first.
-    expect(standing.behind).toEqual([SPECS_MIGRATION, WORKSPACES_MIGRATION, BUILD_MIGRATION])
+    expect(standing.behind).toEqual([
+      SPECS_MIGRATION,
+      WORKSPACES_MIGRATION,
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
     // The Specs arrived, and the columns that tie a Project and a Session to them...
@@ -878,13 +885,13 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
     // Behind by this lot's migration and the ones after it — the Specs', the Workspaces', the
-    // build's —
-    // and the copy taken before them is named after the first.
+    // build's, the review's — and the copy taken before them is named after the first.
     expect(standing.behind).toEqual([
       TOOLS_MIGRATION,
       SPECS_MIGRATION,
       WORKSPACES_MIGRATION,
       BUILD_MIGRATION,
+      REVIEW_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1023,7 +1030,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([WORKSPACES_MIGRATION, BUILD_MIGRATION])
+    expect(standing.behind).toEqual([WORKSPACES_MIGRATION, BUILD_MIGRATION, REVIEW_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
     ])
@@ -1144,7 +1151,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: BUILD_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: REVIEW_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1363,7 +1370,7 @@ describe('A profile of lot 20 is migrated to lot 22', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
-    expect(standing.behind).toEqual([BUILD_MIGRATION])
+    expect(standing.behind).toEqual([BUILD_MIGRATION, REVIEW_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
     const schema = (await on(dataFolder, schemaOf)).join('\n')

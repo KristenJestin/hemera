@@ -83,6 +83,7 @@ export function BuildSession({
   onTaskDone,
   onTaskSkip,
   onDismissBlocker,
+  onOpenChat,
 }: BuildSessionProps): ReactNode {
   const [specOpen, setSpecOpen] = useState(defaultSpecOpen)
   const panel = useRef<HTMLDivElement>(null)
@@ -163,6 +164,7 @@ export function BuildSession({
                 onTaskDone={onTaskDone}
                 onTaskSkip={onTaskSkip}
                 onDismissBlocker={onDismissBlocker}
+                onOpenChat={onOpenChat}
               />
             </div>
             <AnimatePresence initial={false}>

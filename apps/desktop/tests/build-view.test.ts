@@ -14,6 +14,7 @@ import { Effect, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeStep } from '#engine/agents/fake.ts'
+import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { Builds } from '#engine/build/build.ts'
 import { Specs } from '#engine/specs/specs.ts'
 
@@ -26,6 +27,7 @@ import {
   finished,
   journalOf,
   launched,
+  statesOf,
   scriptedChecks,
 } from './build-harness.ts'
 import { held } from './application.ts'
@@ -261,5 +263,70 @@ describe('Stop closes the build', () => {
     expect(seen.read.tasks.map((task) => task.label)).toEqual(['T1', 'T2', 'T3'])
     expect(seen.again.message).toBe('This build is stopped.')
     expect(seen.next).not.toBe(seen.sessionId)
+  })
+})
+
+describe('A review sends the build back to work', () => {
+  test('a message sent while the build waits for it is its review, and the whole Spec is checked again', async () => {
+    // The review's turn is held before its one step, so what it leaves behind can be read.
+    const answer = held()
+    let reviewing = false
+    const { agent, handed } = buildAgent(
+      {
+        execute: (labels, text): readonly FakeStep[] => {
+          if (!text.includes("# The user's review")) return labels.map(finished)
+          reviewing = true
+          return [{ does: 'says', text: 'The exporter writes the header row first now.' }]
+        },
+      },
+      { between: () => (reviewing ? answer.promise : Promise.resolve()) },
+    )
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const builds = yield* Builds
+        const runtime = yield* AgentRuntime
+        const waiting = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        // The review is written in the chat and sent like any other message (issue #117), so the
+        // turn it starts runs beside what the suite reads of the build while it is held.
+        const [, read] = yield* Effect.all(
+          [
+            runtime.prompt(sessionId, 'The export needs a header row; the reader is fine.'),
+            Effect.gen(function* () {
+              const working = yield* eventually(
+                buildOf(sessionId),
+                (view) => view.phase === 'execute' && !view.canAccept,
+              )
+              const refused = yield* Effect.flip(builds.accept(sessionId))
+              answer.carryOn()
+              const back = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+              return { working, refused, back }
+            }),
+          ],
+          { concurrency: 2 },
+        )
+        return {
+          waiting,
+          ...read,
+          handed,
+          lines: yield* journalOf(sessionId),
+        }
+      }),
+    )
+    expect(seen.waiting.canAccept).toBe(true)
+    // Back to work: the phase is `execute` again, and Accept says what it waits for.
+    expect(seen.working.phase).toBe('execute')
+    expect(seen.refused.message).toBe('The build went back to work on your review.')
+    // The agent was handed the brief of a review, in front of the user's own message.
+    expect(seen.handed.some((text) => text.includes("# The user's review"))).toBe(true)
+    // Nothing was accepted: the whole Spec is checked again, and the build waits for the user once
+    // more — its tasks where they stood, its second round of end checks green.
+    expect(seen.back.endAttempts.map((attempt) => attempt.result)).toEqual(['green', 'green'])
+    expect(statesOf(seen.back)).toEqual({ T1: 'done', T2: 'done', T3: 'done' })
+    expect(
+      seen.lines.filter((line) => line.type === 'build.reviewed').map((line) => line.payload),
+    ).toEqual(['{}'])
   })
 })

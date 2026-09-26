@@ -21,6 +21,7 @@ import {
   storyRowsOf,
   taskStateLabel,
 } from './model.ts'
+import { ReviewCard } from './review-card.tsx'
 import { StopBuild } from './stop-build.tsx'
 import { BuildTries, TaskStage } from './task-stage.tsx'
 import { ago, taskTime, tryLabel } from './times.ts'
@@ -70,6 +71,9 @@ const BANDS = {
 } as const
 
 const APPROACH = 'border-b border-border px-5 py-2'
+
+/** The review card, first in the pane under the head: the decision the pane is opened for. */
+const REVIEW = 'mx-6 mt-3'
 
 const APPROACH_LINE = 'flex items-center gap-2 text-sm'
 
@@ -305,8 +309,10 @@ export interface BuildViewProps {
   onTaskDone: (taskId: string) => void
   /** A task that was the user's is skipped, with the reason and whether its dependants go on. */
   onTaskSkip: (taskId: string, reason: string, unblock: boolean) => void
-  /** The Spec stands: the blocked task goes back to ready. */
-  onDismissBlocker: (blockerId: string) => void
+  /** The Spec stands: the blocked task goes back to ready, with the note the user wrote. */
+  onDismissBlocker: (blockerId: string, note: string | null) => void
+  /** The build waits for the user's review: the panel asks for it where it is written. */
+  onOpenChat: () => void
 }
 
 export function BuildView({
@@ -324,6 +330,7 @@ export function BuildView({
   onTaskDone,
   onTaskSkip,
   onDismissBlocker,
+  onOpenChat,
 }: BuildViewProps): ReactNode {
   const [chosen, setChosen] = useState<string | null>(() => firstShown(build))
   const [unfolded, setUnfolded] = useState<readonly string[]>([])
@@ -429,6 +436,7 @@ export function BuildView({
         <StateLine build={build} stories={rows} now={now} />
       </header>
       <Band build={build} />
+      {!over && build.canAccept && <ReviewCard className={REVIEW} onOpenChat={onOpenChat} />}
       <Approach build={build} />
       <div className={BODY} role="region" tabIndex={0} aria-label={`The build of ${build.specKey}`}>
         {rows.length === 0 && <p className={HINT}>No story of the Spec is being built yet.</p>}
@@ -462,7 +470,7 @@ export function BuildView({
                         blocker={blocker}
                         now={now}
                         suspended={dependantsOf(blocked.label, build.tasks)}
-                        onDismiss={() => onDismissBlocker(blocker.id)}
+                        onDismiss={(note) => onDismissBlocker(blocker.id, note)}
                       />
                     ))}
                     {story.tasks.length > 0 && (

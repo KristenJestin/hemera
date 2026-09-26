@@ -155,6 +155,8 @@ function labelOf(entry: JournalEntry): string {
       return 'Build paused'
     case 'build.resumed':
       return 'Build resumed'
+    case 'build.reviewed':
+      return 'Build back to work on the review of the user'
     case 'build.accepted':
       return 'Build accepted'
     case 'build.stopped':

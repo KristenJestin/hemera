@@ -85,6 +85,14 @@ export function briefPath(phase: BuildPhase): string {
   return `build · ${phase}`
 }
 
+/**
+ * The path a review's brief is recorded under (issue #117), the same in `context_deliveries` and in
+ * `briefed`: the agent is briefed once per review, and a review after another is a brief of its own.
+ */
+export function reviewBrief(at: string): string {
+  return `build · review · ${at}`
+}
+
 export function phaseOf(row: Pick<SessionRow, 'buildPhase'>): BuildPhase | null {
   return BUILD_PHASES.find((known) => known === row.buildPhase) ?? null
 }
@@ -394,7 +402,10 @@ export function moveTask(
     .pipe(Effect.mapError(failed('writing the task')))
 }
 
-/** Writes where a build's protocol stands (D10-01). */
+/**
+ * Writes where a build's protocol stands (D10-01). A review's stamp is not the phase's to clear: it
+ * stands until the checks it asked for are judged (issue #117).
+ */
 export function movePhase(
   transaction: EngineTransaction,
   sessionId: string,
