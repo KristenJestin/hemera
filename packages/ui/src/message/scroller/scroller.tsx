@@ -51,7 +51,7 @@ const WIDTH = { rest: 1, near: 1.5, active: 2 } as const
  * The whole of the room the page gives the thread, which the rail and the pill stand in.
  *
  * It is as wide as the content area and not as wide as the thread (trial of 22 September 2026,
- * evening): the rail stands at its right edge, in the gutter beside the thread's column, and the
+ * evening): the rail stands at its left edge, in the gutter beside the thread's column, and the
  * pill floats over its middle — which is the middle of the column, since the column is centred
  * in it. Neither takes anything of the column's width.
  */
@@ -108,13 +108,19 @@ const PILL_ROW = 'pointer-events-none absolute inset-x-0 bottom-4 flex justify-c
 const RAIL = 'flex shrink-0 flex-col items-center gap-1 pt-3'
 
 /**
- * Where the scroller stands its rail: at the right edge of the frame, not beside the column.
+ * Where the scroller stands its rail: at the left edge of the frame, not beside the column.
  *
  * Counted inside the column, the rail took its own width and a gap out of the thread's, and the
  * thread ended short of the composer under it (trial of 22 September 2026, evening). Out here it
  * is in the gutter the column leaves, and the column is the composer's.
+ *
+ * The left and not the right (recette of 26 September 2026, issue #149): the panel of the
+ * Session's mission opens on the right of the chat, and the rail — the reader's history of the
+ * thread, with the preview of the message each mark stands for — stood against it, its preview
+ * laid over the thread's own side of the column. At the left it stays by the chat whatever opens
+ * beside it, and its preview opens towards the thread.
  */
-const RAIL_PLACE = 'absolute top-0 right-1'
+const RAIL_PLACE = 'absolute top-0 left-1'
 
 /**
  * A mark is drawn as a line, and pressed as a square.
@@ -284,8 +290,12 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     const node = box.current
     if (node !== null) {
       const moved = node.scrollTop - lastTop.current
-      if (moved < 0) pinned.current = false
-      const edge = node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE
+      const left = node.scrollHeight - node.scrollTop - node.clientHeight
+      // Going up and ending at the very bottom is not the reader: it is the browser putting the
+      // scroll back inside a thread that got shorter under it — a card taken out of the thread
+      // to be pinned above the composer (issue #149) — and a reader who was following still is.
+      if (moved < 0 && left > 1) pinned.current = false
+      const edge = left <= LIVE_EDGE
       if (moved > 0 && edge) pinned.current = true
       lastTop.current = node.scrollTop
     }
@@ -304,7 +314,22 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     node.scrollTop = node.scrollHeight
     lastTop.current = node.scrollTop
     look()
-    const sized = new ResizeObserver(look)
+    /**
+     * The reader who is following, taken to the end of what is written, then everything measured.
+     *
+     * Asked on either of the two changes that can take the end out of sight: the thread growing,
+     * and the room it is given shrinking. The second is a card pinned above the composer — a
+     * proposal, a question (issue #149) — which takes its height from the bottom of the thread:
+     * measured only, the thread stayed where it was and its last lines went under the card.
+     */
+    const follow = (): void => {
+      if (pinned.current && box.current !== null) {
+        box.current.scrollTop = box.current.scrollHeight
+        lastTop.current = box.current.scrollTop
+      }
+      look()
+    }
+    const sized = new ResizeObserver(follow)
     sized.observe(node)
     /**
      * The thread getting taller, which is not the same event as the thread getting an entry.
@@ -314,13 +339,7 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
      * the first word of an answer and then stood still for the rest of it. What is watched is
      * the height of what is written, and a reader who is following is taken along with it.
      */
-    const grown = new ResizeObserver(() => {
-      if (pinned.current && box.current !== null) {
-        box.current.scrollTop = box.current.scrollHeight
-        lastTop.current = box.current.scrollTop
-      }
-      look()
-    })
+    const grown = new ResizeObserver(follow)
     grown.observe(written)
     return () => {
       sized.disconnect()
@@ -464,7 +483,9 @@ export interface NavigationRailProps {
  *
  * Every mark answers the pointer and the keyboard, and wears its preview in the design system's
  * tooltip: a mark is six pixels of line, and what it stands for is a sentence that has to be
- * read somewhere. The rail sits outside the thread's own column and never scrolls with it — a
+ * read somewhere. The preview is a quote and not a name, so it keeps a measure of its own and
+ * wraps over two lines at most, then ends on an ellipsis (issue #149): a whole message laid over
+ * the thread on one line was a line as wide as the thread. The rail sits outside the thread's own column and never scrolls with it — a
  * map that travelled with the territory would move under the hand at the exact moment the hand
  * is on it.
  *
@@ -478,7 +499,7 @@ export function NavigationRail({ label, marks, active, onSelect }: NavigationRai
   return (
     <nav aria-label={label} className={RAIL}>
       {marks.map((mark, index) => (
-        <Tooltip key={mark.id} label={mark.label} side="left">
+        <Tooltip key={mark.id} label={mark.label} side="right" quote>
           <button
             type="button"
             aria-label={mark.label}

@@ -457,6 +457,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ToolCallCard',
       'TerminalOutput',
       'DiffBlock',
+      // #149: the calls of a turn between two things the agent said, folded into one row.
+      'ActionGroup',
       'PermissionRequest',
       'DecisionSummary',
       // The agent, its model and its effort are one control since the trial of 22 September

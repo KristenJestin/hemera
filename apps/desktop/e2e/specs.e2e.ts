@@ -193,9 +193,9 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
     expect(panel).toContain('draft')
     // No sentence of the phase under the head: the rail says where each part stands (#150).
     expect(panel).not.toContain('Shape ·')
-    // The head says what the Session is for, its agent, and the Spec it defines.
-    expect(await shows(`DEFINE · opencode`)).toBe(true)
-    expect(await shows(`· ${KEY}`)).toBe(true)
+    // The head names the Project alone (issue #149): the mission is the panel beside the chat,
+    // and the agent is the composer's.
+    expect(await shows(`DEFINE · opencode`)).toBe(false)
     expect(await region(THREAD)).toContain(ANSWERS[0])
     const { specId } = await sessionOf(ASKED)
     expect(specId).not.toBeNull()
@@ -311,7 +311,6 @@ describe('A second Session reads but does not write', () => {
     })
     expect(await region(READER_BAR)).toContain(`« ${ASKED} »`)
     expect(await region(PANEL)).toContain(PROBLEM)
-    expect(await shows(`DEFINE · opencode`)).toBe(true)
   })
 
   it('takes the write right over, and the first Session reads from then on', async () => {

@@ -80,7 +80,7 @@ const SESSIONS = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: SessionHeader,
   render: (args) => <Harness {...args} />,
@@ -88,7 +88,6 @@ const meta = {
   args: {
     title: 'CSV invoice export',
     projectName: 'Atlas',
-    meta: 'created 3 days ago · 5 messages',
     editing: false,
     archiveDisabled: false,
     onRename: fn(),
@@ -99,10 +98,6 @@ const meta = {
   argTypes: {
     title: { control: 'text', description: 'What the Session is called.' },
     projectName: { control: 'text', description: 'The Project it belongs to.' },
-    meta: {
-      control: 'text',
-      description: "The rest of the head's line, already written for the platform.",
-    },
     editing: { control: 'boolean', description: 'Whether the title is being typed right now.' },
     archiveDisabled: {
       control: 'boolean',
@@ -126,14 +121,17 @@ type Story = StoryObj<typeof meta>
  * A Session with a name, a Project, and the menu that holds what can be done to it.
  *
  * The head is one line (review of #40, defect 4): the title, the Project it lives in, and the
- * `…` at the end of the same line. The title is itself the control that opens the field, because
+ * `…` at the end of the same line. The Project's name and nothing after it (issue #149): the
+ * mission shows in the panel beside the thread, and the agent in the composer. The title is itself the control that opens the field, because
  * the hand that wants the name changed is already on the words.
  */
 export const Named: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
-    expect(canvas.getByText('Atlas · created 3 days ago · 5 messages')).toBeInTheDocument()
+    // The Project's name alone: no date, no count, no mission, no agent after it.
+    expect(canvas.getByText('Atlas', { selector: 'p' })).toBeInTheDocument()
+    expect(canvas.queryByText(/Atlas ·/)).toBeNull()
     expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toBeInTheDocument()
     expect(canvas.getByRole('button', { name: 'Commands for CSV invoice export' })).toBeEnabled()
     // Nothing is being typed, so there is no field: the title is a heading until it is not.
@@ -152,17 +150,10 @@ export const ReadAndTyped: Story = {
   parameters: { layout: 'padded', controls: { disable: true } },
   render: () => (
     <div className="flex w-full flex-col gap-8">
+      <Harness title="CSV invoice export" projectName="Atlas" onRename={fn()} onArchive={fn()} />
       <Harness
         title="CSV invoice export"
         projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
-        onRename={fn()}
-        onArchive={fn()}
-      />
-      <Harness
-        title="CSV invoice export"
-        projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
         editing
         onRename={fn()}
         onArchive={fn()}
@@ -212,7 +203,6 @@ export const NewNamedAndArchived: Story = {
         <Harness
           title="Untitled"
           projectName="Atlas"
-          meta="just now"
           editing
           archiveDisabled
           onRename={fn()}
@@ -220,13 +210,7 @@ export const NewNamedAndArchived: Story = {
         />
         <SessionEmpty />
       </div>
-      <Harness
-        title="CSV invoice export"
-        projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
-        onRename={fn()}
-        onArchive={fn()}
-      />
+      <Harness title="CSV invoice export" projectName="Atlas" onRename={fn()} onArchive={fn()} />
       <ArchivedSessions sessions={ARCHIVED_SESSIONS} onRestore={RESTORED} />
     </div>
   ),
@@ -394,7 +378,7 @@ export const LeavingTheField: Story = {
  */
 export const NewAndEmpty: Story = {
   parameters: { layout: 'fullscreen', controls: { disable: true } },
-  args: { title: 'Untitled', meta: 'just now', editing: true, archiveDisabled: true },
+  args: { title: 'Untitled', editing: true, archiveDisabled: true },
   render: (args) => (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">
       <Harness {...args} />

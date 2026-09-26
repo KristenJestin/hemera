@@ -26,8 +26,6 @@ import { SessionEmpty, SessionHeader } from './session.tsx'
 /** What the harness decides: a thread, how it stands with the profile, and where the page is. */
 interface PageProps {
   title: string
-  /** The line under the title, already written for the platform. */
-  meta: string
   /** The thread, in the order it was written. */
   thread: { day?: string; lines: MessageLine[] }[]
   /** Where the last message stands with the profile. */
@@ -46,7 +44,6 @@ interface PageProps {
 
 function Page({
   title,
-  meta,
   thread,
   state,
   error,
@@ -111,7 +108,6 @@ function Page({
           <SessionHeader
             title={name}
             projectName="Atlas"
-            meta={meta}
             onRename={setName}
             editing={editing}
             onStartEditing={fn()}
@@ -173,19 +169,17 @@ const THREAD = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
   args: {
     title: 'CSV invoice export',
-    meta: 'created 3 days ago · 4 messages',
     thread: THREAD,
     state: 'saved',
   },
   argTypes: {
     title: { control: 'text', description: 'What the Session is called.' },
-    meta: { control: 'text', description: 'The line under the title, already written.' },
     thread: { table: { disable: true } },
     state: {
       control: 'inline-radio',
@@ -226,13 +220,8 @@ export const Variants: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <div className="grid grid-cols-2">
-      <Page
-        title="CSV invoice export"
-        meta="created 3 days ago · 4 messages"
-        thread={THREAD}
-        state="saved"
-      />
-      <Page title="New session" meta="just now" thread={[]} state="saved" empty editing />
+      <Page title="CSV invoice export" thread={THREAD} state="saved" />
+      <Page title="New session" thread={[]} state="saved" empty editing />
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -250,15 +239,9 @@ export const States: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <div className="grid grid-cols-3">
-      <Page title="In flight" meta="just now · 5 messages" thread={THREAD} state="saving" />
-      <Page title="Kept" meta="just now · 5 messages" thread={THREAD} state="saved" />
-      <Page
-        title="Refused"
-        meta="just now · 5 messages"
-        thread={THREAD}
-        state="failed"
-        error="the profile is read-only"
-      />
+      <Page title="In flight" thread={THREAD} state="saving" />
+      <Page title="Kept" thread={THREAD} state="saved" />
+      <Page title="Refused" thread={THREAD} state="failed" error="the profile is read-only" />
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -312,7 +295,7 @@ export const TurnDone: Story = {
  */
 export const NoMessageYet: Story = {
   parameters: { controls: { disable: true } },
-  args: { title: 'New session', meta: 'just now', thread: [], empty: true, editing: true },
+  args: { title: 'New session', thread: [], empty: true, editing: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByText('Nothing written yet')).toBeInTheDocument()

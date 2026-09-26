@@ -231,6 +231,24 @@ describe('A delivery shows in the timeline', () => {
     const drawn = contextDeliveryOf(entry)
     expect(drawn?.body).toBe(`Hemera gave the agent AGENTS.md. (${'a'.repeat(12)})`)
   })
+
+  test('an answer handed over draws no Hemera line: it is the user’s message already', () => {
+    const handed = entryOf(
+      'context_delivery',
+      'hemera',
+      'Hemera handed the agent the answer to “Which date decides the month?”.',
+      JSON.stringify({
+        kind: 'answer',
+        fingerprint: 'b'.repeat(64),
+        deliveredAt: '2026-09-26T10:00:00.000Z',
+        reached: 'delivery_prompt',
+      }),
+    )
+    expect(contextDeliveryOf(handed)).toBe(null)
+    // One that could not be handed over yet is news, and is still said.
+    const waiting = { ...handed, state: 'failed' }
+    expect(contextDeliveryOf(waiting)?.body).toMatch(/^Hemera handed/)
+  })
 })
 
 describe('The agent starts the app and the user opens it', () => {

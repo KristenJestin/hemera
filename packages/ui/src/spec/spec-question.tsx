@@ -10,10 +10,14 @@ import { type SpecAnswer, type SpecQuestionView, answerText } from './model.ts'
  * the chat").
  *
  * Drawn the way a permission request is — a card the turn is waiting on — because it is the same
- * situation: the agent has stopped and the next move is the reader's. The question, its
- * `blocking` chip and its phase; the answers the agent offers as a list, one of them marked
- * `recommended`; and a last choice of the reader's own, `Other`, with its field, for the answer
- * nobody offered. An option is answered by pressing it; the field by `Answer`.
+ * situation: the agent has stopped and the next move is the reader's. The question and its phase;
+ * the answers the agent offers as a list, one of them marked `recommended`; and a last choice of
+ * the reader's own, `Other`, with its field, for the answer nobody offered. An option is answered
+ * by pressing it; the field by `Answer`.
+ *
+ * No `blocking` chip (recette of 26 September 2026, issue #149): whether the question holds the
+ * gate is the Spec's business, and on the card, where the next move is the reader's anyway, it
+ * said nothing the reader could act on.
  *
  * The choices are Hemera's to label (recette of 26 September 2026, issue #134): each is lettered
  * A, B, C… in the order the agent gave them, the recommended one wears its badge, and `Other` is
@@ -23,9 +27,10 @@ import { type SpecAnswer, type SpecQuestionView, answerText } from './model.ts'
  * The question is Markdown, as everything the agent writes is, and reads as the thread reads it
  * (issue #134).
  *
- * Once answered, the card folds to the question with the answer in muted text under it. A turn
- * stopped before it was answered folds it too, and says so: the question stays open in the Spec's
- * register.
+ * Once answered, the card folds to the question alone: the answer is the reader's own message,
+ * which the thread draws where it was given, on the reader's side (issue #149) — said again in
+ * muted text under the question, it was said twice. A turn stopped before it was answered folds
+ * the card too, and says so: the question stays open in the Spec's register.
  */
 
 const CARD = 'flex flex-col gap-2.5 rounded-lg border border-primary bg-primary-muted p-3'
@@ -82,16 +87,18 @@ export function SpecQuestion({
   onAnswer,
 }: SpecQuestionProps): ReactNode {
   const [own, setOwn] = useState('')
-  const answer = answerText(question)
-  if (answer !== null || cancelled) {
+  const answered = answerText(question) !== null
+  if (answered || cancelled) {
     return (
       <div role="group" aria-label={`Question: ${question.body}`} className={FOLDED}>
         <div className={ASKED}>
           <AgentText text={question.body} />
         </div>
-        <span className={QUIET}>
-          {answer ?? 'Not answered · the turn was stopped; it stays open in the Spec'}
-        </span>
+        {!answered && (
+          <span className={QUIET}>
+            Not answered · the turn was stopped; it stays open in the Spec
+          </span>
+        )}
       </div>
     )
   }
@@ -99,7 +106,6 @@ export function SpecQuestion({
   return (
     <div role="group" aria-label={`Question: ${question.body}`} className={CARD}>
       <p className={HEAD}>
-        {question.blocking && <Badge tone="primary">blocking</Badge>}
         <Badge>{question.phase}</Badge>
       </p>
       <div className={BODY}>

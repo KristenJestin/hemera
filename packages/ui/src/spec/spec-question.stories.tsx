@@ -1,12 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { MessageText } from '../message/message-text.tsx'
+import { MessageGroup } from '../message/message.tsx'
 import { CREDIT_NOTES } from './spec-fixtures.ts'
 import { SpecQuestion } from './spec-question.tsx'
 
 /**
  * A question of the Spec asked in the thread: the options the agent offers, one recommended, and
- * a field of your own; folded to its answer once answered.
+ * a field of your own; folded to the question once answered, the answer being your own message.
  */
 const meta = {
   title: 'Blocks/Spec/SpecQuestion',
@@ -25,11 +27,15 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** Open: the question, `blocking` and its phase, the options, and a field of your own. */
+/**
+ * Open: the question and its phase, the options, and a field of your own. No `blocking` chip,
+ * though this question holds the gate (issue #149).
+ */
 export const Open: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('blocking')).toBeVisible()
+    await expect(canvas.getByText('plan')).toBeVisible()
+    await expect(canvas.queryByText('blocking')).toBeNull()
     await expect(canvas.getByRole('list', { name: 'Answers' })).toBeVisible()
     await expect(canvas.getByRole('textbox', { name: 'Other' })).toBeVisible()
   },
@@ -64,13 +70,42 @@ export const FreeText: Story = {
   },
 }
 
-/** Answered: folded to the question and the answer, in muted text. */
+/**
+ * Answered: folded to the question alone. The answer is not said again under it: it is your own
+ * message, which the thread draws where you gave it (issue #149).
+ */
 export const Answered: Story = {
   args: { question: { ...CREDIT_NOTES, answer: { optionId: 'negative' } } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Negative rows in the same file')).toBeVisible()
+    await expect(canvas.getByText(/Credit notes: negative rows/)).toBeVisible()
+    await expect(canvas.queryByText('Negative rows in the same file')).toBeNull()
     await expect(canvas.queryByRole('button')).toBeNull()
+  },
+}
+
+/**
+ * Answered, in the thread: the folded question, and under it the answer as your own message —
+ * the option you chose, in its words, on your side of the thread, where Hemera used to write that
+ * it had handed the agent the answer, with an id (issue #149).
+ */
+export const AnsweredInTheThread: Story = {
+  args: { question: { ...CREDIT_NOTES, answer: { optionId: 'negative' } } },
+  render: (args) => (
+    <div className="flex flex-col gap-5">
+      <SpecQuestion {...args} />
+      <MessageGroup
+        author="user"
+        name="You"
+        lines={[{ id: 'answer', body: <MessageText body="Negative rows in the same file" /> }]}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const mine = canvas.getByRole('group', { name: 'Messages from You' })
+    await expect(mine).toHaveTextContent('Negative rows in the same file')
+    await expect(canvasElement).not.toHaveTextContent(/handed the agent/)
   },
 }
 
@@ -103,7 +138,7 @@ export const Markdown: Story = {
   },
 }
 
-/** Answered, the question still reads its Markdown above the answer. */
+/** Answered, the folded question still reads its Markdown. */
 export const MarkdownAnswered: Story = {
   args: {
     question: {
@@ -115,7 +150,7 @@ export const MarkdownAnswered: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('where do they go').tagName).toBe('STRONG')
-    await expect(canvas.getByText('Negative rows in the same file')).toBeVisible()
+    await expect(canvas.queryByText('Negative rows in the same file')).toBeNull()
   },
 }
 

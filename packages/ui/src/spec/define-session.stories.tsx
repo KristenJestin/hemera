@@ -216,15 +216,7 @@ function goToQuestion(id: string): void {
 }
 
 /** The chat of a Session: its head, its thread and its composer. */
-function Chat({
-  title,
-  mission,
-  thread,
-}: {
-  title: string
-  mission: 'FREE' | 'DEFINE'
-  thread: ScrollerEntry[]
-}): ReactNode {
+function Chat({ title, thread }: { title: string; thread: ScrollerEntry[] }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   return (
@@ -233,7 +225,6 @@ function Chat({
         <SessionHeader
           title={title}
           projectName="Atlas"
-          meta={`${mission} · Claude Code · Sonnet 5`}
           onRename={fn()}
           onStartEditing={fn()}
           onArchive={fn()}
@@ -298,7 +289,7 @@ function DefineSession({
   return (
     // The row is the container the unfolded panel's width is a share of.
     <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <Chat title={shown.title} mission="DEFINE" thread={[...shown.thread, ...asked]} />
+      <Chat title={shown.title} thread={[...shown.thread, ...asked]} />
       <SpecPanel
         spec={spec}
         reader={reader}
@@ -348,11 +339,7 @@ function FreeThenDefine(): ReactNode {
   ]
   return (
     <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <Chat
-        title="Invoices for the accountants"
-        mission={created === null ? 'FREE' : 'DEFINE'}
-        thread={thread}
-      />
+      <Chat title="Invoices for the accountants" thread={thread} />
       <AnimatePresence initial={false}>
         {created !== null && (
           <motion.div
@@ -524,12 +511,12 @@ export const FromAFreeSession: Story = {
   args: { screen: 'fromFree' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/FREE · Claude Code/)).toBeVisible()
     await expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
     await expect(await canvas.findByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
-    await expect(canvas.getByText(/DEFINE · Claude Code/)).toBeVisible()
+    // The head names the Project and nothing more: the mission is the panel (issue #149).
+    await expect(canvas.queryByText(/DEFINE ·/)).toBeNull()
     await expect(canvas.getByRole('status')).toHaveTextContent('Created ATL-7')
     await expect(canvas.getByText(/Shall I write it down as a Spec/)).toBeVisible()
   },

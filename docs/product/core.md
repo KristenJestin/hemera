@@ -768,8 +768,9 @@ writer Session's agent at its next safe point, between two turns, never in the m
 
 A question of the Spec is asked in the chat, where it is answered. The agent offers its answers
 as options, one of them recommended, and the user picks one or writes their own; a question
-with no option takes a text only. The answer is written beside the question in the thread,
-resolves it, and reaches the agent at its next safe point like a human edit. The questions part
+with no option takes a text only. The answer is written beside the question in the thread, drawn
+there as the user's own message — the option chosen or the text typed —, resolves it, and reaches the
+agent at its next safe point like a human edit. The questions part
 of the Spec is the register of what was asked and what was decided.
 
 Presentation examples:
@@ -778,6 +779,9 @@ Presentation examples:
 DEFINE · Claude Sonnet
 BUILD · Claude Opus
 ```
+
+The head of a Session names its Project and nothing else: the mission shows in the panel beside
+the chat, and the agent in the composer.
 
 At this stage, Hemera does not need distinct `Role` or `AgentDefinition` business entities.
 They will only become useful if a need for reusable and configurable profiles is

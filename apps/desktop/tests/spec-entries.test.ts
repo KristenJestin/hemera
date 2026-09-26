@@ -12,6 +12,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
 import {
+  answerOf,
   briefOf,
   proposalIdOf,
   proposalOf,
@@ -115,6 +116,36 @@ describe('A question is asked and answered in the chat', () => {
     expect(questionEntryOf(entry('spec_question', JSON.stringify({ id: 'q' })), [], null)).toBe(
       null,
     )
+  })
+})
+
+describe('An answer reads as the user’s own message', () => {
+  test('an option chosen is said in the words the question offered it', () => {
+    const answer = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', optionId: 'payment' }),
+      'answer',
+    )
+    expect(answerOf(answer, [QUESTION, answer])).toBe('The payment date')
+  })
+
+  test('the words typed are said as they were typed', () => {
+    const own = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', text: 'The delivery date' }),
+      'own',
+    )
+    expect(answerOf(own, [QUESTION, own])).toBe('The delivery date')
+  })
+
+  test('an option the question does not hold, or an entry that does not parse, says nothing', () => {
+    const unknown = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', optionId: 'refund' }),
+      'unknown',
+    )
+    expect(answerOf(unknown, [QUESTION, unknown])).toBe(null)
+    expect(answerOf(entry('spec_answer', '{'), [QUESTION])).toBe(null)
   })
 })
 

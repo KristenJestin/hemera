@@ -11,6 +11,7 @@ import {
   HemeraToolCall,
   type HemeraToolStatus,
   MessageGroup,
+  MessageText,
   MissionBrief,
   PermissionRequest,
   SpecQuestion,
@@ -47,6 +48,7 @@ import {
 } from './agent-tool-payloads.ts'
 import {
   type DefinedSpec,
+  answerOf,
   briefOf,
   proposalIdOf,
   proposalOf,
@@ -541,8 +543,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     return <MissionBrief title={title} detail={detail} brief={brief} />
   }
 
-  // A question of the Spec, asked here and answered here (D7-01). The answer written beside it is
-  // drawn by the question itself, folded to what was chosen, and has no block of its own.
+  // A question of the Spec, asked here and answered here (D7-01). Once answered it folds to the
+  // question alone: the answer is the reader's message, drawn where it was given (issue #149).
   if (entry.kind === 'spec_question') {
     const block = questionEntryOf(entry, context.spec.thread, context.spec.asked)
     if (block === null) return null
@@ -558,7 +560,19 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     )
   }
 
-  if (entry.kind === 'spec_answer') return null
+  // The answer is the reader's: drawn as their own message where they gave it, the option they
+  // chose or the words they typed (issue #149), and the question above folds to itself.
+  if (entry.kind === 'spec_answer') {
+    const said = answerOf(entry, context.spec.thread)
+    if (said === null) return null
+    return (
+      <MessageGroup
+        author="user"
+        name="You"
+        lines={[{ id: entry.id, body: <MessageText body={said} /> }]}
+      />
+    )
+  }
 
   // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07).
   if (entry.kind === 'spec_proposal') {
