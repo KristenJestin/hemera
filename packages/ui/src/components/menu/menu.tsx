@@ -54,11 +54,16 @@ export interface MenuProps {
   /** Groups of commands; a separator is drawn between two groups. */
   groups: MenuItem[][]
   disabled?: boolean | undefined
+  /**
+   * The size of a label trigger, from the scale of the buttons: `sm` beside a small button, the
+   * footer of the Spec rail's build (issue #135). An icon trigger is always the small one.
+   */
+  size?: 'sm' | 'md' | undefined
   /** Where the trigger sits; never how it looks. */
   className?: string | undefined
 }
 
-export function Menu({ label, icon, groups, disabled, className }: MenuProps) {
+export function Menu({ label, icon, groups, disabled, size = 'md', className }: MenuProps) {
   const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
   return (
@@ -69,7 +74,7 @@ export function Menu({ label, icon, groups, disabled, className }: MenuProps) {
           render={
             icon === undefined ? (
               // The label is the trigger's own words, and they are the control's name.
-              <Button variant="secondary" className={className} />
+              <Button variant="secondary" size={size} className={className} />
             ) : (
               // An icon trigger says nothing, so the label is carried as the accessible name
               // instead: the button is drawn as an ellipsis and announced as what it opens.

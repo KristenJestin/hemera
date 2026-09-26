@@ -7,9 +7,8 @@ import { Button } from '../components/button/button.tsx'
  * D7-11).
  *
  * One Session writes a draft, and every other one reads it live. This says which one writes,
- * and offers the one human action that changes it: taking the write right over, at once. You
- * can still edit the text in place from here — your edits carry this Session as their origin —
- * what is refused is the agent of a reading Session writing.
+ * and offers the one human action that changes it: taking the write right over, at once. What is
+ * refused is the agent of a reading Session writing.
  *
  * While the writer is running a turn the right is not taken from under it (Decided 14): the
  * button is disabled and the bar says why, which the button is described by.

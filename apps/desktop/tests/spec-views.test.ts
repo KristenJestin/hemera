@@ -1,7 +1,7 @@
 /**
  * A Spec snapshot as the Spec panel draws it (design D7-01, D7-05, D7-08, D7-10, D7-11, D7-12).
  *
- * The mapping is pure: a snapshot, its revisions, its buffers and its Journal in, the
+ * The mapping is pure: a snapshot, its revisions and its Journal in, the
  * view of `@hemera/ui` out — one sentence of what is happening, a mark per part, the readiness
  * as seven checks and the things left before ready.
  */
@@ -22,7 +22,6 @@ import type {
   SpecSnapshot,
 } from '@hemera/ipc'
 import {
-  dayOf,
   launchOf,
   nowOf,
   readerOf,
@@ -31,7 +30,6 @@ import {
   sectionsOf,
   specViewOf,
   specWorkspacesOf,
-  storiesWith,
   tasksOf,
 } from '#renderer/spec-views.ts'
 
@@ -186,11 +184,9 @@ describe('The panel says what is happening in one sentence', () => {
     )
   })
 
-  test('ready: frozen at its revision, a build can start from it', () => {
+  test('ready: nothing beside the status, which says it', () => {
     const frozen = snapshot()
-    expect(nowOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } })).toBe(
-      'Ready · frozen, a build can start from it',
-    )
+    expect(nowOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } })).toBe('')
   })
 
   test('after a Rework every phase is stale, and the agent re-declares each', () => {
@@ -214,7 +210,7 @@ describe('The panel says what is happening in one sentence', () => {
 
 describe('Each section wears its mark', () => {
   test('empty, written by the agent, edited by you', () => {
-    const marks = sectionsOf(snapshot(), []).map((one) => [one.name, one.mark, one.author])
+    const marks = sectionsOf(snapshot()).map((one) => [one.name, one.mark, one.author])
     expect(marks).toEqual([
       ['problem', 'agent', 'agent'],
       ['expected_outcome', 'empty', null],
@@ -232,53 +228,7 @@ describe('Each section wears its mark', () => {
         section('scope', 'In.', 1, 'agent'),
       ],
     })
-    expect(sectionsOf(stale, []).map((one) => one.mark)).toEqual(['stale', 'agent'])
-  })
-})
-
-describe('An edit of yours is sent to the agent next turn', () => {
-  test('a human edit after the writer was last briefed is pending, and none once briefed', () => {
-    const pending = (briefedAt: number | null) =>
-      sectionsOf(snapshot({ briefedAt }), [])
-        .filter((one) => one.pendingForAgent === true)
-        .map((one) => one.name)
-    // The agent's section and the empty ones the Spec was born with are no edit of yours.
-    expect(pending(null)).toEqual(['scope'])
-    expect(pending(-1)).toEqual(['scope'])
-    expect(pending(0)).toEqual([])
-  })
-})
-
-describe('A conflict keeps the human’s text', () => {
-  test('a text kept on an older version is the conflict of its section', () => {
-    const kept = {
-      specId: 'spec-7',
-      name: 'scope' as const,
-      body: 'Mine.',
-      baseVersion: 1,
-      updatedAt: 0,
-    }
-    const scope = sectionsOf(snapshot(), [kept]).find((one) => one.name === 'scope')
-    expect(scope?.mark).toBe('conflict')
-    expect(scope?.conflict).toEqual({
-      base: 1,
-      current: 2,
-      mine: 'Mine.',
-      theirs: 'In: invoices of a month.',
-    })
-  })
-
-  test('a text kept on the version the section is at is no conflict', () => {
-    const kept = {
-      specId: 'spec-7',
-      name: 'scope' as const,
-      body: 'Mine.',
-      baseVersion: 2,
-      updatedAt: 0,
-    }
-    expect(sectionsOf(snapshot(), [kept]).find((one) => one.name === 'scope')?.conflict).toBe(
-      undefined,
-    )
+    expect(sectionsOf(stale).map((one) => one.mark)).toEqual(['stale', 'agent'])
   })
 })
 
@@ -408,11 +358,10 @@ describe('The readiness bar says what is left', () => {
     expect(readiness.todo).toEqual([])
   })
 
-  test('an obsolete request refused is said by the bar, and nothing is said otherwise', () => {
+  test('an obsolete request refused is said as it is, and nothing is said otherwise', () => {
     const reading = {
       snapshot: snapshot(),
       revisions: [snapshot().revision],
-      buffers: [],
       journal: [],
     }
     const said = 'ATL-7 changed since its gate was shown: read the gate again.'
@@ -420,17 +369,18 @@ describe('The readiness bar says what is left', () => {
     expect(specViewOf({ ...reading, readyRefused: null }).readiness.refused).toBe(undefined)
   })
 
-  test("a refusal listing the gate's failures is said without the engine's words", () => {
+  test("a refusal listing the gate's failures says what is left, without the engine's words", () => {
     const reading = {
       snapshot: snapshot(),
       revisions: [snapshot().revision],
-      buffers: [],
       journal: [],
       readyRefused:
         'ATL-7 does not pass its gate: the decompose phase is open, not finished; the attestation is missing.',
     }
+    const left = readinessOf(snapshot()).todo.map((item) => item.label)
+    expect(left.length).toBeGreaterThan(0)
     expect(specViewOf(reading).readiness.refused).toBe(
-      'ATL-7 is not ready yet: see what is left above.',
+      `ATL-7 is not ready yet. Still to do: ${left.join(', ')}.`,
     )
   })
 })
@@ -450,29 +400,19 @@ describe('An old revision is readable and not editable', () => {
   test('the picker lists the revisions newest first, the older ones read only', () => {
     expect(revisionsOf(second, revisions, [ready('2026-09-22T10:00:00.000Z', 'rev-1')])).toEqual([
       { number: 2, detail: 'Latest · draft' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ])
   })
 
-  test('revision 1 shown is frozen: no editing, no conflict, and the day it froze', () => {
+  test('revision 1 shown is frozen: no editing, and the day it froze', () => {
     const old = { ...snapshot(), spec: second.spec }
-    const kept = {
-      specId: 'spec-7',
-      name: 'scope' as const,
-      body: 'Mine.',
-      baseVersion: 1,
-      updatedAt: 0,
-    }
     const view = specViewOf({
       snapshot: old,
       revisions,
-      buffers: [kept],
       journal: [ready('2026-09-22T10:00:00.000Z', 'rev-1')],
     })
     expect(view.status).toBe('ready')
-    expect(view.frozenOn).toBe('22 Sep')
-    expect(view.now).toBe('An earlier version · read only, as it was frozen')
-    expect(view.sections.some((one) => one.conflict !== undefined)).toBe(false)
+    expect(view.now).toBe('An earlier version · read only')
     expect(view.readiness.todo).toEqual([])
     expect(view.replacedBy).toBe(2)
   })
@@ -482,34 +422,22 @@ describe('An old revision is readable and not editable', () => {
     const view = specViewOf({
       snapshot: { ...frozen, spec: { ...frozen.spec, status: 'ready' } },
       revisions: [frozen.revision],
-      buffers: [],
       journal: [],
     })
     expect(view.status).toBe('ready')
     expect(view.replacedBy).toBe(undefined)
   })
 
-  test('a ready Spec whose line the Journal page did not hold froze when it last changed', () => {
+  test('a ready Spec reads as the latest, ready, in its picker', () => {
     const frozen = snapshot()
     const view = specViewOf({
       snapshot: { ...frozen, spec: { ...frozen.spec, status: 'ready' } },
       revisions: [frozen.revision],
-      buffers: [],
       journal: [],
     })
-    expect(view.frozenOn).toBe(dayOf(Date.UTC(2026, 8, 23, 12)))
-    expect(view.revisions).toEqual([{ number: 1, detail: 'Latest · frozen' }])
+    expect(view.revisions).toEqual([{ number: 1, detail: 'Latest · ready' }])
   })
 })
-
-/** The credit-note story, `S2`, with its narrative and criteria edited in place. */
-const CREDIT_EDITED = {
-  id: 'credit',
-  key: 'S2',
-  title: 'Credit notes',
-  narrative: 'Kept with their invoice number.',
-  criteria: ['Negative rows.', 'Same number.'],
-}
 
 describe('Stories, tasks and questions are named the way the document reads them', () => {
   const decomposed = snapshot({
@@ -571,7 +499,6 @@ describe('Stories, tasks and questions are named the way the document reads them
     const view = specViewOf({
       snapshot: decomposed,
       revisions: [decomposed.revision],
-      buffers: [],
       journal: [],
     })
     expect(view.stories.map((one) => [one.key, one.criteria.length])).toEqual([
@@ -604,7 +531,6 @@ describe('Stories, tasks and questions are named the way the document reads them
     const view = specViewOf({
       snapshot: decomposed,
       revisions: [decomposed.revision],
-      buffers: [],
       journal: [],
     })
     expect(view.questions[0]).toEqual({
@@ -618,57 +544,6 @@ describe('Stories, tasks and questions are named the way the document reads them
       ],
       answer: { optionId: 'issue', text: undefined },
     })
-  })
-
-  test('a story edited in place is written back with every other story as it was', () => {
-    const edited = storiesWith(decomposed, CREDIT_EDITED)
-    expect(edited).toEqual([
-      {
-        id: 'export',
-        title: 'Export a month',
-        narrative: 'As an accountant…',
-        priority: null,
-        criteria: ['One row per line.', 'Empty month, header only.'],
-      },
-      {
-        id: 'credit',
-        title: 'Credit notes',
-        narrative: 'Kept with their invoice number.',
-        priority: 'high',
-        criteria: ['Negative rows.', 'Same number.'],
-      },
-    ])
-  })
-
-  test('a story edited while the list moved is written onto its own story', () => {
-    // `S2` was the credit notes when the edit began; a story put in front of them since has
-    // made the credit notes `S3`, and `S2` another story, which keeps its own text.
-    const moved = {
-      ...decomposed,
-      stories: [
-        decomposed.stories[0]!,
-        {
-          id: 'refund',
-          revisionId: 'rev-1',
-          title: 'Refunds',
-          narrative: '',
-          priority: null,
-          rank: 'ab',
-        },
-        decomposed.stories[1]!,
-      ],
-    }
-    const written = storiesWith(moved, CREDIT_EDITED)
-    expect(written?.map((one) => [one.id, one.narrative])).toEqual([
-      ['export', 'As an accountant…'],
-      ['refund', ''],
-      ['credit', 'Kept with their invoice number.'],
-    ])
-  })
-
-  test('a story taken away while it was edited is not written at all', () => {
-    const gone = { ...decomposed, stories: [decomposed.stories[0]!] }
-    expect(storiesWith(gone, CREDIT_EDITED)).toBe(null)
   })
 })
 

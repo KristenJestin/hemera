@@ -1,7 +1,7 @@
-import { motion } from 'motion/react'
+import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
-import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
+import { CROSSFADE, collapse, crossfade, expand, morph, useTransition } from '../motion.ts'
 import { MissionPanel } from '../session/mission-panel.tsx'
 import type {
   PhaseName,
@@ -10,7 +10,6 @@ import type {
   SectionView,
   SpecTarget,
   SpecView,
-  StoryView,
 } from './model.ts'
 import { QuestionsPart } from './questions-part.tsx'
 import { ReaderBar } from './reader-bar.tsx'
@@ -30,35 +29,38 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * chat, the width that pushes the chat as it unfolds, the agent unfolding it onto what it starts
  * on unless the hand folded it, and the keyboard across a fold. What is the Spec's is here.
  *
- * Unfolded, a head that stays on top — the key, the title, the status and the one sentence of
- * what is happening — and under it the rail beside the stage, the readiness at the rail's foot.
- * The stage shows one part, or every part of one phase when its heading in the rail is chosen.
- * Folded, the band is the rail's glyphs, their tints and the readiness as `3/7`.
+ * Unfolded, a head that stays on top — the key, the title, the status, `Mark ready` on a draft
+ * and `Rework` on a ready Spec, and the one sentence of what is happening — and under it the rail
+ * beside the stage. The stage shows one part, or every part of one phase when its heading in the
+ * rail is chosen. Folded, the band is the rail's glyphs and their tints. No readiness is drawn
+ * (issue #135): what the draft lacks is the agent's to say, and `Mark ready`'s to refuse with.
+ * Once the Spec is ready, the build's actions arrive in a footer at the bottom of the rail, and
+ * leave it when the Spec is reworked.
  *
  * Which part is on the stage follows one rule. While the reader has chosen nothing, it follows
- * the agent: the part it writes. A row of the rail, a group heading or a thing left before ready
- * pins the choice, and from then on the agent's part only breathes in the rail.
+ * the agent: the part it writes. A row of the rail or a group heading pins the choice, and from
+ * then on the agent's part only breathes in the rail.
  *
  * Everything it shows is handed to it, and everything it does is reported: the panel holds only
  * what is on the stage, and whether the rework dialog is open; its shell, whether it is folded.
- * What a save becomes — a version, a conflict, a line in the Journal — is the engine's.
+ * The agent writes the Spec; the reader reads it and answers, and edits nothing (issue #135).
  */
 
 const HEAD = 'flex flex-col gap-1.5 border-b border-border px-5 pt-4 pb-3'
 
 const NOW = 'text-sm text-muted-foreground'
 
+const REFUSED = 'text-sm text-destructive-muted-foreground'
+
 const SCROLL = 'min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring'
 
 const STAGE = 'flex flex-col gap-10 px-10 pt-5 pb-10'
 
+/** The footer of the rail the build's actions stand in, over the rail's own bottom edge. */
+const BUILD_FOOT = 'flex flex-col gap-2 border-t border-border px-2 py-3'
+
 /** What a part does with the reader's hand, handed down from the panel. */
 export interface SpecPartHandlers {
-  /** A section's text, with the version its edit was opened on, which the save is checked on. */
-  onSaveSection: (name: SectionName, body: string, baseVersion: number) => void
-  onApplyMine: (name: SectionName, body: string) => void
-  onDiscardMine: (name: SectionName) => void
-  onSaveStory: (story: StoryView) => void
   /** Takes the thread to where an open question is asked. */
   onGoToQuestion: (id: string) => void
 }
@@ -84,9 +86,9 @@ export interface SpecPanelProps extends SpecPartHandlers {
   onTakeOver: () => void
   /**
    * Where the build stands, and what it is launched in (D8-12, D8-13), which the application
-   * composes. Drawn on a Spec that is not being written, and on a launch already asked for
-   * whatever the Spec is doing: a draft offers nothing to build, and an older revision of a
-   * frozen one is read as it was frozen (D7-05).
+   * composes. Drawn in a footer of the rail on a Spec that is not being written, and on a launch
+   * already asked for whatever the Spec is doing: a draft offers nothing to build, and an older
+   * revision of a ready one is read as it was (D7-05).
    */
   build?: WorkspaceActionsProps | undefined
 }
@@ -109,7 +111,6 @@ export function SpecPanel({
   const [pinned, setPinned] = useState<StageChoice | null>(null)
   const [reworking, setReworking] = useState(defaultReworkOpen)
   const shown: StageChoice = pinned ?? { part: spec.focus ?? 'problem' }
-  const reading = reader !== undefined
   // The build is offered on a Spec that is not being written, and never on an older revision of
   // one: only the current revision of a Spec is built, as only it can be reworked (D7-05, D8-12).
   // A launch already asked for stays where it stands once the Spec moves on: a build that started
@@ -126,10 +127,6 @@ export function SpecPanel({
     following: spec.focus,
     onSelect: (target: SpecTarget) => setPinned({ part: target }),
     onSelectGroup: (phase: PhaseName) => setPinned({ group: phase }),
-    readiness: spec.readiness,
-    frozenOn: spec.frozenOn,
-    replacedBy: spec.replacedBy,
-    onMarkReady,
   }
 
   return (
@@ -156,10 +153,18 @@ export function SpecPanel({
                 superseded={spec.replacedBy !== undefined}
                 onPickRevision={onPickRevision}
                 onRework={() => setReworking(true)}
+                onMarkReady={onMarkReady}
                 onFold={fold}
               />
-              <p className={NOW}>{spec.now}</p>
-              {buildable && build !== undefined && <WorkspaceActions {...build} />}
+              {spec.now !== '' && <p className={NOW}>{spec.now}</p>}
+              {spec.status === 'draft' &&
+                spec.readiness.refused !== undefined && (
+                  // What `Mark ready` was refused with: what the draft still lacks, or that it
+                  // changed as it was pressed (D7-10, issue #135).
+                  <p role="alert" className={REFUSED}>
+                    {spec.readiness.refused}
+                  </p>
+                )}
             </header>
             {reader !== undefined && (
               <ReaderBar
@@ -170,10 +175,13 @@ export function SpecPanel({
             )}
           </>
         )}
-        rail={<SpecRail {...rail} />}
-        stage={
-          <SpecStage spec={spec} shown={shown} groups={groups} reading={reading} {...handlers} />
+        rail={
+          <SpecRail
+            {...rail}
+            foot={<BuildFoot build={buildable && build !== undefined ? build : undefined} />}
+          />
         }
+        stage={<SpecStage spec={spec} shown={shown} groups={groups} {...handlers} />}
         band={<SpecRail {...rail} folded />}
       />
       <ReworkDialog
@@ -190,13 +198,59 @@ export function SpecPanel({
   )
 }
 
+/**
+ * The footer of the rail the build's actions stand in (issue #135): `Prepare and start the build`
+ * and `Use an existing Workspace`, then where the launch stands.
+ *
+ * It arrives when the Spec becomes ready and leaves when it is reworked, on the `expand` and
+ * `collapse` kinds: its height is what makes room, so the rows above it move up rather than being
+ * covered, and it fades as it goes. A Spec opened ready finds it there, with nothing arriving.
+ * While it leaves it is still in the page, and a button there is a button a second press reaches:
+ * so the moment it starts leaving it is `inert` and hidden from assistive technology.
+ */
+function BuildFoot({ build }: { build: WorkspaceActionsProps | undefined }): ReactNode {
+  const transition = useTransition(morph)
+  return (
+    <AnimatePresence initial={false}>
+      {build !== undefined && (
+        <motion.div
+          key="build"
+          className="shrink-0 overflow-hidden"
+          initial={collapse}
+          animate={expand}
+          exit={collapse}
+          transition={transition}
+        >
+          <Leaving>
+            <WorkspaceActions {...build} />
+          </Leaving>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+/** The footer's content, out of reach from the moment it starts leaving. */
+function Leaving({ children }: { children: ReactNode }): ReactNode {
+  const present = useIsPresent()
+  return (
+    <div
+      className={BUILD_FOOT}
+      inert={!present}
+      aria-hidden={present ? undefined : true}
+      data-build-foot
+    >
+      {children}
+    </div>
+  )
+}
+
 /** A section of the revision, or the empty one its name stands for while nothing is written. */
 function sectionOf(spec: SpecView, name: SectionName): SectionView {
   return (
     spec.sections.find((section) => section.name === name) ?? {
       name,
       body: '',
-      version: 0,
       author: null,
       mark: 'empty',
     }
@@ -206,32 +260,12 @@ function sectionOf(spec: SpecView, name: SectionName): SectionView {
 export interface SpecPartProps extends SpecPartHandlers {
   spec: SpecView
   target: SpecTarget
-  /** Whether this Session reads a draft another one writes. */
-  reading: boolean
 }
 
 /** One part of the Spec, drawn by the part of its kind: a section, or one of the three lists. */
-export function SpecPart({
-  spec,
-  target,
-  reading,
-  onSaveSection,
-  onApplyMine,
-  onDiscardMine,
-  onSaveStory,
-  onGoToQuestion,
-}: SpecPartProps): ReactNode {
-  const editable = spec.status === 'draft'
+export function SpecPart({ spec, target, onGoToQuestion }: SpecPartProps): ReactNode {
   if (target === 'stories') {
-    return (
-      <StoriesPart
-        stories={spec.stories}
-        mark={spec.storiesMark}
-        editable={editable}
-        note={reading && editable ? 'you can edit; the agent of the writer is told' : undefined}
-        onSaveStory={onSaveStory}
-      />
-    )
+    return <StoriesPart stories={spec.stories} mark={spec.storiesMark} type={spec.type} />
   }
   if (target === 'tasks') return <TasksPart tasks={spec.tasks} mark={spec.tasksMark} />
   if (target === 'questions') {
@@ -243,19 +277,7 @@ export function SpecPart({
       />
     )
   }
-  const name = target
-  return (
-    <SectionPart
-      // A section is its own editor: another one is another text, never the same area handed a
-      // second text while it may hold the caret.
-      key={name}
-      section={sectionOf(spec, name)}
-      editable={editable}
-      onSave={(body, baseVersion) => onSaveSection(name, body, baseVersion)}
-      onApplyMine={(body) => onApplyMine(name, body)}
-      onDiscardMine={() => onDiscardMine(name)}
-    />
-  )
+  return <SectionPart section={sectionOf(spec, target)} />
 }
 
 export interface SpecStageProps extends SpecPartHandlers {
@@ -264,7 +286,6 @@ export interface SpecStageProps extends SpecPartHandlers {
   shown: StageChoice
   /** The groups of the rail, which say which parts a phase has. */
   groups: RailGroup[]
-  reading: boolean
 }
 
 /** The parts a choice puts on the stage, in the order the rail lists them. */
@@ -282,13 +303,7 @@ function partsOf(shown: StageChoice, groups: RailGroup[]): SpecTarget[] {
  * filter, for the reason the foot of a message gives: the accessibility check measures a text's
  * contrast through an opacity and refuses what it reads mid-flight. New content starts at its top.
  */
-export function SpecStage({
-  spec,
-  shown,
-  groups,
-  reading,
-  ...handlers
-}: SpecStageProps): ReactNode {
+export function SpecStage({ spec, shown, groups, ...handlers }: SpecStageProps): ReactNode {
   const transition = useTransition(crossfade)
   const scroller = useRef<HTMLDivElement>(null)
   const key = 'part' in shown ? `part-${shown.part}` : `group-${shown.group}`
@@ -314,7 +329,7 @@ export function SpecStage({
       >
         {partsOf(shown, groups).map((target) => (
           <div key={target} data-part={target}>
-            <SpecPart spec={spec} target={target} reading={reading} {...handlers} />
+            <SpecPart spec={spec} target={target} {...handlers} />
           </div>
         ))}
       </motion.div>

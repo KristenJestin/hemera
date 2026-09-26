@@ -6,7 +6,6 @@ import type {
   ConfigOption,
   ContextView as Provided,
   PlanRepository,
-  SectionName,
   Session,
   SessionEntry,
   SpecRevision,
@@ -60,12 +59,9 @@ import {
   askForBuild,
   createSpec,
   declineSpecProposal,
-  discardMine,
   markReady,
   retryBuild,
   rework,
-  saveSection,
-  saveStory,
   selectRevision,
   specSnapshot,
   startBuild,
@@ -393,12 +389,9 @@ export function SessionPage({
       : specViewOf({
           snapshot: defined,
           revisions: stored.revisions,
-          buffers: stored.buffers,
           journal: stored.journal,
           readyRefused: stored.readyRefused,
         })
-  const versionOf = (name: SectionName): number =>
-    spec?.sections.find((one) => one.name === name)?.version ?? 0
   /** The plan the Workspace dialog is open on, and what it is to leave behind. */
   const [workspacePlan, setWorkspacePlan] = useState<WorkspacePlan | null>(null)
   /** What Git has answered of that plan so far, in the order the answers arrived (#110). */
@@ -668,12 +661,6 @@ export function SessionPage({
         spec={spec}
         arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
-        // Checked against the version the edit was opened on, which the panel hands back:
-        // an agent may have written the section meanwhile (D7-12).
-        onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
-        onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
-        onDiscardMine={(name) => void discardMine(name)}
-        onSaveStory={(story) => void saveStory(session.id, story)}
         onGoToQuestion={goToQuestion}
         onMarkReady={() => void markReady(session.id)}
         onRework={(reason) => void rework(session.id, reason)}
@@ -682,9 +669,9 @@ export function SessionPage({
           void selectRevision(revision === current?.number ? null : revision)
         }}
         onTakeOver={() => void takeOver(session.id)}
-        // Where the build of this frozen Spec stands, and what is to be pressed next (D8-12,
-        // D8-13): the panel's head holds it, and the whole journey it opens — the plan, the
-        // Workspace, the launch — belongs here.
+        // Where the build of this ready Spec stands, and what is to be pressed next (D8-12,
+        // D8-13): the footer of the panel's rail holds it (issue #135), and the whole journey it
+        // opens — the plan, the Workspace, the launch — belongs here.
         build={{
           launch: launchOf(stored.launches),
           ...specWorkspacesOf(stored.launches),

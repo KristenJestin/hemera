@@ -5,7 +5,7 @@ import { Button, IconButton } from '../components/button/button.tsx'
 import { Menu } from '../components/menu/menu.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconChevronRight, IconRefresh } from '../icons.ts'
+import { IconCheck, IconChevronRight, IconRefresh } from '../icons.ts'
 import type { RevisionView, SpecStatus, SpecType } from './model.ts'
 import { SPEC_TYPE_ICONS } from './spec-icons.ts'
 
@@ -17,8 +17,11 @@ import { SPEC_TYPE_ICONS } from './spec-icons.ts'
  * a quiet chip; the status as a dot and a word — a draft is a plain dot, `ready` the success
  * one. A revision is only named once there is more than one, and then as the picker of the
  * revisions, the older ones read only. `Rework` stands at the end of the line of a `ready` Spec
- * and nowhere else: it is the one way back to a draft (core.md, "Spec and revisions"). The very
- * end is the fold, which takes the panel back to its band beside the chat (brief revision 4).
+ * and nowhere else: it is the one way back to a draft (core.md, "Spec and revisions"). `Mark
+ * ready` stands in its place on a draft, at its current revision, whatever the draft holds: it is
+ * never drawn disabled, and what the Spec still lacks is what the engine refuses it with (issue
+ * #135). The very end is the fold, which takes the panel back to its band beside the chat (brief
+ * revision 4).
  */
 
 const HEAD = 'flex min-h-control-sm items-center gap-2.5'
@@ -57,6 +60,8 @@ export interface SpecHeadProps {
   onPickRevision: (revision: number) => void
   /** Opens the rework of a `ready` Spec. */
   onRework: () => void
+  /** The human click that marks a draft ready; the button is drawn only when this is given. */
+  onMarkReady?: (() => void) | undefined
   /** Folds the panel to its band; the button is drawn only when this is given. */
   onFold?: (() => void) | undefined
 }
@@ -71,11 +76,13 @@ export function SpecHead({
   superseded = false,
   onPickRevision,
   onRework,
+  onMarkReady,
   onFold,
 }: SpecHeadProps): ReactNode {
   const ready = status === 'ready'
   const TypeIcon = SPEC_TYPE_ICONS[type]
   const reworkable = ready && !superseded
+  const markable = status === 'draft' && !superseded && onMarkReady !== undefined
   return (
     <div className={HEAD}>
       <span className={KEY}>{specKey}</span>
@@ -87,7 +94,7 @@ export function SpecHead({
           {status}
         </span>
       </span>
-      {(revisions.length > 1 || reworkable || onFold !== undefined) && (
+      {(revisions.length > 1 || reworkable || markable || onFold !== undefined) && (
         <span className={END}>
           {revisions.length > 1 && (
             <Menu
@@ -100,6 +107,12 @@ export function SpecHead({
                 })),
               ]}
             />
+          )}
+          {markable && (
+            <Button onClick={onMarkReady}>
+              <IconCheck size="sm" />
+              Mark ready
+            </Button>
           )}
           {reworkable && (
             // The height of the picker beside it, which is a menu's own trigger: two controls of

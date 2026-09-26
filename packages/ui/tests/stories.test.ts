@@ -514,7 +514,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'StoriesPart',
       'TasksPart',
       'QuestionsPart',
-      'ConflictBanner',
       'ReaderBar',
       'ReworkDialog',
       'MissionBrief',

@@ -15,14 +15,12 @@ import { MissionBrief } from './mission-brief.tsx'
 import type { ReaderView, SpecType, SpecView } from './model.ts'
 import {
   BUG,
-  CONFLICT,
   GATE_FULL,
   JUST_CREATED,
   MID_PLAN,
   ONE_QUESTION_LEFT,
   READER,
   READY,
-  SCOPE_MINE,
   STALE,
 } from './spec-fixtures.ts'
 import { useLiveSpec } from './spec-harness.tsx'
@@ -173,7 +171,7 @@ const SCREENS = {
       hemera('ready', 'ATL-7 marked ready', '11:34'),
       agents(
         'answer',
-        'The Spec is frozen at revision 2. A build Session can start from it. I can no longer change it unless you rework it.',
+        'The Spec is ready at revision 2. A build Session can start from it. I can no longer change it unless you rework it.',
       ),
     ],
   },
@@ -186,18 +184,6 @@ const SCREENS = {
       agents(
         'answer',
         'Story S2 covers them: negative rows in the same file, marked by a `type` column. Its second criterion says the file total must still equal the billing page total for the month.\n\nI only read it: « Spec CSV » writes it.',
-      ),
-    ],
-  },
-  conflict: {
-    title: 'Spec CSV',
-    spec: CONFLICT,
-    thread: [
-      ASK,
-      hemera('brief', 'What the agent was told · Plan', '10:44', PLAN_BRIEF),
-      agents(
-        'answer',
-        'I rewrote Scope (v5): payments stay out, and the currency column moved to Verification.',
       ),
     ],
   },
@@ -273,10 +259,6 @@ function Chat({
 
 /** The actions a story reports, for the paths that assert on them. */
 const ON = {
-  onSaveSection: fn(),
-  onApplyMine: fn(),
-  onDiscardMine: fn(),
-  onSaveStory: fn(),
   onAnswer: fn(),
   onGoToQuestion: goToQuestion,
   onMarkReady: fn(),
@@ -322,10 +304,6 @@ function DefineSession({
         reader={reader}
         defaultReworkOpen={reworkOpen}
         defaultFolded={folded}
-        onSaveSection={actions.onSaveSection}
-        onApplyMine={actions.onApplyMine}
-        onDiscardMine={actions.onDiscardMine}
-        onSaveStory={actions.onSaveStory}
         onGoToQuestion={actions.onGoToQuestion}
         onMarkReady={actions.onMarkReady}
         onRework={actions.onRework}
@@ -386,10 +364,6 @@ function FreeThenDefine(): ReactNode {
           >
             <SpecPanel
               spec={created}
-              onSaveSection={fn()}
-              onApplyMine={fn()}
-              onDiscardMine={fn()}
-              onSaveStory={fn()}
               onGoToQuestion={fn()}
               onMarkReady={fn()}
               onRework={fn()}
@@ -450,8 +424,8 @@ type Story = StoryObj<typeof meta>
  * The screens first, each named after the state it shows and each left as it opens: its play
  * asserts and changes nothing, so the screen the gate looks at is the screen as drawn. A Session
  * opens its panel folded; a screen that shows the panel's own state opens it unfolded. The paths
- * through them — a link followed, a Spec marked ready, reworked, taken over, a conflict applied,
- * a question answered in the chat — are stories of their own, named after what they do, and
+ * through them — a link followed, a Spec marked ready, reworked, taken over, a question answered
+ * in the chat — are stories of their own, named after what they do, and
  * start from the folded panel a Session opens on: the hand unfolds it first.
  */
 
@@ -465,7 +439,7 @@ async function unfold(canvasElement: HTMLElement): Promise<void> {
 /**
  * Screen 1 · a feature being planned, as the Session opens it: the chat has the width, the panel
  * a band beside it — the glyph of each part, the plan the agent writes tinted and breathing,
- * `Plan` open and three checks of seven. The thread says what the agent was handed in one folded
+ * `Plan` open, and no readiness. The thread says what the agent was handed in one folded
  * Hemera line, and asks the blocking question as a block.
  */
 export const MidPlan: Story = {
@@ -475,9 +449,7 @@ export const MidPlan: Story = {
       canvas.getByRole('button', { name: /What the agent was told · Plan/ }),
     ).toBeVisible()
     const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(
-      within(band).getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
-    ).toHaveTextContent('1/7')
+    await expect(within(band).queryByRole('img', { name: /^Readiness/ })).toBeNull()
     await expect(
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
@@ -485,9 +457,8 @@ export const MidPlan: Story = {
       'aria-current',
       'true',
     )
-    await expect(
-      within(band).getByRole('button', { name: 'Tasks, 0' }),
-    ).toHaveAccessibleDescription('Empty')
+    // The tasks, not written yet, say so in the band without being opened.
+    await expect(within(band).getByRole('button', { name: 'Tasks, 0, empty' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
     await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
     await expect(canvas.getByRole('group', { name: /^Question: Credit notes/ })).toBeVisible()
@@ -495,16 +466,17 @@ export const MidPlan: Story = {
 }
 
 /**
- * Unfolded, then a thing left before ready followed from the rail's foot: the tasks, not written
- * yet, on the stage.
+ * Unfolded, then `Mark ready` pressed too early: refused with what is left, said under the head;
+ * the tasks, not written yet, put on the stage from the rail.
  */
-export const MidPlanLinkFollowed: Story = {
+export const MidPlanMarkReadyRefused: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: '4 things before ready' }))
-    await userEvent.click(await within(document.body).findByRole('button', { name: 'the tasks' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
+    await expect(canvas.getByRole('alert')).toHaveTextContent(/Still to do: .*the tasks/)
+    await userEvent.click(canvas.getByRole('button', { name: /^Tasks/ }))
     await expect(canvas.getByRole('button', { name: /^Tasks/ })).toHaveAttribute(
       'aria-current',
       'true',
@@ -515,7 +487,7 @@ export const MidPlanLinkFollowed: Story = {
   },
 }
 
-/** A question answered in the chat: the register records it, and the gate stops naming it. */
+/** A question answered in the chat: the register records it. */
 export const MidPlanQuestionAnswered: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
@@ -527,7 +499,6 @@ export const MidPlanQuestionAnswered: Story = {
     await userEvent.keyboard('{Enter}')
     await expect(canvas.queryByRole('button', { name: /^Answer in the chat/ })).toBeNull()
     await expect(canvas.getByRole('heading', { name: /^Questions · 0 open/ })).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Readiness, 2 of 7 checks met' })).toBeVisible()
   },
 }
 
@@ -538,7 +509,8 @@ export const Bug: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: /^Reproduction/ })).toBeVisible()
     await expect(canvas.queryByRole('heading', { name: /^Behaviour/ })).toBeNull()
-    await expect(canvas.getByText('sent to the agent next turn')).toBeVisible()
+    // Read, as every part is: nothing of it is edited by hand (issue #135).
+    await expect(canvas.queryByRole('textbox', { name: /^Reproduction/ })).toBeNull()
     await expect(canvas.getByRole('group', { name: /^Question: Is the total/ })).toBeVisible()
   },
 }
@@ -563,18 +535,17 @@ export const FromAFreeSession: Story = {
   },
 }
 
-/** Screen 4 · every check passes: `Ready to freeze`, and `Mark ready` offered. */
+/** Screen 4 · every check passes: `Mark ready` in the head, as on every draft. */
 export const GateFull: Story = {
   args: { screen: 'gateFull', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Ready to freeze')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeEnabled()
     await expect(canvas.getByRole('heading', { name: /^Tasks · 4/ })).toBeVisible()
   },
 }
 
-/** Mark ready pressed: the Spec is frozen, the document read only, and Rework appears. */
+/** Mark ready pressed: the Spec is ready, the document read only, and Rework appears. */
 export const GateFullMarkedReady: Story = {
   args: { screen: 'gateFull' },
   play: async ({ canvasElement }) => {
@@ -582,29 +553,27 @@ export const GateFullMarkedReady: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
     await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
-    await expect(canvas.getByText(/Frozen on today/)).toBeVisible()
+    await expect(canvas.queryByText(/Frozen on/)).toBeNull()
     await expect(canvas.queryByRole('textbox', { name: 'Problem' })).toBeNull()
-    // It leaves the way it came, and is gone once it has.
-    await waitFor(() => expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull())
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
   },
 }
 
 /**
- * Mark ready appearing: the last blocking question answered in the chat, the bar fills, the
- * foot reads `Ready to freeze` and `Mark ready` is offered — and pressed.
+ * The last blocking question: `Mark ready` pressed while it is open is refused and names it;
+ * answered in the chat, the same press marks the Spec ready.
  */
 export const LastQuestionAnswered: Story = {
   args: { screen: 'lastQuestion' },
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
+    await expect(canvas.getByRole('alert')).toHaveTextContent(/the credit-note question/)
     await userEvent.type(
       canvas.getByRole('textbox', { name: 'Other' }),
       'Negative rows, marked by a type column.{Enter}',
     )
-    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks met' })).toBeVisible()
-    await expect(canvas.getByText('Ready to freeze')).toBeVisible()
     await expect(
       canvas.getByText('Negative rows, marked by a type column.', { selector: 'p' }),
     ).toBeVisible()
@@ -616,21 +585,23 @@ export const LastQuestionAnswered: Story = {
 }
 
 /**
- * Screen 5 · ready and frozen at revision 2: no editing look, the picker of the revisions, and
- * Rework at the end of the head.
+ * Screen 5 · ready at revision 2: the status says it, and nothing else — no `frozen` on a
+ * section, no line under the head — the picker of the revisions, and Rework at the end of the head.
  */
-export const ReadyFrozen: Story = {
+export const Ready: Story = {
   args: { screen: 'ready', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getAllByText('frozen').length).toBeGreaterThan(0)
+    const panel = canvas.getByRole('region', { name: 'Spec ATL-7' })
+    await expect(within(panel).getByText('ready')).toBeVisible()
+    await expect(within(panel).queryByText(/frozen/i)).toBeNull()
     await expect(canvas.queryByRole('textbox', { name: 'Expected outcome' })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Rework' })).toBeVisible()
   },
 }
 
-/** Screen 5, with the rework dialog open over the frozen Spec, as the brief draws it. */
+/** Screen 5, with the rework dialog open over the ready Spec, as the brief draws it. */
 export const ReworkAsked: Story = {
   args: { screen: 'ready', reworkOpen: true, folded: false },
   play: async () => {
@@ -665,7 +636,7 @@ export const ReadyReworked: Story = {
 
 /**
  * Screen 6 · the draft read from a second Session: the quiet bar with `Take over` under the head;
- * the agent of this Session does not write, and you still edit in place.
+ * the agent of this Session does not write.
  */
 export const Reader: Story = {
   args: { screen: 'reader', folded: false },
@@ -680,58 +651,17 @@ export const Reader: Story = {
   },
 }
 
-/** A reader opens the stories, edits one in place, saved on blur, then takes the right over. */
-export const ReaderEditsThenTakesOver: Story = {
+/** A reader opens the stories, read like every part, then takes the right over. */
+export const ReaderTakesOver: Story = {
   args: { screen: 'reader' },
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: /^Stories/ }))
-    await expect(canvas.getByText('you can edit; the agent of the writer is told')).toBeVisible()
-    const narrative = canvas.getByRole('textbox', { name: 'Narrative of S2' })
-    await userEvent.click(narrative)
-    await userEvent.keyboard('{Control>}{End}{/Control} Each keeps its invoice number.')
-    await userEvent.tab()
-    await expect(canvas.getByRole('button', { name: 'Stories, 2' })).toHaveAccessibleDescription(
-      'Edited by you',
-    )
+    await expect(canvas.getByRole('list', { name: 'Criteria of S2' })).toBeVisible()
+    await expect(canvas.queryByRole('textbox', { name: /^Narrative/ })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Take over' }))
     await expect(canvas.queryByText('« Spec CSV »')).toBeNull()
-  },
-}
-
-/**
- * Screen 7 · a conflict keeps the human's text: the banner inside Scope and your text in the
- * editor, whole; Scope is the part in focus.
- */
-export const Conflict: Story = {
-  args: { screen: 'conflict', folded: false },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(
-      canvas.getByText('The agent changed this part while you were writing yours.'),
-    ).toBeVisible()
-    await expect(canvas.getByRole('textbox', { name: /^Scope ?, your text/ })).toHaveValue(
-      SCOPE_MINE,
-    )
-    await expect(
-      canvas.getByRole('heading', { name: /^Scope ?, your text and the agent's differ/ }),
-    ).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' })).toBeVisible()
-  },
-}
-
-/** Conflict actions: the agent's version on Compare, then yours applied on top of it. */
-export const ConflictApplied: Story = {
-  args: { screen: 'conflict' },
-  play: async ({ canvasElement }) => {
-    await unfold(canvasElement)
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Compare' }))
-    await expect(canvas.getByText("The agent's text")).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Keep mine' }))
-    await expect(canvas.queryByRole('group', { name: 'Conflict' })).toBeNull()
-    await expect(canvas.getByRole('heading', { name: /^Scope ?, edited by you/ })).toBeVisible()
   },
 }
 
@@ -762,6 +692,6 @@ export const StaleAfterRework: Story = {
       'To review',
     )
     await expect(canvas.getAllByText('to review')[0]).toBeVisible()
-    await expect(canvas.getByRole('button', { name: '2 things before ready' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
   },
 }

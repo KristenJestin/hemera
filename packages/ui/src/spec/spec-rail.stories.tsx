@@ -4,22 +4,21 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { emulateReducedMotion, movesLess } from '../../.storybook/reduced-motion.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
-import type { PhaseName, ReadinessView, SpecTarget } from './model.ts'
-import { BUG, FULL_GATE, MID_PLAN, READER, gate } from './spec-fixtures.ts'
+import type { PhaseName, SpecTarget } from './model.ts'
+import { BUG, MID_PLAN } from './spec-fixtures.ts'
 import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.tsx'
 
 /**
  * The rail of the Spec panel: the parts of the Spec grouped by the phase that writes them, one
- * quiet row each, what is on the stage marked by a thin rule. A row says only what needs
- * attention, by a tint of the whole row or a fainter name, and says it in a
- * sentence in its tooltip. A group opens on a header in the small type of a label, which puts the
+ * row each, what is on the stage on a plain selected surface. Every row says its own state
+ * without being opened — written plainly, empty quietly, being written or to review by a tint —
+ * and says it in a sentence in its tooltip (issue #135). A group opens on a header in the small type of a label, which puts the
  * whole phase on the stage; `Show all` shows under the hand and the keyboard. The arrows walk it
- * and Enter opens a row. At its foot, how far the Spec is from ready: seven thin segments and one
- * line, whose things left open a popover of links, and `Mark ready` once every check passes.
- * Folded, it is the band the panel folds to, each phase a block of glyphs.
+ * and Enter opens a row. No readiness at its foot (issue #135). Folded, it is the band the panel
+ * folds to, each phase a block of glyphs.
  */
 
-/** Every mark once, so the six of them are read side by side. */
+/** Every mark once, so the five of them are read side by side. */
 const EVERY_MARK: RailGroup[] = [
   {
     phase: 'shape',
@@ -28,7 +27,7 @@ const EVERY_MARK: RailGroup[] = [
       { target: 'problem', label: 'Problem', mark: 'agent' },
       { target: 'expected_outcome', label: 'Expected outcome', mark: 'empty' },
       { target: 'scope', label: 'Scope', mark: 'human' },
-      { target: 'verification', label: 'Verification', mark: 'conflict' },
+      { target: 'verification', label: 'Verification', mark: 'agent' },
       { target: 'behaviour', label: 'Behaviour', mark: 'stale' },
     ],
   },
@@ -64,12 +63,8 @@ function Held({
   groups,
   initial,
   following,
-  readiness,
-  frozenOn,
-  replacedBy,
   onSelect,
   onSelectGroup,
-  onMarkReady,
   folded = false,
 }: {
   /** What the rail is called; two rails side by side need two names. */
@@ -77,12 +72,8 @@ function Held({
   groups: RailGroup[]
   initial: SpecTarget
   following?: SpecTarget | undefined
-  readiness: ReadinessView
-  frozenOn?: string | undefined
-  replacedBy?: number | undefined
   onSelect: (target: SpecTarget) => void
   onSelectGroup: (phase: PhaseName) => void
-  onMarkReady: () => void
   /** Draws the band the panel folds to, rather than the rail of words. */
   folded?: boolean | undefined
 }): ReactNode {
@@ -103,10 +94,6 @@ function Held({
             setCurrent({ group: phase })
             onSelectGroup(phase)
           }}
-          readiness={readiness}
-          frozenOn={frozenOn}
-          replacedBy={replacedBy}
-          onMarkReady={onMarkReady}
           folded={folded}
         />
       </div>
@@ -122,22 +109,16 @@ const meta = {
   args: {
     groups: EVERY_MARK,
     initial: 'questions',
-    readiness: MID_PLAN.readiness,
     onSelect: fn(),
     onSelectGroup: fn(),
-    onMarkReady: fn(),
   },
   argTypes: {
     groups: { control: 'object', description: 'The groups and their rows, with their marks.' },
     initial: { control: 'text', description: 'The part on the stage.' },
     following: { control: 'text', description: 'The part the agent writes, which breathes.' },
-    readiness: { control: 'object', description: 'The seven checks and what is left.' },
-    frozenOn: { control: 'text', description: 'When a `ready` Spec was frozen.' },
-    replacedBy: { control: 'number', description: 'The revision that replaced this one.' },
     folded: { control: 'boolean', description: 'The band the panel folds to.' },
     onSelect: { description: 'Puts a part on the stage.' },
     onSelectGroup: { description: 'Puts every part of a phase on the stage.' },
-    onMarkReady: { description: 'The human click that freezes the Spec.' },
   },
 } satisfies Meta<typeof Held>
 
@@ -173,11 +154,12 @@ async function tooltipSays(row: HTMLElement, said: string): Promise<void> {
 }
 
 /**
- * One row per state, and no dot anywhere: a part written and current carries nothing, a part
- * still empty has a fainter name, the part being written, one to review and one whose text
- * differs from yours are each tinted in their own colour, and a part you edited wears nothing on
- * the row: the only line on a row's left is the rule of what is on the stage, even on a part you
- * edited. Each says its state in a sentence, in its tooltip and as its accessible description.
+ * One row per state, each said in the row without opening it, and no dot anywhere (issue #135): a
+ * part written is plain, its name in the foreground; a part still empty is quiet, its name muted
+ * and `empty` in its accessible name; the part being written and one to review are each tinted
+ * in their own colour; a part you edited wears nothing more than a written one. What is on the
+ * stage wears a plain selected surface, and no rule. Each says its state in a sentence in its
+ * tooltip.
  */
 export const States: Story = {
   args: { initial: 'tasks' },
@@ -187,22 +169,26 @@ export const States: Story = {
     await expect(dotsIn(rail)).toEqual([])
     const row = (name: string): HTMLElement => canvas.getByRole('button', { name })
     const written = row('Problem')
-    const empty = row('Expected outcome')
+    const empty = row('Expected outcome, empty')
     const edited = row('Scope')
-    const differs = row('Verification')
     const review = row('Behaviour')
     const writing = row('Plan')
-    // Written and current: nothing, no tint, no edge, no sentence.
+    // Written and current: plain — the foreground text, no tint, no edge, no sentence — and not
+    // the one on the stage, which the tasks are.
     await expect(tintOf(written)).toBe('none')
     await expect(getComputedStyle(written).borderLeftWidth).toBe('0px')
     await expect(written).not.toHaveAttribute('aria-describedby')
-    // Empty: the name fainter than a written one's, and nothing behind it.
+    await expect(written).not.toHaveAttribute('aria-current')
+    await expect(selected(written)).toBe(false)
+    // Empty: quiet, the name fainter than a written one's, nothing behind it, and said in its name.
     await expect(tintOf(empty)).toBe('none')
     await expect(getComputedStyle(empty).color).not.toBe(getComputedStyle(written).color)
-    // The three tints, each its own.
-    const tints = [tintOf(writing), tintOf(review), tintOf(differs)]
+    await expect(getComputedStyle(row('Questions, 1')).color).toBe(getComputedStyle(written).color)
+    await expect(empty).not.toHaveAttribute('aria-describedby')
+    // The two tints, each its own.
+    const tints = [tintOf(writing), tintOf(review)]
     await expect(tints).not.toContain('none')
-    await expect(new Set(tints).size).toBe(3)
+    await expect(new Set(tints).size).toBe(2)
     // Being written: the tint breathes, the text does not.
     const breath = writing.querySelector('[data-tint]')
     if (!movesLess()) {
@@ -213,22 +199,21 @@ export const States: Story = {
     await expect(tintOf(edited)).toBe('none')
     await expect(getComputedStyle(edited).borderLeftWidth).toBe('0px')
     // Each state in a sentence.
-    await expect(empty).toHaveAccessibleDescription('Empty')
     await expect(edited).toHaveAccessibleDescription('Edited by you')
-    await expect(differs).toHaveAccessibleDescription("Your text and the agent's differ")
     await expect(review).toHaveAccessibleDescription('To review')
     await expect(writing).toHaveAccessibleDescription('The agent is writing this')
     await tooltipSays(empty, 'Empty')
     await tooltipSays(edited, 'Edited by you')
-    await tooltipSays(differs, "Your text and the agent's differ")
     await tooltipSays(review, 'To review')
     await tooltipSays(writing, 'The agent is writing this')
     await tooltipSays(written, 'Problem')
-    // On the stage, the part you edited wears the rule and nothing beside it: one line.
+    // On the stage, the part you edited wears the selected surface, and no rule.
     await userEvent.click(edited)
     await expect(edited).toHaveAttribute('aria-current', 'true')
-    await expect(ruled(edited)).toBe(true)
+    await expect(selected(edited)).toBe(true)
+    await expect(ruled(edited)).toBe(false)
     await expect(getComputedStyle(edited).borderLeftWidth).toBe('0px')
+    await expect(selected(row('Tasks, 0, empty'))).toBe(false)
   },
 }
 
@@ -285,13 +270,13 @@ export const Feature: Story = {
       }),
     ).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Behaviour' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tasks, 0, empty' })).toBeVisible()
   },
 }
 
 /** A bug: Reproduction in Shape, and never a Behaviour nor a Stories row. */
 export const Bug: Story = {
-  args: { groups: railOf(BUG), initial: 'reproduction', readiness: BUG.readiness },
+  args: { groups: railOf(BUG), initial: 'reproduction' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('button', { name: /^Reproduction/ })).toBeVisible()
@@ -312,16 +297,22 @@ function shown(header: HTMLElement): boolean {
   return getComputedStyle(hintOf(header)).opacity === '1'
 }
 
-/** Whether something of the rail wears the rule of what is on the stage. */
+/** Whether something of the rail wears a rule on its left, which nothing unfolded does any more. */
 function ruled(element: HTMLElement): boolean {
   return getComputedStyle(element, '::before').content !== 'none'
+}
+
+/** Whether something of the rail wears the selected surface of what is on the stage. */
+function selected(element: HTMLElement): boolean {
+  return getComputedStyle(element).backgroundColor !== 'rgba(0, 0, 0, 0)'
 }
 
 /**
  * The headers of the groups read as the headers of sections, not as rows: a smaller, heavier type
  * in the muted colour, a hairline above every group but the first, the rows set in under them.
  * `Show all` shows under the hand or the keyboard and only then, whatever is on the stage. A
- * group on the stage wears the rule on its header and on every part under it, and nothing else.
+ * group on the stage wears the selected surface on its header alone: no primary bar, and nothing on
+ * the parts under it but their own states (issue #135).
  */
 export const GroupHeaders: Story = {
   args: { groups: railOf(MID_PLAN), initial: 'plan' },
@@ -368,9 +359,8 @@ export const GroupHeaders: Story = {
     await waitFor(() => expect(shown(plan)).toBe(true))
     plan.blur()
     await waitFor(() => expect(shown(plan)).toBe(false))
-    // Its group on the stage: the rule on the header and on every part under it, the hint gone
-    // with the hand, and no word saying so.
-    const rule = getComputedStyle(onStage, '::before').backgroundColor
+    // Its group on the stage: the selected surface on the header alone, the hint gone with the
+    // hand, and no word saying so.
     await userEvent.click(decompose)
     await userEvent.unhover(decompose)
     decompose.blur()
@@ -378,27 +368,29 @@ export const GroupHeaders: Story = {
     await waitFor(() => expect(shown(decompose)).toBe(false))
     await expect(hintOf(decompose)).toHaveTextContent('Show all')
     await expect(canvas.queryByText('Showing all')).toBeNull()
-    await expect(ruled(decompose)).toBe(true)
-    await expect(getComputedStyle(decompose, '::before').backgroundColor).toBe(rule)
+    await expect(selected(decompose)).toBe(true)
+    await expect(ruled(decompose)).toBe(false)
     const parts = within(canvas.getByRole('group', { name: 'Decompose' })).getAllByRole('listitem')
     for (const part of parts) {
       const button = within(part).getByRole('button')
-      expect(ruled(button)).toBe(true)
-      expect(getComputedStyle(button, '::before').backgroundColor).toBe(rule)
+      expect(ruled(button)).toBe(false)
+      expect(selected(button)).toBe(false)
     }
     // Nothing else of the rail wears it.
-    await expect(ruled(onStage)).toBe(false)
-    await expect(ruled(problem)).toBe(false)
-    await expect(ruled(plan)).toBe(false)
+    await expect(selected(onStage)).toBe(false)
+    await expect(selected(problem)).toBe(false)
+    await expect(selected(plan)).toBe(false)
     // Never cut: the longest name and its hint hold in the rail's width.
     await userEvent.hover(decompose)
     await waitFor(() => expect(shown(decompose)).toBe(true))
     await expect(decompose.scrollWidth).toBeLessThanOrEqual(decompose.clientWidth)
-    await expect(getComputedStyle(decompose).color).toBe(header.color)
   },
 }
 
-/** A group header chosen: the whole phase on the stage, the header wearing the rule. */
+/**
+ * `Show all` chosen: the whole phase on the stage, its header on the selected surface and the
+ * parts under it with nothing but their own states — no primary bar on any of them.
+ */
 export const GroupChosen: Story = {
   args: { groups: railOf(MID_PLAN) },
   play: async ({ canvasElement, args }) => {
@@ -406,14 +398,15 @@ export const GroupChosen: Story = {
     const decompose = canvas.getByRole('button', {
       name: 'Decompose phase, pending, show all its parts',
     })
-    await expect(ruled(decompose)).toBe(false)
+    await expect(selected(decompose)).toBe(false)
     await userEvent.click(decompose)
     await expect(args.onSelectGroup).toHaveBeenCalledWith('decompose')
     await expect(decompose).toHaveAttribute('aria-current', 'true')
-    await expect(ruled(decompose)).toBe(true)
-    // The parts under it wear the rule, and the stage stays one stop of the tab order.
+    await expect(selected(decompose)).toBe(true)
+    // The parts under it wear nothing of it, and the stage stays one stop of the tab order.
     const questions = canvas.getByRole('button', { name: /^Questions/ })
-    await expect(ruled(questions)).toBe(true)
+    await expect(selected(questions)).toBe(false)
+    await expect(ruled(questions)).toBe(false)
     await expect(questions).not.toHaveAttribute('aria-current')
   },
 }
@@ -464,7 +457,7 @@ export const Keyboard: Story = {
  * Folded, the band keeps the hierarchy: each phase a block, its glyph in a tinted square, the
  * smaller glyphs of its parts right under it and set in, and a gap and a hairline before the next
  * phase. The tints of the rows fill the squares of the parts; the names leave the eye and stay the
- * accessible name and the tooltip, the state said beside the name. The readiness is said as `1/7`.
+ * accessible name and the tooltip, the state said beside the name. Nothing stands at its foot.
  */
 export const Folded: Story = {
   args: { groups: EVERY_MARK, initial: 'tasks', folded: true },
@@ -473,10 +466,8 @@ export const Folded: Story = {
     const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(canvas.queryByText('Expected outcome')).toBeNull()
     await expect(dotsIn(rail)).toEqual([])
-    await expect(
-      canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
-    ).toHaveTextContent('1/7')
-    await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
+    await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
+    await expect(canvas.queryByText(/^[0-9]+[/][0-9]+$/)).toBeNull()
     const blocks = ['Shape', 'Plan', 'Decompose'].map((name) => canvas.getByRole('group', { name }))
     for (const [index, block] of blocks.entries()) {
       const [phase, ...parts] = within(block).getAllByRole('button')
@@ -503,13 +494,9 @@ export const Folded: Story = {
     }
     // The tints land on the squares of the parts, one colour per state.
     const square = (name: string): HTMLElement => canvas.getByRole('button', { name })
-    const tints = [
-      tintOf(square('Plan')),
-      tintOf(square('Behaviour')),
-      tintOf(square('Verification')),
-    ]
+    const tints = [tintOf(square('Plan')), tintOf(square('Behaviour'))]
     await expect(tints).not.toContain('none')
-    await expect(new Set(tints).size).toBe(3)
+    await expect(new Set(tints).size).toBe(2)
     await expect(tintOf(square('Problem'))).toBe('none')
     // Edited by you: no edge on its square either, the tooltip says it.
     await expect(getComputedStyle(square('Scope')).borderLeftWidth).toBe('0px')
@@ -563,162 +550,18 @@ export const EveryIcon: Story = {
 }
 
 /**
- * The foot, partial: seven thin segments, one filled, and under them what they count in words —
- * `1 of 7 checks met` — then `4 things before ready`: no `Mark ready`, never drawn disabled.
+ * No foot (issue #135): no readiness bar, no count of checks, no things before ready, no
+ * `Mark ready` and no line of when the Spec was marked ready. What the draft lacks is the agent's
+ * to say, and `Mark ready`'s — in the head — to refuse with.
  */
-export const FootPartial: Story = {
+export const NoReadiness: Story = {
   args: { groups: railOf(MID_PLAN) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' })).toBeVisible()
-    await expect(canvas.getByText('1 of 7 checks met')).toBeVisible()
-    await expect(canvas.getByRole('button', { name: '4 things before ready' })).toBeVisible()
+    await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
+    await expect(canvas.queryByText(/checks met/)).toBeNull()
+    await expect(canvas.queryByRole('button', { name: /before ready/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-  },
-}
-
-/**
- * The foot of a Spec just created, where nothing is written yet (issue #130): the bar is empty —
- * a check the gate passes on nothing, no task and no question, meets nothing — and says so.
- */
-export const FootEmpty: Story = {
-  args: {
-    groups: railOf(MID_PLAN),
-    readiness: gate(
-      { contract: 'contract · nothing written', phases: 'phases · shape open' },
-      [{ label: 'the problem', target: 'problem' }],
-      ['references', 'coverage', 'cycle', 'questions', 'attestation'],
-    ),
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const bar = canvas.getByRole('img', { name: 'Readiness, 0 of 7 checks met' })
-    await expect(bar.querySelectorAll('.bg-success')).toHaveLength(0)
-    await expect(canvas.getByText('0 of 7 checks met')).toBeVisible()
-  },
-}
-
-/** The things left open a popover of links, each putting its part on the stage. */
-export const FootLinks: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: READER.readiness },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: '3 things before ready' }))
-    const page = within(document.body)
-    const list = await page.findByRole('dialog', { name: 'Things before ready' })
-    // The attestation has no part in the document: it is said, not linked.
-    // The popover comes down into place; what is asked is where it lands.
-    await waitFor(() => expect(within(list).getByText("the agent's final check")).toBeVisible())
-    await expect(within(list).queryByRole('button', { name: "the agent's final check" })).toBeNull()
-    await userEvent.click(within(list).getByRole('button', { name: 'a task for S2' }))
-    await expect(args.onSelect).toHaveBeenCalledWith('tasks')
-    await expect(canvas.getByRole('button', { name: /^Tasks/ })).toHaveAttribute(
-      'aria-current',
-      'true',
-    )
-  },
-}
-
-/** The foot, full: `Ready to freeze`, and `Mark ready` sits under it. */
-export const FootFull: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks met' })).toBeVisible()
-    await expect(canvas.getByText('Ready to freeze')).toBeVisible()
-    const mark = canvas.getByRole('button', { name: 'Mark ready' })
-    await expect(mark).toBeEnabled()
-    await userEvent.click(mark)
-    await expect(args.onMarkReady).toHaveBeenCalled()
-  },
-}
-
-/** The foot of a Spec that freezes on the press, as the panel does once the engine answered. */
-function Freezing({ onMarkReady }: { onMarkReady: () => void }): ReactNode {
-  const [frozenOn, setFrozenOn] = useState<string | undefined>(undefined)
-  return (
-    <Held
-      groups={railOf(MID_PLAN)}
-      initial="questions"
-      readiness={FULL_GATE}
-      frozenOn={frozenOn}
-      onSelect={fn()}
-      onSelectGroup={fn()}
-      onMarkReady={() => {
-        onMarkReady()
-        setFrozenOn('24 Sep')
-      }}
-    />
-  )
-}
-
-/**
- * `Mark ready` leaving: pressed, the Spec freezes and the button fades out. While it fades it is
- * still in the page, and it is inert and hidden from then on: a second press lands on nothing,
- * and the Spec is marked ready once.
- */
-export const MarkReadyLeaving: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE },
-  render: (args) => <Freezing onMarkReady={args.onMarkReady} />,
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    const mark = canvas.getByRole('button', { name: 'Mark ready' })
-    await userEvent.click(mark)
-    await expect(canvas.getByText(/Frozen on 24 Sep/)).toBeVisible()
-    if (mark.isConnected) {
-      // Still fading: nothing offered, nothing reachable.
-      const leaving = mark.closest('[inert]')
-      expect(leaving).not.toBeNull()
-      expect(leaving).toHaveAttribute('aria-hidden', 'true')
-      expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    }
-    // A second press during the exit, forced past the check a person's pointer would fail.
-    await userEvent.click(mark, { pointerEventsCheck: 0 })
-    await waitFor(() => {
-      expect(mark.isConnected).toBe(false)
-    })
-    await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
-  },
-}
-
-/**
- * An obsolete request refused: the Spec changed between the gate shown and the click, so it was
- * not frozen; the foot says why, under `Mark ready`.
- */
-export const FootRefused: Story = {
-  args: {
-    groups: railOf(MID_PLAN),
-    readiness: {
-      ...FULL_GATE,
-      refused:
-        'ATL-7 changed since its gate was shown: read the gate again before marking it ready.',
-    },
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('alert')).toHaveTextContent(/changed since its gate was shown/)
-    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeVisible()
-  },
-}
-
-/** Frozen: the bar full, and the line says since when. */
-export const FootFrozen: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE, frozenOn: '23 Sep' },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText(/Frozen on 23 Sep/)).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-  },
-}
-
-/** An older revision: frozen too, and the line says a newer version replaced it. */
-export const FootReplaced: Story = {
-  args: { groups: railOf(MID_PLAN), readiness: FULL_GATE, frozenOn: '22 Sep', replacedBy: 2 },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(
-      canvas.getByText('Frozen on 22 Sep · read only, a newer version replaced it'),
-    ).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(canvas.queryByText(/Frozen on|Ready to freeze/)).toBeNull()
   },
 }

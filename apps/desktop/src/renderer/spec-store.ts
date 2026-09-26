@@ -1,29 +1,23 @@
 import type {
-  EditBuffer,
   EngineEvent,
   JournalEntry,
-  SectionName,
   SpecLaunches,
   SpecRevision,
   SpecSnapshot,
   SpecType,
 } from '@hemera/ipc'
-import type { StoryView } from '@hemera/ui'
-
-import { storiesWith } from './spec-views.ts'
 
 /**
  * The Spec a `define` Session shows beside its chat (design D7-07, D7-10, D7-11, D7-12).
  *
  * Like every store of this window, it holds what the engine answered and nothing else: after
- * each act the Spec, its revisions, its edit buffers and its Journal are read again
+ * each act the Spec, its revisions and its Journal are read again
  * rather than patched here. The engine pushes `spec.changed` for every write, whoever made it —
- * the agent, another Session, the human in another panel — and the Spec on screen is read again
+ * the agent, another Session, an answer given in the chat — and the Spec on screen is read again
  * when it is about that one.
  *
- * A human save refused because the section moved under it is never lost (D7-12): its text goes
- * into the Spec's edit buffers, which the engine keeps across a restart, and the panel shows the
- * conflict from those buffers against the current text.
+ * The agent writes the Spec and the human reads it and answers: nothing here edits a section or a
+ * story by hand (issue #135).
  */
 export interface SpecState {
   /** The revision on screen, or null while no Spec is open. */
@@ -34,8 +28,6 @@ export interface SpecState {
   revision: number | null
   /** Every revision of the open Spec, as the engine lists them. */
   revisions: SpecRevision[]
-  /** The human texts kept after a refused save (D7-12). */
-  buffers: EditBuffer[]
   /** The Spec's lines of the Journal, newest first: `spec.ready` says when a revision froze. */
   journal: JournalEntry[]
   /**
@@ -63,16 +55,12 @@ const EMPTY: SpecState = {
   current: null,
   revision: null,
   revisions: [],
-  buffers: [],
   journal: [],
   launches: null,
   refusal: null,
   readyRefused: null,
   buildRefused: null,
 }
-
-/** What a story edit is refused with when its story was taken away meanwhile. */
-const GONE = 'The story you were editing is gone: your edit was not saved.'
 
 /** How many lines of the Spec's Journal are read, which is the most one page may hold. */
 const JOURNAL_PAGE = 200
@@ -109,15 +97,14 @@ function message(cause: unknown): string {
  */
 let started = 0
 
-/** Reads the open Spec, its revisions, its buffers and its Journal again. */
+/** Reads the open Spec, its revisions and its Journal again. */
 async function reload(specId: string): Promise<void> {
   started += 1
   const ticket = started
   const picked = state.revision
-  const [current, revisions, buffers, launches] = await Promise.all([
+  const [current, revisions, launches] = await Promise.all([
     window.hemera.invoke('specs.read', { specId }),
     window.hemera.invoke('specs.revisions', { specId }),
-    window.hemera.invoke('specs.buffers.read', { specId }),
     window.hemera.invoke('launches.forSpec', { specId }),
   ])
   const snapshot =
@@ -135,7 +122,6 @@ async function reload(specId: string): Promise<void> {
     snapshot,
     current,
     revisions,
-    buffers,
     // The read may answer nothing at all where nothing has been asked for: absent and null are
     // the same thing to the panel.
     launches: launches ?? null,
@@ -221,71 +207,6 @@ export async function declineSpecProposal(
   } catch (cause) {
     return message(cause)
   }
-}
-
-/**
- * Saves one section on the version its editor was opened on (D7-12).
- *
- * Refused while the section moved on since that version, the text goes into the Spec's edit
- * buffers, where a restart finds it too, and the panel shows the conflict against the current
- * text. Any other refusal is said as it was said, and nothing is kept.
- *
- * "Apply mine" is this same save, on the version the conflict names as current: written, the
- * engine lets the buffer go with it; refused again, the conflict is the newer one.
- */
-export async function saveSection(
-  sessionId: string,
-  name: SectionName,
-  body: string,
-  baseVersion: number,
-): Promise<boolean> {
-  const specId = shown
-  if (specId === null) return false
-  try {
-    await window.hemera.invoke('specs.writeSection', { specId, sessionId, name, body, baseVersion })
-  } catch (cause) {
-    try {
-      const now = await window.hemera.invoke('specs.read', { specId })
-      const moved = (now.sections.find((one) => one.name === name)?.version ?? 0) !== baseVersion
-      if (!moved) throw cause
-      await window.hemera.invoke('specs.buffers.save', { specId, name, body, baseVersion })
-      replace({ ...state, refusal: null })
-    } catch (refused) {
-      replace({ ...state, refusal: message(refused) })
-    }
-    await refresh(specId)
-    return false
-  }
-  replace({ ...state, refusal: null })
-  await refresh(specId)
-  return true
-}
-
-/** Lets the human's text of a conflict go, keeping the current one (D7-12). */
-export async function discardMine(name: SectionName): Promise<boolean> {
-  return await acting(async (specId) => {
-    await window.hemera.invoke('specs.buffers.discard', { specId, name })
-  })
-}
-
-/**
- * Writes back a story edited in place, all the stories of the revision with it (D7-12), onto the
- * story of its id wherever it stands now. A story taken away since is not written at all, and
- * the Spec is read again instead.
- */
-export async function saveStory(sessionId: string, changed: StoryView): Promise<boolean> {
-  const specId = shown
-  const current = state.snapshot
-  if (specId === null || current === null) return false
-  const stories = storiesWith(current, changed)
-  if (stories === null) {
-    replace({ ...state, refusal: GONE })
-    await refresh(specId)
-    return false
-  }
-  return await acting(async (id) => {
-    await window.hemera.invoke('specs.writeStories', { specId: id, sessionId, stories })
-  })
 }
 
 /** Answers a question of the open Spec with one of its options or a text (D7-03). */
