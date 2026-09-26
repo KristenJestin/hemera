@@ -279,6 +279,12 @@ export {
 } from './activity/tool-call-card.tsx'
 export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
 export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
+/** The calls of a turn between two things the agent said, folded into one row (issue #149). */
+export {
+  ActionGroup,
+  type ActionGroupProps,
+  type ActionGroupStatus,
+} from './activity/action-group.tsx'
 /** The tools Hemera lends the agent (HEM-18): the call it made, and the command it ran. A call
  * to one of Hemera's own tools is not the agent's business alone, so it says whose it is. */
 export {
