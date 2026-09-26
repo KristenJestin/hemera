@@ -10,7 +10,7 @@ import { WorkspacePill } from './workspace-pill.tsx'
  * fixed once the agent has started. A Project with no dedicated Workspace offers `main` alone.
  */
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/WorkspacePill',
   component: WorkspacePill,
   parameters: { layout: 'padded' },
@@ -78,17 +78,29 @@ export const Several: Story = {
   },
 }
 
-/** Once the agent has started, the select is off and the sentence says why. */
+/**
+ * Once the agent has started, the choice is a plain label with the Workspace's name, and the
+ * reason is its tooltip only: no sentence stays on screen for the whole Session (issue #128).
+ */
 async function theWorkspaceIsFixedOnceTheAgentHasStarted({ canvasElement, args }: StoryContext) {
   // "The Workspace is fixed once the agent has started"
   args.onWorkspaceChange.mockClear()
   const canvas = within(canvasElement)
-  const pill = canvas.getByLabelText('Workspace')
-  await expect(pill).toBeDisabled()
-  await expect(pill).toHaveTextContent('login-form')
-  await expect(canvas.getByText('The Workspace is fixed once the agent has started.')).toBeVisible()
-  // A press on it opens nothing and changes nothing: the pointer is refused as the key would be.
-  await userEvent.click(pill, { pointerEventsCheck: 0 })
+  const label = canvas.getByRole('img', { name: 'Workspace: login-form' })
+  await expect(label).toHaveTextContent('login-form')
+  // Not a choice any more, and not drawn as one.
+  await expect(canvas.queryByRole('combobox')).toBeNull()
+  await expect(canvas.queryByText('The Workspace is fixed once the agent has started.')).toBeNull()
+  // The reason is the tooltip, reached by the keyboard as by the pointer.
+  await userEvent.tab()
+  await expect(document.activeElement).toBe(label)
+  await waitFor(() => {
+    expect(within(document.body).getByRole('tooltip')).toHaveTextContent(
+      'The Workspace is fixed once the agent has started.',
+    )
+  })
+  // A press on it opens nothing and changes nothing.
+  await userEvent.click(label)
   await expect(within(document.body).queryByRole('listbox')).toBeNull()
   await expect(args.onWorkspaceChange).not.toHaveBeenCalled()
 }

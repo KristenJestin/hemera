@@ -212,6 +212,17 @@ export const stopReasonSchema = z.enum([
 export type StopReason = z.infer<typeof stopReasonSchema>
 
 /**
+ * What a prompt is sent for, beside its text (issue #128).
+ *
+ * `spec` is the Home's `New Spec`: the first message of a Session the user started to write a
+ * Spec, whose agent is asked, with that message, to propose one. A prompt without an intent is a
+ * message like any other.
+ */
+export const promptIntentSchema = z.enum(['spec'])
+
+export type PromptIntent = z.infer<typeof promptIntentSchema>
+
+/**
  * How far a Session came back to its agent's own native session, which is what a resume answers
  * (design D5-06).
  *

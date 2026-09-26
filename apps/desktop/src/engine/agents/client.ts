@@ -650,6 +650,25 @@ function resolvedDefault(values: readonly AgentOptionValue[], current: string) {
   return { values: kept, current: current === DEFAULT_VALUE ? named.id : current }
 }
 
+/** What the protocol calls the option of an agent's modes, as a category and as an id. */
+const MODE = 'mode'
+
+/** Whether an option is the agent's mode. */
+function isMode(option: AgentOption | undefined): boolean {
+  return option !== undefined && (option.category === MODE || option.id === MODE)
+}
+
+/**
+ * What an agent lets a Session choose, once what is not the user's to choose is left out.
+ *
+ * An agent left no mode of its own by its bare means offers none (issue #128): what it announces
+ * as its modes is either what a bare session refuses or Hemera's own agent.
+ */
+function offered(adapter: AgentAdapter, announced: readonly AgentOption[]): readonly AgentOption[] {
+  if (adapter.modeless !== true) return announced
+  return announced.filter((option) => !isMode(option))
+}
+
 /** What an agent lets a Session choose, in Hemera's words. */
 function optionsOf(
   announced: readonly SessionConfigOption[] | null | undefined,
@@ -789,12 +808,23 @@ export function connect(
         resumes: handshake.agentCapabilities?.sessionCapabilities?.resume != null,
       },
 
-      options: () => announced,
+      options: () => offered(adapter, announced),
 
       setOption: (optionId, value) =>
         Effect.gen(function* () {
           const open = yield* named(sessionId ?? '', 'setSessionConfigOption')
           const chosen = announced.find((option) => option.id === optionId)
+          // A mode is never sent to an agent left none by its bare means, whatever asked for it:
+          // a choice remembered from before, or a session opened without Hemera's configuration
+          // that announced modes the bare one refuses (issue #128).
+          if (adapter.modeless === true && (optionId === MODE || isMode(chosen))) {
+            return yield* Effect.fail(
+              new AgentProtocolError({
+                what: 'setSessionConfigOption',
+                cause: `${adapter.label} has no mode to choose when it runs bare`,
+              }),
+            )
+          }
           const answered = yield* Effect.tryPromise({
             try: () =>
               connection.setSessionConfigOption(
@@ -811,7 +841,7 @@ export function connect(
               new AgentProtocolError({ what: 'setSessionConfigOption', cause: String(cause) }),
           })
           announced = optionsOf(answered.configOptions)
-          return announced
+          return offered(adapter, announced)
         }),
 
       open: (workingDirectory, mcpServers, meta) =>

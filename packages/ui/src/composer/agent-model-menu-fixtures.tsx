@@ -200,8 +200,10 @@ export function offerOf(agent: string | null, model: string | null = null): Offe
   if (agent === 'codex') {
     return { models: CODEX_MODELS, efforts: [], modes: CODEX_MODES }
   }
+  // OpenCode run bare has no mode: `build` and `plan` are disabled for an agent of Hemera's, and
+  // the engine offers none (issue #128).
   if (agent === 'opencode') {
-    return { models: OPENCODE_MODELS, efforts: OPENCODE_EFFORTS, modes: OPENCODE_MODES }
+    return { models: OPENCODE_MODELS, efforts: OPENCODE_EFFORTS, modes: [] }
   }
   return NOTHING
 }
