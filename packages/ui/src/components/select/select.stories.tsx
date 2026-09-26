@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconMoon, IconSun } from '../../icons.ts'
+import { PRESS_EDGE } from '../../motion.ts'
 import { Select } from './select.tsx'
 
 const FLAT = [
@@ -25,7 +26,7 @@ const GROUPED = [
 const ROUNDING = 2
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Select',
   component: Select,
   args: { label: 'Model', items: FLAT, onValueChange: fn() },
@@ -182,5 +183,46 @@ export const Keyboard: Story = {
       expect(within(document.body).queryByRole('listbox')).toBeNull()
     })
     expect(document.activeElement).toBe(trigger)
+  },
+}
+
+/**
+ * A select filling what it is given, held: the widest control of the catalogue, and the one a
+ * share of the size caved in the most — ten pixels an edge on the trigger of a dialog. It goes
+ * in by the same pixels as a narrow one now (issue #108).
+ */
+export const Pressed: Story = {
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true }, layout: 'padded' },
+  args: { defaultValue: 'opus' },
+  render: (args) => (
+    <div className="flex w-full flex-col items-start gap-2">
+      <Select {...args} className="w-24" label="Narrow" />
+      <Select {...args} className="w-full" label="Wide" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const trigger = canvas.getByLabelText('Wide')
+    const rest = trigger.getBoundingClientRect()
+
+    await userEvent.hover(trigger)
+    // A real pointer event and not a synthesised click: motion tracks the pointer that went
+    // down, and only the matching one up ends the press.
+    fireEvent.pointerDown(trigger, { isPrimary: true, button: 0, pointerId: 1 })
+    const pressed = await waitFor(() => {
+      const box = trigger.getBoundingClientRect()
+      const edge = (rest.width - box.width) / 2
+      if (edge < 1.2) throw new Error(`the trigger has gone in by ${edge.toFixed(2)}px and no more`)
+      return box
+    })
+    fireEvent.pointerUp(trigger, { isPrimary: true, button: 0, pointerId: 1 })
+    await userEvent.unhover(trigger)
+
+    // In by the two pixels of every other control, and no more — the list hangs off a wrapper
+    // around the trigger, so the anchor it is measured against does not move with it.
+    expect((rest.width - pressed.width) / 2).toBeLessThanOrEqual(PRESS_EDGE + 0.05)
+    expect((rest.height - pressed.height) / 2).toBeGreaterThan(0)
   },
 }

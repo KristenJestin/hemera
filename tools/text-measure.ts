@@ -45,11 +45,18 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
  * the hand is along its own track, and the track is the only thing a pointer's position can be
  * read against. It sizes nothing by what it reads — the track, the notches and the words beside
  * them are steps of the scale, and the words are kept still by a grid rather than by a measure.
+ *
+ * `useHand` reads the box of the control it is handed, to work out the share of itself that brings
+ * its edges in by the same distance whatever its size (issue #108): the press is a distance now,
+ * and that distance is a share only the layout knows — the width of a button is its label's, and
+ * no token holds it. It sizes no zone by what it reads: what it reads was laid out by the theme
+ * and by the label in the first place.
  */
 export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/shell/gutter.tsx',
   'packages/ui/src/shell/tab-mark.tsx',
   'packages/ui/src/composer/effort-slider.tsx',
+  'packages/ui/src/motion.ts',
 ]
 
 export interface Refusal {

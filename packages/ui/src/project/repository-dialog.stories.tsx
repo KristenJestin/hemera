@@ -10,7 +10,8 @@ import { RepositoryDialog, type RepositoryDialogProps } from './repository-dialo
  * The dialog a repository of a Project is added or edited in, on fixtures (recette 1 of lot 20).
  *
  * The story opens it at once, as the pencil of a row or the "Add repository" of the section
- * would, and holds what the engine answers in `refusal`.
+ * would, and holds what the engine answers in `refusal`. The tiles it picks a folder with give
+ * under the press by the same pixels as every other control (issue #108).
  */
 const API: RepositoryLine = {
   path: './sources/api',
@@ -61,7 +62,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/RepositoryDialog',
   component: RepositoryDialog,
   render: (args) => <Controlled {...args} />,

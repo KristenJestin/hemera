@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { Button } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { IconArrowUp, IconPencil, IconPlayerStop } from '../icons.ts'
-import { PRESSED_COMPACT, arrival, useTransition } from '../motion.ts'
+import { MARK_SCALE, arrival, useTransition } from '../motion.ts'
 import { type WorkspaceChoice, WorkspacePill } from './workspace-pill.tsx'
 
 /**
@@ -134,9 +134,9 @@ export function ComposerActions({
               {morphs ? (
                 <motion.span
                   key="stop"
-                  initial={{ opacity: 0, scale: PRESSED_COMPACT }}
+                  initial={{ opacity: 0, scale: MARK_SCALE }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: PRESSED_COMPACT }}
+                  exit={{ opacity: 0, scale: MARK_SCALE }}
                   transition={transition}
                 >
                   <IconPlayerStop size="sm" />
@@ -144,9 +144,9 @@ export function ComposerActions({
               ) : (
                 <motion.span
                   key="send"
-                  initial={{ opacity: 0, scale: PRESSED_COMPACT }}
+                  initial={{ opacity: 0, scale: MARK_SCALE }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: PRESSED_COMPACT }}
+                  exit={{ opacity: 0, scale: MARK_SCALE }}
                   transition={transition}
                 >
                   <IconArrowUp size="sm" />

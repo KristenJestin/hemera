@@ -1,6 +1,6 @@
 import { MotionConfigContext, useReducedMotion } from 'motion/react'
 import type { Easing, TargetAndTransition, Transition } from 'motion/react'
-import { useContext } from 'react'
+import { type RefObject, useContext, useEffect, useRef, useState } from 'react'
 
 /**
  * The motion personality of Hemera: a closed set of presets, and nowhere else to write a
@@ -60,17 +60,59 @@ export const REACH_OVERSHOOT = 3
 export const instant: Transition = { duration: 0 }
 
 /**
- * How far a press takes a control from its resting size — and a second, deeper one for a
- * control that is only as wide as it is tall.
+ * How far the edges of a control travel under the hand, in pixels: inwards while it is pressed,
+ * outwards while the pointer is over it (issue #108).
  *
- * The same ratio does not read the same on two sizes: a wide button pulls its edges in by
- * several pixels and is unmistakable, while a square one moves by a single pixel and looks
- * like nothing happened at all. What has to match between them is the movement, not the
- * number, so the small one goes deeper.
+ * A share of the element's own size cannot say this. The same ratio pulls the edges of a wide
+ * control in by several pixels and moves a small one by almost nothing: a Select filling a
+ * dialog caves in while the icon button beside it barely answers. What has to match between two
+ * controls is the movement, so these are pixels, and the share is computed from the box
+ * `useHand` measured.
+ *
+ * Both stay under two pixels on purpose: enough to read as giving way, little enough that a
+ * label never leaves the room the layout gave it.
  */
-export const PRESSED = 0.93
-export const PRESSED_COMPACT = 0.86
-export const HOVERED = 1.02
+export const PRESS_EDGE = 1.5
+export const LIFT_EDGE = 1
+
+/** The box a control took in the layout, which its press is a share of. */
+export interface ControlBox {
+  readonly width: number
+  readonly height: number
+}
+
+/**
+ * What a control is drawn at under the hand: the share of itself, one per axis.
+ *
+ * A type and not an interface on purpose: motion takes a `Target`, and an interface is not
+ * assignable to one, which has an index signature an interface does not inherit.
+ */
+export type Scales = {
+  readonly scaleX: number
+  readonly scaleY: number
+}
+
+/** Nothing at all: what a control whose box is not known yet is drawn at. */
+export const STILL: Scales = { scaleX: 1, scaleY: 1 }
+
+/**
+ * The shares that move each edge of a box by `edge` pixels: inwards when `edge` is positive,
+ * outwards when it is negative. A box the layout has not measured yet is left alone, because a
+ * share computed from a width of zero is not a press.
+ */
+export function edgeScale(box: ControlBox, edge: number): Scales {
+  if (box.width < 1 || box.height < 1) return STILL
+  return { scaleX: 1 - (2 * edge) / box.width, scaleY: 1 - (2 * edge) / box.height }
+}
+
+/**
+ * The scale a mark arrives at on a control, and leaves by: the Composer's attachments and its
+ * actions come in small, so they read as something landing rather than as a label appearing.
+ *
+ * Not a press. Since #108 nothing in the catalogue gives under the hand by a share of itself —
+ * what was the compact press of the catalogue is what a mark arriving is drawn at.
+ */
+export const MARK_SCALE = 0.86
 
 /** How far the mark of a state travels in from under the edge, in pixels. */
 export const MARK_TRAVEL = 12
@@ -123,6 +165,54 @@ export function useTransition(preset: Transition = arrival): Transition {
   const system = useReducedMotion()
   if (reducedMotion === 'always') return instant
   return system === true ? instant : preset
+}
+
+/**
+ * The hand of a control: what carries it, and what it is drawn at under the pointer and the
+ * press.
+ */
+export interface Hand {
+  readonly element: RefObject<HTMLButtonElement | null>
+  readonly hover: Scales
+  readonly tap: Scales
+}
+
+/**
+ * What a control answers the hand with: what it wears while the pointer is over it, and while it
+ * is pressed, both computed from the box it actually took.
+ *
+ * The press is decided here and nowhere else (issue #108): a control spreads `hover` into
+ * `whileHover` and `tap` into `whileTap`, and every one of them — a narrow button, a Select
+ * filling a dialog, an icon button — gives by the same `PRESS_EDGE` pixels. The box is read with
+ * `offsetWidth`, which is the layout's and not what a transform is doing to it, and it is
+ * followed, because a control whose label changed is no longer the size it was measured at.
+ *
+ * `element` goes on the element that carries the press; it is what the box is read from.
+ */
+export function useHand(): Hand {
+  const element = useRef<HTMLButtonElement | null>(null)
+  const [box, setBox] = useState<ControlBox | null>(null)
+  useEffect(() => {
+    const node = element.current
+    if (node === null) return
+    const measure = (): void => {
+      const { offsetWidth: width, offsetHeight: height } = node
+      // A box without a size says nothing, and a box that did not change is the one already
+      // held: neither is worth a render.
+      if (width < 1 || height < 1) return
+      setBox((before) =>
+        before?.width === width && before.height === height ? before : { width, height },
+      )
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+  if (box === null) return { element, hover: STILL, tap: STILL }
+  return { element, hover: edgeScale(box, -LIFT_EDGE), tap: edgeScale(box, PRESS_EDGE) }
 }
 
 /**
