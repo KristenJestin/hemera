@@ -12,13 +12,18 @@ const meta = {
   component: StoriesPart,
   tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
-  args: { stories: STORIES, mark: 'agent' },
+  args: { stories: STORIES, mark: 'agent', type: 'feature' },
   argTypes: {
     stories: { control: 'object', description: 'The stories, in order, with their criteria.' },
     mark: {
       control: 'select',
       options: MARKS,
       description: 'The state, said to a screen reader in the heading.',
+    },
+    type: {
+      control: 'inline-radio',
+      options: ['feature', 'bug', 'maintenance'],
+      description: 'The type of the Spec, which says what an empty list means.',
     },
   },
 } satisfies Meta<typeof StoriesPart>
@@ -39,7 +44,29 @@ export const Filled: Story = {
   },
 }
 
-/** No story: the Spec is verified as a whole. */
+/** No story on a `bug` or a `maintenance`: the Spec is verified as a whole. */
 export const Empty: Story = {
-  args: { stories: [], mark: 'empty' },
+  args: { stories: [], mark: 'empty', type: 'bug' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/verified as a whole, by its verification/)).toBeVisible()
+    await expect(canvas.queryByText(/needs at least one user story/)).toBeNull()
+  },
+}
+
+/**
+ * No story on a `feature`: it is not verified as a whole — it needs at least one user story, with
+ * a criterion, before it can be ready, and says so plainly.
+ */
+export const FeatureEmpty: Story = {
+  args: { stories: [], mark: 'empty', type: 'feature' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(
+        'No story yet: a feature needs at least one user story, with a criterion, before it can be ready.',
+      ),
+    ).toBeVisible()
+    await expect(canvas.queryByText(/verified as a whole/)).toBeNull()
+  },
 }

@@ -264,7 +264,9 @@ export interface SpecPartProps extends SpecPartHandlers {
 
 /** One part of the Spec, drawn by the part of its kind: a section, or one of the three lists. */
 export function SpecPart({ spec, target, onGoToQuestion }: SpecPartProps): ReactNode {
-  if (target === 'stories') return <StoriesPart stories={spec.stories} mark={spec.storiesMark} />
+  if (target === 'stories') {
+    return <StoriesPart stories={spec.stories} mark={spec.storiesMark} type={spec.type} />
+  }
   if (target === 'tasks') return <TasksPart tasks={spec.tasks} mark={spec.tasksMark} />
   if (target === 'questions') {
     return (

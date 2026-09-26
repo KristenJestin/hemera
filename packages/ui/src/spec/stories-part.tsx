@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import type { Mark, StoryView } from './model.ts'
+import type { Mark, SpecType, StoryView } from './model.ts'
 import { PartHead } from './part-head.tsx'
 
 /**
@@ -9,6 +9,10 @@ import { PartHead } from './part-head.tsx'
  *
  * The order of the criteria is the order they are read in and the one the gate checks against:
  * they are numbered by the list itself and never by a field anybody maintains.
+ *
+ * With no story, what it says depends on the type: a `feature` needs at least one user story with
+ * a criterion before it can be ready, and says so; a `bug` or a `maintenance` is verified as a
+ * whole, by its verification.
  */
 
 const ITEM = 'flex flex-col gap-1 border-t border-border py-3 first:border-t-0 first:pt-1'
@@ -25,9 +29,11 @@ const PROSE = 'text-sm leading-relaxed'
 export interface StoriesPartProps {
   stories: StoryView[]
   mark: Mark
+  /** The Spec's type, which says what an empty list means. */
+  type: SpecType
 }
 
-export function StoriesPart({ stories, mark }: StoriesPartProps): ReactNode {
+export function StoriesPart({ stories, mark, type }: StoriesPartProps): ReactNode {
   const criteria = stories.reduce((sum, story) => sum + story.criteria.length, 0)
   return (
     <div className="flex flex-col gap-1.5">
@@ -38,7 +44,9 @@ export function StoriesPart({ stories, mark }: StoriesPartProps): ReactNode {
       />
       {stories.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No story: this Spec is verified as a whole, by its verification.
+          {type === 'feature'
+            ? 'No story yet: a feature needs at least one user story, with a criterion, before it can be ready.'
+            : 'No story: this Spec is verified as a whole, by its verification.'}
         </p>
       ) : (
         <ul aria-label="Stories">
