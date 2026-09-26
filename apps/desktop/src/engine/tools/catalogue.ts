@@ -21,13 +21,16 @@
 
 import {
   READ_PAGE_BYTES,
+  ROOT_REPOSITORY,
   SEARCH_MATCH_LIMIT,
   SEARCH_SCAN_BYTES,
   type SearchResult,
   TOOL_NAMES,
   type ToolName,
   admitTool,
+  commandPlace,
   offeredTools,
+  runsInMain,
 } from '@hemera/core'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -39,7 +42,9 @@ import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
+import type { DescribedWorkspace } from '../workspaces/described.ts'
 import { Database } from '../storage/database.ts'
+import { Variables } from '../workspaces/variables.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
 import {
@@ -264,6 +269,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | AgentNotices
   | Specs
   | Database
+  | Variables
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -275,6 +281,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const access = yield* ToolAccess
     const held = yield* HeldWords
     const notices = yield* AgentNotices
+    const variables = yield* Variables
     const specs = yield* Specs
 
     /**
@@ -590,8 +597,8 @@ export const toolCatalogueLayer: Layer.Layer<
     /** Which run a call means, when it named none: the only one this Session has going. */
     /**
      * Which run a call is about: the one it names, else the only one running, else — when the
-     * call came to read and nothing is running — the last run of the Session. A `check` or a
-     * `utility` is over by the time its output is read, and its exit code is the whole point.
+     * call came to read and nothing is running — the last run of the Session. A `test` or a
+     * `script` is over by the time its output is read, and its exit code is the whole point.
      */
     const chooseRun = (
       asked: ToolCall,
@@ -625,6 +632,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const perform = (
       asked: ToolCall,
       root: string,
+      workspace: DescribedWorkspace,
       projectId: string,
       projectName: string,
       repositories: readonly string[],
@@ -793,7 +801,7 @@ export const toolCatalogueLayer: Layer.Layer<
             // that runs in one of the Project's repositories is not the same one run at the root.
             const lines = listed.map(
               (command) =>
-                `${command.name}  ${command.kind}  in ${command.folder ?? 'the Workspace root'}  ${command.line}`,
+                `${command.name}  ${command.type}  in ${commandPlace(command) ?? 'the Workspace root'}  ${command.line}`,
             )
             // And the runs of this Session, whoever started them (recette 4 of 23 September 2026):
             // a line the human ran from the panel is in the thread, and an agent asked about it
@@ -835,6 +843,9 @@ export const toolCatalogueLayer: Layer.Layer<
             }
             const catalogue = yield* answered(commands.list(projectId))
             const entry = catalogue?.find((command) => command.name === named)
+            // Where a catalogue command runs: its folder under its base, relative to the root
+            // (D8-07 as amended by recette 1).
+            const entryPlace = entry === undefined ? null : commandPlace(entry)
             if (named !== undefined && entry === undefined) {
               const known = catalogue?.map((one) => one.name).join(', ') ?? ''
               return failed(
@@ -851,24 +862,33 @@ export const toolCatalogueLayer: Layer.Layer<
             if (
               entry !== undefined &&
               call.arguments.folder !== undefined &&
-              declared(call.arguments.folder) !== declared(entry.folder)
+              declared(call.arguments.folder) !== declared(entryPlace)
             ) {
-              const home = entry.folder ?? 'the Workspace root'
+              const home = entryPlace ?? 'the Workspace root'
               return failed(
                 `${entry.name} runs in ${home}, not in ${call.arguments.folder}`,
                 `the folder of a catalogue command is the Project's: ${entry.name} runs in ${home}. Send no folder to run it there, or a \`line\` to run something else where you need it`,
               )
             }
-            const where = entry?.folder ?? call.arguments.folder ?? null
+            const where = entry === undefined ? (call.arguments.folder ?? null) : entryPlace
             const folder = where === null || where === '' || where === '.' ? '.' : where
+            // A Project-scoped service is one instance for all, in `main`, whichever Workspace
+            // this Session works in (D8-07): its folder resolves under `main`, not here.
+            const home =
+              entry !== undefined && runsInMain(entry)
+                ? yield* answered(sessions.mainOf(projectId))
+                : workspace
+            if (home === undefined) {
+              return failed("could not read the Project's main", 'the Workspace main did not read')
+            }
             // A catalogue command is the user's own line, and inside the root it runs on its own.
             // A one-off is a line the agent wrote: whatever folder it names, the human sees the
             // line and decides before anything runs (D5-09) — one question, not one per rule.
             const inside =
               entry !== undefined
                 ? folder === '.'
-                  ? { allowed: true as const, path: root }
-                  : yield* allowed(asked, root, folder)
+                  ? { allowed: true as const, path: home.path }
+                  : yield* allowed(asked, home.path, folder)
                 : yield* Effect.gen(function* () {
                     const place = yield* placeOf(root, folder)
                     if (place.inside === null) {
@@ -903,21 +923,32 @@ export const toolCatalogueLayer: Layer.Layer<
                 commandId: entry?.id ?? null,
                 name: entry?.name ?? named ?? (line ?? '').split(/\s+/)[0] ?? 'command',
                 line: entry?.line ?? line ?? '',
-                kind: entry?.kind ?? 'utility',
+                lineWindows: entry?.lineWindows ?? null,
+                lineLinux: entry?.lineLinux ?? null,
+                type: entry?.type ?? 'script',
+                scope: entry?.scope ?? 'workspace',
+                portless: entry?.portless ?? false,
+                portlessName: entry?.portlessName ?? null,
+                folder: folder === '.' ? null : folder,
                 cwd: inside.path,
+                // D8-08: the run belongs to the Workspace it runs in, which names it too.
+                workspaceId: home.id,
+                workspaceName: home.name,
+                // D8-06: the Project's variables overridden by that Workspace's, kept on the run.
+                environment: (yield* answered(variables.givenFor(projectId, home.id))) ?? {},
                 startedBy: 'agent',
               }),
             )
             if (started === undefined) {
               return failed('the command did not start', 'the engine could not start this command')
             }
-            // A check or a utility is waited for, so the agent reads how it ended in the same
+            // A test or a script is waited for, so the agent reads how it ended in the same
             // answer instead of polling for it; one that outlasts the wait is left running and
-            // said to be. An app is meant to keep running, and is answered once it has started.
+            // said to be. A server is meant to keep running, and is answered once it has started.
             const waits =
               call.arguments.background !== true &&
               !started.joined &&
-              started.kind !== 'app' &&
+              started.type !== 'serve' &&
               started.state === 'running'
             const run = waits
               ? ((yield* answered(
@@ -1000,6 +1031,74 @@ export const toolCatalogueLayer: Layer.Layer<
             )
           }
 
+          case 'commands_propose': {
+            const { name, line, type, why } = call.arguments
+            // The folder is the root or one of the Project's repositories, as a catalogue
+            // command's is (D6-12): a proposal the human could not accept as it stands is refused.
+            const named = call.arguments.folder ?? ROOT_REPOSITORY
+            const folder =
+              named === '' || named === ROOT_REPOSITORY
+                ? null
+                : repositories.find((one) => one === named || one === `./${named}`)
+            if (folder === undefined) {
+              return failed(
+                `${named} is not a repository of ${projectName}`,
+                `a command runs at the Workspace root or in one of the Project's repositories: ${repositories.length === 0 ? 'it declares none' : repositories.join(', ')}`,
+              )
+            }
+            const catalogue = yield* answered(commands.list(projectId))
+            if (catalogue === undefined) {
+              return failed("could not read the Project's commands", 'the commands did not read')
+            }
+            if (catalogue.some((command) => command.name === name)) {
+              return failed(
+                `the catalogue already holds ${name}`,
+                `${name} is already a command of ${projectName}: run it with commands_run, or propose another name`,
+              )
+            }
+            // The proposal is an entry of the thread the human decides on, and nothing else: the
+            // agent has no write on the catalogue (D8-11). Its Journal line goes in the same
+            // transaction as the entry (D8-16).
+            const proposalId = crypto.randomUUID()
+            const written = yield* answered(
+              inThread(asked.sessionId, {
+                role: 'hemera',
+                kind: 'command_proposal',
+                body: name,
+                payload: JSON.stringify({
+                  proposalId,
+                  name,
+                  line,
+                  type,
+                  folder,
+                  why,
+                  state: 'pending',
+                }),
+                correlationId: `proposal:${proposalId}`,
+                state: 'pending',
+                events: [
+                  {
+                    type: 'command.proposed',
+                    entityKind: 'command',
+                    entityId: proposalId,
+                    source: 'system',
+                    author: 'agent',
+                    projectId,
+                    sessionId: asked.sessionId,
+                    payload: { name, type },
+                  },
+                ],
+              }),
+            )
+            if (written === undefined) {
+              return failed('the proposal was not written', 'the thread of this Session refused it')
+            }
+            return completed(
+              `proposed ${name} for the catalogue`,
+              'proposed: a human will decide in the Session; nothing is in the catalogue yet',
+            )
+          }
+
           case 'project_get': {
             const lines = [
               `project: ${projectName} (${projectId})`,
@@ -1067,7 +1166,20 @@ export const toolCatalogueLayer: Layer.Layer<
             range: null,
           }
         }
-        const root = project.mainPath
+        // The tools act in the Session's Workspace (D8-08): its path is their root.
+        const workspace = yield* answered(sessions.workspace(asked.sessionId))
+        if (workspace === undefined) {
+          return {
+            ok: false,
+            state: 'failed' as const,
+            summary: 'the Workspace of this Session is missing',
+            text: 'this Session works in a Workspace the engine cannot read',
+            paths: [],
+            repeated: false,
+            range: null,
+          }
+        }
+        const root = workspace.path
         // The agent of the Session is what the thread names as the caller, beside the digest of
         // the token: a Session without one is served all the same, and "agent" is what it says.
         const made = {
@@ -1108,6 +1220,7 @@ export const toolCatalogueLayer: Layer.Layer<
           const answer = yield* perform(
             asked,
             root,
+            workspace,
             project.id,
             project.name,
             project.repositories,

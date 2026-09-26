@@ -72,12 +72,17 @@ export const CHANNELS = {
   'projects.restore': ENGINE_REQUESTS['projects.restore'],
   'repositories.add': ENGINE_REQUESTS['repositories.add'],
   'repositories.remove': ENGINE_REQUESTS['repositories.remove'],
+  'repositories.update': ENGINE_REQUESTS['repositories.update'],
+  'projects.setWorkspacesRoot': ENGINE_REQUESTS['projects.setWorkspacesRoot'],
+  'projects.setBranchPrefix': ENGINE_REQUESTS['projects.setBranchPrefix'],
+  'projects.setRepositoryIncluded': ENGINE_REQUESTS['projects.setRepositoryIncluded'],
   'journal.read': ENGINE_REQUESTS['journal.read'],
   'journal.unseen': ENGINE_REQUESTS['journal.unseen'],
   'journal.markSeen': ENGINE_REQUESTS['journal.markSeen'],
   'sessions.list': ENGINE_REQUESTS['sessions.list'],
   'sessions.create': ENGINE_REQUESTS['sessions.create'],
   'sessions.rename': ENGINE_REQUESTS['sessions.rename'],
+  'sessions.chooseWorkspace': ENGINE_REQUESTS['sessions.chooseWorkspace'],
   'sessions.archive': ENGINE_REQUESTS['sessions.archive'],
   'sessions.restore': ENGINE_REQUESTS['sessions.restore'],
   'sessions.append': ENGINE_REQUESTS['sessions.append'],
@@ -100,6 +105,12 @@ export const CHANNELS = {
   'specs.buffers.read': ENGINE_REQUESTS['specs.buffers.read'],
   'specs.buffers.save': ENGINE_REQUESTS['specs.buffers.save'],
   'specs.buffers.discard': ENGINE_REQUESTS['specs.buffers.discard'],
+  // The Workspace a Spec's build is given, and the launch of that build (D8-12, D8-13).
+  'specs.useWorkspace': ENGINE_REQUESTS['specs.useWorkspace'],
+  'launches.forSpec': ENGINE_REQUESTS['launches.forSpec'],
+  'launches.request': ENGINE_REQUESTS['launches.request'],
+  'launches.start': ENGINE_REQUESTS['launches.start'],
+  'launches.retry': ENGINE_REQUESTS['launches.retry'],
 
   // The agents, relayed the same way: what this machine has, what a Session's agent offers, and
   // what the window asks of a Session that is running — a turn, a stop, a decision, a resume.
@@ -120,6 +131,7 @@ export const CHANNELS = {
   // What Hemera lends the agent, relayed the same way: a Project's commands and the runs they
   // became, and what a Session was provided (design D6-10, D6-12).
   'commands.list': ENGINE_REQUESTS['commands.list'],
+  'commands.portless': ENGINE_REQUESTS['commands.portless'],
   'commands.create': ENGINE_REQUESTS['commands.create'],
   'commands.update': ENGINE_REQUESTS['commands.update'],
   'commands.remove': ENGINE_REQUESTS['commands.remove'],
@@ -127,7 +139,33 @@ export const CHANNELS = {
   'commands.run': ENGINE_REQUESTS['commands.run'],
   'commands.stop': ENGINE_REQUESTS['commands.stop'],
   'commands.output': ENGINE_REQUESTS['commands.output'],
+  'commands.runOf': ENGINE_REQUESTS['commands.runOf'],
+  'commands.services': ENGINE_REQUESTS['commands.services'],
+  'commands.stopService': ENGINE_REQUESTS['commands.stopService'],
+  'commands.proposeAccept': ENGINE_REQUESTS['commands.proposeAccept'],
+  'commands.proposeDecline': ENGINE_REQUESTS['commands.proposeDecline'],
   'context.read': ENGINE_REQUESTS['context.read'],
+
+  // The Workspaces of a Project, their preparation, the Project's recipe and its variables,
+  // relayed the same way: a worktree, a step and a variable are the engine's (D8-01 to D8-06).
+  'workspaces.list': ENGINE_REQUESTS['workspaces.list'],
+  'workspaces.plan': ENGINE_REQUESTS['workspaces.plan'],
+  'workspaces.planRepository': ENGINE_REQUESTS['workspaces.planRepository'],
+  'workspaces.create': ENGINE_REQUESTS['workspaces.create'],
+  'workspaces.createOnFolder': ENGINE_REQUESTS['workspaces.createOnFolder'],
+  'workspaces.status': ENGINE_REQUESTS['workspaces.status'],
+  'workspaces.cleanup': ENGINE_REQUESTS['workspaces.cleanup'],
+  'preparation.steps': ENGINE_REQUESTS['preparation.steps'],
+  'preparation.prepare': ENGINE_REQUESTS['preparation.prepare'],
+  'preparation.resume': ENGINE_REQUESTS['preparation.resume'],
+  'recipe.list': ENGINE_REQUESTS['recipe.list'],
+  'recipe.add': ENGINE_REQUESTS['recipe.add'],
+  'recipe.update': ENGINE_REQUESTS['recipe.update'],
+  'recipe.remove': ENGINE_REQUESTS['recipe.remove'],
+  'recipe.move': ENGINE_REQUESTS['recipe.move'],
+  'variables.list': ENGINE_REQUESTS['variables.list'],
+  'variables.set': ENGINE_REQUESTS['variables.set'],
+  'variables.remove': ENGINE_REQUESTS['variables.remove'],
 
   /**
    * The four the main process answers itself, because each of them is something only it can do.
@@ -136,8 +174,13 @@ export const CHANNELS = {
    * right now, and the files of a Workspace. None of them is a row, so none of them crosses to
    * the engine: asking a database where a Git branch is would be asking it to guess.
    */
+  /**
+   * A folder the system asks for, opened where the page says the user is working when it says:
+   * a command's picker starts at the folder the command runs from, and the Project's dialog
+   * starts nowhere in particular, on the system's own last place.
+   */
   'dialog.pickFolder': {
-    arguments: nothingSchema,
+    arguments: z.object({ start: z.string().optional() }),
     response: z.string().nullable(),
   },
   /**

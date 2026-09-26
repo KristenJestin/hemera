@@ -53,7 +53,10 @@ export interface NewEvent {
   projectId?: string | null
   /** The Session the event is about, for what happens inside one (design D4b-04). */
   sessionId?: string | null
-  /** The Spec, its revision and the phase a step of a Spec is correlated to (design D7-13). */
+  /**
+   * The Spec the event is about (a Workspace made for one, and what happens to it, D8-16), its
+   * revision and the phase a step of a Spec is correlated to (design D7-13).
+   */
   specId?: string | null
   revisionId?: string | null
   phaseId?: string | null

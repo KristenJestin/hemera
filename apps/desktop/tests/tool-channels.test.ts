@@ -68,7 +68,7 @@ async function aProject(window: OpenWindow) {
 }
 
 describe('The catalogue is edited and read', () => {
-  test('a command in a repository is listed with its kind and folder, and edited in place', async () => {
+  test('a command in a repository is listed with its type and folder, and edited in place', async () => {
     opened = await openWindow(dataFolder, fakeAgent())
     const { bridge } = opened
     const project = await aProject(opened)
@@ -77,18 +77,30 @@ describe('The catalogue is edited and read', () => {
       projectId: project.id,
       name: 'check',
       line: 'pnpm check',
-      kind: 'check',
-      folder: 'api',
+      type: 'test',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
+      portlessName: null,
+      folderBase: 'api',
+      folder: null,
     })
     // The folder is stored the way the Project declares its repository.
-    expect(made.folder).toBe('./api')
+    expect(made.folderBase).toBe('./api')
     expect(await bridge.invoke('commands.list', { projectId: project.id })).toEqual([made])
 
     const edited = await bridge.invoke('commands.update', {
       projectId: project.id,
       name: 'check',
       line: 'pnpm test',
-      kind: 'check',
+      type: 'test',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
+      portlessName: null,
+      folderBase: null,
       folder: null,
     })
     expect(edited.id).toBe(made.id)
@@ -105,16 +117,32 @@ describe('The catalogue is edited and read', () => {
     opened = await openWindow(dataFolder, fakeAgent())
     const { bridge } = opened
     const project = await aProject(opened)
-    const draft = { projectId: project.id, name: 'dev', line: 'pnpm dev', kind: 'app' as const }
+    const draft = {
+      projectId: project.id,
+      name: 'dev',
+      line: 'pnpm dev',
+      type: 'serve' as const,
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace' as const,
+      portless: false,
+      portlessName: null,
+      folderBase: null,
+    }
     await bridge.invoke('commands.create', { ...draft, folder: null })
 
     await expect(bridge.invoke('commands.create', { ...draft, folder: null })).rejects.toThrow(
       'a command named dev is already in this Project: it is refused, not replaced',
     )
     await expect(
-      bridge.invoke('commands.create', { ...draft, name: 'web', folder: 'elsewhere' }),
+      bridge.invoke('commands.create', {
+        ...draft,
+        name: 'web',
+        folderBase: 'elsewhere',
+        folder: null,
+      }),
     ).rejects.toThrow(
-      "a command runs in the Workspace root or in one of the Project's repositories",
+      "a command runs under the Workspace root or under one of the Project's repositories",
     )
     await expect(
       bridge.invoke('commands.update', { ...draft, name: 'nothing', folder: null }),
@@ -135,7 +163,13 @@ describe('The agent starts the app and the user opens it', () => {
       projectId: project.id,
       name: 'dev',
       line: PUBLISHES_AN_ADDRESS,
-      kind: 'app',
+      type: 'serve',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
+      portlessName: null,
+      folderBase: null,
       folder: null,
     })
 
@@ -206,7 +240,13 @@ describe('The view lists the sources with their provenance', () => {
       projectId: project.id,
       name: 'check',
       line: 'pnpm check',
-      kind: 'check',
+      type: 'test',
+      lineWindows: null,
+      lineLinux: null,
+      scope: 'workspace',
+      portless: false,
+      portlessName: null,
+      folderBase: null,
       folder: null,
     })
     const session = await bridge.invoke('sessions.create', {

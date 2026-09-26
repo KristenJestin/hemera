@@ -1,17 +1,22 @@
-import { TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
+import { COMMAND_TYPES, TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
 import type { CommandRun, SessionEntry } from '@hemera/ipc'
 import type {
-  CommandKind,
+  CommandProposalState,
   CommandState,
+  CommandType,
   HemeraToolArgument,
   HemeraToolStatus,
+  PortClaim,
+  PortConflict,
+  Readiness,
   ToolKind,
   ToolSubject,
 } from '@hemera/ui'
 import { z } from 'zod'
 
 /**
- * The three kinds this lot writes, read out of their payload (design D6-06, D6-12, D6-10).
+ * The kinds Hemera writes into a thread, read out of their payload (design D6-06, D6-12, D6-10,
+ * D8-11).
  *
  * Kept apart from `agent-blocks.tsx`, which draws them: that module imports `@hemera/ui`'s
  * components, which read the theme at module scope, so nothing that only wants to parse a
@@ -41,12 +46,27 @@ const commandRunPayloadSchema = z.object({
   runId: z.string().optional(),
   name: z.string(),
   line: z.string(),
-  kind: z.enum(['app', 'check', 'utility']),
+  type: z.enum(COMMAND_TYPES),
   state: z.enum(['running', 'exited', 'failed', 'stopped']),
   cwd: z.string(),
   url: z.string().nullable().optional(),
   exitCode: z.number().nullable().optional(),
   oneOff: z.boolean().optional(),
+})
+
+/**
+ * What a command the agent proposed carries (engine, `tools/catalogue.ts`), and what the human
+ * decided of it: the entry is written again in its outcome (engine, `commands/proposals.ts`).
+ */
+const commandProposalPayloadSchema = z.object({
+  proposalId: z.string(),
+  name: z.string(),
+  line: z.string(),
+  type: z.enum(COMMAND_TYPES),
+  /** A repository of the Project, or null for the Workspace root. */
+  folder: z.string().nullable(),
+  why: z.string(),
+  state: z.enum(['pending', 'accepted', 'declined']),
 })
 
 /** What one thing delivered to the agent carries (engine, `context/service.ts`). */
@@ -297,6 +317,39 @@ export function hemeraToolCallOf(
   }
 }
 
+/**
+ * What a run shows of what it ran beside its line (D8-06, D8-09): where its address stands, the
+ * variables it was given, and a port conflict on either side of it. Nothing until the window has
+ * heard of the run: the entry alone carries none of it.
+ */
+export interface RunFacts {
+  readonly readiness: Readiness | undefined
+  readonly environment: Readonly<Record<string, string>>
+  readonly portConflict: PortConflict | undefined
+  readonly heldAgainst: readonly PortClaim[]
+}
+
+export function runFactsOf(run: CommandRun | undefined): RunFacts {
+  const conflict = run?.portConflict ?? null
+  return {
+    readiness: run?.readiness ?? undefined,
+    environment: run?.environment ?? {},
+    portConflict:
+      conflict === null
+        ? undefined
+        : {
+            port: conflict.port,
+            holderRun: conflict.name,
+            holderWorkspace: conflict.workspaceName,
+          },
+    heldAgainst: (run?.heldAgainst ?? []).map((one) => ({
+      port: one.port,
+      run: one.name,
+      workspace: one.workspaceName,
+    })),
+  }
+}
+
 /** What a Spec's status is, said to the reader where the engine names the value. */
 function statusSaid(status: string): string {
   if (status === 'ready') return 'is marked ready'
@@ -342,12 +395,12 @@ export function plainRefusal(text: string): string {
 }
 
 /** What `CommandRun` needs, read off a `command_run` entry. */
-export interface CommandRunDrawn {
+export interface CommandRunDrawn extends RunFacts {
   /** The run it is, or null for an entry written before runs were named in it. */
   readonly runId: string | null
   readonly name: string
   readonly command: string
-  readonly kind: CommandKind
+  readonly type: CommandType
   readonly state: CommandState
   readonly folder: string
   readonly url: string | undefined
@@ -371,7 +424,7 @@ export function commandRunOf(
 ): CommandRunDrawn | null {
   const read = readPayload(commandRunPayloadSchema, entry.payload)
   if (read === null) return null
-  const { runId, name, line, kind, cwd, oneOff } = read
+  const { runId, name, line, type, cwd, oneOff } = read
   const heard = runId === undefined ? undefined : live.find((one) => one.id === runId)
   const state = heard?.state ?? read.state
   const url = heard === undefined ? read.url : heard.url
@@ -380,14 +433,44 @@ export function commandRunOf(
     runId: runId ?? null,
     name,
     command: line,
-    kind,
+    type,
     state: state === 'exited' ? 'finished' : state,
     folder: cwd,
     url: url ?? undefined,
     exitCode: exitCode ?? undefined,
     oneOff,
     output: heard?.output ?? '',
+    ...runFactsOf(heard),
   }
+}
+
+/** What `CommandProposal` needs, read off a `command_proposal` entry (D8-11). */
+export interface CommandProposalDrawn {
+  /** What Accept and Decline name the proposal by. */
+  readonly proposalId: string
+  readonly name: string
+  readonly line: string
+  readonly type: CommandType
+  /** Where it would run, `.` for the Workspace root, which is what the block says it as. */
+  readonly folder: string
+  readonly why: string
+  readonly state: CommandProposalState
+}
+
+/** `null` when the payload does not parse: the entry is left out rather than drawn from a guess. */
+export function commandProposalOf(entry: SessionEntry): CommandProposalDrawn | null {
+  const read = readPayload(commandProposalPayloadSchema, entry.payload)
+  if (read === null) return null
+  return { ...read, folder: read.folder ?? '.' }
+}
+
+/**
+ * The Workspace a run's block names, or undefined when it is the Session's own (D8-08): a
+ * Project-scoped service asked for from a Session elsewhere runs in `main` (D8-07). Undefined too
+ * while the Session's own is not known, rather than naming every run.
+ */
+export function elsewhereOf(run: CommandRun, own: string | undefined): string | undefined {
+  return own === undefined || run.workspaceName === own ? undefined : run.workspaceName
 }
 
 /** What the thread shows of a `context_delivery` entry: one line, like a `note`. */

@@ -1,8 +1,9 @@
 /**
  * What an agent is provided, and how a change of it reaches it (D6-07, D6-08).
  *
- * The base is `CONTEXT_BASE`, the four sentences every Session is given once, by whatever means
- * its adapter has. The Project's instructions are the `AGENTS.md` at the root of the Workspace.
+ * The base is `CONTEXT_BASE`, the four sentences every Session is given once, and the line that
+ * names the Session's Workspace (D8-08), by whatever means its adapter has. The Project's
+ * instructions are the `AGENTS.md` at the root of the Workspace.
  * Whether the agent reads it itself is its adapter's declaration, since bare mode can keep it
  * from reading it. An agent that reads it is not sent it — that would be a second injection of a
  * text it already has — and the Context view says the file was read natively. An agent that does
@@ -37,7 +38,7 @@ import { Context as EffectContext, Effect, Layer } from 'effect'
 
 import { bareModeOf } from '../agents/bare.ts'
 import { ADAPTERS } from '../agents/discovery.ts'
-import { Projects, UnknownProjectError } from '../projects.ts'
+import { Git } from '../git.ts'
 import { Sessions, UnknownSessionError } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
 import { type ContextDeliveryKind, contextDeliveries } from '../storage/schema.ts'
@@ -95,6 +96,11 @@ export interface Pending {
 
 /** What this service provides a Session, and what it can be refused with. */
 export interface ContextService {
+  /**
+   * The base a Session is given, word for word: `CONTEXT_BASE`, then the line that names its
+   * Workspace, its path and its repositories (D8-08).
+   */
+  readonly base: (sessionId: string) => Effect.Effect<string, Refusal>
   /** Records what a Session starts with, and hands back what its adapter gives it. */
   readonly start: (sessionId: string) => Effect.Effect<Started, Refusal>
   /** What waits for the next safe point, if anything. */
@@ -111,11 +117,7 @@ export interface ContextService {
 }
 
 /** Everything a delivery can be refused with. */
-type Refusal =
-  | DatabaseError
-  | UnknownProjectError
-  | UnknownSessionError
-  | UnreadableInstructionsError
+type Refusal = DatabaseError | UnknownSessionError | UnreadableInstructionsError
 
 /** Thrown when `AGENTS.md` is there and could not be read: not the same as not having one. */
 export class UnreadableInstructionsError extends Error {
@@ -148,7 +150,7 @@ export const contextLayer = Layer.effect(
   Effect.gen(function* () {
     const database = yield* Database
     const sessions = yield* Sessions
-    const projects = yield* Projects
+    const git = yield* Git
 
     const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
 
@@ -181,30 +183,41 @@ export const contextLayer = Layer.effect(
         return { text: read.text, fingerprint: fingerprintOf(read.text) }
       })
 
-    /** The root of the Workspace: what a Session is given is its Project's own folder. */
+    /** Where a Session works (D8-08): its Workspace, whose root holds the instructions. */
+    const workspaceOf = (sessionId: string) =>
+      sessions
+        .workspace(sessionId)
+        .pipe(
+          Effect.mapError((cause) =>
+            cause instanceof UnknownSessionError
+              ? cause
+              : new DatabaseError({ doing: 'reading the Workspace of a delivery', cause }),
+          ),
+        )
+
+    /** The root of the Workspace: what a Session is given is its Workspace's own folder. */
     const rootOf = (sessionId: string): Effect.Effect<string, Refusal> =>
+      workspaceOf(sessionId).pipe(Effect.map((workspace) => workspace.path))
+
+    /**
+     * The base, and the line that says where the Session works (D8-08): the Workspace by name
+     * and path, and its repositories relative to that path.
+     */
+    const composedBase = (sessionId: string): Effect.Effect<string, Refusal> =>
       Effect.gen(function* () {
-        const { session } = yield* sessions
-          .one(sessionId)
-          .pipe(
-            Effect.mapError((cause) =>
-              cause instanceof UnknownSessionError
-                ? cause
-                : new DatabaseError({ doing: 'reading the Session of a delivery', cause }),
-            ),
-          )
-        const all = yield* projects
-          .list(true)
-          .pipe(
-            Effect.mapError(
-              (cause) => new DatabaseError({ doing: 'reading the Projects of a delivery', cause }),
-            ),
-          )
-        const project = all.find((one) => one.id === session.projectId)
-        if (project === undefined) {
-          return yield* Effect.fail(new UnknownProjectError(session.projectId))
-        }
-        return project.mainPath
+        const workspace = yield* workspaceOf(sessionId)
+        // Each repository with its branch, read from Git as the base is composed and never
+        // stored (D8-08, D8-15); a folder Git cannot read is named without a branch.
+        const named = yield* Effect.forEach(workspace.repositories, (repository) =>
+          git.status(join(workspace.path, repository)).pipe(
+            Effect.match({
+              onFailure: () => repository,
+              onSuccess: (status) => `${repository} on ${status.branch}`,
+            }),
+          ),
+        )
+        const held = named.length === 0 ? '' : ` (repositories: ${named.join(', ')})`
+        return `${CONTEXT_BASE}\nWorkspace: ${workspace.name} at ${workspace.path}${held}`
       })
 
     /** The kind of a row, which the table's check constraint already closed. */
@@ -341,8 +354,9 @@ export const contextLayer = Layer.effect(
       Effect.gen(function* () {
         const root = yield* rootOf(sessionId)
         const instructions = yield* instructionsOf(root)
-        yield* record(sessionId, 'base', '', fingerprintOf(CONTEXT_BASE))
-        if (instructions === null) return { base: CONTEXT_BASE, instructions: null }
+        const given = yield* composedBase(sessionId)
+        yield* record(sessionId, 'base', '', fingerprintOf(given))
+        if (instructions === null) return { base: given, instructions: null }
         const reads = yield* readsItself(sessionId)
         yield* record(
           sessionId,
@@ -351,7 +365,7 @@ export const contextLayer = Layer.effect(
           instructions.fingerprint,
         )
         return {
-          base: CONTEXT_BASE,
+          base: given,
           instructions: {
             path: AGENTS_FILE,
             fingerprint: instructions.fingerprint,
@@ -447,6 +461,6 @@ export const contextLayer = Layer.effect(
         }))
       })
 
-    return { start, pending, delivered, handedInternal, provided }
+    return { base: composedBase, start, pending, delivered, handedInternal, provided }
   }),
 )

@@ -202,9 +202,15 @@ export const Variants: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await waitFor(() => {
-      expect(canvas.getByRole('heading', { level: 1 }).parentElement).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the journey slowly: the second given can end while it is in flight.
+    await waitFor(
+      () => {
+        expect(canvas.getByRole('heading', { level: 1 }).parentElement).toHaveStyle({
+          opacity: '1',
+        })
+      },
+      { timeout: 10_000 },
+    )
     expect(canvas.getByRole('heading', { name: 'What are we doing in Atlas?' })).toBeInTheDocument()
     expect(canvas.getByText('Repository ./sources/api added')).toBeInTheDocument()
     expect(canvas.getByText('No Session in Atlas')).toBeInTheDocument()
@@ -260,9 +266,15 @@ export const FirstLaunchPage: Story = {
   render: (args) => <FirstLaunch onCreateProject={args.onOpenJournal} commandShortcut="Ctrl+K" />,
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await waitFor(() => {
-      expect(canvas.getByRole('heading', { level: 1 }).parentElement).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the journey slowly: the second given can end while it is in flight.
+    await waitFor(
+      () => {
+        expect(canvas.getByRole('heading', { level: 1 }).parentElement).toHaveStyle({
+          opacity: '1',
+        })
+      },
+      { timeout: 10_000 },
+    )
 
     expect(canvas.getByRole('heading', { name: 'Welcome to Hemera' })).toBeInTheDocument()
     // One action, and the palette said to be there too.

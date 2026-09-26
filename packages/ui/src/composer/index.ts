@@ -13,7 +13,7 @@ export { PromptInput, type PromptInputProps, type PromptShape } from './prompt-i
 export { ComposerActions, type ComposerActionsProps } from './composer-actions.tsx'
 export { ComposerAttachments, type ComposerAttachmentsProps } from './composer-attachments.tsx'
 export { MentionMenu, type MentionMenuProps } from './mention-menu.tsx'
-export { WorkspacePill, type WorkspacePillProps } from './workspace-pill.tsx'
+export { WorkspacePill, type WorkspaceChoice, type WorkspacePillProps } from './workspace-pill.tsx'
 
 /**
  * What the Session runs on, asked and set in one place (design D17-11, D17-14).

@@ -111,6 +111,9 @@ export const States: Story = {
         name: 'Atlas',
         tone: 'info',
         mainPath: 'D:\\Projects\\atlas',
+        // A new Project makes its dedicated Workspaces in Hemera's own folder, on its slug.
+        workspacesRoot: null,
+        branchPrefix: null,
       })
     })
     await waitFor(() => {

@@ -227,10 +227,11 @@ const THREAD: ScrollerEntry[] = [
       <CommandRun
         name="dev"
         command="pnpm dev"
-        kind="app"
+        type="serve"
         state="running"
         folder="./sources/front"
         url="http://localhost:5173/"
+        readiness="ready"
         output={'vite v7.1.4  ready in 412 ms\n\n  Local:   http://localhost:5173/\n'}
         onOpenUrl={fn()}
         onStop={fn()}
@@ -274,17 +275,18 @@ const COMMANDS = (
         id: 'run-dev',
         name: 'dev',
         command: 'pnpm dev',
-        kind: 'app',
+        type: 'serve',
         state: 'running',
         folder: './sources/front',
         url: 'http://localhost:5173/',
+        readiness: 'ready',
         output: 'vite v7.1.4  ready in 412 ms',
       },
       {
         id: 'run-check',
         name: 'check',
         command: 'pnpm check',
-        kind: 'check',
+        type: 'test',
         state: 'failed',
         folder: '.',
         exitCode: 1,

@@ -41,6 +41,7 @@ export {
   journalEntrySchema,
   projectSchema,
   projectToneSchema,
+  repositoryIconSchema,
   sessionEntryOriginSchema,
   sessionEntrySchema,
   sessionSchema,
@@ -50,6 +51,7 @@ export {
 } from './engine.ts'
 export type {
   Channel,
+  RepositoryIcon,
   ComposerChoice,
   DisplayPreferences,
   DisplayPreferencesChange,
@@ -96,15 +98,55 @@ export type {
   ToolCallStatus,
 } from './agents.ts'
 export {
-  commandKindSchema,
   commandRunSchema,
   commandSchema,
+  commandScopeSchema,
+  commandTypeSchema,
   contextReachSchema,
   contextViewSchema,
   providedSchema,
   runStateSchema,
 } from './tools.ts'
-export type { Command, CommandKind, CommandRun, ContextView, Provided, RunState } from './tools.ts'
+export type {
+  Command,
+  CommandRun,
+  CommandScope,
+  CommandType,
+  ContextView,
+  Provided,
+  RunState,
+} from './tools.ts'
+export {
+  planRepositorySchema,
+  recipeKindSchema,
+  recipeStepSchema,
+  repositoryStateSchema,
+  variableSchema,
+  workspacePlanSchema,
+  workspaceSchema,
+  workspaceStateSchema,
+  workspaceStepSchema,
+  worktreeSchema,
+} from './workspaces.ts'
+export type {
+  PlanRepository,
+  RecipeStep,
+  RepositoryState,
+  Variable,
+  Workspace,
+  WorkspacePlan,
+  WorkspaceState,
+  WorkspaceStep,
+  Worktree,
+} from './workspaces.ts'
+export {
+  LAUNCH_REQUESTS,
+  launchSchema,
+  launchStateSchema,
+  launchWorkspaceSchema,
+  specLaunchesSchema,
+} from './launches.ts'
+export type { Launch, LaunchState, LaunchWorkspace, SpecLaunches } from './launches.ts'
 export {
   SPEC_REQUESTS,
   acceptanceCriterionSchema,

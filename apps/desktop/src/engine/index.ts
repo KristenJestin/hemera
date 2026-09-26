@@ -9,7 +9,6 @@
  * Electron API beyond the port it was handed, and it is the only program of the four that ever
  * opens the database of the data folder.
  */
-
 import { join } from 'node:path'
 
 import { type EngineEventName, channelSchema } from '@hemera/ipc'
@@ -29,6 +28,7 @@ import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
+import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
 import { type Context, contextLayer } from './context/service.ts'
 import { toolAccessLayer } from './tools/access.ts'
@@ -51,6 +51,17 @@ import type { Specs } from './specs/specs.ts'
 import { engineStatusLayer } from './status.ts'
 import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
+import { gitLayer } from './git.ts'
+import {
+  type Preparation,
+  hostLinks,
+  preparationLayer,
+  recovered,
+} from './workspaces/preparation.ts'
+import { type Launches, launchesLayer } from './workspaces/launches.ts'
+import { type Recipe, recipeLayer } from './workspaces/recipe.ts'
+import { type Variables, variablesLayer } from './workspaces/variables.ts'
+import { type Workspaces, WorkspacesRoot, workspacesLayer } from './workspaces/workspaces.ts'
 import type { Database, SqliteClient } from './storage/database.ts'
 
 /** The file the data folder keeps its database in. */
@@ -65,7 +76,10 @@ export interface EngineStart {
 }
 
 /** The name each change of a Session travels under, on the one channel the page listens on. */
-export const PUSHED: Record<Notice, Exclude<EngineEventName, 'entry' | 'run' | 'spec_changed'>> = {
+export const PUSHED: Record<
+  Notice,
+  Exclude<EngineEventName, 'entry' | 'run' | 'spec_changed' | 'launch_changed' | 'workspace'>
+> = {
   permission_requested: 'permission',
   turn_started: 'turn_start',
   turn_ended: 'turn',
@@ -108,6 +122,20 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
         log(`pushing a run failed: ${named(died)}`)
       }
     },
+    workspace: (projectId, workspaceId) => {
+      try {
+        port.postMessage({ event: 'workspace', projectId, workspaceId })
+      } catch (died) {
+        log(`pushing a Workspace failed: ${named(died)}`)
+      }
+    },
+    launched: (specId, projectId) => {
+      try {
+        port.postMessage({ event: 'launch.changed', specId, projectId })
+      } catch (died) {
+        log(`pushing a launch failed: ${named(died)}`)
+      }
+    },
   })
 }
 
@@ -147,7 +175,7 @@ function specNoticesTo(
  * and its thread are rows — and their notices go out on the port the main process handed over.
  */
 /** Everything this process holds once it is built, named so the composition is checked against it. */
-type EngineServices =
+export type EngineServices =
   | Preferences
   | EngineStatus
   | Projects
@@ -158,7 +186,13 @@ type EngineServices =
   | Discovery
   | Agents
   | Commands
+  | Proposals
   | Context
+  | Workspaces
+  | Recipe
+  | Variables
+  | Preparation
+  | Launches
   | Database
   | SqliteClient
 
@@ -206,6 +240,8 @@ function servicesOf(
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
+    // The variables a run is given are the Project's overridden by the Workspace's (D8-06).
+    Layer.provide(variablesLayer),
     Layer.provide(rows),
     Layer.provide(specs),
     Layer.provide(processes),
@@ -215,8 +251,59 @@ function servicesOf(
     Layer.provide(heldWordsLayer),
   )
   // What a Session is provided with, and the book of which agents are live (D6-07, D5-05).
-  const provisions = Layer.mergeAll(contextLayer.pipe(Layer.provide(rows)), poolLayer).pipe(
-    Layer.provide(clockLayer),
+  // The context names each repository's branch, read through the machine's `git` (D8-08).
+  const git = gitLayer()
+  const provisions = Layer.mergeAll(
+    contextLayer.pipe(Layer.provide(rows), Layer.provide(git)),
+    poolLayer,
+  ).pipe(Layer.provide(clockLayer))
+  const runtime = runtimeLayer.pipe(
+    // Discovery is handed up rather than hidden: the settings page asks this process what the
+    // machine has, and that question is answered without starting anything.
+    Layer.provideMerge(discoveryLayer),
+    Layer.provide(rows),
+    // What each Project's composer was left on: the runtime seeds the Home's choices from it
+    // at start and writes them back as they are made (D5-17).
+    Layer.provide(preferencesLayer),
+    // Handed up rather than hidden: the Commands panel, the Project settings and the Context
+    // view ask this process for the very catalogue, runs and provisions the runtime lends.
+    Layer.provideMerge(tools),
+    // What a Session is provided with, and the book of what is running on the engine's own
+    // clock: it is what closes an agent nobody is talking to any more (D5-05).
+    Layer.provideMerge(provisions),
+    // The variables of a Session's Workspace, which its agent is started with (D8-06).
+    Layer.provide(variablesLayer),
+    Layer.provide(processes),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+    // A directory of Hemera's per agent, inside the data folder, where its bare means is written.
+    Layer.provide(agentDirectoriesLayer(start.directory)),
+  )
+
+  // Starting a build: the Spec asked for, the Workspace waited for, the Session that runs it
+  // (D8-13). Built at the top, on the very runtime instance the window's requests reach, so a
+  // launch and a command start through the same book of live agents.
+  const launches = launchesLayer.pipe(
+    Layer.provide(rows),
+    Layer.provide(preferencesLayer),
+    Layer.provide(runtime),
+    // Its diagnostic, and the window it tells when a launch changes.
+    Layer.provide(agents),
+  )
+
+  // The Workspaces of the Projects, over the machine's `git`, made under the data folder unless a
+  // Project names a folder of its own (D8-02, D8-03), and prepared through the very commands the
+  // tools run: a `run` step is one of their runs, with no Session (D8-05, Decided 11).
+  const workspaces = preparationLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
+    Layer.provide(git),
+    Layer.provide(hostLinks),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
+    Layer.provide(tools),
+    // Its diagnostic, and the window it tells when a Workspace or its steps change.
+    Layer.provide(agents),
+    // The launches, which start the builds a ready Workspace was waited for.
+    Layer.provideMerge(launches),
   )
 
   return Layer.mergeAll(
@@ -226,26 +313,11 @@ function servicesOf(
     rows,
     specs,
     listed,
-    runtimeLayer.pipe(
-      // Discovery is handed up rather than hidden: the settings page asks this process what the
-      // machine has, and that question is answered without starting anything.
-      Layer.provideMerge(discoveryLayer),
-      Layer.provide(rows),
-      // What each Project's composer was left on: the runtime seeds the Home's choices from it
-      // at start and writes them back as they are made (D5-17).
-      Layer.provide(preferencesLayer),
-      // Handed up rather than hidden: the Commands panel, the Project settings and the Context
-      // view ask this process for the very catalogue, runs and provisions the runtime lends.
-      Layer.provideMerge(tools),
-      // What a Session is provided with, and the book of what is running on the engine's own
-      // clock: it is what closes an agent nobody is talking to any more (D5-05).
-      Layer.provideMerge(provisions),
-      Layer.provide(processes),
-      Layer.provide(agents),
-      Layer.provide(heldWordsLayer),
-      // A directory of Hemera's per agent, inside the data folder, where its bare means is written.
-      Layer.provide(agentDirectoriesLayer(start.directory)),
-    ),
+    // What a human decides of the commands the agent proposed: the catalogue is written from
+    // there, on the very commands the tools run (D8-11).
+    proposalsLayer.pipe(Layer.provide(tools), Layer.provide(rows), Layer.provide(agents)),
+    workspaces,
+    runtime,
   ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
 }
 
@@ -304,6 +376,9 @@ if (process.parentPort !== undefined) {
             context,
           )
           log(`opened the database of ${start.directory}`)
+          // What the last engine left going is not going any more: its runs are ended and its
+          // steps wait for a resume (D8-05, D6-12).
+          yield* Effect.provide(recovered, context)
 
           port.on('message', (event) => {
             // SAFETY: what the main process put on the port; `decideRequest` is what reads it.

@@ -82,9 +82,13 @@ import {
 } from './agent-store.ts'
 import { bareRowOf, offeredOf } from './bare-mode.ts'
 import {
+  acceptProposal,
+  addToCatalogue,
+  declineProposal,
   listenToTools,
   readCatalogue,
   readContext,
+  readPortless,
   removeCommand,
   saveCommand,
   readRuns,
@@ -94,10 +98,41 @@ import {
   toolsSnapshot,
 } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
+import { repositoryLinesOf } from './project-lines.ts'
+import {
+  addRecipeStep,
+  cleanUp,
+  createDedicated,
+  createOnFolder,
+  listenToWorkspaces,
+  moveRecipeStep,
+  planDedicated,
+  readPlanRepositories,
+  readMainStatus,
+  readProjectVariables,
+  readRecipe,
+  readWorkspaces,
+  removeRecipeStep,
+  removeVariable,
+  resumePreparation,
+  selectRun,
+  setVariable,
+  showStepRun,
+  showWorkspace,
+  stopService,
+  subscribeToWorkspaces,
+  updateRecipeStep,
+  workspacesSnapshot,
+} from './workspaces-store.ts'
 import {
   archivedSessions,
   archiveSession,
+  chooseWorkspace,
   closeSessions,
+  endedTurnsOf,
+  listenToWorkspaces as listenToOfferedWorkspaces,
+  offeredWorkspacesOf,
+  workspaceRootOf,
   openSession,
   openSessions,
   readSessions,
@@ -134,7 +169,10 @@ import {
   removeRepository,
   renameProject,
   restoreProject,
+  setBranchPrefix,
+  setWorkspacesRoot,
   subscribeToProjects,
+  updateRepository,
 } from './projects-store.ts'
 import {
   keepActiveProject,
@@ -222,9 +260,15 @@ function unanswered(channel: string) {
   }
 }
 
-/** The system's own folder picker, which belongs to the main process. */
-async function pickFolder(): Promise<string | null> {
-  return await window.hemera.invoke('dialog.pickFolder', {})
+/**
+ * The system's own folder picker, which belongs to the main process.
+ *
+ * Opened on the folder the caller says the user is working in, when it says one: a command's
+ * picker starts where that command runs from. The pages that have nowhere in mind ask for no
+ * start, and the system's own last place is what they get.
+ */
+async function pickFolder(start?: string): Promise<string | null> {
+  return await window.hemera.invoke('dialog.pickFolder', start === undefined ? {} : { start })
 }
 
 /**
@@ -281,6 +325,8 @@ export function Application() {
   // The runs of the Sessions, as they were last pushed: the thread's blocks and the Commands
   // panel read the same run from here (design D6-12).
   const tools = useSyncExternalStore(subscribeToTools, toolsSnapshot, toolsSnapshot)
+  // The Workspaces of the Project whose settings are open, and the one shown under them (D8-02).
+  const places = useSyncExternalStore(subscribeToWorkspaces, workspacesSnapshot, workspacesSnapshot)
   // What a page holds is a name, and what the channels take is one of the agents the engine
   // knows: resolved among them here rather than asserted at each call, so a name that answers to
   // none of them asks for nothing at all.
@@ -331,6 +377,8 @@ export function Application() {
    * session", so the first entry of one is what sends it to the list again.
    */
   const named = useRef(new Set<string>())
+  /** The ended turns that already sent the list to be read again for a Session's Workspace. */
+  const turnsRead = useRef(new Set<string>())
   /** The folder the settings are showing, which is what everything below it is read against. */
   const [shownPath, setShownPath] = useState<string | null>(null)
 
@@ -481,6 +529,12 @@ export function Application() {
   // And the runs, heard on the same channel: a command a Session started while another was on
   // screen has moved on by the time the reader comes back to it (D6-12).
   useEffect(() => listenToTools(), [])
+  // And the Workspaces of the Project in front, which the composer's pill offers: one becomes
+  // `ready`, or is cleaned up, while a Home or a Session is on screen (D8-08).
+  useEffect(() => listenToOfferedWorkspaces(), [])
+  // And the Workspaces the settings show, heard on it too: a preparation moves on whatever page
+  // is on screen (D8-05).
+  useEffect(() => listenToWorkspaces(), [])
 
   // A Spec is written by whoever holds its right and read live by every Session on it (D7-11).
   // A Spec step can change a Session too — accepting a proposal makes it `define`, a Session is
@@ -525,6 +579,18 @@ export function Application() {
     if (stale) void readSessions(projectId)
   }, [agents.sessions, shell.activeProjectId])
 
+  // And when a turn ends in a Session the list still says is free to change Workspace: its agent
+  // started during that turn, after the read above, and the pill is fixed from then on (D8-08).
+  useEffect(() => {
+    const projectId = shell.activeProjectId
+    if (projectId === null) return
+    const unread = endedTurnsOf(sessions.sessions, agents.sessions).filter(
+      (id) => !turnsRead.current.has(id),
+    )
+    for (const id of unread) turnsRead.current.add(id)
+    if (unread.length > 0) void readSessions(projectId)
+  }, [agents.sessions, sessions.sessions, shell.activeProjectId])
+
   // What the agent of the Session on screen offers, asked when that Session becomes the one the
   // window is on: an agent announces its models and its modes when it starts, and what it is on
   // now is its own answer rather than a value this window remembers (design D5-13).
@@ -546,7 +612,27 @@ export function Application() {
   useEffect(() => {
     if (settingsOf === null) return
     void readCatalogue(settingsOf)
+    // And whether this machine has Portless, which the engine looks up once (D8-10).
+    void readPortless()
+    // And its Workspaces, which the engine's `workspace` event keeps current from then on (D8-02),
+    // then what Git says of `main`, which its row sums up (D8-15); and its own variables, which a
+    // Workspace shown lists under its own (D8-06).
+    void readWorkspaces(settingsOf).then(async () => await readMainStatus(settingsOf))
+    void readProjectVariables(settingsOf)
+    // And the recipe each dedicated Workspace is prepared with (D8-05).
+    void readRecipe(settingsOf)
+    // The Workspace shown is the page's: leaving it puts the Workspace away.
+    return () => void showWorkspace(null)
   }, [settingsOf])
+
+  // And what Git says of `main` again whenever the Project changes while its settings are open: a
+  // repository declared, moved or removed is another first repository for its row to sum up, or
+  // the first one at all (D8-15). Before its Workspaces were ever listed, this asks nothing.
+  const settingsVersion = settingsOf === null ? null : (current?.version ?? null)
+  useEffect(() => {
+    if (settingsOf === null) return
+    void readMainStatus(settingsOf)
+  }, [settingsOf, settingsVersion])
 
   // And what it was provided, for its Context tab: read when it is opened, and again by the store
   // whenever a turn ends or a change of the Workspace's instructions is delivered (D6-10).
@@ -626,9 +712,9 @@ export function Application() {
       .invoke('repositories.status', { root, paths: current.repositories })
       .then((found) => {
         if (!asking) return
-        setRepositories(
-          found.map((one) => ({ path: one.path, branch: one.git, exists: one.exists })),
-        )
+        // What the Project says of each — whether a dedicated Workspace takes it (D8-04), the
+        // icon it wears — beside what the disk says.
+        setRepositories(repositoryLinesOf(found, current))
       })
       .catch(unanswered('repositories.status'))
     // And what the Workspace holds that has not been declared, which is what the page offers
@@ -637,7 +723,15 @@ export function Application() {
       .invoke('workspace.folders', { root })
       .then((found) => {
         if (!asking) return
-        setFolders(found.map((one) => ({ path: one.path, branch: one.git, exists: one.exists })))
+        setFolders(
+          found.map((one) => ({
+            path: one.path,
+            branch: one.git,
+            exists: one.exists,
+            includedByDefault: true,
+            icon: null,
+          })),
+        )
       })
       .catch(unanswered('workspace.folders'))
     return () => {
@@ -884,6 +978,22 @@ export function Application() {
     </Shell>
   )
 
+  /**
+   * The files of a Workspace of the Project in front, searched and picked where a composer is
+   * writing about it (D8-08): nothing while its folder is not known yet.
+   */
+  async function searchIn(workspaceId: string | null, query: string): Promise<string[]> {
+    const root =
+      current === null ? null : workspaceRootOf(workspaceId, sessions.workspaces, current.mainPath)
+    return root === null ? [] : await window.hemera.invoke('workspace.files', { root, query })
+  }
+
+  async function pickIn(workspaceId: string | null): Promise<string[]> {
+    const root =
+      current === null ? null : workspaceRootOf(workspaceId, sessions.workspaces, current.mainPath)
+    return root === null ? [] : await window.hemera.invoke('dialog.pickFiles', { root })
+  }
+
   /** Which page the content area holds, which is where the window is looking. */
   function page() {
     if (place === 'settings') {
@@ -999,9 +1109,15 @@ export function Application() {
             tone: current.tone,
             mainPath: current.mainPath,
             specPrefix: current.specPrefix,
+            workspacesRoot: current.workspacesRoot,
+            branchPrefix: current.branchPrefix,
           }}
           repositories={repositories}
           onSave={async (draft: ProjectSettingsDraft) => {
+            // One change after the other, each carrying the version the one before it left: sent
+            // together, the second would be refused as stale.
+            const latest = () =>
+              projectsSnapshot().projects.find((one) => one.id === current.id) ?? current
             // The prefix goes with the identity: only the keys minted from now on take it (D7-02).
             const renamed = await renameProject(current, {
               name: draft.name,
@@ -1009,12 +1125,23 @@ export function Application() {
               specPrefix: draft.specPrefix,
             })
             if (!renamed) return projectsSnapshot().refusal
-            if (draft.mainPath === current.mainPath) return null
-            const moved = await moveMainWorkspace(
-              projectsSnapshot().projects.find((one) => one.id === current.id) ?? current,
-              draft.mainPath,
-            )
-            return moved ? null : projectsSnapshot().refusal
+            const changes = [
+              draft.mainPath === current.mainPath
+                ? null
+                : async () => await moveMainWorkspace(latest(), draft.mainPath),
+              // A blank is the default, which the channel carries as null (Decided 17).
+              draft.workspacesRoot === current.workspacesRoot
+                ? null
+                : async () => await setWorkspacesRoot(latest(), draft.workspacesRoot),
+              draft.branchPrefix === current.branchPrefix
+                ? null
+                : async () => await setBranchPrefix(latest(), draft.branchPrefix),
+            ]
+            for (const change of changes) {
+              // oxlint-disable-next-line no-await-in-loop -- one version at a time; see above
+              if (change !== null && !(await change())) return projectsSnapshot().refusal
+            }
+            return null
           }}
           folders={folders}
           onBrowse={pickFolder}
@@ -1028,17 +1155,72 @@ export function Application() {
             const went = await addRepository(latest, path)
             return went ? null : projectsSnapshot().refusal
           }}
+          onUpdateRepository={async (path, next) => {
+            // Read again rather than closed over, as a declaration is: see above.
+            const latest =
+              projectsSnapshot().projects.find((one) => one.id === current.id) ?? current
+            const went = await updateRepository(latest, path, {
+              path: next.path,
+              icon: next.icon,
+              included: next.includedByDefault,
+            })
+            return went ? null : projectsSnapshot().refusal
+          }}
           onRemoveRepository={(path) => void removeRepository(current, path)}
           commands={tools.catalogues.get(current.id) ?? []}
+          portlessInstalled={tools.portlessInstalled}
           onSaveCommand={async (command, existing) =>
             await saveCommand({ projectId: current.id, ...command }, existing)
           }
           onRemoveCommand={(name) => void removeCommand(current.id, name)}
           onArchive={() => void archiveProject(current)}
+          workspaces={places.workspaces.get(current.id) ?? []}
+          mainStatus={places.mainStatus.get(current.id) ?? null}
+          shown={places.shown?.projectId === current.id ? places.shown : null}
+          projectVariables={places.variables.get(current.id) ?? []}
+          workspaceActions={{
+            onShow: (id) => {
+              const chosen = places.workspaces.get(current.id)?.find((one) => one.id === id)
+              void showWorkspace(chosen ?? null)
+            },
+            onResume: (id) => void resumePreparation(id),
+            onSetVariable: async (workspaceId, key, value) =>
+              await setVariable(current.id, workspaceId, key, value),
+            onRemoveVariable: (workspaceId, key) =>
+              void removeVariable(current.id, workspaceId, key),
+            onSelectRun: selectRun,
+            onShowStepRun: (runId) => void showStepRun(runId),
+            onStopService: (runId) => void stopService(runId),
+          }}
+          onPlanWorkspace={async () => await planDedicated(current.id)}
+          onReadPlanWorkspace={async (relativePaths, reading, onRead) =>
+            await readPlanRepositories(current.id, null, '', relativePaths, reading, onRead)
+          }
+          onCreateDedicated={async (name, worktrees) =>
+            await createDedicated(current.id, name, worktrees)
+          }
+          onCreateWorkspace={async (path, name) => await createOnFolder(current.id, path, name)}
+          onCleanupWorkspace={async (id) => await cleanUp(current.id, id)}
+          recipe={places.recipes.get(current.id) ?? []}
+          onAddRecipeStep={async (step) => await addRecipeStep(current.id, step)}
+          onUpdateRecipeStep={async (id, step) => await updateRecipeStep(current.id, id, step)}
+          onRemoveRecipeStep={(id) => void removeRecipeStep(current.id, id)}
+          onMoveRecipeStep={(id, direction) => void moveRecipeStep(current.id, id, direction)}
+          onSetProjectVariable={async (key, value) =>
+            await setVariable(current.id, null, key, value)
+          }
+          onRemoveProjectVariable={(key) => void removeVariable(current.id, null, key)}
+          workspacesRefusal={places.refusal}
         />
       )
     }
     if (open !== null) {
+      // The folder the Session works in, which its runs are said relative to: its Workspace's,
+      // `main`'s when it has none, and none until the list has named it (D8-08).
+      const root =
+        current === null
+          ? null
+          : workspaceRootOf(open.workspaceId, sessions.workspaces, current.mainPath)
       return (
         <SessionPage
           // Keyed on the Session: a draft of a title belongs to the Session it is about, and
@@ -1069,19 +1251,8 @@ export function Application() {
           onStartEditing={() => setNaming(open.id)}
           onCancelEditing={() => setNaming(null)}
           onArchive={() => void archive(open)}
-          onSearchFiles={async (query: string) =>
-            current === null
-              ? []
-              : await window.hemera.invoke('workspace.files', {
-                  root: current.mainPath,
-                  query,
-                })
-          }
-          onPickFiles={async () =>
-            current === null
-              ? []
-              : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
-          }
+          onSearchFiles={async (query: string) => await searchIn(open.workspaceId, query)}
+          onPickFiles={async () => await pickIn(open.workspaceId)}
           commandRuns={tools.runs.get(open.id) ?? []}
           // An address a run published is opened by the browser: the window hands every web
           // address to the platform and never navigates away itself.
@@ -1089,7 +1260,7 @@ export function Application() {
             window.open(url, '_blank', 'noopener')
           }}
           onStopRun={(runId) => void stopRun(open.id, runId)}
-          root={current?.mainPath ?? ''}
+          root={root}
           context={tools.contexts.get(open.id) ?? null}
           // A line that names a command of the catalogue runs that command, in its folder; any
           // other line is a one-off, run in the Workspace root and not added to the catalogue.
@@ -1097,6 +1268,11 @@ export function Application() {
             const known = tools.contexts.get(open.id)?.commands.some((one) => one.name === line)
             void runCommand(open.id, known === true ? { name: line } : { line })
           }}
+          workspaces={offeredWorkspacesOf(sessions.workspaces, open.workspaceId)}
+          onChooseWorkspace={(workspaceId) => void chooseWorkspace(open, workspaceId)}
+          onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}
+          onDeclineProposal={async (proposalId) => await declineProposal(open.id, proposalId)}
+          onAddToCatalogue={addToCatalogue}
         />
       )
     }
@@ -1127,27 +1303,18 @@ export function Application() {
         onOpenSession={goTo}
         onOpenAllSessions={() => setPlace('archived')}
         onOpenJournal={() => goTo(JOURNAL_ENTRY)}
-        onSearchFiles={async (query: string) =>
-          current === null
-            ? []
-            : await window.hemera.invoke('workspace.files', {
-                root: current.mainPath,
-                query,
-              })
-        }
-        onPickFiles={async () =>
-          current === null
-            ? []
-            : await window.hemera.invoke('dialog.pickFiles', { root: current.mainPath })
-        }
+        // The files of the Workspace the pill chose, which is `main` until another is (D8-08).
+        onSearchFiles={searchIn}
+        onPickFiles={pickIn}
         // What the greeting promises: the first message makes the Session, and the Session is
         // made with the agent chosen at the end of the box. What was chosen with it is not handed
         // over again — the engine kept those choices against this Project and this agent, and the
         // Session it opens is opened on them (D5-17). An agent the engine does not know is
         // refused by the engine rather than by a sentence written here.
-        onSend={async (text, chosen) => {
+        workspaces={offeredWorkspacesOf(sessions.workspaces)}
+        onSend={async (text, chosen, workspaceId) => {
           const asked = providerOf(chosen)
-          const made = await startSession(active.id, asked)
+          const made = await startSession(active.id, asked, workspaceId)
           if (made === null) return sessionsSnapshot().refusal
           goTo(made.id)
           // The thread is read before the agent is spoken to: the message the engine writes as

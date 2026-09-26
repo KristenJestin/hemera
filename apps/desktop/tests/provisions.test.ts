@@ -9,7 +9,7 @@
  * what deliberately does not.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -33,8 +33,10 @@ let workingDirectory: string
 let opened: ReturnType<typeof application>
 
 beforeEach(() => {
-  dataFolder = mkdtempSync(join(tmpdir(), 'hemera-provisions-'))
-  workingDirectory = mkdtempSync(join(tmpdir(), 'hemera-workspace-'))
+  // The engine spells a path the way the filesystem does — `realpathSync.native`, the long form
+  // of a short name under a Windows runner — so the fixture is settled the same way before use.
+  dataFolder = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-provisions-')))
+  workingDirectory = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-workspace-')))
   opened = application(dataFolder)
 })
 
@@ -47,6 +49,9 @@ afterEach(() => {
 const instructions = (text: string): void => {
   writeFileSync(join(workingDirectory, AGENTS_FILE), text)
 }
+
+/** The base a Session on `main` at that folder is given: it names its Workspace (D8-08). */
+const based = (folder: string): string => `${CONTEXT_BASE}\nWorkspace: main at ${folder}`
 
 /** An agent that answers every turn with one line, which is all these suites need of it. */
 const answering = () => fakeAgent({ steps: [{ does: 'says', text: 'done' }] })
@@ -80,7 +85,7 @@ describe('The base is provided once, by the agent’s means', () => {
 
     // Handed once, with the session, as the system prompt Claude Code takes on `_meta`.
     const meta = SYSTEM_PROMPT.parse(JSON.parse(agent.answers.metas[0] ?? '{}'))
-    expect(meta.claudeCode.options.systemPrompt.prompt).toBe(CONTEXT_BASE)
+    expect(meta.claudeCode.options.systemPrompt.prompt).toBe(based(workingDirectory))
     // So the prompts are the user's own text, and nothing else.
     expect(agent.answers.prompts).toEqual(['start on the reader', 'carry on'])
     expect(agent.answers.blocks.flat().some((block) => block.type === 'resource')).toBe(false)
@@ -111,7 +116,7 @@ describe('The base is provided once, by the agent’s means', () => {
       { type: 'text', text: DELIVERY_MARKER },
       {
         type: 'resource',
-        resource: { uri: contextUri(''), mimeType: 'text/plain', text: CONTEXT_BASE },
+        resource: { uri: contextUri(''), mimeType: 'text/plain', text: based(workingDirectory) },
       },
       { type: 'text', text: 'start on the reader' },
     ])

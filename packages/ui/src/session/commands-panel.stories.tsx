@@ -14,18 +14,19 @@ const SERVER: CommandPanelRun = {
   id: 'run-dev',
   name: 'dev',
   command: 'pnpm dev',
-  kind: 'app',
+  type: 'serve',
   state: 'running',
   folder: 'apps/desktop',
   output: 'vite v7.1.4\n\n  Local:   http://localhost:5173/',
   url: 'http://localhost:5173/',
+  readiness: 'ready',
 }
 
 const CHECK: CommandPanelRun = {
   id: 'run-check',
   name: 'check',
   command: 'pnpm check',
-  kind: 'check',
+  type: 'test',
   state: 'finished',
   folder: '.',
   output: 'Test Files  155 passed (155)',

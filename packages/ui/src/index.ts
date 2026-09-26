@@ -19,6 +19,7 @@ export {
   type DialogSize,
 } from './components/dialog/dialog.tsx'
 export { Badge, type BadgeProps } from './components/badge/badge.tsx'
+export { Checkbox, type CheckboxProps } from './components/checkbox/checkbox.tsx'
 export { Input, Textarea, type InputProps, type TextareaProps } from './components/field/field.tsx'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
 export {
@@ -84,11 +85,31 @@ export {
   DangerZone,
   ProjectSettings,
   RepositoryList,
-  type CommandLine,
   type ProjectSettingsProps,
+  type ProjectSettingsSection,
 } from './project/project-settings.tsx'
+/** The dialogs a repository and a command of the Project are added and edited in. */
+export { CommandDialog, type CommandDialogProps } from './project/command-dialog.tsx'
+export { RepositoryDialog, type RepositoryDialogProps } from './project/repository-dialog.tsx'
 
-export type { ProjectDraft, ProjectSettingsDraft, RepositoryLine } from './project/model.ts'
+export {
+  REPOSITORY_ICONS,
+  type CommandLine,
+  type ProjectDraft,
+  type ProjectSettingsDraft,
+  type RepositoryDraft,
+  type RepositoryIcon,
+  type RepositoryLine,
+} from './project/model.ts'
+/** The preparation of a Project: the ordered recipe each dedicated Workspace replays (D8-05). */
+export {
+  PreparationEditor,
+  type PreparationEditorProps,
+  type RecipeCommand,
+  type RecipeKind,
+  type RecipeStepDraft,
+  type RecipeStepLine,
+} from './project/preparation-editor.tsx'
 
 /** The settings of the application, and the bell of the chrome bar. */
 export {
@@ -145,6 +166,7 @@ export {
   type MentionMenuProps,
   type PromptInputProps,
   type PromptShape,
+  type WorkspaceChoice,
   type WorkspacePillProps,
 } from './composer/index.ts'
 
@@ -266,12 +288,22 @@ export {
   type HemeraToolMark,
   type HemeraToolStatus,
 } from './activity/hemera-tool-call.tsx'
+export { CommandRun, type CommandRunProps, type CommandState } from './activity/command-run.tsx'
+/** A command the agent proposes for the catalogue, and the human's answer (D8-11). */
 export {
-  CommandRun,
-  type CommandKind,
-  type CommandRunProps,
-  type CommandState,
-} from './activity/command-run.tsx'
+  CommandProposal,
+  type CommandProposalProps,
+  type CommandProposalState,
+} from './activity/command-proposal.tsx'
+/** The seven types of a command and the icon the design system fixes for each (D8-07). */
+export {
+  COMMAND_SCOPES,
+  COMMAND_TYPES,
+  COMMAND_TYPE_ICONS,
+  COMMAND_TYPE_LABELS,
+  type CommandScope,
+  type CommandType,
+} from './activity/command-type.ts'
 
 /** The gate a turn stops at, and the one line the answer leaves behind. */
 export {
@@ -357,6 +389,43 @@ export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
 } from './session/resume-fallback-banner.tsx'
+
+/** The variables, the services and the details of a run of a Workspace (lot 20). */
+export { VariablesEditor, type VariablesEditorProps } from './workspace/variables-editor.tsx'
+export { ServiceList, type ServiceListProps } from './workspace/service-list.tsx'
+export { RunDetails, type RunDetailsProps, type RunState } from './activity/run-details.tsx'
+export type {
+  PortClaim,
+  PortConflict,
+  Readiness,
+  ServiceLine,
+  VariableLine,
+} from './workspace/services-model.ts'
+/** The Workspace and its preparation (lot 20). */
+export { CleanupDialog, type CleanupDialogProps } from './workspace/cleanup-dialog.tsx'
+export {
+  CreateWorkspaceDialog,
+  type CreateWorkspaceDialogProps,
+} from './workspace/create-workspace-dialog.tsx'
+export {
+  type GitState,
+  type PlanRepositoryLine,
+  type PlanRepositoryRead,
+  type PreparationStepLine,
+  type StepKind,
+  type StepState,
+  type WorkspaceDraft,
+  type WorkspaceRepositoryLine,
+  type WorkspaceRow,
+  type WorkspaceState,
+  type WorkspaceSummary,
+} from './workspace/model.ts'
+export { PreparationSteps, type PreparationStepsProps } from './workspace/preparation-steps.tsx'
+export { WorkspaceList, type WorkspaceListProps } from './workspace/workspace-list.tsx'
+export {
+  WorkspaceRepositories,
+  type WorkspaceRepositoriesProps,
+} from './workspace/workspace-repositories.tsx'
 /**
  * The panel a Session's mission opens beside the chat, and the rail it is fed with: the fold, the
  * width that pushes the chat, the band; groups of items that say what needs attention. The Spec
@@ -407,6 +476,7 @@ export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
 export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
 export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
 export { SpecQuestion, type SpecQuestionProps } from './spec/spec-question.tsx'
+export { WorkspaceActions, type WorkspaceActionsProps } from './spec/workspace-actions.tsx'
 export {
   CreateSpecProposal,
   type CreateSpecProposalProps,
@@ -418,6 +488,9 @@ export type {
   Executor,
   GateCheck,
   GateCheckView,
+  LaunchState,
+  LaunchView,
+  LaunchWorkspace,
   Mark,
   PhaseName,
   PhaseState,

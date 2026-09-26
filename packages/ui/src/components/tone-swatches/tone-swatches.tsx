@@ -4,7 +4,7 @@ import { cn } from 'cn'
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
-import { PRESSED_COMPACT, press, useTransition } from '../../motion.ts'
+import { press, useHand, useTransition } from '../../motion.ts'
 import { PROJECT_TONES, type ProjectTone } from '../../shell/model.ts'
 
 /**
@@ -52,6 +52,7 @@ export function ToneSwatches({
   label = 'Colour',
 }: ToneSwatchesProps): ReactNode {
   const transition = useTransition(press)
+  const hand = useHand()
   return (
     <RadioGroup
       className={ROW}
@@ -72,7 +73,7 @@ export function ToneSwatches({
           nativeButton
           aria-label={NAMED[tone]}
           className={cn(SWATCH, TONE[tone], tone === value && CHOSEN)}
-          render={<motion.button whileTap={{ scale: PRESSED_COMPACT }} transition={transition} />}
+          render={<motion.button ref={hand.element} whileTap={hand.tap} transition={transition} />}
         />
       ))}
     </RadioGroup>

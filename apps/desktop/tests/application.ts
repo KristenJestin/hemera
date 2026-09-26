@@ -54,6 +54,8 @@ import type { ToolAccess } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { type ToolPermissions, toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
+import { gitLayer } from '#engine/git.ts'
+import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 
 export const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -68,6 +70,21 @@ export const VERSION = '0.4.0'
  * from a `node_modules` this machine pretends to have, which is where a real one would find them
  * — never the `PATH`.
  */
+/**
+ * The same machine, holding none of the agents' bare means: a start that cannot happen, as it
+ * cannot on a machine where the agent was never installed (D6-02).
+ */
+export const bareMachine = Layer.succeed(MachineEnvironment, {
+  home: '/home/ana',
+  env: {},
+  locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
+  bundled: (packageName: string) =>
+    Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
+  readVersion: () => Effect.succeed('1.0.0'),
+  holds: () => Effect.succeed(false),
+  read: () => Effect.succeed(undefined),
+})
+
 export const machine = Layer.succeed(MachineEnvironment, {
   home: '/home/ana',
   env: {},
@@ -107,6 +124,11 @@ export function watching() {
       // A run is pushed as the run it is and not as an entry: the suites that watch the window
       // read the thread, and the Commands panel has suites of its own.
       ran: () => undefined,
+      // A launch change is about a Spec: the suite about the panel's own read of it is the
+      // renderer's, and this double keeps to what the thread is drawn from.
+      launched: () => undefined,
+      // A Workspace change is about a Project: the suites about Workspaces read it of their own.
+      workspace: () => undefined,
     }),
   }
 }
@@ -198,7 +220,9 @@ export function application(
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(contextLayer),
-      Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer)),
+      Layer.provide(
+        Layer.mergeAll(server, commandsLayer, toolPermissionsLayer, gitLayer(), variablesLayer),
+      ),
       Layer.provideMerge(
         Layer.mergeAll(
           projectsLayer,
@@ -383,6 +407,7 @@ export type ToolEngine =
   | Database
   | SqliteClient
   | HeldWords
+  | Variables
 
 /**
  * One supervisor for an agent that is the fake and commands that are real (D5-04, D6-11, D6-12).
@@ -450,10 +475,12 @@ export function toolApplication(
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(toolPermissionsLayer),
       Layer.provideMerge(commandsLayer),
+      Layer.provide(variablesLayer),
     )
     const services: Layer.Layer<ToolEngine> = runtimeLayer.pipe(
       Layer.provideMerge(tools),
-      Layer.provideMerge(contextLayer),
+      Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),
+      Layer.provideMerge(variablesLayer),
       Layer.provideMerge(journalLayer),
       Layer.provideMerge(
         Layer.mergeAll(

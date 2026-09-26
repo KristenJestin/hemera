@@ -67,11 +67,18 @@ function climbsOut(candidate: string): boolean {
   return false
 }
 
-/** What the creation dialog and the identity of the settings both hold. */
+/**
+ * What the creation dialog and the identity of the settings both hold.
+ *
+ * The folder of dedicated Workspaces and the branch prefix are optional (D8-02, D8-04): null is
+ * Hemera's own folder and the Project's slug, which is what an empty field says.
+ */
 export const projectFormSchema = z.object({
   name: nameSchema,
   tone: tonesSchema,
   mainPath: folderSchema,
+  workspacesRoot: z.string().nullable(),
+  branchPrefix: z.string().nullable(),
 })
 
 /**

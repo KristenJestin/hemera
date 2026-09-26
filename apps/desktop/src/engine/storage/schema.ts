@@ -31,19 +31,26 @@ import {
 
 import {
   AGENT_PROVIDERS,
-  COMMAND_KINDS,
+  COMMAND_SCOPES,
+  COMMAND_TYPES,
+  LAUNCH_STATES,
   MISSIONS,
   NATIVE_STATES,
   PHASE_IDS,
   PHASE_STATES,
   PROJECT_TONES,
+  RECIPE_KINDS,
+  REPOSITORY_ICONS,
   SECTION_NAMES,
   SESSION_ENTRY_KINDS,
   SESSION_ENTRY_ORIGINS,
   SPEC_ACTORS,
   SPEC_STATUSES,
   SPEC_TYPES,
+  STEP_KINDS,
+  STEP_STATES,
   TASK_EXECUTORS,
+  WORKSPACE_STATES,
 } from '@hemera/core'
 
 /**
@@ -97,6 +104,11 @@ function oneOf(values: readonly string[]): string {
  * incremented by every mutation and compared inside the transaction, so two windows editing the
  * same project refuse the second write instead of losing it.
  *
+ * `workspaces_root` is where its dedicated Workspaces are made, and null means Hemera's own
+ * folder for them, `<data folder>/workspaces/<project id>` (D8-02); `branch_prefix` is what
+ * their branches start with, and null means the Project's name as a slug (D8-04). Both are
+ * nullable rather than filled in, so a default that changes is not a value frozen in every row.
+ *
  * `spec_prefix` and `next_spec_number` mint the key of its next Spec, `PREFIX-n`, in the
  * transaction that creates it (design D7-02): a counter per project, never reused.
  */
@@ -112,6 +124,8 @@ export const projects = sqliteTable(
     updatedAt: text('updated_at').notNull(),
     archivedAt: text('archived_at'),
     version: integer('version').notNull().default(1),
+    workspacesRoot: text('workspaces_root'),
+    branchPrefix: text('branch_prefix'),
   },
   (table) => [
     check('project_tone_is_known', sql`${table.tone} IN (${sql.raw(oneOf(PROJECT_TONES))})`),
@@ -123,6 +137,19 @@ export const projects = sqliteTable(
  *
  * `main` is created with the project and never removed. The name is unique inside a project
  * rather than globally: two projects both have a `main`, and they are not the same folder.
+ *
+ * There is one kind of Workspace (D8-01): `main`, one the user made on a folder of theirs, and
+ * one dedicated to a Spec are rows of this table alike. `spec_id` is the Spec a dedicated one was
+ * made for, and null for the two others; a Spec has one at most, which the partial index says,
+ * and the foreign key to `specs` keeps it a Spec that exists. `state` defaults to `ready`
+ * because that is what every Workspace written before this lot is, `main` first, and what one
+ * made on a folder is from its creation; a dedicated one is written `preparing`, explicitly.
+ * `cleaned_at` is when a cleanup removed its folder: the row is kept, `cleaned`, and so is every
+ * branch it made (D8-14).
+ *
+ * Both uniques leave a `cleaned` Workspace out. Its folder is gone, so its name is free for a new
+ * one in the same place (D8-02), and a Spec whose Workspace was cleaned can be given another
+ * (D8-01, D8-14): the row stays as a record, not as a claim on the name or the Spec.
  */
 export const workspaces = sqliteTable(
   'workspaces',
@@ -134,8 +161,40 @@ export const workspaces = sqliteTable(
     name: text('name').notNull(),
     path: text('path').notNull(),
     createdAt: text('created_at').notNull(),
+    specId: text('spec_id').references((): AnySQLiteColumn => specs.id, { onDelete: 'set null' }),
+    state: text('state').notNull().default('ready'),
+    cleanedAt: text('cleaned_at'),
   },
-  (table) => [unique('workspace_name_in_project').on(table.projectId, table.name)],
+  (table) => [
+    uniqueIndex('workspace_name_in_project')
+      .on(table.projectId, table.name)
+      .where(sql`${table.state} <> 'cleaned'`),
+    check('workspace_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(WORKSPACE_STATES))})`),
+    uniqueIndex('workspace_once_per_spec')
+      .on(table.specId)
+      .where(sql`${table.specId} IS NOT NULL AND ${table.state} <> 'cleaned'`),
+  ],
+)
+
+/**
+ * What each worktree of a dedicated Workspace was created on (D8-01): the repository it is, by
+ * its path relative to the root, the branch it was made with and the base it started from.
+ *
+ * A record of the creation and not of the present: the branch a worktree is on now is read from
+ * Git when it is shown (D8-15), never from this row, and never stored on the Spec.
+ */
+export const workspaceRepositories = sqliteTable(
+  'workspace_repositories',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    relativePath: text('relative_path').notNull(),
+    branch: text('branch').notNull(),
+    base: text('base').notNull(),
+  },
+  (table) => [unique('worktree_once_in_workspace').on(table.workspaceId, table.relativePath)],
 )
 
 /**
@@ -144,6 +203,11 @@ export const workspaces = sqliteTable(
  * The path is relative and stays relative: the root is a property of the workspace, and a
  * repository that stored an absolute path would break the day the folder moves. Order is a
  * rank rather than a position, so inserting one never renumbers the others.
+ *
+ * `included_by_default` says whether a dedicated Workspace gets a worktree of it unless the
+ * user leaves it out at creation (D8-04): 1 by default, which is what every repository declared
+ * before this lot is. `icon` is the one of a fixed set it wears (recette 1, item 11), and null
+ * for none.
  */
 export const projectRepositories = sqliteTable(
   'project_repositories',
@@ -154,8 +218,46 @@ export const projectRepositories = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     relativePath: text('relative_path').notNull(),
     rank: text('rank').notNull(),
+    includedByDefault: integer('included_by_default').notNull().default(1),
+    icon: text('icon'),
   },
-  (table) => [unique('repository_once_in_project').on(table.projectId, table.relativePath)],
+  (table) => [
+    unique('repository_once_in_project').on(table.projectId, table.relativePath),
+    check(
+      'repository_icon_is_known',
+      sql`${table.icon} IS NULL OR ${table.icon} IN (${sql.raw(oneOf(REPOSITORY_ICONS))})`,
+    ),
+  ],
+)
+
+/**
+ * The variables a Project sets, and those a Workspace sets over them (D8-06).
+ *
+ * A row with no `workspace_id` is the Project's; one with a Workspace overrides the Project's
+ * variable of the same key in that Workspace. What a run is given is the process's environment,
+ * then the Project's, then the Workspace's. A key is set once per Project and once per
+ * Workspace: two partial indexes rather than one unique on the three columns, because SQLite
+ * holds two NULLs as distinct and a plain unique would let a Project set `PORT` twice.
+ */
+export const environmentVariables = sqliteTable(
+  'environment_variables',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    value: text('value').notNull(),
+  },
+  (table) => [
+    uniqueIndex('variable_once_in_project')
+      .on(table.projectId, table.key)
+      .where(sql`${table.workspaceId} IS NULL`),
+    uniqueIndex('variable_once_in_workspace')
+      .on(table.workspaceId, table.key)
+      .where(sql`${table.workspaceId} IS NOT NULL`),
+  ],
 )
 
 /** What a title is: proposed from the first message, or chosen by the user (design D4b-03). */
@@ -193,6 +295,14 @@ export const SESSION_ENTRY_ROLES = ['user', 'agent', 'hemera'] as const
  * durable I — it is the handle the agent itself gave, kept so the next start can ask to resume
  * — and `native_state` says whether that handle is still worth anything. `cwd` is the directory
  * the agent was started in, kept because a resumed Session must be resumed where it ran.
+ *
+ * `workspace_id` is the Workspace the Session works in (D8-08), fixed once its agent started;
+ * null on a Session written before this lot, which is read as `main`.
+ *
+ * `choices` is what the user put the Session's agent on — its model, its effort, its mode — as a
+ * JSON object of the agent's own option ids to the values chosen, in the order they were first
+ * chosen. An agent does not keep them across a restart of its process: every start puts the
+ * agent back on them, or the Session would go on with the agent's defaults (issue #133).
  */
 export const sessions = sqliteTable(
   'sessions',
@@ -208,6 +318,10 @@ export const sessions = sqliteTable(
     nativeSessionId: text('native_session_id'),
     nativeState: text('native_state').notNull().default('none'),
     cwd: text('cwd'),
+    choices: text('choices').notNull().default('{}'),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    /** The revision a `build` Session was started on (D8-13); null on every other Session. */
+    revisionId: text('revision_id'),
     mission: text('mission').notNull().default('free'),
     specId: text('spec_id').references((): AnySQLiteColumn => specs.id),
     briefedAt: text('briefed_at'),
@@ -330,14 +444,21 @@ export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
  * The commands of a Project: a name, a line to run, what it is for, and where it runs (D6-12).
  *
  * The catalogue is the Project's and not a Session's: a command written once is offered to
- * every Session of that Project, and the same process answers the agent and the user. `folder`
- * is empty for the Workspace root and is otherwise one of the Project's repositories, stored
- * the way a repository is — relative to the root — so that a Project whose folder moves keeps
- * pointing at what it meant.
+ * every Session of that Project, and the same process answers the agent and the user. Where it
+ * runs is a base and a folder under it (D8-07 as amended by recette 1): `folder_base` is one of
+ * the Project's repositories as the Project declares it, null for the Workspace root, and
+ * `folder` is relative to that base, null for the base itself — so a command of a repository
+ * follows it into every Workspace, and a Project whose folder moves keeps pointing at what it
+ * meant. The migration reads lot 18's `folder`, a repository or empty for the root, as that base.
  *
- * `kind` decides whether a second run starts a second process, and it is a closed set in the
- * database rather than a convention: an `app` command already running is returned, and a
- * `check` or a `utility` run twice is two runs.
+ * `type` is what the command is for, one of seven with the icon the design system fixes (D8-07),
+ * and it replaces lot 18's `kind`: the migration reads `app` as `serve`, `check` as `test` and
+ * `utility` as `script`. It is a closed set in the database rather than a convention, because it
+ * decides whether a second run starts a second process: a `serve` already running is joined.
+ * `line_windows` and `line_linux` are the machine's own line, null when it runs the default one;
+ * `scope` says whether a `serve` runs once per Workspace or once for the Project; `portless`
+ * whether its line runs through Portless (D8-10), and `portless_name` the name it runs under,
+ * null for the Project's name as a slug (D8-10 as amended by recette 1).
  */
 export const projectCommands = sqliteTable(
   'project_commands',
@@ -348,13 +469,20 @@ export const projectCommands = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     line: text('line').notNull(),
-    kind: text('kind').notNull(),
-    folder: text('folder').notNull().default(''),
+    type: text('type').notNull(),
+    folder: text('folder'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
+    lineWindows: text('line_windows'),
+    lineLinux: text('line_linux'),
+    scope: text('scope').notNull().default('workspace'),
+    portless: integer('portless').notNull().default(0),
+    folderBase: text('folder_base'),
+    portlessName: text('portless_name'),
   },
   (table) => [
-    check('command_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(COMMAND_KINDS))})`),
+    check('command_type_is_known', sql`${table.type} IN (${sql.raw(oneOf(COMMAND_TYPES))})`),
+    check('command_scope_is_known', sql`${table.scope} IN (${sql.raw(oneOf(COMMAND_SCOPES))})`),
     // One name per Project: a catalogue with two `dev` entries is a name nobody can ask for.
     unique('command_name_in_project').on(table.projectId, table.name),
   ],
@@ -364,7 +492,9 @@ export const projectCommands = sqliteTable(
  * One run of a command, what it printed, and what it published (D6-12).
  *
  * A run belongs to the Session that asked for it and not to the process that held it: the row
- * outlives the process, and the Commands panel of a Session reads what it did. `command_id` is
+ * outlives the process, and the Commands panel of a Session reads what it did. `session_id` is
+ * null for a run no Session asked for — a preparation's `run` step, which has none (Decided 11) —
+ * and a Session's panel never lists such a run. `command_id` is
  * null for a one-off command line, which is the one thing that tells the two apart — a one-off
  * is never promoted to the catalogue by itself.
  *
@@ -372,19 +502,30 @@ export const projectCommands = sqliteTable(
  * hour of rows, so the store keeps the last `OUTPUT_KEPT_BYTES` and says it truncated the rest.
  * `url` is the first `http://localhost:<port>` the output named, which is what the panel offers
  * to open and what the agent reads back.
+ *
+ * `type` replaces `kind` as the catalogue's does (D8-07), with no check, as before: a run keeps
+ * what it was started as. `workspace_id` is the Workspace it runs in (D8-08), null on a run
+ * written before this lot, which is read as `main`; the index is how a Workspace's services and
+ * a cleanup's running runs are found. `environment` is the JSON of the variables it was given
+ * (D8-06). `ready_at` is when its address first answered (D8-09), and `port_conflict` the JSON
+ * of the run holding the port it published — `{ port, runId, workspaceId, workspaceName, name }`.
+ *
+ * `folder` and `scope` are the command's as the run was started, kept on the run because the
+ * Spec asks every run to record its folder, and the catalogue entry cannot answer for it: it may
+ * have been edited or removed since, and a one-off has none. `folder` is relative to the
+ * Workspace root and null for the root; a run written before this lot ran at the root, once per
+ * Workspace, which is what the defaults say (D8-07).
  */
 export const commandRuns = sqliteTable(
   'command_runs',
   {
     id: text('id').primaryKey(),
-    sessionId: text('session_id')
-      .notNull()
-      .references(() => sessions.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').references(() => sessions.id, { onDelete: 'cascade' }),
     /** The catalogue entry this ran, and null for a one-off command line. */
     commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
     name: text('name').notNull(),
     line: text('line').notNull(),
-    kind: text('kind').notNull(),
+    type: text('type').notNull(),
     cwd: text('cwd').notNull(),
     state: text('state').notNull(),
     pid: integer('pid'),
@@ -397,11 +538,94 @@ export const commandRuns = sqliteTable(
     startedBy: text('started_by').notNull(),
     startedAt: text('started_at').notNull(),
     endedAt: text('ended_at'),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    environment: text('environment').notNull().default('{}'),
+    readyAt: text('ready_at'),
+    portConflict: text('port_conflict'),
+    folder: text('folder'),
+    scope: text('scope').notNull().default('workspace'),
   },
   (table) => [
     check('run_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(COMMAND_RUN_STATES))})`),
+    check('run_scope_is_known', sql`${table.scope} IN (${sql.raw(oneOf(COMMAND_SCOPES))})`),
     check('run_starter_is_known', sql`${table.startedBy} IN ('agent', 'user')`),
     index('run_by_session').on(table.sessionId, table.startedAt),
+    index('run_by_workspace').on(table.workspaceId, table.state),
+  ],
+)
+
+/**
+ * The recipe a Project prepares each dedicated Workspace with (D8-05), in `rank` order.
+ *
+ * `copy` puts a file or a folder of `main` at the same relative place, `link` makes a link to
+ * it, `run` starts a command of the catalogue or a line of its own (recette 2). `base` is where a
+ * copy or a link applies, and where a run of a line of its own runs from (D8-05 as amended by
+ * recette 1): one of the Project's repositories as the Project declares it, null for the Workspace
+ * root, several repositories being several steps; `path` is relative to that base — the file or
+ * the folder of a copy and a link, the folder a run of a line of its own starts in, or null.
+ * `command_id` is the catalogue command a `run` starts; a line of its own belongs to the step and
+ * never reaches the catalogue, so it carries `line`, `line_windows` and `line_linux` the way a
+ * command carries its own, and the agent never sees it. A command taken out of the catalogue
+ * leaves its step without one rather than taking the step with it: the recipe is the user's, and a
+ * step that cannot run is one they are shown.
+ */
+export const projectPreparationSteps = sqliteTable(
+  'project_preparation_steps',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    base: text('base'),
+    path: text('path'),
+    commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
+    /** The line a run of a line of its own runs where it has no variant of its own. */
+    line: text('line'),
+    /** The lines a run of a line of its own runs on Windows and on Linux, when it has one each. */
+    lineWindows: text('line_windows'),
+    lineLinux: text('line_linux'),
+    rank: text('rank').notNull(),
+  },
+  (table) => [
+    check('recipe_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(RECIPE_KINDS))})`),
+  ],
+)
+
+/**
+ * The preparation of one Workspace, one row per step, each with its own state (D8-05).
+ *
+ * Built at creation — the worktrees in the repositories' order, then the recipe in its order —
+ * and written as each step changes, outside any transaction that would hold a process or Git:
+ * a failure stops the list and keeps what was done, and a resume reads this table to know what
+ * to re-check and what to retry. `base` and `target` are a copy's or a link's repository and its
+ * path under it, the recipe's own; a run of a line of its own (recette 2) keeps that line as its
+ * `target` and the folder it starts in as `path`, its `base` being where it runs from. `message`
+ * is what refused a step, as it was said; `run_id` the run a `run` step started, whose output is
+ * where its failure is read.
+ */
+export const workspaceSteps = sqliteTable(
+  'workspace_steps',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    kind: text('kind').notNull(),
+    target: text('target').notNull(),
+    base: text('base'),
+    /** The folder a run of a line of its own starts in, relative to `base`; null otherwise. */
+    path: text('path'),
+    commandId: text('command_id').references(() => projectCommands.id, { onDelete: 'set null' }),
+    state: text('state').notNull(),
+    message: text('message'),
+    runId: text('run_id').references(() => commandRuns.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    check('step_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(STEP_KINDS))})`),
+    check('step_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(STEP_STATES))})`),
+    unique('step_once_in_workspace').on(table.workspaceId, table.position),
   ],
 )
 
@@ -448,8 +672,20 @@ export const contextDeliveries = sqliteTable(
   ],
 )
 
-/** What an event is about. `session` is lot 5's, `spec` lot 19's (design D7-13). */
-export const ENTITY_KINDS = ['project', 'profile', 'session', 'spec'] as const
+/**
+ * What an event is about. `session` is lot 5's, `spec` lot 19's (design D7-13); `workspace`,
+ * `command` and `launch` are lot 20's (D8-16): a Workspace prepared and cleaned, a run started,
+ * ready and ended, a proposal decided, a build launched.
+ */
+export const ENTITY_KINDS = [
+  'project',
+  'profile',
+  'session',
+  'spec',
+  'workspace',
+  'command',
+  'launch',
+] as const
 
 /** Where an event came from: the user acting, or the application doing its work. */
 export const EVENT_SOURCES = ['ui', 'system'] as const
@@ -533,7 +769,7 @@ export const specs = sqliteTable(
     slug: text('slug').notNull(),
     status: text('status').notNull(),
     priority: text('priority'),
-    workspaceId: text('workspace_id'),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
     currentRevisionId: text('current_revision_id').notNull(),
     /** The one Session whose agent may write the draft (D7-11). */
     writerSessionId: text('writer_session_id').references((): AnySQLiteColumn => sessions.id),
@@ -781,5 +1017,39 @@ export const specEditBuffers = sqliteTable(
   (table) => [
     check('buffer_name_is_known', sql`${table.name} IN (${sql.raw(oneOf(SECTION_NAMES))})`),
     primaryKey({ columns: [table.specId, table.name] }),
+  ],
+)
+
+/**
+ * A launch of a build: the request that waits for its environment, then starts it (D8-13).
+ *
+ * A row per request and not a flag on the Spec, because a request has a life of its own: it
+ * waits, it is being started, it started, it failed with a cause, or a Rework cancelled it.
+ * `revision_id` is the revision the launch was asked on, and stays text rather than a foreign
+ * key (D8-13). `workspace_id` and `session_id` are set to null rather than cascaded: a Workspace
+ * cleaned up or a Session gone leaves the record of the launch where it is. `detail` is what
+ * refused it, as it was said, and null while nothing did.
+ *
+ * The environment is not named here: the launch is a request against what the Spec already
+ * holds, and its Workspace is the one the Spec was given.
+ */
+export const buildLaunches = sqliteTable(
+  'build_launches',
+  {
+    id: text('id').primaryKey(),
+    specId: text('spec_id')
+      .notNull()
+      .references(() => specs.id, { onDelete: 'cascade' }),
+    revisionId: text('revision_id').notNull(),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    state: text('state').notNull(),
+    sessionId: text('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+    detail: text('detail'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('launch_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(LAUNCH_STATES))})`),
+    index('launch_by_spec').on(table.specId, table.state),
   ],
 )

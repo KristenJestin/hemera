@@ -1,4 +1,11 @@
-import type { Command, CommandKind, CommandRun, ContextView, EngineEvent } from '@hemera/ipc'
+import type {
+  Command,
+  CommandRun,
+  CommandScope,
+  CommandType,
+  ContextView,
+  EngineEvent,
+} from '@hemera/ipc'
 
 /**
  * The runs and the Context view of the Sessions this window has open (design D6-10, D6-12).
@@ -23,6 +30,11 @@ export interface ToolsState {
   contexts: ReadonlyMap<string, ContextView>
   /** The catalogue of each Project the settings have read, oldest first. */
   catalogues: ReadonlyMap<string, readonly Command[]>
+  /**
+   * Whether `portless` is on this machine, asked once (D8-10 as amended by recette 1); false until
+   * the engine answered, so a Portless box is never offered on a machine that may not have it.
+   */
+  portlessInstalled: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
 }
@@ -31,6 +43,7 @@ const EMPTY: ToolsState = {
   runs: new Map(),
   contexts: new Map(),
   catalogues: new Map(),
+  portlessInstalled: false,
   refusal: null,
 }
 
@@ -93,7 +106,10 @@ export function listenToTools(): () => void {
   listening = true
   const stop = window.hemera.on((event: EngineEvent) => {
     if (event.event === 'run') {
-      holding(event.sessionId, withRun(runsOf(event.sessionId), event.run))
+      // A run no Session asked for — a preparation's step — is in no Session's panel (Decided 11).
+      if (event.sessionId !== null) {
+        holding(event.sessionId, withRun(runsOf(event.sessionId), event.run))
+      }
       return
     }
     // What a Session was provided may have changed: a turn carried the base with its first
@@ -187,13 +203,42 @@ export async function readCatalogue(projectId: string): Promise<void> {
   }
 }
 
-/** A command as the settings write it: `folder` null for the Workspace root. */
+/** Whether the machine was asked about `portless` already: the engine looks it up once. */
+let portlessAsked = false
+
+/**
+ * Asks the engine whether `portless` is on this machine, the first time the settings open and
+ * never again: the engine looks it up once per start, and a second question has its answer.
+ */
+export async function readPortless(): Promise<void> {
+  if (portlessAsked) return
+  portlessAsked = true
+  try {
+    const { installed } = await window.hemera.invoke('commands.portless', {})
+    replace({ ...state, portlessInstalled: installed })
+  } catch (cause) {
+    // Asked again next time: a question nobody answered was not asked.
+    portlessAsked = false
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/**
+ * A command as the settings write it: `folderBase` null for the Workspace root, `folder` under it
+ * and null for the base itself.
+ */
 export interface CommandDraft {
   readonly projectId: string
   readonly name: string
   readonly line: string
-  readonly kind: CommandKind
+  readonly lineWindows: string | null
+  readonly lineLinux: string | null
+  readonly type: CommandType
+  readonly folderBase: string | null
   readonly folder: string | null
+  readonly scope: CommandScope
+  readonly portless: boolean
+  readonly portlessName: string | null
 }
 
 /**
@@ -206,6 +251,68 @@ export async function saveCommand(draft: CommandDraft, existing: boolean): Promi
   try {
     await window.hemera.invoke(existing ? 'commands.update' : 'commands.create', draft)
     await readCatalogue(draft.projectId)
+    return null
+  } catch (cause) {
+    return message(cause)
+  }
+}
+
+/**
+ * Keeps a one-off run in the Project's catalogue: the human adds, the run promotes nothing by
+ * itself (D8-11). The command takes the run's name, the line it ran as its default line, the type
+ * `script` and the folder it ran in (null for the Workspace root); the rest stays at its defaults.
+ * The run is not rewritten — it stays the one-off it was.
+ *
+ * Answers the engine's sentence when it refuses — a name the catalogue already holds — and null
+ * once the catalogue was read again.
+ */
+export async function addToCatalogue(run: CommandRun): Promise<string | null> {
+  return await saveCommand(
+    {
+      projectId: run.projectId,
+      name: run.name,
+      line: run.line,
+      lineWindows: null,
+      lineLinux: null,
+      type: 'script',
+      // The folder it ran in, relative to the Workspace root: a base of the root.
+      folderBase: null,
+      folder: run.folder,
+      scope: 'workspace',
+      portless: false,
+      portlessName: null,
+    },
+    false,
+  )
+}
+
+/**
+ * Accepts a command the agent proposed in a Session (D8-11): the engine writes it into the
+ * catalogue and the proposal's entry in its outcome, which reaches the thread as any entry does.
+ *
+ * Answers the engine's sentence when it refuses — a name the catalogue took since the proposal,
+ * a proposal already decided — and null once the catalogue was read again.
+ */
+export async function acceptProposal(
+  sessionId: string,
+  proposalId: string,
+): Promise<string | null> {
+  try {
+    const command = await window.hemera.invoke('commands.proposeAccept', { sessionId, proposalId })
+    await readCatalogue(command.projectId)
+    return null
+  } catch (cause) {
+    return message(cause)
+  }
+}
+
+/** Declines it: nothing enters the catalogue. Answers the engine's refusal, or null. */
+export async function declineProposal(
+  sessionId: string,
+  proposalId: string,
+): Promise<string | null> {
+  try {
+    await window.hemera.invoke('commands.proposeDecline', { sessionId, proposalId })
     return null
   } catch (cause) {
     return message(cause)

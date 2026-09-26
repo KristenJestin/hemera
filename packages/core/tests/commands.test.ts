@@ -1,10 +1,29 @@
 /**
- * The address a run publishes, read from what it printed (D6-12).
+ * The address a run publishes, read from what it printed (D6-12, D8-09), the line a machine
+ * runs (D8-07), and which type joins a run already going (D8-07).
  */
 
 import { describe, expect, test } from 'vite-plus/test'
 
-import { addressIn } from '#index.ts'
+import {
+  COMMAND_SCOPES,
+  COMMAND_TYPES,
+  InvalidCommandFolderError,
+  InvalidPortlessNameError,
+  UnknownCommandScopeError,
+  UnknownCommandTypeError,
+  addressIn,
+  commandFolder,
+  commandPlace,
+  commandScope,
+  commandType,
+  joinsRunningRun,
+  lineFor,
+  portOf,
+  portlessName,
+  portlessNameFor,
+  runsPortless,
+} from '#index.ts'
 
 describe('The address a dev server prints is found', () => {
   test('on the machine name and on each loopback spelling', () => {
@@ -25,5 +44,134 @@ describe('The address a dev server prints is found', () => {
       'http://127.0.0.1:4000',
     )
     expect(addressIn('nothing here but https://example.com:443')).toBeNull()
+  })
+
+  test('a loopback address still needs its port', () => {
+    expect(addressIn('open http://localhost/ in a browser')).toBeNull()
+  })
+})
+
+describe('A Portless address is an address', () => {
+  test('a `<name>.localhost` host with a port is found, and its port read', () => {
+    const url = addressIn('portless: ready at http://login-form-dev.localhost:1355 (proxy)')
+    expect(url).toBe('http://login-form-dev.localhost:1355')
+    expect(portOf(url ?? '')).toBe(1355)
+  })
+
+  test('a `<name>.localhost` host without a port is found, and names no port', () => {
+    const url = addressIn('portless: ready at http://login-form-dev.localhost/ (proxy)')
+    expect(url).toBe('http://login-form-dev.localhost')
+    expect(portOf(url ?? '')).toBeNull()
+  })
+
+  test('the port of a loopback address is read as well', () => {
+    expect(portOf('http://localhost:3000')).toBe(3000)
+    expect(portOf('https://[::1]:4443')).toBe(4443)
+  })
+})
+
+describe('The machine runs its own variant', () => {
+  const seed = { line: './scripts/seed.sh', lineWindows: 'scripts\\seed.cmd', lineLinux: null }
+
+  test('Windows runs its own line when the command has one', () => {
+    expect(lineFor(seed, 'win32')).toBe('scripts\\seed.cmd')
+  })
+
+  test('Linux runs the default line when it has none, and its own when it has one', () => {
+    expect(lineFor(seed, 'linux')).toBe('./scripts/seed.sh')
+    expect(lineFor({ ...seed, lineLinux: 'bash scripts/seed.sh' }, 'linux')).toBe(
+      'bash scripts/seed.sh',
+    )
+  })
+
+  test('a system with no variant of its own runs the default line', () => {
+    expect(lineFor({ ...seed, lineLinux: 'bash scripts/seed.sh' }, 'darwin')).toBe(
+      './scripts/seed.sh',
+    )
+  })
+})
+
+describe('Only a running serve is joined', () => {
+  test.each(COMMAND_TYPES)('%s', (type) => {
+    expect(joinsRunningRun(type, true)).toBe(type === 'serve')
+    expect(joinsRunningRun(type, false)).toBe(false)
+  })
+})
+
+describe('A type and a scope are words the catalogue knows', () => {
+  test('each of the seven types and the two scopes is read as itself', () => {
+    for (const type of COMMAND_TYPES) expect(commandType(type)).toBe(type)
+    for (const scope of COMMAND_SCOPES) expect(commandScope(scope)).toBe(scope)
+  })
+
+  test('a word of lot 18, or none at all, is refused naming the seven', () => {
+    expect(() => commandType('app')).toThrow(UnknownCommandTypeError)
+    expect(() => commandType('check')).toThrow(
+      /serve, test, lint, build, configure, debug or script/,
+    )
+    expect(() => commandScope('everywhere')).toThrow(UnknownCommandScopeError)
+  })
+})
+
+describe("A command's folder resolves under its base", () => {
+  test('the folder is kept relative to its base, and null is the base itself', () => {
+    expect(commandFolder(null)).toBeNull()
+    expect(commandFolder('')).toBeNull()
+    expect(commandFolder('./')).toBeNull()
+    expect(commandFolder('src/')).toBe('./src')
+    expect(commandFolder('packages/app/../web')).toBe('./packages/web')
+  })
+
+  test('a folder that is absolute or climbs out of its base is refused', () => {
+    expect(() => commandFolder('..')).toThrow(InvalidCommandFolderError)
+    expect(() => commandFolder('../api')).toThrow('it climbs out of its base')
+    expect(() => commandFolder('/etc')).toThrow('it is absolute')
+    expect(() => commandFolder('C:/work')).toThrow('it is absolute')
+  })
+
+  test('the place is the folder under the base, relative to the Workspace root', () => {
+    expect(commandPlace({ folderBase: null, folder: null })).toBeNull()
+    expect(commandPlace({ folderBase: '.', folder: null })).toBeNull()
+    expect(commandPlace({ folderBase: './web', folder: null })).toBe('./web')
+    expect(commandPlace({ folderBase: './web', folder: './src' })).toBe('./web/src')
+    expect(commandPlace({ folderBase: null, folder: './tools' })).toBe('./tools')
+  })
+})
+
+describe('A Portless command is named by its Project, or by its own name', () => {
+  const named = (name: string | null) => portlessNameFor({ name, projectName: 'Atlas Café' })
+
+  test("a command with no name of its own runs under the Project's name as a slug", () => {
+    expect(named(null)).toBe('atlas-cafe')
+  })
+
+  test("a name of the command's own takes the Project's place", () => {
+    expect(named('api')).toBe('api')
+  })
+
+  test('a Project whose name makes no slug still has a name', () => {
+    expect(portlessNameFor({ name: null, projectName: '日本' })).toBe('hemera')
+  })
+
+  test('a name of its own is one word, and a blank one is none', () => {
+    expect(portlessName(null)).toBeNull()
+    expect(portlessName('  ')).toBeNull()
+    expect(portlessName(' api ')).toBe('api')
+    expect(() => portlessName('my api')).toThrow(InvalidPortlessNameError)
+  })
+})
+
+describe('A line that already runs portless is recognised', () => {
+  test.each([
+    'portless myapp pnpm dev',
+    'npx portless myapp next dev',
+    './node_modules/.bin/portless myapp vite',
+    '"C:/tools/portless.cmd" myapp vite',
+  ])('%s', (line) => {
+    expect(runsPortless(line)).toBe(true)
+  })
+
+  test.each(['pnpm dev', 'pnpm dev --portless', 'node portless-proxy.js'])('%s is not', (line) => {
+    expect(runsPortless(line)).toBe(false)
   })
 })

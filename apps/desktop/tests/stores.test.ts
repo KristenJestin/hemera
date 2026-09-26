@@ -23,7 +23,9 @@ import {
   loadProjects,
   projectsSnapshot,
   renameProject,
+  updateRepository,
 } from '#renderer/projects-store.ts'
+import { readPortless, toolsSnapshot } from '#renderer/tools-store.ts'
 
 /** One Project, as the engine answers with one. */
 function project(id: string, name: string, version = 1): Project {
@@ -37,7 +39,11 @@ function project(id: string, name: string, version = 1): Project {
     version,
     mainPath: `/tmp/${id}`,
     repositories: [],
+    workspacesRoot: null,
+    branchPrefix: null,
+    included: [],
     specPrefix: 'SPEC',
+    repositoryIcons: {},
   }
 }
 
@@ -136,6 +142,43 @@ describe('Le store des Projets porte ce que le moteur a répondu', () => {
     })
   })
 
+  test('a repository is rewritten at once, path, icon and inclusion, on the version read', async () => {
+    answers.set('repositories.update', project('atlas', 'Atlas', 5))
+    answers.set('projects.list', [project('atlas', 'Atlas', 5)])
+
+    const went = await updateRepository(project('atlas', 'Atlas', 4), './api', {
+      path: './sources/api',
+      icon: 'server',
+      included: false,
+    })
+
+    expect(went).toBe(true)
+    expect(asked[0]).toEqual({
+      name: 'repositories.update',
+      argument: {
+        id: 'atlas',
+        version: 4,
+        relativePath: './api',
+        newPath: './sources/api',
+        icon: 'server',
+        included: false,
+      },
+    })
+  })
+
+  test("a repository's new path refused is the engine's sentence, kept for its dialog", async () => {
+    answers.set('repositories.update', new Error('./sources/api is already declared'))
+
+    const went = await updateRepository(project('atlas', 'Atlas', 4), './api', {
+      path: './sources/api',
+      icon: null,
+      included: true,
+    })
+
+    expect(went).toBe(false)
+    expect(projectsSnapshot().refusal).toBe('./sources/api is already declared')
+  })
+
   test('a refusal is kept in the words it came in, and the list is left alone', async () => {
     answers.set('projects.list', [project('atlas', 'Atlas')])
     await loadProjects()
@@ -147,6 +190,18 @@ describe('Le store des Projets porte ce que le moteur a répondu', () => {
     expect(projectsSnapshot().refusal).toBe('the Project is not at that version any more')
     // Nothing on screen says the change went through.
     expect(projectsSnapshot().projects.map((one) => one.name)).toEqual(['Atlas'])
+  })
+})
+
+describe('Portless is asked of the machine once', () => {
+  test('the first opening asks the engine, and every one after it has the answer', async () => {
+    answers.set('commands.portless', { installed: true })
+
+    await readPortless()
+    await readPortless()
+
+    expect(toolsSnapshot().portlessInstalled).toBe(true)
+    expect(asked.filter((one) => one.name === 'commands.portless')).toHaveLength(1)
   })
 })
 

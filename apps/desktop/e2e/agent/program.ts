@@ -25,6 +25,8 @@ import {
   type FakeStep,
 } from '../../src/engine/agents/fake.ts'
 import {
+  COMMAND_PROPOSAL,
+  COMMAND_PROPOSE_ANSWER,
   COMPLETE,
   COMPLETED,
   CONTRACT_VERSION,
@@ -139,6 +141,14 @@ const script: FakeScript = {
       return [
         { does: 'uses', call: 'fs_read', arguments: { path: NOTES } },
         { does: 'says', text: READ_ANSWER, messageId: `read-${RUN}-${String(turn)}` },
+      ]
+    }
+    // A prompt that names the proposed command is a proposal through Hemera's own tool, then an
+    // answer: the catalogue is the human's to write (D8-11).
+    if (asked.includes(COMMAND_PROPOSAL.name)) {
+      return [
+        { does: 'uses', call: 'commands_propose', arguments: { ...COMMAND_PROPOSAL } },
+        { does: 'says', text: COMMAND_PROPOSE_ANSWER, messageId: `propose-${RUN}-${String(turn)}` },
       ]
     }
     if (asked.includes(COMPLETE)) {

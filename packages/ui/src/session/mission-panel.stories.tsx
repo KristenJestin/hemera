@@ -246,9 +246,11 @@ export const PushesTheChat: Story = {
     const narrowest = widths.at(-1)!
     await expect(narrowest).toBeLessThan(full)
     await expect(widths).toEqual(widths.toSorted((a, b) => b - a))
+    // How many frames play this spring is the runner's frame rate, not the product's — a loaded
+    // Chromium gives two or three. A row of widths in between is the claim; their count is not.
     await expect(
       widths.filter((width) => width < full && width > narrowest).length,
-    ).toBeGreaterThan(3)
+    ).toBeGreaterThan(0)
     await expect(frames.filter((frame) => frame.over)).toEqual([])
   },
 }

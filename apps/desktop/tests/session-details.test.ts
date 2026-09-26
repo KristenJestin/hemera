@@ -38,12 +38,22 @@ function aRun(id: string, cwd: string, state: CommandRun['state'], commandId: st
     commandId,
     name: 'dev',
     line: 'pnpm dev',
-    kind: 'app' as const,
+    type: 'serve' as const,
+    scope: 'workspace' as const,
     cwd,
+    folder: null,
+    workspaceId: null,
+    workspaceName: 'main',
+    environment: {},
     state,
     pid: 4242,
     url: state === 'running' ? 'http://localhost:5173' : null,
+    readyAt: null,
+    readiness: state === 'running' ? ('starting' as const) : null,
+    portConflict: null,
+    heldAgainst: [],
     exitCode: state === 'running' ? null : 0,
+    startedBy: 'agent' as const,
     output: 'ready\n',
     dropped: 0,
     startedAt: '2026-09-23T08:00:00.000Z',
@@ -73,6 +83,8 @@ describe('The agent starts the app and the user opens it', () => {
     ])
     // A Windows root reads the same way.
     expect(panelRunsOf(runs.slice(2), 'C:\\Users\\ana\\atlas')[0]?.folder).toBe('web')
+    // A root not known yet shows the folder as the run was started in it.
+    expect(panelRunsOf(runs.slice(1, 2), null)[0]?.folder).toBe('/home/ana/atlas/api')
   })
 
   test('the details of a Session with a command running open on its commands', () => {
@@ -82,6 +94,42 @@ describe('The agent starts the app and the user opens it', () => {
     expect(openingTabOf([done], tabs)).toBe('activity')
     // With nothing done yet, the tab that has something is the one it opens on.
     expect(openingTabOf([done], detailsTabsOf(0, 0, [done], null))).toBe('commands')
+  })
+})
+
+describe('A URL is ready only after it answers', () => {
+  test('the panel and the block carry the readiness the run was pushed with', () => {
+    const starting = aRun('r1', '/home/ana/atlas', 'running', 'c1')
+    const ready = { ...starting, readiness: 'ready' as const, readyAt: '2026-09-23T08:00:02.000Z' }
+    expect(panelRunsOf([starting], '/home/ana/atlas')[0]?.readiness).toBe('starting')
+    expect(panelRunsOf([ready], '/home/ana/atlas')[0]?.readiness).toBe('ready')
+    // A run with no address has no readiness to say.
+    expect(panelRunsOf([aRun('r2', '/a', 'exited', 'c1')], '/a')[0]?.readiness).toBeUndefined()
+  })
+})
+
+describe('A run shows what it ran', () => {
+  test('the panel carries its variables and a port conflict on either side', () => {
+    const run = {
+      ...aRun('r1', '/home/ana/login-form', 'running', 'c1'),
+      workspaceName: 'login-form',
+      environment: { PORT: '3001' },
+      portConflict: {
+        port: 3001,
+        runId: 'r0',
+        workspaceId: null,
+        workspaceName: 'main',
+        name: 'dev',
+      },
+      heldAgainst: [
+        { port: 3001, runId: 'r9', workspaceId: 'spike', workspaceName: 'spike', name: 'web' },
+      ],
+    }
+    expect(panelRunsOf([run], '/home/ana/login-form')[0]).toMatchObject({
+      environment: { PORT: '3001' },
+      portConflict: { port: 3001, holderRun: 'dev', holderWorkspace: 'main' },
+      heldAgainst: [{ port: 3001, run: 'web', workspace: 'spike' }],
+    })
   })
 })
 
@@ -285,6 +333,13 @@ describe('The Context tab says how the instructions reached the agent', () => {
 
   test('the Workspace is the main one, at the root the page reads', () => {
     expect(contextListsOf(aViewOf([]), ROOT).workspace).toEqual({ name: 'main', path: ROOT })
+  })
+
+  test("the Workspace is the Session's own when the composer chose another", () => {
+    expect(contextListsOf(aViewOf([]), ROOT, 'login-form').workspace).toEqual({
+      name: 'login-form',
+      path: ROOT,
+    })
   })
 
   test('the tools were lent when the base went in, and have no time before it', () => {

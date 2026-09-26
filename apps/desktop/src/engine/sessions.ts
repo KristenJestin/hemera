@@ -33,14 +33,20 @@ import {
   sessionTitle,
   titleAfterMessage,
 } from '@hemera/core'
-import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, getColumns, isNull, lt, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
+import { z } from 'zod'
 
 import { StderrSink } from './agents/supervisor.ts'
 import { InvalidCursorError, PAGE, type NewEvent } from './journal.ts'
 import { UnknownProjectError } from './projects.ts'
+import {
+  type DescribedWorkspace,
+  UnknownWorkspaceError,
+  describedWorkspace,
+} from './workspaces/described.ts'
 import { Database, DatabaseError } from './storage/database.ts'
-import { projects, sessionEntries, sessions } from './storage/schema.ts'
+import { projects, sessionEntries, sessions, workspaces } from './storage/schema.ts'
 import { type Mutation, StaleVersionError, mutate } from './transaction.ts'
 
 /** The domain's own Session, read back out: it carries no path and loads nothing beside it. */
@@ -53,6 +59,28 @@ export class UnknownSessionError extends Error {
   constructor(readonly id: string) {
     super(`no Session has the identifier "${id}"`)
     this.name = 'UnknownSessionError'
+  }
+}
+
+/** A Session was asked to work in a Workspace that is not `ready` (D8-08). */
+export class WorkspaceNotReadyError extends Error {
+  constructor(
+    readonly workspace: string,
+    readonly state: string,
+  ) {
+    super(`the Workspace ${workspace} is ${state}, and a Session works only in a ready one`)
+    this.name = 'WorkspaceNotReadyError'
+  }
+}
+
+/**
+ * A Session's Workspace was changed after its agent started (D8-08): the agent's own session was
+ * opened in that folder, and moving the Session would leave it working somewhere else.
+ */
+export class WorkspaceFixedError extends Error {
+  constructor() {
+    super('The Workspace is fixed once the agent has started.')
+    this.name = 'WorkspaceFixedError'
   }
 }
 
@@ -74,6 +102,12 @@ export interface Written {
 export interface AgentChoice {
   readonly provider: AgentProvider
   readonly model: string | null
+}
+
+/** One option the user put a Session's agent on: the agent's own id for it, and the value. */
+export interface OptionChoice {
+  readonly optionId: string
+  readonly value: string
 }
 
 /** What an agent handed back about its own session, and where it ran (design D5-06). */
@@ -108,6 +142,11 @@ export interface ThreadWrite {
    * message grows chunk by chunk, and whoever wrote it last is the one that knows it has stopped.
    */
   readonly settled?: boolean
+  /**
+   * What the Journal records beside the entry, in the same transaction: a proposal and the
+   * `command.proposed` that says it was made are one write (D8-16).
+   */
+  readonly events?: readonly NewEvent[]
 }
 
 /**
@@ -133,13 +172,21 @@ export interface SessionsService {
    * D5-06), and a Session nothing can answer is what `NoAgentError` refuses. The parameter is
    * still nullable at the wire because a Session written before the agents existed holds nothing
    * there; reading one is not making one.
+   *
+   * The Workspace is one of the Project's in state `ready`, or null for `main` (D8-08).
    */
   readonly create: (
     projectId: string | null,
     provider?: AgentProvider | null,
+    workspaceId?: string | null,
   ) => Effect.Effect<
     Session,
-    DatabaseError | NoActiveProjectError | NoAgentError | UnknownProjectError
+    | DatabaseError
+    | NoActiveProjectError
+    | NoAgentError
+    | UnknownProjectError
+    | UnknownWorkspaceError
+    | WorkspaceNotReadyError
   >
   readonly rename: (id: string, version: number, title: string) => Effect.Effect<Session, Refusal>
   readonly archive: (id: string, version: number) => Effect.Effect<Session, Refusal>
@@ -172,26 +219,66 @@ export interface SessionsService {
     choice: AgentChoice,
   ) => Effect.Effect<Session, Refusal>
   /**
+   * Chooses the Workspace a Session works in, null for `main` (D8-08).
+   *
+   * Only before its agent has started: the agent's own session is opened in that folder, so once
+   * it has a directory or a native session the choice is fixed and a change is refused.
+   */
+  readonly chooseWorkspace: (
+    id: string,
+    version: number,
+    workspaceId: string | null,
+  ) => Effect.Effect<
+    Session,
+    Refusal | UnknownWorkspaceError | WorkspaceNotReadyError | WorkspaceFixedError
+  >
+  /**
+   * Where a Session works (D8-08): its Workspace's name, path and repositories, `main`'s when it
+   * chose none. What the agent is started in, what its tools take as their root, and what its
+   * context names.
+   */
+  readonly workspace: (id: string) => Effect.Effect<DescribedWorkspace, Refusal>
+  /**
+   * The Project's `main`, by its own row (D8-07): where a Project-scoped service runs, whichever
+   * Workspace the Session asking for it works in.
+   */
+  readonly mainOf: (projectId: string) => Effect.Effect<DescribedWorkspace, DatabaseError>
+  /**
    * Records what the agent itself handed back: the handle of its native session, the directory
    * it ran in, and how far that handle is still worth anything (design D5-06).
    *
-   * No version is taken, and this is the one write of a Session that does not bump one: the
-   * engine writes it while the agent is working, and a version the agent keeps raising would
+   * No version is taken, and this and `recordChoice` are the writes of a Session that bump none:
+   * the engine writes it while the agent is working, and a version the agent keeps raising would
    * refuse the rename the user is making at that very moment. The fields are the engine's own,
    * and nothing else writes them.
    */
   readonly recordNative: (id: string, native: NativeRecord) => Effect.Effect<Session, Refusal>
   /**
-   * One Session, and what the agent handed back about it (design D5-06).
+   * Records one option the user put the Session's agent on, beside the ones chosen before.
+   *
+   * An agent keeps its model, its effort and its mode for as long as its process lives, and no
+   * longer: what is recorded here is what the next start of the agent is put back on, whatever
+   * ended the last one (issue #133). No version is taken, for the reason `recordNative` takes
+   * none: the choice is made while the agent works and the user may be renaming the Session.
+   */
+  readonly recordChoice: (id: string, choice: OptionChoice) => Effect.Effect<void, Refusal>
+  /**
+   * One Session, what the agent handed back about it (design D5-06), and what its agent was put
+   * on, in the order it was first chosen.
    *
    * The engine reads a Session by its identifier where the window reads a Project's list: a turn
    * names the Session it belongs to, and the handle the agent gave is the engine's own — the
    * window is told how far the Session is still attached, never which conversation the agent is
    * keeping.
    */
-  readonly one: (
-    id: string,
-  ) => Effect.Effect<{ readonly session: Session; readonly native: NativeRecord }, Refusal>
+  readonly one: (id: string) => Effect.Effect<
+    {
+      readonly session: Session
+      readonly native: NativeRecord
+      readonly choices: readonly OptionChoice[]
+    },
+    Refusal
+  >
   /**
    * Writes one entry of the thread the user did not write — what the agent said, called, ran or
    * asked for (design D5-11).
@@ -258,8 +345,46 @@ function written(candidate: string) {
   })
 }
 
+/**
+ * Whether the user has written into a Session: 1 once its first message is in the thread, 0
+ * before. Asked of the thread in the same read as the row, so a change is judged on what the
+ * database holds at that moment.
+ */
+const SPOKEN = sql<number>`exists (select 1 from ${sessionEntries} where ${sessionEntries.sessionId} = ${sessions.id} and ${sessionEntries.role} = 'user')`
+
+/** A row of `sessions` as it is read to be a Session: its columns, and whether it was spoken to. */
+export const SESSION_ROW = { ...getColumns(sessions), spoken: SPOKEN }
+
+/**
+ * Whether a Session's Workspace is fixed (D8-08): "the choice is made before the first message".
+ * From the first message the user writes, the turn that starts the agent in that Workspace is
+ * under way — the agent is opened after the message is written, and records its folder later
+ * still — so a change accepted in between would leave the row naming one Workspace and the agent
+ * running in another. An agent started without a message (a folder handed to it, its own session
+ * begun) fixes it too.
+ */
+function workspaceFixedOf(row: { spoken: number; cwd: string | null; nativeState: string }) {
+  return row.spoken !== 0 || row.cwd !== null || row.nativeState !== 'none'
+}
+
+/**
+ * What a Session's agent was put on, in the order it was first chosen; nothing when the column
+ * holds something this version cannot read, which starts the agent as a Session never set.
+ */
+function choicesOf(value: string): OptionChoice[] {
+  try {
+    const read = CHOICES.safeParse(JSON.parse(value))
+    if (!read.success) return []
+    return Object.entries(read.data).map(([optionId, chosen]) => ({ optionId, value: chosen }))
+  } catch {
+    return []
+  }
+}
+
+const CHOICES = z.record(z.string(), z.string())
+
 /** A row of `sessions`, as the domain's own Session; the Specs read one they change (D7-07). */
-export function sessionOf(row: typeof sessions.$inferSelect): Session {
+export function sessionOf(row: typeof sessions.$inferSelect & { spoken: number }): Session {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -274,6 +399,8 @@ export function sessionOf(row: typeof sessions.$inferSelect): Session {
     // SAFETY: the same, for the check on `native_state`: it admits exactly the states the
     // domain declares.
     nativeState: row.nativeState as NativeState,
+    workspaceId: row.workspaceId,
+    workspaceFixed: workspaceFixedOf(row),
     // SAFETY: the same, for the check on `mission`: it admits exactly the missions the domain
     // declares (design D7-07).
     mission: row.mission as Mission,
@@ -370,7 +497,7 @@ export const sessionsLayer = Layer.effect(
     const readOne = (transaction: Parameters<Parameters<typeof mutate>[1]>[0], id: string) =>
       Effect.gen(function* () {
         const found = yield* transaction
-          .select()
+          .select(SESSION_ROW)
           .from(sessions)
           .where(eq(sessions.id, id))
           .pipe(Effect.mapError(failed('reading the Session')))
@@ -396,6 +523,7 @@ export const sessionsLayer = Layer.effect(
         model: string | null
         lastWrittenAt: string
         archivedAt: string | null
+        workspaceId: string | null
       }>,
     ) =>
       Effect.gen(function* () {
@@ -412,6 +540,31 @@ export const sessionsLayer = Layer.effect(
         }
       })
 
+    /**
+     * The Workspace a Session may be given (D8-08): one of its Project's, and `ready` — `main`
+     * always is. Null is `main` and needs no check.
+     */
+    const usable = (
+      transaction: Parameters<Parameters<typeof mutate>[1]>[0],
+      projectId: string,
+      workspaceId: string | null,
+    ) =>
+      Effect.gen(function* () {
+        if (workspaceId === null) return
+        const found = yield* transaction
+          .select({ name: workspaces.name, state: workspaces.state })
+          .from(workspaces)
+          .where(and(eq(workspaces.id, workspaceId), eq(workspaces.projectId, projectId)))
+          .pipe(Effect.mapError(failed('reading the Workspace')))
+        const workspace = found[0]
+        if (workspace === undefined) {
+          return yield* Effect.fail(new UnknownWorkspaceError(workspaceId))
+        }
+        if (workspace.state !== 'ready') {
+          return yield* Effect.fail(new WorkspaceNotReadyError(workspace.name, workspace.state))
+        }
+      })
+
     return {
       /**
        * The Sessions of a Project, most recently written first (D4b-04).
@@ -422,7 +575,7 @@ export const sessionsLayer = Layer.effect(
       list: (projectId, archived = false) =>
         withDatabase(
           database
-            .select()
+            .select(SESSION_ROW)
             .from(sessions)
             .where(
               and(
@@ -439,7 +592,7 @@ export const sessionsLayer = Layer.effect(
             ),
         ),
 
-      create: (projectId, provider = null) =>
+      create: (projectId, provider = null, workspaceId = null) =>
         withDatabase(
           mutate('creating a Session', (transaction) =>
             Effect.gen(function* () {
@@ -458,6 +611,7 @@ export const sessionsLayer = Layer.effect(
               // Refused here rather than in the interface, because a Session nothing can answer
               // is not something a second reader of this service should be able to make either.
               if (provider === null) return yield* Effect.fail(new NoAgentError())
+              yield* usable(transaction, projectId, workspaceId)
 
               const id = crypto.randomUUID()
               const at = now()
@@ -475,6 +629,9 @@ export const sessionsLayer = Layer.effect(
                 provider,
                 model: null,
                 nativeState: 'none',
+                workspaceId,
+                // Nothing has started in it yet: its Workspace can still be chosen (D8-08).
+                workspaceFixed: false,
                 archivedAt: null,
                 createdAt: Date.parse(at),
                 lastWrittenAt: Date.parse(at),
@@ -488,6 +645,7 @@ export const sessionsLayer = Layer.effect(
                   title: session.title,
                   titleSource: session.titleSource,
                   provider,
+                  workspaceId,
                   createdAt: at,
                   lastWrittenAt: at,
                 })
@@ -705,6 +863,66 @@ export const sessionsLayer = Layer.effect(
           ),
         ),
 
+      chooseWorkspace: (id, version, workspaceId) =>
+        withDatabase(
+          mutate('choosing the Workspace of a Session', (transaction) =>
+            Effect.gen(function* () {
+              const rows = yield* transaction
+                .select({
+                  projectId: sessions.projectId,
+                  cwd: sessions.cwd,
+                  nativeState: sessions.nativeState,
+                  spoken: SPOKEN,
+                })
+                .from(sessions)
+                .where(eq(sessions.id, id))
+                .pipe(Effect.mapError(failed('reading the Session')))
+              const row = rows[0]
+              if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
+              // Fixed from the first message (D8-08): the agent that message starts is started in
+              // that folder, and its own session knows no other.
+              if (workspaceFixedOf(row)) {
+                return yield* Effect.fail(new WorkspaceFixedError())
+              }
+              yield* usable(transaction, row.projectId, workspaceId)
+              yield* bump(transaction, id, version, { workspaceId, lastWrittenAt: now() })
+              const session = yield* readOne(transaction, id)
+              return {
+                result: session,
+                events: [
+                  {
+                    type: 'session.workspace_chosen',
+                    entityKind: 'session',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: session.projectId,
+                    sessionId: id,
+                    payload: { workspaceId },
+                  },
+                ],
+              } satisfies Mutation<Session>
+            }),
+          ),
+        ),
+
+      workspace: (id) =>
+        withDatabase(
+          Effect.gen(function* () {
+            const rows = yield* database
+              .select({ projectId: sessions.projectId, workspaceId: sessions.workspaceId })
+              .from(sessions)
+              .where(eq(sessions.id, id))
+              .limit(1)
+              .pipe(Effect.mapError(failed('reading the Session')))
+            const row = rows[0]
+            if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
+            return yield* describedWorkspace(database, row.projectId, row.workspaceId)
+          }),
+        ),
+
+      mainOf: (projectId) => describedWorkspace(database, projectId, null),
+
       recordNative: (id, native) =>
         withDatabase(
           mutate('recording the agent of a Session', (transaction) =>
@@ -742,11 +960,53 @@ export const sessionsLayer = Layer.effect(
           ),
         ),
 
+      recordChoice: (id, choice) =>
+        withDatabase(
+          mutate('recording a choice of a Session', (transaction) =>
+            Effect.gen(function* () {
+              const rows = yield* transaction
+                .select({ choices: sessions.choices, projectId: sessions.projectId })
+                .from(sessions)
+                .where(eq(sessions.id, id))
+                .limit(1)
+                .pipe(Effect.mapError(failed('reading the Session')))
+              const row = rows[0]
+              if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
+              // A value chosen again keeps its place: a model is put back before the effort it
+              // publishes, whichever of the two was changed last.
+              const held = new Map(
+                choicesOf(row.choices).map((one) => [one.optionId, one.value] as const),
+              )
+              held.set(choice.optionId, choice.value)
+              yield* transaction
+                .update(sessions)
+                .set({ choices: JSON.stringify(Object.fromEntries(held)) })
+                .where(eq(sessions.id, id))
+                .pipe(Effect.mapError(failed('writing the Session')))
+              return {
+                result: undefined,
+                events: [
+                  {
+                    type: 'session.choice_recorded',
+                    entityKind: 'session',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: row.projectId,
+                    sessionId: id,
+                    payload: { optionId: choice.optionId, value: choice.value },
+                  },
+                ],
+              } satisfies Mutation<void>
+            }),
+          ),
+        ),
+
       one: (id) =>
         withDatabase(
           Effect.gen(function* () {
             const rows = yield* database
-              .select()
+              .select(SESSION_ROW)
               .from(sessions)
               .where(eq(sessions.id, id))
               .limit(1)
@@ -762,6 +1022,7 @@ export const sessionsLayer = Layer.effect(
                 nativeState: row.nativeState as NativeState,
                 cwd: row.cwd,
               },
+              choices: choicesOf(row.choices),
             }
           }),
         ),
@@ -880,6 +1141,7 @@ export const sessionsLayer = Layer.effect(
               const events: NewEvent[] = []
               if (settled === undefined) events.push({ ...line, type: 'session.entry_written' })
               if (entry.settled === true) events.push({ ...line, type: 'session.entry_settled' })
+              events.push(...(entry.events ?? []))
 
               return {
                 result: { session, entry: entryOf(settledRow) },

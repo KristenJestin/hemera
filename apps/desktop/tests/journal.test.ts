@@ -29,7 +29,10 @@ beforeEach(async () => {
   dataFolder = join(workspace, 'data')
   mkdirSync(dataFolder, { recursive: true })
   await on(openProfile(dataFolder, SHIPPED, '0.4.0'))
-})
+  // Opening a profile runs every migration the application ships, which outlasts the ten seconds
+  // a hook is given on a Windows runner that has just been created: this suite's own timeout, and
+  // nothing here spends it (#99).
+}, 60_000)
 
 afterEach(() => {
   rmSync(workspace, { recursive: true, force: true })

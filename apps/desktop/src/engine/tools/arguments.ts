@@ -11,6 +11,7 @@
  */
 
 import {
+  COMMAND_TYPES,
   PHASE_IDS,
   READ_PAGE_BYTES,
   SEARCH_MATCH_LIMIT,
@@ -50,6 +51,10 @@ export type ParsedCall =
   | {
       readonly tool: 'commands_stop'
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['commands_stop']>
+    }
+  | {
+      readonly tool: 'commands_propose'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['commands_propose']>
     }
   | {
       readonly tool: 'project_get'
@@ -219,6 +224,20 @@ export const TOOL_ARGUMENTS = {
   }),
   commands_stop: z.object({
     run: z.string().min(1).optional().describe('which run; the only one running without it'),
+  }),
+  // What a proposal carries (D8-11): what the catalogue entry would be, and why the agent thinks
+  // it is worth keeping, which is what the human reads before deciding.
+  commands_propose: z.object({
+    name: z.string().trim().min(1).describe('the name it would have in the catalogue'),
+    line: z.string().trim().min(1).describe('the line it runs'),
+    type: z
+      .enum(COMMAND_TYPES)
+      .describe('what it is for: serve stays up, the others end with an exit code'),
+    folder: z
+      .string()
+      .optional()
+      .describe('the repository of the Project it runs in; the Workspace root without it'),
+    why: z.string().trim().min(1).describe('why it is worth keeping, for the human who decides'),
   }),
   project_get: z.object({}),
   session_get: z.object({}),
@@ -393,10 +412,12 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   search: `Search the files of the Workspace root for a piece of text, \`.gitignore\` respected. One call returns at most ${SEARCH_MATCH_LIMIT} matches and scans at most ${SEARCH_SCAN_BYTES} bytes: the answer says which limit stopped it, gives the cursor to continue from, and names the files it did not read (binary or unreadable).`,
   commands_list:
     "The commands the Project's catalogue holds: name, line, kind, and the folder each runs in. Then the runs of this Session, whoever started them, you or the user from the Commands panel: run id, name, state, the exit code once it ended, catalogue or one-off, and the line.",
-  commands_run: `Ask for a command of the Project's catalogue to run, by name, or a one-off line, which the user is asked to allow before it runs. An app command that is already running is handed back rather than started twice. A check or a utility is waited for, up to timeout, and answers with its exit code and the end of its output; one still running then is left running in the background and its run id is given, so there is nothing to poll for. background: true answers at once. An app is left running as soon as it has started. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
+  commands_run: `Ask for a command of the Project's catalogue to run, by name, or a one-off line, which the user is asked to allow before it runs. A serve command that is already running is handed back rather than started twice. Any other type is waited for, up to timeout, and answers with its exit code and the end of its output; one still running then is left running in the background and its run id is given, so there is nothing to poll for. background: true answers at once. A serve command is left running as soon as it has started. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
   commands_output:
     'What a run of this Session has printed, whoever started it, bounded, the address it published, and how it ended if it has.',
   commands_stop: 'Stop a run and everything it started.',
+  commands_propose:
+    "Proposes a command worth keeping in the Project's catalogue. A human accepts or declines it in the Session; nothing enters the catalogue by this call.",
   project_get:
     'The Project this Session belongs to: its name, where its Workspace root is, and what it reads from.',
   session_get:
@@ -423,6 +444,7 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   commands_run: 'the catalogue, or a one-off line the user allows',
   commands_output: `the last ${OUTPUT_KEPT_BYTES / 1024} KiB a run printed`,
   commands_stop: 'a run of this Project, and all it started',
+  commands_propose: 'a proposal a human decides; nothing written to the catalogue',
   project_get: 'this Project',
   session_get: `this Session and its last ${THREAD_TAIL} entries`,
   spec_read: `this Session's Spec, ${SPEC_PAGE_CHARACTERS / 1024} K characters a page`,
@@ -491,6 +513,8 @@ export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision
       return decide(tool, read(TOOL_ARGUMENTS['commands_output'], raw))
     case 'commands_stop':
       return decide(tool, read(TOOL_ARGUMENTS['commands_stop'], raw))
+    case 'commands_propose':
+      return decide(tool, read(TOOL_ARGUMENTS['commands_propose'], raw))
     case 'project_get':
       return decide(tool, read(TOOL_ARGUMENTS['project_get'], raw))
     case 'session_get':

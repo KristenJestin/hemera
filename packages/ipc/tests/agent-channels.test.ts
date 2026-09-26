@@ -341,16 +341,18 @@ describe('No tool is replayed on resume', () => {
 })
 
 describe('Text arrives as a stream', () => {
-  test('the eight things the engine pushes are the ones declared', () => {
+  test('the ten things the engine pushes are the ones declared', () => {
     expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
       'agent',
       'delivery',
       'entry',
+      'launch_changed',
       'permission',
       'run',
       'spec_changed',
       'turn',
       'turn_start',
+      'workspace',
     ])
   })
 
@@ -413,10 +415,16 @@ describe('The agent starts the app and the user opens it', () => {
       'commands.create',
       'commands.list',
       'commands.output',
+      'commands.portless',
+      'commands.proposeAccept',
+      'commands.proposeDecline',
       'commands.remove',
       'commands.run',
+      'commands.runOf',
       'commands.runs',
+      'commands.services',
       'commands.stop',
+      'commands.stopService',
       'commands.update',
       'context.read',
     ])
@@ -430,12 +438,22 @@ describe('The agent starts the app and the user opens it', () => {
       commandId: 'command-1',
       name: 'dev',
       line: 'pnpm dev',
-      kind: 'app',
+      type: 'serve',
+      scope: 'workspace',
       cwd: '/home/ana/atlas',
+      folder: null,
+      workspaceId: null,
+      workspaceName: 'main',
+      environment: {},
       state: 'running',
       pid: 4242,
       url: 'http://localhost:5173',
+      readyAt: null,
+      readiness: 'starting',
+      portConflict: null,
+      heldAgainst: [],
       exitCode: null,
+      startedBy: 'agent',
       output: 'ready in 300 ms',
       dropped: 0,
       startedAt: '2026-09-23T08:00:00.000Z',
@@ -445,6 +463,14 @@ describe('The agent starts the app and the user opens it', () => {
     expect(ENGINE_EVENTS.run.safeParse({ event: 'run', sessionId: 'session-1', run }).success).toBe(
       true,
     )
+    // A run no Session asked for — a preparation's step — is pushed with none (Decided 11).
+    expect(
+      ENGINE_EVENTS.run.safeParse({
+        event: 'run',
+        sessionId: null,
+        run: { ...run, sessionId: null },
+      }).success,
+    ).toBe(true)
     expect(
       ENGINE_EVENTS.run.safeParse({
         event: 'run',

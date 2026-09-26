@@ -234,6 +234,12 @@ sections and phases, the ready gate and the write right. Every write checks that
 draft on its current revision and, for an agent, that its Session holds the write right, and
 records its Journal line in the same transaction.
 
+The product Workspaces live under `apps/desktop/src/engine/workspaces/`: the Workspaces of a
+Project (created, observed, cleaned up), their preparation step by step, the Project's recipe and
+the variables given to what runs in them. Git is `apps/desktop/src/engine/git.ts`: the machine's
+own `git`, spawned with its arguments and no shell, never inside a transaction, its refusal
+answered as Git wrote it.
+
 `data` and `engine` are the names the code uses; `Profile` is the word the interface keeps for
 the same folder, in the settings, in the Journal filter and on the `profile` events the engine
 writes at start-up.
@@ -266,8 +272,9 @@ writes at start-up.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
 - Storybook sidebar, five roots in this order and nothing else: **Foundations** (tokens,
   icons, motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the
-  composed pieces that are not a screen, grouped by family and five families at most
-  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`, `Blocks/Spec`);
+  composed pieces that are not a screen, grouped by family and six families at most
+  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`, `Blocks/Spec`,
+  `Blocks/Workspace`);
   **Surfaces**, one entry per screen (`Surfaces/Session`, `Surfaces/Project/Dialog` when a
   screen has several parts), never one entry per variant; **Shell**, the window frame. The
   order of the roots and the alphabetical order inside are forced by `storySort` in

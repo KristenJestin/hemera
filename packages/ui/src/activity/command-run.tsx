@@ -3,7 +3,10 @@ import type { ReactNode } from 'react'
 
 import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
-import { IconPlayerStop } from '../icons.ts'
+import { IconAlertTriangle, IconBookmarkPlus, IconPlayerStop } from '../icons.ts'
+import { claimOf, conflictOf, ServiceUrl } from '../workspace/service-list.tsx'
+import type { PortClaim, PortConflict, Readiness } from '../workspace/services-model.ts'
+import { COMMAND_TYPE_ICONS, COMMAND_TYPE_LABELS, type CommandType } from './command-type.ts'
 import { Disclosure } from './disclosure.tsx'
 import { TerminalOutput } from './terminal-output.tsx'
 
@@ -14,7 +17,8 @@ import { TerminalOutput } from './terminal-output.tsx'
  * the reader through the Commands panel. Both watch the same process, so both read the same
  * line here — the command, where it runs, what it exited with, and the URL it published once
  * its output named one. That URL is the point of the block: a server started in a corner and
- * forgotten is what this lot exists to end, so the address is on the line, one press away.
+ * forgotten is what this lot exists to end, so the address is on the line, one press away once
+ * it answers.
  *
  * The line stays open while the process runs, for the same reason a console does: what the
  * reader is waiting on is the output. Once it exits 0 it folds itself, like the rest of the turn,
@@ -22,7 +26,16 @@ import { TerminalOutput } from './terminal-output.tsx'
  *
  * A one-off command line is marked as one: it runs inside the Workspace root, shows here, and
  * is never promoted to the catalogue by itself. The reader is the one who decides what a
- * Project keeps.
+ * Project keeps, which is why a one-off offers `Add to catalogue` beside its command line, the
+ * first line of its body, and the run itself writes nothing (D8-11).
+ *
+ * The type is drawn with the icon the design system fixes for it (D8-07), beside the name, so a
+ * `test` reads as a test here as it does in the settings. A run in another Workspace than the
+ * Session's says which, beside its folder (D8-08).
+ *
+ * Inside the fold, the run shows what it ran (D8-06, D8-09): its address as the services of a
+ * Workspace say it — a link only once it has answered — a port conflict naming the other run,
+ * and the variables Hemera gave it. The rest of a run is `RunDetails`' to show.
  */
 
 /** How a run is read at a glance: the state is the word, and the exit code is the proof. */
@@ -43,28 +56,41 @@ const SUMMARY = 'flex min-w-0 items-center gap-2'
 
 const NAME = 'min-w-0 truncate text-foreground'
 
+const TYPE_ICON = 'flex shrink-0 text-muted-foreground'
+
 const FOLDER = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
 
+/**
+ * The first line of the body: the command line, and a one-off's offer to be kept beside it, which
+ * is the line it is about.
+ */
+const COMMAND = 'flex min-w-0 items-center gap-2'
+
 /** The command line itself, under the name, as it was given to the shell. */
-const LINE = 'truncate font-mono text-xs text-muted-foreground'
+const LINE = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
 
 /** The address the command published, and what it exited with. */
 const FACTS = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground'
 
-const URL = 'min-w-0 truncate font-mono text-info-muted-foreground'
+/** The variables Hemera gave the run, read as RunDetails reads them, and no bigger (D8-06). */
+const VARIABLES = 'mt-1 flex flex-col gap-0.5 rounded-md border border-border bg-muted px-2 py-1.5'
+
+const VARIABLE = 'flex min-w-0 gap-2 font-mono text-xs'
+
+const KEY = 'shrink-0 text-foreground'
+
+const SETTING = 'min-w-0 truncate text-muted-foreground'
 
 /** Where a run stands: a process is running, over, or was stopped under it. */
 export type CommandState = 'running' | 'finished' | 'failed' | 'stopped'
-
-/** What a command is for, which is what the catalogue keeps it as. */
-export type CommandKind = 'app' | 'check' | 'utility'
 
 export interface CommandRunProps {
   /** The command's name in the catalogue, or what a one-off is called on screen. */
   name: string
   /** The command line, exactly as it was run. */
   command: string
-  kind: CommandKind
+  /** What the command is for, drawn with its fixed icon and its word (D8-07). */
+  type: CommandType
   state: CommandState
   /** The folder it runs in, relative to the Workspace when it is inside it. */
   folder: string
@@ -72,16 +98,37 @@ export interface CommandRunProps {
   output: string
   /** The first `http://localhost:<port>` its output named, once it named one. */
   url?: string | undefined
+  /**
+   * Where that address stands (D8-09): a link once it has answered, text beside `starting` or
+   * the minute without an answer until then.
+   */
+  readiness?: Readiness | undefined
+  /** The variables Hemera gave the run, on top of the machine's environment (D8-06). */
+  environment?: Readonly<Record<string, string>> | undefined
+  /** The run holding the port this one published, named (D8-09). */
+  portConflict?: PortConflict | undefined
+  /** On the holder: the runs that published its port after it, each named (Decided 12). */
+  heldAgainst?: readonly PortClaim[] | undefined
   /** What it exited with, once it is over. */
   exitCode?: number | undefined
   /** Whether the line was run without being in the catalogue. */
   oneOff?: boolean | undefined
+  /**
+   * The Workspace it runs in, named only when it is not the Session's own: a Project-scoped
+   * service runs in `main` whichever Workspace asked for it (D8-07, D8-08).
+   */
+  workspace?: string | undefined
   /** Whether a reader who has not touched it finds it open. */
   defaultOpen?: boolean | undefined
   /** Opens the address the command published, which this block cannot do. */
   onOpenUrl?: ((url: string) => void) | undefined
   /** Stops the process, which is the reader's one action on a run. */
   onStop?: (() => void) | undefined
+  /**
+   * Asks for a one-off line to be kept in the catalogue (D8-11): the human adds, and the run
+   * itself promotes nothing. Offered on a one-off only.
+   */
+  onAddToCatalogue?: (() => void) | undefined
   /** Where the block sits; never how it looks. */
   className?: string | undefined
 }
@@ -89,20 +136,35 @@ export interface CommandRunProps {
 export function CommandRun({
   name,
   command,
-  kind,
+  type,
   state,
   folder,
   output,
   url,
+  readiness,
+  environment = {},
+  portConflict,
+  heldAgainst = [],
   exitCode,
   oneOff = false,
+  workspace,
   defaultOpen = false,
   onOpenUrl,
   onStop,
+  onAddToCatalogue,
   className,
 }: CommandRunProps): ReactNode {
   const shown = STATE[state]
+  const TypeIcon = COMMAND_TYPE_ICONS[type]
   const running = state === 'running'
+  // By code point, as RunDetails sorts them: the same order on every machine and locale.
+  const variables = Object.entries(environment).toSorted(([one], [other]) =>
+    one < other ? -1 : one > other ? 1 : 0,
+  )
+  const conflicts = [
+    ...(portConflict === undefined ? [] : [conflictOf(portConflict)]),
+    ...heldAgainst.map(claimOf),
+  ]
   // A process the reader is waiting on is held open: the output is the answer rather than a
   // detail to go and open. A run that exits 0 folds itself the moment it does (recette 5 of 24
   // September 2026): its exit code on the line is the answer. A run that failed opens on its
@@ -117,27 +179,50 @@ export function CommandRun({
         defaultOpen={defaultOpen || state === 'failed'}
         summary={
           <span className={SUMMARY}>
+            <span className={TYPE_ICON}>
+              <TypeIcon size="sm" aria-hidden="true" />
+            </span>
             <span className={NAME}>{name}</span>
             <Badge tone={shown.tone}>
               {exitCode === undefined || running ? shown.word : `${shown.word} ${exitCode}`}
             </Badge>
-            <Badge tone="neutral">{kind}</Badge>
+            <Badge tone="neutral">{COMMAND_TYPE_LABELS[type]}</Badge>
             {oneOff && <Badge tone="neutral">One-off</Badge>}
+            {workspace !== undefined && <Badge tone="neutral">{`in ${workspace}`}</Badge>}
             <span className={FOLDER}>{folder}</span>
           </span>
         }
       >
-        <p className={LINE}>{command}</p>
+        <div className={COMMAND}>
+          <p className={LINE}>{command}</p>
+          {oneOff && onAddToCatalogue !== undefined && (
+            <Button variant="secondary" size="sm" className="shrink-0" onClick={onAddToCatalogue}>
+              <IconBookmarkPlus size="sm" aria-hidden="true" />
+              Add to catalogue
+            </Button>
+          )}
+        </div>
         {url !== undefined && (
           <p className={FACTS}>
-            {onOpenUrl === undefined ? (
-              <span className={URL}>{url}</span>
-            ) : (
-              <Button variant="link" size="sm" className="min-w-0" onClick={() => onOpenUrl(url)}>
-                {url}
-              </Button>
-            )}
+            <ServiceUrl url={url} readiness={readiness} onOpenUrl={onOpenUrl} />
           </p>
+        )}
+        {conflicts.map((conflict) => (
+          <p key={conflict} className={FACTS}>
+            <Badge tone="destructive" icon={<IconAlertTriangle size="sm" aria-hidden="true" />}>
+              {conflict}
+            </Badge>
+          </p>
+        ))}
+        {variables.length > 0 && (
+          <ul className={VARIABLES} aria-label="Variables given">
+            {variables.map(([key, value]) => (
+              <li key={key} className={VARIABLE}>
+                <span className={KEY}>{key}</span>
+                <span className={SETTING}>{value}</span>
+              </li>
+            ))}
+          </ul>
         )}
         <TerminalOutput
           plain

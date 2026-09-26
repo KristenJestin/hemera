@@ -15,12 +15,13 @@ export {
   MAIN_WORKSPACE,
   MAX_PROJECT_NAME_LENGTH,
   PROJECT_TONES,
+  REPOSITORY_ICONS,
   ROOT_REPOSITORY,
   projectName,
   repositoryLocations,
   repositoryPath,
 } from './domain/project.ts'
-export type { Project, ProjectTone, Workspace } from './domain/project.ts'
+export type { Project, ProjectTone, RepositoryIcon, Workspace } from './domain/project.ts'
 export {
   EmptyMessageError,
   EmptyTitleError,
@@ -77,18 +78,31 @@ export type {
   ToolName,
 } from './domain/tools.ts'
 export {
-  COMMAND_KINDS,
+  COMMAND_SCOPES,
+  COMMAND_TYPES,
   DuplicateCommandNameError,
   EmptyCommandLineError,
   EmptyCommandNameError,
-  UnknownCommandKindError,
+  InvalidCommandFolderError,
+  InvalidPortlessNameError,
+  UnknownCommandScopeError,
+  UnknownCommandTypeError,
   addressIn,
-  commandKind,
+  commandFolder,
   commandLine,
   commandName,
+  commandPlace,
+  commandScope,
+  commandType,
   joinsRunningRun,
+  runsInMain,
+  runsPortless,
+  lineFor,
+  portOf,
+  portlessName,
+  portlessNameFor,
 } from './domain/commands.ts'
-export type { Command, CommandKind } from './domain/commands.ts'
+export type { Command, CommandScope, CommandType } from './domain/commands.ts'
 export {
   AGENTS_FILE,
   CONTEXT_BASE,
@@ -100,6 +114,35 @@ export {
   internalText,
 } from './domain/context.ts'
 export type { BaseReach, ContextReach, ContextSource } from './domain/context.ts'
+export {
+  InvalidVariableKeyError,
+  InvalidWorkspaceNameError,
+  LAUNCH_STATES,
+  RECIPE_KINDS,
+  STEP_KINDS,
+  STEP_STATES,
+  WORKSPACE_STATES,
+  branchNameFor,
+  defaultBranchPrefix,
+  mergedEnvironment,
+  nextPending,
+  resumedSteps,
+  slugify,
+  stepsFor,
+  variableKey,
+  workspaceName,
+  workspaceStateOf,
+} from './domain/workspace.ts'
+export type {
+  LaunchState,
+  RecipeKind,
+  RecipeStep,
+  StepKind,
+  StepState,
+  Variables,
+  WorkspaceState,
+  WorkspaceStep,
+} from './domain/workspace.ts'
 export {
   BASE_SECTIONS,
   DEFAULT_SPEC_PREFIX,

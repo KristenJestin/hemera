@@ -9,6 +9,8 @@ import type {
   SessionDetailsTab,
 } from '@hemera/ui'
 
+import { runFactsOf } from './agent-tool-payloads.ts'
+
 /**
  * What the details of a Session draw from the tools store (design D6-10, D6-12).
  *
@@ -21,8 +23,9 @@ import type {
  * without a theme or a DOM.
  */
 
-/** Where a run ran, relative to the Workspace root when it is inside it. */
-function folderOf(cwd: string, root: string): string {
+/** Where a run ran, relative to the Workspace root when it is inside it and the root is known. */
+function folderOf(cwd: string, root: string | null): string {
+  if (root === null) return cwd
   const inside = cwd.replaceAll('\\', '/')
   const base = root.replaceAll('\\', '/').replace(/\/$/, '')
   if (inside === base) return '.'
@@ -31,18 +34,20 @@ function folderOf(cwd: string, root: string): string {
 }
 
 /** The runs of a Session as the Commands panel lists them, oldest first. */
-export function panelRunsOf(runs: readonly CommandRun[], root: string): CommandPanelRun[] {
+export function panelRunsOf(runs: readonly CommandRun[], root: string | null): CommandPanelRun[] {
   return runs.map((run) => ({
     id: run.id,
     name: run.name,
     command: run.line,
-    kind: run.kind,
+    type: run.type,
     state: run.state === 'exited' ? 'finished' : run.state,
     folder: folderOf(run.cwd, root),
     output: run.output,
     url: run.url ?? undefined,
     exitCode: run.exitCode ?? undefined,
     oneOff: run.commandId === null,
+    // Its address as it stands, its variables and its conflict, as the thread's block shows them.
+    ...runFactsOf(run),
   }))
 }
 
@@ -169,15 +174,19 @@ function fileLineOf(file: Provided | undefined, change: Provided | undefined): C
 /**
  * The Context view of a Session, in the words the view draws it with (D6-10).
  *
- * The Workspace is the Project's `main` one, the only one a Session runs in until lot 7, at the
+ * The Workspace is the Session's own, `main` unless the composer chose another (D8-08), at the
  * root the page already reads its runs from. The tools were lent when the agent's session was
  * opened, which is the moment the base was recorded: the engine provides a session the instant it
  * opens it, with the tools already in its hands. Before that there is no time to give.
  */
-export function contextListsOf(view: ContextView, root: string): ContextLists {
+export function contextListsOf(
+  view: ContextView,
+  root: string,
+  workspace = MAIN_WORKSPACE,
+): ContextLists {
   const base = view.provided.find((one) => one.kind === 'base')
   return {
-    workspace: { name: MAIN_WORKSPACE, path: root },
+    workspace: { name: workspace, path: root },
     instructions: instructionsOf(view.provided),
     tools: view.tools.map((tool) => ({ name: tool.name, bound: tool.bound })),
     lentAt: base === undefined ? undefined : atOf(base.deliveredAt),

@@ -76,6 +76,22 @@ export const NOTES = 'notes.md'
 export const READ_ANSWER = 'The notes are read through Hemera.'
 
 /**
+ * The command a turn that names it has the agent propose for the catalogue (design D8-11).
+ *
+ * A prompt that says `seed` is answered with a call to Hemera's `commands_propose` over MCP, then
+ * the sentence below: the agent proposes, and only a human's "Accept" writes the catalogue. The
+ * line is Node's own, which is on the `PATH` of whatever runs the suite.
+ */
+export const COMMAND_PROPOSAL = {
+  name: 'seed',
+  line: `node -e "console.log('seeded')"`,
+  type: 'script',
+  why: 'The data is seeded by hand before every trial.',
+} as const
+
+export const COMMAND_PROPOSE_ANSWER = 'A human decides whether seed is kept.'
+
+/**
  * What makes the agent propose a Spec: a prompt that asks for one (design D7-07).
  *
  * The agent answers, then proposes through Hemera's `spec_propose` with kind `spec`, the one Spec

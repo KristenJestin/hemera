@@ -166,7 +166,7 @@ function frameOf(box: HTMLElement): HTMLElement {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
@@ -174,7 +174,7 @@ const meta = {
   args: {
     value: '',
     files: [],
-    workspaces: ['main'],
+    workspaces: [{ name: 'main' }],
     action: 'Start chat',
     placeholder: 'Ask anything, think out loud, or describe what you want to do…',
     onValueChange: fn(),
@@ -188,7 +188,15 @@ const meta = {
   argTypes: {
     value: { control: 'text', description: 'What is written; the page holds it.' },
     files: { control: 'object', description: 'The files attached, as paths of the Workspace.' },
-    workspaces: { control: 'object', description: 'The Workspaces on offer; lot 4 has one.' },
+    workspaces: {
+      control: 'object',
+      description: 'The Workspaces in state ready, main first.',
+    },
+    workspaceFixed: {
+      control: 'boolean',
+      description: 'Whether the agent has started, which fixes the Workspace.',
+      table: { defaultValue: { summary: 'false' } },
+    },
     action: {
       control: 'text',
       description: 'The word on the button that sends.',
@@ -432,13 +440,17 @@ export const ForceStop: Story = {
  * A popup on its way out still has Base UI's focus guards in the page, and a guard is a
  * focusable node inside something marked hidden — which is a violation the accessibility pass
  * is right to report. Every story that chooses from the menu waits it out before it ends.
+ * A loaded runner plays the leave slowly: the second the wait gives can end while it is in flight.
  */
 async function menuGone() {
-  await waitFor(() => {
-    expect(
-      within(document.body).queryByRole('listbox', { name: 'Files of the Project' }),
-    ).toBeNull()
-  })
+  await waitFor(
+    () => {
+      expect(
+        within(document.body).queryByRole('listbox', { name: 'Files of the Project' }),
+      ).toBeNull()
+    },
+    { timeout: 10_000 },
+  )
 }
 
 /**
@@ -607,11 +619,15 @@ export const AttachAFile: Story = {
     // separately and the story waits for both: a colour read while either is still fading is
     // two colours mixed with what is behind them, and a contrast the accessibility pass is
     // right to refuse.
-    await waitFor(() => {
-      const chip = canvas.getByTitle(attached)
-      expect(chip).toHaveStyle({ opacity: '1' })
-      expect(chip.parentElement).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the rise slowly: the second it gives can end while it is in flight.
+    await waitFor(
+      () => {
+        const chip = canvas.getByTitle(attached)
+        expect(chip).toHaveStyle({ opacity: '1' })
+        expect(chip.parentElement).toHaveStyle({ opacity: '1' })
+      },
+      { timeout: 10_000 },
+    )
     // And in the sentence, as the same chip a mention leaves: one gesture, read as one.
     const chip = canvas.getByRole('textbox').querySelector('[data-file]')
     expect(chip).toHaveAttribute('data-file', attached)
@@ -623,9 +639,13 @@ export const AttachAFile: Story = {
 
     // The send comes out of the quiet it was in while there was nothing to send, and the story
     // waits for it: a colour read halfway through a fade is a contrast axe refuses.
-    await waitFor(() => {
-      expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the rise slowly: the second it gives can end while it is in flight.
+    await waitFor(
+      () => {
+        expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
+      },
+      { timeout: 10_000 },
+    )
 
     await menuGone()
   },
@@ -677,7 +697,13 @@ export const ShiftEnterBreaksTheLine: Story = {
   },
 }
 
-/** A chip taken back: the header goes with the last of them, and nothing is left behind. */
+/**
+ * A chip taken back: the header goes with the last of them, and nothing is left behind.
+ *
+ * A chip lands on the field small — a `MARK_SCALE` on the `arrival` preset, which is what it
+ * always was, and no longer a name taken from the press: nothing gives by a share of itself since
+ * issue #108.
+ */
 export const Attachments: Story = {
   args: { files: ['sources/api/AGENTS.md'] },
   play: async ({ canvasElement }) => {

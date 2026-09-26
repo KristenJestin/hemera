@@ -15,8 +15,10 @@ import { hemeraToolNamed } from '@hemera/core'
 import type { SessionEntry } from '@hemera/ipc'
 
 import {
+  commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
+  elsewhereOf,
   foldedCallsOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
@@ -106,7 +108,7 @@ describe('A one-off command shows and is not promoted', () => {
       JSON.stringify({
         name: 'pnpm dev',
         line: 'pnpm dev',
-        kind: 'app',
+        type: 'serve',
         state: 'exited',
         cwd: '.',
         url: null,
@@ -120,6 +122,46 @@ describe('A one-off command shows and is not promoted', () => {
     expect(drawn?.oneOff).toBe(true)
     // `exited` is what the engine writes; `finished` is the word the block reads it as.
     expect(drawn?.state).toBe('finished')
+  })
+})
+
+describe('A proposal enters the catalogue only when accepted', () => {
+  /** A proposal entry as `commands_propose` writes it, and as a decision writes it again. */
+  const proposal = (state: string, folder: string | null) =>
+    entryOf(
+      'command_proposal',
+      'hemera',
+      'seed',
+      JSON.stringify({
+        proposalId: 'proposal-1',
+        name: 'seed',
+        line: 'node scripts/seed.js',
+        type: 'script',
+        folder,
+        why: 'the seed is run before every test',
+        state,
+      }),
+    )
+
+  test('a proposal entry is read with its outcome', () => {
+    expect(commandProposalOf(proposal('pending', null))).toEqual({
+      proposalId: 'proposal-1',
+      name: 'seed',
+      line: 'node scripts/seed.js',
+      type: 'script',
+      // The Workspace root, in the word the block reads it in.
+      folder: '.',
+      why: 'the seed is run before every test',
+      state: 'pending',
+    })
+    expect(commandProposalOf(proposal('accepted', './sources/api'))?.state).toBe('accepted')
+    expect(commandProposalOf(proposal('accepted', './sources/api'))?.folder).toBe('./sources/api')
+    expect(commandProposalOf(proposal('declined', null))?.state).toBe('declined')
+  })
+
+  test('an entry that does not parse is left out', () => {
+    expect(commandProposalOf(proposal('withdrawn', null))).toBeNull()
+    expect(commandProposalOf(entryOf('command_proposal', 'hemera', 'seed', '{'))).toBeNull()
   })
 })
 
@@ -151,7 +193,7 @@ describe('The agent starts the app and the user opens it', () => {
         runId: 'run-1',
         name: 'dev',
         line: 'pnpm dev',
-        kind: 'app',
+        type: 'serve',
         state: 'running',
         cwd: '/home/ana/atlas',
         url: null,
@@ -166,12 +208,22 @@ describe('The agent starts the app and the user opens it', () => {
       commandId: 'command-1',
       name: 'dev',
       line: 'pnpm dev',
-      kind: 'app' as const,
+      type: 'serve' as const,
+      scope: 'workspace' as const,
       cwd: '/home/ana/atlas',
+      folder: null,
+      workspaceId: null,
+      workspaceName: 'main',
+      environment: {},
       state: 'running' as const,
       pid: 4242,
       url: 'http://localhost:5173',
+      readyAt: null,
+      readiness: 'starting' as const,
+      portConflict: null,
+      heldAgainst: [],
       exitCode: null,
+      startedBy: 'agent' as const,
       output: 'ready on http://localhost:5173\n',
       dropped: 0,
       startedAt: '2026-09-23T08:00:00.000Z',
@@ -190,6 +242,22 @@ describe('The agent starts the app and the user opens it', () => {
     })
     // And a run of another entry is not this one's.
     expect(commandRunOf(entry, [{ ...pushed, id: 'run-2' }])?.url).toBeUndefined()
+
+    // Its address stands where the run says (D8-09), and nothing is said before it was heard of.
+    expect(commandRunOf(entry, [pushed])?.readiness).toBe('starting')
+    expect(commandRunOf(entry)).toMatchObject({
+      readiness: undefined,
+      environment: {},
+      portConflict: undefined,
+      heldAgainst: [],
+    })
+
+    // A Project-scoped service runs in `main` whichever Session asked for it (D8-07): the block
+    // of a Session in another Workspace names `main`, and a Session in `main` names nothing.
+    expect(elsewhereOf(pushed, 'login-form')).toBe('main')
+    expect(elsewhereOf(pushed, 'main')).toBeUndefined()
+    // Nor while the Session's own Workspace is not known yet.
+    expect(elsewhereOf(pushed, undefined)).toBeUndefined()
   })
 })
 

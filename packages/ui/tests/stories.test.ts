@@ -90,6 +90,9 @@ const CATALOGUE: Catalogued[] = [
   // HEM-17: where a piece of work stands, said as a dot. A thing to read and not a thing to
   // operate, so there is no keyboard story to ask of it.
   { name: 'StatusDot', folder: 'status-dot', keyboard: false },
+  // Lot 20, recette of 24 September 2026: a box to tick, drawn in the theme, which every box of
+  // the application is instead of the platform's own.
+  { name: 'Checkbox', folder: 'checkbox', keyboard: true },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */
@@ -100,7 +103,14 @@ const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter', 'command-palette']
  * shows as a screen or a composed piece, with the same discipline whatever root they sit under.
  */
 const SURFACES = {
-  project: ['project-dialog', 'project-settings'],
+  // Recette 1 of lot 20: the dialogs a repository and a command are added and edited in.
+  project: [
+    'project-dialog',
+    'project-settings',
+    'preparation-editor',
+    'repository-dialog',
+    'command-dialog',
+  ],
   journal: ['journal'],
   composer: ['composer', 'prompt-input'],
   // The thread of a Session (HEM-57): the messages, the viewport they are read in, and the
@@ -113,6 +123,17 @@ const SURFACES = {
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
+  // Lot 20: what a Workspace is made of: its repositories, its creation, its preparation, the list
+  // of a Project's Workspaces and their cleanup, the variables and the services.
+  workspace: [
+    'workspace-repositories',
+    'create-workspace-dialog',
+    'preparation-steps',
+    'workspace-list',
+    'cleanup-dialog',
+    'variables-editor',
+    'service-list',
+  ],
 }
 
 /**
@@ -136,6 +157,105 @@ const ALWAYS = ['Playground', 'Variants', 'States']
  */
 const NAMED_STATES = new Map([
   ['composer/composer', ['Playground', 'Empty', 'Ready', 'Sending', 'Blocked']],
+  [
+    'workspace/variables-editor',
+    ['Project', 'Workspace', 'Empty', 'Adding', 'Editing', 'KeyExists', 'Keyboard'],
+  ],
+  [
+    'workspace/service-list',
+    [
+      'Starting',
+      'Ready',
+      'Unanswered',
+      'PortConflict',
+      'Failed',
+      'TwoInstances',
+      'ProjectScoped',
+      'Empty',
+      'Keyboard',
+    ],
+  ],
+  ['workspace/workspace-repositories', ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError']],
+  [
+    'workspace/create-workspace-dialog',
+    [
+      'Proposed',
+      'DetachedHead',
+      'RepositoryLeftOut',
+      'Refused',
+      'GitMissing',
+      'Invalid',
+      'FromSettings',
+      'Keyboard',
+    ],
+  ],
+  [
+    'workspace/preparation-steps',
+    [
+      'Pending',
+      'Running',
+      'Done',
+      'Skipped',
+      'Failed',
+      'Resumed',
+      'LinkRefused',
+      'RunFailed',
+      'Keyboard',
+    ],
+  ],
+  [
+    'workspace/workspace-list',
+    ['MainOnly', 'Filled', 'Expanded', 'NewWorkspace', 'MapFolder', 'Keyboard'],
+  ],
+  [
+    'workspace/cleanup-dialog',
+    ['Confirm', 'RefusedRunningService', 'RefusedGit', 'RefusedBuildSession', 'Keyboard'],
+  ],
+  // Lot 20: the recipe of a Project, with nothing in it, in order, being added to and edited, a
+  // source main does not hold, walked, and — recette 2 — a run carrying its own line and a copy's
+  // path picked outside its base.
+  [
+    'project/preparation-editor',
+    [
+      'Empty',
+      'Filled',
+      'Adding',
+      'Editing',
+      'SourceMissing',
+      'OwnLine',
+      'PickedOutside',
+      'Keyboard',
+    ],
+  ],
+  // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
+  [
+    'project/project-settings',
+    [
+      'Complete',
+      'General',
+      'Repositories',
+      'Workspaces',
+      'Commands',
+      'Preparation',
+      'Variables',
+      'Refused',
+      'Keyboard',
+    ],
+  ],
+  ['project/repository-dialog', ['Add', 'Edit', 'Invalid', 'Refused', 'Keyboard']],
+  [
+    'project/command-dialog',
+    [
+      'Add',
+      'Edit',
+      'Portless',
+      'PortlessNameInvalid',
+      'PortlessMissing',
+      'PortlessInLine',
+      'Refused',
+      'Keyboard',
+    ],
+  ],
 ])
 
 function storiesIn(path: string): string[] {
@@ -282,6 +402,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ProjectDialog',
       'ProjectSettings',
       'RepositoryList',
+      'PreparationEditor',
       'DangerZone',
       'Journal',
       'JournalEntry',
@@ -360,10 +481,23 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // its own, and the Session says what it runs and what it works from in its details.
       'HemeraToolCall',
       'CommandRun',
+      'CommandProposal',
       'CommandsPanel',
       'ContextView',
       'BareModeState',
       'CommandList',
+      // Lot 20: the variables, the services and the details of a run of a Workspace.
+      'VariablesEditor',
+      'ServiceList',
+      'RunDetails',
+      // Lot 20: what Git says of a Workspace's repositories, the dialog that creates one, its
+      // preparation step by step, the Workspaces of a Project, and the cleanup that keeps the
+      // branches.
+      'WorkspaceRepositories',
+      'CreateWorkspaceDialog',
+      'PreparationSteps',
+      'WorkspaceList',
+      'CleanupDialog',
       // Lot 19: the Spec panel of a `define` Session, its rail and its parts, and the three
       // blocks of the thread: what the agent was handed, a question of the Spec asked in the
       // chat, and the agent proposing a Spec in a `free` Session.
@@ -382,10 +516,16 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'MissionBrief',
       'SpecQuestion',
       'CreateSpecProposal',
+      // The build of a frozen Spec: what it is launched in, and where that launch stands
+      // (D8-12, D8-13).
+      'WorkspaceActions',
       // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
       // and the rail it is fed with.
       'MissionPanel',
       'MissionRail',
+      // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
+      'CommandDialog',
+      'RepositoryDialog',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
@@ -411,6 +551,11 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
     // theme, not components: the application needs them to hand the shell a width and to say
     // which place it is on.
     const values = [
+      // Lot 20: the seven command types, their scopes, their icons and their labels (D8-07).
+      'COMMAND_SCOPES',
+      'COMMAND_TYPES',
+      'COMMAND_TYPE_ICONS',
+      'COMMAND_TYPE_LABELS',
       'EMPTY_DRAFT',
       'EVERYWHERE_PREFIX',
       'HOME_ENTRY',
@@ -418,6 +563,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'NESTED_RADIUS',
       'PROJECT_SETTINGS_ENTRY',
       'PROJECT_TONES',
+      // Recette 1 of lot 20: the icons a repository may be drawn with.
+      'REPOSITORY_ICONS',
       'SIDEBAR_DEFAULT',
       'SIDEBAR_MAX',
       'SIDEBAR_MIN',

@@ -74,7 +74,7 @@ describe('An unqualified combination is refused with its reason', () => {
       const sentence = `Codex cannot run without its own tools here: ${declared.reason}`
 
       // Asked all the same, the engine refuses at the creation, in the adapter's own words.
-      expect(await startSession(project.id, 'codex')).toBeNull()
+      expect(await startSession(project.id, 'codex', null)).toBeNull()
       expect(sessionsSnapshot().refusal).toBe(sentence)
       expect(await opened.bridge.invoke('sessions.list', { projectId: project.id })).toEqual([])
     }))

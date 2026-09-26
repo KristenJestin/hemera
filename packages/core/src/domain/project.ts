@@ -24,6 +24,24 @@ export const PROJECT_TONES = ['primary', 'info', 'success', 'warning', 'neutral'
 
 export type ProjectTone = (typeof PROJECT_TONES)[number]
 
+/**
+ * The icons a repository of a Project may wear (recette 1, item 11): a fixed set, drawn by the
+ * design system, so a repository reads as what it is — a server, a web front, a database — and
+ * never as a picture of the user's own. A repository wears none until one is chosen.
+ */
+export const REPOSITORY_ICONS = [
+  'folder',
+  'server',
+  'browser',
+  'database',
+  'package',
+  'book',
+  'mobile',
+  'terminal',
+] as const
+
+export type RepositoryIcon = (typeof REPOSITORY_ICONS)[number]
+
 export interface Project {
   id: string
   name: string

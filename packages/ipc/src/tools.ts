@@ -9,24 +9,46 @@
 
 import { z } from 'zod'
 
-/** What a command is for: an app stays up, a check ends with a code, a utility is the rest. */
-export const commandKindSchema = z.enum(['app', 'check', 'utility'])
+/** What a command is for (D8-07): `serve` stays up, and the six others end with a code. */
+export const commandTypeSchema = z.enum([
+  'serve',
+  'test',
+  'lint',
+  'build',
+  'configure',
+  'debug',
+  'script',
+])
 
-export type CommandKind = z.infer<typeof commandKindSchema>
+export type CommandType = z.infer<typeof commandTypeSchema>
+
+/** Where a `serve` command runs: once per Workspace, or once for the Project (D8-07). */
+export const commandScopeSchema = z.enum(['workspace', 'project'])
+
+export type CommandScope = z.infer<typeof commandScopeSchema>
 
 /**
  * A command of a Project's catalogue (design D6-12).
  *
- * `folder` is where it runs: null for the Workspace root, or one of the Project's repositories,
- * relative to the root as the Project declares it.
+ * Where it runs is `folderBase`, one of the Project's repositories as the Project declares it or
+ * null for the Workspace root, and `folder` under it, relative to that base or null for the base
+ * itself (D8-07 as amended by recette 1). `lineWindows` and `lineLinux` are the lines those
+ * systems run instead of `line`, null when they run it (D8-07).
  */
 export const commandSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   name: z.string(),
   line: z.string(),
-  kind: commandKindSchema,
+  lineWindows: z.string().nullable(),
+  lineLinux: z.string().nullable(),
+  type: commandTypeSchema,
+  folderBase: z.string().nullable(),
   folder: z.string().nullable(),
+  scope: commandScopeSchema,
+  portless: z.boolean(),
+  /** The name Portless serves it under, null for the Project's name as a slug (D8-10). */
+  portlessName: z.string().nullable(),
   createdAt: z.number(),
 })
 
@@ -38,25 +60,66 @@ export const runStateSchema = z.enum(['running', 'exited', 'failed', 'stopped'])
 export type RunState = z.infer<typeof runStateSchema>
 
 /**
+ * A port two runs published (D8-09): the other run, in which Workspace, under which name. On the
+ * run that published second it names the holder; on the holder, read among its Workspace's
+ * services, it names each run that published the port after it (Decided 12).
+ */
+export const portConflictSchema = z.object({
+  port: z.number(),
+  runId: z.string(),
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string(),
+  name: z.string(),
+})
+
+export type PortConflict = z.infer<typeof portConflictSchema>
+
+/**
+ * Where the address of a `serve` run stands (D8-09): `starting` until it answers, `ready` once it
+ * has, `unanswered` after a minute without an answer or when the run ended without one; null for a
+ * run with no address and for any run that is not a `serve`.
+ */
+export const readinessSchema = z.enum(['starting', 'ready', 'unanswered']).nullable()
+
+/**
  * One run of a command, as the panel and the agent both read it (design D6-12).
  *
  * `commandId` is null for a one-off line. `output` is the end of what it printed, bounded, and
  * `dropped` how many characters of the beginning were let go of. `joined` says the run asked for
- * was an app already running, handed back rather than started a second time.
+ * was a server already running, handed back rather than started a second time. `sessionId` is
+ * null for a run no Session asked for, a preparation's step (Decided 11). `workspaceId` is
+ * the Workspace it runs in, null for `main` (D8-08), and `workspaceName` what it is called;
+ * `scope` and `folder` are the command's as the run was started, `folder` relative to the
+ * Workspace root and null for the root (D8-07); `environment` the variables it was given
+ * (D8-06); `readyAt` when its address first answered, `readiness` where that address stands, and
+ * `portConflict` the run holding the port it published (D8-09); `heldAgainst` the runs that
+ * published the port this one holds, filled when a Workspace's services are read and empty
+ * elsewhere (Decided 12). `startedBy` is who asked for it: the agent through its tool, or the user
+ * through a panel or a preparation — a Workspace's services say it of each (D8-08).
  */
 export const commandRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
-  sessionId: z.string(),
+  sessionId: z.string().nullable(),
   commandId: z.string().nullable(),
   name: z.string(),
   line: z.string(),
-  kind: commandKindSchema,
+  type: commandTypeSchema,
+  scope: commandScopeSchema,
   cwd: z.string(),
+  folder: z.string().nullable(),
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string(),
+  environment: z.record(z.string(), z.string()),
   state: runStateSchema,
   pid: z.number().nullable(),
   url: z.string().nullable(),
+  readyAt: z.string().nullable(),
+  readiness: readinessSchema,
+  portConflict: portConflictSchema.nullable(),
+  heldAgainst: z.array(portConflictSchema),
   exitCode: z.number().nullable(),
+  startedBy: z.enum(['agent', 'user']),
   output: z.string(),
   dropped: z.number(),
   startedAt: z.string(),

@@ -40,6 +40,18 @@ export const UNHURRIED: ReadonlySet<EngineRequestName> = new Set([
   'agents.check',
   // A stop gives a run the grace it is owed before its tree is taken down (D5-04, D6-12).
   'commands.stop',
+  'commands.stopService',
+  // The machine's `git`, once per repository (D8-03): a plan reads each of its locations, and a
+  // slow, refused or absent one is read on its own so that it holds back its own row and never the
+  // dialog (#110); a creation checks every base and branch, a status reads each worktree of a
+  // large tree, and a cleanup removes each worktree and then deletes a folder that may hold
+  // thousands of installed files (D8-04, D8-14, D8-15). `preparation.*` is not here: it answers
+  // with the steps at once and runs in the engine, followed through the `workspace` event (D8-05).
+  'workspaces.plan',
+  'workspaces.planRepository',
+  'workspaces.create',
+  'workspaces.status',
+  'workspaces.cleanup',
 ])
 
 /**

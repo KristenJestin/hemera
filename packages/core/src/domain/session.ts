@@ -91,6 +91,8 @@ export const SESSION_ENTRY_KINDS = [
   'spec_question',
   'spec_answer',
   'spec_proposal',
+  /** A command the agent proposed for the catalogue, waiting for a human's decision (D8-11). */
+  'command_proposal',
 ] as const
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number]
@@ -121,6 +123,18 @@ export interface Session {
    * a resumed thread is drawn from, rather than a claim that the thread was continued.
    */
   nativeState: NativeState
+  /**
+   * The Workspace this Session works in (D8-08), fixed once its agent has started.
+   *
+   * Null on a Session written before Workspaces were real, which is read as `main`.
+   */
+  workspaceId: string | null
+  /**
+   * Whether that Workspace can no longer be changed (D8-08): from the first message the user
+   * writes, since the agent that message starts is opened in that folder, or once an agent has
+   * started there. The engine's rule, which a page reads rather than repeats.
+   */
+  workspaceFixed: boolean
   archivedAt: number | null
   createdAt: number
   /** When it was last written to — a message or a rename: what the list is sorted on. */

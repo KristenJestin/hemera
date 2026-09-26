@@ -5,11 +5,13 @@ import type {
   CommandRun,
   ConfigOption,
   ContextView as Provided,
+  PlanRepository,
   SectionName,
   Session,
   SessionEntry,
   SpecRevision,
   SpecSnapshot,
+  WorkspacePlan,
 } from '@hemera/ipc'
 import {
   ActivityRow,
@@ -23,6 +25,7 @@ import {
   MessageScroller,
   MessageText,
   SessionEmpty,
+  CreateWorkspaceDialog,
   SessionDetails,
   SessionHeader,
   SpecPanel,
@@ -37,24 +40,38 @@ import {
 import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
 import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
-import { foldedCallsOf } from '../agent-tool-payloads.ts'
+import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
+import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
+import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionAnchor } from '../spec-entries.ts'
 import {
   answerQuestion,
+  askForBuild,
   createSpec,
   discardMine,
   markReady,
+  retryBuild,
   rework,
   saveSection,
   saveStory,
   selectRevision,
   specSnapshot,
+  startBuild,
   subscribeToSpec,
   takeOver,
 } from '../spec-store.ts'
-import { readerOf, specViewOf } from '../spec-views.ts'
+import { launchOf, readerOf, specViewOf, specWorkspacesOf } from '../spec-views.ts'
+import {
+  closePlanReading,
+  createForSpec,
+  isPlanReadingOpen,
+  openPlanReading,
+  planForSpec,
+  readPlanRepositories,
+} from '../workspaces-store.ts'
+import { planLinesOf, worktreesOf } from '../workspace-details.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -210,12 +227,22 @@ export interface SessionPageProps {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
-  /** The Workspace root, which is what a run's folder is said relative to. */
-  root: string
+  /** The Workspace root, which is what a run's folder is said relative to; null until known. */
+  root: string | null
   /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
   onRunCommand: (line: string) => void
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
   context: Provided | null
+  /** The Workspaces the pill lists: `ready`, `main` first, and the Session's own (D8-08). */
+  workspaces: readonly OfferedWorkspace[]
+  /** Moves the Session to another Workspace, null for `main`, before its agent has started. */
+  onChooseWorkspace: (workspaceId: string | null) => void
+  /** Accepts a command the agent proposed; answers the engine's refusal, or null (D8-11). */
+  onAcceptProposal: (proposalId: string) => Promise<string | null>
+  /** Declines it; answers the engine's refusal, or null. */
+  onDeclineProposal: (proposalId: string) => Promise<string | null>
+  /** Keeps a one-off run in the catalogue; answers the engine's refusal, or null (D8-11). */
+  onAddToCatalogue: (run: CommandRun) => Promise<string | null>
 }
 
 export function SessionPage({
@@ -249,6 +276,11 @@ export function SessionPage({
   root,
   onRunCommand,
   context,
+  workspaces,
+  onChooseWorkspace,
+  onAcceptProposal,
+  onDeclineProposal,
+  onAddToCatalogue,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -258,6 +290,15 @@ export function SessionPage({
   const [attempted, setAttempted] = useState<string | null>(null)
   /** Whether the reader has the Session details open: only the head's button opens them. */
   const [detailsOpen, setDetailsOpen] = useState(false)
+  /**
+   * What the reader's last decision in the thread was refused with — a proposal or a one-off
+   * run whose name the catalogue already holds (D8-11) — or null once one went through. Said
+   * where the page's other refusals are, and before them: it answers the last press.
+   */
+  const [refused, setRefused] = useState<string | null>(null)
+  const deciding = (decision: Promise<string | null>): void => {
+    void decision.then(setRefused)
+  }
   /** The proposals `Not now` was pressed on: this window's answer, which nothing keeps. */
   const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set())
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
@@ -274,6 +315,55 @@ export function SessionPage({
         })
   const versionOf = (name: SectionName): number =>
     spec?.sections.find((one) => one.name === name)?.version ?? 0
+  /** The plan the Workspace dialog is open on, and what it is to leave behind. */
+  const [workspacePlan, setWorkspacePlan] = useState<WorkspacePlan | null>(null)
+  /** What Git has answered of that plan so far, in the order the answers arrived (#110). */
+  const [workspaceReads, setWorkspaceReads] = useState<readonly PlanRepository[]>([])
+  const [intent, setIntent] = useState<'start' | 'only' | null>(null)
+  /**
+   * Prepares a Workspace for this Spec (D8-12): the plan is asked for first — its branches are
+   * named after the Spec (D8-04) — and the dialog opens on it at once, because it takes its rows
+   * as it opens; each location of the plan is read on its own afterwards, so a repository that
+   * is slow, refused or gone holds back its own row alone (#110). Both ways in go through it:
+   * the Workspace is named and its branches chosen by the hand either way, and `start` is the
+   * only thing that differs afterwards.
+   */
+  const prepareWorkspace = (start: boolean): void => {
+    const held = defined
+    if (held === null) return
+    // The opening is taken here, before the plan is asked: this dialog is the one these answers
+    // belong to, and a dialog closed or opened again on another Spec takes the next one (#110).
+    const reading = openPlanReading()
+    void planForSpec(session.projectId, held.spec.key, held.spec.slug).then((planned) => {
+      if (planned === null || !isPlanReadingOpen(reading)) return
+      setWorkspacePlan(planned)
+      setWorkspaceReads([])
+      setIntent(start ? 'start' : 'only')
+      void readPlanRepositories(
+        session.projectId,
+        held.spec.key,
+        held.spec.slug,
+        planned.repositories,
+        reading,
+        (read) => {
+          setWorkspaceReads((current) => [...current, read])
+        },
+      )
+    })
+  }
+
+  /**
+   * Opens the build Session the launch started. The list is read again first: the engine made
+   * that Session on its own, and the page it opens is a page this window knows. What the window
+   * shows is the shell's own entry, which is why going there is `selectEntry` — the thread
+   * follows, read by the window when its entry becomes the one on screen.
+   */
+  const openBuild = (): void => {
+    const launched = stored.launches?.launch
+    if (launched === null || launched === undefined || launched.sessionId === null) return
+    const id = launched.sessionId
+    void openSessions(session.projectId).then(() => selectEntry(id))
+  }
 
   const write = async (body: string): Promise<string | null> => {
     setAttempted(body)
@@ -292,6 +382,11 @@ export function SessionPage({
 
   const thread = together(entries, agent.entries)
   const waiting = waitingOf(thread)
+
+  // The Workspace the Session works in, on the pill: it can be changed until the agent has
+  // started, and is fixed from then on, which the pill says in words (D8-08). A run in another
+  // one — a Project-scoped service, in `main` — names it on its block.
+  const workspace = workspaces.find((one) => one.id === session.workspaceId)
 
   /**
    * The user's messages cut into the days they were written on.
@@ -345,9 +440,13 @@ export function SessionPage({
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
       runs: commandRuns,
+      workspace: workspace?.name,
       onOpenUrl,
       onStopRun,
       reportedCall: (toolCallId) => reported.get(toolCallId),
+      onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
+      onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
+      onAddToCatalogue: (run) => deciding(onAddToCatalogue(run)),
       spec: {
         thread,
         specId: session.specId,
@@ -486,6 +585,19 @@ export function SessionPage({
           void selectRevision(revision === current?.number ? null : revision)
         }}
         onTakeOver={() => void takeOver(session.id)}
+        // Where the build of this frozen Spec stands, and what is to be pressed next (D8-12,
+        // D8-13): the panel's head holds it, and the whole journey it opens — the plan, the
+        // Workspace, the launch — belongs here.
+        build={{
+          launch: launchOf(stored.launches),
+          ...specWorkspacesOf(stored.launches),
+          onPrepareAndStart: () => prepareWorkspace(true),
+          onPrepareOnly: () => prepareWorkspace(false),
+          onUseWorkspace: (id) => void askForBuild(id),
+          onStart: () => void startBuild(),
+          onRetry: () => void retryBuild(),
+          onOpen: openBuild,
+        }}
       />
     )
   }
@@ -566,14 +678,15 @@ export function SessionPage({
           )}
           {/*
             What the page's last act was refused with — a rename, an archive, a thread that could
-            not be read — said here and not on the send: those are refusals of the header and of
-            the opening, and a Session whose archive was refused is one that can still be written
-            in. It stands in the same stack as the meter rather than over the thread, so what it
-            moves is itself and nothing above it (D4b-02).
+            not be read, a Workspace changed once the agent had started (D8-08) — said here and
+            not on the send: those are refusals of the header and of the opening, and a Session
+            whose archive was refused is one that can still be written in. It stands in the same
+            stack as the meter rather than over the thread, so what it moves is itself and nothing
+            above it (D4b-02).
           */}
-          {(refusal ?? stored.refusal) !== null && (
+          {(refused ?? refusal ?? stored.refusal) !== null && (
             <p role="alert" className="text-sm text-muted-foreground">
-              {refusal ?? stored.refusal}
+              {refused ?? refusal ?? stored.refusal}
             </p>
           )}
           <Composer
@@ -591,6 +704,15 @@ export function SessionPage({
                 : `Say something to ${session.provider}…`
             }
             onSend={write}
+            workspaces={[...workspaces]}
+            workspace={workspace?.name}
+            workspaceFixed={workspaceFixedOf(session, agent.running)}
+            onWorkspaceChange={(name) => {
+              const chosen = workspaces.find((one) => one.name === name)
+              if (chosen !== undefined && chosen.id !== session.workspaceId) {
+                onChooseWorkspace(chosen.id)
+              }
+            }}
             // Nothing is handed over here: a refusal of this page is not a reason not to write,
             // and a write that is refused answers `write` itself — which is what the composer
             // shows under the box, on the sentence that was not written (D4b-02).
@@ -652,7 +774,16 @@ export function SessionPage({
         commands={
           session.provider === null ? undefined : (
             <CommandsPanel
-              runs={panelRunsOf(commandRuns, root)}
+              // A one-off offers "Add to catalogue" here as it does in the thread (D8-11), and a
+              // run in another Workspace names it (D8-08).
+              runs={panelRunsOf(commandRuns, root).map((shown) => {
+                const run = commandRuns.find((one) => one.id === shown.id)
+                if (run !== undefined) {
+                  shown.onAddToCatalogue = () => deciding(onAddToCatalogue(run))
+                  shown.workspace = elsewhereOf(run, workspace?.name)
+                }
+                return shown
+              })}
               onStop={onStopRun}
               onOpenUrl={onOpenUrl}
               onRun={onRunCommand}
@@ -660,8 +791,12 @@ export function SessionPage({
           )
         }
         // What the agent works from, its Workspace, instructions and tools (D6-10), once the engine
-        // has said it.
-        context={context === null ? undefined : <ContextView {...contextListsOf(context, root)} />}
+        // has said it and the Session's Workspace is known: no root is guessed before (D8-08).
+        context={
+          context === null || root === null ? undefined : (
+            <ContextView {...contextListsOf(context, root, workspace?.name)} />
+          )
+        }
         // The tab it opens on follows what is happening: a command running opens on Commands,
         // then the tab that has something, and the Context when no tab has anything (D6-12). It
         // is read when the dialog opens, so an open dialog never changes tab under the reader.
@@ -674,6 +809,39 @@ export function SessionPage({
         aside when the hand or the agent asks (brief revisions 4, 4b).
       */}
       {missionPanel()}
+      {workspacePlan !== null && (
+        <CreateWorkspaceDialog
+          open={intent !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              closePlanReading()
+              setIntent(null)
+            }
+          }}
+          root={workspacePlan.root}
+          defaultName={workspacePlan.name}
+          repositories={planLinesOf(workspacePlan, workspaceReads)}
+          gitMissing={!workspacePlan.gitAvailable}
+          // No `branchOf`: the branches follow the Spec, which the plan they came with already
+          // names (D8-04), and a name typed here does not rename the Spec.
+          onCreate={async (draft) => {
+            const held = defined
+            if (held === null) return null
+            const made = await createForSpec(
+              session.projectId,
+              held.spec.id,
+              draft.name,
+              worktreesOf(draft),
+            )
+            if (made.workspace === null) return made.refusal
+            // A build asked for while the preparation runs waits for it, then starts (D8-13):
+            // asking now is asking for the build this Workspace was made for.
+            if (intent === 'start') await askForBuild(made.workspace.id)
+            setIntent(null)
+            return null
+          }}
+        />
+      )}
     </div>
   )
 }

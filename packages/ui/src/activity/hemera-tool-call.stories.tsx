@@ -72,7 +72,9 @@ const A_FOLD = 30
  * The press on the path sat beside the whole fold and was centred on it, so it slid down the
  * block while the body opened under it. It is on the fold's own line now, the one line that
  * never moves, and pressing it goes to the path without opening the block. Since recette 3 it is
- * the subject itself, where the line is read, and there is no second copy of it at the end.
+ * the subject itself, where the line is read, and there is no second copy of it at the end. The
+ * block is opened from the keyboard in the story: the subject gives under the hand since issue
+ * #108, and a hand on it would be measured with the fold.
  */
 export const AFoldOpening: Story = {
   play: async ({ canvasElement, args }) => {
@@ -96,8 +98,16 @@ export const AFoldOpening: Story = {
       'false',
     )
 
+    // The hand lets go, and the line is read where it rests: since issue #108 a control under the
+    // hand moves, by the same pixels whatever its size. The row is opened from the keyboard, so
+    // the pointer stays away from it and what is measured is the fold and nothing else.
+    await userEvent.unhover(path)
+    await waitFor(() => {
+      expect(path.getBoundingClientRect().width).toBeCloseTo(path.offsetWidth, 0)
+    })
     const closed = path.getBoundingClientRect().top
-    await userEvent.click(row)
+    row.focus()
+    await userEvent.keyboard('{Enter}')
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     const moved = () => Math.abs(path.getBoundingClientRect().top - closed) > 0.5
     await expect(await withinFrames(moved, A_FOLD), 'the path slid while the block opened').toBe(
@@ -480,6 +490,7 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
   ['commands_stop', 'Stop command', 'stop-command', 'dev', 'Stopping dev'],
   ['commands_list', 'List commands', 'list-commands', null, 'Reading the catalogue'],
   ['commands_output', 'Command output', 'command-output', 'check', 'Reading the output of check'],
+  ['commands_propose', 'Propose command', 'propose-command', 'test', 'Proposing test'],
   ['project_get', 'Project', 'project', null, 'Reading the Project'],
   ['session_get', 'Session', 'session', null, 'Reading this Session'],
   ['spec_read', 'Read Spec', 'read-spec', 'HEM-7', 'Reading HEM-7'],
@@ -488,8 +499,8 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): fourteen tools, fourteen
- * marks and fourteen labels, and what each call is about where it is about something. A mark per
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): fifteen tools, fifteen
+ * marks and fifteen labels, and what each call is about where it is about something. A mark per
  * kind of tool drew `fs_list` as `fs_read` and the four commands as one.
  */
 export const EveryTool: Story = {

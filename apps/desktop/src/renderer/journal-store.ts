@@ -1,4 +1,5 @@
 import type { JournalEntry } from '@hemera/ipc'
+import type { JournalFilter } from '@hemera/ui'
 
 /**
  * The Journal of the Project being looked at, one page at a time (design D4-05, D4-11).
@@ -18,7 +19,7 @@ export interface JournalState {
   /** Whether a page is on its way, which is what the button at the foot says. */
   loading: boolean
   /** Which entity is wanted, and whether only what the user did themselves is. */
-  kind: JournalEntry['entityKind'] | 'all'
+  kind: JournalFilter
   byYou: boolean
   refusal: string | null
 }

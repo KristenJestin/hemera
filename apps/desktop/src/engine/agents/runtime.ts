@@ -39,7 +39,6 @@ import {
   AGENTS_FILE,
   type AgentProvider,
   type BaseReach,
-  CONTEXT_BASE,
   contextUri,
   hemeraToolNamed,
   internalText,
@@ -74,12 +73,13 @@ import { Commands } from '../commands/service.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
-import { Sessions, type NativeRecord, type ThreadWrite } from '../sessions.ts'
+import { Sessions, type NativeRecord, type OptionChoice, type ThreadWrite } from '../sessions.ts'
 import { type SpecDelivery, briefFor, briefed, definedBy } from '../specs/brief.ts'
 import { Database } from '../storage/database.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { ToolPermissions } from '../tools/permissions.ts'
 import { ToolServer } from '../tools/server.ts'
+import { Variables } from '../workspaces/variables.ts'
 
 /** How long an agent is given to answer `session/cancel` before its process tree is stopped. */
 export const CANCEL_GRACE = Duration.seconds(10)
@@ -554,6 +554,8 @@ export const runtimeLayer = Layer.effect(
     const permissions = yield* ToolPermissions
     const heldWords = yield* HeldWords
     const pool = yield* Pool
+    // The variables of a Session's Workspace, which its agent is started with (D8-06).
+    const variables = yield* Variables
     // Where each agent's bare means is written: a directory of Hemera's, never the user's (D6-09).
     const directories = yield* AgentDirectories
     const database = yield* Database
@@ -1007,21 +1009,26 @@ export const runtimeLayer = Layer.effect(
         return project.mainPath
       })
 
-    /** The path of the Project a Session belongs to, which is where its agent is run. */
-    const projectPath = (session: Session): Effect.Effect<string, AgentRuntimeError> =>
-      mainPathOf(session.projectId)
+    /**
+     * The path of the Session's Workspace, which is where its agent is run (D8-08): the Workspace
+     * it chose, or `main` when it chose none.
+     */
+    const workspacePathOf = (session: Session): Effect.Effect<string, AgentRuntimeError> =>
+      attempt('reading the Workspace', sessions.workspace(session.id)).pipe(
+        Effect.map((workspace) => workspace.path),
+      )
 
-    /** Where an agent runs for this Session: where it ran before, or the Project's own path. */
+    /** Where an agent runs for this Session: where it ran before, or its Workspace's path. */
     const workingDirectory = (
       session: Session,
       native: NativeRecord,
     ): Effect.Effect<string, AgentRuntimeError> =>
       Effect.gen(function* () {
-        const project = yield* projectPath(session)
+        const workspace = yield* workspacePathOf(session)
         // A directory that is gone is not a place to run an agent in, and a Session does not
-        // stop being one because its folder was moved: the Project's own path takes it in.
+        // stop being one because its folder was moved: the Workspace's path takes it in.
         if (native.cwd !== null && existsSync(native.cwd)) return native.cwd
-        return project
+        return workspace
       })
 
     /** What the supervisor is told to start, with only what the resolve named. */
@@ -1029,14 +1036,21 @@ export const runtimeLayer = Layer.effect(
       resolved: ResolvedAgent,
       cwd: string,
       bare: Readonly<Record<string, string>> = {},
+      given: Readonly<Record<string, string>> = {},
     ) => {
       // Built in statements rather than by spreading a conditional empty object, the way the
       // supervisor builds what it hands the host: an env that is not there is not a property.
       const options: AgentStartOptions = { cwd }
-      // What the bare means sets is on top of what the resolve named: the agent's own
-      // configuration directory is Hemera's, whatever the machine says it is (D6-09).
-      if (resolved.env !== undefined || Object.keys(bare).length > 0) {
-        options.env = { ...resolved.env, ...bare }
+      // The machine's environment as the resolve named it, then the variables of the Session's
+      // Workspace — the Project's overridden by the Workspace's (D8-06) — and what the bare means
+      // sets on top of all of it: the agent's own configuration directory is Hemera's, whatever
+      // the machine or a variable says it is, or the agent would leave its bare mode (D6-09).
+      if (
+        resolved.env !== undefined ||
+        Object.keys(given).length > 0 ||
+        Object.keys(bare).length > 0
+      ) {
+        options.env = { ...resolved.env, ...given, ...bare }
       }
       if (resolved.source === 'bundled') options.script = true
       return options
@@ -1456,7 +1470,10 @@ export const runtimeLayer = Layer.effect(
         if (held !== undefined && held.death === null) return held
         if (held !== undefined) live.delete(sessionId)
 
-        const { session, native } = yield* attempt('reading the Session', sessions.one(sessionId))
+        const { session, native, choices } = yield* attempt(
+          'reading the Session',
+          sessions.one(sessionId),
+        )
         const provider: AgentProvider | null = session.provider
         if (provider === null) {
           return yield* Effect.fail(
@@ -1476,7 +1493,8 @@ export const runtimeLayer = Layer.effect(
         const mode = bareModeOf(resolved.adapter, globalThis.process.platform)
         const bare = yield* bareOptionsOf(resolved.adapter, globalThis.process.platform, {
           ownerDirectory: directory,
-          base: CONTEXT_BASE,
+          // The base as the Context composes it for this Session: it names its Workspace (D8-08).
+          base: yield* attempt('composing the context', context.base(sessionId)),
           own: resolved.own,
         }).pipe(
           Effect.mapError(
@@ -1488,9 +1506,19 @@ export const runtimeLayer = Layer.effect(
           ),
         )
         yield* attempt('preparing the agent', writtenFiles(directory, bare.files))
+        // What Hemera gives the agent of this Workspace, as it gives a run of it (D8-06).
+        const workspace = yield* attempt('reading the Workspace', sessions.workspace(sessionId))
+        const given = yield* attempt(
+          'reading the variables',
+          variables.givenFor(session.projectId, workspace.id),
+        )
         const process = yield* attempt(
           'starting the agent',
-          supervisor.start(resolved.command, resolved.args, startOptions(resolved, cwd, bare.env)),
+          supervisor.start(
+            resolved.command,
+            resolved.args,
+            startOptions(resolved, cwd, bare.env, given),
+          ),
         )
 
         // The token is minted for this process and for this Session, and it is the whole of what
@@ -1584,17 +1612,32 @@ export const runtimeLayer = Layer.effect(
 
         // The Workspace's instructions are watched for as long as this agent holds the Session:
         // a change is handed over at the next safe point rather than at the next prompt (D6-08).
-        const root = yield* projectPath(session)
+        const root = yield* workspacePathOf(session)
         watched(sessionId, root)
 
-        // A Session opened for the first time starts on the choices its composer made before it
-        // existed: the model and the mode were picked on the Home's probe, and the session the
-        // agent has just opened knows nothing of them until it is told (D5-17).
-        if (fresh) {
-          for (const [optionId, value] of chosen.get(`${session.projectId}:${provider}`) ?? []) {
-            yield* attempt('choosing an option', connection.setOption(optionId, value)).pipe(
-              // A choice the agent will not take is not a Session that cannot start: it opens on
-              // what the agent is on, and the composer shows what that is.
+        // The agent is put back on what the Session chose, whatever started it this time: an
+        // agent keeps its model, its effort and its mode for as long as its process lives, and a
+        // session it resumes, loads or opens again after an idle release, a define brief, a death
+        // or a restart of the application is on the agent's own defaults (issue #133).
+        //
+        // A Session opened for the first time has chosen nothing yet, and starts on the choices
+        // its composer made before it existed: the model and the mode were picked on the Home's
+        // probe, and the session the agent has just opened knows nothing of them until it is told
+        // (D5-17). Those become the Session's own, so the next start puts them back too.
+        const inherited = fresh && choices.length === 0
+        const put: readonly OptionChoice[] = inherited
+          ? [...(chosen.get(`${session.projectId}:${provider}`) ?? [])].map(
+              ([optionId, value]) => ({ optionId, value }),
+            )
+          : choices
+        for (const choice of put) {
+          const set = yield* Effect.result(
+            attempt('choosing an option', connection.setOption(choice.optionId, choice.value)),
+          )
+          // A choice the agent will not take is not a Session that cannot start: it opens on
+          // what the agent is on, and the composer shows what that is.
+          if (Result.isSuccess(set) && inherited) {
+            yield* attempt('recording a choice', sessions.recordChoice(sessionId, choice)).pipe(
               Effect.ignore,
             )
           }
@@ -2370,6 +2413,12 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
         yield* attempt('choosing an option', held.connection.setOption(optionId, value))
+        // Written down once the agent took it: the next start of this Session's agent is put back
+        // on it, which no agent does by itself (issue #133).
+        yield* attempt(
+          'recording a choice',
+          sessions.recordChoice(sessionId, { optionId, value }),
+        ).pipe(Effect.ignore)
       })
 
     const prompt = (sessionId: string, text: string) =>

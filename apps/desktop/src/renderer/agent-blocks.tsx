@@ -2,6 +2,7 @@ import { hemeraToolNamed } from '@hemera/core'
 import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
   AgentText,
+  CommandProposal,
   CommandRun,
   CreateSpecProposal,
   DecisionSummary,
@@ -31,8 +32,10 @@ import type { ReactNode } from 'react'
 import { z } from 'zod'
 
 import {
+  commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
+  elsewhereOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
   hemeraToolLabelOf,
@@ -314,6 +317,8 @@ export interface AgentContext {
   onDecide: (toolCallId: string, option: PermissionOption) => void
   /** The runs of the Session as they were last pushed: what a run's block is drawn from (D6-12). */
   runs: readonly Run[]
+  /** The name of the Session's Workspace, which a run elsewhere is told apart from (D8-08). */
+  workspace: string | undefined
   /** Opens the address a run published, in the browser: this window is not one. */
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
@@ -324,6 +329,12 @@ export interface AgentContext {
    * 2026).
    */
   reportedCall: (toolCallId: string) => SessionEntry | undefined
+  /** Writes a command the agent proposed into the catalogue: the human's click (D8-11). */
+  onAcceptProposal: (proposalId: string) => void
+  /** Leaves it out of the catalogue, and says so on the proposal. */
+  onDeclineProposal: (proposalId: string) => void
+  /** Keeps a one-off run in the catalogue, which is the human's to do (D8-11). */
+  onAddToCatalogue: (run: Run) => void
   /** What the Spec entries of the thread are drawn with. */
   spec: SpecContext
 }
@@ -582,11 +593,31 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const drawn = commandRunOf(entry, context.runs)
     if (drawn === null) return null
     const { runId, ...shown } = drawn
+    // What is kept is the run as it ran — its line and its folder — so only a run the window has
+    // heard of can be added; the block offers it on a one-off alone.
+    const heard = context.runs.find((one) => one.id === runId)
     return (
       <CommandRun
         {...shown}
         onOpenUrl={context.onOpenUrl}
         onStop={runId === null ? undefined : () => context.onStopRun(runId)}
+        workspace={heard === undefined ? undefined : elsewhereOf(heard, context.workspace)}
+        onAddToCatalogue={heard === undefined ? undefined : () => context.onAddToCatalogue(heard)}
+      />
+    )
+  }
+
+  if (entry.kind === 'command_proposal') {
+    // A command the agent proposes, and nothing more until a human decides (D8-11): the decision
+    // comes back as this same entry in its outcome, which draws the block again without buttons.
+    const drawn = commandProposalOf(entry)
+    if (drawn === null) return null
+    const { proposalId, ...shown } = drawn
+    return (
+      <CommandProposal
+        {...shown}
+        onAccept={() => context.onAcceptProposal(proposalId)}
+        onDecline={() => context.onDeclineProposal(proposalId)}
       />
     )
   }

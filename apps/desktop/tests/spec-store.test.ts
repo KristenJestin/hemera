@@ -9,9 +9,10 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import type { EditBuffer, EngineEvent, SpecSnapshot } from '@hemera/ipc'
+import type { EditBuffer, EngineEvent, SpecLaunches, SpecSnapshot } from '@hemera/ipc'
 import {
   answerQuestion,
+  askForBuild,
   closeSpec,
   createSpec,
   discardMine,
@@ -21,9 +22,11 @@ import {
   openSpec,
   rework,
   saveSection,
+  retryBuild,
   saveStory,
   selectRevision,
   specSnapshot,
+  startBuild,
   takeOver,
 } from '#renderer/spec-store.ts'
 
@@ -100,12 +103,30 @@ let told: string[] = []
 
 let stop: () => void = () => undefined
 
+/**
+ * A launch as the engine answers it: the Workspace the Spec is set on, the ones a build may be
+ * started in, where the launch stands, and the step its Workspace runs while it waits (D8-12).
+ */
+function launches(over: Partial<SpecLaunches> = {}): SpecLaunches {
+  return {
+    launch: null,
+    workspace: null,
+    workspaces: [
+      { id: 'main', name: 'main' },
+      { id: 'w-1', name: 'csv-invoice' },
+    ],
+    step: null,
+    ...over,
+  }
+}
+
 /** The answers of an open Spec whose `scope` is at `version`, with the buffers kept. */
 function reads(version: number, buffers: EditBuffer[] = [], writer = 'writer'): void {
   answers.set('specs.read', snapshot(version, writer))
   answers.set('specs.revisions', [snapshot(version).revision])
   answers.set('specs.buffers.read', buffers)
   answers.set('journal.read', { entries: [], nextBefore: null })
+  answers.set('launches.forSpec', launches())
 }
 
 const names = (): string[] => asked.map((one) => one.name)
@@ -163,6 +184,7 @@ describe('A Spec is opened with everything the panel draws', () => {
 
     expect(names().toSorted()).toEqual([
       'journal.read',
+      'launches.forSpec',
       'specs.buffers.read',
       'specs.read',
       'specs.revisions',
@@ -556,5 +578,104 @@ describe('An older read of the Spec never replaces a newer one', () => {
     await settled()
 
     expect(specSnapshot().snapshot?.spec.contentVersion).toBe(4)
+  })
+})
+
+describe('The build of a frozen Spec is read and reached', () => {
+  const held = {
+    id: 'l-1',
+    specId: 'spec-7',
+    revisionId: 'rev-1',
+    workspaceId: 'w-1',
+    state: 'waiting',
+    sessionId: null,
+    detail: null,
+    createdAt: '2026-09-25T09:00:00.000Z',
+    updatedAt: '2026-09-25T09:00:00.000Z',
+  } as const
+
+  test('its launch, the Workspace it is set on and the ones a build may use are read whole', async () => {
+    reads(2)
+    answers.set(
+      'launches.forSpec',
+      launches({
+        launch: { ...held },
+        workspace: { id: 'w-1', name: 'csv-invoice' },
+        step: 'install',
+      }),
+    )
+
+    await openSpec('spec-7')
+
+    expect(argumentOf('launches.forSpec')).toEqual({ specId: 'spec-7' })
+    expect(specSnapshot().launches?.launch?.state).toBe('waiting')
+    // The step belongs to the Workspace and is read beside the launch, not inside it (D8-05).
+    expect(specSnapshot().launches?.step).toBe('install')
+    expect(specSnapshot().launches?.workspace?.name).toBe('csv-invoice')
+    expect(specSnapshot().launches?.workspaces.map((one) => one.id)).toEqual(['main', 'w-1'])
+  })
+
+  test('a change to the launch of the Spec on screen reads the panel again', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    asked = []
+
+    push({ event: 'launch.changed', specId: 'spec-7', projectId: 'atlas' })
+    await settled()
+
+    expect(names()).toContain('launches.forSpec')
+    expect(names()).toContain('specs.read')
+  })
+
+  test('a change to another Spec leaves this one where it is', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    asked = []
+
+    push({ event: 'launch.changed', specId: 'spec-9', projectId: 'atlas' })
+    await settled()
+
+    expect(names()).toEqual([])
+  })
+
+  test('a build is asked for in a named Workspace, then the panel is read again', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    asked = []
+
+    expect(await askForBuild('w-1')).toBe(true)
+
+    expect(argumentOf('launches.request')).toEqual({ specId: 'spec-7', workspaceId: 'w-1' })
+    expect(names()).toContain('launches.forSpec')
+  })
+
+  test('starting the build asks for the Workspace the Spec is set on', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    asked = []
+
+    expect(await startBuild()).toBe(true)
+
+    expect(argumentOf('launches.start')).toEqual({ specId: 'spec-7' })
+  })
+
+  test('retrying starts the launch that is on screen again', async () => {
+    reads(2)
+    answers.set('launches.forSpec', launches({ launch: { ...held, state: 'failed' } }))
+    await openSpec('spec-7')
+    asked = []
+
+    expect(await retryBuild()).toBe(true)
+
+    expect(argumentOf('launches.retry')).toEqual({ launchId: 'l-1' })
+  })
+
+  test('a retry with no launch on screen asks nothing', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    asked = []
+
+    expect(await retryBuild()).toBe(false)
+    expect(names()).toEqual([])
   })
 })

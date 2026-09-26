@@ -365,4 +365,13 @@ export const SPEC_REQUESTS = {
     arguments: z.object({ specId: z.string(), name: sectionNameSchema }),
     response: z.array(editBufferSchema),
   },
+  /**
+   * Gives the Spec a Workspace without asking for a build in it (D8-12): what "Prepare a Workspace
+   * only" writes, and where the next launch proposes itself from. Answered as every Spec write is,
+   * with the snapshot it leaves.
+   */
+  'specs.useWorkspace': {
+    arguments: z.object({ specId: z.string(), workspaceId: z.string() }),
+    response: specSnapshotSchema,
+  },
 } as const

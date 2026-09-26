@@ -138,12 +138,21 @@ function labelOf(entry: JournalEntry): string {
   }
 }
 
+/**
+ * The entity a line is drawn under. The Journal tells a Project, a Session, a Spec and the Profile
+ * apart; a Workspace, a command and a launch (D8-16) belong to their Project, and are drawn under
+ * it.
+ */
+function drawnKind(kind: JournalEntry['entityKind']): JournalLine['kind'] {
+  return kind === 'session' || kind === 'profile' || kind === 'spec' ? kind : 'project'
+}
+
 /** One entry, as the Journal and the Activity frame draw one. */
 export function lineOf(entry: JournalEntry, now = new Date()): JournalLine {
   const at = new Date(entry.occurredAt)
   return {
     sequence: entry.sequence,
-    kind: entry.entityKind,
+    kind: drawnKind(entry.entityKind),
     label: labelOf(entry),
     day: dayOf(at, now),
     time: at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),

@@ -33,6 +33,7 @@ export const TOOL_NAMES = [
   'commands_run',
   'commands_output',
   'commands_stop',
+  'commands_propose',
   'project_get',
   'session_get',
   'spec_read',
@@ -57,6 +58,7 @@ export type ToolMark =
   | 'stop-command'
   | 'list-commands'
   | 'command-output'
+  | 'propose-command'
   | 'project'
   | 'session'
   | 'read-spec'
@@ -85,6 +87,7 @@ export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
   commands_stop: { label: 'Stop command', mark: 'stop-command' },
   commands_list: { label: 'List commands', mark: 'list-commands' },
   commands_output: { label: 'Command output', mark: 'command-output' },
+  commands_propose: { label: 'Propose command', mark: 'propose-command' },
   project_get: { label: 'Project', mark: 'project' },
   session_get: { label: 'Session', mark: 'session' },
   spec_read: { label: 'Read Spec', mark: 'read-spec' },
@@ -151,9 +154,10 @@ const READ_ONLY_CODE_TOOLS = [
  * The tools of a Session, by its mission.
  *
  * A `free` Session is offered the code tools, and of the Spec's only `spec_propose`: it has no
- * Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session produces a Spec and not code (D7-14): it reads the Workspace, never writes
- * to it nor runs anything, and writes its Spec through the three Spec tools. `build` has no
- * Session to offer anything to yet.
+ * Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session
+ * produces a Spec and not code (D7-14): it reads the Workspace, never writes to it nor runs
+ * anything, and writes its Spec through the three Spec tools. A `build` Session is offered what a
+ * `free` one is until its own set is written: an agent with no tool at all is not a build.
  */
 export function offeredTools(mission: Mission): readonly ToolName[] {
   switch (mission) {
@@ -162,7 +166,7 @@ export function offeredTools(mission: Mission): readonly ToolName[] {
     case 'define':
       return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
     case 'build':
-      return []
+      return TOOL_NAMES.filter((name) => name !== 'spec_read' && name !== 'spec_write')
   }
 }
 

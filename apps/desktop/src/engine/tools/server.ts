@@ -149,7 +149,7 @@ export const toolServerLayer: Layer.Layer<ToolServer, never, ToolAccess | ToolCa
        * The handler asks for a fresh server per request and connects it to that request's own
        * transport: a server kept and handed to a second request would be connected a second time,
        * and the answer of a call still waiting — on the human, on a command — would go to the
-       * transport of the call that came after it. Building one is registering eleven tools, which
+       * transport of the call that came after it. Building one is registering twelve tools, which
        * is nothing next to the call itself.
        *
        * Only the tools the Session was offered are registered (D6-01, D6-03): what an agent lists

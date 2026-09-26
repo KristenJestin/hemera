@@ -19,7 +19,7 @@ import { eq, sql } from 'drizzle-orm'
 import { Data, Effect } from 'effect'
 
 import type { NewEvent } from '../journal.ts'
-import { UnknownSessionError, sessionOf } from '../sessions.ts'
+import { SESSION_ROW, UnknownSessionError, sessionOf } from '../sessions.ts'
 import type { EngineTransaction } from '../storage/database.ts'
 import { sessions, specs } from '../storage/schema.ts'
 import { failed, now, specEvent } from './snapshot.ts'
@@ -37,7 +37,7 @@ export class SpecAnchorRefusedError extends Data.TaggedError('SpecAnchorRefusedE
 export function sessionRow(transaction: EngineTransaction, sessionId: string) {
   return Effect.gen(function* () {
     const found = yield* transaction
-      .select()
+      .select(SESSION_ROW)
       .from(sessions)
       .where(eq(sessions.id, sessionId))
       .pipe(Effect.mapError(failed('reading the Session')))

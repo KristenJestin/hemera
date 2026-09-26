@@ -44,6 +44,7 @@ import {
   sessionsSnapshot,
   writeMessage,
 } from '#renderer/sessions-store.ts'
+import { listenToTools, runsOf, toolsSnapshot } from '#renderer/tools-store.ts'
 
 /** One Session, as the engine answers with one. */
 function session(id: string, version = 1): Session {
@@ -55,6 +56,8 @@ function session(id: string, version = 1): Session {
     provider: 'claude',
     model: null,
     nativeState: 'none',
+    workspaceId: null,
+    workspaceFixed: false,
     mission: 'free',
     specId: null,
     archivedAt: null,
@@ -496,7 +499,12 @@ describe('Le titre proposé paraît sans rechargement', () => {
     })
     await readSessions('atlas')
 
-    expect(asked.map((one) => one.name)).toEqual(['sessions.list', 'sessions.list'])
+    // Opening the Project reads its Workspaces too, which the composer's pill offers (D8-08).
+    expect(asked.map((one) => one.name)).toEqual([
+      'workspaces.list',
+      'sessions.list',
+      'sessions.list',
+    ])
     expect(sessionsSnapshot().sessions.map((one) => one.id)).toEqual(['session-2', 'session-1'])
     // The list alone: a read that dropped the thread would close a page nobody asked to close.
     expect(sessionsSnapshot().thread).toEqual([])
@@ -763,7 +771,7 @@ describe('A new model lands the effort on its recommended level', () => {
 
 describe('The agent starts the app and the user opens it', () => {
   /** A run of a command, as the thread holds its entry. */
-  function aRun(id: string, name: string, kind: 'app' | 'check', state: string): SessionEntry {
+  function aRun(id: string, name: string, type: 'serve' | 'test', state: string): SessionEntry {
     return {
       ...reported(id, 'command_run', name, state, null),
       role: 'hemera',
@@ -771,7 +779,7 @@ describe('The agent starts the app and the user opens it', () => {
         runId: `run-${id}`,
         name,
         line: `pnpm ${name}`,
-        kind,
+        type,
         state,
         cwd: '/home/ana/atlas',
         url: null,
@@ -784,11 +792,11 @@ describe('The agent starts the app and the user opens it', () => {
   test('a check Hemera is running for the turn is what the row names', () => {
     const said = entry('e1', 'user', 'Check it')
     const call = reported('e2', 'tool_call', 'mcp__hemera__commands_run', 'in_progress')
-    const check = aRun('e3', 'check', 'check', 'running')
+    const check = aRun('e3', 'check', 'test', 'running')
 
     expect(activityOf([said, call, check])).toEqual({ state: 'running', detail: 'Running check' })
     // Once it has ended, the row goes back to what the turn is doing.
-    const ended = aRun('e3', 'check', 'check', 'exited')
+    const ended = aRun('e3', 'check', 'test', 'exited')
     expect(activityOf([said, call, ended])).toEqual({
       state: 'running',
       detail: 'mcp__hemera__commands_run',
@@ -797,9 +805,53 @@ describe('The agent starts the app and the user opens it', () => {
 
   test('an app left running is not what the turn is doing', () => {
     const said = entry('e1', 'user', 'Start the app')
-    const app = aRun('e2', 'dev', 'app', 'running')
+    const app = aRun('e2', 'dev', 'serve', 'running')
     const answer = reported('e3', 'message', 'It is up.')
 
     expect(activityOf([said, app, answer], 'e3').state).toBe('streaming')
+  })
+})
+
+describe("A run no Session asked for is in no Session's panel", () => {
+  test("a preparation's run is heard without being kept for a Session (Decided 11)", () => {
+    // The tools store listens in place of the agent store: the stand-in bridge holds one listener.
+    const stopTools = listenToTools()
+    const before = toolsSnapshot()
+    push({
+      event: 'run',
+      sessionId: null,
+      run: {
+        id: 'run-1',
+        projectId: 'atlas',
+        sessionId: null,
+        commandId: 'install',
+        name: 'install',
+        line: 'pnpm install',
+        type: 'configure',
+        scope: 'workspace',
+        cwd: '/home/ana/workspaces/login-form',
+        folder: null,
+        workspaceId: 'login-form',
+        workspaceName: 'login-form',
+        startedBy: 'user',
+        environment: {},
+        state: 'exited',
+        pid: null,
+        url: null,
+        readyAt: null,
+        readiness: null,
+        portConflict: null,
+        heldAgainst: [],
+        exitCode: 1,
+        output: 'ERR_PNPM_NO_LOCKFILE',
+        dropped: 0,
+        startedAt: '2026-09-24T08:00:00.000Z',
+        endedAt: '2026-09-24T08:00:01.000Z',
+        joined: false,
+      },
+    })
+    expect(toolsSnapshot()).toBe(before)
+    expect(runsOf(null)).toEqual([])
+    stopTools()
   })
 })

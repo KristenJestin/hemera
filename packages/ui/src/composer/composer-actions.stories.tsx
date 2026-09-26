@@ -12,14 +12,18 @@ import { ComposerActions } from './composer-actions.tsx'
  * `New Spec` is the Home's and nobody else's since the trial of 22 September 2026: a Spec is
  * made from the question that starts a Session, and a control drawn and disabled in every place
  * it appears says nothing about where it belongs.
+ *
+ * What its menus put on the field arrives and leaves small, on the `arrival` preset: a
+ * `MARK_SCALE`, which is a thing landing on the field — and no longer a press, since nothing in
+ * the catalogue gives by a share of itself (issue #108).
  */
 const meta = {
   title: 'Blocks/Composer/ComposerActions',
   component: ComposerActions,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
-    workspaces: ['hemera'],
+    workspaces: [{ name: 'hemera' }],
     workspace: 'hemera',
     onWorkspaceChange: fn(),
     ready: true,
@@ -33,6 +37,11 @@ const meta = {
     ready: { control: 'boolean', description: 'Whether there is anything to send.' },
     sending: { control: 'boolean', description: 'Whether a write is in flight.' },
     running: { control: 'boolean', description: 'Whether an agent turn is running.' },
+    workspaceFixed: {
+      control: 'boolean',
+      description: 'Whether the agent has started, which fixes the Workspace.',
+      table: { defaultValue: { summary: 'false' } },
+    },
     spec: {
       control: 'boolean',
       description: 'Whether the row offers a Spec: the Home does, a Session does not.',

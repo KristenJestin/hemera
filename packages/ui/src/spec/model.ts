@@ -11,8 +11,11 @@
 /** The three contracts a Spec can be written under (core.md, "Spec types"). */
 export type SpecType = 'feature' | 'bug' | 'maintenance'
 
-/** The two statuses this lot writes; the others are declared by the domain and never drawn yet. */
-export type SpecStatus = 'draft' | 'ready'
+/**
+ * The statuses a Spec is drawn with: core's own, all four (D8-13 draws the two a build makes of a
+ * frozen Spec — `in_progress` once its build has started, `cancelled` when one was taken back).
+ */
+export type SpecStatus = 'draft' | 'ready' | 'in_progress' | 'cancelled'
 
 /** The four phases of the `define` protocol, in their order; `prototype` is not drawn in v1. */
 export type PhaseName = 'shape' | 'plan' | 'decompose' | 'prototype'
@@ -263,6 +266,37 @@ export interface SpecView {
    */
   replacedBy?: number | undefined
 }
+
+/**
+ * Where a launch of this Spec stands, in the words the domain uses for it (D8-13): its Workspace
+ * still being prepared, the agent being started, started, refused with the cause it gave, or
+ * cancelled by the Rework that took the Spec back. These are the names of `LAUNCH_STATES`, read
+ * here as the panel says them: the design system imports nothing of Hemera, and the application
+ * turns the one into the other.
+ */
+export type LaunchState = 'waiting' | 'starting' | 'started' | 'failed' | 'cancelled'
+
+/** A Workspace a build may be started in: the `main` one, or one of the Project's own (D8-12). */
+export interface LaunchWorkspace {
+  id: string
+  name: string
+}
+
+/** What a launch says of itself, and the one thing it offers from where it stands (D8-13). */
+export type LaunchView =
+  | {
+      state: 'waiting'
+      /** The preparation step running, as the Workspace names it (D8-05). */
+      step?: string | undefined
+    }
+  | { state: 'starting' }
+  | { state: 'started' }
+  | {
+      state: 'failed'
+      /** What the start was refused with, in the engine's own words. */
+      cause: string
+    }
+  | { state: 'cancelled' }
 
 /** How each section is named in the document. */
 export const SECTION_TITLES: Record<SectionName, string> = {

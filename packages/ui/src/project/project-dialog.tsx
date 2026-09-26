@@ -34,7 +34,13 @@ const FORM = 'flex flex-col gap-4'
 const REFUSAL = 'text-sm text-destructive-muted-foreground'
 
 /** What a Project starts as before anything has been typed into it. */
-export const EMPTY_DRAFT: ProjectDraft = { name: '', tone: 'primary', mainPath: '' }
+export const EMPTY_DRAFT: ProjectDraft = {
+  name: '',
+  tone: 'primary',
+  mainPath: '',
+  workspacesRoot: null,
+  branchPrefix: null,
+}
 
 export interface ProjectDialogProps {
   open: boolean

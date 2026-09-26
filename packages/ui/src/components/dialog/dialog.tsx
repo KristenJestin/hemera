@@ -24,21 +24,29 @@ const POPUP =
   'fixed inset-0 m-auto flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-lg outline-none translate-y-0 scale-100 popup-motion data-starting-style:translate-y-4 data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:translate-y-4 data-ending-style:scale-95 data-ending-style:opacity-0'
 
 /**
- * How wide the dialog is. `md` is a question and its answer, as tall as what it says; `wide` is
- * a dialog that holds a page of its own — the details of a Session — and is `dialog-wide` tall
- * whatever it holds: a page of tabs that took the height of each tab would change size under the
- * hand that switches them. It keeps a margin above and below, and what it holds scrolls inside
- * it while the title and the close button stay where they are.
+ * How wide the dialog is, and how tall it may be. `md` is a question and its answer, `wide` a
+ * dialog that holds a page of its own — the details of a Session. Neither is taller than what it
+ * holds, and neither is taller than `dialog-wide`: past that only the body scrolls, so the
+ * buttons stay under it and a short dialog has no hole above them. What it holds scrolls while
+ * the title and the close button stay where they are.
  */
 export type DialogSize = 'md' | 'wide'
 
 const SIZE: Record<DialogSize, string> = {
-  md: 'h-fit max-w-md',
-  wide: 'h-dialog-wide max-w-3xl',
+  md: 'h-fit max-h-dialog-wide max-w-md',
+  wide: 'h-fit max-h-dialog-wide max-w-3xl',
 }
 
-/** The room the content of a wide dialog scrolls in, with space left for its focus rings. */
-const SCROLL = '-m-1 min-h-0 overflow-y-auto p-1'
+/**
+ * The body: the only part that scrolls, and the room a control moves in. It carries a little
+ * more than the lift of a control under the hand — one per cent of its width, and this is the
+ * widest body a dialog may have — so a hover never widens what holds it. Nothing is ever
+ * scrolled sideways either: what a dialog is asked to hold wider than itself is cut, not slid.
+ */
+const BODY = '-mx-2 -my-1 min-h-0 overflow-x-clip overflow-y-auto px-2 py-1'
+
+/** The footer: the buttons, at the same place in every dialog, under a rule that parts it. */
+const FOOTER = 'flex shrink-0 justify-end gap-2 border-t border-border pt-4'
 
 export interface DialogProps {
   title: string
@@ -101,8 +109,8 @@ export function Dialog({
               }
             />
           </div>
-          {size === 'wide' ? <div className={SCROLL}>{children}</div> : children}
-          {actions !== undefined && <div className="flex justify-end gap-2">{actions}</div>}
+          {children !== undefined && <div className={BODY}>{children}</div>}
+          {actions !== undefined && <div className={FOOTER}>{actions}</div>}
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>

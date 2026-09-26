@@ -29,6 +29,7 @@ import { z } from 'zod'
 
 import {
   AGENTS_FILE,
+  type CommandType,
   DELIVERY_MARKER,
   READ_PAGE_BYTES,
   SEARCH_MATCH_LIMIT,
@@ -71,8 +72,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dataFolder, { recursive: true, force: true })
-  rmSync(workspace, { recursive: true, force: true })
+  // A run stopped by tree may still be closing when the test ends: Windows keeps its folder until then.
+  rmSync(dataFolder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  rmSync(workspace, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 })
 
 /** What the runtime keeps of a tool call the agent streamed: its input and its output, as text. */
@@ -126,12 +128,27 @@ const inCatalogue = (
   projectId: string,
   name: string,
   line: string,
-  kind: 'app' | 'check' | 'utility',
-  folder: string | null = null,
+  type: CommandType,
+  folderBase: string | null = null,
 ) =>
   Effect.gen(function* () {
     const commands = yield* Commands
-    return yield* commands.save({ projectId, name, line, kind, folder }, false)
+    return yield* commands.save(
+      {
+        projectId,
+        name,
+        line,
+        lineWindows: null,
+        lineLinux: null,
+        type,
+        folderBase,
+        folder: null,
+        scope: 'workspace',
+        portless: false,
+        portlessName: null,
+      },
+      false,
+    )
   })
 
 /** The requests the human was asked in a thread by Hemera's tools, pending or answered. */
@@ -223,7 +240,7 @@ describe('The agent starts the app and the user opens it', () => {
         const runtime = yield* AgentRuntime
         const commands = yield* Commands
         const session = yield* aSessionOn(workspace, 'claude')
-        yield* inCatalogue(session.projectId, 'dev', PUBLISHES_AN_ADDRESS, 'app')
+        yield* inCatalogue(session.projectId, 'dev', PUBLISHES_AN_ADDRESS, 'serve')
         yield* runtime.prompt(session.id, 'start the app')
         // The panel shows it running, with its address once the output has named one.
         const panel = yield* until(panelOf(session.id), (read) => read.running[0]?.url != null)
@@ -260,7 +277,7 @@ describe('A running app is not started twice', () => {
         const runtime = yield* AgentRuntime
         const commands = yield* Commands
         const session = yield* aSessionOn(workspace, 'claude')
-        const dev = yield* inCatalogue(session.projectId, 'dev', PUBLISHES_AN_ADDRESS, 'app')
+        const dev = yield* inCatalogue(session.projectId, 'dev', PUBLISHES_AN_ADDRESS, 'serve')
         yield* runtime.prompt(session.id, 'start the app')
         yield* runtime.prompt(session.id, 'start it again')
         // The user presses Run in the panel, on the same command.
@@ -270,8 +287,17 @@ describe('A running app is not started twice', () => {
           commandId: dev.id,
           name: dev.name,
           line: dev.line,
-          kind: dev.kind,
+          lineWindows: null,
+          lineLinux: null,
+          type: dev.type,
+          scope: 'workspace',
+          portless: false,
+          portlessName: null,
+          folder: null,
           cwd: workspace,
+          workspaceId: null,
+          workspaceName: 'main',
+          environment: {},
           startedBy: 'user',
         })
         return { fromPanel, panel: yield* panelOf(session.id) }
@@ -334,7 +360,7 @@ describe('Nothing is left running', () => {
         const runtime = yield* AgentRuntime
         const commands = yield* Commands
         const session = yield* aSessionOn(workspace, 'claude')
-        yield* inCatalogue(session.projectId, 'tree', STARTS_A_TREE, 'app')
+        yield* inCatalogue(session.projectId, 'tree', STARTS_A_TREE, 'serve')
         yield* runtime.prompt(session.id, 'start it')
         const panel = yield* until(panelOf(session.id), (read) => read.running[0]?.url != null)
         const run = panel.running[0]
@@ -362,7 +388,7 @@ describe('Nothing is left running', () => {
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime
         const session = yield* aSessionOn(workspace, 'claude')
-        yield* inCatalogue(session.projectId, 'tree', STARTS_A_TREE, 'app')
+        yield* inCatalogue(session.projectId, 'tree', STARTS_A_TREE, 'serve')
         yield* runtime.prompt(session.id, 'start it')
         const panel = yield* until(panelOf(session.id), (read) => read.running[0]?.url != null)
         const run = panel.running[0]
@@ -883,7 +909,7 @@ describe('The same write twice has one effect', () => {
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime
         const session = yield* aSessionOn(workspace, 'claude')
-        yield* inCatalogue(session.projectId, 'count', counts, 'check')
+        yield* inCatalogue(session.projectId, 'count', counts, 'test')
         yield* runtime.prompt(session.id, 'write, edit and run')
         return yield* panelOf(session.id)
       }),
@@ -949,7 +975,7 @@ describe('A search is bounded and says so', () => {
 })
 
 describe('The catalogue is edited and read', () => {
-  test('a command in a repository of the Project is listed to the agent with its kind and folder', async () => {
+  test('a command in a repository of the Project is listed to the agent with its type and folder', async () => {
     mkdirSync(join(workspace, 'api'))
     const agent = fakeAgent({ steps: [{ does: 'uses', call: 'commands_list', arguments: {} }] })
 
@@ -961,18 +987,18 @@ describe('The catalogue is edited and read', () => {
         const session = yield* aSessionOn(workspace, 'claude')
         const project = (yield* projects.list()).find((one) => one.id === session.projectId)
         yield* projects.addRepository(session.projectId, project?.version ?? 0, 'api')
-        yield* inCatalogue(session.projectId, 'test-api', 'pnpm test', 'check', 'api')
+        yield* inCatalogue(session.projectId, 'test-api', 'pnpm test', 'test', 'api')
         yield* runtime.prompt(session.id, 'what can I run?')
         return yield* commands.list(session.projectId)
       }),
     )
 
     // What the panel offers is the catalogue the user edited.
-    expect(seen.map((one) => [one.name, one.kind, one.folder])).toEqual([
-      ['test-api', 'check', 'api'],
+    expect(seen.map((one) => [one.name, one.type, one.folderBase, one.folder])).toEqual([
+      ['test-api', 'test', 'api', null],
     ])
-    // And the agent reads the same command, with its kind and the folder it runs in.
-    expect(agent.answers.used[0]?.text).toContain('test-api  check  in api  pnpm test')
+    // And the agent reads the same command, with its type and the folder it runs in.
+    expect(agent.answers.used[0]?.text).toContain('test-api  test  in ./api  pnpm test')
   })
 })
 
@@ -989,8 +1015,14 @@ describe('A command saved in the settings is listed to the agent at once', () =>
           projectId: session.projectId,
           name: 'check',
           line: 'bun run check',
-          kind: 'check',
+          lineWindows: null,
+          lineLinux: null,
+          type: 'test',
+          folderBase: null,
           folder: null,
+          scope: 'workspace',
+          portless: false,
+          portlessName: null,
         })
         yield* runtime.prompt(session.id, 'what can I run?')
       }),
@@ -998,7 +1030,7 @@ describe('A command saved in the settings is listed to the agent at once', () =>
 
     expect(agent.answers.used[0]?.isError).toBe(false)
     expect(agent.answers.used[0]?.text).toContain(
-      'check  check  in the Workspace root  bun run check',
+      'check  test  in the Workspace root  bun run check',
     )
   })
 })
