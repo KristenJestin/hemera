@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import type {
@@ -13,6 +13,7 @@ import type {
   WorkspacePlan,
 } from '@hemera/ipc'
 import {
+  ActionGroup,
   AgentModelMenu,
   BlockedBanner,
   CommandsPanel,
@@ -46,6 +47,7 @@ import {
   type Activity,
   type AgentSessionState,
 } from '../agent-store.ts'
+import { type Grouping, groupActions, groupingOf } from '../action-groups.ts'
 import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
@@ -479,6 +481,8 @@ export function SessionPage({
    */
   const byLine = new Map(runs.map((run, index) => [run.lines[0]?.id ?? '', index]))
   const byEntry = new Map<string, ScrollerEntry>()
+  // What each block is to a run of tool calls, which the thread folds into one group (#149).
+  const groupings = new Map<string, Grouping>()
   // A call to one of Hemera's tools is drawn once, as Hemera's block, where the agent reported
   // it: the agent's own report of it stays in the thread and is not drawn a second time (D6-06).
   const folded = foldedCallsOf(thread)
@@ -505,7 +509,8 @@ export function SessionPage({
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
     const next = thread[at + 1]
-    const block = drawEntry(folded.inPlaceOf.get(entry.id) ?? entry, {
+    const drawn = folded.inPlaceOf.get(entry.id) ?? entry
+    const block = drawEntry(drawn, {
       now,
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
@@ -538,14 +543,42 @@ export function SessionPage({
     // are (issue #149).
     const mark = entry.kind === 'spec_answer' ? (answerOf(entry, thread) ?? undefined) : undefined
     byEntry.set(entry.id, { id: entry.id, mark, content: block })
+    groupings.set(entry.id, groupingOf(drawn))
   }
 
   const scroller: ScrollerEntry[] = []
+  /**
+   * The agent's blocks since the last thing the user wrote, waiting to be laid out: every run of
+   * two tool calls or more between two things the agent said is one row, folded (issue #149).
+   */
+  let pending: { item: ScrollerEntry; grouping: Grouping }[] = []
+  const lay = (): void => {
+    for (const piece of groupActions(pending)) {
+      if (piece.kind === 'one') {
+        scroller.push(piece.item)
+        continue
+      }
+      scroller.push({
+        // Named after its first row, which stays its first row however long the run grows: the
+        // group the reader unfolded is the same group when the next call arrives in it.
+        id: `actions-${piece.items[0]?.id ?? ''}`,
+        content: (
+          <ActionGroup count={piece.count} summary={piece.summary} status={piece.status}>
+            {piece.items.map((one) => (
+              <Fragment key={one.id}>{one.content}</Fragment>
+            ))}
+          </ActionGroup>
+        ),
+      })
+    }
+    pending = []
+  }
   /** The day last named over the thread, so a run that follows the agent's words repeats nothing. */
   let named: string | null = null
   for (const entry of thread) {
     const run = byLine.get(entry.id)
     if (run !== undefined) {
+      lay()
       const held = runs[run]
       const last = run === runs.length - 1
       const day = held?.day ?? ''
@@ -589,8 +622,10 @@ export function SessionPage({
     const held = runs.at(-1)
     if (held !== undefined) held.broken = true
     const block = byEntry.get(entry.id)
-    if (block !== undefined) scroller.push(block)
+    if (block !== undefined)
+      pending.push({ item: block, grouping: groupings.get(entry.id) ?? null })
   }
+  lay()
 
   /**
    * What the turn is doing, for as long as it runs (design D17-04, trial of 22 September 2026).
