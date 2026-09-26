@@ -46,6 +46,7 @@ import { openProfile } from './migrate.ts'
 import { journalLayer } from './journal.ts'
 import type { Journal } from './journal.ts'
 import { preferencesLayer } from './preferences.ts'
+import { type ClassifierSettings, classifierSettingsLayer } from './classifier/settings.ts'
 import type { Preferences } from './preferences.ts'
 import { projectsLayer } from './projects.ts'
 import type { Projects } from './projects.ts'
@@ -206,6 +207,7 @@ function buildNoticesTo(
 /** Everything this process holds once it is built, named so the composition is checked against it. */
 export type EngineServices =
   | Preferences
+  | ClassifierSettings
   | EngineStatus
   | Projects
   | Journal
@@ -364,6 +366,7 @@ function servicesOf(
 
   return Layer.mergeAll(
     preferencesLayer,
+    classifierSettingsLayer,
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),
     journalLayer,
     rows,

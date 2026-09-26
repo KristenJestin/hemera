@@ -14,6 +14,7 @@ import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { DIAGNOSTIC_FILE } from './diagnostic.ts'
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
+import { encryptClassifierKey, protectedStorageReady } from './classifier-key.ts'
 import type { EngineConversation } from './engine-conversation.ts'
 import { wearPreference } from './window.ts'
 import {
@@ -35,6 +36,34 @@ export function registerChannels(
   engine: EngineConversation,
   directory: string,
 ): void {
+  handle('classifier.read', () =>
+    Effect.gen(function* () {
+      const state = yield* engine.ask('classifier.state', {})
+      if (!protectedStorageReady()) {
+        return {
+          mode: state.mode,
+          credential: 'storage-unavailable' as const,
+          generation: state.generation,
+        }
+      }
+      if (state.hasKey)
+        return { mode: state.mode, credential: 'saved' as const, generation: state.generation }
+      const ciphertext = yield* engine.ask('classifier.ciphertext.read', {})
+      return {
+        mode: state.mode,
+        credential: ciphertext === null ? ('missing' as const) : ('invalid' as const),
+        generation: state.generation,
+      }
+    }),
+  )
+  handle('classifier.mode.write', ({ mode }) => engine.ask('classifier.mode.write', { mode }))
+  handle('classifier.key.save', ({ key }) => {
+    const ciphertext = encryptClassifierKey(key)
+    return ciphertext === null
+      ? Effect.fail(new Error('Protected storage is unavailable'))
+      : engine.ask('classifier.key.replace', { ciphertext, plaintext: key })
+  })
+  handle('classifier.key.remove', () => engine.ask('classifier.key.remove', {}))
   // What the engine pushes while a Session is worked on goes straight to the page, on the one
   // channel the preload listens on: nothing in the main process reads it, and a turn that is
   // happening is drawn from what arrives rather than from asking again (D5-12).

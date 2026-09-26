@@ -38,6 +38,20 @@ export const windowCommandSchema = z.object({
  * schema of what comes back, so the type of an answer is read from the same place.
  */
 export const CHANNELS = {
+  'classifier.read': {
+    arguments: nothingSchema,
+    response: z.object({
+      mode: ENGINE_REQUESTS['classifier.state'].response.shape.mode,
+      credential: z.enum(['missing', 'saved', 'invalid', 'storage-unavailable']),
+      generation: z.number().int(),
+    }),
+  },
+  'classifier.mode.write': ENGINE_REQUESTS['classifier.mode.write'],
+  'classifier.key.save': {
+    arguments: z.object({ key: z.string().trim().min(1) }),
+    response: z.void(),
+  },
+  'classifier.key.remove': { arguments: nothingSchema, response: z.void() },
   'env.report': {
     arguments: nothingSchema,
     response: environmentReportSchema,

@@ -27,6 +27,7 @@ import {
   dataDirectory,
 } from './channel.ts'
 import { registerChannels } from './channels.ts'
+import { restoreClassifierKey } from './classifier-key.ts'
 import { openDiagnosticLog, reported, writeDiagnosticTo } from './diagnostic.ts'
 import { readSidecar } from './display-sidecar.ts'
 import { collectReport } from './environment.ts'
@@ -124,6 +125,7 @@ if (!app.requestSingleInstanceLock()) {
     // The database is opened in its own process, and only once the application is ready: it is
     // the one program that holds the database file, and the main process never touches it.
     const engine = startEngine(main, data, identity, MIGRATIONS)
+    await restoreClassifierKey(engine)
 
     // Where the data folder turned out to stand, written down once (design D3-09). It is asked
     // for rather than assumed: the migration it is at is the migrator's own answer, and the

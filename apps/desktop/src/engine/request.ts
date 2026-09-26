@@ -58,6 +58,7 @@ import { type Context, type UnreadableInstructionsError } from './context/servic
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { Preferences } from './preferences.ts'
+import { ClassifierSettings } from './classifier/settings.ts'
 import {
   type InvalidBranchPrefixError,
   type InvalidWorkspacesRootError,
@@ -179,6 +180,7 @@ export function answer(
   EngineResponse<EngineRequestName>,
   Refusal,
   | Preferences
+  | ClassifierSettings
   | EngineStatus
   | Projects
   | Journal
@@ -199,6 +201,28 @@ export function answer(
   | Builds
 > {
   return Effect.gen(function* () {
+    if (decision.name === 'classifier.state') {
+      const current = yield* (yield* ClassifierSettings).current
+      return { mode: current.mode, hasKey: current.key !== null, generation: current.generation }
+    }
+    if (decision.name === 'classifier.mode.write') {
+      return yield* (yield* ClassifierSettings).select(decision.argument.mode)
+    }
+    if (decision.name === 'classifier.ciphertext.read') {
+      return yield* (yield* ClassifierSettings).ciphertext
+    }
+    if (decision.name === 'classifier.key.replace') {
+      return yield* (yield* ClassifierSettings).replaceKey(
+        decision.argument.ciphertext,
+        decision.argument.plaintext,
+      )
+    }
+    if (decision.name === 'classifier.key.restore') {
+      return yield* (yield* ClassifierSettings).restoreKey(decision.argument.plaintext)
+    }
+    if (decision.name === 'classifier.key.remove') {
+      return yield* (yield* ClassifierSettings).removeKey
+    }
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
 
     if (decision.name === 'preferences.read') return yield* (yield* Preferences).read

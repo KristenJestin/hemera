@@ -44,6 +44,7 @@ import { type EngineServices, PUSHED, named } from '#engine/index.ts'
 import { journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { preferencesLayer } from '#engine/preferences.ts'
+import { classifierSettingsLayer } from '#engine/classifier/settings.ts'
 import { projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
 import { sessionsLayer } from '#engine/sessions.ts'
@@ -234,7 +235,12 @@ async function openOver(
     Layer.provide(runtime),
   )
 
-  const services = Layer.mergeAll(runtime, workspaces, projectCheckServices)
+  const services = Layer.mergeAll(
+    runtime,
+    workspaces,
+    projectCheckServices,
+    classifierSettingsLayer.pipe(Layer.provide(database)),
+  )
 
   mkdirSync(dataFolder, { recursive: true })
   const scope = Effect.runSync(Scope.make())
