@@ -5,6 +5,7 @@ import type {
   AgentUpdate,
   ConfigOption,
   EngineEvent,
+  PromptIntent,
   ResumeState,
   SessionEntry,
   StopReason,
@@ -537,10 +538,16 @@ export async function setOffered(
  * then is what emptied the row and put the Stop away five seconds into every turn (trial of
  * 22 September 2026): once the turn is announced, the engine's own `turn` is what ends it.
  */
-export async function say(sessionId: string, text: string): Promise<string | null> {
+export async function say(
+  sessionId: string,
+  text: string,
+  intent?: PromptIntent,
+): Promise<string | null> {
   changed(sessionId, { running: true })
   try {
-    const answered = await window.hemera.invoke('agents.prompt', { sessionId, text })
+    // The intent is said only when there is one: a message like any other carries none.
+    const asked = intent === undefined ? { sessionId, text } : { sessionId, text, intent }
+    const answered = await window.hemera.invoke('agents.prompt', asked)
     changed(sessionId, { running: false, stopReason: answered.stopReason })
     return null
   } catch (cause) {

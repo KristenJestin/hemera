@@ -12,8 +12,9 @@ import { type WorkspaceChoice, WorkspacePill } from './workspace-pill.tsx'
  *
  * Sending is the one live control of the row, and the only one that writes: `onSend` hands the
  * sentence to the page, which records it and answers with the reason it could not, or with
- * nothing when it did. `New Spec` is the Home's alone and stays disabled there — a Spec is made
- * from the question that starts a Session, and the Spec itself is lot 6 — and the arrow becomes a
+ * nothing when it did. `New Spec` is the Home's alone: a Spec is made from the question that
+ * starts a Session, and pressing it starts that Session with the intent of writing one (issue
+ * #128), on the same terms as the send since it sends the same sentence. The arrow becomes a
  * square while the write is in flight: two icons crossing in opacity and scale, a morph a
  * compositor carries, and never a swap that flickers.
  *
@@ -27,6 +28,9 @@ import { type WorkspaceChoice, WorkspacePill } from './workspace-pill.tsx'
  * away until the engine has answered — the row does not move under the hand that pressed it.
  */
 const MORPH = 'relative flex size-icon-md items-center justify-center'
+
+/** What `New Spec` does, in plain words, on the control itself. */
+const SPEC = 'Start a Session that writes a Spec from this'
 
 export interface ComposerActionsProps {
   /** The Workspaces in state `ready`, `main` first (D8-08). */
@@ -49,14 +53,14 @@ export interface ComposerActionsProps {
    */
   forcing?: boolean | undefined
   /**
-   * Whether the row offers to turn what is written into a Spec (design D4b-02).
+   * Starts a Session that writes a Spec from what is written (design D4b-02, issue #128).
    *
-   * The Home does and a Session does not: a Session is a conversation already under way, and a
-   * Spec is made from the question that starts one. Off unless the page asks for it — a control
-   * drawn and disabled in every place it appears is a control that says nothing about where it
+   * The Home offers it and a Session does not: a Session is a conversation already under way, and
+   * a Spec is made from the question that starts one. No button unless the page hands this over:
+   * a control drawn in every place it appears is a control that says nothing about where it
    * belongs.
    */
-  spec?: boolean | undefined
+  onSpec?: (() => void) | undefined
   /** The word on the button: `Start chat` on the Home, `Send` inside a Session. */
   action: string
   onSend: () => void
@@ -82,7 +86,7 @@ export function ComposerActions({
   sending,
   running = false,
   forcing = false,
-  spec = false,
+  onSpec,
   action,
   onSend,
   onStop,
@@ -105,8 +109,15 @@ export function ComposerActions({
         fixed={workspaceFixed}
       />
       <span className="ml-auto flex items-center gap-2">
-        {spec && (
-          <Button variant="secondary" size="sm" disabled title="A Spec comes with lot 6">
+        {onSpec !== undefined && (
+          <Button
+            variant="secondary"
+            size="sm"
+            // Off exactly when the send is: it sends the same sentence to the same agent.
+            disabled={busy || !ready}
+            title={SPEC}
+            onClick={onSpec}
+          >
             <IconPencil size="sm" />
             New Spec
           </Button>

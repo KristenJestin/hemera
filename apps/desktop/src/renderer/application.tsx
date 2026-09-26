@@ -369,6 +369,8 @@ export function Application() {
   const [putAway, setPutAway] = useState<Session[]>([])
   /** The Session whose title is being typed into, when one is. */
   const [naming, setNaming] = useState<string | null>(null)
+  /** Whether a new Session was asked for and the Home's composer has not taken the caret yet. */
+  const [focusHome, setFocusHome] = useState(false)
   /** Which Project the window has already decided where to look in. */
   const placed = useRef<string | null>(null)
   /**
@@ -761,10 +763,14 @@ export function Application() {
    * Session exists from the moment that first message is sent, and the message names it (D4b-01):
    * a Session made before there is an agent to answer it would be a thread nothing can be said
    * to, which is exactly what the Home used to make.
+   *
+   * The caret goes into that composer at once (issue #128): what was asked for is a Session, and
+   * the next thing the hand does is type its first message.
    */
   const newSession = useCallback(() => {
     if (shell.activeProjectId === null) return
     goTo(HOME_ENTRY)
+    setFocusHome(true)
   }, [shell.activeProjectId, goTo])
 
   /** Writes a message into a Session, and reads the Journal again when one was written. */
@@ -1322,7 +1328,7 @@ export function Application() {
         // Session it opens is opened on them (D5-17). An agent the engine does not know is
         // refused by the engine rather than by a sentence written here.
         workspaces={offeredWorkspacesOf(sessions.workspaces)}
-        onSend={async (text, chosen, workspaceId) => {
+        onSend={async (text, chosen, workspaceId, intent) => {
           const asked = providerOf(chosen)
           const made = await startSession(active.id, asked, workspaceId)
           if (made === null) return sessionsSnapshot().refusal
@@ -1332,9 +1338,12 @@ export function Application() {
           await openSession(made.id)
           // The turn is watched in the Session, which is where the window just went, and the Home
           // does not wait for it: a first answer can take a minute.
-          void say(made.id, text)
+          // With what it was sent for: New Spec asks the agent for a Spec proposal (issue #128).
+          void say(made.id, text, intent)
           return null
         }}
+        focusComposer={focusHome}
+        onFocusTaken={() => setFocusHome(false)}
       />
     )
   }

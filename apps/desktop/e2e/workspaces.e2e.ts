@@ -484,8 +484,9 @@ describe('A URL is ready only after it answers', () => {
 describe('Two Workspaces run the same command as two instances', () => {
   it('runs dev from a Session in login-form too, where running it again joins it', async () => {
     await startSession('login-form', 'Serve the app in login-form.')
-    // The agent started in login-form: its Workspace is fixed now (D8-08).
-    expect(await shows('The Workspace is fixed once the agent has started.')).toBe(true)
+    // The agent started in login-form: its Workspace is fixed now (D8-08), a plain label whose
+    // tooltip says why (issue #128).
+    expect(await $('[aria-label="Workspace: login-form"]').waitForExist()).toBe(true)
     await openCommands()
     await runLine('dev')
     await awaitsIn('[role="dialog"]', 'Running')

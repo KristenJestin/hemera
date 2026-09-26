@@ -20,6 +20,7 @@ import {
   agentProviderSchema,
   agentUpdateSchema,
   configOptionSchema,
+  promptIntentSchema,
   resumeStateSchema,
   stopReasonSchema,
 } from './agents.ts'
@@ -598,8 +599,13 @@ export const ENGINE_REQUESTS = {
   },
   'agents.prompt': {
     // Answered when the turn is over and not when it is sent: what the page is waiting for is
-    // why it ended, and the rest of the turn reaches it as it happens (design D5-12).
-    arguments: z.object({ sessionId: z.string(), text: z.string() }),
+    // why it ended, and the rest of the turn reaches it as it happens (design D5-12). The intent
+    // says what the message was sent for: `spec` is the Home's New Spec (issue #128).
+    arguments: z.object({
+      sessionId: z.string(),
+      text: z.string(),
+      intent: promptIntentSchema.optional(),
+    }),
     response: z.object({ stopReason: stopReasonSchema }),
   },
   'agents.stop': {
