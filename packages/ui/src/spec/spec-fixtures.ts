@@ -19,7 +19,7 @@ import { GATE_CHECKS } from './model.ts'
  *
  * One Spec, taken through the eight screens of the brief, so that what changes from one story
  * to the next is the state and never the words: shaped and being planned, frozen, reworked, read
- * from a second Session, in conflict. Consistent with the product rules on purpose: no task
+ * from a second Session. Consistent with the product rules on purpose: no task
  * exists before `decompose` opens, and a gate is only full when every phase has finished.
  */
 
@@ -57,7 +57,6 @@ export const FULL_GATE: ReadinessView = gate({}, [])
 const PROBLEM: SectionView = {
   name: 'problem',
   body: 'Accountants rebuild each month of invoices by hand in their ledger: the billing page shows a month, but it cannot hand it over. The September close took two days of retyping.',
-  version: 3,
   author: 'agent',
   mark: 'agent',
 }
@@ -65,7 +64,6 @@ const PROBLEM: SectionView = {
 const OUTCOME: SectionView = {
   name: 'expected_outcome',
   body: 'An accountant picks a month on the billing page and downloads one CSV file holding every invoice and credit note issued that month, one row per line, in the columns their ledger imports.\n\nThe total of the file equals the total the billing page shows for the same month.',
-  version: 2,
   author: 'agent',
   mark: 'agent',
 }
@@ -76,7 +74,6 @@ const SCOPE_TEXT =
 const SCOPE: SectionView = {
   name: 'scope',
   body: SCOPE_TEXT,
-  version: 4,
   author: 'human',
   mark: 'human',
 }
@@ -84,7 +81,6 @@ const SCOPE: SectionView = {
 const VERIFICATION: SectionView = {
   name: 'verification',
   body: 'Export September on the demo account and import the file into the ledger: no row is refused, and the file total equals the billing page total for the month. An empty month downloads the header row only.',
-  version: 2,
   author: 'agent',
   mark: 'agent',
 }
@@ -92,7 +88,6 @@ const VERIFICATION: SectionView = {
 const BEHAVIOUR: SectionView = {
   name: 'behaviour',
   body: 'The billing page gains an **Export** button beside the month picker. It downloads `invoices-2026-09.csv`: one row per invoice line, in the column order of the ledger, credit notes as negative rows.',
-  version: 2,
   author: 'agent',
   mark: 'agent',
 }
@@ -103,7 +98,6 @@ const PLAN_TEXT =
 const PLAN: SectionView = {
   name: 'plan',
   body: PLAN_TEXT,
-  version: 2,
   author: 'agent',
   mark: 'agent',
 }
@@ -112,7 +106,6 @@ const PLAN: SectionView = {
 const PLAN_WRITING: SectionView = {
   name: 'plan',
   body: 'Reuse the invoice query of `export.service.ts`, grouped by issue date, and stream its rows through the CSV writer of `shared/csv`.',
-  version: 1,
   author: 'agent',
   mark: 'writing',
 }
@@ -287,29 +280,25 @@ export const BUG: SpecView = {
     {
       name: 'problem',
       body: 'Invoices in a currency other than the account one show a total one cent above the sum of their lines. Accounting found it on the September close.',
-      version: 1,
       author: 'agent',
       mark: 'agent',
     },
     {
       name: 'expected_outcome',
       body: 'The total of an invoice is the sum of its lines as printed, in every currency.',
-      version: 1,
       author: 'agent',
       mark: 'agent',
     },
-    { name: 'scope', body: '', version: 0, author: null, mark: 'empty' },
-    { name: 'verification', body: '', version: 0, author: null, mark: 'empty' },
+    { name: 'scope', body: '', author: null, mark: 'empty' },
+    { name: 'verification', body: '', author: null, mark: 'empty' },
     {
       name: 'reproduction',
       body: '1. Create an invoice in EUR with three lines at 19.99, 0.35 and 7.10, VAT 20 %.\n2. Switch the account currency to USD and open the invoice.\n3. Compare the total with the sum of the lines.\n\nObserved: the total is 33.93 USD, one cent above the lines.\nExpected: 33.92 USD, the sum of the lines as printed.',
-      version: 2,
       author: 'human',
       mark: 'human',
-      pendingForAgent: true,
       note: 'Replayed after the build, by an agent or by you, to see the wrong total is gone.',
     },
-    { name: 'plan', body: '', version: 0, author: null, mark: 'empty' },
+    { name: 'plan', body: '', author: null, mark: 'empty' },
   ],
   stories: [],
   storiesMark: 'empty',
@@ -399,38 +388,6 @@ export const READER: SpecView = {
   ),
 }
 
-/** Your scope, written on version 3, and what the agent made of it at version 5. */
-export const SCOPE_MINE =
-  'In: invoices and credit notes issued in the chosen month, in every currency, from the Export button of the billing page.\n\nOut: scheduled exports, PDF, filtering by client.\nOut: payments and refunds, which belong to the cash report.'
-
-const SCOPE_THEIRS =
-  'In: invoices and credit notes issued in the chosen month, from the Export button of the billing page. The currency is a column of the file (see Verification).\n\nOut: scheduled exports, PDF, filtering by client, payments.'
-
-/**
- * Screen 7 · you were editing Scope when the agent rewrote it: your text was written on
- * version 3, the section is at version 5, and nothing of yours is lost.
- */
-export const CONFLICT: SpecView = {
-  ...MID_PLAN,
-  now: 'Plan · the agent rewrote Scope while you were editing it',
-  focus: 'scope',
-  sections: [
-    PROBLEM,
-    OUTCOME,
-    {
-      ...SCOPE,
-      body: SCOPE_THEIRS,
-      version: 5,
-      author: 'agent',
-      mark: 'conflict',
-      conflict: { base: 3, current: 5, mine: SCOPE_MINE, theirs: SCOPE_THEIRS },
-    },
-    VERIFICATION,
-    BEHAVIOUR,
-    PLAN_WRITING,
-  ],
-}
-
 /**
  * Screen 8 · reworked into revision 3: a complete copy, whose plan and tasks are stale until
  * the agent declares them again; shape still holds.
@@ -479,39 +436,34 @@ export const MAINTENANCE: SpecView = {
     {
       name: 'problem',
       body: 'The invoice PDFs fill the disk of the application server: 180 GB, growing by 6 GB a month.',
-      version: 1,
       author: 'agent',
       mark: 'agent',
     },
     {
       name: 'expected_outcome',
       body: 'Every PDF lives in the object store, and the server keeps none.',
-      version: 1,
       author: 'agent',
       mark: 'agent',
     },
     {
       name: 'scope',
       body: 'In: the PDFs of invoices and credit notes, old and new.\n\nOut: the exports, which are streamed and never stored.',
-      version: 1,
       author: 'agent',
       mark: 'agent',
     },
     {
       name: 'verification',
       body: 'Every invoice of the demo account opens its PDF after the migration, and the disk holds none.',
-      version: 1,
       author: 'agent',
       mark: 'agent',
     },
     {
       name: 'invariants',
       body: '- The URL of a PDF sent to a client keeps working.\n- A PDF, once issued, is never regenerated.\n- Nobody but the account can read it.',
-      version: 2,
       author: 'human',
       mark: 'human',
     },
-    { name: 'plan', body: '', version: 0, author: null, mark: 'writing' },
+    { name: 'plan', body: '', author: null, mark: 'writing' },
   ],
   stories: [],
   storiesMark: 'empty',
@@ -565,7 +517,6 @@ export const JUST_CREATED: SpecView = {
     {
       name: 'problem',
       body: 'Accountants rebuild each month of invoices by hand in their ledger.',
-      version: 1,
       author: 'agent',
       mark: 'writing',
     },

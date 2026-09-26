@@ -15,14 +15,12 @@ import { MissionBrief } from './mission-brief.tsx'
 import type { ReaderView, SpecType, SpecView } from './model.ts'
 import {
   BUG,
-  CONFLICT,
   GATE_FULL,
   JUST_CREATED,
   MID_PLAN,
   ONE_QUESTION_LEFT,
   READER,
   READY,
-  SCOPE_MINE,
   STALE,
 } from './spec-fixtures.ts'
 import { useLiveSpec } from './spec-harness.tsx'
@@ -189,18 +187,6 @@ const SCREENS = {
       ),
     ],
   },
-  conflict: {
-    title: 'Spec CSV',
-    spec: CONFLICT,
-    thread: [
-      ASK,
-      hemera('brief', 'What the agent was told · Plan', '10:44', PLAN_BRIEF),
-      agents(
-        'answer',
-        'I rewrote Scope (v5): payments stay out, and the currency column moved to Verification.',
-      ),
-    ],
-  },
   stale: {
     title: 'Spec CSV',
     spec: STALE,
@@ -273,10 +259,6 @@ function Chat({
 
 /** The actions a story reports, for the paths that assert on them. */
 const ON = {
-  onSaveSection: fn(),
-  onApplyMine: fn(),
-  onDiscardMine: fn(),
-  onSaveStory: fn(),
   onAnswer: fn(),
   onGoToQuestion: goToQuestion,
   onMarkReady: fn(),
@@ -322,10 +304,6 @@ function DefineSession({
         reader={reader}
         defaultReworkOpen={reworkOpen}
         defaultFolded={folded}
-        onSaveSection={actions.onSaveSection}
-        onApplyMine={actions.onApplyMine}
-        onDiscardMine={actions.onDiscardMine}
-        onSaveStory={actions.onSaveStory}
         onGoToQuestion={actions.onGoToQuestion}
         onMarkReady={actions.onMarkReady}
         onRework={actions.onRework}
@@ -386,10 +364,6 @@ function FreeThenDefine(): ReactNode {
           >
             <SpecPanel
               spec={created}
-              onSaveSection={fn()}
-              onApplyMine={fn()}
-              onDiscardMine={fn()}
-              onSaveStory={fn()}
               onGoToQuestion={fn()}
               onMarkReady={fn()}
               onRework={fn()}
@@ -450,8 +424,8 @@ type Story = StoryObj<typeof meta>
  * The screens first, each named after the state it shows and each left as it opens: its play
  * asserts and changes nothing, so the screen the gate looks at is the screen as drawn. A Session
  * opens its panel folded; a screen that shows the panel's own state opens it unfolded. The paths
- * through them — a link followed, a Spec marked ready, reworked, taken over, a conflict applied,
- * a question answered in the chat — are stories of their own, named after what they do, and
+ * through them — a link followed, a Spec marked ready, reworked, taken over, a question answered
+ * in the chat — are stories of their own, named after what they do, and
  * start from the folded panel a Session opens on: the hand unfolds it first.
  */
 
@@ -538,7 +512,8 @@ export const Bug: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: /^Reproduction/ })).toBeVisible()
     await expect(canvas.queryByRole('heading', { name: /^Behaviour/ })).toBeNull()
-    await expect(canvas.getByText('sent to the agent next turn')).toBeVisible()
+    // Read, as every part is: nothing of it is edited by hand (issue #135).
+    await expect(canvas.queryByRole('textbox', { name: /^Reproduction/ })).toBeNull()
     await expect(canvas.getByRole('group', { name: /^Question: Is the total/ })).toBeVisible()
   },
 }
@@ -665,7 +640,7 @@ export const ReadyReworked: Story = {
 
 /**
  * Screen 6 · the draft read from a second Session: the quiet bar with `Take over` under the head;
- * the agent of this Session does not write, and you still edit in place.
+ * the agent of this Session does not write.
  */
 export const Reader: Story = {
   args: { screen: 'reader', folded: false },
@@ -680,58 +655,17 @@ export const Reader: Story = {
   },
 }
 
-/** A reader opens the stories, edits one in place, saved on blur, then takes the right over. */
-export const ReaderEditsThenTakesOver: Story = {
+/** A reader opens the stories, read like every part, then takes the right over. */
+export const ReaderTakesOver: Story = {
   args: { screen: 'reader' },
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: /^Stories/ }))
-    await expect(canvas.getByText('you can edit; the agent of the writer is told')).toBeVisible()
-    const narrative = canvas.getByRole('textbox', { name: 'Narrative of S2' })
-    await userEvent.click(narrative)
-    await userEvent.keyboard('{Control>}{End}{/Control} Each keeps its invoice number.')
-    await userEvent.tab()
-    await expect(canvas.getByRole('button', { name: 'Stories, 2' })).toHaveAccessibleDescription(
-      'Edited by you',
-    )
+    await expect(canvas.getByRole('list', { name: 'Criteria of S2' })).toBeVisible()
+    await expect(canvas.queryByRole('textbox', { name: /^Narrative/ })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Take over' }))
     await expect(canvas.queryByText('« Spec CSV »')).toBeNull()
-  },
-}
-
-/**
- * Screen 7 · a conflict keeps the human's text: the banner inside Scope and your text in the
- * editor, whole; Scope is the part in focus.
- */
-export const Conflict: Story = {
-  args: { screen: 'conflict', folded: false },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(
-      canvas.getByText('The agent changed this part while you were writing yours.'),
-    ).toBeVisible()
-    await expect(canvas.getByRole('textbox', { name: /^Scope ?, your text/ })).toHaveValue(
-      SCOPE_MINE,
-    )
-    await expect(
-      canvas.getByRole('heading', { name: /^Scope ?, your text and the agent's differ/ }),
-    ).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' })).toBeVisible()
-  },
-}
-
-/** Conflict actions: the agent's version on Compare, then yours applied on top of it. */
-export const ConflictApplied: Story = {
-  args: { screen: 'conflict' },
-  play: async ({ canvasElement }) => {
-    await unfold(canvasElement)
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Compare' }))
-    await expect(canvas.getByText("The agent's text")).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Keep mine' }))
-    await expect(canvas.queryByRole('group', { name: 'Conflict' })).toBeNull()
-    await expect(canvas.getByRole('heading', { name: /^Scope ?, edited by you/ })).toBeVisible()
   },
 }
 

@@ -1,22 +1,19 @@
 /**
  * A Spec written beside the chat of a `define` Session (designs D7-01, D7-03, D7-07, D7-09,
- * D7-11, D7-12, D7-14).
+ * D7-11, D7-14; issue #135).
  *
  * One journey, in the order a hand makes it, on one data folder: a `free` Session whose agent
  * proposes a Spec through `spec_propose`, the proposal accepted, the brief handed over before the
- * next turn, a human edit handed over as it is saved, a question asked and answered in the chat, a
- * conflict applied, and a second Session that reads the draft and takes it over. The restart is
+ * next turn, the Spec read in the panel with nothing to edit, a question asked and answered in the
+ * chat, and a second Session that reads the draft and takes it over. The restart is
  * `specs.reopened.e2e.ts`, which starts a second instance on the folder this one wrote
- * (`wdio.conf.ts`, `CONTINUED`), finds the draft, its phases and the text left in a buffer, and
- * takes the Spec to `ready`.
+ * (`wdio.conf.ts`, `CONTINUED`), finds the draft and its phases, and takes the Spec to `ready`.
  *
  * Two acts are not a hand's, and say so where they are made:
  *
- * - Some of the agent's writes. The fake agent follows a script fixed when its turn starts, so it
- *   cannot write on a version it reads during the turn: what it would write under the human's
- *   open editor, and the question, go through the window's own bridge, as the human actor the
- *   renderer always is, which moves the section's version all the same. What it writes on its
- *   own, through `spec_write`, is `specs.reopened.e2e.ts`'s.
+ * - Some of the agent's writes. The fake agent follows a script fixed when its turn starts and
+ *   writes neither `Problem` nor `Scope`: those, and the question, go through the window's own
+ *   bridge. What it writes on its own, through `spec_write`, is `specs.reopened.e2e.ts`'s.
  * - The second Session. Nothing in the window lists Specs yet: it is opened on the Spec through
  *   `specs.openSession`, the call such a list would make.
  *
@@ -31,15 +28,12 @@ import {
   addProject,
   awaits,
   control,
-  leave,
   press,
   pressIn,
   region,
   showPart,
   shows,
   sidebar,
-  textOf,
-  typeIn,
   unfoldSpec,
   write,
 } from './hand.ts'
@@ -59,25 +53,13 @@ const KEY = 'ATL-1'
 /** What is said once the Session defines the Spec, which is the turn the brief rides. */
 const DEFINING = 'Let us shape the export fix.'
 
-/** What the human writes in `Problem`. */
+/** What `Problem` and `Scope` are written with, through the bridge. */
 const PROBLEM = 'The CSV export leaves the invoice date column empty.'
-
-/** The line the thread says once the human's edit of `Problem` was handed to the agent. */
-const EDIT_HANDED = 'Your edits to problem went to the agent.'
+const SCOPE = 'The invoice and credit note CSV exports.'
 
 /** The question asked in the chat, and the option it is answered with. */
 const QUESTION = 'Which date decides the month of an invoice?'
 const ISSUE = 'The issue date'
-
-/** `Scope` as the agent rewrites it while the human has it open, twice. */
-const THEIRS = 'Only the invoice CSV export.'
-const THEIRS_AGAIN = 'The invoice CSV export, in every currency.'
-
-/** The human's `Scope`, refused on the older version and applied on the current one. */
-const MINE = 'The invoice and credit note CSV exports.'
-
-/** The text left in a buffer when the application is closed. */
-const KEPT = 'Every CSV export of the billing module.'
 
 /** The title a Session opened on a Spec starts with. */
 const OPENED = 'New session'
@@ -118,28 +100,48 @@ async function sectionOf(specId: string, name: 'problem' | 'scope') {
   )
 }
 
-/**
- * Writes `Scope` as the agent would, through the window's bridge, on the version it is at: what
- * lands under a human editor that was opened on the version before.
- */
-async function rewriteScope(specId: string, sessionId: string, body: string): Promise<void> {
-  const { version } = await sectionOf(specId, 'scope')
+/** Writes a section through the window's bridge, on the version it is at. */
+async function writeThrough(
+  specId: string,
+  sessionId: string,
+  name: 'problem' | 'scope',
+  body: string,
+): Promise<void> {
+  const { version } = await sectionOf(specId, name)
   await browser.execute(
-    async (spec: string, session: string, text: string, base: number) => {
+    async (
+      spec: string,
+      session: string,
+      section: 'problem' | 'scope',
+      text: string,
+      base: number,
+    ) => {
       await window.hemera.invoke('specs.writeSection', {
         specId: spec,
         sessionId: session,
-        name: 'scope',
+        name: section,
         body: text,
         baseVersion: base,
       })
     },
     specId,
     sessionId,
+    name,
     body,
     version,
   )
   await browser.pause(1200)
+}
+
+/** How many editable fields the panel holds. */
+async function fieldsIn(scope: string): Promise<number> {
+  return await browser.execute(
+    (selector: string) =>
+      document
+        .querySelector(selector)
+        ?.querySelectorAll('textarea, input, [contenteditable="true"]').length ?? 0,
+    scope,
+  )
 }
 
 /** How many times the thread says this. */
@@ -212,36 +214,18 @@ describe('The brief is part of the turn, never a human message', () => {
   })
 })
 
-describe('A human edit is recorded and reaches the agent', () => {
-  it('writes Problem from the panel with human provenance', async () => {
-    await typeIn('Problem', PROBLEM)
-    await leave('Problem')
+describe('The Spec is read, never edited by hand', () => {
+  it('draws what is written as text, and offers nothing to type in', async () => {
+    const { id, specId } = await sessionOf(ASKED)
+    await writeThrough(specId ?? '', id, 'problem', PROBLEM)
+    await writeThrough(specId ?? '', id, 'scope', SCOPE)
+    await showPart(KEY, 'Problem')
 
-    const { specId } = await sessionOf(ASKED)
-    const problem = await sectionOf(specId ?? '', 'problem')
-    expect(problem).toEqual({ body: PROBLEM, version: 2, author: 'human' })
-    expect(await textOf('Problem')).toBe(PROBLEM)
+    expect(await region(PANEL)).toContain(PROBLEM)
+    expect(await fieldsIn(PANEL)).toBe(0)
+    expect(await control(`Preview Problem as Markdown`)).toBeNull()
     // The sentence moves on to the next section left to write.
     expect(await region(PANEL)).toContain('Shape · the agent is writing the expected outcome')
-  })
-
-  it('lists the edit in the brief of the next turn', async () => {
-    // No turn runs, so the edit is handed over at once, as a delivery of its own: a line of
-    // Hemera's in the thread, never a message of the user's.
-    await awaits(EDIT_HANDED)
-    await write('Is the problem clear now?')
-    await press('Send')
-    await browser.waitUntil(async () => (await timesInThread(ANSWERS[1])) === 2, {
-      timeout: 20_000,
-      interval: 200,
-      timeoutMsg: 'the turn after the edit never answered',
-    })
-    await browser.pause(1500)
-
-    // The brief is one per phase: `shape` is still the focus, so no second brief came, and the
-    // edit went over once.
-    expect(await timesInThread('What the agent was told · Shape')).toBe(1)
-    expect(await timesInThread(EDIT_HANDED)).toBe(1)
   })
 })
 
@@ -306,39 +290,6 @@ describe('A question is asked and answered in the chat', () => {
   })
 })
 
-describe('A conflict keeps the human’s text', () => {
-  it('refuses a save on a section written since it was opened, and keeps the text', async () => {
-    const { id, specId } = await sessionOf(ASKED)
-    await showPart(KEY, 'Scope')
-    await typeIn('Scope', MINE)
-    await rewriteScope(specId ?? '', id, THEIRS)
-    await leave('Scope')
-
-    const scope = await sectionOf(specId ?? '', 'scope')
-    expect(scope.body).toBe(THEIRS)
-    expect(await region(PANEL)).toContain(
-      'The agent changed this part while you were writing yours.',
-    )
-    expect(await textOf('Scope, your text')).toBe(MINE)
-
-    await pressIn(PANEL, 'Compare')
-    expect(await region(PANEL)).toContain(THEIRS)
-  })
-
-  it('applies the kept text on the current version, and the banner goes', async () => {
-    await pressIn(PANEL, 'Keep mine')
-    await browser.pause(1200)
-
-    const { specId } = await sessionOf(ASKED)
-    const scope = await sectionOf(specId ?? '', 'scope')
-    expect(scope).toEqual({ body: MINE, version: 3, author: 'human' })
-    expect(await region(PANEL)).not.toContain(
-      'The agent changed this part while you were writing yours.',
-    )
-    expect(await textOf('Scope')).toBe(MINE)
-  })
-})
-
 describe('A second Session reads but does not write', () => {
   it('reads the draft another Session writes, and is told which one', async () => {
     const { specId } = await sessionOf(ASKED)
@@ -378,8 +329,7 @@ describe('A second Session reads but does not write', () => {
     expect(writer).toBe(id)
 
     // The first Session, revisited, is the reader now. Its agent's writes are refused by the
-    // engine (`writable`, tested there): the renderer writes as the human only, whose edits
-    // pass from any Session's panel (D7-11).
+    // engine (`writable`, tested there).
     await press(ASKED)
     await browser.waitUntil(async () => (await region(PANEL)) !== '', {
       timeout: 10_000,
@@ -399,20 +349,5 @@ describe('Mark ready is offered only once the checks pass', () => {
     const panel = await region(PANEL)
     expect(panel).toContain('before ready')
     expect(await control('Mark ready')).toBeNull()
-  })
-})
-
-describe('A conflict keeps the human’s text across a relaunch', () => {
-  it('keeps a text refused on its way, for the next start to find', async () => {
-    const { id, specId } = await sessionOf(OPENED)
-    await showPart(KEY, 'Scope')
-    await typeIn('Scope', KEPT)
-    await rewriteScope(specId ?? '', id, THEIRS_AGAIN)
-    await leave('Scope')
-
-    expect(await region(PANEL)).toContain(
-      'The agent changed this part while you were writing yours.',
-    )
-    expect(await textOf('Scope, your text')).toBe(KEPT)
   })
 })

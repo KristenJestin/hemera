@@ -52,55 +52,30 @@ export type SectionName =
 export type SpecTarget = SectionName | 'stories' | 'tasks' | 'questions'
 
 /**
- * The mark in the margin of a part: nothing written yet, written by the agent, edited by you, out
- * of date after a rework, in conflict with an unsaved text of yours, or being written right now.
+ * The mark of a part: nothing written yet, written by the agent, written by you, out of date after
+ * a rework, or being written right now.
  */
-export type Mark = 'empty' | 'agent' | 'human' | 'stale' | 'conflict' | 'writing'
+export type Mark = 'empty' | 'agent' | 'human' | 'stale' | 'writing'
 
 /** Who wrote a section last. */
 export type Author = 'agent' | 'human'
-
-/**
- * A text of yours that could not be saved, because the section moved under it (D7-12).
- *
- * It is kept whole: the editor holds `mine`, and `current` is what the section says now, for
- * the comparison.
- */
-export interface ConflictView {
-  /** The version the human's text was written on. */
-  base: number
-  /** The version the section is at now. */
-  current: number
-  /** The human's text, never lost. */
-  mine: string
-  /** What the section says at `current`, written by whoever wrote it. */
-  theirs: string
-}
 
 export interface SectionView {
   name: SectionName
   /** The Markdown body; empty while nothing is written. */
   body: string
-  /** The section's own version, which a save is checked against. */
-  version: number
   /** Who wrote it last; `null` while nothing is written. */
   author: Author | null
   mark: Mark
-  /** A human edit not yet handed to the agent: it goes with the next turn. */
-  pendingForAgent?: boolean | undefined
   /** The revision it was copied from, after a rework, while its phase is stale. */
   copiedFrom?: number | undefined
-  conflict?: ConflictView | undefined
   /** A line under the text saying what the section is for, when the type says it. */
   note?: string | undefined
 }
 
 /** A story (core.md, "Spec"): one sentence of actor, need and benefit, and ordered criteria. */
 export interface StoryView {
-  /**
-   * The story itself, whatever its place: an edit is handed back on it, so a story added or moved
-   * while its text was being edited never receives another story's text.
-   */
+  /** The story itself, whatever its place. */
   id: string
   /** `S1`, `S2`: how tasks and questions point at it. */
   key: string

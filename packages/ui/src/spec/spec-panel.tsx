@@ -10,7 +10,6 @@ import type {
   SectionView,
   SpecTarget,
   SpecView,
-  StoryView,
 } from './model.ts'
 import { QuestionsPart } from './questions-part.tsx'
 import { ReaderBar } from './reader-bar.tsx'
@@ -41,7 +40,7 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  *
  * Everything it shows is handed to it, and everything it does is reported: the panel holds only
  * what is on the stage, and whether the rework dialog is open; its shell, whether it is folded.
- * What a save becomes — a version, a conflict, a line in the Journal — is the engine's.
+ * The agent writes the Spec; the reader reads it and answers, and edits nothing (issue #135).
  */
 
 const HEAD = 'flex flex-col gap-1.5 border-b border-border px-5 pt-4 pb-3'
@@ -54,11 +53,6 @@ const STAGE = 'flex flex-col gap-10 px-10 pt-5 pb-10'
 
 /** What a part does with the reader's hand, handed down from the panel. */
 export interface SpecPartHandlers {
-  /** A section's text, with the version its edit was opened on, which the save is checked on. */
-  onSaveSection: (name: SectionName, body: string, baseVersion: number) => void
-  onApplyMine: (name: SectionName, body: string) => void
-  onDiscardMine: (name: SectionName) => void
-  onSaveStory: (story: StoryView) => void
   /** Takes the thread to where an open question is asked. */
   onGoToQuestion: (id: string) => void
 }
@@ -109,7 +103,6 @@ export function SpecPanel({
   const [pinned, setPinned] = useState<StageChoice | null>(null)
   const [reworking, setReworking] = useState(defaultReworkOpen)
   const shown: StageChoice = pinned ?? { part: spec.focus ?? 'problem' }
-  const reading = reader !== undefined
   // The build is offered on a Spec that is not being written, and never on an older revision of
   // one: only the current revision of a Spec is built, as only it can be reworked (D7-05, D8-12).
   // A launch already asked for stays where it stands once the Spec moves on: a build that started
@@ -171,9 +164,7 @@ export function SpecPanel({
           </>
         )}
         rail={<SpecRail {...rail} />}
-        stage={
-          <SpecStage spec={spec} shown={shown} groups={groups} reading={reading} {...handlers} />
-        }
+        stage={<SpecStage spec={spec} shown={shown} groups={groups} {...handlers} />}
         band={<SpecRail {...rail} folded />}
       />
       <ReworkDialog
@@ -196,7 +187,6 @@ function sectionOf(spec: SpecView, name: SectionName): SectionView {
     spec.sections.find((section) => section.name === name) ?? {
       name,
       body: '',
-      version: 0,
       author: null,
       mark: 'empty',
     }
@@ -206,33 +196,11 @@ function sectionOf(spec: SpecView, name: SectionName): SectionView {
 export interface SpecPartProps extends SpecPartHandlers {
   spec: SpecView
   target: SpecTarget
-  /** Whether this Session reads a draft another one writes. */
-  reading: boolean
 }
 
 /** One part of the Spec, drawn by the part of its kind: a section, or one of the three lists. */
-export function SpecPart({
-  spec,
-  target,
-  reading,
-  onSaveSection,
-  onApplyMine,
-  onDiscardMine,
-  onSaveStory,
-  onGoToQuestion,
-}: SpecPartProps): ReactNode {
-  const editable = spec.status === 'draft'
-  if (target === 'stories') {
-    return (
-      <StoriesPart
-        stories={spec.stories}
-        mark={spec.storiesMark}
-        editable={editable}
-        note={reading && editable ? 'you can edit; the agent of the writer is told' : undefined}
-        onSaveStory={onSaveStory}
-      />
-    )
-  }
+export function SpecPart({ spec, target, onGoToQuestion }: SpecPartProps): ReactNode {
+  if (target === 'stories') return <StoriesPart stories={spec.stories} mark={spec.storiesMark} />
   if (target === 'tasks') return <TasksPart tasks={spec.tasks} mark={spec.tasksMark} />
   if (target === 'questions') {
     return (
@@ -243,19 +211,7 @@ export function SpecPart({
       />
     )
   }
-  const name = target
-  return (
-    <SectionPart
-      // A section is its own editor: another one is another text, never the same area handed a
-      // second text while it may hold the caret.
-      key={name}
-      section={sectionOf(spec, name)}
-      editable={editable}
-      onSave={(body, baseVersion) => onSaveSection(name, body, baseVersion)}
-      onApplyMine={(body) => onApplyMine(name, body)}
-      onDiscardMine={() => onDiscardMine(name)}
-    />
-  )
+  return <SectionPart section={sectionOf(spec, target)} editable={spec.status === 'draft'} />
 }
 
 export interface SpecStageProps extends SpecPartHandlers {
@@ -264,7 +220,6 @@ export interface SpecStageProps extends SpecPartHandlers {
   shown: StageChoice
   /** The groups of the rail, which say which parts a phase has. */
   groups: RailGroup[]
-  reading: boolean
 }
 
 /** The parts a choice puts on the stage, in the order the rail lists them. */
@@ -282,13 +237,7 @@ function partsOf(shown: StageChoice, groups: RailGroup[]): SpecTarget[] {
  * filter, for the reason the foot of a message gives: the accessibility check measures a text's
  * contrast through an opacity and refuses what it reads mid-flight. New content starts at its top.
  */
-export function SpecStage({
-  spec,
-  shown,
-  groups,
-  reading,
-  ...handlers
-}: SpecStageProps): ReactNode {
+export function SpecStage({ spec, shown, groups, ...handlers }: SpecStageProps): ReactNode {
   const transition = useTransition(crossfade)
   const scroller = useRef<HTMLDivElement>(null)
   const key = 'part' in shown ? `part-${shown.part}` : `group-${shown.group}`
@@ -314,7 +263,7 @@ export function SpecStage({
       >
         {partsOf(shown, groups).map((target) => (
           <div key={target} data-part={target}>
-            <SpecPart spec={spec} target={target} reading={reading} {...handlers} />
+            <SpecPart spec={spec} target={target} {...handlers} />
           </div>
         ))}
       </motion.div>

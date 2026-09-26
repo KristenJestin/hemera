@@ -37,12 +37,10 @@ import {
   choose,
   control,
   fill,
-  leave,
   press,
   pressIn,
   pressTab,
   region,
-  showPart,
   unfoldSpec,
   write,
 } from './hand.ts'
@@ -202,10 +200,9 @@ async function writeSpec(asked: string, key: string): Promise<void> {
 
   await unfoldSpec(key)
   // The `shape` phase cannot finish without these two, and this fake agent writes neither: they
-  // are the human's, written in the panel as a human writes them.
-  await writeSection(key, 'Problem', PROBLEM)
-  await showPart(key, 'Scope')
-  await writeSection(key, 'Scope', SCOPE)
+  // go through the window's bridge, since nothing of the Spec is edited by hand (issue #135).
+  await writeSection(key, 'problem', PROBLEM)
+  await writeSection(key, 'scope', SCOPE)
 
   await write(COMPLETE)
   await press('Send')
@@ -217,30 +214,28 @@ async function writeSpec(asked: string, key: string): Promise<void> {
 }
 
 /**
- * Writes a section of the Spec from the panel, as the human's own edit. `typeIn` wants the field
- * focused afterwards, and the answer of the thread takes the caret back: here the text is set and
- * the blur commits it, which is what the panel listens to.
+ * Writes a section of the Spec through the window's bridge, on the version it is at, from the
+ * Session that writes the Spec: the panel edits nothing (issue #135), and this fake agent writes
+ * neither `problem` nor `scope`.
  */
-async function writeSection(key: string, title: string, body: string): Promise<void> {
-  const written = await browser.execute(
-    (label: string, said: string) => {
-      const field = document.querySelector(`textarea[aria-label="${label}"]`)
-      if (!(field instanceof HTMLTextAreaElement)) return 'no field'
-      field.focus()
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
-        field,
-        said,
-      )
-      field.dispatchEvent(new Event('input', { bubbles: true }))
-      return 'written'
+async function writeSection(key: string, name: 'problem' | 'scope', body: string): Promise<void> {
+  const specId = await specIdOf(key)
+  await browser.execute(
+    async (id: string, section: 'problem' | 'scope', said: string) => {
+      const read = await window.hemera.invoke('specs.read', { specId: id })
+      await window.hemera.invoke('specs.writeSection', {
+        specId: id,
+        sessionId: read.spec.writerSessionId ?? '',
+        name: section,
+        body: said,
+        baseVersion: read.sections.find((one) => one.name === section)?.version ?? 0,
+      })
     },
-    title,
+    specId,
+    name,
     body,
   )
-  if (written !== 'written') {
-    throw new Error(`wrote ${title}: ${written}. Panel: ${await region(panelOf(key))}`)
-  }
-  await leave(title)
+  await browser.pause(600)
 }
 
 /**

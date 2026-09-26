@@ -1,9 +1,9 @@
 /**
- * The same Spec, in an application that was started again (designs D7-01, D7-08, D7-11, D7-12).
+ * The same Spec, in an application that was started again (designs D7-01, D7-08, D7-11).
  *
  * A Spec is Hemera's and lives in its data folder: its sections with their versions, its phases
- * with their states, the Session that holds its write right, and a human text refused on an
- * older version, kept until the human chooses. Only a second start proves it, so this is one:
+ * with their states, and the Session that holds its write right. Only a second start proves it,
+ * so this is one:
  * `wdio.conf.ts` points this file at the data folder `specs.e2e.ts` wrote (`CONTINUED`).
  *
  * The restart is checked in `shape`, where that file left the Spec; "Phases survive a restart"
@@ -29,17 +29,7 @@ import {
   REWRITE_ANSWER,
   WRITTEN,
 } from './agent/script.ts'
-import {
-  awaits,
-  control,
-  press,
-  pressIn,
-  region,
-  showPart,
-  textOf,
-  unfoldSpec,
-  write,
-} from './hand.ts'
+import { awaits, control, press, pressIn, region, showPart, unfoldSpec, write } from './hand.ts'
 
 /** The first Session of `specs.e2e.ts`, which is the title it is listed under. */
 const ASKED = `The CSV export drops the date. ${PROPOSE}`
@@ -49,8 +39,6 @@ const OPENED = 'New session'
 
 const KEY = 'ATL-1'
 const PROBLEM = 'The CSV export leaves the invoice date column empty.'
-const THEIRS_AGAIN = 'The invoice CSV export, in every currency.'
-const KEPT = 'Every CSV export of the billing module.'
 
 const PANEL = `section[aria-label="Spec ${KEY}"]`
 
@@ -104,30 +92,13 @@ describe('Phases survive a restart', () => {
     const panel = await region(PANEL)
     expect(panel).toContain(PROPOSAL.title)
     expect(panel).toContain('draft')
-    expect(await textOf('Problem')).toBe(PROBLEM)
+    await showPart(KEY, 'Problem')
+    expect(await region(PANEL)).toContain(PROBLEM)
     expect(await phaseHeading('Shape')).toBe('Shape phase, open, show all its parts')
     expect(await phaseHeading('Plan')).toBe('Plan phase, pending, show all its parts')
     expect(await phaseHeading('Decompose')).toBe('Decompose phase, pending, show all its parts')
     // The write right stayed with the Session that took it.
     expect(await region('[role="group"][aria-label="Write right"]')).toContain(`« ${OPENED} »`)
-  })
-})
-
-describe('A conflict keeps the human’s text', () => {
-  it('still holds the text refused before the restart, and lets it go on Discard mine', async () => {
-    await showPart(KEY, 'Scope')
-    expect(await region(PANEL)).toContain(
-      'The agent changed this part while you were writing yours.',
-    )
-    expect(await textOf('Scope, your text')).toBe(KEPT)
-
-    await pressIn(PANEL, 'Discard mine')
-    await browser.pause(1200)
-    expect(await region(PANEL)).not.toContain(
-      'The agent changed this part while you were writing yours.',
-    )
-    expect(await control('Discard mine')).toBeNull()
-    expect(await textOf('Scope')).toBe(THEIRS_AGAIN)
   })
 })
 

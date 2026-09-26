@@ -113,7 +113,6 @@ export const STATE_SENTENCES: Record<Mark, string | undefined> = {
   agent: undefined,
   human: 'Edited by you',
   stale: 'To review',
-  conflict: "Your text and the agent's differ",
   writing: 'The agent is writing this',
 }
 
@@ -123,7 +122,6 @@ const ATTENTION: Record<Mark, RailAttention> = {
   agent: 'none',
   human: 'edited',
   stale: 'review',
-  conflict: 'conflict',
   writing: 'writing',
 }
 

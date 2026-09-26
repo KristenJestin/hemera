@@ -4,12 +4,9 @@ import { Button } from '../components/button/button.tsx'
 import {
   SECTION_TITLES,
   type ReaderView,
-  type SectionName,
-  type SectionView,
   type SpecAnswer,
   type SpecTarget,
   type SpecView,
-  type StoryView,
 } from './model.ts'
 import { phases } from './spec-fixtures.ts'
 import { SpecPanel } from './spec-panel.tsx'
@@ -17,20 +14,14 @@ import { SpecPanel } from './spec-panel.tsx'
 /**
  * The Spec held by the state the engine would hold, for the stories (lot 19, phase 0).
  *
- * A story is where the panel is tried, and a panel whose saves go nowhere cannot be: the text
- * would snap back on every blur. So this stands in for the engine with the few answers phase 1
- * will give for real — a save is a new human version for the agent's next turn, `Apply mine` is
- * one on top of the current version, an answer in the chat closes its question and, when it was
- * the last blocking one, lets the gate fill; `Mark ready` freezes; `Rework` copies into a new
- * draft whose plan and tasks are stale — and nothing else. Every action is also reported to
- * `on`, which is what a play asserts on.
+ * A story is where the panel is tried, and a panel whose actions go nowhere cannot be. So this
+ * stands in for the engine with the few answers phase 1 gives for real — an answer in the chat
+ * closes its question and, when it was the last blocking one, lets the gate pass; `Mark ready`
+ * freezes; `Rework` copies into a new draft whose plan and tasks are stale — and nothing else.
+ * Every action is also reported to `on`, which is what a play asserts on.
  */
 
 export interface SpecActions {
-  onSaveSection: (name: SectionName, body: string, baseVersion: number) => void
-  onApplyMine: (name: SectionName, body: string) => void
-  onDiscardMine: (name: SectionName) => void
-  onSaveStory: (story: StoryView) => void
   onAnswer: (id: string, answer: SpecAnswer) => void
   onGoToQuestion: (id: string) => void
   onMarkReady: () => void
@@ -63,50 +54,7 @@ export function useLiveSpec(
   const [spec, setSpec] = useState(initial)
   const [reader, setReader] = useState(initialReader)
 
-  function section(name: SectionName, change: (one: SectionView) => SectionView): void {
-    setSpec((now) => ({
-      ...now,
-      sections: now.sections.map((one) => (one.name === name ? change(one) : one)),
-    }))
-  }
-
   const actions: SpecActions = {
-    onSaveSection: (name, body, baseVersion) => {
-      on.onSaveSection(name, body, baseVersion)
-      section(name, (one) => ({
-        ...one,
-        body,
-        version: one.version + 1,
-        author: 'human',
-        mark: 'human',
-        pendingForAgent: true,
-        copiedFrom: undefined,
-      }))
-    },
-    onApplyMine: (name, body) => {
-      on.onApplyMine(name, body)
-      section(name, (one) => ({
-        ...one,
-        body,
-        version: (one.conflict?.current ?? one.version) + 1,
-        author: 'human',
-        mark: 'human',
-        pendingForAgent: true,
-        conflict: undefined,
-      }))
-    },
-    onDiscardMine: (name) => {
-      on.onDiscardMine(name)
-      section(name, (one) => ({ ...one, mark: 'agent', conflict: undefined }))
-    },
-    onSaveStory: (story) => {
-      on.onSaveStory(story)
-      setSpec((now) => ({
-        ...now,
-        stories: now.stories.map((one) => (one.id === story.id ? story : one)),
-        storiesMark: 'human',
-      }))
-    },
     onAnswer: (id, answer) => {
       on.onAnswer(id, answer)
       setSpec((now) => {
@@ -246,10 +194,6 @@ export function LiveSpecPanel({
         defaultFolded={defaultFolded}
         onFoldChange={onFoldChange}
         arrives={arrives}
-        onSaveSection={actions.onSaveSection}
-        onApplyMine={actions.onApplyMine}
-        onDiscardMine={actions.onDiscardMine}
-        onSaveStory={actions.onSaveStory}
         onGoToQuestion={actions.onGoToQuestion}
         onMarkReady={actions.onMarkReady}
         onRework={actions.onRework}

@@ -21,8 +21,7 @@ import type { IconProps } from '../icons.ts'
  * the way the maintainer decided for the Spec (lot 19, the rail's states): a row says only what
  * needs attention, and says it with the row itself. An item with nothing to say carries nothing.
  * An empty one has its name in a fainter text. The one the agent is working on is tinted in the
- * primary, the tint breathing; one to review is tinted in the warning colour, one in conflict in
- * the destructive one. One edited by the reader wears nothing: the part itself says who wrote it,
+ * primary, the tint breathing; one to review is tinted in the warning colour. One edited by the reader wears nothing: the part itself says who wrote it,
  * and the only line on a row's left is the rule of what is on the stage. Each says its state in a
  * sentence, in its tooltip and as its accessible description.
  *
@@ -43,7 +42,7 @@ import type { IconProps } from '../icons.ts'
  */
 
 /** What needs attention about an item, which the row says with a tint, a fainter name or a sentence. */
-export type RailAttention = 'writing' | 'review' | 'conflict' | 'edited' | 'empty' | 'none'
+export type RailAttention = 'writing' | 'review' | 'edited' | 'empty' | 'none'
 
 /** A glyph of the catalogue, at the rail's size. */
 export type RailIcon = FunctionComponent<IconProps>
@@ -92,7 +91,6 @@ const TINT_FOLDED = 'pointer-events-none absolute inset-0 -z-10 rounded-md'
 const TINTS: Partial<Record<RailAttention, string>> = {
   writing: 'bg-primary/10 motion-safe:animate-breathe',
   review: 'bg-warning/15',
-  conflict: 'bg-destructive/15',
 }
 
 /**

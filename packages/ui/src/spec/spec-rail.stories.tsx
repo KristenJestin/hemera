@@ -19,7 +19,7 @@ import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.
  * Folded, it is the band the panel folds to, each phase a block of glyphs.
  */
 
-/** Every mark once, so the six of them are read side by side. */
+/** Every mark once, so the five of them are read side by side. */
 const EVERY_MARK: RailGroup[] = [
   {
     phase: 'shape',
@@ -28,7 +28,7 @@ const EVERY_MARK: RailGroup[] = [
       { target: 'problem', label: 'Problem', mark: 'agent' },
       { target: 'expected_outcome', label: 'Expected outcome', mark: 'empty' },
       { target: 'scope', label: 'Scope', mark: 'human' },
-      { target: 'verification', label: 'Verification', mark: 'conflict' },
+      { target: 'verification', label: 'Verification', mark: 'agent' },
       { target: 'behaviour', label: 'Behaviour', mark: 'stale' },
     ],
   },
@@ -174,8 +174,8 @@ async function tooltipSays(row: HTMLElement, said: string): Promise<void> {
 
 /**
  * One row per state, and no dot anywhere: a part written and current carries nothing, a part
- * still empty has a fainter name, the part being written, one to review and one whose text
- * differs from yours are each tinted in their own colour, and a part you edited wears nothing on
+ * still empty has a fainter name, the part being written and one to review are each tinted in
+ * their own colour, and a part you edited wears nothing on
  * the row: the only line on a row's left is the rule of what is on the stage, even on a part you
  * edited. Each says its state in a sentence, in its tooltip and as its accessible description.
  */
@@ -189,7 +189,6 @@ export const States: Story = {
     const written = row('Problem')
     const empty = row('Expected outcome')
     const edited = row('Scope')
-    const differs = row('Verification')
     const review = row('Behaviour')
     const writing = row('Plan')
     // Written and current: nothing, no tint, no edge, no sentence.
@@ -199,10 +198,10 @@ export const States: Story = {
     // Empty: the name fainter than a written one's, and nothing behind it.
     await expect(tintOf(empty)).toBe('none')
     await expect(getComputedStyle(empty).color).not.toBe(getComputedStyle(written).color)
-    // The three tints, each its own.
-    const tints = [tintOf(writing), tintOf(review), tintOf(differs)]
+    // The two tints, each its own.
+    const tints = [tintOf(writing), tintOf(review)]
     await expect(tints).not.toContain('none')
-    await expect(new Set(tints).size).toBe(3)
+    await expect(new Set(tints).size).toBe(2)
     // Being written: the tint breathes, the text does not.
     const breath = writing.querySelector('[data-tint]')
     if (!movesLess()) {
@@ -215,12 +214,10 @@ export const States: Story = {
     // Each state in a sentence.
     await expect(empty).toHaveAccessibleDescription('Empty')
     await expect(edited).toHaveAccessibleDescription('Edited by you')
-    await expect(differs).toHaveAccessibleDescription("Your text and the agent's differ")
     await expect(review).toHaveAccessibleDescription('To review')
     await expect(writing).toHaveAccessibleDescription('The agent is writing this')
     await tooltipSays(empty, 'Empty')
     await tooltipSays(edited, 'Edited by you')
-    await tooltipSays(differs, "Your text and the agent's differ")
     await tooltipSays(review, 'To review')
     await tooltipSays(writing, 'The agent is writing this')
     await tooltipSays(written, 'Problem')
@@ -503,13 +500,9 @@ export const Folded: Story = {
     }
     // The tints land on the squares of the parts, one colour per state.
     const square = (name: string): HTMLElement => canvas.getByRole('button', { name })
-    const tints = [
-      tintOf(square('Plan')),
-      tintOf(square('Behaviour')),
-      tintOf(square('Verification')),
-    ]
+    const tints = [tintOf(square('Plan')), tintOf(square('Behaviour'))]
     await expect(tints).not.toContain('none')
-    await expect(new Set(tints).size).toBe(3)
+    await expect(new Set(tints).size).toBe(2)
     await expect(tintOf(square('Problem'))).toBe('none')
     // Edited by you: no edge on its square either, the tooltip says it.
     await expect(getComputedStyle(square('Scope')).borderLeftWidth).toBe('0px')
