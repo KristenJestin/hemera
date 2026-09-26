@@ -46,6 +46,7 @@ import {
 import {
   type DefinedSpec,
   briefOf,
+  proposalIdOf,
   proposalOf,
   questionAnchor,
   questionEntryOf,
@@ -349,11 +350,10 @@ export interface SpecContext {
   defined: DefinedSpec | null
   /** The ids of the current revision's questions, null until the Spec is read. */
   asked: ReadonlySet<string> | null
-  /** The proposals `Not now` was pressed on, in this window only: nothing keeps it. */
-  declined: ReadonlySet<string>
   onAnswer: (questionId: string, answer: SpecAnswer) => void
   onCreate: (title: string, type: SpecType) => void
-  onDecline: (entryId: string) => void
+  /** `Not now`: the engine keeps the proposal declined and tells the agent (issue #130). */
+  onDecline: (proposalId: string) => void
 }
 
 /**
@@ -560,8 +560,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
 
   // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07).
   if (entry.kind === 'spec_proposal') {
-    const { thread, specId, defined, declined } = context.spec
-    const proposal = proposalOf(entry, thread, specId, defined, declined.has(entry.id))
+    const { thread, specId, defined } = context.spec
+    const proposal = proposalOf(entry, thread, specId, defined)
     if (proposal === null) return null
     return (
       <CreateSpecProposal
@@ -570,7 +570,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         state={proposal.state}
         createdKey={defined?.key}
         onCreate={context.spec.onCreate}
-        onDecline={() => context.spec.onDecline(entry.id)}
+        onDecline={() => context.spec.onDecline(proposalIdOf(entry))}
       />
     )
   }

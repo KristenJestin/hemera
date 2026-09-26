@@ -41,18 +41,21 @@ import {
   specKey,
   taskGraph,
   writable,
+  SPEC_TYPES,
 } from '@hemera/core'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
+import { z } from 'zod'
 
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
 import { UnknownWorkspaceError } from '../workspaces/described.ts'
-import type { Session, UnknownSessionError } from '../sessions.ts'
+import { type Session, type UnknownSessionError, entryOf } from '../sessions.ts'
 import { Database, type DatabaseError, type EngineTransaction } from '../storage/database.ts'
 import {
   acceptanceCriteria,
   projects,
+  sessionEntries,
   specEditBuffers,
   specQuestions,
   specRevisions,
@@ -207,9 +210,58 @@ export class UnknownSpecItemError extends Data.TaggedError('UnknownSpecItemError
   }
 }
 
+/**
+ * A proposal of the agent declined that its Session does not hold, or that no longer waits for
+ * an answer: declined already, or the Session defines a Spec since (issue #130).
+ */
+export class ProposalRefusedError extends Data.TaggedError('ProposalRefusedError')<{
+  readonly proposalId: string
+  readonly why: 'unknown' | 'answered'
+}> {
+  override get message(): string {
+    return this.why === 'unknown'
+      ? `This Session has no proposal "${this.proposalId}".`
+      : 'This proposal was already answered.'
+  }
+}
+
+/** A proposal declined, as the agent proposed it: what it is told it was refused. */
+export interface DeclinedProposal {
+  title: string
+  type: SpecType
+}
+
+/**
+ * What the agent is handed when the user declined its proposal (issue #130): Hemera's words,
+ * never the user's, so that it goes on in the Session it is in rather than waiting for an answer.
+ */
+export function declinedNotice(proposal: DeclinedProposal): string {
+  return [
+    '# Proposal declined',
+    '',
+    `The user declined your proposal to create the ${proposal.type} Spec "${proposal.title}": no Spec was created, and this Session stays free.`,
+    "This is a note from Hemera, not a message of the user's. Carry on with the conversation where it was, and do not propose that Spec again unless the user asks for it.",
+  ].join('\n')
+}
+
+/** What a `spec_proposal` entry carries, as `spec_propose` wrote it. */
+const PROPOSED = z.object({ title: z.string(), type: z.enum(SPEC_TYPES) })
+
+/** The proposal an entry holds; one whose payload does not read is named by its body alone. */
+function proposedIn(payload: string, body: string): DeclinedProposal {
+  try {
+    const read = PROPOSED.safeParse(JSON.parse(payload))
+    if (read.success) return read.data
+  } catch {
+    // Falls through to the body, which is the title the entry was written with.
+  }
+  return { title: body, type: 'feature' }
+}
+
 /** Everything a Spec use case can be refused with. */
 export type SpecRefusal =
   | DatabaseError
+  | ProposalRefusedError
   | UnknownSpecError
   | UnknownRevisionError
   | UnknownSessionError
@@ -239,6 +291,11 @@ export interface SpecsService {
    * was proposed in becomes its writer and turns `define`, in one transaction.
    */
   readonly create: (input: NewSpec) => Answer<DefiningSession>
+  /**
+   * The agent's proposal declined (issue #130): its entry is kept `declined`, which the thread
+   * draws, and the Session stays `free`. Telling the agent is the runtime's.
+   */
+  readonly declineProposal: (sessionId: string, proposalId: string) => Answer<DeclinedProposal>
   /** A new `define` Session on a Spec: the writer if it has none, a reader otherwise (D7-11). */
   readonly openSession: (input: SessionOpening) => Answer<DefiningSession>
   readonly writeSection: (actor: SpecWriter, input: SectionWrite) => Answer<SpecSnapshot>
@@ -1024,6 +1081,59 @@ export const specsLayer = Layer.effect(
         ),
 
       create: (input) => defining('creating a Spec', (transaction) => createIn(transaction, input)),
+
+      declineProposal: (sessionId, proposalId) =>
+        withDatabase(
+          mutate('declining a proposal', (transaction) =>
+            Effect.gen(function* () {
+              const found = yield* transaction
+                .select()
+                .from(sessionEntries)
+                .where(
+                  and(
+                    eq(sessionEntries.sessionId, sessionId),
+                    eq(sessionEntries.kind, 'spec_proposal'),
+                    eq(sessionEntries.correlationId, `proposal:${proposalId}`),
+                  ),
+                )
+                .limit(1)
+                .pipe(Effect.mapError(failed('reading the proposal')))
+              const row = found[0]
+              if (row === undefined) {
+                return yield* Effect.fail(new ProposalRefusedError({ proposalId, why: 'unknown' }))
+              }
+              const session = yield* sessionRow(transaction, sessionId)
+              // A Session that defines a Spec answered every proposal it held when it was made.
+              if (row.state === 'declined' || session.mission !== 'free') {
+                return yield* Effect.fail(new ProposalRefusedError({ proposalId, why: 'answered' }))
+              }
+              const rows = yield* transaction
+                .update(sessionEntries)
+                .set({ state: 'declined' })
+                .where(eq(sessionEntries.id, row.id))
+                .returning()
+                .pipe(Effect.mapError(failed('declining the proposal')))
+              const entry = entryOf(rows[0] ?? row)
+              const event: NewEvent = {
+                type: 'session.entry_written',
+                entityKind: 'session',
+                entityId: sessionId,
+                source: 'ui',
+                author: 'human',
+                projectId: session.projectId,
+                sessionId,
+                payload: { seq: row.seq, kind: 'spec_proposal', role: 'hemera', state: 'declined' },
+              }
+              return {
+                result: { entry, proposal: proposedIn(row.payload, row.body) },
+                events: [event],
+              }
+            }),
+          ),
+        ).pipe(
+          Effect.tap(({ entry }) => Effect.sync(() => notices.wrote(sessionId, entry))),
+          Effect.map(({ proposal }) => proposal),
+        ),
 
       openSession: (input) =>
         defining('opening a Session on a Spec', (transaction) =>

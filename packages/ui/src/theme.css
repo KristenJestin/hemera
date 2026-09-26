@@ -570,11 +570,14 @@
    frame of a fold — 0 folded, 1 unfolded — so the chat beside it is pushed as it moves. A share
    and not a length, because the two ends are lengths of different kinds, rems and a share of the row, and
    only the browser can put them on one line; at rest it is one of the two tokens exactly, and
-   stays so while the window is resized. The fallback is the band, which the panel opens at. */
+   stays so while the window is resized. The fallback is the band, which the panel opens at.
+   `--mission-panel-in` scales the whole of it, from nothing to 1, while a panel whose mission has
+   just begun arrives in the row (issue #130); it is 1 for a panel that was already there. */
 @utility mission-panel-slot {
   width: calc(
-    var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
-      var(--mission-panel-open, 0)
+    (var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
+        var(--mission-panel-open, 0)) *
+      var(--mission-panel-in, 1)
   );
 }
 

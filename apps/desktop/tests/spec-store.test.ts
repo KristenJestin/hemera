@@ -15,6 +15,7 @@ import {
   askForBuild,
   closeSpec,
   createSpec,
+  declineSpecProposal,
   discardMine,
   forgetSpecRefusal,
   listenToSpecs,
@@ -473,6 +474,21 @@ describe('Accepting the proposal creates the Spec', () => {
       argument: { sessionId: 'writer', type: 'feature', title: 'CSV invoice export' },
     })
     expect(specSnapshot().snapshot?.spec.key).toBe('ATL-7')
+  })
+})
+
+describe('Declining the proposal asks the engine', () => {
+  test('Not now sends the proposal to the engine, and answers what it was refused with', async () => {
+    answers.set('specs.declineProposal', {})
+
+    expect(await declineSpecProposal('writer', '4f1c')).toBeNull()
+    expect(asked.at(-1)).toEqual({
+      name: 'specs.declineProposal',
+      argument: { sessionId: 'writer', proposalId: '4f1c' },
+    })
+
+    answers.set('specs.declineProposal', new Error('This proposal was already answered.'))
+    expect(await declineSpecProposal('writer', '4f1c')).toBe('This proposal was already answered.')
   })
 })
 

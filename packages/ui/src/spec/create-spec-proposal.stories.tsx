@@ -10,7 +10,7 @@ import { CreateSpecProposal } from './create-spec-proposal.tsx'
 const meta = {
   title: 'Blocks/Spec/CreateSpecProposal',
   component: CreateSpecProposal,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: { title: 'CSV invoice export', type: 'feature', onCreate: fn(), onDecline: fn() },
   argTypes: {
@@ -35,6 +35,16 @@ export const Proposed: Story = {
       'CSV invoice export',
     )
     await expect(canvas.getByRole('radio', { name: 'feature' })).toBeChecked()
+    // Each type wears its glyph beside its word, which stays the chip's name (issue #130).
+    for (const [type, glyph] of Object.entries({
+      feature: 'sparkles',
+      bug: 'bug',
+      maintenance: 'tool',
+    })) {
+      const chip = canvas.getByRole('radio', { name: type })
+      // oxlint-disable-next-line no-await-in-loop -- one chip after the other, as they are read
+      await expect(chip.querySelector(`.tabler-icon-${glyph}`)).not.toBeNull()
+    }
     await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
     await expect(args.onCreate).toHaveBeenCalledWith('CSV invoice export', 'feature')
   },

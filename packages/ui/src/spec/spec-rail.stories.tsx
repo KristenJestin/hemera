@@ -5,7 +5,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { emulateReducedMotion, movesLess } from '../../.storybook/reduced-motion.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import type { PhaseName, ReadinessView, SpecTarget } from './model.ts'
-import { BUG, FULL_GATE, MID_PLAN, READER } from './spec-fixtures.ts'
+import { BUG, FULL_GATE, MID_PLAN, READER, gate } from './spec-fixtures.ts'
 import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.tsx'
 
 /**
@@ -117,7 +117,7 @@ function Held({
 const meta = {
   title: 'Blocks/Spec/SpecRail',
   component: Held,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'fullscreen' },
   args: {
     groups: EVERY_MARK,
@@ -464,7 +464,7 @@ export const Keyboard: Story = {
  * Folded, the band keeps the hierarchy: each phase a block, its glyph in a tinted square, the
  * smaller glyphs of its parts right under it and set in, and a gap and a hairline before the next
  * phase. The tints of the rows fill the squares of the parts; the names leave the eye and stay the
- * accessible name and the tooltip, the state said beside the name. The readiness is said as `3/7`.
+ * accessible name and the tooltip, the state said beside the name. The readiness is said as `1/7`.
  */
 export const Folded: Story = {
   args: { groups: EVERY_MARK, initial: 'tasks', folded: true },
@@ -474,8 +474,8 @@ export const Folded: Story = {
     await expect(canvas.queryByText('Expected outcome')).toBeNull()
     await expect(dotsIn(rail)).toEqual([])
     await expect(
-      canvas.getByRole('img', { name: 'Readiness, 3 of 7 checks pass' }),
-    ).toHaveTextContent('3/7')
+      canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' }),
+    ).toHaveTextContent('1/7')
     await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
     const blocks = ['Shape', 'Plan', 'Decompose'].map((name) => canvas.getByRole('group', { name }))
     for (const [index, block] of blocks.entries()) {
@@ -563,17 +563,38 @@ export const EveryIcon: Story = {
 }
 
 /**
- * The foot, partial: seven thin segments, three filled, and `3/7 · 4 things before ready` — no
- * `Mark ready`, never drawn disabled.
+ * The foot, partial: seven thin segments, one filled, and under them what they count in words —
+ * `1 of 7 checks met` — then `4 things before ready`: no `Mark ready`, never drawn disabled.
  */
 export const FootPartial: Story = {
   args: { groups: railOf(MID_PLAN) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Readiness, 3 of 7 checks pass' })).toBeVisible()
-    await expect(canvas.getByText('3/7')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Readiness, 1 of 7 checks met' })).toBeVisible()
+    await expect(canvas.getByText('1 of 7 checks met')).toBeVisible()
     await expect(canvas.getByRole('button', { name: '4 things before ready' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+  },
+}
+
+/**
+ * The foot of a Spec just created, where nothing is written yet (issue #130): the bar is empty —
+ * a check the gate passes on nothing, no task and no question, meets nothing — and says so.
+ */
+export const FootEmpty: Story = {
+  args: {
+    groups: railOf(MID_PLAN),
+    readiness: gate(
+      { contract: 'contract · nothing written', phases: 'phases · shape open' },
+      [{ label: 'the problem', target: 'problem' }],
+      ['references', 'coverage', 'cycle', 'questions', 'attestation'],
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const bar = canvas.getByRole('img', { name: 'Readiness, 0 of 7 checks met' })
+    await expect(bar.querySelectorAll('.bg-success')).toHaveLength(0)
+    await expect(canvas.getByText('0 of 7 checks met')).toBeVisible()
   },
 }
 
@@ -603,7 +624,7 @@ export const FootFull: Story = {
   args: { groups: railOf(MID_PLAN), readiness: FULL_GATE },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks pass' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Readiness, 7 of 7 checks met' })).toBeVisible()
     await expect(canvas.getByText('Ready to freeze')).toBeVisible()
     const mark = canvas.getByRole('button', { name: 'Mark ready' })
     await expect(mark).toBeEnabled()
