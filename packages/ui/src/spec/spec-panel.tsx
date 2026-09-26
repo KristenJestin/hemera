@@ -1,6 +1,8 @@
 import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
+import { Button } from '../components/button/button.tsx'
+import { IconCheck } from '../icons.ts'
 import { CROSSFADE, collapse, crossfade, expand, morph, useTransition } from '../motion.ts'
 import { MissionPanel } from '../session/mission-panel.tsx'
 import type {
@@ -29,13 +31,14 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * chat, the width that pushes the chat as it unfolds, the agent unfolding it onto what it starts
  * on unless the hand folded it, and the keyboard across a fold. What is the Spec's is here.
  *
- * Unfolded, a head that stays on top — the key, the title, the status, `Mark ready` on a draft
- * and `Rework` on a ready Spec, and the one sentence of what is happening — and under it the rail
- * beside the stage. The stage shows one part, or every part of one phase when its heading in the
- * rail is chosen. Folded, the band is the rail's glyphs and their tints. No readiness is drawn
- * (issue #135): what the draft lacks is the agent's to say, and `Mark ready`'s to refuse with.
- * Once the Spec is ready, the build's actions arrive in a footer at the bottom of the rail, and
- * leave it when the Spec is reworked.
+ * Unfolded, a head that stays on top — the key, the title, the status, `Rework` on a ready Spec,
+ * and no sentence of what the agent is doing — under it the rail beside the stage, and under both
+ * a footer the panel's whole width (issue #150). The stage shows one part, or every part of one
+ * phase when its heading in the rail is chosen. Folded, the band is the rail's glyphs and their
+ * tints. No readiness is drawn (issue #135): what the draft lacks is the agent's to say, and
+ * `Mark ready`'s to refuse with. The footer holds `Mark ready` on a draft — quiet until the agent
+ * has confirmed the Spec complete, primary from then on — and once the Spec is ready, the build's
+ * actions in its place, until the Spec is reworked.
  *
  * Which part is on the stage follows one rule. While the reader has chosen nothing, it follows
  * the agent: the part it writes. A row of the rail or a group heading pins the choice, and from
@@ -50,14 +53,15 @@ const HEAD = 'flex flex-col gap-1.5 border-b border-border px-5 pt-4 pb-3'
 
 const NOW = 'text-sm text-muted-foreground'
 
-const REFUSED = 'text-sm text-destructive-muted-foreground'
+/** What `Mark ready` was refused with, beside it in the footer, taking the room it leaves. */
+const REFUSED = 'min-w-0 flex-1 text-sm text-destructive-muted-foreground'
 
 const SCROLL = 'min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring'
 
 const STAGE = 'flex flex-col gap-10 px-10 pt-5 pb-10'
 
-/** The footer of the rail the build's actions stand in, over the rail's own bottom edge. */
-const BUILD_FOOT = 'flex flex-col gap-2 border-t border-border px-2 py-3'
+/** The footer of the panel, under the rail and the stage alike, its actions at its end. */
+const FOOT = 'flex items-center justify-end gap-3 border-t border-border px-5 py-3'
 
 /** What a part does with the reader's hand, handed down from the panel. */
 export interface SpecPartHandlers {
@@ -86,7 +90,7 @@ export interface SpecPanelProps extends SpecPartHandlers {
   onTakeOver: () => void
   /**
    * Where the build stands, and what it is launched in (D8-12, D8-13), which the application
-   * composes. Drawn in a footer of the rail on a Spec that is not being written, and on a launch
+   * composes. Drawn in the panel's footer on a Spec that is not being written, and on a launch
    * already asked for whatever the Spec is doing: a draft offers nothing to build, and an older
    * revision of a ready one is read as it was (D7-05).
    */
@@ -118,6 +122,20 @@ export function SpecPanel({
   // panel is where the Session it opened, or what became of it, is said (D8-13).
   const launched = build !== undefined && build.launch !== null
   const buildable = spec.replacedBy === undefined && (spec.status !== 'draft' || launched)
+  // `Mark ready` is offered on the current revision of a draft, whatever it holds: never disabled,
+  // what the Spec still lacks is what the engine refuses it with (issue #135). It turns primary
+  // once the agent's `ready` proposal was accepted — its attestation stands on the content the
+  // Spec is at now (D7-10) — and stays quiet before (issue #150).
+  const markable = spec.status === 'draft' && spec.replacedBy === undefined
+  const confirmed = spec.readiness.checks.some(
+    (check) => check.check === 'attestation' && check.passed,
+  )
+  const foot: FootContent | null =
+    buildable && build !== undefined
+      ? { kind: 'build', build }
+      : markable
+        ? { kind: 'ready', confirmed, refused: spec.readiness.refused, onMarkReady }
+        : null
   const groups = railOf(spec)
 
   const rail = {
@@ -153,18 +171,13 @@ export function SpecPanel({
                 superseded={spec.replacedBy !== undefined}
                 onPickRevision={onPickRevision}
                 onRework={() => setReworking(true)}
-                onMarkReady={onMarkReady}
                 onFold={fold}
               />
-              {spec.now !== '' && <p className={NOW}>{spec.now}</p>}
-              {spec.status === 'draft' &&
-                spec.readiness.refused !== undefined && (
-                  // What `Mark ready` was refused with: what the draft still lacks, or that it
-                  // changed as it was pressed (D7-10, issue #135).
-                  <p role="alert" className={REFUSED}>
-                    {spec.readiness.refused}
-                  </p>
-                )}
+              {spec.replacedBy !== undefined && (
+                // The one line under the head, and only for an older revision: which phase the
+                // agent is on is the rail's to say, and whether it is done the footer's (#150).
+                <p className={NOW}>An earlier version · read only</p>
+              )}
             </header>
             {reader !== undefined && (
               <ReaderBar
@@ -175,14 +188,10 @@ export function SpecPanel({
             )}
           </>
         )}
-        rail={
-          <SpecRail
-            {...rail}
-            foot={<BuildFoot build={buildable && build !== undefined ? build : undefined} />}
-          />
-        }
+        rail={<SpecRail {...rail} />}
         stage={<SpecStage spec={spec} shown={shown} groups={groups} {...handlers} />}
         band={<SpecRail {...rail} folded />}
+        foot={<SpecFoot content={foot} />}
       />
       <ReworkDialog
         open={reworking}
@@ -198,31 +207,66 @@ export function SpecPanel({
   )
 }
 
+/** What the footer holds: `Mark ready` on a draft, the build's actions once the Spec is ready. */
+type FootContent =
+  | { kind: 'build'; build: WorkspaceActionsProps }
+  | {
+      kind: 'ready'
+      /** Whether the agent confirmed the Spec complete, which makes `Mark ready` the primary. */
+      confirmed: boolean
+      /** What the last `Mark ready` was refused with. */
+      refused: string | undefined
+      onMarkReady: () => void
+    }
+
 /**
- * The footer of the rail the build's actions stand in (issue #135): `Prepare and start the build`
- * and `Use an existing Workspace`, then where the launch stands.
+ * The footer of the panel (issues #135, #150): under the rail and the stage together, what the
+ * Spec offers at its end — `Mark ready` on a draft, with what it was refused with beside it; once
+ * ready, `Use an existing Workspace` and `Prepare and start the build`, then where the launch
+ * stands.
  *
- * It arrives when the Spec becomes ready and leaves when it is reworked, on the `expand` and
- * `collapse` kinds: its height is what makes room, so the rows above it move up rather than being
- * covered, and it fades as it goes. A Spec opened ready finds it there, with nothing arriving.
- * While it leaves it is still in the page, and a button there is a button a second press reaches:
- * so the moment it starts leaving it is `inert` and hidden from assistive technology.
+ * What it holds arrives and leaves on the `expand` and `collapse` kinds: its height is what makes
+ * room, so the rail and the stage above it give it room rather than being covered, and it fades as
+ * it goes. Marked ready, `Mark ready` folds away as the build's actions unfold in its place; a
+ * Rework takes the build's actions back and brings `Mark ready` back. A Spec opened in either
+ * state finds its footer there. While a content leaves it is still in the page, and a button there
+ * is a button a second press reaches: so the moment it starts leaving it is `inert` and hidden
+ * from assistive technology.
  */
-function BuildFoot({ build }: { build: WorkspaceActionsProps | undefined }): ReactNode {
+function SpecFoot({ content }: { content: FootContent | null }): ReactNode {
   const transition = useTransition(morph)
   return (
     <AnimatePresence initial={false}>
-      {build !== undefined && (
+      {content !== null && (
         <motion.div
-          key="build"
+          key={content.kind}
           className="shrink-0 overflow-hidden"
           initial={collapse}
           animate={expand}
           exit={collapse}
           transition={transition}
         >
-          <Leaving>
-            <WorkspaceActions {...build} />
+          <Leaving kind={content.kind}>
+            {content.kind === 'build' ? (
+              <WorkspaceActions {...content.build} />
+            ) : (
+              <>
+                {content.refused !== undefined && (
+                  // What the draft still lacks, or that it changed as it was pressed (D7-10).
+                  <p role="alert" className={REFUSED}>
+                    {content.refused}
+                  </p>
+                )}
+                <Button
+                  variant={content.confirmed ? 'primary' : 'secondary'}
+                  size="sm"
+                  onClick={content.onMarkReady}
+                >
+                  <IconCheck size="sm" aria-hidden="true" />
+                  Mark ready
+                </Button>
+              </>
+            )}
           </Leaving>
         </motion.div>
       )}
@@ -231,14 +275,20 @@ function BuildFoot({ build }: { build: WorkspaceActionsProps | undefined }): Rea
 }
 
 /** The footer's content, out of reach from the moment it starts leaving. */
-function Leaving({ children }: { children: ReactNode }): ReactNode {
+function Leaving({
+  kind,
+  children,
+}: {
+  kind: FootContent['kind']
+  children: ReactNode
+}): ReactNode {
   const present = useIsPresent()
   return (
     <div
-      className={BUILD_FOOT}
+      className={FOOT}
       inert={!present}
       aria-hidden={present ? undefined : true}
-      data-build-foot
+      data-foot={kind}
     >
       {children}
     </div>

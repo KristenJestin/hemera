@@ -389,7 +389,7 @@ function Screens({
 const meta = {
   title: 'Surfaces/Session/Define',
   component: Screens,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'fullscreen' },
   args: { screen: 'midPlan' },
   argTypes: {
@@ -453,14 +453,14 @@ export const MidPlan: Story = {
 }
 
 /**
- * Unfolded, then `Mark ready` pressed too early: refused with what is left, said under the head;
+ * Unfolded, then `Mark ready` pressed too early: refused with what is left, said beside it;
  * the tasks, not written yet, put on the stage from the rail.
  */
 export const MidPlanMarkReadyRefused: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Plan · the agent is writing the plan')).toBeVisible()
+    await expect(canvas.queryByText(/^Plan ·/)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
     await expect(canvas.getByRole('alert')).toHaveTextContent(/Still to do: .*the tasks/)
     await userEvent.click(canvas.getByRole('button', { name: /^Tasks/ }))
@@ -522,7 +522,7 @@ export const FromAFreeSession: Story = {
   },
 }
 
-/** Screen 4 · every check passes: `Mark ready` in the head, as on every draft. */
+/** Screen 4 · every check passes: `Mark ready` in the footer, the primary action once confirmed. */
 export const GateFull: Story = {
   args: { screen: 'gateFull', folded: false },
   play: async ({ canvasElement }) => {
@@ -615,9 +615,11 @@ export const ReadyReworked: Story = {
     await waitFor(() => expect(says).toBeVisible())
     await userEvent.click(page.getByRole('button', { name: 'Rework' }))
     await waitFor(() => expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible())
+    // The rail says what is to review; no sentence under the head says it again (issue #150).
     await expect(
-      canvas.getByText('Every phase to review · the agent goes over each again'),
+      canvas.getByRole('button', { name: 'Plan phase, to review, show all its parts' }),
     ).toBeVisible()
+    await expect(canvas.queryByText(/^Every phase to review/)).toBeNull()
   },
 }
 
@@ -661,9 +663,7 @@ export const StaleAfterRework: Story = {
   args: { screen: 'stale', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(
-      canvas.getByText('Every phase to review · the agent goes over each again'),
-    ).toBeVisible()
+    await expect(canvas.queryByText(/^Every phase to review/)).toBeNull()
     const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
     await expect(
       within(rail).getByRole('button', {
@@ -676,7 +676,7 @@ export const StaleAfterRework: Story = {
       }),
     ).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Tasks, 4' })).toHaveAccessibleDescription(
-      'To review',
+      'Started. To review',
     )
     await expect(canvas.getAllByText('to review')[0]).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()

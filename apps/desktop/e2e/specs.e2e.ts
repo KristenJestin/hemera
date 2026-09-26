@@ -191,7 +191,8 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
     expect(panel).toContain(KEY)
     expect(panel).toContain(PROPOSAL.title)
     expect(panel).toContain('draft')
-    expect(panel).toContain('Shape · the agent is writing the problem')
+    // No sentence of the phase under the head: the rail says where each part stands (#150).
+    expect(panel).not.toContain('Shape ·')
     // The head names the Project alone (issue #149): the mission is the panel beside the chat,
     // and the agent is the composer's.
     expect(await shows(`DEFINE · opencode`)).toBe(false)
@@ -224,8 +225,6 @@ describe('The Spec is read, never edited by hand', () => {
     expect(await region(PANEL)).toContain(PROBLEM)
     expect(await fieldsIn(PANEL)).toBe(0)
     expect(await control(`Preview Problem as Markdown`)).toBeNull()
-    // The sentence moves on to the next section left to write.
-    expect(await region(PANEL)).toContain('Shape · the agent is writing the expected outcome')
   })
 })
 
@@ -257,7 +256,6 @@ describe('A question is asked and answered in the chat', () => {
 
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 1 open')
-    expect(panel).toContain('Shape · waiting for your answer')
 
     await pressIn(PANEL, 'Answer in the chat')
     await browser.pause(500)

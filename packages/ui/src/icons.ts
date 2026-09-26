@@ -53,6 +53,7 @@ import {
   IconCircleCheck as TablerCircleCheck,
   IconCircleCheckFilled as TablerCircleCheckFilled,
   IconCircleDashed as TablerCircleDashed,
+  IconCircleHalf2 as TablerCircleHalf2,
   IconCircleX as TablerCircleX,
   IconCircleXFilled as TablerCircleXFilled,
   IconClock as TablerClock,
@@ -376,6 +377,9 @@ export const IconCircleDashed = catalogued(
   TablerCircleDashed,
   'IconCircleDashed',
 )
+/* A circle half hatched: a thing begun and not finished, as the Spec's rail marks a part whose
+   phase is still open (issue #150). Tabler draws it in lines only; the outline stands for both. */
+export const IconCircleHalf2 = catalogued(TablerCircleHalf2, TablerCircleHalf2, 'IconCircleHalf2')
 export const IconCircleX = catalogued(TablerCircleXFilled, TablerCircleX, 'IconCircleX')
 export const IconClock = catalogued(TablerClockFilled, TablerClock, 'IconClock')
 export const IconCopy = catalogued(TablerCopy, TablerCopy, 'IconCopy')

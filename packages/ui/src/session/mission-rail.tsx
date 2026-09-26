@@ -9,7 +9,7 @@ import {
 } from 'react'
 
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import type { IconProps } from '../icons.ts'
+import { IconCheck, IconCircleHalf2, type IconProps } from '../icons.ts'
 
 /**
  * The rail of a mission panel: what the mission is made of, one quiet row each, grouped under
@@ -25,6 +25,10 @@ import type { IconProps } from '../icons.ts'
  * tinted in the warning colour. One edited by the reader wears nothing more: the part itself says
  * who wrote it. Each says its state in a sentence in its tooltip, and to a screen reader: an
  * empty one in its name, the others as its accessible description.
+ *
+ * How far along a row is shows at its end, after its count, without a dot (issue #150): a check
+ * when it is done, a circle half hatched when it is started, and nothing when it is empty — its
+ * muted name says that. The mark is the glyph's only; its words are the row's sentence.
  *
  * What is on the stage says so with a plain selected surface, and nothing else. A group opens on
  * its header, which reads as the header of a section and not as one more row: its name in the
@@ -46,6 +50,9 @@ import type { IconProps } from '../icons.ts'
 /** What needs attention about an item, which the row says with a tint, a fainter name or a sentence. */
 export type RailAttention = 'writing' | 'review' | 'edited' | 'empty' | 'none'
 
+/** How far along an item is, which its row says with a mark at its end. */
+export type RailProgress = 'done' | 'started' | 'empty'
+
 /** A glyph of the catalogue, at the rail's size. */
 export type RailIcon = FunctionComponent<IconProps>
 
@@ -57,6 +64,8 @@ export interface MissionRailItem {
   label: string
   count?: number | undefined
   attention: RailAttention
+  /** How far along it is: done, started or empty; nothing is drawn at its end when absent. */
+  progress?: RailProgress | undefined
   /** The state in a sentence, for the tooltip and the accessible description. */
   description?: string | undefined
 }
@@ -193,6 +202,30 @@ const HINT_SHOWN = 'font-normal tracking-normal opacity-100'
 const LABEL = 'min-w-0 flex-1 truncate'
 
 const COUNT = 'text-xs text-muted-foreground tabular-nums'
+
+/** The mark at a row's end: a check in the success tone for done, the muted half for started. */
+const DONE = 'flex shrink-0 text-success-muted-foreground'
+
+const STARTED = 'flex shrink-0 text-muted-foreground'
+
+/** The mark of how far along a row is, at its end; an empty row wears none. */
+function ProgressMark({ progress }: { progress: RailProgress | undefined }): ReactNode {
+  if (progress === 'done') {
+    return (
+      <span aria-hidden="true" data-progress="done" className={DONE}>
+        <IconCheck size="sm" />
+      </span>
+    )
+  }
+  if (progress === 'started') {
+    return (
+      <span aria-hidden="true" data-progress="started" className={STARTED}>
+        <IconCircleHalf2 size="sm" />
+      </span>
+    )
+  }
+  return null
+}
 
 export interface MissionRailProps {
   /** What the rail is called: `Parts of ATL-7`. */
@@ -343,6 +376,7 @@ export function MissionRail({
                               {item.count !== undefined && (
                                 <span className={COUNT}>{item.count}</span>
                               )}
+                              <ProgressMark progress={item.progress} />
                             </>
                           )}
                         </button>

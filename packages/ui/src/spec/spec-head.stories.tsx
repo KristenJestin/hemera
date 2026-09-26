@@ -6,8 +6,9 @@ import { SpecHead } from './spec-head.tsx'
 
 /**
  * The first line of the Spec panel: the key, the title, the type, the status, and — once there
- * is more than one revision — the picker of the revisions, with `Mark ready` on a draft and
- * `Rework` on a `ready` Spec — and at the very end the fold that takes the panel back to its band.
+ * is more than one revision — the picker of the revisions, with `Rework` on a `ready` Spec — and
+ * at the very end the fold that takes the panel back to its band. `Mark ready` is not here: it
+ * stands in the panel's footer (issue #150).
  */
 const meta = {
   title: 'Blocks/Spec/SpecHead',
@@ -30,7 +31,6 @@ const meta = {
     revisions: [{ number: 1, detail: 'Latest · draft' }],
     onPickRevision: fn(),
     onRework: fn(),
-    onMarkReady: fn(),
     onFold: fn(),
   },
   argTypes: {
@@ -43,9 +43,6 @@ const meta = {
     superseded: { control: 'boolean', description: 'Whether an older revision is shown.' },
     onPickRevision: { description: 'Shows another revision.' },
     onRework: { description: 'Opens the rework of a `ready` Spec.' },
-    onMarkReady: {
-      description: 'Marks a draft ready; refused by the engine while it lacks something.',
-    },
     onFold: { description: 'Folds the panel to its band.' },
   },
 } satisfies Meta<typeof SpecHead>
@@ -55,8 +52,8 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * A first draft: no revision named, no picker, no Rework; `Mark ready`, never disabled, and the
- * fold at the end of the line.
+ * A first draft: no revision named, no picker, no Rework, no `Mark ready` — the footer holds it
+ * (issue #150) — and the fold at the end of the line.
  */
 export const Draft: Story = {
   play: async ({ canvasElement, args }) => {
@@ -65,10 +62,7 @@ export const Draft: Story = {
     await expect(canvas.getByText('draft')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /rev/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
-    const mark = canvas.getByRole('button', { name: 'Mark ready' })
-    await expect(mark).toBeEnabled()
-    await userEvent.click(mark)
-    await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
     await expect(args.onFold).toHaveBeenCalled()
   },

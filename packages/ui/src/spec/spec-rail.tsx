@@ -5,6 +5,7 @@ import {
   type MissionRailItem,
   MissionRail,
   type RailAttention,
+  type RailProgress,
 } from '../session/mission-rail.tsx'
 import {
   PHASE_TITLES,
@@ -26,9 +27,14 @@ import { SPEC_PART_ICONS, SPEC_PHASE_ICONS } from './spec-icons.ts'
  * needs attention, by a tint or a fainter name, and says it in a sentence; the headers,
  * the hint, the rule of what is on the stage and the folded band are the same for every mission.
  * What is the Spec's is here: which parts a type has, under which phase, the glyph of each, what
- * each mark asks of the reader, and the sentences. How far the Spec is from `ready` is not drawn
- * (issue #135): what is missing is the agent's to say, and `Mark ready`'s to refuse with its
- * reasons.
+ * each mark asks of the reader, how far along each part is, and the sentences. How far the Spec is
+ * from `ready` is not drawn (issue #135): what is missing is the agent's to say, and `Mark
+ * ready`'s to refuse with its reasons.
+ *
+ * How far along a part is (issue #150) is read from what is written and from the phase that writes
+ * it, the phase being what the agent declares finished (D7-08): done once it is written and its
+ * phase finished; started while it is being written, or written with its phase still open, pending
+ * or to review; empty while nothing is written.
  */
 
 /** One row: where it leads, what it is called, its mark and, for a list, its count. */
@@ -128,20 +134,48 @@ const PHASE_STATE_WORDS: Record<PhaseState, string> = {
   unavailable: 'unavailable',
 }
 
+/** How far along a part is, said as the first words of its sentence; empty says so in its name. */
+const PROGRESS_WORDS: Record<RailProgress, string | undefined> = {
+  done: 'Done',
+  started: 'Started',
+  empty: undefined,
+}
+
+/**
+ * How far along a part is: being written is started, whatever it holds; nothing written is empty;
+ * to review is started; written is done once its phase is finished, and started until then.
+ */
+export function progressOf(state: Mark, phase: PhaseState): RailProgress {
+  if (state === 'writing') return 'started'
+  if (state === 'empty') return 'empty'
+  // To review is not done, whatever its phase says: the agent has it to go over again.
+  if (state === 'stale') return 'started'
+  return phase === 'finished' ? 'done' : 'started'
+}
+
 /** A row as the rail draws it: the part the agent is writing is that, whatever its mark says. */
-function itemOf(row: RailRow, following: SpecTarget | undefined): MissionRailItem {
+function itemOf(
+  row: RailRow,
+  phase: PhaseState,
+  following: SpecTarget | undefined,
+): MissionRailItem {
   const state: Mark = row.target === following ? 'writing' : row.mark
+  const progress = progressOf(state, phase)
   // An edit of yours the agent has not read yet stays said beside what the row is now.
   const edited = row.mark === 'human' && state !== 'human'
-  const said = [STATE_SENTENCES[state], edited ? STATE_SENTENCES.human : undefined].filter(
-    (one) => one !== undefined,
-  )
+  // Being written says it is started already: the word would only say it twice.
+  const said = [
+    state === 'writing' ? undefined : PROGRESS_WORDS[progress],
+    STATE_SENTENCES[state],
+    edited ? STATE_SENTENCES.human : undefined,
+  ].filter((one) => one !== undefined)
   return {
     id: row.target,
     icon: SPEC_PART_ICONS[row.target],
     label: row.label,
     count: row.count,
     attention: ATTENTION[state],
+    progress,
     description: said.length === 0 ? undefined : said.join('. '),
   }
 }
@@ -158,7 +192,7 @@ function groupOf(group: RailGroup, following: SpecTarget | undefined): MissionRa
     tooltip: review ? `${title} · ${STATE_SENTENCES.stale} · show all` : `${title} · show all`,
     attention: review ? 'review' : 'none',
     description: review ? STATE_SENTENCES.stale : undefined,
-    items: group.rows.map((row) => itemOf(row, following)),
+    items: group.rows.map((row) => itemOf(row, group.state, following)),
   }
 }
 
@@ -174,8 +208,6 @@ export interface SpecRailProps {
   onSelect: (target: SpecTarget) => void
   /** Puts every part of a phase on the stage. */
   onSelectGroup: (phase: PhaseName) => void
-  /** What stands at the bottom of the rail, unfolded: the build's actions of a ready Spec. */
-  foot?: ReactNode
   /** The band of glyphs the panel folds to, rather than the rail of words. */
   folded?: boolean | undefined
 }
@@ -191,7 +223,6 @@ export function SpecRail({
   following,
   onSelect,
   onSelectGroup,
-  foot,
   folded = false,
 }: SpecRailProps): ReactNode {
   // The ids of the rail are the Spec's own names: a part's target, a phase's name.
@@ -212,7 +243,6 @@ export function SpecRail({
         const group = phases.get(id)
         if (group !== undefined) onSelectGroup(group.phase)
       }}
-      foot={foot}
       folded={folded}
     />
   )

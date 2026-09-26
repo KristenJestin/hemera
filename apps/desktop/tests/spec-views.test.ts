@@ -23,7 +23,6 @@ import type {
 } from '@hemera/ipc'
 import {
   launchOf,
-  nowOf,
   readerOf,
   readinessOf,
   revisionsOf,
@@ -154,59 +153,6 @@ function ready(at: string, revisionId: string): JournalEntry {
     phaseId: null,
   }
 }
-
-describe('The panel says what is happening in one sentence', () => {
-  test('shape open: the agent is writing the first empty section of the type', () => {
-    expect(nowOf(snapshot())).toBe('Shape · the agent is writing the expected outcome')
-  })
-
-  test('a blocking question of the phase in focus: the answer is yours', () => {
-    const waiting = snapshot({ questions: [question('q', 'shape')] })
-    expect(nowOf(waiting)).toBe('Shape · waiting for your answer')
-    // Answered, or of another phase, it waits on nobody.
-    expect(nowOf(snapshot({ questions: [question('q', 'shape', true)] }))).not.toContain('waiting')
-    expect(nowOf(snapshot({ questions: [question('q', 'plan')] }))).not.toContain('waiting')
-  })
-
-  test('plan open: the agent is writing the plan', () => {
-    expect(nowOf(snapshot({ phases: phases('finished', 'open', 'pending') }))).toBe(
-      'Plan · the agent is writing the plan',
-    )
-  })
-
-  test('every phase finished and attested: the agent confirmed the Spec is complete', () => {
-    const done = snapshot({ phases: phases('finished', 'finished', 'finished') })
-    expect(nowOf({ ...done, revision: { ...done.revision, attestedContentVersion: 3 } })).toBe(
-      'Decompose · finished, the agent confirmed the Spec is complete',
-    )
-    expect(nowOf(done)).toBe(
-      'Decompose · finished, waiting for the agent to confirm the Spec is complete',
-    )
-  })
-
-  test('ready: nothing beside the status, which says it', () => {
-    const frozen = snapshot()
-    expect(nowOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } })).toBe('')
-  })
-
-  test('after a Rework every phase is stale, and the agent re-declares each', () => {
-    const reworked = snapshot({ phases: phases('stale', 'stale', 'stale') })
-    expect(nowOf({ ...reworked, revision: { ...reworked.revision, number: 2 } })).toBe(
-      'Every phase to review · the agent goes over each again',
-    )
-    // A stale phase among finished ones is a new shaping's doing, not a Rework's.
-    expect(nowOf(snapshot({ phases: phases('finished', 'stale', 'pending') }))).toBe(
-      'Plan · to review, the agent goes over it again',
-    )
-  })
-
-  test('on revision 2, once shape is declared again, a stale plan is a new shaping', () => {
-    const redeclared = snapshot({ phases: phases('finished', 'stale', 'stale') })
-    expect(nowOf({ ...redeclared, revision: { ...redeclared.revision, number: 2 } })).toBe(
-      'Plan · to review, the agent goes over it again',
-    )
-  })
-})
 
 describe('Each section wears its mark', () => {
   test('empty, written by the agent, edited by you', () => {
@@ -412,7 +358,6 @@ describe('An old revision is readable and not editable', () => {
       journal: [ready('2026-09-22T10:00:00.000Z', 'rev-1')],
     })
     expect(view.status).toBe('ready')
-    expect(view.now).toBe('An earlier version · read only')
     expect(view.readiness.todo).toEqual([])
     expect(view.replacedBy).toBe(2)
   })

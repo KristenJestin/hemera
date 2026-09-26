@@ -36,11 +36,11 @@ export interface LiveSpec {
   reader: ReaderView | undefined
   /** The same actions, answered the way the engine will answer them. */
   actions: SpecActions
-  /** The agent starting on a part: the part it writes, and the sentence saying so. */
+  /** The agent starting on a part: the part it writes. */
   write: (target: SpecTarget) => void
 }
 
-/** How a part is named in the sentence of the head. */
+/** How a part is named on the button that lets the agent write it. */
 function partName(target: SpecTarget): string {
   if (target === 'stories' || target === 'tasks' || target === 'questions') return target
   return SECTION_TITLES[target].toLowerCase()
@@ -95,7 +95,6 @@ export function useLiveSpec(
           ...now,
           status: 'ready',
           focus: undefined,
-          now: '',
           revisions:
             now.revisions.length > 1
               ? now.revisions.map((one) =>
@@ -120,7 +119,6 @@ export function useLiveSpec(
           ),
         ],
         phases: phases('finished', 'stale', 'stale'),
-        now: 'Every phase to review · the agent goes over each again',
         focus: 'plan',
         sections: now.sections.map((one) =>
           one.name === 'plan' ? { ...one, mark: 'stale', copiedFrom: now.revision } : one,
@@ -149,7 +147,6 @@ export function useLiveSpec(
     setSpec((now) => ({
       ...now,
       focus: target,
-      now: `The agent is writing the ${partName(target)}`,
       sections: now.sections.map((one) =>
         one.name === target ? { ...one, mark: 'writing' } : one,
       ),
@@ -170,7 +167,7 @@ export interface LiveSpecPanelProps extends SpecActions {
   arrives?: boolean | undefined
   /** A part the agent can be made to start on, from a button where the chat stands. */
   agentWrites?: SpecTarget | undefined
-  /** The build of the Spec once it is ready, which the footer of the rail holds. */
+  /** The build of the Spec once it is ready, which the footer of the panel holds. */
   build?: WorkspaceActionsProps | undefined
 }
 
