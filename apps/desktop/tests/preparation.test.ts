@@ -123,10 +123,13 @@ const createdWith = (recipe: readonly (RecipeEdit | { run: string })[]) =>
       }
     }
     const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+    const reads = yield* Effect.forEach(plan.repositories, (relativePath) =>
+      workspaces.planRepository(project.id, 'HEM-7', 'login-form', relativePath),
+    )
     return yield* workspaces.create(project.id, {
       specId: 'HEM-7',
       name: plan.name,
-      repositories: plan.repositories
+      repositories: reads
         .filter((one) => one.included)
         .map((one) => ({
           relativePath: one.relativePath,

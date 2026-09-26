@@ -129,10 +129,13 @@ describe('A Workspace’s variable overrides the Project’s', () => {
           lineLinux: null,
         })
         const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const reads = yield* Effect.forEach(plan.repositories, (relativePath) =>
+          workspaces.planRepository(project.id, 'HEM-7', 'login-form', relativePath),
+        )
         const workspace = yield* workspaces.create(project.id, {
           specId: 'HEM-7',
           name: plan.name,
-          repositories: plan.repositories.map((one) => ({
+          repositories: reads.map((one) => ({
             relativePath: one.relativePath,
             base: one.base ?? '',
             branch: one.branch,

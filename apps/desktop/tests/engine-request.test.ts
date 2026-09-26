@@ -446,11 +446,20 @@ describe('Every Workspace channel reaches its use case', () => {
           key: 'HEM-7',
           slug: 'login-form',
         })
+        // Each location read on its own, as the dialog reads them (#110).
+        const reads = yield* Effect.forEach(plan.repositories, (relativePath) =>
+          asked('workspaces.planRepository', {
+            projectId,
+            key: 'HEM-7',
+            slug: 'login-form',
+            relativePath,
+          }),
+        )
         const workspace = yield* asked('workspaces.create', {
           projectId,
           specId: null,
           name: plan.name,
-          repositories: plan.repositories.map((one) => ({
+          repositories: reads.map((one) => ({
             relativePath: one.relativePath,
             base: one.base ?? '',
             branch: one.branch,
@@ -490,6 +499,7 @@ describe('Every Workspace channel reaches its use case', () => {
           recipe,
           moved,
           plan,
+          reads,
           workspace,
           begun,
           twice,
@@ -509,7 +519,9 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.recipe.map((step) => [step.kind, step.path])).toEqual([['copy', './.env']])
 
     expect(seen.plan).toMatchObject({ name: 'login-form', gitAvailable: true })
-    expect(seen.plan.repositories).toEqual([
+    // The plan names its locations and reads none of them; each read answers on its own (#110).
+    expect(seen.plan.repositories).toEqual(['./sources/api'])
+    expect(seen.reads).toEqual([
       expect.objectContaining({ relativePath: './sources/api', branch: 'atlas/HEM-7-login-form' }),
     ])
     expect(seen.workspace).toMatchObject({ state: 'preparing', dedicated: true, main: false })
@@ -687,11 +699,20 @@ describe('Every Workspace channel reaches its use case', () => {
           key: 'HEM-7',
           slug: 'login-form',
         })
+        // Each location read on its own, as the dialog reads them (#110).
+        const reads = yield* Effect.forEach(plan.repositories, (relativePath) =>
+          asked('workspaces.planRepository', {
+            projectId: project.id,
+            key: 'HEM-7',
+            slug: 'login-form',
+            relativePath,
+          }),
+        )
         const workspace = yield* asked('workspaces.create', {
           projectId: project.id,
           specId: null,
           name: plan.name,
-          repositories: plan.repositories.map((one) => ({
+          repositories: reads.map((one) => ({
             relativePath: one.relativePath,
             base: one.base ?? '',
             branch: one.branch,

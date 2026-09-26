@@ -31,6 +31,7 @@ import {
   contextViewSchema,
 } from './tools.ts'
 import {
+  planRepositorySchema,
   recipeKindSchema,
   recipeStepSchema,
   repositoryStateSchema,
@@ -747,6 +748,17 @@ export const ENGINE_REQUESTS = {
     // branch is `<prefix>/<slug>`.
     arguments: z.object({ projectId: z.string(), key: z.string().nullable(), slug: z.string() }),
     response: workspacePlanSchema,
+  },
+  'workspaces.planRepository': {
+    // One location of that plan, read on its own so that a repository that is slow, refused or
+    // gone holds back its own row alone, and never the dialog (#110).
+    arguments: z.object({
+      projectId: z.string(),
+      key: z.string().nullable(),
+      slug: z.string(),
+      relativePath: z.string(),
+    }),
+    response: planRepositorySchema,
   },
   'workspaces.create': {
     // Every check runs before anything is written, and one that fails refuses the whole

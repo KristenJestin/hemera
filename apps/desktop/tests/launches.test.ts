@@ -100,10 +100,13 @@ const making = (projectId: string, specId: string, key: string) =>
   Effect.gen(function* () {
     const workspaces = yield* Workspaces
     const plan = yield* workspaces.plan(projectId, key, 'export')
+    const reads = yield* Effect.forEach(plan.repositories, (relativePath) =>
+      workspaces.planRepository(projectId, key, 'export', relativePath),
+    )
     return yield* workspaces.create(projectId, {
       specId,
       name: plan.name,
-      repositories: plan.repositories
+      repositories: reads
         .filter((one) => one.included)
         .map((one) => ({
           relativePath: one.relativePath,
