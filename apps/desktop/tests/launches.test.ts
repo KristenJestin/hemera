@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Option } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
@@ -204,7 +204,13 @@ describe('A build waits for its environment', () => {
       Effect.gen(function* () {
         const { project, specId } = yield* atlas()
         const workspace = yield* picked(project.id)
-        const launch = yield* (yield* Launches).request(specId, workspace.id)
+        const launched = yield* Launches
+        const asked = yield* launched.request(specId, workspace.id)
+        // Answered once written, started right after, in the engine (#132).
+        const launch = yield* until(
+          launched.one(asked.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
         return { builds: yield* builds, builtIn: yield* builtIn(specId), launch, workspace }
       }),
     )
@@ -290,14 +296,16 @@ describe('A request whose start is refused says so on its launch', () => {
         const workspace = yield* picked(project.id)
         const nothing = yield* unwrittenSpec(project.id)
         const asked = yield* launched.request(nothing.id, workspace.id)
-        return { asked, builds: yield* builds, rows: yield* launches }
+        const ended = yield* until(launched.one(asked.id), (one) => one.state !== 'waiting')
+        return { asked, builds: yield* builds, ended, rows: yield* launches }
       }),
     )
     // Refused, and the launch says it: left `waiting`, the user asks again and the engine would
     // start the first one on the way back — two build Sessions for one request (D8-13).
-    expect(seen.asked.state).toBe('failed')
-    expect(seen.asked.detail).toContain('no agent has been chosen')
-    expect(seen.rows).toEqual([{ state: 'failed', session_id: null, detail: seen.asked.detail }])
+    expect(seen.asked.state).toBe('waiting')
+    expect(seen.ended.state).toBe('failed')
+    expect(seen.ended.detail).toContain('no agent has been chosen')
+    expect(seen.rows).toEqual([{ state: 'failed', session_id: null, detail: seen.ended.detail }])
     expect(seen.builds).toEqual([])
   })
 })
@@ -484,9 +492,11 @@ describe('A failed start is retried on its own', () => {
           (one) => one.state === 'started' || one.state === 'failed',
         )
         const before = yield* preparation.steps(workspace.id)
-        const again = yield* launched.retry(first.id)
+        const retried = yield* launched.retry(first.id)
+        const again = yield* until(launched.one(first.id), (one) => one.state === 'failed')
         return {
           again,
+          retried,
           after: yield* preparation.steps(workspace.id),
           before,
           builds: yield* builds,
@@ -499,6 +509,7 @@ describe('A failed start is retried on its own', () => {
     expect(seen.first.detail).toContain('Claude Code')
     expect(seen.before).toHaveLength(1)
     // The same Session, started again: the environment is not touched a second time.
+    expect(seen.retried.state).toBe('starting')
     expect(seen.again.sessionId).toBe(seen.first.sessionId)
     expect(seen.again.state).toBe('failed')
     expect(seen.after).toEqual(seen.before)
@@ -809,7 +820,11 @@ describe('A Rework cancels a launch that has not started', () => {
         // A Workspace that is already ready: the launch starts at once, and its build Session is
         // there (D8-13).
         const workspace = yield* picked(project.id)
-        const launch = yield* launched.request(specId, workspace.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const launch = yield* until(
+          launched.one(asked.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
         const [spec] = yield* sql<{ current_revision_id: string }>`
           SELECT current_revision_id FROM specs WHERE id = ${specId}`
         const revisionId = spec?.current_revision_id
@@ -881,6 +896,60 @@ const never = () => new Promise<void>(() => undefined)
 
 /** A deadline short enough for a suite to see a start outlive it (#132). */
 const SHORT_DEADLINE = Duration.millis(400)
+
+describe('A request answers once its launch is written', () => {
+  test('A request on a ready Workspace answers at once, and the launch reaches started after', async () => {
+    // The agent takes its time to start, as a cold Claude Code does: the window gives a request
+    // five seconds, and a request that waited for the agent was a timeout on screen (#132).
+    let release: () => void = () => undefined
+    const slow = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    opened = await openWindow(dataFolder, fakeAgent({ holdsStart: () => slow }))
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const answered = yield* launched
+          .request(specId, workspace.id)
+          .pipe(Effect.timeoutOption(Duration.seconds(2)))
+        // Whatever the request answered, the agent may start now.
+        release()
+        if (Option.isNone(answered)) return { answered: null, started: null }
+        const started = yield* until(
+          launched.one(answered.value.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        return { answered: answered.value, started }
+      }),
+    )
+    expect(seen.answered).not.toBeNull()
+    expect(['waiting', 'starting']).toContain(seen.answered?.state)
+    expect(seen.started?.state).toBe('started')
+  })
+
+  test('A retry answers at once, and the launch says how the agent answered after', async () => {
+    opened = await openWindowOn(dataFolder, bareMachine, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const failed = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        const again = yield* launched.retry(failed.id)
+        const after = yield* until(launched.one(asked.id), (one) => one.state === 'failed')
+        return { again, after, failed }
+      }),
+    )
+    expect(seen.failed.state).toBe('failed')
+    expect(seen.again.state).toBe('starting')
+    expect(seen.again.sessionId).toBe(seen.failed.sessionId)
+    expect(seen.after.state).toBe('failed')
+    expect(seen.after.detail).toContain('Claude Code')
+  })
+})
 
 describe('A start that outlives the agent’s deadline fails', () => {
   test('A launch staying starting past the agent’s start deadline becomes failed, and Retry is offered', async () => {
