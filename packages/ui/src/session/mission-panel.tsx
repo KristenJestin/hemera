@@ -72,6 +72,13 @@ export interface MissionPanelProps {
   defaultFolded?: boolean | undefined
   /** Told each time the panel folds or unfolds, by the hand or because the agent works. */
   onFoldChange?: ((folded: boolean) => void) | undefined
+  /**
+   * Whether the panel arrives rather than being there when its Session is opened (issue #130):
+   * the mission has just begun — a Spec created from the agent's proposal — and the panel opens
+   * from nothing to its unfolded width on the width's own spring, pushing the chat as an unfold
+   * does, rather than standing there from the first frame. It arrives unfolded.
+   */
+  arrives?: boolean | undefined
 }
 
 export function MissionPanel({
@@ -86,12 +93,14 @@ export function MissionPanel({
   onFollow,
   defaultFolded = true,
   onFoldChange,
+  arrives = false,
 }: MissionPanelProps): ReactNode {
-  const [folded, setFolded] = useState(defaultFolded)
+  const startsFolded = arrives ? false : defaultFolded
+  const [folded, setFolded] = useState(startsFolded)
   // Whether the width is on its way. Folding, what was open stays in the slot until it has closed.
   const [moving, setMoving] = useState(false)
   // The fold as it is now, read by the several hands one click may bubble through.
-  const isFolded = useRef(defaultFolded)
+  const isFolded = useRef(startsFolded)
   // Whether the last fold was the hand's: it holds against the agent until the hand unfolds.
   const byHand = useRef(false)
   const followed = useRef(following)
@@ -101,7 +110,9 @@ export function MissionPanel({
   const refocus = useRef(false)
   const width = useTransition(morph)
   // How far open the panel is, from the band (0) to the unfolded width (1).
-  const open = useMotionValue(defaultFolded ? 0 : 1)
+  const open = useMotionValue(startsFolded ? 0 : 1)
+  // How far in the panel has arrived, from nothing (0) to its place in the row (1).
+  const present = useMotionValue(arrives ? 0 : 1)
   const fade = useTransition(crossfade)
 
   function fold(next: boolean, hand: boolean): void {
@@ -135,8 +146,29 @@ export function MissionPanel({
     slot.current?.style.setProperty('--mission-panel-open', String(share))
   }
 
+  /** Writes how far in the panel has arrived, which scales the whole of its slot's width. */
+  function place(share: number): void {
+    slot.current?.style.setProperty('--mission-panel-in', String(share))
+  }
+
   // The first frame has no animation to report a width: the resting one is written before it.
-  useLayoutEffect(() => pose(open.get()), [])
+  useLayoutEffect(() => {
+    pose(open.get())
+    place(present.get())
+  }, [])
+
+  // Arriving, the slot opens from nothing on `morph`, the spring its fold is played on; told to
+  // move less, it is there at once.
+  useLayoutEffect(() => {
+    if (present.get() === 1) return
+    if (width === instant) {
+      present.jump(1)
+      place(1)
+      return
+    }
+    const travel = animate(present, 1, { ...width, onUpdate: place })
+    return () => travel.stop()
+  }, [])
 
   // A fold moves the width on `morph`, from wherever it stands, pushing the chat on every frame.
   // Told to move less, it lands at once.

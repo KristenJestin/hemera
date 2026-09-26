@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import type {
@@ -301,6 +301,10 @@ export function SessionPage({
     void decision.then(setRefused)
   }
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
+  // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
+  // proposal just made, and it arrives rather than standing there (issue #130). The page is
+  // keyed by the Session, so this is read once per Session opened.
+  const openedFree = useRef(session.mission === 'free')
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
   const spec =
     defined === null
@@ -581,6 +585,7 @@ export function SessionPage({
     return (
       <SpecPanel
         spec={spec}
+        arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
         // Checked against the version the edit was opened on, which the panel hands back:
         // an agent may have written the section meanwhile (D7-12).

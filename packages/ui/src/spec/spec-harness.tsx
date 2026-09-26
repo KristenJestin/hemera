@@ -204,6 +204,8 @@ export interface LiveSpecPanelProps extends SpecActions {
   defaultReworkOpen?: boolean | undefined
   defaultFolded?: boolean | undefined
   onFoldChange?: ((folded: boolean) => void) | undefined
+  /** Whether the Spec was just created here, and the panel arrives. */
+  arrives?: boolean | undefined
   /** A part the agent can be made to start on, from a button where the chat stands. */
   agentWrites?: SpecTarget | undefined
 }
@@ -218,6 +220,7 @@ export function LiveSpecPanel({
   defaultReworkOpen,
   defaultFolded,
   onFoldChange,
+  arrives,
   agentWrites,
   ...on
 }: LiveSpecPanelProps): ReactNode {
@@ -242,6 +245,7 @@ export function LiveSpecPanel({
         defaultReworkOpen={defaultReworkOpen}
         defaultFolded={defaultFolded}
         onFoldChange={onFoldChange}
+        arrives={arrives}
         onSaveSection={actions.onSaveSection}
         onApplyMine={actions.onApplyMine}
         onDiscardMine={actions.onDiscardMine}

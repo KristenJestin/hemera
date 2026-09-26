@@ -73,6 +73,11 @@ export interface SpecPanelProps extends SpecPartHandlers {
   defaultFolded?: boolean | undefined
   /** Told each time the panel folds or unfolds, by the hand or because the agent writes. */
   onFoldChange?: ((folded: boolean) => void) | undefined
+  /**
+   * Whether the Spec was just created in this Session, from the agent's proposal: the panel then
+   * arrives, unfolding from nothing on its own spring, rather than standing there (issue #130).
+   */
+  arrives?: boolean | undefined
   onMarkReady: () => void
   onRework: (reason: string) => void
   onPickRevision: (revision: number) => void
@@ -92,6 +97,7 @@ export function SpecPanel({
   defaultReworkOpen = false,
   defaultFolded = true,
   onFoldChange,
+  arrives,
   onMarkReady,
   onRework,
   onPickRevision,
@@ -133,6 +139,7 @@ export function SpecPanel({
         noun="Spec"
         defaultFolded={defaultFolded}
         onFoldChange={onFoldChange}
+        arrives={arrives}
         following={spec.focus}
         // Unfolded by the agent, the stage shows the part it starts on, whatever was chosen.
         onFollow={() => setPinned(null)}
