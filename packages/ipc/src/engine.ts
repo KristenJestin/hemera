@@ -399,6 +399,14 @@ export const sessionEntrySchema = z.object({
 
 export type SessionEntry = z.infer<typeof sessionEntrySchema>
 
+/** What an entry of a folder is, as a path field lists it (#109). */
+export const pathEntryKindSchema = z.enum(['folder', 'file'])
+
+/** One entry of a folder: its name alone, and what it is. */
+export const pathEntrySchema = z.object({ name: z.string(), kind: pathEntryKindSchema })
+
+export type PathEntryKind = z.infer<typeof pathEntryKindSchema>
+
 /**
  * Every use case of the process that holds the database.
  *
@@ -892,6 +900,19 @@ export const ENGINE_REQUESTS = {
       key: z.string(),
     }),
     response: z.void(),
+  },
+
+  // The entries of one folder under a base, one level at a time: what a path field offers while
+  // it is typed (#109). `base` is an absolute folder, `relative` a folder under it, '' for the
+  // base itself; a `relative` that is absolute, climbs with `..` or leads outside the base is
+  // refused, and a folder that is not there answers nothing.
+  'paths.entries': {
+    arguments: z.object({
+      base: z.string(),
+      relative: z.string(),
+      kinds: z.array(pathEntryKindSchema).min(1),
+    }),
+    response: z.array(pathEntrySchema),
   },
 
   // The Specs a `define` Session writes and a human freezes (D7-01).

@@ -62,6 +62,7 @@ export type {
   EngineRequests,
   EngineResponse,
   EngineStatus,
+  PathEntryKind,
   SidebarPreference,
   ThemePreference,
   JournalEntry,

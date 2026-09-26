@@ -163,6 +163,7 @@ describe('Appel typé nominal', () => {
       'variables.list',
       'variables.set',
       'variables.remove',
+      'paths.entries',
       // Answered by the main process itself, because only it can.
       'dialog.pickFolder',
       'dialog.pickFiles',
@@ -296,6 +297,7 @@ describe('Cas d’usage nommés du process dédié', () => {
       'variables.list',
       'variables.set',
       'variables.remove',
+      'paths.entries',
     ]
     expect(Object.keys(ENGINE_REQUESTS).toSorted()).toEqual(names.toSorted())
   })

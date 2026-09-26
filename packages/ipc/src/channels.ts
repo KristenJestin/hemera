@@ -167,6 +167,7 @@ export const CHANNELS = {
   'variables.list': ENGINE_REQUESTS['variables.list'],
   'variables.set': ENGINE_REQUESTS['variables.set'],
   'variables.remove': ENGINE_REQUESTS['variables.remove'],
+  'paths.entries': ENGINE_REQUESTS['paths.entries'],
 
   /**
    * The four the main process answers itself, because each of them is something only it can do.
