@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
@@ -18,7 +18,7 @@ import { Sessions } from '#engine/sessions.ts'
 import { ReopenRefusedError } from '#engine/specs/revisions.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
-import { Launches } from '#engine/workspaces/launches.ts'
+import { Launches, StartDeadline } from '#engine/workspaces/launches.ts'
 import { Preparation, recovered } from '#engine/workspaces/preparation.ts'
 import { Workspaces } from '#engine/workspaces/workspaces.ts'
 
@@ -873,5 +873,34 @@ describe('A Rework cancels a launch that has not started', () => {
     ])
     // And the Workspace the build works in is still there.
     expect(seen.workspace.state).toBe('ready')
+  })
+})
+
+/** A promise that never settles: the start of an agent that never answers its handshake. */
+const never = () => new Promise<void>(() => undefined)
+
+/** A deadline short enough for a suite to see a start outlive it (#132). */
+const SHORT_DEADLINE = Duration.millis(400)
+
+describe('A start that outlives the agent’s deadline fails', () => {
+  test('A launch staying starting past the agent’s start deadline becomes failed, and Retry is offered', async () => {
+    opened = await openWindow(dataFolder, fakeAgent({ holdsStart: never }))
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId } = yield* atlas()
+        const launched = yield* Launches
+        const workspace = yield* picked(project.id)
+        const asked = yield* launched.request(specId, workspace.id)
+        const ended = yield* until(
+          launched.one(asked.id),
+          (one) => one.state !== 'waiting' && one.state !== 'starting',
+        )
+        return { ended }
+      }).pipe(Effect.provideService(StartDeadline, SHORT_DEADLINE)),
+    )
+    // Failed, saying why, on the Session it wrote: what `Retry` starts again (D8-13).
+    expect(seen.ended.state).toBe('failed')
+    expect(seen.ended.detail).toContain('did not answer within')
+    expect(seen.ended.sessionId).not.toBeNull()
   })
 })

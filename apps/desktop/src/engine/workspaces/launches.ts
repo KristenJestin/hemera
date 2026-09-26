@@ -36,7 +36,7 @@ import {
   renderSpecMarkdown,
 } from '@hemera/core'
 import { type SQL, and, desc, eq, inArray } from 'drizzle-orm'
-import { Context, Data, Effect, Layer, Result } from 'effect'
+import { Context, Data, Duration, Effect, Layer, Result } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
 import { AgentRuntime } from '../agents/runtime.ts'
@@ -134,6 +134,15 @@ export interface LaunchesService {
 }
 
 export class Launches extends Context.Service<Launches, LaunchesService>()('Launches') {}
+
+/**
+ * How long the agent of a build is given to start: a spawn, a handshake and a `session/new`, a
+ * cold one included (#132). Past it the launch is `failed`, saying so, and `Retry` is offered
+ * instead of a "Starting the agent…" that never ends. A suite hands a shorter one.
+ */
+export const StartDeadline = Context.Reference<Duration.Duration>('LaunchStartDeadline', {
+  defaultValue: () => Duration.minutes(2),
+})
 
 /** What a launch waiting on a Workspace whose preparation failed is told (D8-13). */
 const NOT_PREPARED = 'The Workspace could not be prepared'
@@ -329,7 +338,22 @@ export const launchesLayer = Layer.effect(
         if ((yield* briefs(sessionId)).length === 0) {
           yield* writeBrief(sessionId, yield* readLaunched(launch.specId, launch.revisionId))
         }
-        const handshake = yield* Effect.result(runtime.start(sessionId))
+        // Bounded by the agent's start deadline (#132): an agent that never answers its handshake
+        // is a launch `failed` that offers `Retry`, not one "Starting the agent…" for ever.
+        const deadline = yield* StartDeadline
+        const handshake = yield* Effect.result(
+          runtime.start(sessionId).pipe(
+            Effect.timeoutOrElse({
+              duration: deadline,
+              orElse: () =>
+                Effect.fail(
+                  new LaunchRefusedError({
+                    reason: `it did not answer within ${String(Duration.toSeconds(deadline))} seconds`,
+                  }),
+                ),
+            }),
+          ),
+        )
         const at = now()
         const answered: LaunchView = Result.isSuccess(handshake)
           ? { ...launch, state: 'started', sessionId, detail: null, updatedAt: at }
