@@ -392,6 +392,8 @@ export {
   type ActivityRowProps,
   type ActivityState,
 } from './session/activity-row.tsx'
+/** The row above the box: what the turn is doing, and what it has spent. */
+export { TurnLine, type TurnLineProps } from './session/turn-line.tsx'
 export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,

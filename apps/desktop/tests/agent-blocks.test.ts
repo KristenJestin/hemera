@@ -98,6 +98,55 @@ describe('A read inside the Workspace goes through on its own', () => {
     const entry = entryOf('hemera_tool_call', 'agent', 'Read a file', '{"tool":"fs_read"}')
     expect(hemeraToolCallOf(entry)).toBeNull()
   })
+
+  /** A `spec_propose` of a phase, answered by the engine with `reason`. */
+  function proposedPhase(reason: string, state = 'refused') {
+    return entryOf(
+      'hemera_tool_call',
+      'agent',
+      reason,
+      JSON.stringify({
+        tool: 'spec_propose',
+        state,
+        caller: 'a1b2c3d4e5f6',
+        paths: [],
+        arguments: JSON.stringify({ kind: 'phase', phase: 'shape' }),
+      }),
+    )
+  }
+
+  test('a phase proposed while a question is open is a quiet folded row', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase(
+        'The shape phase cannot finish: a blocking question is open: Which date decides the month?.',
+      ),
+    )
+    expect(drawn?.status).toBe('deferred')
+    expect(drawn?.note).toBe('not yet: a question is open')
+    expect(drawn?.defaultOpen).toBe(false)
+    expect(drawn?.subject).toEqual({ text: 'shape' })
+    // The whole reason is still there, in the body the reader may unfold.
+    expect(drawn?.error).toMatch(/Which date decides the month/)
+  })
+
+  test('a phase proposed before its other checks pass is a quiet "not yet" as well', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase('The plan phase cannot finish: the contract has no task.'),
+    )
+    expect(drawn?.status).toBe('deferred')
+    expect(drawn?.note).toBe('not yet')
+  })
+
+  test('any other refusal of a proposal stays a refusal, open on its reason', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase(
+        'The shape phase is finished: only an open or stale phase is declared finished.',
+      ),
+    )
+    expect(drawn?.status).toBe('refused')
+    expect(drawn?.note).toBeUndefined()
+    expect(drawn?.defaultOpen).toBe(true)
+  })
 })
 
 describe('A one-off command shows and is not promoted', () => {

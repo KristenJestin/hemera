@@ -14,7 +14,6 @@ import type {
   WorkspacePlan,
 } from '@hemera/ipc'
 import {
-  ActivityRow,
   AgentModelMenu,
   BlockedBanner,
   CommandsPanel,
@@ -757,7 +756,7 @@ export function SessionPage({
         */}
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
           {(activity !== null || usage !== null) && (
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-end justify-between gap-3">
               {activity !== null ? (
                 <ListeningRow
                   activity={activity}
@@ -769,7 +768,9 @@ export function SessionPage({
                 <span />
               )}
               {usage !== null && (
-                <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
+                <span className="flex h-6 shrink-0 items-center">
+                  <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
+                </span>
               )}
             </div>
           )}
