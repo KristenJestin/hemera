@@ -114,24 +114,36 @@ const TAKEN = 'a branch named hemera/HEM-7-login-form already exists in ./source
 interface Extra {
   /** What the engine answers when the draft is handed over: null, or a refusal. */
   refusal?: string | null
+  /**
+   * The plan once Git has answered it (#110): the dialog opens on `repositories`, which is that
+   * plan with nothing read of it yet, and is handed this one when it closes — so a story can open
+   * the dialog twice, before and after the answers, and compare the two.
+   */
+  answered?: readonly PlanRepositoryLine[] | undefined
 }
 
 function Controlled({
   open,
   refusal = null,
+  answered,
   onOpenChange,
   onCreate,
   ...rest
 }: CreateWorkspaceDialogProps & Extra) {
   const [shown, setShown] = useState(open)
+  const [read, setRead] = useState<readonly PlanRepositoryLine[] | undefined>(undefined)
   return (
     <div className="flex h-screen flex-col items-start gap-2 p-6">
       <Button onClick={() => setShown(true)}>New Workspace</Button>
       <CreateWorkspaceDialog
         {...rest}
+        repositories={read ?? rest.repositories}
         open={shown}
         onOpenChange={(next) => {
           setShown(next)
+          // Git answered every location before the dialog was closed (#110): the next opening is
+          // the same plan, read.
+          if (!next && answered !== undefined) setRead(answered)
           onOpenChange(next)
         }}
         onCreate={async (draft) => {
@@ -182,7 +194,12 @@ type Context = Parameters<NonNullable<Story['play']>>[0]
 
 /** The row of one repository, found by the path its checkbox is named after. */
 function rowOf(dialog: HTMLElement, path: string) {
-  return within(within(dialog).getByRole('checkbox', { name: path }).closest('li')!)
+  return within(lineOf(dialog, path))
+}
+
+/** The row itself, which is where what a row takes rather than says is read (#110). */
+function lineOf(dialog: HTMLElement, path: string): HTMLElement {
+  return within(dialog).getByRole('checkbox', { name: path }).closest('li')!
 }
 
 /**
@@ -289,6 +306,12 @@ async function aNameIsTypedBeforeThePlanArrives(): Promise<void> {
   // The row nothing is known about yet is on screen with the others, and says as much.
   const front = rowOf(dialog, './sources/front')
   front.getByText('being read')
+  // And it is already the height of the row it becomes: what Git has not answered for yet is
+  // reserved at the size the fields take, so the dialog never moves under the answers (#110).
+  await expect(lineOf(dialog, './sources/front').getBoundingClientRect().height).toBeCloseTo(
+    lineOf(dialog, './sources/api').getBoundingClientRect().height,
+    0,
+  )
   await expect(front.getByRole('checkbox', { name: './sources/front' })).toHaveAttribute(
     'aria-disabled',
     'true',
@@ -301,6 +324,42 @@ async function aNameIsTypedBeforeThePlanArrives(): Promise<void> {
   within(dialog).getByText('/home/kris/.local/share/hemera/workspaces/atlas/login-form at once')
   // Create waits for the last location to be read.
   await expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled()
+}
+
+/**
+ * The dialog opened before Git has answered anything, and opened again once every location is
+ * read: the same plan, and the same height (#110). This is the pair the rows are held to — the
+ * first opening is what the dialog looks like while the answers are still coming, and the second
+ * is where they land.
+ */
+export const Answered: Story = {
+  args: {
+    repositories: [API, { path: './sources/front', read: null }, DOCS],
+    answered: [API, FRONT, DOCS],
+  },
+  play: theDialogIsTheSameHeightBeforeAndAfterTheAnswers,
+}
+
+// Scenario "The dialog opens at once, and fills in as Git answers" (#110).
+async function theDialogIsTheSameHeightBeforeAndAfterTheAnswers(): Promise<void> {
+  const before = within(document.body).getByRole('dialog')
+  await expect(within(before).getByText('being read')).toBeVisible()
+  // Its layout height, which the rise into place does not change: what is compared is where the
+  // dialog sits on the screen, not what it is drawn from.
+  const height = before.offsetHeight
+  await userEvent.click(within(before).getByRole('button', { name: 'Cancel' }))
+  await waitFor(() => {
+    expect(within(document.body).queryByRole('dialog')).toBeNull()
+  })
+  // Git has answered every location by now: it opens read, and what was reserved while it was
+  // being read is exactly what the fields take.
+  await userEvent.click(within(document.body).getByRole('button', { name: 'New Workspace' }))
+  const after = within(document.body).getByRole('dialog')
+  await expect(within(after).queryByText('being read')).toBeNull()
+  await expect(
+    rowOf(after, './sources/front').getByRole('combobox', { name: 'Base' }),
+  ).toHaveTextContent('dev')
+  expect(after.offsetHeight).toBe(height)
 }
 
 /** One repository left out, and a declared location with no repository in `main`. */

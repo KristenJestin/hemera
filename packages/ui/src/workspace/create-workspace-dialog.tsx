@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { type ReactNode, useEffect, useState } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
@@ -6,6 +7,7 @@ import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Select, type SelectItem } from '../components/select/select.tsx'
+import { IconLoader } from '../icons.ts'
 import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './model.ts'
 
 /**
@@ -24,8 +26,9 @@ import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './m
  *
  * The dialog opens at once: the plan names the folder and every location of the Project before
  * Git has read any of them, and each location is read on its own afterwards, one after the other.
- * A row not read yet shows nothing, and Create waits for the last of them — a repository that is
- * slow, refused or gone holds back its own row alone, and never the dialog.
+ * A row not read yet says so and reserves the room of the two fields it will have, so the dialog
+ * keeps its height while the answers arrive, and Create waits for the last of them — a repository
+ * that is slow, refused or gone holds back its own row alone, and never the dialog.
  *
  * Opened from a Spec, the name is the Spec's slug and the branches are the Spec's. Opened from the
  * settings, there is no Spec: the name may start empty, and each branch follows the name as it is
@@ -63,6 +66,15 @@ const HINT = 'text-xs text-muted-foreground'
 const FIELD_ERROR = 'text-xs text-destructive-muted-foreground'
 
 const BRANCH_FIELD = 'min-w-0 flex-2'
+
+/** What a row says while Git is reading it (#110), on the line its checkbox stands on. */
+const READING = 'flex items-center gap-1 text-xs text-muted-foreground'
+
+/**
+ * The box of a control that is not there yet: the height, the corner and the outline of the one
+ * that will be, and nothing of what it will say.
+ */
+const RESERVED_CONTROL = 'h-control-md rounded-md border border-input bg-muted'
 
 /** The commit a repository is on when it is on none of its branches (D8-04). */
 interface Commit {
@@ -112,6 +124,30 @@ function answered(read: PlanRepositoryRead): Partial<Row> {
     included: read.holdsRepository && read.included,
     reason: read.reason,
   }
+}
+
+/**
+ * The room of the two fields a row will have, drawn while Git is reading it (#110).
+ *
+ * The dialog opens before Git has read anything and fills in one location at a time, so a row that
+ * reserved nothing would make the whole dialog jump at every answer. What is drawn is the shape of
+ * the fields themselves — their labels, and a box the height of the control that will be under
+ * each, at the width the field has. None of it is read out: it is a box, and the row beside it
+ * already says the location is being read.
+ */
+function ReservedFields(): ReactNode {
+  return (
+    <>
+      <span aria-hidden="true" className={BASE_FIELD}>
+        <span className={BASE_LABEL}>Base</span>
+        <span className={RESERVED_CONTROL} />
+      </span>
+      <span aria-hidden="true" className={cn('flex flex-col gap-1', BRANCH_FIELD)}>
+        <span className={BASE_LABEL}>Branch</span>
+        <span className={RESERVED_CONTROL} />
+      </span>
+    </>
+  )
 }
 
 function rowsOf(plan: readonly PlanRepositoryLine[]): Row[] {
@@ -322,11 +358,14 @@ export function CreateWorkspaceDialog({
                   disabled={!row.read || !row.holdsRepository}
                   onCheckedChange={(checked) => change(row.path, { included: checked })}
                 />
-                {/* A row Git has not answered for yet says so and nothing else, and a repository
-                    Git would not read says it in Git's own words, where a location that simply
-                    holds none is not the user's problem (D8-04). */}
+                {/* A row Git has not answered for yet says so, on the checkbox's own line, and a
+                    repository Git would not read says it in Git's own words, where a location
+                    that simply holds none is not the user's problem (D8-04). */}
                 {!row.read ? (
-                  <Badge tone="neutral">being read</Badge>
+                  <span className={READING}>
+                    <IconLoader size="sm" aria-hidden="true" />
+                    being read
+                  </span>
                 ) : (
                   !row.holdsRepository && (
                     <Badge tone={row.reason === null ? 'neutral' : 'destructive'}>
@@ -335,7 +374,10 @@ export function CreateWorkspaceDialog({
                   )
                 )}
               </span>
-              {row.holdsRepository && (
+              {/* Nothing has been read of this row yet: the room its fields will take, which is
+                  what holds the dialog's height while the answers come in (#110). */}
+              {!row.read && <ReservedFields />}
+              {row.read && row.holdsRepository && (
                 <>
                   <div className={BASE_FIELD}>
                     <span className={BASE_LABEL}>
